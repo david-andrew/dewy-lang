@@ -1,0 +1,136 @@
+import p"../../semantic/ty.dewy" as types
+import p"../../semantic/type_queries.dewy" as views
+import p"../../semantic/brands.dewy" as brands
+import p"../../semantic/subtyping.dewy" as subtyping
+
+# Shared with the hosted backend and the source runtime library. Descriptors
+# are six words; offsets are bytes. Ownership flags describe storage, not the
+# type of the elements or their mutability contract.
+const array_descriptor=[data=0 length=8 capacity=16 stride=24 flags=32 owner=40 size=48]
+const array_flags=[mutable=1 borrowed_static=2 arena_descriptor=4]
+const string_descriptor=[data=0 byte_length=8 boundaries=16 grapheme_length=24 start=32 owner=40 size=48]
+const brand_field='__brand__'
+
+Storage:type = const [size:addr alignment:uint8 & ~0 signed:bool=false]
+Record:type = const [size:addr alignment:uint8 & ~0 offsets:dict<string addr>]
+Pending:type = const [detail:string]
+Context:type = const [brands:brands.Registry=brands.Registry[] nominals:set<addr>=set[]]
+align = (offset:addr alignment:uint8 & ~0):>addr => {
+    let width:addr & ~0=alignment as int64
+    let remainder=offset % width
+    if remainder =? 0 return offset
+    $runtime_assert remainder <? width
+    let padding:addr=width-remainder
+    return offset+padding
+}
+handle = (type:types.Type):>bool => type is? types.ArrayType|types.FunctionType|types.StringLiteralType|types.BinaryLiteralType|types.StringType or type is? types.Primitive and type.name in? ['string' 'grapheme' 'char']
+
+# An array element is a scalar or one handle, including a nested record and
+# a union cell. A record field instead embeds nested records and union cells
+# inline. Keeping these queries separate prevents an array stride from being
+# mistaken for the size of a record stored behind its element handle.
+element = (id:addr @nodes:array<types.Type>):>Storage|Pending => {
+    let plain=types.unfold(types.strip_refinement(id nodes) nodes)
+    let type=types.node_at(nodes plain)
+    if types.is_primitive(type 'bool') return Storage[1 1 false]
+    let word=views.fixed_integer_layout(plain nodes)
+    if word isnt? none {
+        $runtime_assert word.bits >=? 8 and word.bits <=? 64
+        let bytes:uint8 & ~0=word.bits // 8
+        return Storage[bytes as int64 bytes word.signed]
+    }
+    if handle(type) or type is? types.ObjectType|types.MetaType or views.string_valued(plain nodes) or views.optional_payload(plain @nodes) isnt? none or views.runtime_union_members(plain @nodes) isnt? none return Storage[8 8 true]
+    return Pending['array element has no selected runtime representation']
+}
+field = (id:addr context:Context @nodes:array<types.Type> active:set<addr>=set[]):>Storage|Pending => {
+    let plain=types.unfold(types.strip_refinement(id nodes) nodes)
+    let type=types.node_at(nodes plain)
+    if types.is_primitive(type 'bool') return Storage[1 1]
+    let word=views.fixed_integer_layout(plain nodes)
+    if word isnt? none {
+        $runtime_assert word.bits >=? 8 and word.bits <=? 64
+        let bytes:uint8 & ~0=word.bits // 8
+        return Storage[bytes as int64 bytes word.signed]
+    }
+    if handle(type) or plain in? context.nominals or views.string_valued(plain nodes) or views.enum_members(plain nodes) isnt? none or type is? types.MetaType return Storage[8 8 true]
+    if views.runtime_union_members(plain @nodes) isnt? none or views.optional_payload(plain @nodes) isnt? none return Storage[16 8 true]
+    if type is? types.ObjectType {
+        let layout=record(plain context @nodes active=active)
+        if layout is? Pending return layout
+        # The hosted nested-field alignment comes from its declared fields;
+        # the record's own rounded size also includes a possible brand word.
+        let alignment:uint8 & ~0=1
+        loop item in type.fields {
+            let nested=field(item.value_type context @nodes active=active)
+            if nested is? Pending return nested
+            if nested.alignment >? alignment {alignment=nested.alignment}
+        }
+        return Storage[layout.size alignment]
+    }
+    return Pending['record field has no selected runtime representation']
+}
+
+# A root mint puts its brand word after the shared root fields. Descendants
+# keep that offset and append their own fields. A parent slot reserves the
+# largest descendant, so a value can be copied or viewed through an ancestor
+# without truncating its dynamic type. An unbranded root structure that a mint
+# carries reserves the same word and descendant storage (brand zero for a
+# plain structural value).
+record = (id:addr context:Context @nodes:array<types.Type> active:set<addr>=set[]):>Record|Pending => {
+    let plain=types.unfold(types.strip_refinement(id nodes) nodes)
+    if plain in? active return Pending['recursive record storage needs an indirection']
+    active.add(plain)
+    let type=types.node_at(nodes plain)
+    if type isnt? types.ObjectType return Pending['record layout requires an object type']
+    let root_fields:addr?=none
+    let descendants:array<string>=[]
+    if type.minted and type.brand isnt? none {
+        let root=brands.lookup(brands.root(type.brand context.brands) context.brands)
+        if root is? none return Pending['minted type is missing from the program brand registry']
+        let root_type=types.node_at(nodes root.value_type)
+        $runtime_assert root_type is? types.ObjectType
+        root_fields=root_type.fields.length
+        loop child in brands.descendants(type.brand context.brands) {if child not=? type.brand {descendants.push(child)}}
+    } else if type.brand is? none {
+        loop entry in context.brands.entries {
+            if entry.parent isnt? none continue
+            let mint=types.node_at(nodes entry.value_type)
+            if mint isnt? types.ObjectType or not subtyping.brand_carries(mint type nodes) continue
+            root_fields=type.fields.length
+            loop child in brands.descendants(entry.name context.brands) {descendants.push(child)}
+        }
+    }
+    let offset:addr=0
+    let alignment:uint8 & ~0=1
+    let offsets:dict<string addr>=[]
+    let index:addr=0
+    loop item in type.fields {
+        if root_fields isnt? none and index =? root_fields {
+            offset=align(offset 8)
+            offsets[brand_field]=offset
+            offset+=8 alignment=8
+        }
+        let storage=field(item.value_type context @nodes active=active)
+        if storage is? Pending return storage
+        offset=align(offset storage.alignment)
+        offsets[item.name]=offset
+        offset+=storage.size
+        if storage.alignment >? alignment {alignment=storage.alignment}
+        index+=1
+    }
+    if root_fields isnt? none and brand_field not in? offsets {
+        offset=align(offset 8)
+        offsets[brand_field]=offset
+        offset+=8 alignment=8
+    }
+    let size=align(offset alignment)
+    if size =? 0 {size=1}
+    loop name in descendants {
+        let child=brands.lookup(name context.brands)
+        if child is? none continue
+        let layout=record(child.value_type context @nodes active=active)
+        if layout is? Pending return layout
+        if layout.size >? size {size=layout.size}
+    }
+    return Record[size alignment offsets]
+}
