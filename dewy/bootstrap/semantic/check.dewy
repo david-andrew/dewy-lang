@@ -1098,7 +1098,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         container_state.changed(existing env.state @session)
         container_state.seed(existing value env.state @session)
         container_state.seed_fields(existing value env.state @session)
-        set_read_type(existing node_at(value session).value_type env @session)
+        set_read_type(existing stored_read_type(value @session) env @session)
         return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' value] @session)
     }
     let rhs = contexts.node_at(node.right env.lexical session)
@@ -1218,6 +1218,18 @@ set_read_type = (id:addr type:addr env:Environment @session:contexts.Session):>v
     let state = session.read_states[env.state]
     state.types[id] = type
     session.read_states[env.state] = state
+}
+# Packing a value into its wider store union changes storage, not which
+# alternatives this assignment can produce. Keep that evidence for the next
+# read; actual conversions (such as decoding bytes to string|none) retain
+# their result type because the input is not a subtype of that result.
+stored_read_type = (value:addr @session:contexts.Session):>addr => {
+    let node=node_at(value session)
+    if node is? hir.RepresentationCast and types.node_at(session.types node.value_type) is? types.TypeOr {
+        let source=node_at(node.expr session)
+        if subtyping.is_subtype(source.value_type node.value_type session.links @session.types) return stored_read_type(node.expr @session)
+    }
+    return node.value_type
 }
 fork = (env:Environment @session:contexts.Session):>Environment => {
     $runtime_assert env.state <? session.read_states.length
@@ -1590,6 +1602,12 @@ join_reads = (exits:array<Environment> env:Environment @session:contexts.Session
             let array=array_read_join(alternatives @session)
             let result=if array is? none subtyping.join(alternatives session.links @session.types) else array
             let original=read_type(binding env session)
+            # A join can encounter the same union alternatives in another
+            # order (for example a record assignment before the zero arm).
+            # When the value set is unchanged, retain the incoming union's
+            # representation and prelude identity instead of inventing a
+            # reordered tagged type. Strictly narrower joins still survive.
+            if original isnt? none and types.node_at(session.types original) is? types.TypeOr and subtyping.is_subtype(original result session.links @session.types) and subtyping.is_subtype(result original session.links @session.types) {result=original}
             # A family split by `is? Child` rejoins to the same family.
             # The negative arm is represented explicitly as T & ~Child;
             # retaining Child | (T & ~Child) here would invent tagged storage
@@ -2467,7 +2485,7 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     container_state.replaced(target env.state @session)
     if read is? hir.MemberAccess return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) target result] @session)
     $runtime_assert read is? hir.ExpressedIdentifier and read.binding_id isnt? none
-    set_read_type(read.binding_id node_at(result session).value_type env @session)
+    set_read_type(read.binding_id stored_read_type(result @session) env @session)
     # Keep the selected operation, including any conversions, on the RHS.
     # Lowering need not redispatch a source compound operator independently.
     return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' result] @session)

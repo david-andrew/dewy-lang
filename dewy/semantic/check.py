@@ -1776,6 +1776,16 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         _invalidate_routes(target.binding_id, ctx=ctx)
         _drop_key_facts(ctx, dictionary_id=target.binding_id)
         _drop_key_facts(ctx, key_id=target.binding_id)
+        if isinstance(ty.strip_refinement(store_expected), ty.TypeOr):
+            # A union store admits more alternatives than this assignment
+            # necessarily produces. Packing must not invent an absent arm;
+            # real conversions such as UTF-8 decoding keep their result type.
+            assigned = value
+            while (isinstance(assigned, hir.RepresentationCast)
+                   and isinstance(assigned.type, ty.TypeOr)
+                   and ctx.type_system.is_subtype(assigned.expr.type, assigned.type)):
+                assigned = assigned.expr
+            ctx.refinements[target.binding_id] = assigned.type
     return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', value)
 
 

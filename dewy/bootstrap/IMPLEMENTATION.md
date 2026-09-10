@@ -35,7 +35,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   remainder successfully. Explicit integer-to-bigint casts share annotated
   storage conversion in both checkers, including literals larger than a word;
   source comparisons and signed/unsigned boundary obligations pass. These
-  changes are undergoing the full paired self-build.
+  changes are undergoing the full paired self-build. Packing zero into a
+  bigint argument uses a tagged cell, and bigint interpolation invokes the
+  prelude formatter. The full-library wide-integer smoke test prints the
+  expected decimal values and exits with its expected result. Assignments
+  into optional stores retain the alternatives actually assigned, while an
+  equivalent branch join retains the incoming union identity. Native source
+  comparison covers ordinary/compound writes and rejection after storing none.
 
 - The paired native build is executable through `tools/bootstrap_native.sh`.
   Native checks of the compiler's own semantic sources exposed optional-value
