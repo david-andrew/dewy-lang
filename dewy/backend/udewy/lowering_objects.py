@@ -131,8 +131,31 @@ class _ObjectLowering:
                 self._storage_routes_overlap(route, place)
                 for place in self._call_place_argument_routes(call, position)
             ):
-                return self._clone_object_value(arg, arg.type)
-        return self._extract_object_pointer(arg)
+                prelude, value = self._clone_object_value(arg, arg.type)
+                return self._object_statement_temporary(prelude, value, arg.type, arg.loc)
+        prelude, value = self._extract_object_pointer(arg)
+        if isinstance(arg.type, ty.ObjectType) and (
+            isinstance(arg, hir.ObjectLiteral)
+            or isinstance(arg, hir.FunctionCall)
+            and isinstance(arg.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))
+        ):
+            return self._object_statement_temporary(prelude, value, arg.type, arg.loc)
+        return prelude, value
+
+    def _object_statement_temporary(
+        self,
+        prelude: list[hir.AST],
+        value: hir.AST,
+        object_type: ty.ObjectType,
+        loc: Span,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Keep a frame-rooted record's owned fields until this statement ends."""
+        if not self._has_arena() or self.lowering_module_startup:
+            return prelude, value
+        temporary = self._new_string_temp(loc, 'int64', 'object_temporary')
+        self.statement_temporaries.append(('object', temporary))
+        self.temporary_object_types[temporary.name] = object_type
+        return [*prelude, hir.Assign(loc, ty.VOID_TYPE, temporary, '=', value)], temporary
 
     def _clone_object_value(
         self,
@@ -680,11 +703,7 @@ class _ObjectLowering:
             # A field view keeps its returned receiver alive for the whole
             # statement. Retained fields are copied by their ordinary value
             # boundary before this receiver's owned members are released.
-            temporary = self._new_string_temp(node.loc, 'int64', 'object_receiver')
-            self.statement_temporaries.append(('object', temporary))
-            self.temporary_object_types[temporary.name] = node.value.type
-            prelude.append(hir.Assign(node.loc, ty.VOID_TYPE, temporary, '=', obj))
-            obj = temporary
+            prelude, obj = self._object_statement_temporary(prelude, obj, node.value.type, node.loc)
         _size, offsets = self._object_layout(node.value.type, node)
         address = self._field_address(obj, offsets[node.name], node.loc)
         field = node.value.type.field(node.name)

@@ -580,3 +580,40 @@ let main=():>int64=>{{
     cursors = run(source, tmp_path).splitlines()
     assert len(cursors) == 13
     assert len(set(cursors[2:])) == 1, cursors
+
+
+def test_record_call_snapshots_and_fresh_arguments_release_after_the_call(tmp_path):
+    source = '''
+State:type=[rows:array<array<string>>]
+let make=():>State=>State[[["payload"]]]
+let inspect=(value:State @shared:State):>int64=>{
+    shared.rows.clear
+    return value.rows.length+41
+}
+let read=(value:State):>int64=>value.rows.length+41
+let text=(value:State):>string=>{
+    let rows=value.rows
+    $runtime_assert rows.length >? 0
+    let words=rows[0]
+    $runtime_assert words.length >? 0
+    return words[0]
+}
+let exercise=():>void=>{
+    let value=make()
+    $runtime_assert inspect(value @value)=?42
+    $runtime_assert value.rows.length=?0
+    $runtime_assert read(make())=?42
+    $runtime_assert read(State[[["literal"]]])=?42
+    let retained=text(make())
+    $runtime_assert read(make())=?42
+    $runtime_assert retained=?"payload"
+}
+let main=():>int64=>{
+    exercise(); exercise();
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
