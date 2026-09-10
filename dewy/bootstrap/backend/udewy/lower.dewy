@@ -7,6 +7,8 @@ import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/type_queries.dewy" as views
 import p"../../semantic/builtins.dewy" as builtins
+import p"../../semantic/brands.dewy" as brands
+import p"../../semantic/subtyping.dewy" as subtyping
 
 doc"""
 Legalize validated semantic HIR into concrete µDewy function units.
@@ -17,7 +19,8 @@ the output arena has its own indices and shares only the type arena values.
 
 This slice handles scalar storage and scalar arrays, including independent
 argument/default copies, returned arena values, and growth/removal methods.
-Owned aggregate elements, captures, place parameters, and proof node removal
+Records preserve inline fields, copied array members, and dynamic brands.
+Owned aggregate array elements, captures, place parameters, and proof node removal
 belong to subsequent legalization steps. Until those exist,
 reaching them returns a diagnostic rather than emitting an unsafe program.
 """
@@ -30,6 +33,8 @@ State:type = [
     serial:addr=0
     # The driver identifies the prelude allocator by binding, not spelling.
     allocator:addr?=none
+    layout_context:layouts.Context=layouts.Context[]
+    brand_numbers:array<brands.NumberedBrand>=[]
     problem:Error?=none
 ]
 Result:type = const [program:program.Program input:emit.Input]
@@ -47,7 +52,7 @@ symbol = (name:string binding:addr? @state:State):>string => {
     return name
 }
 runtime_type = (id:addr node:hir.AST @state:State):>addr => {
-    let plain=types.strip_refinement(id state.input.types)
+    let plain=types.unfold(types.strip_refinement(id state.input.types) state.input.types)
     let type=types.node_at(state.input.types plain)
     if type is? types.IntegerLiteralType {
         if type.value <? -9223372036854775808 or type.value >? 9223372036854775807 {reject(node 'arbitrary-precision integer storage' @state);}
@@ -60,6 +65,10 @@ runtime_type = (id:addr node:hir.AST @state:State):>addr => {
     if type is? types.ArrayType {
         let element=types.node_at(state.input.types types.strip_refinement(type.element state.input.types))
         if not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.input.types) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
+        return types.primitive('int64' @state.type_nodes)
+    }
+    if type is? types.ObjectType {
+        loop field in type.fields {runtime_type(field.value_type node @state);}
         return types.primitive('int64' @state.type_nodes)
     }
     if type is? types.FunctionType {
@@ -89,6 +98,11 @@ parameters = (node:hir.FunctionLiteral):>array<hir.Param> => {
 discover = (id:addr @state:State):>void => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.Declare and node.binding_id isnt? none {state.symbols[node.binding_id]="__dewy_binding_{node.binding_id}_{node.name}"}
+    if node is? hir.ObjectLiteral {
+        loop field in node.fields {
+            if field.binding_id isnt? none {state.symbols[field.binding_id]="__dewy_binding_{field.binding_id}_{field.name}"}
+        }
+    }
     if node is? hir.FunctionLiteral {
         loop parameter in parameters(node) {
             if parameter.binding_id isnt? none {state.symbols[parameter.binding_id]="__dewy_binding_{parameter.binding_id}_{parameter.name}"}
@@ -108,6 +122,17 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Suppress return expression(node.item @state)
     if node is? hir.GenericFunction return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
     let type=runtime_type(node.value_type node @state)
+    if node is? hir.ObjectLiteral return object_literal(node @state)
+    if node is? hir.TypeTest return object_test(node @state)
+    if node is? hir.MemberAccess return field_read(field_pointer(node @state) node.value_type node @state)
+    if node is? hir.MemberAssign {
+        let target=hir.node_at(state.input.nodes node.target)
+        if target isnt? hir.MemberAccess return reject(node 'a non-record member assignment' @state)
+        let prefix:array<addr>=[]
+        let pointer=snapshot(field_pointer(target @state) @prefix @state)
+        prefix.push(field_write(pointer owned_value(node.value @state) target.value_type node @state))
+        return sequence(prefix node @state)
+    }
     if node is? hir.ArrayLiteral return array_literal(node @state)
     if node is? hir.ArrayLength return intrinsic('__load_i64__' [address(expression(node.array @state) layouts.array_descriptor.length node @state)] types.primitive('int64' @state.type_nodes) node @state)
     if node is? hir.Index {
@@ -131,18 +156,14 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Declare {
         if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral return reject(node 'hoisting a local function and its captures' @state)
         let original=hir.node_at(state.input.nodes node.expr)
-        let value=expression(node.expr @state)
-        let array=array_type(original.value_type state)
-        if array isnt? none and original isnt? hir.ArrayLiteral {value=array_copy(value array node @state)}
+        let value=owned_value(node.expr @state)
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
         return put(hir.Declare[node.loc type node.decltype symbol(node.name node.binding_id @state) annotation value node.binding_id] @state)
     }
     if node is? hir.Assign {
         let target=expression(node.target @state)
         let original=hir.node_at(state.input.nodes node.value)
-        let value=expression(node.value @state)
-        let array=array_type(original.value_type state)
-        if array isnt? none and original isnt? hir.ArrayLiteral {value=array_copy(value array node @state)}
+        let value=owned_value(node.value @state)
         if node.op not=? '=' {
             if node.op.length <? 2 return reject(node 'invalid compound assignment spelling' @state)
             let operator=node.op[0..node.op.length-1)
@@ -218,7 +239,9 @@ owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     let value=expression(id @state)
     let array=array_type(node.value_type state)
-    return if array is? none or node is? hir.ArrayLiteral value else array_copy(value array node @state)
+    if array isnt? none and node isnt? hir.ArrayLiteral return array_copy(value array node @state)
+    if object_type(node.value_type state) isnt? none and node isnt? hir.ObjectLiteral return object_copy(value node.value_type node @state)
+    return value
 }
 ArrayMemory:type = [descriptor:addr data:addr prefix:array<addr>]
 array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory => {
@@ -412,6 +435,155 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
     return put(hir.Block[call.loc runtime_type(call.value_type call @state) prefix false] @state)
 }
 
+# Record fields embed other records, but store arrays and callable values as
+# handles. Copy fields through the selected dynamic brand's schema rather
+# than blindly reading the maximum reserved size of a parent: a smaller
+# child need not contain the storage reserved for one of its siblings.
+object_type = (id:addr state:State):>types.ObjectType? => {
+    let type=types.node_at(state.input.types types.unfold(types.strip_refinement(id state.input.types) state.input.types))
+    return if type is? types.ObjectType type else none
+}
+aggregate = (id:addr state:State):>bool => array_type(id state) isnt? none or object_type(id state) isnt? none
+object_layout = (id:addr node:hir.AST @state:State):>layouts.Record => {
+    let layout=layouts.record(id state.layout_context @state.type_nodes)
+    if layout is? layouts.Pending {reject(node layout.detail @state); return layouts.Record[1 1 []]}
+    return layout
+}
+brand_number = (name:string state:State):>brands.NumberedBrand? => {
+    loop brand in state.brand_numbers {if brand.name =? name return brand}
+    return none
+}
+field_pointer = (node:hir.MemberAccess @state:State):>addr => {
+    let type=hir.node_at(state.input.nodes node.value).value_type
+    let layout=object_layout(type node @state)
+    let offset=layout.offsets.get(node.name)
+    if offset is? none return reject(node 'a checked field is absent from its record layout' @state)
+    return address(expression(node.value @state) offset node @state)
+}
+field_read = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+    if object_type(type state) isnt? none return pointer
+    if array_type(type state) isnt? none return read_word(pointer 0 node @state)
+    let plain=types.node_at(state.input.types types.strip_refinement(type state.input.types))
+    if plain is? types.FunctionType {
+        return put(hir.Transmute[node.loc runtime_type(type node @state) read_word(pointer 0 node @state)] @state)
+    }
+    return array_load(pointer type node @state)
+}
+field_write = (pointer:addr value:addr type:addr node:hir.AST @state:State):>addr => {
+    if object_type(type state) isnt? none return object_write(pointer value type node @state)
+    if array_type(type state) isnt? none return store_word(value pointer 0 node @state)
+    let plain=types.node_at(state.input.types types.strip_refinement(type state.input.types))
+    if plain is? types.FunctionType {
+        let word=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) value] @state)
+        return store_word(word pointer 0 node @state)
+    }
+    return array_store(value pointer type node @state)
+}
+object_fields = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => {
+    let record=object_type(type state)
+    $runtime_assert record isnt? none
+    runtime_type(type node @state);
+    if state.problem isnt? none return sequence([] node @state)
+    let layout=object_layout(type node @state)
+    let prefix:array<addr>=[]
+    loop field in record.fields {
+        let offset=layout.offsets.get(field.name)
+        $runtime_assert offset isnt? none
+        let pointer=address(source offset node @state)
+        let value=field_read(pointer field.value_type node @state)
+        let array=array_type(field.value_type state)
+        if array isnt? none {value=array_copy(value array node @state)}
+        prefix.push(field_write(address(destination offset node @state) value field.value_type node @state))
+    }
+    let brand=layout.offsets.get(layouts.brand_field)
+    if brand isnt? none {prefix.push(store_word(read_word(source brand node @state) destination brand node @state))}
+    return sequence(prefix node @state)
+}
+object_write = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => {
+    let record=object_type(type state)
+    $runtime_assert record isnt? none
+    let layout=object_layout(type node @state)
+    let tag_offset=layout.offsets.get(layouts.brand_field)
+    if tag_offset is? none return object_fields(destination source type node @state)
+    let prefix:array<addr>=[]
+    let tag=snapshot(read_word(source tag_offset node @state) @prefix @state)
+    let arms:array<addr>=[]
+    loop entry in state.layout_context.brands.entries {
+        let candidate=types.node_at(state.input.types entry.value_type)
+        $runtime_assert candidate is? types.ObjectType
+        if not subtyping.is_subtype(entry.value_type type subtyping.default_links @state.type_nodes) continue
+        let brand=brand_number(entry.name state)
+        $runtime_assert brand isnt? none
+        let condition=intrinsic('__eq__' [tag word(brand.first node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let body=object_fields(destination source entry.value_type node @state)
+        arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state))
+    }
+    let plain=object_fields(destination source type node @state)
+    prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms plain] @state))
+    return sequence(prefix node @state)
+}
+object_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
+    let layout=object_layout(type node @state)
+    let prefix:array<addr>=[]
+    let source=snapshot(value @prefix @state)
+    let destination=snapshot(allocation(word(layout.size node @state) node @state) @prefix @state)
+    prefix.push(object_write(destination source type node @state))
+    prefix.push(destination)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+object_literal = (node:hir.ObjectLiteral @state:State):>addr => {
+    let layout=object_layout(node.value_type node @state)
+    let record=object_type(node.value_type state)
+    $runtime_assert record isnt? none
+    let prefix:array<addr>=[]
+    let destination=snapshot(allocation(word(layout.size node @state) node @state) @prefix @state)
+    loop item in node.fields {
+        let field=types.object_field(record item.name)
+        let offset=layout.offsets.get(item.name)
+        $runtime_assert field isnt? none and offset isnt? none
+        let value=owned_value(item.value @state)
+        if item.binding_id isnt? none {
+            let name=symbol(item.name item.binding_id @state)
+            let type=runtime_type(field.value_type node @state)
+            prefix.push(put(hir.Declare[item.loc types.primitive('void' @state.type_nodes) 'let' name type value item.binding_id] @state))
+            value=put(hir.ExpressedIdentifier[item.loc type name item.binding_id] @state)
+        }
+        prefix.push(field_write(address(destination offset node @state) value field.value_type node @state))
+    }
+    let offset=layout.offsets.get(layouts.brand_field)
+    if offset isnt? none {
+        let number:addr=0
+        if record.brand isnt? none {
+            let brand=brand_number(record.brand state)
+            if brand is? none return reject(node 'a minted record has no runtime brand number' @state)
+            number=brand.first
+        }
+        prefix.push(store_word(word(number node @state) destination offset node @state))
+    }
+    prefix.push(destination)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+object_test = (node:hir.TypeTest @state:State):>addr => {
+    let tested=object_type(node.test_type state)
+    let actual=object_type(hir.node_at(state.input.nodes node.value).value_type state)
+    if tested is? none or actual is? none return reject(node 'this runtime type test representation' @state)
+    if tested.brand is? none return reject(node 'a structural runtime record test' @state)
+    let brand=brand_number(tested.brand state)
+    if brand is? none return reject(node 'the tested type has no runtime brand number' @state)
+    let layout=object_layout(hir.node_at(state.input.nodes node.value).value_type node @state)
+    let offset=layout.offsets.get(layouts.brand_field)
+    if offset is? none return reject(node 'the tested value has no brand storage' @state)
+    let prefix:array<addr>=[]
+    let tag=snapshot(read_word(expression(node.value @state) offset node @state) @prefix @state)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let lower=intrinsic('__ge__' [tag word(brand.first node @state)] boolean node @state)
+    let upper=intrinsic('__lt__' [tag word(brand.end node @state)] boolean node @state)
+    let result=put(hir.ShortCircuit[node.loc boolean 'and' lower upper] @state)
+    if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
+    prefix.push(result)
+    return put(hir.Block[node.loc boolean prefix false] @state)
+}
+
 # Function defaults are callee expressions. The ABI passes an ordinary value
 # plus a presence flag; only the absent branch evaluates the default. Keyword
 # spelling disappears here, after preserving the source evaluation order.
@@ -476,14 +648,14 @@ ordinary_call = (node:hir.FunctionCall result_type:addr @state:State):>addr => {
 }
 function = (node:hir.FunctionLiteral @state:State):>addr => {
     if node.rest_args isnt? none return reject(node 'rest parameter legalization' @state)
-    if array_type(node.rettype state) isnt? none and state.allocator is? none return reject(node 'array results need the prelude arena allocator' @state)
+    if aggregate(node.rettype state) and state.allocator is? none return reject(node 'aggregate results need the prelude arena allocator' @state)
     let arguments:array<hir.Param>=[]
     let prologue:array<addr>=[]
     let void_type=types.primitive('void' @state.type_nodes)
     let boolean=types.primitive('bool' @state.type_nodes)
     loop argument in parameters(node) {
         if argument.place return reject(node 'place parameter legalization' @state)
-        if array_type(argument.value_type state) isnt? none and state.allocator is? none return reject(node 'array arguments need the prelude arena allocator' @state)
+        if aggregate(argument.value_type state) and state.allocator is? none return reject(node 'aggregate arguments need the prelude arena allocator' @state)
         let type=runtime_type(argument.value_type node @state)
         let name=symbol(argument.name argument.binding_id @state)
         if argument is? hir.BoundParam {
@@ -508,8 +680,8 @@ function = (node:hir.FunctionLiteral @state:State):>addr => {
     return put(hir.FunctionLiteral[node.loc runtime_type(node.value_type node @state) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none):>Result|Error => {
-    let state=State[input source type_nodes=input.types allocator=allocator]
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[]):>Result|Error => {
+    let state=State[input source type_nodes=input.types allocator=allocator layout_context=layout_context brand_numbers=brands.numbered(layout_context.brands)]
     let block=hir.node_at(input.nodes root)
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
     discover(root @state)
@@ -531,7 +703,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none):>Result
                 if node.name =? 'main' {main=name}
                 continue
             }
-            if array_type(value.value_type state) isnt? none and state.allocator is? none {reject(node 'global arrays need the prelude arena allocator' @state); continue}
+            if aggregate(value.value_type state) and state.allocator is? none {reject(node 'global aggregates need the prelude arena allocator' @state); continue}
             let declared=expression(id @state)
             let declaration=hir.node_at(state.nodes declared)
             if declaration isnt? hir.Declare continue

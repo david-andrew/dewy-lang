@@ -13,6 +13,14 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    ('Point:type=[x:int64 y:int64]\nlet main=():>int64=>{let value=Point[20 22] return value.x+value.y}', 42),
+    ('let main=():>int64=>{let value=[x=20 y=x+2] return value.x+value.y}', 42),
+    ('Outer:type=[tag:uint8 inner:[x:int64] tail:uint8]\nlet main=():>int64=>{let value=Outer[1 [x=40] 2] let copy=value copy.inner.x=99 return value.inner.x+(copy.tail as int64)}', 42),
+    ('Box:type=[values:array<int64>]\nlet main=():>int64=>{let value=Box[[40 2]] let copy=value copy.values[0]=99 return value.values[0]+copy.values[1]}', 42),
+    ('Base:type=type of [x:int64]\nChild:type=type of Base & [y:int64]\nWide:type=type of Base & [a:int64 b:int64 c:int64]\nlet main=():>int64=>{let value:Base=Child[40 2] let copy=value if copy is? Child return copy.x+copy.y return 0}', 42),
+    ('Root:type=[x:int64]\nMint:type=type of Root\nChild:type=type of Mint & [y:int64]\nlet main=():>int64=>{let value:Root=Child[40 2] let copy=value if copy is? Child return copy.x+copy.y return 0}', 42),
+    ('Fn:type=(x:int64):>int64\nBox:type=[f:Fn]\nlet twice=(x:int64):>int64=>x*2\nlet main=():>int64=>{let box=Box[@twice] return box.f(21)}', 42),
+
     ('let main=():>int64=>{let values:array<int64>=[20 22] return values[0]+values[1]}', 42),
     ('let main=():>int64=>{let values:array<int64>=[40 2] let copy=values copy[0]=99 return values[0]+copy[1]}', 42),
     ('let main=():>int64=>{let values:array<int64>=[40 2] let copy:array<int64>=[0 0] copy=values copy[0]=99 return values[0]+copy[1]}', 42),
@@ -55,6 +63,11 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ('Pair:type=[x:int64 y:int64]\nlet make=():>Pair=>Pair[40 2]\nlet main=():>int64=>{let value=make() return value.x+value.y}', 42),
+    ('Pair:type=[x:int64 y:int64]\nlet change=(value:Pair):>int64=>{value.x=99 return value.y}\nlet main=():>int64=>{let value=Pair[40 2] return change(value)+value.x}', 42),
+    ('Box:type=[values:array<int64>]\nlet make=():>Box=>Box[[40 2]]\nlet main=():>int64=>{let value=make() let copy=value copy.values[0]=99 return value.values[0]+copy.values[1]}', 42),
+    ('Base:type=type of [x:int64]\nChild:type=type of Base & [values:array<int64>]\nlet make=():>Base=>Child[40 [2]]\nlet main=():>int64=>{let value=make() let copy=value if copy is? Child return copy.x+copy.values[0] return 0}', 42),
+
     ('let main=():>int64=>{let values:array<int64>=[] values.push(40) values.push(2) return values.pop+values.pop}', 42),
     ('let main=():>int64=>{let values:array<int64>=[20 9] values.reserve(12) values.insert(22 1) values.pop(idx=2); return values[0]+values[1]}', 42),
     ('let main=():>int64=>{let values:array<int64>=[40 2 9] values.truncate(2) values.truncate(100) let answer=values[0]+values[1] values.clear; values.push(answer) return values.pop}', 42),
@@ -79,6 +92,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/context.dewy'}" as contexts
 import p"{ROOT / 'dewy/bootstrap/semantic/bindings.dewy'}" as bindings
 import p"{ROOT / 'dewy/bootstrap/semantic/check.dewy'}" as checking
 import p"{ROOT / 'dewy/bootstrap/backend/udewy/emit.dewy'}" as emit
+import p"{ROOT / 'dewy/bootstrap/backend/udewy/layouts.dewy'}" as layouts
 import p"{ROOT / 'dewy/bootstrap/backend/udewy/lower.dewy'}" as lower
 import p"{ROOT / 'dewy/bootstrap/backend/udewy/program.dewy'}" as program
 main = (argv:array<string>):>int64 => {{
@@ -94,7 +108,7 @@ main = (argv:array<string>):>int64 => {{
     let root=checking.module(parsed.root env @session)
     if root is? Error {{root.fail}}
     let allocator=bindings.lookup(session.scopes env.lexical.scope '_arena_alloc')
-    let lowered=lower.lower(root emit.Input[session.hir session.types] source allocator=allocator)
+    let lowered=lower.lower(root emit.Input[session.hir session.types] source allocator=allocator layout_context=layouts.Context[session.brands])
     if lowered is? Error {{lowered.fail}}
     let code=program.render(lowered.program lowered.input)
     if code is? Error {{code.fail}}
