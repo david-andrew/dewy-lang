@@ -164,12 +164,12 @@ syntax_ref = (id:addr context:Context @session:Session):>addr => {
     return reference
 }
 problem = (id:addr title:string message:string context:Context session:Session hint:string=''):>Error => {
-    let source = source_at(context session)
-    let node = tokens.node_at(source.nodes id)
+    $runtime_assert context.source <? session.sources.length
+    let node = node_at(id context session)
     # Build the nested pointer before entering Report's field scope: its
     # own default `message` must not hide this function's pointer message.
     let pointer = Pointer[span=node.loc message=message]
-    return Error[srcfile=source.srcfile title=title pointers=[pointer] hint=hint]
+    return Error[srcfile=session.sources[context.source].srcfile title=title pointers=[pointer] hint=hint]
 }
 unsupported = (id:addr detail:string context:Context session:Session):>Error => problem(id 'native checker implementation pending' detail context session)
 child = (context:Context @session:Session):>Context => {

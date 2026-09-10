@@ -3,6 +3,7 @@ import p"../paths.dewy" as paths
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"context.dewy" as contexts
+import p"source_views.dewy" as sources
 import p"check.dewy" as checking
 import p"import_syntax.dewy" as imports
 import p"syntax.dewy" as syntax
@@ -81,8 +82,8 @@ literal_path = (id:addr nodes:array<tokens.Token>):>string? => {
     return none
 }
 source_path = (spec:imports.Import context:contexts.Context engine:Engine):>string|Error => {
-    let source = contexts.source_at(context engine.session)
-    let library = imports.library_name(spec.path source.nodes)
+    $runtime_assert context.source <? engine.session.sources.length
+    let library = imports.library_name(spec.path engine.session.sources[context.source].nodes)
     if library isnt? none {
         loop root in engine.library_roots {
             let candidate = normalize_path("{root}/{library}.dewy")
@@ -90,16 +91,15 @@ source_path = (spec:imports.Import context:contexts.Context engine:Engine):>stri
         }
         return contexts.problem(spec.path 'library module not found' library context engine.session)
     }
-    let path = literal_path(spec.path source.nodes)
+    let path = literal_path(spec.path engine.session.sources[context.source].nodes)
     if path is? none return contexts.unsupported(spec.path 'evaluating this import path expression' context engine.session)
     if path.startswith('/') return normalize_path(path)
-    let parent = p(source.srcfile.path).parent.path
+    let parent = p(sources.srcfile(context engine.session).path).parent.path
     return normalize_path("{parent}/{path}")
 }
 
 install = (spec:imports.Import module:Module id:addr env:checking.Environment @engine:Engine):>Error? => {
-    let source = contexts.source_at(env.lexical engine.session)
-    let loc = tokens.node_at(source.nodes id).loc
+    let loc = contexts.node_at(id env.lexical engine.session).loc
     let scope = bindings.scope_at(engine.session.scopes env.lexical.scope)
     if spec.namespace isnt? none {
         let name = spec.namespace
@@ -153,6 +153,10 @@ has_target = (id:addr nodes:array<tokens.Token>):>bool => {
     if node is? parser.BinOp return has_target(node.left nodes) or has_target(node.right nodes)
     return false
 }
+source_has_target = (id:addr context:contexts.Context session:contexts.Session):>bool => {
+    $runtime_assert context.source <? session.sources.length
+    return has_target(id session.sources[context.source].nodes)
+}
 prepare_imports = (id:addr env:checking.Environment @engine:Engine):>Error? => {
     let spec=imports.read(id env.lexical engine.session)
     if spec is? Error return spec
@@ -163,21 +167,20 @@ prepare_imports = (id:addr env:checking.Environment @engine:Engine):>Error? => {
         if dependency is? Error return dependency
         return install(spec module_at(dependency engine) id env @engine)
     }
-    let source=contexts.source_at(env.lexical engine.session)
-    let node=tokens.node_at(source.nodes id)
+    let node=contexts.node_at(id env.lexical engine.session)
     if node isnt? parser.Flow return none
     loop arm_id in node.arms {
-        let arm=tokens.node_at(source.nodes arm_id)
+        let arm=contexts.node_at(arm_id env.lexical engine.session)
         if arm isnt? parser.KeywordExpr or arm.parts.length not=? 3 return none
-        let keyword=tokens.node_at(source.nodes arm.parts[0])
+        let keyword=contexts.node_at(arm.parts[0] env.lexical engine.session)
         if keyword isnt? tokens.Keyword or keyword.name not=? 'if' return none
-        if not has_target(arm.parts[1] source.nodes) return none
+        if not source_has_target(arm.parts[1] env.lexical engine.session) return none
         let condition=checking.expression(arm.parts[1] env @engine.session)
         if condition is? Error return condition
         let selected=target_values.unwrap(condition engine.session.hir)
         if selected isnt? hir.TargetBool return none
         if not selected.value continue
-        let body=tokens.node_at(source.nodes arm.parts[2])
+        let body=contexts.node_at(arm.parts[2] env.lexical engine.session)
         if body is? parser.Block and body.delims =? '\{}' {
             loop item in body.inner {
                 let error=prepare_imports(item env @engine)

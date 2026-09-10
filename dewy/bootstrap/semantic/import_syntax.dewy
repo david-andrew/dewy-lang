@@ -18,23 +18,23 @@ keyword = (id:addr expected:string nodes:array<tokens.Token>):>bool => {
     return node is? tokens.Keyword and node.name =? expected
 }
 read_names = (id:addr context:contexts.Context session:contexts.Session):>array<Name>|Error => {
-    let source = contexts.source_at(context session)
-    let node = tokens.node_at(source.nodes id)
+    $runtime_assert context.source <? session.sources.length
+    let node = tokens.node_at(session.sources[context.source].nodes id)
     let items:array<addr> = [id]
     if node is? parser.Block and node.delims =? '()' { items = node.inner }
-    if node is? parser.Flat and syntax.is_operator(node.op ',' source.nodes) { items = node.items }
+    if node is? parser.Flat and syntax.is_operator(node.op ',' session.sources[context.source].nodes) { items = node.items }
     if items.length =? 1 {
-        let first = tokens.node_at(source.nodes items[0])
-        if first is? parser.Flat and syntax.is_operator(first.op ',' source.nodes) { items = first.items }
+        let first = tokens.node_at(session.sources[context.source].nodes items[0])
+        if first is? parser.Flat and syntax.is_operator(first.op ',' session.sources[context.source].nodes) { items = first.items }
     }
     let names:array<Name> = []
     loop item in items {
-        let row = tokens.node_at(source.nodes item)
-        let source_name = syntax.identifier(item source.nodes)
+        let row = tokens.node_at(session.sources[context.source].nodes item)
+        let source_name = syntax.identifier(item session.sources[context.source].nodes)
         let local = source_name
-        if row is? parser.BinOp and syntax.is_operator(row.op 'as' source.nodes) {
-            source_name = syntax.identifier(row.left source.nodes)
-            local = syntax.identifier(row.right source.nodes)
+        if row is? parser.BinOp and syntax.is_operator(row.op 'as' session.sources[context.source].nodes) {
+            source_name = syntax.identifier(row.left session.sources[context.source].nodes)
+            local = syntax.identifier(row.right session.sources[context.source].nodes)
         }
         if source_name is? none or local is? none return contexts.problem(item 'invalid imported name' 'use `name` or `name as alias`' context session)
         names.push(Name[source_name local row.loc])
@@ -42,17 +42,17 @@ read_names = (id:addr context:contexts.Context session:contexts.Session):>array<
     return names
 }
 read = (id:addr context:contexts.Context session:contexts.Session):>Import|Error|none => {
-    let source = contexts.source_at(context session)
-    let node = tokens.node_at(source.nodes id)
+    $runtime_assert context.source <? session.sources.length
+    let node = tokens.node_at(session.sources[context.source].nodes id)
     if node isnt? parser.KeywordExpr or node.parts.length =? 0 return none
-    if not keyword(node.parts[0] 'from' source.nodes) and not keyword(node.parts[0] 'import' source.nodes) return none
+    if not keyword(node.parts[0] 'from' session.sources[context.source].nodes) and not keyword(node.parts[0] 'import' session.sources[context.source].nodes) return none
     if node.parts.length =? 4 {
         let path:addr? = none
         let selected:addr? = none
-        if keyword(node.parts[0] 'from' source.nodes) and keyword(node.parts[2] 'import' source.nodes) {
+        if keyword(node.parts[0] 'from' session.sources[context.source].nodes) and keyword(node.parts[2] 'import' session.sources[context.source].nodes) {
             path = node.parts[1] selected = node.parts[3]
         }
-        if keyword(node.parts[0] 'import' source.nodes) and keyword(node.parts[2] 'from' source.nodes) {
+        if keyword(node.parts[0] 'import' session.sources[context.source].nodes) and keyword(node.parts[2] 'from' session.sources[context.source].nodes) {
             path = node.parts[3] selected = node.parts[1]
         }
         if path isnt? none and selected isnt? none {
@@ -61,10 +61,10 @@ read = (id:addr context:contexts.Context session:contexts.Session):>Import|Error
             return Import[path names]
         }
     }
-    if node.parts.length =? 2 and keyword(node.parts[0] 'import' source.nodes) {
-        let path = tokens.node_at(source.nodes node.parts[1])
-        if path is? parser.BinOp and syntax.is_operator(path.op 'as' source.nodes) {
-            let name = syntax.identifier(path.right source.nodes)
+    if node.parts.length =? 2 and keyword(node.parts[0] 'import' session.sources[context.source].nodes) {
+        let path = tokens.node_at(session.sources[context.source].nodes node.parts[1])
+        if path is? parser.BinOp and syntax.is_operator(path.op 'as' session.sources[context.source].nodes) {
+            let name = syntax.identifier(path.right session.sources[context.source].nodes)
             if name is? none return contexts.problem(id 'namespace import needs a name' 'use `import source as name`' context session)
             return Import[path.left namespace=name]
         }

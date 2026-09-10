@@ -1,7 +1,7 @@
 from reporting import Error, Warning, Pointer
 import p"../parser/p0.dewy" as parser
 import p"context.dewy" as contexts
-import p"syntax.dewy" as syntax
+import p"source_views.dewy" as sources
 import p"type_check.dewy" as declarations
 import p"bindings.dewy" as bindings
 import p"ty.dewy" as types
@@ -35,9 +35,8 @@ resolve_type = (id:addr name:string? context:contexts.Context @session:contexts.
     return declarations.resolve(id scope @session)
 }
 parse = (id:addr context:contexts.Context @session:contexts.Session):>Pattern|Error => {
-    let source=contexts.source_at(context session)
     let node=contexts.node_at(id context session)
-    let name=syntax.identifier(id source.nodes)
+    let name=sources.identifier(id context session)
     if name isnt? none {
         if name not=? '_' {
             let existing=bindings.lookup(session.scopes context.scope name)
@@ -54,7 +53,7 @@ parse = (id:addr context:contexts.Context @session:contexts.Session):>Pattern|Er
                 }
             }
             let pointer=Pointer[span=node.loc message=message]
-            session.warnings.push(Warning[srcfile=source.srcfile title='bare name in a match arm binds the whole value' pointers=[pointer] hint=hint])
+            session.warnings.push(Warning[srcfile=sources.srcfile(context session) title='bare name in a match arm binds the whole value' pointers=[pointer] hint=hint])
         }
         return Pattern[id 'any' name=name]
     }
@@ -64,8 +63,8 @@ parse = (id:addr context:contexts.Context @session:contexts.Session):>Pattern|Er
         if test is? Error return test
         return Pattern[id 'type' test=test]
     }
-    if node is? parser.BinOp and syntax.is_operator(node.op ':' source.nodes) {
-        let binding=syntax.identifier(node.left source.nodes)
+    if node is? parser.BinOp and sources.is_operator(node.op ':' context session) {
+        let binding=sources.identifier(node.left context session)
         if binding isnt? none {
             let test=resolve_type(node.right binding context @session)
             if test is? Error return test
@@ -75,11 +74,11 @@ parse = (id:addr context:contexts.Context @session:contexts.Session):>Pattern|Er
     if node is? parser.Block and node.delims =? '[]' {
         let fields:array<Field>=[]
         loop item in node.inner {
-            let binding=syntax.identifier(item source.nodes)
+            let binding=sources.identifier(item context session)
             if binding isnt? none {fields.push(Field[binding]) continue}
             let field=contexts.node_at(item context session)
-            if field is? parser.BinOp and syntax.is_operator(field.op ':' source.nodes) {
-                let field_name=syntax.identifier(field.left source.nodes)
+            if field is? parser.BinOp and sources.is_operator(field.op ':' context session) {
+                let field_name=sources.identifier(field.left context session)
                 if field_name isnt? none {
                     let test=resolve_type(field.right field_name context @session)
                     if test is? Error return test
