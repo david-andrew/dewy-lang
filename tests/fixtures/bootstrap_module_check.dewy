@@ -8,8 +8,17 @@ import p"../../dewy/bootstrap/semantic/type_display.dewy" as display
 main = (argv:array<string>):>int64 => {
     $runtime_assert argv.length >=? 2
     let prelude:array<string>=[]
-    loop i in 2.. and i <? argv.length {prelude.push(argv[i])}
-    let engine=modules.Engine[prelude_files=prelude]
+    let roots:array<string>=[]
+    let i:addr=2
+    loop i <? argv.length {
+        if argv[i] =? '--library-root' {
+            i+=1
+            $runtime_assert i <? argv.length
+            roots.push(argv[i])
+        } else {prelude.push(argv[i])}
+        i+=1
+    }
+    let engine=modules.Engine[prelude_files=prelude library_roots=roots]
     let entry=modules.load(argv[1] @engine)
     if entry is? Error {entry.fail return 1}
     let module=modules.module_at(entry engine)

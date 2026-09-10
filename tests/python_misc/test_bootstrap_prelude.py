@@ -62,3 +62,12 @@ def test_native_numeric_prelude(tmp_path):
              'math', 'rational', 'fixed', 'bigint', 'bigrational']
     prelude = [ROOT / f'library/{name}.dewy' for name in names]
     assert run_module(tmp_path, entry, prelude, timeout=600) == ['value:int64']
+
+
+def test_native_library_search_roots(tmp_path):
+    library = tmp_path / 'library'
+    library.mkdir()
+    (library / 'example.dewy').write_text('Word:type=int64\nlet answer:Word=42\n')
+    entry = tmp_path / 'uses-library.dewy'
+    entry.write_text('from example import Word, answer\nlet value:Word=answer\n')
+    assert run_module(tmp_path, entry, ['--library-root', library]) == ['value:int64']
