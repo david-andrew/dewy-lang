@@ -852,7 +852,7 @@ class _ObjectLowering:
                 )
                 place_postlude.extend(arg_postlude)
             elif payload is not None:
-                arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                arg_prelude, lowered_arg = self._materialize_optional(arg, payload, temporary=True)
             elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
                 arg_prelude, lowered_arg = self._extract_object_pointer(arg)
             else:
@@ -869,7 +869,7 @@ class _ObjectLowering:
                 )
                 place_postlude.extend(arg_postlude)
             elif payload is not None:
-                arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                arg_prelude, lowered_arg = self._materialize_optional(arg, payload, temporary=True)
             elif isinstance(arg.type, ty.ObjectType):
                 arg_prelude, lowered_arg = self._extract_object_pointer(arg)
             else:

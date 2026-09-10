@@ -241,11 +241,19 @@ class _OptionalLowering:
         self,
         value: hir.AST,
         payload: ty.TypeExpr,
+        *, temporary: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        if (isinstance(value, (hir.RepresentationCast, hir.ValueCast))
+                and ty.optional_payload(value.type) == payload
+                and ty.TypeSystem().is_subtype(value.expr.type, value.type)):
+            return self._materialize_optional(value.expr, payload, temporary=temporary)
         if ty.optional_payload(value.type) is not None:
             prelude, cell = self._extract_expression(value)
             if isinstance(cell, hir.ExpressedIdentifier):
-                return prelude, replace(cell, type='int64')
+                result = replace(cell, type='int64')
+                if temporary and self._fresh_cell_expression(value):
+                    return self._cell_statement_temporary(prelude, result, ('none', payload), prepared=False)
+                return prelude, result
             target = hir.ExpressedIdentifier(
                 value.loc,
                 'int64',
@@ -266,11 +274,41 @@ class _OptionalLowering:
             'int64',
             self._optional_allocation(value.loc),
         )
-        return [
+        statements = [
             *prelude,
             declaration,
             *self._optional_write(target, value, payload),
-        ], target
+        ]
+        if temporary:
+            return self._cell_statement_temporary(statements, target, ('none', payload), prepared=False)
+        return statements, target
+
+    def _fresh_cell_expression(self, value: hir.AST) -> bool:
+        value = self._copy_source_expression(value)
+        if (isinstance(value, hir.RepresentationCast)
+                and isinstance(value.expr.type, (ty.ArrayType, ty.BinaryLiteralType))
+                and (payload := ty.optional_payload(value.type)) is not None
+                and self._is_string_valued(payload)):
+            return True  # A checked UTF-8 decode constructs its own cell/string.
+        return (isinstance(value, hir.Flow)
+                or isinstance(value, hir.FunctionCall)
+                and isinstance(value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral)))
+
+    def _cell_statement_temporary(self, prelude: list[hir.AST], value: hir.ExpressedIdentifier,
+                                  members: tuple[ty.TypeExpr, ...], *, prepared: bool
+                                  ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """A newly packed argument or call result owns its payload until the call ends.
+
+        Existing binding/field cells remain borrowed. The enclosing statement
+        keeps fresh cells alive across later arguments and returned views.
+        Their roots are frame storage; only the owned payload needs releasing.
+        """
+        if not self._has_arena() or self.lowering_module_startup:
+            return prelude, value
+        temporary = self._new_string_temp(value.loc, 'int64', 'cell_temporary')
+        self.statement_temporaries.append(('cell', temporary))
+        self.temporary_cell_types[temporary.name] = (members, prepared)
+        return [*prelude, hir.Assign(value.loc, ty.VOID_TYPE, temporary, '=', value)], temporary
 
     def _new_optional_name(self, role: str) -> str:
         while True:
@@ -1023,17 +1061,21 @@ class _OptionalLowering:
         self,
         value: hir.AST,
         members: tuple[ty.TypeExpr, ...],
+        *, temporary: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         """Produce a union cell pointer for one argument value."""
         if (
             isinstance(value, (hir.RepresentationCast, hir.ValueCast))
             and ty.runtime_union_members(value.type) == members
         ):
-            return self._materialize_union(value.expr, members)
+            return self._materialize_union(value.expr, members, temporary=temporary)
         if ty.runtime_union_members(value.type) == members:
             prelude, cell = self._extract_expression(value)
             if isinstance(cell, hir.ExpressedIdentifier):
-                return prelude, replace(cell, type='int64')
+                result = replace(cell, type='int64')
+                if temporary and self._fresh_cell_expression(value):
+                    return self._cell_statement_temporary(prelude, result, members, prepared=True)
+                return prelude, result
             target = hir.ExpressedIdentifier(
                 value.loc,
                 'int64',
@@ -1063,11 +1105,14 @@ class _OptionalLowering:
             'int64',
             self._union_cell_allocation(members, value.loc),
         )
-        return [
+        statements = [
             declaration,
             *self._union_prepare_trees(target, members, value.loc),
             *self._union_write(target, value, members),
-        ], target
+        ]
+        if temporary:
+            return self._cell_statement_temporary(statements, target, members, prepared=True)
+        return statements, target
 
     def _union_result_write(self, item: hir.AST) -> list[hir.AST]:
         """Write one returned union value into the caller-owned result cell."""

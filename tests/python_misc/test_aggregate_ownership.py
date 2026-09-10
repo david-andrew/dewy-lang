@@ -517,6 +517,67 @@ let main=():>int64=>{{
     assert len(set(cursors[2:])) == 1, cursors
 
 
+@pytest.mark.parametrize('value_type', ['Box', 'Box|none', 'Box|string'])
+def test_fresh_arguments_and_parameter_copies_release_after_retaining_results(value_type, tmp_path):
+    source = '''
+Box:type=[words:array<string>]
+let calls:int64=100
+let make=():>VALUE_TYPE=>{calls+=1 return Box[["payload-{calls}"]]}
+let take=(value:VALUE_TYPE):>string=>{
+    if value isnt? Box return "other"
+    $runtime_assert value.words.length=?1
+    let result=value.words[0]
+    value.words.clear
+    return result
+}
+let defaulted=(value:VALUE_TYPE=make()):>string=>take(value)
+let exercise=():>void=>{
+    let original=make()
+    let kept=take(original)
+    $runtime_assert original is? Box
+    $runtime_assert original.words.length=?1
+    let positional=take(make())
+    let keyword=take(value=make())
+    let packed=take(Box[["literal"]])
+    let omitted=defaulted()
+    $runtime_assert kept.startswith("payload-")
+    $runtime_assert positional.startswith("payload-")
+    $runtime_assert keyword.startswith("payload-")
+    $runtime_assert omitted.startswith("payload-")
+    $runtime_assert packed=?"literal"
+}
+let main=():>int64=>{
+    exercise(); exercise();
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''.replace('VALUE_TYPE', value_type)
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
+def test_optional_argument_decoding_retains_conversion_and_owned_result(tmp_path):
+    source = '''
+let keep=(value:string|none):>string=>if value is? none "absent" else value
+let exercise=():>void=>{
+    let good:array<uint8>=[65]
+    let invalid:array<uint8>=[255]
+    let retained=keep(good as string|none)
+    $runtime_assert keep(invalid as string|none)=?"absent"
+    $runtime_assert retained=?"A"
+}
+let main=():>int64=>{
+    exercise(); exercise();
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
 @pytest.mark.parametrize('result_type', ['Box|none', 'Box|string', 'array<string>|none'])
 def test_discarded_call_type_tests_release_their_payloads(result_type, tmp_path):
     value = 'words' if result_type.startswith('array') else 'Box[words]'

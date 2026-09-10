@@ -364,6 +364,7 @@ class _Lowerer(
         self.consumed_string_values: set[int] = set()   # call nodes whose string result a binding, a return, or a store takes over (not temporaries)
         self.temporary_array_elements: dict[str, ty.TypeExpr] = {}   # array temporaries' element types, by temp name
         self.temporary_object_types: dict[str, ty.ObjectType] = {}
+        self.temporary_cell_types: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] = {}
         self.owned_cells: dict[str, tuple[ty.TypeExpr, ...]] = {}   # optional/union locals (and match temporaries) whose string payload is released at scope exit
         self.owned_aggregate_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] = {}
         self.local_initializers: dict[int, list[hir.AST]] = {}   # every local's initializers and assigned values (`_local_initializers`), this function
@@ -598,6 +599,8 @@ class _Lowerer(
         lowered_pos: list[hir.Param | hir.BoundParam] = []
         default_prologue: list[hir.AST] = []
         parameter_prologue: list[hir.AST] = []
+        parameter_objects: dict[LocalBindingKey, ty.ObjectType] = {}
+        parameter_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] = {}
         place_parameter_cells: dict[int, hir.ExpressedIdentifier] = {}
 
         def lower_param(param: hir.Param) -> hir.Param:
@@ -698,6 +701,7 @@ class _Lowerer(
                 parameter_prologue.extend(
                     self._object_copy(cell, incoming, param.type, literal.loc)
                 )
+                parameter_objects[local_binding_key(cell)] = param.type
                 return replace(
                     param,
                     name=incoming_name,
@@ -760,6 +764,7 @@ class _Lowerer(
                 parameter_prologue.extend(
                     self._union_write(cell, incoming, members)
                 )
+                parameter_cells[param.name] = (members, True)
                 return replace(
                     param,
                     name=incoming_name,
@@ -793,6 +798,7 @@ class _Lowerer(
                 )
             )
             parameter_prologue.extend(self._optional_write(cell, incoming, payload))
+            parameter_cells[param.name] = (('none', payload), False)
             return replace(
                 param,
                 name=incoming_name,
@@ -836,6 +842,7 @@ class _Lowerer(
                     )],
                     hir.Block(literal.loc, ty.VOID_TYPE, self._optional_write(cell, default_value, payload), True),
                 ))
+                parameter_cells[param.name] = (('none', payload), False)
                 continue
             incoming_name = self._new_default_name(f'arg_{param.name}')
             present_name = self._new_default_name(f'has_{param.name}')
@@ -1020,7 +1027,8 @@ class _Lowerer(
                     True,
                 )
         body = self._lower_function_body(
-            transformed_body, literal.rettype, parameter_prologue
+            transformed_body, literal.rettype, parameter_prologue,
+            parameter_objects=parameter_objects, parameter_cells=parameter_cells,
         )
         self.current_optional_result = previous_result
         self.current_object_result = previous_object_result
@@ -3033,11 +3041,20 @@ class _Lowerer(
 
     def _lower_function_body(
         self, node: hir.AST, rettype: ty.Type, prologue: list[hir.AST] | None = None,
+        *, parameter_objects: dict[LocalBindingKey, ty.ObjectType] | None = None,
+        parameter_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] | None = None,
     ) -> hir.AST:
         """Lower a function body and install labeled-exit signal state when needed."""
         self.owned_array_names = set()
         self.owned_array_elements = {}
-        self.owned_objects = {}
+        self.owned_objects = dict(parameter_objects or {})
+        # Already-lowered parameter copies belong to this scope just like
+        # body declarations. Register them before lowering writes/returns so
+        # replacement and every exit release their owned fields or payloads.
+        self.owned_aggregate_cells.update(parameter_cells or {})
+        for name, (members, _) in (parameter_cells or {}).items():
+            if any(self._is_string_valued(member) for member in members):
+                self.owned_cells[name] = members
         self.borrowed_fields = {}
         self.object_flow_targets = set()
         previous_state = (
@@ -3714,6 +3731,9 @@ class _Lowerer(
                 )
             elif kind == 'object':
                 body = self._release_object_members(value, self.temporary_object_types[value.name], value.loc)
+            elif kind == 'cell':
+                members, prepared = self.temporary_cell_types[value.name]
+                body = self._release_cell_payload(value, members, value.loc, prepared=prepared)
             else:
                 body = self._release_string_elements(value, value.loc)
             present = self._typed_equality(value, self._int64_literal(value.loc, 0), 'int64', value.loc)
@@ -4888,7 +4908,7 @@ class _Lowerer(
                         copy_type,
                     )
                 elif payload is not None:
-                    arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                    arg_prelude, lowered_arg = self._materialize_optional(arg, payload, temporary=True)
                 elif (
                     union_arguments[index]
                     if index < len(union_arguments)
@@ -4901,7 +4921,7 @@ class _Lowerer(
                     )
                     arg_prelude, lowered_arg = self._materialize_union(
                         arg,
-                        arg_members,
+                        arg_members, temporary=True,
                     )
                 elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
                     arg_prelude, lowered_arg = self._lower_object_argument(node, arg, index)
@@ -4934,11 +4954,11 @@ class _Lowerer(
                         copy_type,
                     )
                 elif payload is not None:
-                    arg_prelude, lowered_arg = self._materialize_optional(arg, payload)
+                    arg_prelude, lowered_arg = self._materialize_optional(arg, payload, temporary=True)
                 elif ty.runtime_union_members(arg.type) is not None:
                     arg_prelude, lowered_arg = self._materialize_union(
                         arg,
-                        ty.runtime_union_members(arg.type),
+                        ty.runtime_union_members(arg.type), temporary=True,
                     )
                 elif isinstance(arg.type, ty.ObjectType):
                     arg_prelude, lowered_arg = self._lower_object_argument(node, arg, name)

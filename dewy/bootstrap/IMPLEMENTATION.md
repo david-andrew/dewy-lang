@@ -114,10 +114,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   including snapshots required by overlapping place arguments. Fresh record
   arguments use the same lifetime boundary. Discarded ordinary record and
   union call results also release their payloads, and a fresh record returned
-  into another record's field transfers its ownership. The 41 ownership
-  cases pass (the new nested-field case includes a guard for its array read).
-  Profiling localized most remaining full-invocation allocation growth to
-  validation; the newest seed is being built with these cleanup paths.
+  into another record's field transfers its ownership. Fresh replacement
+  records transfer their fields too; this reduced a full-library version
+  invocation's peak memory from 8.6 GiB to 5.4 GiB. Fresh optional/union
+  arguments now release their payloads after the enclosing statement, and
+  copied aggregate parameters participate in ordinary scope-exit cleanup.
+  Optional string returns retain independent bytes before that cleanup,
+  including values produced by checked UTF-8 decoding. All 47 aggregate
+  ownership cases and 27 neighboring string/union checks pass. A new seed is
+  being built with the parameter and argument cleanup paths.
   No allocator policy or language syntax changed.
 
 - Native version output embeds the shared `VERSION` at compilation. A native
