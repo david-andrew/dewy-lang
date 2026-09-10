@@ -4706,6 +4706,37 @@ class _Lowerer(
             union_arguments = self.call_union_args.get(id(node), [])
             argument_types = self.call_argument_types.get(id(node), [])
             pos_args: list[hir.AST] = []
+            kw_args: dict[str, hir.AST] = {}
+            held_pos = 0
+            held_kw: set[str] = set()
+
+            def append_argument_prelude(statements: list[hir.AST]) -> None:
+                # Extraction can leave a scalar call/read in the operand
+                # while moving a later aggregate copy into the prelude.
+                # Finish earlier operands before that copy (or any other
+                # preparation), preserving source argument evaluation order.
+                nonlocal held_pos
+                if not statements:
+                    return
+
+                def hold(argument: hir.AST) -> hir.AST:
+                    if isinstance(argument, (hir.Integer, hir.Bool, hir.String)):
+                        return argument
+                    runtime_type = self._lower_runtime_value_type(argument.type)
+                    result = hir.ExpressedIdentifier(argument.loc, runtime_type, self._new_result_name())
+                    prelude.append(hir.Declare(argument.loc, ty.VOID_TYPE, 'let', result.name, runtime_type, argument))
+                    return result
+
+                for position in range(held_pos, len(pos_args)):
+                    pos_args[position] = hold(pos_args[position])
+                held_pos = len(pos_args)
+                for name, argument in kw_args.items():
+                    if name in held_kw:
+                        continue
+                    kw_args[name] = hold(argument)
+                    held_kw.add(name)
+                prelude.extend(statements)
+
             place_postlude: list[hir.AST] = []
             for index, arg in enumerate(node.pos_args):
                 expected_type = (
@@ -4764,9 +4795,8 @@ class _Lowerer(
                     arg_prelude, lowered_arg = self._lower_object_argument(node, arg)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
-                prelude.extend(arg_prelude)
+                append_argument_prelude(arg_prelude)
                 pos_args.append(lowered_arg)
-            kw_args: dict[str, hir.AST] = {}
             optional_kwargs = self.call_optional_kwargs.get(id(node), {})
             for name, arg in node.kw_args.items():
                 payload = optional_kwargs.get(name)
@@ -4802,7 +4832,7 @@ class _Lowerer(
                     arg_prelude, lowered_arg = self._lower_object_argument(node, arg)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
-                prelude.extend(arg_prelude)
+                append_argument_prelude(arg_prelude)
                 kw_args[name] = lowered_arg
             if isinstance(node.type, ty.ObjectType):
                 call_prelude, result = self._finish_object_call(

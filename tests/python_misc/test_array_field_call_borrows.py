@@ -93,6 +93,32 @@ let main=():>int64=>{
     assert result.stdout == b'7\n9\n'
 
 
+@pytest.mark.parametrize('argument', ['bag', 'bag.items'])
+def test_an_earlier_argument_finishes_before_a_later_snapshot(tmp_path, argument):
+    parameter = 'after:Bag' if argument == 'bag' else 'after:array<Entry>'
+    items = 'after.items' if argument == 'bag' else 'after'
+    binary = _build(tmp_path, '''Entry:type=[value:int64]
+Bag:type=[items:array<Entry>]
+let append=(@bag:Bag):>int64=>{
+    let index:int64=bag.items.length
+    bag.items.push(Entry[9])
+    return index
+}
+let read=(index:int64 PARAMETER):>int64=>{
+    $runtime_assert index >=? 0 and index <? ITEMS.length
+    return ITEMS[index].value
+}
+let main=():>int64=>{
+    let bag=Bag[[Entry[7]]]
+    printl(read(append(@bag) ARGUMENT))
+    return 0
+}
+'''.replace('PARAMETER', parameter).replace('ITEMS', items).replace('ARGUMENT', argument))
+    result = subprocess.run([binary], capture_output=True, timeout=10, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == b'9\n'
+
+
 @pytest.mark.skipif(sys.platform != 'linux', reason='native Linux process memory limit')
 @pytest.mark.parametrize('object_argument', [False, True])
 def test_disjoint_field_places_do_not_force_value_copies(tmp_path, object_argument):
