@@ -17,10 +17,12 @@ Binding ids choose symbols, so source shadowing and imported names cannot
 silently capture each other during hoisting. Input nodes remain immutable;
 the output arena has its own indices and shares only the type arena values.
 
-This slice handles scalar storage and scalar arrays, including independent
+This slice handles scalar and aggregate array storage, including independent
 argument/default copies, returned arena values, and growth/removal methods.
 Records preserve inline fields, copied array members, and dynamic brands.
-Owned aggregate array elements, captures, place parameters, and proof node removal
+Cached copy helpers retain value semantics through nested arrays and minted
+record hierarchies without recursively expanding the lowering visitor.
+Captures, place parameters, and proof node removal
 belong to subsequent legalization steps. Until those exist,
 reaching them returns a diagnostic rather than emitting an unsafe program.
 """
@@ -35,6 +37,8 @@ State:type = [
     allocator:addr?=none
     layout_context:layouts.Context=layouts.Context[]
     brand_numbers:array<brands.NumberedBrand>=[]
+    copy_helpers:dict<string string>=[]
+    generated:array<program.Function>=[]
     problem:Error?=none
 ]
 Result:type = const [program:program.Program input:emit.Input]
@@ -63,8 +67,8 @@ runtime_type = (id:addr node:hir.AST @state:State):>addr => {
         if type.name in? ['bool' 'void' 'never'] or views.fixed_integer_layout(plain state.input.types) isnt? none return plain
     }
     if type is? types.ArrayType {
-        let element=types.node_at(state.input.types types.strip_refinement(type.element state.input.types))
-        if not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.input.types) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
+        let element=types.node_at(state.input.types types.unfold(types.strip_refinement(type.element state.input.types) state.input.types))
+        if element isnt? types.ObjectType|types.ArrayType|types.FunctionType and not types.is_primitive(element 'bool') and views.fixed_integer_layout(type.element state.input.types) is? none {reject(node 'array elements requiring owned aggregate storage' @state);}
         return types.primitive('int64' @state.type_nodes)
     }
     if type is? types.ObjectType {
@@ -144,7 +148,7 @@ expression = (id:addr @state:State):>addr => {
         if target isnt? hir.Index return reject(node 'a non-array index assignment' @state)
         let prefix:array<addr>=[]
         let pointer=snapshot(array_index(target @state) @prefix @state)
-        prefix.push(array_store(expression(node.value @state) pointer target.value_type node @state))
+        prefix.push(array_store(owned_value(node.value @state) pointer target.value_type node @state))
         return put(hir.Block[node.loc type prefix false] @state)
     }
     if node is? hir.Void return put(hir.Void[node.loc type] @state)
@@ -208,7 +212,7 @@ expression = (id:addr @state:State):>addr => {
 # Copies own their bytes; aggregate elements still need recursive ownership
 # lowering. Arena release/reuse insertion remains a subsequent lifetime pass.
 array_type = (id:addr state:State):>types.ArrayType? => {
-    let type=types.node_at(state.input.types types.strip_refinement(id state.input.types))
+    let type=types.node_at(state.input.types types.unfold(types.strip_refinement(id state.input.types) state.input.types))
     return if type is? types.ArrayType type else none
 }
 word = (value:bigint node:hir.AST @state:State):>addr => put(hir.Integer[node.loc types.primitive('int64' @state.type_nodes) '0d' value] @state)
@@ -258,7 +262,12 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory 
     return ArrayMemory[descriptor data prefix]
 }
 array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>addr => {
-    let type=types.node_at(state.input.types types.strip_refinement(element state.input.types))
+    let type=types.node_at(state.input.types types.unfold(types.strip_refinement(element state.input.types) state.input.types))
+    if type is? types.ObjectType|types.ArrayType return store_word(value pointer 0 node @state)
+    if type is? types.FunctionType {
+        let word=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) value] @state)
+        return store_word(word pointer 0 node @state)
+    }
     if types.is_primitive(type 'bool') {
         let byte=put(hir.Transmute[node.loc types.primitive('uint8' @state.type_nodes) value] @state)
         return intrinsic('__store_u8__' [byte pointer] types.primitive('void' @state.type_nodes) node @state)
@@ -268,7 +277,9 @@ array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>
     return intrinsic("__store_{if layout.signed 'i' else 'u'}{layout.bits}__" [value pointer] types.primitive('void' @state.type_nodes) node @state)
 }
 array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
-    let type=types.node_at(state.input.types types.strip_refinement(element state.input.types))
+    let type=types.node_at(state.input.types types.unfold(types.strip_refinement(element state.input.types) state.input.types))
+    if type is? types.ObjectType|types.ArrayType return read_word(pointer 0 node @state)
+    if type is? types.FunctionType return put(hir.Transmute[node.loc runtime_type(element node @state) read_word(pointer 0 node @state)] @state)
     if types.is_primitive(type 'bool') {
         let byte=intrinsic('__load_i8__' [pointer] types.primitive('int8' @state.type_nodes) node @state)
         return put(hir.Transmute[node.loc types.primitive('bool' @state.type_nodes) byte] @state)
@@ -285,7 +296,7 @@ array_literal = (node:hir.ArrayLiteral @state:State):>addr => {
     let memory=array_memory(word(node.items.length node @state) layout.size node @state)
     let offset:addr=0
     loop item in node.items {
-        memory.prefix.push(array_store(expression(item @state) address(memory.data offset node @state) type.element node @state))
+        memory.prefix.push(array_store(owned_value(item @state) address(memory.data offset node @state) type.element node @state))
         offset+=layout.size
     }
     memory.prefix.push(memory.descriptor)
@@ -304,7 +315,57 @@ array_index = (node:hir.Index @state:State):>addr => {
     prefix.push(word_op('__add__' data offset node @state))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+# Copy helpers are monomorphic in storage type and shared by every use.
+# Reserve the symbol before generating its body: a recursive record through
+# array handles calls the reserved helper rather than recursively expanding
+# the compiler's own lowering stack. These helpers require arena storage;
+# a stack allocation inside a returning helper would immediately dangle.
+finish_copy = (name:string parameter:string body:addr node:hir.AST @state:State):>void => {
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let type=types.function_type([types.PosOrKwArg[parameter word_type]] [] none word_type [] @state.type_nodes)
+    let literal=put(hir.FunctionLiteral[node.loc type [hir.Param[parameter word_type]] [] none word_type body source=state.source] @state)
+    state.generated.push(program.Function[name literal])
+}
 array_copy = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr => {
+    if state.allocator is? none return array_copy_body(value type node @state)
+    let key="array:{type.element}"
+    let name=state.copy_helpers.get(key)
+    if name is? none {
+        let generated_name=fresh('copy_array' @state)
+        name=generated_name
+        state.copy_helpers[key]=generated_name
+        let parameter=fresh('copy_source' @state)
+        let source=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) parameter] @state)
+        let body=array_copy_body(source type node @state)
+        finish_copy(generated_name parameter body node @state)
+    }
+    $runtime_assert name isnt? none
+    return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
+}
+object_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
+    if state.allocator is? none return object_copy_body(value type node @state)
+    let key="object:{types.unfold(types.strip_refinement(type state.input.types) state.input.types)}"
+    let name=state.copy_helpers.get(key)
+    if name is? none {
+        let generated_name=fresh('copy_object' @state)
+        name=generated_name
+        state.copy_helpers[key]=generated_name
+        let parameter=fresh('copy_source' @state)
+        let source=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) parameter] @state)
+        let body=object_copy_body(source type node @state)
+        finish_copy(generated_name parameter body node @state)
+    }
+    $runtime_assert name isnt? none
+    return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
+}
+owned_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
+    let array=array_type(type state)
+    if array isnt? none return array_copy(value array node @state)
+    if object_type(type state) isnt? none return object_copy(value type node @state)
+    return value
+}
+
+array_copy_body = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let descriptor=snapshot(value @prefix @state)
     let source=snapshot(intrinsic('__load_i64__' [descriptor] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
@@ -313,6 +374,21 @@ array_copy = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr =
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let memory=array_memory(length layout.size node @state)
     loop item in memory.prefix {prefix.push(item)}
+    if aggregate(type.element state) {
+        if state.allocator is? none return reject(node 'owned aggregate array elements need the prelude arena allocator' @state)
+        let cursor=snapshot(word(0 node @state) @prefix @state)
+        let offset=word_op('__mul__' cursor word(layout.size node @state) node @state)
+        let item=array_load(word_op('__add__' source offset node @state) type.element node @state)
+        let copied=owned_copy(item type.element node @state)
+        let store=array_store(copied word_op('__add__' memory.data offset node @state) type.element node @state)
+        let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
+        let body=sequence([store increment] node @state)
+        let condition=intrinsic('__lt__' [cursor length] types.primitive('bool' @state.type_nodes) node @state)
+        let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
+        prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
+        prefix.push(memory.descriptor)
+        return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    }
     let count=snapshot(word_op('__mul__' length word(layout.size node @state) node @state) @prefix @state)
     let cursor=snapshot(word(0 node @state) @prefix @state)
     let source_pointer=word_op('__add__' source cursor node @state)
@@ -386,9 +462,9 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
     if method.name in? ['truncate' 'reserve'] {names.push('count')}
     loop i in 0.. and i <? call.pos_args.length {
         $runtime_assert i <? names.length
-        arguments[names[i]]=snapshot(expression(call.pos_args[i] @state) @prefix @state)
+        arguments[names[i]]=snapshot(owned_value(call.pos_args[i] @state) @prefix @state)
     }
-    loop [name argument] in call.kw_args {arguments[name]=snapshot(expression(argument @state) @prefix @state)}
+    loop [name argument] in call.kw_args {arguments[name]=snapshot(owned_value(argument @state) @prefix @state)}
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length call @state) @prefix @state)
     let new_length=length
     let result:addr?=none
@@ -522,7 +598,7 @@ object_write = (destination:addr source:addr type:addr node:hir.AST @state:State
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms plain] @state))
     return sequence(prefix node @state)
 }
-object_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
+object_copy_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     let layout=object_layout(type node @state)
     let prefix:array<addr>=[]
     let source=snapshot(value @prefix @state)
@@ -716,6 +792,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         } else {startup.push(expression(id @state))}
     }
     if state.problem isnt? none return state.problem
+    loop function in state.generated {functions.push(function)}
     let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source] emit.Input[state.nodes state.type_nodes])
     return Result[normalized.program normalized.input]
 }

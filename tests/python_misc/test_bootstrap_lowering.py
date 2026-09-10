@@ -63,6 +63,12 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ('Cell:type=[value:int64]\nlet main=():>int64=>{let item=Cell[40] let values:array<Cell>=[item] let copy=values copy[0].value=99 return item.value+values[0].value-38}', 42),
+    ('let main=():>int64=>{let inner:array<int64>=[40 2] let rows:array<array<int64 length=2>>=[inner] let copy=rows copy[0][0]=99 return rows[0][0]+copy[0][1]}', 42),
+    ('Cell:type=[value:int64]\nlet main=():>int64=>{let item=Cell[40] let values:array<Cell>=[] values.push(item) item.value=99 values.reserve(100) let removed=values.pop return removed.value+2}', 42),
+    ('let main=():>int64=>{let inner:array<int64>=[40 2] let rows:array<array<int64 length=2>>=[[0 0]] rows[0]=inner inner[0]=99 return rows[0][0]+rows[0][1]}', 42),
+    ('Node:type=$abstract type of [value:int64]\nLeaf:type=type of Node\nBranch:type=type of Node & [children:array<Node>]\nlet main=():>int64=>{let root:Node=Branch[40 [Leaf[2]]] let copy=root if copy is? Branch and copy.children.length >? 0 {copy.children[0]=Leaf[99]} if root is? Branch and root.children.length >? 0 return root.value+root.children[0].value return 0}', 42),
+    ('Fn:type=(x:int64):>int64\nlet twice=(x:int64):>int64=>x*2\nlet main=():>int64=>{let values:array<Fn>=[@twice] let copy=values return copy[0](21)}', 42),
     ('Pair:type=[x:int64 y:int64]\nlet make=():>Pair=>Pair[40 2]\nlet main=():>int64=>{let value=make() return value.x+value.y}', 42),
     ('Pair:type=[x:int64 y:int64]\nlet change=(value:Pair):>int64=>{value.x=99 return value.y}\nlet main=():>int64=>{let value=Pair[40 2] return change(value)+value.x}', 42),
     ('Box:type=[values:array<int64>]\nlet make=():>Box=>Box[[40 2]]\nlet main=():>int64=>{let value=make() let copy=value copy.values[0]=99 return value.values[0]+copy.values[1]}', 42),
