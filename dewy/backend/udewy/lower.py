@@ -3955,6 +3955,18 @@ class _Lowerer(
         if isinstance(node, hir.MemberAssign):
             return self._lower_member_assign(node)
         if isinstance(node, hir.Assign):
+            if node.op != '=':
+                # Checking retains primitive op= for facts and induction.
+                # Lower its selected operation through the ordinary call
+                # path: spelling it directly in µDewy would miss bitwise
+                # aliases, unsigned operations, and fixed-width wrapping.
+                operation = self._intrinsic_call(
+                    builtins.BINOP_DUNDER_MAP[node.op[:-1]],
+                    [node.target, node.value],
+                    node.target.type,
+                    node.loc,
+                )
+                node = replace(node, op='=', value=operation)
             if (
                 node.target.binding_id is not None
                 and node.target.binding_id in self.current_object_field_ids
@@ -3970,10 +3982,6 @@ class _Lowerer(
                 else None
             )
             if members is not None:
-                if node.op != '=':
-                    self._target_error(
-                        node, f'union compound assignment `{node.op}`'
-                    )
                 cell = replace(node.target, type='int64')
                 prologue: list[hir.AST] = []
                 binding = self.binding_by_semantic_id.get(node.target.binding_id)
@@ -4026,33 +4034,6 @@ class _Lowerer(
                     )
                     self.optional_globals_initialized.add(node.target.binding_id)
                 value = node.value
-                if node.op != '=':
-                    dunder = {
-                        '+=': '__add__',
-                        '-=': '__sub__',
-                    }.get(node.op)
-                    if dunder is None:
-                        self._target_error(node, f'optional compound assignment `{node.op}`')
-                    function_type = ty.FunctionType(
-                        [
-                            ty.PosOrKwArg('left', payload),
-                            ty.PosOrKwArg('right', payload),
-                        ],
-                        [],
-                        None,
-                        payload,
-                        [],
-                    )
-                    value = hir.FunctionCall(
-                        node.loc,
-                        payload,
-                        hir.ExpressedIdentifier(node.loc, function_type, dunder),
-                        [
-                            self._optional_load_payload(cell, payload, node.loc),
-                            node.value,
-                        ],
-                        {},
-                    )
                 if node.target.name in self.owned_cells:
                     statements.extend(self._release_cell_string_payload(node.target, self.owned_cells[node.target.name], node.loc))   # the old payload goes back
                 statements.extend(self._optional_write(cell, value, payload))
