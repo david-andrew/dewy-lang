@@ -158,6 +158,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.RepresentationCast return representation(node @state)
     if node is? hir.ObjectLiteral return object_literal(node @state)
     if node is? hir.TypeTest return runtime_test(node @state)
+    if node is? hir.ForwardingAccess return forwarding_field(node @state)
     if node is? hir.NoneValue return word(0 node @state)
     if node is? hir.MemberAccess {
         let stored=stored_type(id state)
@@ -1352,4 +1353,46 @@ string_type_test = (value:addr tested:addr node:hir.AST @state:State):>addr => {
     }
     prefix.push(result)
     return put(hir.Block[node.loc boolean prefix false] @state)
+}
+
+
+# A union field read evaluates its receiver once. Each record alternative
+# uses its own layout, and exception alternatives pass through unchanged.
+# The result then adopts the same enum/cell representation as an ordinary
+# value conversion; the receiver's tag is never reused as the field's tag.
+forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
+    let source_type=hir.node_at(state.input.nodes node.value).value_type
+    let members=cell_members(source_type @state)
+    if members is? none return reject(node 'forwarded fields require a tagged record union' @state)
+    let prefix:array<addr>=[]
+    let receiver=snapshot(expression(node.value @state) @prefix @state)
+    let tag=snapshot(read_word(receiver 0 node @state) @prefix @state)
+    let output=runtime_type(node.value_type node @state)
+    let arms:array<addr>=[]
+    loop member in members {
+        let actual=member
+        let value=cell_payload(receiver member node @state)
+        if not subtyping.is_subtype(member node.exception_type subtyping.default_links @state.type_nodes) {
+            let record=object_type(member state)
+            if record is? none return reject(node 'a forwarded member is not a record or exception' @state)
+            let field=types.object_field(record node.field)
+            if field is? none return reject(node 'a checked forwarded field is absent from its record' @state)
+            let layout=object_layout(member node @state)
+            let offset=layout.offsets.get(node.field)
+            if offset is? none return reject(node 'a forwarded field has no storage offset' @state)
+            value=field_read(address(value offset node @state) field.value_type node @state)
+            actual=field.value_type
+        }
+        if enum_members(node.value_type state) isnt? none {value=enum_pack(value actual node.value_type node @state)}
+        else if enum_members(actual state) isnt? none {value=enum_read(value actual node.value_type node @state)}
+        else if cell_members(node.value_type @state) isnt? none {value=cell_pack(value actual node.value_type node @state)}
+        else {value=read_value(value actual node.value_type node @state)}
+        let condition=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        arms.push(put(hir.IfArm[node.loc output condition value] @state))
+    }
+    if arms.length =? 0 return reject(node 'a forwarded field has no reachable member' @state)
+    let last=hir.node_at(state.nodes arms.pop)
+    $runtime_assert last is? hir.IfArm
+    prefix.push(put(hir.Flow[node.loc output arms last.body] @state))
+    return put(hir.Block[node.loc output prefix false] @state)
 }

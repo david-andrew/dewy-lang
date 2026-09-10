@@ -63,6 +63,9 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ('A:type=type of [text:string]\nB:type=type of [code:int64 text:string]\nlet size=(value:A|B):>int64=>value.text.length\nlet main=():>int64=>size(A["abcd"])+size(B[99 "xy"])+36', 42),
+    ('A:type=type of [value:int64]\nB:type=type of [value:string]\nlet get=(value:A|B|none):>int64|string|none=>value.value\nlet main=():>int64=>{let first=get(A[40]) let second=get(B["xy"]) let absent=get(none) if first is? int64 and second is? string and absent is? none return first+second.length return 0}', 42),
+    ('A:type=type of [value:int64]\nB:type=type of [other:int64 value:int64]\nlet count:int64=0\nlet next=():>A|B=>{count+=1 return B[99 40]}\nlet main=():>int64=>next().value+count+1', 42),
     ('let main=():>int64=>{let value:int64<v=>v>?0>=42 return value}', 42),
     ('let count:int64=0\nlet next=():>42=>{count+=1 return 42}\nlet main=():>int64=>{let value:int64<v=>v>?0>=next() return count+41}', 42),
     ('let choose=(value:int64|"a"|"b"):>int64=>if value is? "a" 0 else 42\nlet main=():>int64=>choose("b")', 42),
