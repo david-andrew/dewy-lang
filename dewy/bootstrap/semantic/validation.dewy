@@ -1,0 +1,91 @@
+from reporting import SrcFile, Error, Pointer, Warning
+import p"modules.dewy" as modules
+import p"context.dewy" as contexts
+import p"source_views.dewy" as sources
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+import p"../targets.dewy" as targets
+import p"analyze/bounds.dewy" as bounds
+import p"analyze/value_bounds.dewy" as values
+import p"analyze/predicate_facts.dewy" as predicates
+import p"analyze/relations.dewy" as relations
+import p"analyze/fact_state.dewy" as facts
+import p"analyze/expression_intervals.dewy" as intervals
+import p"analyze/representation.dewy" as representation
+
+# Bounds validation precedes representation selection. Library foundations
+# cannot fall back to the BigInt helpers they are themselves defining.
+# Keep this boundary separate from loading: a checked graph still contains
+# proof obligations and mathematical integers with no chosen storage.
+Result:type = [warnings:array<Warning>=[] notes:array<representation.Note>=[]]
+
+# Rewrite proof witnesses only after their module has passed validation.
+# Runtime assertions already have their reporting/control flow in HIR; the
+# Assert node is the analysis witness alongside that actual runtime code.
+discharge = (root:addr constants:dict<addr bigint> @session:contexts.Session):>void => {
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    let void_type=types.primitive('void' @session.types)
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(session.hir id)
+        loop child in hir.children(node) {pending.push(child)}
+        if node is? hir.Obligation {
+            $runtime_assert id <? session.hir.length
+            session.hir[id]=hir.Block[node.loc node.value_type [node.value] false]
+        } else if node is? hir.Assert {
+            $runtime_assert id <? session.hir.length
+            session.hir[id]=hir.Void[node.loc void_type]
+        } else if node is? hir.Index|hir.StringIndex {
+            let constant=constants.get(id)
+            if constant isnt? none and constant >=? 0 and constant <=? targets.max_length($target) {
+                if node is? hir.Index {node.constant_index=constant as addr}
+                else {node.constant_index=constant as addr}
+                $runtime_assert id <? session.hir.length
+                session.hir[id]=node
+            }
+        }
+    }
+}
+validate_module = (module:modules.Module @engine:modules.Engine):>Result|Error => {
+    let source=sources.srcfile(module.context engine.session)
+    let word=types.primitive('int64' @engine.session.types)
+    let cap:bigint=targets.max_length(engine.session.target)
+    let env=values.Environment[engine.session.hir engine.session.types engine.session.registry cap]
+    let data=predicates.Data[env relations.Context[facts.Context[cap]] intervals.Snapshot[] engine.session.registry]
+    let checker=bounds.Checker[data source word]
+    bounds.configure(@checker)
+    checker.data.links=engine.session.links
+    bounds.validate(module.root @checker)
+    if checker.problem isnt? none return checker.problem
+    let result=Result[warnings=checker.warnings]
+    let strict=module.prelude or module.no_prelude or 'BigInt' not in? engine.prelude_bindings
+    let unfit:dict<addr representation.Unfit>=[]
+    loop [id flag] in checker.unfit {
+        if strict {
+            let node=hir.node_at(engine.session.hir id)
+            return Error[srcfile=source title="cannot prove this integer fits `{flag.word}`" pointers=[Pointer[span=node.loc message=representation.describe(flag.interval)]] hint='annotate a fixed width or establish its range with a comparison']
+        }
+        unfit[id]=representation.Unfit[flag.interval flag.word]
+    }
+    if not strict {
+        let selected=representation.select(module.root source engine.prelude_bindings unfit @engine.session)
+        if selected is? Error return selected
+        result.notes=selected
+    }
+    discharge(module.root checker.constant_indices @engine.session)
+    return result
+}
+validate = (@engine:modules.Engine):>Result|Error => {
+    let result=Result[]
+    let loaded=engine.modules
+    loop module in loaded {
+        let checked=validate_module(module @engine)
+        if checked is? Error return checked
+        loop warning in checked.warnings {result.warnings.push(warning)}
+        loop note in checked.notes {result.notes.push(note)}
+    }
+    return result
+}

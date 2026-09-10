@@ -32,6 +32,9 @@ Binding:type = [
     read_only_reason:string?=none
     nominal_name:string?=none
     route_root:addr?=none
+    # Intrinsic definitions have stable names/types but no startup declaration.
+    # A user declaration with the same spelling remains an ordinary binding.
+    builtin:bool=false
 ]
 
 # Generic instances retain the defining source and call context so a later

@@ -1,4 +1,4 @@
-"""Assemble checked module HIR by binding identity below the public proof driver."""
+"""Validate module proofs and startup before native graph legalization."""
 import subprocess
 from pathlib import Path
 
@@ -22,7 +22,7 @@ main=(argv:array<string>):>int64=>{{
     let engine=modules.Engine[]
     let entry=modules.load(argv[1] @engine)
     if entry is? Error {{entry.fail}}
-    let lowered=graph.lower_checked(entry @engine)
+    let lowered=graph.lower_validated(entry @engine)
     if lowered is? Error {{lowered.fail}}
     let code=program.render(lowered.program lowered.input)
     if code is? Error {{code.fail}}
@@ -74,3 +74,15 @@ main=(argv:array<string>):>int64=>{{
     result = subprocess.run([binary, bad / 'entry.dewy'], capture_output=True, text=True, timeout=60, check=False)
     assert result.returncode != 0
     assert str(bad / 'dependency.dewy') in result.stderr
+
+    for index, (body, title) in enumerate([
+        ('let f=(n:int64):>int64=>{ $assert n >? 0\nreturn n }', 'cannot prove assertion'),
+        ('let main=(n:int64):>int64=>n', '`main` must take no arguments'),
+        ('let x:int=9223372036854775807\nlet main=():>int=>x+1', 'cannot prove this integer fits'),
+        ('call(); let call=():>int64=>42', 'before'),
+    ]):
+        path = tmp_path / f'rejected-{index}.dewy'
+        path.write_text(body)
+        result = subprocess.run([binary, path], capture_output=True, text=True, timeout=60, check=False)
+        assert result.returncode != 0, body
+        assert title in result.stderr, result.stdout + result.stderr

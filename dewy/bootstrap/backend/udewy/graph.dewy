@@ -3,6 +3,8 @@ import p"../../semantic/modules.dewy" as modules
 import p"../../semantic/source_views.dewy" as sources
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
+import p"../../semantic/validation.dewy" as validation
+import p"../../semantic/analyze/initialization.dewy" as initialization
 import p"lower.dewy" as lower
 import p"layouts.dewy" as layouts
 import p"emit.dewy" as emit
@@ -79,5 +81,19 @@ lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
     let required:array<addr>=[]
     if allocator isnt? none {required.push(allocator)}
     let prepared=assemble(entry @engine required_bindings=required)
+    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item)
+}
+# The executable boundary: every module proves its contracts before storage
+# selection, and startup is checked with the explicit entry export. Keep the
+# lower-level checked-HIR entry available for focused legalization tests.
+lower_validated = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
+    let validated=validation.validate(@engine)
+    if validated is? Error return validated
+    let allocator=engine.prelude_bindings.get('_arena_alloc')
+    let required:array<addr>=[]
+    if allocator isnt? none {required.push(allocator)}
+    let prepared=assemble(entry @engine required_bindings=required)
+    let error=initialization.validate_initialization(prepared.root engine.session.hir engine.session.types engine.session.registry prepared.source entry=prepared.entry source_by_item=prepared.source_by_item)
+    if error isnt? none return error
     return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item)
 }

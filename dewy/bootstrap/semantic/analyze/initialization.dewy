@@ -24,6 +24,7 @@ CheckedCall:type = const [key:string required:set<addr> assumed_calls:set<addr>]
 Checker:type = [
     nodes:array<hir.AST> type_nodes:array<types.Type>
     registry:bindings.Registry srcfile:SrcFile
+    source_by_item:dict<addr SrcFile>=[]
     functions:array<addr>=[]
     reassigned_callables:set<addr>=set[] reassigned_objects:set<addr>=set[]
     reassigned_members:array<MemberRoute>=[]
@@ -190,6 +191,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
         if parameter isnt? none return parameter.targets
         if node.binding_id in? seen return []
         let binding = bindings.binding_at(checker.registry node.binding_id)
+        if binding.builtin return []
         if binding.kind =? 'function' and binding.function isnt? none return [binding.function]
         if binding.declaration is? none or node.binding_id in? checker.reassigned_callables return none
         seen.add(node.binding_id)
@@ -309,6 +311,7 @@ require_initialized = (node:hir.ExpressedIdentifier initialized:set<addr> @check
     if node.binding_id is? none return void
     if node.binding_id in? initialized { record_requirements(set[node.binding_id] set[] @checker) return void }
     let binding = bindings.binding_at(checker.registry node.binding_id)
+    if binding.builtin return void
     checker.problem = Error[
         srcfile=checker.srcfile title="`{binding.name}` used before initialization"
         pointers=[Pointer[node.loc "`{binding.name}` may be accessed here before it is initialized"] Pointer[binding.loc "`{binding.name}` is initialized here"]]
@@ -326,6 +329,9 @@ check_block = (block:hir.Block initialized:set<addr> parameters:dict<addr Callab
     loop id in block.items {
         if checker.problem isnt? none return current
         let item = hir.node_at(checker.nodes id)
+        let source=checker.srcfile
+        let origin=checker.source_by_item.get(id)
+        if origin isnt? none {checker.srcfile=origin}
         if item is? hir.Declare {
             let expr = hir.node_at(checker.nodes item.expr)
             if expr is? hir.FunctionLiteral { current = check_defaults(expr current parameters stack @checker) }
@@ -333,6 +339,7 @@ check_block = (block:hir.Block initialized:set<addr> parameters:dict<addr Callab
             if item.binding_id isnt? none { current.add(item.binding_id) }
         }
         else { current = check_eager(id current parameters stack @checker) }
+        checker.srcfile=source
     }
     return current
 }
@@ -497,9 +504,12 @@ check_function = (id:addr initialized:set<addr> arguments:array<addr> keywords:d
     }
     checker.frames.push(CheckFrame[id available])
     stack.add(id)
+    let source=checker.srcfile
+    if function.source isnt? none {checker.srcfile=function.source}
     let body = hir.node_at(checker.nodes function.body)
     if body is? hir.Block { check_block(body available parameter_effects stack @checker); }
     else { check_eager(function.body available parameter_effects stack @checker); }
+    checker.srcfile=source
     $runtime_assert checker.frames.length >? 0
     let frame = checker.frames.pop
     if checker.problem is? none { checker.checked.push(CheckedCall[key frame.required frame.assumed_calls]) }
@@ -532,8 +542,8 @@ validate_main = (declaration:hir.Declare @checker:Checker):>void => {
     if result is? types.Primitive { valid = result.name in? ['void' 'never' 'int' 'uint' 'uint8' 'uint16' 'uint32' 'uint64' 'int8' 'int16' 'int32' 'int64'] }
     if not valid { main_error(declaration '`main` must return an integer or `void`' "`main` returns `{types.describe(function.rettype checker.type_nodes)}`" @checker) }
 }
-validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry srcfile:SrcFile):>Error? => {
-    let checker = Checker[nodes type_nodes registry srcfile]
+validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry srcfile:SrcFile entry:'named'|addr|none='named' source_by_item:dict<addr SrcFile>=[]):>Error? => {
+    let checker = Checker[nodes type_nodes registry srcfile source_by_item=source_by_item]
     collect(root @checker)
     let block = hir.node_at(nodes root)
     $runtime_assert block is? hir.Block
@@ -541,7 +551,12 @@ validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:array<types
     if checker.problem isnt? none return checker.problem
     loop id in block.items {
         let declaration = hir.node_at(nodes id)
-        if declaration isnt? hir.Declare or declaration.name not=? 'main' continue
+        if declaration isnt? hir.Declare or entry is? none continue
+        # A combined graph can contain several declarations spelled `main`.
+        # Its caller supplies the entry module's exported binding identity.
+        if entry is? addr {
+            if declaration.binding_id not=? entry continue
+        } else if declaration.name not=? 'main' continue
         validate_main(declaration @checker)
         if checker.problem is? none { check_function(declaration.expr initialized [] [] [] set[] @checker) }
         break

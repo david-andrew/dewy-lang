@@ -73,6 +73,7 @@ begin = (source:contexts.Context @session:contexts.Session inherited:dict<string
         let binding_id = bindings.allocate(@session.registry none name 'function' loc)
         let binding = bindings.binding_at(session.registry binding_id)
         binding.value_type = value_type
+        binding.builtin = true
         session.registry.by_id[binding_id] = binding
         bindings.bind(@session.scopes source.scope name binding_id)
     }
@@ -277,7 +278,7 @@ call_hint = (expected:addr? function:addr arguments:array<addr> env:Environment 
     let callee=node_at(function session)
     if callee isnt? hir.ExpressedIdentifier or callee.binding_id is? none return expected
     let binding=bindings.binding_at(session.registry callee.binding_id)
-    if binding.kind not=? 'function' or binding.syntax isnt? none or binding.declaration isnt? none return expected
+    if not binding.builtin return expected
     if callee.name not in? builtins.binary_operators.values and callee.name not in? builtins.prefix_operators.values and callee.name not in? builtins.inverted_comparisons.values return expected
     if target is? types.TypeOr return none
     let number=if target is? types.QuantityType target.number else expected
@@ -296,7 +297,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     let func = node_at(function session)
     if func is? hir.ExpressedIdentifier and func.binding_id isnt? none {
         let binding=bindings.binding_at(session.registry func.binding_id)
-        let builtin=binding.kind =? 'function' and binding.syntax is? none and binding.declaration is? none
+        let builtin=binding.builtin
         if builtin and (func.name in? builtins.binary_operators.values or func.name in? builtins.prefix_operators.values or func.name in? builtins.inverted_comparisons.values) {
             # A finite integer set is not closed under arithmetic. Decode its
             # physical tag before selecting the ordinary numeric operation.
@@ -1053,11 +1054,14 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     if args is? Error return args
     let parameters:array<types.PosOrKwArg> = []
     loop arg in args {
-        parameters.push(types.PosOrKwArg[arg.name declarations.word_element(arg.value_type @session) arg.required arg.place])
+        parameters.push(types.PosOrKwArg[arg.name arg.value_type arg.required arg.place])
     }
     let result=if result_id is? none types.primitive('untyped' @session.types) else declarations.function_result(result_id lexical @session)
     if result is? Error return result
-    return types.function_type(parameters [] none declarations.word_element(result @session) generic @session.types)
+    # Abstract integers keep mathematical arithmetic until bounds analysis
+    # chooses their representation. Selecting a word here would silently
+    # give an `int` function wrapping arithmetic before its proofs run.
+    return types.function_type(parameters [] none result generic @session.types)
 }
 predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error? => {
     let node = contexts.node_at(id env.lexical session)
@@ -2775,7 +2779,7 @@ builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @se
     let func = node_at(function session)
     if func isnt? hir.ExpressedIdentifier or func.binding_id is? none return none
     let binding = bindings.binding_at(session.registry func.binding_id)
-    if binding.kind not=? 'function' or binding.syntax isnt? none or binding.declaration isnt? none return none
+    if not binding.builtin return none
     let name = func.name
     let folded=folded_number(name arguments id env @session)
     if folded isnt? none return folded
