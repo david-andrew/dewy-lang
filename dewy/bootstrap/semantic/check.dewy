@@ -913,20 +913,19 @@ fork = (env:Environment @session:contexts.Session):>Environment => {
 # is checked. Initialization analysis, not name resolution, decides whether
 # an eager call reaches a declaration before its value has been initialized.
 function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session concrete:bool=false):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
-    let signature = tokens.node_at(source.nodes literal.left)
+    let signature = contexts.node_at(literal.left env.lexical session)
     let parameter_id=literal.left
     let result_id:addr?=none
-    if signature is? parser.BinOp and syntax.is_operator(signature.op ':>' source.nodes) {
+    if signature is? parser.BinOp and source_views.is_operator(signature.op ':>' env.lexical session) {
         parameter_id=signature.left result_id=signature.right
-    } else if signature is? parser.BinOp and syntax.is_operator(signature.op 'TypeParamJuxtapose' source.nodes) {
+    } else if signature is? parser.BinOp and source_views.is_operator(signature.op 'TypeParamJuxtapose' env.lexical session) {
         return problem(literal.left 'a generic function needs a declared result type' 'annotate the result with `:>T`' env session)
     }
     let lexical = env.lexical
     let generic:array<types.GenericParam> = []
-    let prefix = tokens.node_at(source.nodes parameter_id)
-    if prefix is? parser.BinOp and syntax.is_operator(prefix.op 'TypeParamJuxtapose' source.nodes) {
-        let parameters = tokens.node_at(source.nodes prefix.left)
+    let prefix = contexts.node_at(parameter_id env.lexical session)
+    if prefix is? parser.BinOp and source_views.is_operator(prefix.op 'TypeParamJuxtapose' env.lexical session) {
+        let parameters = contexts.node_at(prefix.left env.lexical session)
         if parameters isnt? parser.Block or parameters.delims not=? '<>' return problem(prefix.left 'invalid generic parameters' 'expected a type-parameter block' env session)
         if parameters.inner.length =? 0 return problem(prefix.left 'a generic function needs at least one type parameter' 'this parameter list is empty' env session)
         parameter_id = prefix.right
@@ -937,13 +936,13 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
         }
         # Generic signatures need declared parameter types; an implicit any
         # would hide the connection between arguments and type parameters.
-        let arguments = tokens.node_at(source.nodes parameter_id)
+        let arguments = contexts.node_at(parameter_id env.lexical session)
         let rows:array<addr> = if arguments is? parser.Block arguments.inner else [parameter_id]
         loop item in rows {
-            let row = tokens.node_at(source.nodes item)
-            if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) { row = tokens.node_at(source.nodes row.left) }
-            if row is? parser.Prefix and syntax.is_operator(row.op '@' source.nodes) { row = tokens.node_at(source.nodes row.item) }
-            if row isnt? parser.BinOp or not syntax.is_operator(row.op ':' source.nodes) return problem(item 'a generic function needs every parameter type declared' 'annotate this parameter' env session)
+            let row = contexts.node_at(item env.lexical session)
+            if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) { row = contexts.node_at(row.left env.lexical session) }
+            if row is? parser.Prefix and source_views.is_operator(row.op '@' env.lexical session) { row = contexts.node_at(row.item env.lexical session) }
+            if row isnt? parser.BinOp or not source_views.is_operator(row.op ':' env.lexical session) return problem(item 'a generic function needs every parameter type declared' 'annotate this parameter' env session)
         }
     }
     let args = declarations.function_args(parameter_id lexical @session)
@@ -957,18 +956,17 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     return types.function_type(parameters [] none declarations.word_element(result @session) generic @session.types)
 }
 predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error? => {
-    let source = contexts.source_at(env.lexical session)
-    let node = tokens.node_at(source.nodes id)
+    let node = contexts.node_at(id env.lexical session)
     if node is? parser.KeywordExpr and node.parts.length =? 2 {
-        let keyword = tokens.node_at(source.nodes node.parts[0])
-        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] { node = tokens.node_at(source.nodes node.parts[1]) }
+        let keyword = contexts.node_at(node.parts[0] env.lexical session)
+        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] { node = contexts.node_at(node.parts[1] env.lexical session) }
     }
-    if node isnt? parser.BinOp or syntax.symbol(node.op source.nodes) not in? ['=' '::' ':='] return none
-    let name = syntax.identifier(node.left source.nodes)
-    let literal = tokens.node_at(source.nodes node.right)
-    if name is? none or literal isnt? parser.BinOp or not syntax.is_operator(literal.op '=>' source.nodes) return none
-    let signature = tokens.node_at(source.nodes literal.left)
-    if signature isnt? parser.BinOp or not syntax.is_operator(signature.op ':>' source.nodes) return none
+    if node isnt? parser.BinOp or source_views.symbol(node.op env.lexical session) not in? ['=' '::' ':='] return none
+    let name = source_views.identifier(node.left env.lexical session)
+    let literal = contexts.node_at(node.right env.lexical session)
+    if name is? none or literal isnt? parser.BinOp or not source_views.is_operator(literal.op '=>' env.lexical session) return none
+    let signature = contexts.node_at(literal.left env.lexical session)
+    if signature isnt? parser.BinOp or not source_views.is_operator(signature.op ':>' env.lexical session) return none
     let shape = function_shape(literal env @session)
     if shape is? Error return shape
     let scope = bindings.scope_at(session.scopes env.lexical.scope)
@@ -977,7 +975,7 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
     let binding_id = bindings.allocate(@session.registry reference name 'function' node.loc)
     let binding = bindings.binding_at(session.registry binding_id)
     binding.value_type = shape binding.store_type = shape
-    binding.literal_path_parameter=path_values.parameter(literal source.nodes)
+    binding.literal_path_parameter=source_views.path_parameter(literal env.lexical session)
     let signature_type = dispatch.method_at(session.types shape)
     if signature_type.type_params.length >? 0 {
         let literal_ref = contexts.syntax_ref(node.right env.lexical @session)
@@ -1008,12 +1006,11 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
     let inner = Environment[contexts.child(env.lexical @session) fork(env @session).state annotation return_collector=collector]
     container_state.set_facts(inner.state container_state.inherited(env.state session) @session)
     let parameters:array<hir.Param> = []
-    let source = contexts.source_at(env.lexical session)
-    let signature = tokens.node_at(source.nodes literal.left)
-    let parameter_id=if signature is? parser.BinOp and syntax.is_operator(signature.op ':>' source.nodes) signature.left else literal.left
-    let prefix = tokens.node_at(source.nodes parameter_id)
-    if prefix is? parser.BinOp and syntax.is_operator(prefix.op 'TypeParamJuxtapose' source.nodes) { parameter_id = prefix.right }
-    let arguments = tokens.node_at(source.nodes parameter_id)
+    let signature = contexts.node_at(literal.left env.lexical session)
+    let parameter_id=if signature is? parser.BinOp and source_views.is_operator(signature.op ':>' env.lexical session) signature.left else literal.left
+    let prefix = contexts.node_at(parameter_id env.lexical session)
+    if prefix is? parser.BinOp and source_views.is_operator(prefix.op 'TypeParamJuxtapose' env.lexical session) { parameter_id = prefix.right }
+    let arguments = contexts.node_at(parameter_id env.lexical session)
     let rows:array<addr> = if arguments is? parser.Block arguments.inner else [parameter_id]
     let position:addr = 0
     loop param in shape.pos_or_kw {
@@ -1024,9 +1021,9 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
         # as in the hosted checker. BoundParam retains the checked expression
         # without evaluating it while declaring the function.
         $runtime_assert position <? rows.length
-        let row = tokens.node_at(source.nodes rows[position])
+        let row = contexts.node_at(rows[position] env.lexical session)
         let default:addr? = none
-        if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
+        if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) {
             let value = expression(row.right env @session expected=param.value_type)
             if value is? Error return value
             default = value
@@ -1083,7 +1080,7 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
     if method isnt? none and method.receiver_type isnt? none {slots.push(types.PosOrKwArg['__dewy_receiver' method.receiver_type true method.place_self])}
     loop slot in shape.pos_or_kw {slots.push(slot)}
     let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types)
-    let value=put(hir.FunctionLiteral[literal.loc function_type parameters [] none returns body source=contexts.source_at(env.lexical session).srcfile] @session)
+    let value=put(hir.FunctionLiteral[literal.loc function_type parameters [] none returns body source=source_views.srcfile(env.lexical session)] @session)
     return if expected_signature is? none value else against(value expected_signature id env @session)
 }
 
@@ -1517,24 +1514,54 @@ string_method = (receiver:addr name:string id:addr env:Environment @session:cont
 # can refer to earlier fields. These bindings identify the already evaluated
 # field values; they do not cause the initializer to run again.
 record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
     let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
-    let wanted:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
+    let selected = if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types)
+    let wanted = types.node_at(session.types selected)
+    if wanted is? types.TypeOr {
+        # Check fields against the expected record before constructing its
+        # shape. A unique record alternative is unambiguous; with several,
+        # written field names select one. Predicates remain obligations.
+        let candidates:array<addr>=[]
+        loop member in wanted.items {
+            let unfolded=types.unfold(member session.types)
+            if types.node_at(session.types unfolded) is? types.ObjectType {candidates.push(unfolded)}
+        }
+        if candidates.length >? 1 {
+            let written:set<string>=set[]
+            loop row_id in node.inner {
+                let row=contexts.node_at(row_id env.lexical session)
+                if row isnt? parser.BinOp or not source_views.is_operator(row.op '=' env.lexical session) continue
+                let name=source_views.identifier(row.left env.lexical session)
+                if name isnt? none {written.add(name)}
+            }
+            let matching:array<addr>=[]
+            loop candidate in candidates {
+                let record=types.node_at(session.types candidate)
+                $runtime_assert record is? types.ObjectType
+                let names:set<string>=set[]
+                loop field in record.fields {names.add(field.name)}
+                if names.length =? written.length and (names - written).length =? 0 {matching.push(candidate)}
+            }
+            if matching.length =? 1 {candidates=matching}
+        }
+        if candidates.length =? 1 {selected=candidates[0] wanted=types.node_at(session.types selected)}
+    }
+    if expected isnt? none and wanted isnt? types.ObjectType return problem(id 'type mismatch' 'the expected type must select one record alternative' env session)
     let fields:array<hir.ObjectField> = []
     let layout:array<types.ObjectField> = []
     loop row_id in node.inner {
-        let row = tokens.node_at(source.nodes row_id)
-        if row isnt? parser.BinOp or not syntax.is_operator(row.op '=' source.nodes) return problem(row_id 'mixed record and array literal' 'each record field needs a named value' env session)
-        let target = tokens.node_at(source.nodes row.left)
+        let row = contexts.node_at(row_id env.lexical session)
+        if row isnt? parser.BinOp or not source_views.is_operator(row.op '=' env.lexical session) return problem(row_id 'mixed record and array literal' 'each record field needs a named value' env session)
+        let target = contexts.node_at(row.left env.lexical session)
         let name_id = row.left
         let annotation:addr? = none
-        if target is? parser.BinOp and syntax.is_operator(target.op ':' source.nodes) {
+        if target is? parser.BinOp and source_views.is_operator(target.op ':' env.lexical session) {
             name_id = target.left
             let resolved = declarations.resolve(target.right inner.lexical @session)
             if resolved is? Error return resolved
             annotation = resolved
         }
-        let name = syntax.identifier(name_id source.nodes)
+        let name = source_views.identifier(name_id env.lexical session)
         if name is? none return problem(row_id 'record field needs a name' 'use `name=value` or `name:Type=value`' env session)
         let scope = bindings.scope_at(session.scopes inner.lexical.scope)
         if name in? scope.names return problem(row_id 'duplicate record field' name env session)
@@ -1566,7 +1593,7 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
             if field.name not in? scope.names return problem(id 'missing record field' field.name env session)
         }
     }
-    let type = if wanted is? types.ObjectType and expected isnt? none types.strip_refinement(expected session.types) else types.object_type(layout none false [] [] @session.types)
+    let type = if wanted is? types.ObjectType and expected isnt? none selected else types.object_type(layout none false [] [] @session.types)
     let value = put(hir.ObjectLiteral[node.loc type fields] @session)
     return if expected is? none value else against(value expected id env @session)
 }
