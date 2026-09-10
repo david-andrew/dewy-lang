@@ -60,6 +60,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   their payload for literal tests. Constant scalar promises discharge only
   when proven, preserving effects and every unresolved obligation. Two such
   unresolved/refuted programs still stop before unchecked legalization.
+  The Dewy Unicode library now validates UTF-8 and streams extended grapheme
+  boundaries using generated Unicode 16 tables. Its compiled library test
+  matches all 1,093 conformance rows, seven additional strings, and twelve
+  malformed UTF-8 inputs. Wiring this helper into native concatenation and
+  decoding remains subsequent backend work.
   Frame/arena lifetime optimization and release insertion remain pending.
   These tests enter below the full proof driver; they are not a public
   unchecked compilation route.

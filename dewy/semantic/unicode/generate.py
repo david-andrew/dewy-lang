@@ -2,30 +2,26 @@
 
 from hashlib import sha256
 from pathlib import Path
+from struct import pack
 from urllib.request import urlopen
-
 
 UNICODE_VERSION = '16.0.0'
 HERE = Path(__file__).parent
 SOURCES = {
     'GraphemeBreakProperty.txt': (
-        f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/auxiliary/'
-        'GraphemeBreakProperty.txt',
+        f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/auxiliary/GraphemeBreakProperty.txt',
         'c29360bd6f7132811d701d29069541e827eb44bfc4c8fbde8c370d6982689dc1',
     ),
     'emoji-data.txt': (
-        f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/emoji/'
-        'emoji-data.txt',
+        f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/emoji/emoji-data.txt',
         'f1365a5173eee18e1f98b240cdc492e84a25f1ce7e0c9d1094eb29c41a22696a',
     ),
     'DerivedCoreProperties.txt': (
-        f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/'
-        'DerivedCoreProperties.txt',
+        f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/DerivedCoreProperties.txt',
         '39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd',
     ),
     'GraphemeBreakTest.txt': (
-        f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/auxiliary/'
-        'GraphemeBreakTest.txt',
+        f'https://www.unicode.org/Public/{UNICODE_VERSION}/ucd/auxiliary/GraphemeBreakTest.txt',
         'ee2b9354d270ac061b29f09662cafea06341d77e704b8cc6bd72aaeeda363cb5',
     ),
     'CaseFolding.txt': (
@@ -122,6 +118,23 @@ def _format_ranges(
     return lines
 
 
+def grapheme_runtime_tables(grapheme_break, extended_pictographic, indic_conjunct):
+    """Binary range records consumed by the Dewy Unicode library."""
+    gcb = {name: index for index, name in enumerate((
+        'Other', 'CR', 'LF', 'Control', 'L', 'V', 'T', 'LV', 'LVT',
+        'Extend', 'ZWJ', 'SpacingMark', 'Prepend', 'Regional_Indicator',
+    ))}
+    incb = {'None': 0, 'Consonant': 1, 'Extend': 2, 'Linker': 3}
+    return {
+        name: b''.join(pack('<IIB', start, stop, values[value]) for start, stop, value in ranges)
+        for name, ranges, values in (
+            ('grapheme_break.bin', grapheme_break, gcb),
+            ('extended_pictographic.bin', extended_pictographic, {'Extended_Pictographic': 1}),
+            ('indic_conjunct_break.bin', indic_conjunct, incb),
+        )
+    }
+
+
 def generate() -> None:
     grapheme_break = _property_ranges(_download('GraphemeBreakProperty.txt'))
     emoji = _property_ranges(_download('emoji-data.txt'))
@@ -162,6 +175,8 @@ def generate() -> None:
     # the case-folding table the prelude includes (`$include_bytes` in strings.dewy)
     library_unicode = HERE.parents[2] / 'library' / 'unicode'
     library_unicode.mkdir(exist_ok=True)
+    for name, content in grapheme_runtime_tables(grapheme_break, extended_pictographic, indic_conjunct).items():
+        (library_unicode / name).write_bytes(content)
     (library_unicode / 'casefold.bin').write_bytes(
         _case_folding_table(_case_folding(_download('CaseFolding.txt')))
     )
