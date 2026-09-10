@@ -115,9 +115,14 @@ shape_of = (id:addr nodes:array<Type>):>string => {
     return if shape is? none nodes[id].key else shape
 }
 same_type = (a:addr b:addr nodes:array<Type>):>bool => a =? b or shape_of(a nodes) =? shape_of(b nodes)
+# Shape components are length-prefixed, not recursively quoted. Quoting an
+# already encoded child doubles its escapes at every enclosing type layer;
+# nested compiler types then spend most of checking copying those escapes.
+# Prefixing the component length preserves exact, collision-free identity.
+component = (value:string):>string => "{value.length}:{value}"
 shapes_key = (items:array<addr> nodes:array<Type>):>string => {
     let parts:array<string> = []
-    loop id in items { parts.push(_quoted(shape_of(id nodes))) }
+    loop id in items { parts.push(component(shape_of(id nodes))) }
     return parts.join(',')
 }
 contains_type = (items:array<addr> id:addr nodes:array<Type>):>bool => {
@@ -299,7 +304,7 @@ propositions_key = (props:array<facts.Proposition> structural:bool nodes:array<T
             let scalar = facts.Proposition[p.subject p.op p.value p.projection p.term p.term_id p.term_projection none p.when p.subject_id p.axiom]
             key = "{facts.identity_key(scalar)}:{shapes_key([p.tested_type] nodes)}"
         }
-        parts.push(_quoted(key))
+        parts.push(component(key))
     }
     return parts.join(';')
 }
@@ -383,10 +388,10 @@ alias_key = (value:TypeAliasValue nodes:array<Type> structural:bool):>string => 
     let params:array<string> = []
     loop param in value.params {
         let bound = if structural shape_of(param.bound nodes) else "{param.bound}"
-        params.push("{_quoted(param.name)}:{_quoted(bound)}")
+        params.push("{_quoted(param.name)}:{component(bound)}")
     }
     let body = if structural shape_of(value.body nodes) else "{value.body}"
-    return "alias[{params.join(';')}]:{_quoted(body)}"
+    return "alias[{params.join(';')}]:{component(body)}"
 }
 module_type = (fields:array<ModuleField> @nodes:array<Type>):>addr => {
     let parts:array<string> = []

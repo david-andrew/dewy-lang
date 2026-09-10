@@ -418,3 +418,33 @@ def test_native_type_algebra_matches_hosted_normalization(algebra_program):
     assert dimensions.splitlines() == ['dimension[length^1 time^-2]', 'dimension[length^1]',
                                        'dimension[a^2]', 'dimension[]', '5/7']
     assert metadata.splitlines() == ['true'] * 13
+
+
+def test_deep_type_shapes_do_not_requote_child_encodings(tmp_path):
+    source = tmp_path / 'deep-shapes.dewy'
+    source.write_text(f'''
+import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
+let main=():>int64=>{{
+    let nodes:array<types.Type>=[]
+    let integer=types.primitive('int64' @nodes)
+    let left=types.object_type([types.ObjectField['field' integer]] none false [] [] @nodes)
+    let right=types.object_type([types.ObjectField['field' integer default=17]] none false [] [] @nodes)
+    $runtime_assert left not=? right and types.same_type(left right nodes)
+    loop depth in 0..127 {{
+        left=types.array_type(left none @nodes)
+        right=types.array_type(right none @nodes)
+        $runtime_assert types.same_type(left right nodes)
+        $runtime_assert types.shape_of(left nodes).length <? 32*(depth+2)
+    }}
+    let a=types.string_literal('a:1,b' @nodes)
+    let b=types.string_literal('a' @nodes)
+    let c=types.string_literal('1,b' @nodes)
+    $runtime_assert types.shapes_key([a] nodes) not=? types.shapes_key([b c] nodes)
+    return 0
+}}
+''')
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source)))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], timeout=30, check=False)
+    assert result.returncode == 0
