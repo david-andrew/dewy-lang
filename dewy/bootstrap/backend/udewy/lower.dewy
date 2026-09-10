@@ -363,7 +363,7 @@ allocation = (size:addr node:hir.AST @state:State):>addr => {
 }
 # Records and tagged cells occupy inline storage in fields. Their existing
 # storage is itself the place; scalar values and array handles need a slot.
-inline_place = (type:addr @state:State):>bool => object_type(type state) isnt? none or cell_members(type @state) isnt? none
+inline_place = (type:addr @state:State):>bool => object_valued(type state) or cell_members(type @state) isnt? none
 binding_storage = (node:hir.ExpressedIdentifier stored:addr @state:State):>addr => {
     let type=if node.binding_id isnt? none and node.binding_id in? state.boxed types.primitive('int64' @state.type_nodes) else runtime_type(stored node @state)
     return put(hir.ExpressedIdentifier[node.loc type symbol(node.name node.binding_id @state) node.binding_id] @state)
@@ -393,7 +393,7 @@ owned_value = (id:addr @state:State):>addr => {
     if cell_members(node.value_type @state) isnt? none return cell_copy(value node.value_type node @state)
     let array=array_type(node.value_type state)
     if array isnt? none and node isnt? hir.ArrayLiteral return array_copy(value array node @state)
-    if object_type(node.value_type state) isnt? none and node isnt? hir.ObjectLiteral return object_copy(value node.value_type node @state)
+    if object_valued(node.value_type state) and node isnt? hir.ObjectLiteral return object_copy(value node.value_type node @state)
     return value
 }
 ArrayMemory:type = [descriptor:addr data:addr prefix:array<addr>]
@@ -511,7 +511,7 @@ owned_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
     if cell_members(type @state) isnt? none return cell_copy(value type node @state)
     let array=array_type(type state)
     if array isnt? none return array_copy(value array node @state)
-    if object_type(type state) isnt? none return object_copy(value type node @state)
+    if object_valued(type state) return object_copy(value type node @state)
     return value
 }
 
@@ -1185,13 +1185,26 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
 # handles. Copy fields through the selected dynamic brand's schema rather
 # than blindly reading the maximum reserved size of a parent: a smaller
 # child need not contain the storage reserved for one of its siblings.
+# Boolean storage queries inspect the arena in place. Returning an optional
+# ObjectType just to test for presence would copy its fields, methods and
+# identity strings, then discard all of that metadata at every value use.
+object_valued = (id:addr state:State):>bool => {
+    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    $runtime_assert plain <? state.type_nodes.length
+    return state.type_nodes[plain] is? types.ObjectType
+}
+array_valued = (id:addr state:State):>bool => {
+    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    $runtime_assert plain <? state.type_nodes.length
+    return state.type_nodes[plain] is? types.ArrayType
+}
 object_type = (id:addr state:State):>types.ObjectType? => {
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
     return if type is? types.ObjectType type else none
 }
 aggregate = (id:addr state:State):>bool => {
     let plain=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
-    return (plain is? types.TypeOr and enum_members(id state) is? none) or string_type(id state) or array_type(id state) isnt? none or object_type(id state) isnt? none
+    return (plain is? types.TypeOr and enum_members(id state) is? none) or string_type(id state) or array_valued(id state) or object_valued(id state)
 }
 object_layout = (id:addr node:hir.AST @state:State):>layouts.Record => {
     let layout=layouts.record(id state.layout_context @state.type_nodes)
@@ -1210,8 +1223,8 @@ field_pointer = (node:hir.MemberAccess @state:State):>addr => {
     return address(expression(node.value @state) offset node @state)
 }
 field_read = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
-    if cell_members(type @state) isnt? none or object_type(type state) isnt? none return pointer
-    if array_type(type state) isnt? none return read_word(pointer 0 node @state)
+    if cell_members(type @state) isnt? none or object_valued(type state) return pointer
+    if array_valued(type state) return read_word(pointer 0 node @state)
     let plain=types.node_at(state.type_nodes types.strip_refinement(type state.type_nodes))
     if plain is? types.FunctionType {
         return put(hir.Transmute[node.loc runtime_type(type node @state) read_word(pointer 0 node @state)] @state)
@@ -1220,8 +1233,8 @@ field_read = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
 }
 field_write = (pointer:addr value:addr type:addr node:hir.AST @state:State):>addr => {
     if cell_members(type @state) isnt? none return cell_write(pointer value type node @state)
-    if object_type(type state) isnt? none return object_write(pointer value type node @state)
-    if array_type(type state) isnt? none return store_word(value pointer 0 node @state)
+    if object_valued(type state) return object_write(pointer value type node @state)
+    if array_valued(type state) return store_word(value pointer 0 node @state)
     let plain=types.node_at(state.type_nodes types.strip_refinement(type state.type_nodes))
     if plain is? types.FunctionType {
         let word=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) value] @state)
@@ -2197,7 +2210,7 @@ copy_stored = (value:addr type:addr node:hir.AST @state:State):>addr => {
     if cell_members(type @state) isnt? none return cell_copy(value type node @state)
     let array=array_type(type state)
     if array isnt? none return array_copy(value array node @state)
-    if object_type(type state) isnt? none return object_copy(value type node @state)
+    if object_valued(type state) return object_copy(value type node @state)
     return value
 }
 algebra_entries = (source:DictParts other:DictParts destination:DictParts mode:string node:hir.AST @state:State):>addr => {
