@@ -3150,14 +3150,14 @@ class _StringLowering:
         return targets
 
     def _string_storage(self, node: hir.AST, *, visiting: set[int] | None = None) -> str:
-        """Where a string value's bytes live: `static`, `arena`, `frame`, or `caller` (a parameter's, unknown here).
+        """Where a string value remains valid, including its descriptor.
 
         The placement step: a string stored where it outlives the current
         evaluation is copied into the arena only when this says it may be
         frame-backed or the caller's. Literals are static; decoded bytes,
         joins, and anything loaded from an array element or an object field
-        (copied there when stored) are arena-backed; a view lives where its
-        source does; a local is traced to its initializers; an interpolation
+        (copied there when stored) are arena-backed; a view's descriptor is
+        evaluation-local even when its bytes are static; a local is traced to its initializers; an interpolation
         or a call result (copied into this frame) is frame-backed.
         """
         visiting = set() if visiting is None else visiting
@@ -3180,12 +3180,12 @@ class _StringLowering:
             return 'frame'
         if isinstance(node, hir.Block) and node.items:
             return self._string_storage(node.items[-1], visiting=visiting)
+        if isinstance(node, (hir.StringSlice, hir.StringIndex)):
+            return 'frame'   # the descriptor is rebuilt, and loop regions reuse it
         if isinstance(node, hir.String) or isinstance(node.type, ty.StringLiteralType):
             return 'static'
         if isinstance(node, hir.InterpolatedString):
             return 'frame'
-        if isinstance(node, (hir.StringSlice, hir.StringIndex)):
-            return self._string_storage(node.string, visiting=visiting)
         if isinstance(node, hir.ArrayMethod):
             return 'frame'
         if isinstance(node, hir.FunctionCall):
