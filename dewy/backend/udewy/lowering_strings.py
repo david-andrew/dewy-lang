@@ -3212,11 +3212,14 @@ class _StringLowering:
                 return 'frame' if self._stays_in_frame(node) else 'arena'   # `xs.join` builds in the frame region unless returned
             return 'frame'   # copied into this frame, or a callee's view of a caller's string
         if isinstance(node, hir.ExpressedIdentifier):
+            if node.binding_id is None:
+                # A lowering temporary can borrow a container element, even
+                # during module startup. Its name does not establish static
+                # storage: the owner may be released later in this expression.
+                return 'frame'
             literal = self.current_literal
             if literal is None:
                 return 'static'   # module level: startup values live in static storage
-            if node.binding_id is None:
-                return 'frame'
             if any(param.binding_id == node.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]):
                 return 'caller'
             if node.binding_id in visiting:

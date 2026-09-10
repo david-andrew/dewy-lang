@@ -93,6 +93,35 @@ let main=():>int64=>{
     assert len(set(cursors[2:])) == 1, cursors
 
 
+def test_module_algebra_owns_string_members_and_values(tmp_path):
+    source = '''
+let suffix:int64=42
+let left:set<string>=set["left-{suffix}" "shared-{suffix}"]
+let right:set<string>=set["right-{suffix}" "shared-{suffix}"]
+let united=(left|right)|set["last"]
+let common=left&right
+let distinct=left-right
+let first:dict<string string>=["key-{suffix}"->"old-{suffix}"]
+let second:dict<string string>=["key-{suffix}"->"new-{suffix}"]
+let merged=first|second
+left.clear right.clear first.clear second.clear
+let exercise=():>void=>{
+    let copy=united|set["extra"]
+    $runtime_assert "left-42" in? copy and "right-42" in? copy
+    $runtime_assert "shared-42" in? common and "left-42" in? distinct
+    $runtime_assert merged.get("key-42" "missing") =? "new-42"
+}
+let main=():>int64=>{
+    exercise(); exercise();
+    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    return 0
+}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 13
+    assert len(set(cursors[2:])) == 1, cursors
+
+
 @pytest.mark.parametrize('payload', ['Bag', 'array<int64>', 'Node'])
 @pytest.mark.parametrize('braced', [False, True])
 def test_union_record_copy_reuses_memory_on_every_return(payload, braced, tmp_path):
