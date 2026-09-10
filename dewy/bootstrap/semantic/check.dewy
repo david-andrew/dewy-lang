@@ -2225,6 +2225,47 @@ array_transition = (method:hir.ArrayMethod positional:array<addr> keyword:dict<s
     return none
 }
 
+# A compound dictionary store retains the lookup's membership proof and
+# evaluates its key once. Only named writable receiver routes reach this
+# boundary; the ordinary store lowering retains the receiver across the RHS.
+compound_container = (lookup:hir.DictLookup right_id:addr operator:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let keys_array=node_at(lookup.keys session)
+    $runtime_assert keys_array is? hir.MemberAccess
+    let receiver=keys_array.value
+    let writable=writable_container(receiver id env @session)
+    if writable is? Error return writable
+    let key=node_at(lookup.key session)
+    let name="__dewy_store_key_{session.registry.next_id}"
+    let binding_id=bindings.allocate(@session.registry none name 'value' key.loc)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=key.value_type binding.store_type=key.value_type
+    let declaration=put(hir.Declare[key.loc types.primitive('void' @session.types) 'let' name key.value_type lookup.key binding_id] @session)
+    binding.declaration=declaration
+    session.registry.by_id[binding_id]=binding
+    let local=put(hir.ExpressedIdentifier[key.loc key.value_type name binding_id] @session)
+    let original_key=lookup.key
+    lookup.key=local
+    let read=put(lookup @session)
+    let right=expression(right_id env @session expected=lookup.value_type)
+    if right is? Error return right
+    let function=identifier(operator id env @session)
+    if function is? Error return function
+    let result=call(function [read right] [] id env @session expected=lookup.value_type)
+    if result is? Error return result
+    result=against(result lookup.value_type id env @session)
+    if result is? Error return result
+    container_state.forget_positions(receiver env.state @session)
+    let position=key_position(@session)
+    container_state.remember(receiver local env.state @session position=position)
+    # The RHS may have changed the original key binding. The captured key is
+    # present after the store; that does not prove the binding's new value is.
+    let identity=keys.identity(original_key session.hir @session.registry @session.types)
+    if identity is? keys.Literal {container_state.remember(receiver original_key env.state @session position=position)}
+    let loc=contexts.node_at(id env.lexical session).loc
+    let store=put(hir.DictStore[loc types.primitive('void' @session.types) lookup.keys lookup.values local result position=position] @session)
+    return put(hir.Block[loc types.primitive('void' @session.types) [declaration store] false] @session)
+}
+
 compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contexts.Session):>addr|Error => {
     let op = contexts.node_at(node.op env.lexical session)
     $runtime_assert op is? post.CombinedAssignment
@@ -2235,6 +2276,7 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     if target is? Error return target
     let read = node_at(target session)
     if read is? hir.TypeValue and symbol =? '&' return declare_constructor(read node.right id env @session)
+    if read is? hir.DictLookup return compound_container(read node.right name id env @session)
     if read isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return problem(id 'assignment requires mutable storage' 'select a binding, record field, or array element' env session)
     let error = writable(target id env session)
     if error isnt? none return error

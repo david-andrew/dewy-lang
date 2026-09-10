@@ -68,7 +68,8 @@ proven = (container:addr key:addr state:addr @session:contexts.Session):>keys.Fa
             if entry isnt? none { total = entry.key }
         }
     }
-    if total isnt? none and subtyping.is_subtype(hir.node_at(session.hir key).value_type total session.links @session.types) return keys.Fact[if binding is? none 0 else binding keys.Total[]]
+    let key_type=if identity is? keys.Literal identity.value else hir.node_at(session.hir key).value_type
+    if total isnt? none and subtyping.is_subtype(key_type total session.links @session.types) return keys.Fact[if binding is? none 0 else binding keys.Total[]]
     return none
 }
 forget_positions = (container:addr state:addr @session:contexts.Session):>void => {

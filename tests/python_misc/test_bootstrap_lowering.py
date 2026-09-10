@@ -70,6 +70,9 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ("let main=():>int64=>{let d=['a' -> 40] d['a']+=2 return d['a']}", 42),
+    ("let main=():>int64=>{let d=['a' -> 40] d['a'] += {d.pop('a'); 2} return d['a']}", 42),
+    ("let calls:int64=0\nlet next=():>'a'=>{calls+=1 return 'a'}\nlet main=():>int64=>{let d:totaldict<'a' int64>=['a' -> 40] d[next()]+=2 return if calls=?1 d['a'] else 0}", 42),
     ('let read=(values:array<int64>):>int64=>{let bits=values[0] transmute uint64 return bits transmute int64}\nlet main=():>int64=>{let values:array<int64>=[42] let before=_arena_cursor let answer=read(values) return if before =? _arena_cursor answer else 0}', 42),
     # Growing a descriptor moves its element handles and returns only the
     # obsolete data block. The allocator must be able to reuse that block.

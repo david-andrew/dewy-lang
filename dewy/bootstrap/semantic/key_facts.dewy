@@ -30,7 +30,14 @@ identity = (id:addr nodes:array<hir.AST> @registry:bindings.Registry @type_nodes
     if node is? hir.Integer return Literal[types.integer_literal(node.value @type_nodes)]
     if node is? hir.Bool return Literal[types.primitive(if node.value 'true' else 'false' @type_nodes)]
     let binding = bindings.array_route_id(id nodes @registry)
-    return if binding is? none none else Binding[binding]
+    if binding isnt? none return Binding[binding]
+    # An effectful expression can still promise one exact returned key.
+    # Its singleton result type is evidence about that evaluated value, not
+    # permission to evaluate the expression again when reading or storing.
+    let type=types.node_at(type_nodes types.strip_refinement(node.value_type type_nodes))
+    if type is? types.StringLiteralType return Literal[types.string_literal(type.value @type_nodes)]
+    if type is? types.IntegerLiteralType return Literal[types.integer_literal(type.value @type_nodes)]
+    return none
 }
 find = (facts:array<Fact> container:addr key:Identity):>Fact? => {
     loop fact in facts { if fact.container =? container and same(fact.key key) return fact }
