@@ -25,6 +25,28 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- The native checker now accepts the complete parser (`p0.dewy`, including
+  t0/t1/t2 imports) with all **18 prelude modules**. The latest full source
+  check completed in 1,084 seconds. Successive union type tests distribute
+  over the surviving nominal descendants before common-field access.
+
+- Native UTF-8 decoding, concatenation, interpolation (including signed and
+  unsigned word extremes), array string joining, and process argument setup
+  pass end-to-end graph validation, emission, compilation, and execution.
+  Concatenation and joining resegment graphemes across piece boundaries.
+  Include paths use the preprocessor's literal spelling; unsafe filenames
+  fall back to embedded bytes. Invalid UTF-8 arguments exit with status 1.
+
+- Result contracts are checked on each live expression branch before its
+  guard is joined away. Differential bounds cases cover `min`, `max`, nested
+  selections, scoped result bindings, and rejection of a false contract.
+
+- A first public native command driver builds and handles help/version. A
+  small emitted program runs through native µDewy and returns 42. The full
+  prelude compilation reached proof validation and exposed the `min` gap
+  fixed above; that complete run is being repeated. This is not yet a native
+  Dewy rebuild or a release-ready compiler pair.
+
 - Native local functions are hoisted with hidden read-only capture arguments,
   including defaults, recursive calls, and transitive captures. The lowering
   driver executes **166 programs**, plus invalid calls, unresolved proofs,
