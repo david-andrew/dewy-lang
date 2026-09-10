@@ -2,6 +2,8 @@
 import test_bootstrap_check as source_values
 
 CASES = [
+    'let add=(value:int):>int=>value+1\nadd(2)',
+    'let narrow=(value:int):>uint32=>value as uint32\nnarrow(7)',
     'let negative=(value:int64 & ~0):>bool=>value <? 0\nnegative(-1)',
     'let add=(value:int64 & ~0):>int64=>value+1\nadd(2)',
     'let divide=(value:int64 divisor:int64 & ~0):>int64=>value // divisor\ndivide(7 2)',

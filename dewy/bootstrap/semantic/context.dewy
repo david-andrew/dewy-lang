@@ -37,6 +37,9 @@ CheckState:type = [
     warnings:array<Warning>=[]
     pending_brand_matches:array<PendingBrandMatch>=[]
     read_states:array<ReadState>=[]
+    # Literal membership of already evaluated container values. A later
+    # operand may mutate their source binding without changing these copies.
+    value_keys:dict<addr array<keys.Fact>>=[]
     return_collectors:array<ReturnCollector>=[]
     prepared_imports:set<addr>=set[]
     next_key_position:addr=0
@@ -71,6 +74,7 @@ checkpoint = (session:Session):>CheckState => CheckState[
     warnings=session.warnings
     pending_brand_matches=session.pending_brand_matches
     read_states=session.read_states
+    value_keys=session.value_keys
     return_collectors=session.return_collectors
     prepared_imports=session.prepared_imports
     next_key_position=session.next_key_position
@@ -97,6 +101,7 @@ restore = (snapshot:CheckState @session:Session):>void => {
     session.warnings=snapshot.warnings
     session.pending_brand_matches=snapshot.pending_brand_matches
     session.read_states=snapshot.read_states
+    session.value_keys=snapshot.value_keys
     session.return_collectors=snapshot.return_collectors
     session.prepared_imports=snapshot.prepared_imports
     session.next_key_position=snapshot.next_key_position

@@ -451,7 +451,9 @@ library_call = (name:string arguments:array<addr> id:addr env:Environment @sessi
 # Keep an already emitted refinement obligation rather than duplicating it.
 expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
     let value=expression_inner(id env @session expected=expected call_target=call_target allow_place=allow_place)
-    if value is? Error or expected is? none return value
+    if value is? Error return value
+    container_state.capture(value env.state @session)
+    if expected is? none return value
     let node=node_at(value session)
     if node.value_type =? expected or node is? hir.Obligation and node.refined =? expected return value
     return against(value expected id env @session)
@@ -648,7 +650,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             return problem(id '`set` takes a string or an array' display.type_to_dewy(type session.types) env session)
         }
         if adjacency is? post.Juxtapose and adjacency.options.length >? 1 {
-            let left = expression(node.left env @session call_target=true)
+            let left = expression(node.left env @session call_target=true allow_place=allow_place)
             if left is? Error return left
             let value = node_at(left session)
             if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
@@ -674,7 +676,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             return call_syntax(func node.right id env @session expected=expected)
         }
         if op =? 'IndexJuxtapose' {
-            let sequence = expression(node.left env @session)
+            let sequence = expression(node.left env @session allow_place=allow_place)
             if sequence is? Error return sequence
             return index_syntax(sequence node.right id env @session)
         }
@@ -1510,6 +1512,14 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
 # The index scope binds `end` to this sequence's last position. Its binding
 # is lexical and disappears after the index; a nested index gets its own end.
 index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    # Prefix @ may sit to the left of juxtaposed brackets. Project the
+    # storage first and retain the place wrapper around the selected element.
+    let source=node_at(sequence session)
+    if source is? hir.Place {
+        let selected=index_syntax(source.target index_id id env @session)
+        if selected is? Error return selected
+        return place(selected id env @session)
+    }
     sequence=binary_array(sequence @session)
     if views.container_entry_types(node_at(sequence session).value_type session.types) isnt? none return container_index(sequence index_id id env @session)
     let arguments = contexts.node_at(index_id env.lexical session)
@@ -3631,7 +3641,7 @@ explicit_conversion = (value:addr target:addr id:addr env:Environment @session:c
         }
     }
     if subtyping.is_subtype(node.value_type target session.links @session.types) return value
-    if views.fixed_integer_layout(node.value_type session.types) isnt? none and views.fixed_integer_layout(target session.types) isnt? none return put(hir.ValueCast[node.loc target value] @session)
+    if subtyping.is_subtype(node.value_type types.primitive('int' @session.types) session.links @session.types) and views.fixed_integer_layout(target session.types) isnt? none return put(hir.ValueCast[node.loc target value] @session)
     let converted=conversion_method(value target id env @session)
     if converted is? Error return converted
     if converted isnt? none return converted

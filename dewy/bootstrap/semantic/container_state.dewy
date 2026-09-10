@@ -86,6 +86,44 @@ removed = (container:addr key:addr? state:addr @session:contexts.Session):>void 
     }
     set_facts(state current @session)
 }
+# Evidence for an expression's value never consults its source binding
+# again: in `left | change_left()`, the left operand has already been read.
+captured = (value:addr session:contexts.Session):>array<keys.Fact> => {
+    let node=hir.node_at(session.hir value)
+    if node is? hir.Obligation return captured(node.value session)
+    if node is? hir.ValueCast|hir.RepresentationCast return captured(node.expr session)
+    let result=session.value_keys.get(value)
+    return if result is? none [] else result
+}
+let capture = (value:addr state:addr @session:contexts.Session):>void => {
+    let node=hir.node_at(session.hir value)
+    if views.container_entry_types(node.value_type session.types) is? none return void
+    let result=values.literal_facts(0 value @session)
+    let source=route(value @session)
+    if source isnt? none {
+        loop fact in facts(state session) {
+            # A mutable key binding may change in a later operand too. Only
+            # constant key identities survive without a value-version fact.
+            if fact.container =? source and fact.key is? keys.Literal|keys.Total {keys.record(@result keys.Fact[0 fact.key])}
+        }
+    } else if node is? hir.DictView and node.name =? 'keys' {
+        result=captured(node.dictionary session)
+    } else if node is? hir.SetAlgebra {
+        let left=captured(node.left session)
+        let right=captured(node.right session)
+        if node.op =? 'union' {
+            loop fact in left {keys.record(@result keys.Fact[0 fact.key])}
+            loop fact in right {keys.record(@result keys.Fact[0 fact.key])}
+        } else if node.op =? 'intersection' {
+            loop fact in left {if keys.find(right 0 fact.key) isnt? none {keys.record(@result keys.Fact[0 fact.key])}}
+        }
+        # Absence of a membership fact is not evidence of absence. Difference
+        # and symmetric difference need negative facts before seeding keys.
+    } else if node is? hir.Obligation|hir.ValueCast|hir.RepresentationCast {
+        result=captured(value session)
+    }
+    if result.length >? 0 {session.value_keys[value]=result}
+}
 seed = (binding:addr value:addr state:addr @session:contexts.Session):>void => {
     let current = facts(state session)
     let source = route(value @session)
@@ -96,6 +134,7 @@ seed = (binding:addr value:addr state:addr @session:contexts.Session):>void => {
     }
     let literal = values.literal_facts(binding value @session)
     loop fact in literal { keys.record(@current fact) }
+    loop fact in captured(value session) {keys.record(@current keys.Fact[binding fact.key])}
     let entry = views.container_entry_types(hir.node_at(session.hir value).value_type session.types)
     if entry isnt? none and entry.value isnt? none {
         let members = views.finite_members(entry.key session.types)
