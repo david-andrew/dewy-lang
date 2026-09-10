@@ -8,9 +8,13 @@ CASES = [
     'let compare=(value:int64 & ~(0|1)):>bool=>value >? 1\ncompare(2)',
     'Choice:type=0|[value:int64]\nNonzero:type=Choice & ~0\nlet read=(value:Nonzero):>int64=>value.value\nread([7])',
     'let negative=(value:~0 & int64):>bool=>value <? 0\nnegative(-1)',
+    'Fixed:type=[raw:int64]\nlet nonzero=(value:Fixed):>bool=>value not=? 0\nnonzero([7])',
+    'Fixed:type=[raw:int64]\nlet zero=(value:Fixed):>bool=>0 =? value\nzero([0])',
+    'Rational:type=[numerator:int64 denominator:int64]\nlet zero=(value:Rational):>bool=>value =? 0\nzero([0 1])',
 ]
 ERRORS = [
     'Bad:type=(0|[value:int64]) & ~1',
+    'let value=[raw=7]\nvalue =? 0',
 ]
 
 

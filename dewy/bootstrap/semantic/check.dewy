@@ -140,11 +140,11 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     if node is? hir.Integer return put(hir.Integer[node.loc expected node.prefix node.value] @session)
     return put(hir.ValueCast[node.loc expected value] @session)
 }
-widen = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+widen = (value:addr id:addr env:Environment @session:contexts.Session strings:bool=true):>addr|Error => {
     let node = node_at(value session)
     let type=types.node_at(session.types node.value_type)
     if type is? types.IntegerLiteralType return against(value types.primitive('int64' @session.types) id env @session)
-    if type is? types.StringLiteralType return against(value types.primitive('string' @session.types) id env @session)
+    if strings and type is? types.StringLiteralType return against(value types.primitive('string' @session.types) id env @session)
     if type is? types.RationalLiteralType return pending(id 'runtime rational materialization' env session)
     if type is? types.TypeAnd {
         # A negative branch fact is not a new mutable variable's store
@@ -772,7 +772,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         if inhabitant isnt? none {value=inhabitant}
     }
     if value is? Error return value
-    if annotation is? none and not constant { value = widen(value node.right env @session) }
+    if annotation is? none and not constant { value = widen(value node.right env @session strings=false) }
     if value is? Error return value
     let checked = node_at(value session)
     let syntax_id = contexts.syntax_ref(id env.lexical @session)
@@ -2500,6 +2500,22 @@ builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @se
     let right = arguments[1]
     let a = node_at(left session)
     let b = node_at(right session)
+    if name in? ['__eq__' '__ne__'] {
+        loop index in 0..1 {
+            let value=arguments[index]
+            let other=arguments[1-index]
+            let constant=numeric_constants.value(other session)
+            if constant is? none or constant.numerator not=? 0 continue
+            let field=numeric_zero_field(node_at(value session).value_type env session)
+            if field is? none continue
+            # The guard must name the payload route. Fixed division needs
+            # its raw word nonzero; word-rational division needs its numerator.
+            let payload=member_named(value field id env @session)
+            if payload is? Error return payload
+            let zero=put(hir.Integer[node_at(other session).loc types.integer_literal(0 @session.types) '0d' 0] @session)
+            return call(function [payload zero] [] id env @session)
+        }
+    }
     if name =? '__and__' and types.node_at(session.types a.value_type) is? types.CallableType and types.node_at(session.types b.value_type) is? types.CallableType {
         let methods:array<addr>=[]
         let alternates:array<addr>=[]
@@ -2533,6 +2549,18 @@ builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @se
             return put(hir.String[loc types.string_literal(content @session.types) content] @session)
         }
         return put(hir.StringConcat[loc types.string_type(none @session.types) left right] @session)
+    }
+    return none
+}
+
+numeric_zero_field = (type:addr env:Environment session:contexts.Session):>string? => {
+    const names:dict<string string>=['Fixed'->'raw' 'Rational'->'numerator']
+    loop [name field] in names {
+        let id=declarations.lookup(name env.lexical session)
+        if id is? none continue
+        let binding=bindings.binding_at(session.registry id)
+        let declared=binding.type_value
+        if declared is? addr and types.same_type(type declared session.types) return field
     }
     return none
 }
@@ -2738,7 +2766,7 @@ match_bind = (name:string value:addr id:addr env:Environment @session:contexts.S
     let loc=contexts.node_at(id env.lexical session).loc
     # Pattern bindings are sequential declarations, including repeated `_`
     # parameters. A later binding shadows the earlier name, not its HIR id.
-    let checked=if hidden value else widen(value id env @session)
+    let checked=if hidden value else widen(value id env @session strings=false)
     if checked is? Error return checked
     let type=node_at(checked session).value_type
     let binding_id=bindings.allocate(@session.registry none name 'value' loc)

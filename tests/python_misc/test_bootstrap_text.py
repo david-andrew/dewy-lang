@@ -2,6 +2,10 @@
 import test_bootstrap_check as source_values
 
 CASES = [
+    'let text="abc"\ntext',
+    'let text="abc"\ntext.length',
+    'let text="abc"\ntext="abc"\ntext',
+    'let text:string="abc"\ntext="def"\ntext',
     '"café" as array<uint8>',
     '"café" as array<uint32>',
     '"café" as array<grapheme>',
@@ -24,6 +28,7 @@ CASES = [
     (source_values.ROOT / 'library/arrays.dewy').read_text(),
 ]
 ERRORS = [
+    'let text="abc"\ntext="def"',
     'let bytes:array<uint8>=[97]\nbytes as string',
     'let scalars:array<uint32>=[97]\nscalars as string',
     '"abc" transmute array<uint8>',
