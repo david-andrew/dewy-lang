@@ -1,0 +1,36 @@
+from reporting import SrcFile
+import p"context.dewy" as contexts
+import p"syntax.dewy" as syntax
+import p"binary_literals.dewy" as binary_literals
+import p"path_values.dewy" as path_values
+import p"../parser/p0.dewy" as parser
+
+# Borrow a source's token array only for a read. Returning Source first would
+# copy the whole forest, while retaining an unchecked array view across a
+# mutable Session call would lose its index/lifetime evidence. These small
+# readers keep that evidence local and return only the requested result.
+identifier = (id:addr context:contexts.Context session:contexts.Session):>string? => {
+    $runtime_assert context.source <? session.sources.length
+    return syntax.identifier(id session.sources[context.source].nodes)
+}
+symbol = (id:addr context:contexts.Context session:contexts.Session):>string => {
+    $runtime_assert context.source <? session.sources.length
+    return syntax.symbol(id session.sources[context.source].nodes)
+}
+is_operator = (id:addr name:string context:contexts.Context session:contexts.Session):>bool => symbol(id context session) =? name
+integer = (id:addr context:contexts.Context session:contexts.Session):>bigint? => {
+    $runtime_assert context.source <? session.sources.length
+    return syntax.integer(id session.sources[context.source].nodes)
+}
+srcfile = (context:contexts.Context session:contexts.Session):>SrcFile => {
+    $runtime_assert context.source <? session.sources.length
+    return session.sources[context.source].srcfile
+}
+include_arguments = (id:addr context:contexts.Context session:contexts.Session):>addr? => {
+    $runtime_assert context.source <? session.sources.length
+    return binary_literals.include_arguments(id session.sources[context.source].nodes)
+}
+path_parameter = (function:parser.BinOp context:contexts.Context session:contexts.Session):>string? => {
+    $runtime_assert context.source <? session.sources.length
+    return path_values.parameter(function session.sources[context.source].nodes)
+}

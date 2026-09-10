@@ -1,0 +1,37 @@
+import p"context.dewy" as contexts
+import p"ty.dewy" as types
+import p"hir.dewy" as hir
+import p"analyze/value_bounds.dewy" as constants
+
+Member:type = const [value:addr literal:addr]
+
+# `value =? 0` on `0 | [sign limbs]` tests the literal alternative's tag.
+# A union made entirely of integer literals remains an ordinary integer
+# comparison. String enums use member tags, including all-string unions.
+# This shares normal type-test narrowing instead of inventing numeric facts
+# that would leave the zero alternative visible after its early return.
+find = (left:addr right:addr session:contexts.Session):>Member? => {
+    let arguments:array<addr>=[left right]
+    loop index in 0..1 {
+        let value=arguments[index]
+        let other=arguments[1-index]
+        let union=types.node_at(session.types types.strip_refinement(hir.node_at(session.hir value).value_type session.types))
+        if union isnt? types.TypeOr continue
+        let constant=constants.constant_in(other session.hir session.types session.registry)
+        if constant isnt? none and constant.lower isnt? none and constant.upper isnt? none and constant.lower =? constant.upper {
+            let literal:addr?=none
+            let mixed=false
+            loop member in union.items {
+                let node=types.node_at(session.types member)
+                if node isnt? types.IntegerLiteralType {mixed=true}
+                else if node.value =? constant.lower {literal=member}
+            }
+            if mixed and literal isnt? none return Member[value literal]
+        } else {
+            let type=hir.node_at(session.hir other).value_type
+            if types.node_at(session.types type) isnt? types.StringLiteralType continue
+            loop member in union.items {if types.same_type(member type session.types) return Member[value member]}
+        }
+    }
+    return none
+}

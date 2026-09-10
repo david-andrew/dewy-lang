@@ -1,4 +1,5 @@
 from reporting import Error
+import p"source_views.dewy" as source_views
 import p"../targets.dewy" as targets
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
@@ -544,8 +545,7 @@ when_true = (p:facts.Proposition truth:bool):>facts.Proposition =>
     facts.Proposition[p.subject p.op p.value p.projection p.term p.term_id p.term_projection p.tested_type truth p.subject_id p.axiom]
 
 resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
-    let source = contexts.source_at(context session)
-    let node = tokens.node_at(source.nodes id)
+    let node = contexts.node_at(id context session)
     let exported = namespaces.source_field(id context session)
     if exported isnt? none {
         let value = exported.type_value
@@ -553,22 +553,22 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
         if value isnt? none return contexts.unsupported(id 'unapplied generic alias imported through a namespace' context session)
         return contexts.problem(id 'exported value is not a type' exported.name context session)
     }
-    let literal = syntax.integer(id source.nodes)
+    let literal = source_views.integer(id context session)
     if literal isnt? none return types.integer_literal(literal @session.types)
     if node is? parser.Atom {
-        let item = tokens.node_at(source.nodes node.item)
+        let item = contexts.node_at(node.item context session)
         if item is? tokens.Identifier return resolve_name(item.name id context @session)
         if item is? tokens.String return types.string_literal(item.content @session.types)
         if item is? tokens.BasedString {
-            let packed=binary_literals.pack(item source.srcfile)
+            let packed=binary_literals.pack(item source_views.srcfile(context session))
             if packed is? Error return packed
             return types.binary_literal(packed.bytes @session.types)
         }
         return contexts.unsupported(id "{item.kind} in type position" context session)
     }
     if node is? parser.KeywordExpr and node.parts.length =? 2 {
-        let keyword = tokens.node_at(source.nodes node.parts[0])
-        let body = tokens.node_at(source.nodes node.parts[1])
+        let keyword = contexts.node_at(node.parts[0] context session)
+        let body = contexts.node_at(node.parts[1] context session)
         if keyword is? tokens.Keyword and keyword.name =? 'const' and body is? parser.Block and body.delims =? '[]' {
             return resolve(node.parts[1] contexts.Context[context.source context.scope context.refinement_subject true] @session)
         }
@@ -581,12 +581,12 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
             let names:set<string> = set[]
             let inner = contexts.Context[context.source context.scope context.refinement_subject]
             loop item in node.inner {
-                let row = tokens.node_at(source.nodes item)
-                if row is? parser.BinOp and syntax.symbol(row.op source.nodes) in? ['=' '&='] {
-                    let name = syntax.identifier(row.left source.nodes)
-                    let body = tokens.node_at(source.nodes row.right)
-                    if name isnt? none and body is? parser.BinOp and syntax.is_operator(body.op '=>' source.nodes) {
-                        if syntax.is_operator(row.op '=' source.nodes) and name in? names return contexts.problem(item "duplicate object member `{name}`" 'this member repeats a name' context session)
+                let row = contexts.node_at(item context session)
+                if row is? parser.BinOp and source_views.symbol(row.op context session) in? ['=' '&='] {
+                    let name = source_views.identifier(row.left context session)
+                    let body = contexts.node_at(row.right context session)
+                    if name isnt? none and body is? parser.BinOp and source_views.is_operator(body.op '=>' context session) {
+                        if source_views.is_operator(row.op '=' context session) and name in? names return contexts.problem(item "duplicate object member `{name}`" 'this member repeats a name' context session)
                         names.add(name)
                         methods.push(types.MethodSpec[name contexts.syntax_ref(row.right inner @session)])
                         continue
@@ -606,14 +606,14 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
             return types.object_type(fields none context.immutable_record methods [] @session.types)
         }
     }
-    if node is? parser.Postfix and syntax.is_operator(node.op '?' source.nodes) {
+    if node is? parser.Postfix and source_views.is_operator(node.op '?' context session) {
         let inner = resolve(node.item context @session)
         if inner is? Error return inner
         let absent = types.primitive('none' @session.types)
         return types.union([inner absent] @session.types)
     }
     if node is? parser.Prefix {
-        let op = syntax.symbol(node.op source.nodes)
+        let op = source_views.symbol(node.op context session)
         if op =? 'type of' return contexts.problem(id '`type of` mints only in an alias declaration' 'a fresh type needs a name to be referred to by' context session)
         if op =? '~' or op =? 'not' {
             let inner = resolve(node.item context @session)
@@ -622,7 +622,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
         }
     }
     if node is? parser.BinOp {
-        let op = syntax.symbol(node.op source.nodes)
+        let op = source_views.symbol(node.op context session)
         if op is? facts.Operator {
             let parsed = conditions(id context @session)
             if parsed is? Error return parsed
@@ -660,7 +660,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
             }
         }
         if op =? '&' or op =? 'and' {
-            let block = tokens.node_at(source.nodes node.right)
+            let block = contexts.node_at(node.right context session)
             if block is? parser.Block and block.delims =? '<>' {
                 let parsed = fact_block(block context @session)
                 if parsed is? Error return parsed

@@ -1,4 +1,5 @@
 from reporting import Error, Span, Warning, Pointer
+import p"source_views.dewy" as source_views
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"../parser/t2.dewy" as post
@@ -36,6 +37,7 @@ import p"integer_ranges.dewy" as integer_ranges
 import p"binary_literals.dewy" as binary_literals
 import p"numeric_literals.dewy" as numeric_literals
 import p"numeric_constants.dewy" as numeric_constants
+import p"literal_members.dewy" as literal_members
 import p"path_values.dewy" as path_values
 
 doc"""
@@ -348,34 +350,33 @@ library_call = (name:string arguments:array<addr> id:addr env:Environment @sessi
 }
 
 expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
-    let node = tokens.node_at(source.nodes id)
+    let node = contexts.node_at(id env.lexical session)
     if node is? parser.Directive return directive(id node env @session)
     if node is? parser.Ambiguous return ambiguous(id node env @session expected=expected call_target=call_target allow_place=allow_place)
-    let included=binary_literals.include_arguments(id source.nodes)
+    let included=source_views.include_arguments(id env.lexical session)
     if included isnt? none {
         let value=include_bytes(included id env @session)
         if value is? Error return value
         return if expected is? none value else against(value expected id env @session)
     }
-    let number = syntax.integer(id source.nodes)
+    let number = source_views.integer(id env.lexical session)
     if number isnt? none {
         let literal = types.integer_literal(number @session.types)
         let value = put(hir.Integer[node.loc literal '0d' number] @session)
         return if expected is? none value else against(value expected id env @session)
     }
     if node is? parser.Atom {
-        let atom = tokens.node_at(source.nodes node.item)
+        let atom = contexts.node_at(node.item env.lexical session)
         let value:addr|Error = void_at(id env @session)
         if atom is? tokens.Identifier { value = identifier(atom.name id env @session) }
         else if atom is? tokens.String { value = put(hir.String[node.loc types.string_literal(atom.content @session.types) atom.content] @session) }
         else if atom is? tokens.BasedString {
-            let packed=binary_literals.pack(atom source.srcfile)
+            let packed=binary_literals.pack(atom source_views.srcfile(env.lexical session))
             if packed is? Error return packed
             value=put(hir.BasedString[node.loc types.binary_literal(packed.bytes @session.types) atom.base packed.digits packed.bytes] @session)
         }
         else if atom is? tokens.Real {
-            let fraction=numeric_literals.real(atom source.srcfile)
+            let fraction=numeric_literals.real(atom source_views.srcfile(env.lexical session))
             if fraction is? Error return fraction
             let type=types.rational_literal(fraction.numerator fraction.denominator @session.types)
             let normalized=types.node_at(session.types type)
@@ -395,23 +396,23 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         return if expected is? none value else against(value expected id env @session)
     }
     if node is? parser.Flow return flow(id node env @session expected=expected)
-    if node is? parser.Flat and syntax.is_operator(node.op 'RangeJuxtapose' source.nodes) return range_value(id node env @session)
+    if node is? parser.Flat and source_views.is_operator(node.op 'RangeJuxtapose' env.lexical session) return range_value(id node env @session)
     if node is? parser.Block {
         if node.inner.length =? 1 and node.delims in? ['[]' '[)' '(]' '()'] {
-            let content = tokens.node_at(source.nodes node.inner[0])
-            if content is? parser.Flat and syntax.is_operator(content.op 'RangeJuxtapose' source.nodes) return range_value(id content env @session bounds=node.delims)
+            let content = contexts.node_at(node.inner[0] env.lexical session)
+            if content is? parser.Flat and source_views.is_operator(content.op 'RangeJuxtapose' env.lexical session) return range_value(id content env @session bounds=node.delims)
         }
         if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected call_target=call_target allow_place=allow_place)
         if node.delims =? '[]' {
             let entry = if expected is? none none else views.container_entry_types(expected session.types)
             if entry isnt? none and entry.value isnt? none return container_literal(id node env @session expected=expected)
             loop item in node.inner {
-                let row = tokens.node_at(source.nodes item)
-                if row is? parser.BinOp and syntax.symbol(row.op source.nodes) in? ['->' '<->'] return container_literal(id node env @session expected=expected)
+                let row = contexts.node_at(item env.lexical session)
+                if row is? parser.BinOp and source_views.symbol(row.op env.lexical session) in? ['->' '<->'] return container_literal(id node env @session expected=expected)
             }
             loop item in node.inner {
-                let row = tokens.node_at(source.nodes item)
-                if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) return record_literal(id node env @session expected=expected)
+                let row = contexts.node_at(item env.lexical session)
+                if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) return record_literal(id node env @session expected=expected)
             }
             let target:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
             if target is? types.ObjectType and expected isnt? none {
@@ -427,7 +428,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if node.delims =? '\{}' return block(id env @session scoped=true expected=expected)
     }
     if node is? parser.Prefix {
-        let op = syntax.symbol(node.op source.nodes)
+        let op = source_views.symbol(node.op env.lexical session)
         if op =? '@' {
             let value = expression(node.item env @session call_target=true)
             if value is? Error return value
@@ -454,7 +455,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         }
     }
     if node is? parser.BinOp {
-        let op = syntax.symbol(node.op source.nodes)
+        let op = source_views.symbol(node.op env.lexical session)
         if op =? 'SemicolonJuxtapose' {
             let value = expression(node.left env @session)
             if value is? Error return value
@@ -467,12 +468,12 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if tested is? Error return tested
             return put(hir.TypeTest[node.loc types.primitive('bool' @session.types) value tested op =? 'isnt?'] @session)
         }
-        if tokens.node_at(source.nodes node.op) is? post.CombinedAssignment return compound_assignment(id node env @session)
+        if contexts.node_at(node.op env.lexical session) is? post.CombinedAssignment return compound_assignment(id node env @session)
         if op =? '=>' return function_literal(id node env @session expected_signature=expected)
         if op =? '=' or op =? ':=' or op =? '::' return declaration(id env @session)
         if op =? 'as' {
-            let included=binary_literals.include_arguments(node.left source.nodes)
-            let name=syntax.identifier(node.right source.nodes)
+            let included=source_views.include_arguments(node.left env.lexical session)
+            let name=source_views.identifier(node.right env.lexical session)
             if included isnt? none and name isnt? none {
                 let value=include_bytes(included id env @session)
                 if value is? Error return value
@@ -493,11 +494,11 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             return put(hir.Transmute[node.loc target value] @session)
         }
         if op =? '.' {
-            let primitive=syntax.identifier(node.left source.nodes)
+            let primitive=source_views.identifier(node.left env.lexical session)
             if primitive isnt? none and declarations.lookup(primitive env.lexical session) is? none {
                 let bounds=views.fixed_integer_bounds(types.primitive(primitive @session.types) session.types)
                 if bounds isnt? none {
-                    let name=syntax.identifier(node.right source.nodes)
+                    let name=source_views.identifier(node.right env.lexical session)
                     if name not=? 'min' and name not=? 'max' return problem(id 'integer type has no such member' 'fixed-width integer types expose `min` and `max`' env session)
                     let number=if name =? 'min' bounds.minimum else bounds.maximum
                     let value=put(hir.Integer[node.loc types.integer_literal(number @session.types) '0d' number] @session)
@@ -514,9 +515,9 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if not call_target and types.node_at(session.types node_at(value session).value_type) is? types.CallableType return auto_call(value id env @session expected=expected)
             return if expected is? none value else against(value expected id env @session)
         }
-        let adjacency = tokens.node_at(source.nodes node.op)
-        if adjacency is? post.Juxtapose and syntax.identifier(node.left source.nodes) =? 'set' and declarations.lookup('set' env.lexical session) is? none {
-            let body = tokens.node_at(source.nodes node.right)
+        let adjacency = contexts.node_at(node.op env.lexical session)
+        if adjacency is? post.Juxtapose and source_views.identifier(node.left env.lexical session) =? 'set' and declarations.lookup('set' env.lexical session) is? none {
+            let body = contexts.node_at(node.right env.lexical session)
             if body is? parser.Block and body.delims =? '[]' return container_literal(id body env @session expected=expected is_set=true)
             let value=expression(node.right env @session)
             if value is? Error return value
@@ -628,7 +629,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         }
     }
     if node is? parser.KeywordExpr and node.parts.length >? 0 {
-        let keyword = tokens.node_at(source.nodes node.parts[0])
+        let keyword = contexts.node_at(node.parts[0] env.lexical session)
         if keyword is? tokens.Keyword and keyword.name in? ['import' 'from'] {
             let reference = contexts.syntax_ref(id env.lexical @session)
             if reference in? session.prepared_imports return void_at(id env @session)
@@ -652,7 +653,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         }
     }
     if node is? parser.KeywordExpr and node.parts.length =? 2 {
-        let keyword = tokens.node_at(source.nodes node.parts[0])
+        let keyword = contexts.node_at(node.parts[0] env.lexical session)
         if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] return declaration(node.parts[1] env @session constant=keyword.name =? 'const' explicit=true)
     }
     return pending(id "{node.kind} expression" env session)
@@ -686,23 +687,22 @@ ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Ses
 }
 
 declaration = (id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
-    let node = tokens.node_at(source.nodes id)
+    let node = contexts.node_at(id env.lexical session)
     if node isnt? parser.BinOp return problem(id 'declaration needs a value' 'expected a named assignment' env session)
-    let target = tokens.node_at(source.nodes node.left)
+    let target = contexts.node_at(node.left env.lexical session)
     let target_id = node.left
     let annotation:addr? = none
-    if target is? parser.BinOp and syntax.is_operator(target.op ':' source.nodes) {
+    if target is? parser.BinOp and source_views.is_operator(target.op ':' env.lexical session) {
         target_id = target.left
         let type = declarations.resolve(target.right env.lexical @session)
         if type is? Error return type
         annotation = type
     }
-    let name = syntax.identifier(target_id source.nodes)
+    let name = source_views.identifier(target_id env.lexical session)
     if name is? none {
         if explicit or annotation isnt? none return pending(id 'destructuring declaration' env session)
         if target is? parser.BinOp {
-            let adjacency = tokens.node_at(source.nodes target.op)
+            let adjacency = contexts.node_at(target.op env.lexical session)
             if adjacency is? post.Juxtapose and 'IndexJuxtapose' in? adjacency.options {
                 let container = expression(target.left env @session)
                 if container is? Error return container
@@ -763,8 +763,8 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         set_read_type(existing node_at(value session).value_type env @session)
         return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' value] @session)
     }
-    let rhs = tokens.node_at(source.nodes node.right)
-    let value = if rhs is? parser.BinOp and syntax.is_operator(rhs.op '=>' source.nodes) function_literal(node.right rhs env @session name=name expected_signature=annotation) else expression(node.right env @session expected=annotation)
+    let rhs = contexts.node_at(node.right env.lexical session)
+    let value = if rhs is? parser.BinOp and source_views.is_operator(rhs.op '=>' env.lexical session) function_literal(node.right rhs env @session name=name expected_signature=annotation) else expression(node.right env @session expected=annotation)
     if value is? Error return value
     if annotation is? none and explicit {
         let inhabitant=unit_inhabitant(value none node.right env @session)
@@ -790,7 +790,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     binding.declaration = declared
     if checked is? hir.FunctionLiteral | hir.GenericFunction {
         binding.function = value binding.kind = 'function'
-        if rhs is? parser.BinOp {binding.literal_path_parameter=path_values.parameter(rhs source.nodes)}
+        if rhs is? parser.BinOp {binding.literal_path_parameter=source_views.path_parameter(rhs env.lexical session)}
     }
     if checked is? hir.OverloadedFunction {binding.function=value binding.kind='overload'}
     session.registry.by_id[binding_id] = binding
@@ -2501,6 +2501,8 @@ builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @se
     let a = node_at(left session)
     let b = node_at(right session)
     if name in? ['__eq__' '__ne__'] {
+        let member=literal_members.find(left right session)
+        if member isnt? none return put(hir.TypeTest[contexts.node_at(id env.lexical session).loc types.primitive('bool' @session.types) member.value member.literal name =? '__ne__'] @session)
         loop index in 0..1 {
             let value=arguments[index]
             let other=arguments[1-index]
