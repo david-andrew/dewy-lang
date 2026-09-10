@@ -15,9 +15,9 @@ Binding ids choose symbols, so source shadowing and imported names cannot
 silently capture each other during hoisting. Input nodes remain immutable;
 the output arena has its own indices and shares only the type arena values.
 
-This slice handles scalar storage, local scalar arrays, and ordinary
-function/control flow, including ordered arguments and callee defaults.
-Escaping aggregates, captures, place parameters, and proof node removal
+This slice handles scalar storage and scalar arrays, including independent
+argument/default copies, returned arena values, and growth/removal methods.
+Owned aggregate elements, captures, place parameters, and proof node removal
 belong to subsequent legalization steps. Until those exist,
 reaching them returns a diagnostic rather than emitting an unsafe program.
 """
@@ -28,6 +28,8 @@ State:type = [
     type_nodes:array<types.Type>=[]
     symbols:dict<addr string>=[]
     serial:addr=0
+    # The driver identifies the prelude allocator by binding, not spelling.
+    allocator:addr?=none
     problem:Error?=none
 ]
 Result:type = const [program:program.Program input:emit.Input]
@@ -125,7 +127,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Bool return put(hir.Bool[node.loc type node.value] @state)
     if node is? hir.ExpressedIdentifier return put(hir.ExpressedIdentifier[node.loc type symbol(node.name node.binding_id @state) node.binding_id] @state)
     if node is? hir.Transmute return put(hir.Transmute[node.loc type expression(node.expr @state)] @state)
-    if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else expression(node.item @state)] @state)
+    if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else owned_value(node.item @state)] @state)
     if node is? hir.Declare {
         if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral return reject(node 'hoisting a local function and its captures' @state)
         let original=hir.node_at(state.input.nodes node.expr)
@@ -156,6 +158,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.FunctionCall {
         let args:array<addr>=[]
         let callee=hir.node_at(state.input.nodes node.func)
+        if callee is? hir.ArrayMethod return array_method_call(node callee @state)
         let function:addr=0
         if node.kw_args.length =? 0 and callee is? hir.ExpressedIdentifier and (callee.binding_id is? none or callee.binding_id not in? state.symbols) and (callee.name in? emit.binary or callee.name in? emit.prefix or callee.name in? emit.intrinsics) {
             # Builtins and intrinsics have already converted their operands. Their
@@ -178,11 +181,11 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Continue return put(hir.Continue[node.loc type node.label node.loop_levels] @state)
     return reject(node "{node.typename} legalization" @state)
 }
-# The first array storage tier is local scalar data. Each value owns its
-# descriptor and bytes until function exit; copying a binding copies bytes.
-# Arrays cannot cross a function/global boundary until its ownership lowering
-# is present. These are the hosted six-word descriptors, so later tiers can
-# share the same indexing and mutation operations.
+# Scalar arrays use the hosted six-word descriptors. Without a runtime
+# allocator they stay within one function frame. The driver can supply the
+# prelude allocator binding for independent values that cross frames or grow.
+# Copies own their bytes; aggregate elements still need recursive ownership
+# lowering. Arena release/reuse insertion remains a subsequent lifetime pass.
 array_type = (id:addr state:State):>types.ArrayType? => {
     let type=types.node_at(state.input.types types.strip_refinement(id state.input.types))
     return if type is? types.ArrayType type else none
@@ -197,13 +200,33 @@ intrinsic = (name:string arguments:array<addr> result:addr node:hir.AST @state:S
 }
 word_op = (name:string left:addr right:addr node:hir.AST @state:State):>addr => intrinsic(name [left right] types.primitive('int64' @state.type_nodes) node @state)
 address = (base:addr offset:addr node:hir.AST @state:State):>addr => if offset =? 0 base else word_op('__add__' base word(offset node @state) node @state)
+# A provided allocator makes descriptors and element bytes survive the
+# creating frame. The caller copies an ordinary array argument before any
+# later argument is evaluated, so callee mutation cannot affect the caller.
+# Frame storage remains available for small compiler-kernel tests without a
+# prelude; values using it are forbidden from escaping that frame.
+allocation = (size:addr node:hir.AST @state:State):>addr => {
+    let name:string='__alloca__'
+    if state.allocator isnt? none {
+        let selected=state.symbols.get(state.allocator)
+        if selected is? none return reject(node 'the requested arena allocator has no declaration' @state)
+        name=selected
+    }
+    return intrinsic(name [size] types.primitive('int64' @state.type_nodes) node @state)
+}
+owned_value = (id:addr @state:State):>addr => {
+    let node=hir.node_at(state.input.nodes id)
+    let value=expression(id @state)
+    let array=array_type(node.value_type state)
+    return if array is? none or node is? hir.ArrayLiteral value else array_copy(value array node @state)
+}
 ArrayMemory:type = [descriptor:addr data:addr prefix:array<addr>]
 array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory => {
     let prefix:array<addr>=[]
     let size=word_op('__mul__' length word(stride node @state) node @state)
-    let data=snapshot(intrinsic('__alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
-    let descriptor=snapshot(intrinsic('__alloca__' [word(layouts.array_descriptor.size node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
-    let fields:array<addr>=[data length length word(stride node @state) word(layouts.array_flags.mutable node @state) word(0 node @state)]
+    let data=snapshot(allocation(size node @state) @prefix @state)
+    let descriptor=snapshot(allocation(word(layouts.array_descriptor.size node @state) node @state) @prefix @state)
+    let fields:array<addr>=[data length length word(stride node @state) word(layouts.array_flags.mutable + (if state.allocator is? none 0 else layouts.array_flags.arena_descriptor) node @state) word(0 node @state)]
     let offset:addr=0
     loop value in fields {
         prefix.push(intrinsic('__store_i64__' [value address(descriptor offset node @state)] types.primitive('void' @state.type_nodes) node @state))
@@ -282,6 +305,113 @@ array_copy = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr =
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 
+# Receiver and written arguments are captured before a mutation starts.
+# A growable array keeps its descriptor identity while replacing its data;
+# shrinking preserves capacity. Only live bytes are copied during growth.
+read_word = (descriptor:addr offset:addr node:hir.AST @state:State):>addr => intrinsic('__load_i64__' [address(descriptor offset node @state)] types.primitive('int64' @state.type_nodes) node @state)
+store_word = (value:addr descriptor:addr offset:addr node:hir.AST @state:State):>addr => intrinsic('__store_i64__' [value address(descriptor offset node @state)] types.primitive('void' @state.type_nodes) node @state)
+sequence = (items:array<addr> node:hir.AST @state:State):>addr => put(hir.Block[node.loc types.primitive('void' @state.type_nodes) items false] @state)
+conditional = (condition:addr body:addr node:hir.AST @state:State):>addr => {
+    let arm=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
+    return put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state)
+}
+counted_bytes = (source:addr target:addr start:addr stop:addr node:hir.AST @state:State backwards:bool=false):>addr => {
+    let prefix:array<addr>=[]
+    let cursor=snapshot(start @prefix @state)
+    let offset=if backwards word_op('__sub__' cursor word(1 node @state) node @state) else cursor
+    let byte=intrinsic('__load_u8__' [word_op('__add__' source offset node @state)] types.primitive('uint8' @state.type_nodes) node @state)
+    let store=intrinsic('__store_u8__' [byte word_op('__add__' target offset node @state)] types.primitive('void' @state.type_nodes) node @state)
+    let step=word_op(if backwards '__sub__' else '__add__' cursor word(1 node @state) node @state)
+    let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' step] @state)
+    let body=sequence([store increment] node @state)
+    let condition=intrinsic(if backwards '__gt__' else '__lt__' [cursor stop] types.primitive('bool' @state.type_nodes) node @state)
+    let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
+    prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
+    return sequence(prefix node @state)
+}
+array_reserve = (descriptor:addr required:addr stride:addr node:hir.AST @state:State):>addr => {
+    if state.allocator is? none return reject(node 'array growth needs the prelude arena allocator' @state)
+    let prefix:array<addr>=[]
+    let capacity=snapshot(read_word(descriptor layouts.array_descriptor.capacity node @state) @prefix @state)
+    let body:array<addr>=[]
+    let next=snapshot(word_op('__mul__' capacity word(2 node @state) node @state) @body @state)
+    let insufficient=intrinsic('__lt__' [next required] types.primitive('bool' @state.type_nodes) node @state)
+    let choose=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) next '=' required] @state)
+    body.push(conditional(insufficient choose node @state))
+    let data=snapshot(allocation(word_op('__mul__' next word(stride node @state) node @state) node @state) @body @state)
+    let source=snapshot(read_word(descriptor layouts.array_descriptor.data node @state) @body @state)
+    let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @body @state)
+    body.push(counted_bytes(source data word(0 node @state) word_op('__mul__' length word(stride node @state) node @state) node @state))
+    body.push(store_word(data descriptor layouts.array_descriptor.data node @state))
+    body.push(store_word(next descriptor layouts.array_descriptor.capacity node @state))
+    let condition=intrinsic('__lt__' [capacity required] types.primitive('bool' @state.type_nodes) node @state)
+    prefix.push(conditional(condition sequence(body node @state) node @state))
+    return sequence(prefix node @state)
+}
+array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr => {
+    if method.name not in? ['push' 'pop' 'clear' 'truncate' 'reserve' 'insert'] return reject(call "array {method.name} lowering" @state)
+    let type=array_type(hir.node_at(state.input.nodes method.array).value_type state)
+    $runtime_assert type isnt? none
+    let layout=layouts.element(type.element @state.type_nodes)
+    if layout is? layouts.Pending return reject(call layout.detail @state)
+    let prefix:array<addr>=[]
+    let descriptor=snapshot(expression(method.array @state) @prefix @state)
+    let arguments:dict<string addr>=[]
+    let names:array<string>=[]
+    if method.name in? ['push' 'insert'] {names.push('value')}
+    if method.name in? ['pop' 'insert'] {names.push('idx')}
+    if method.name in? ['truncate' 'reserve'] {names.push('count')}
+    loop i in 0.. and i <? call.pos_args.length {
+        $runtime_assert i <? names.length
+        arguments[names[i]]=snapshot(expression(call.pos_args[i] @state) @prefix @state)
+    }
+    loop [name argument] in call.kw_args {arguments[name]=snapshot(expression(argument @state) @prefix @state)}
+    let length=snapshot(read_word(descriptor layouts.array_descriptor.length call @state) @prefix @state)
+    let new_length=length
+    let result:addr?=none
+    let void_type=types.primitive('void' @state.type_nodes)
+    if method.name =? 'reserve' {
+        $runtime_assert 'count' in? arguments
+        prefix.push(array_reserve(descriptor arguments['count'] layout.size call @state))
+    }
+    else if method.name =? 'clear' {new_length=word(0 call @state)}
+    else if method.name =? 'truncate' {
+        $runtime_assert 'count' in? arguments
+        let condition=intrinsic('__lt__' [arguments['count'] length] types.primitive('bool' @state.type_nodes) call @state)
+        let store=store_word(arguments['count'] descriptor layouts.array_descriptor.length call @state)
+        prefix.push(conditional(condition store call @state))
+    } else if method.name =? 'push' or method.name =? 'insert' {
+        new_length=snapshot(word_op('__add__' length word(1 call @state) call @state) @prefix @state)
+        prefix.push(array_reserve(descriptor new_length layout.size call @state))
+        let data=snapshot(read_word(descriptor layouts.array_descriptor.data call @state) @prefix @state)
+        let index=arguments.get('idx')
+        if method.name =? 'push' {index=length}
+        $runtime_assert index isnt? none
+        let offset=word_op('__mul__' index word(layout.size call @state) call @state)
+        if method.name =? 'insert' {
+            let bytes=word_op('__mul__' length word(layout.size call @state) call @state)
+            prefix.push(counted_bytes(data address(data layout.size call @state) bytes offset call @state backwards=true))
+        }
+        $runtime_assert 'value' in? arguments
+        prefix.push(array_store(arguments['value'] word_op('__add__' data offset call @state) type.element call @state))
+    } else {
+        new_length=snapshot(word_op('__sub__' length word(1 call @state) call @state) @prefix @state)
+        let index=arguments.get('idx')
+        if index is? none {index=new_length}
+        $runtime_assert index isnt? none
+        let data=snapshot(read_word(descriptor layouts.array_descriptor.data call @state) @prefix @state)
+        let offset=word_op('__mul__' index word(layout.size call @state) call @state)
+        result=snapshot(array_load(word_op('__add__' data offset call @state) type.element call @state) @prefix @state)
+        let start=word_op('__add__' offset word(layout.size call @state) call @state)
+        let stop=word_op('__mul__' length word(layout.size call @state) call @state)
+        prefix.push(counted_bytes(data word_op('__sub__' data word(layout.size call @state) call @state) start stop call @state))
+    }
+    if method.name not in? ['truncate' 'reserve'] {prefix.push(store_word(new_length descriptor layouts.array_descriptor.length call @state))}
+    if result is? none {prefix.push(put(hir.Void[call.loc void_type] @state))}
+    else {prefix.push(result)}
+    return put(hir.Block[call.loc runtime_type(call.value_type call @state) prefix false] @state)
+}
+
 # Function defaults are callee expressions. The ABI passes an ordinary value
 # plus a presence flag; only the absent branch evaluates the default. Keyword
 # spelling disappears here, after preserving the source evaluation order.
@@ -322,9 +452,9 @@ ordinary_call = (node:hir.FunctionCall result_type:addr @state:State):>addr => {
     let function=expression(node.func @state)
     if callee isnt? hir.ExpressedIdentifier or callee.name not in? emit.intrinsics {function=snapshot(function @prefix @state)}
     let positional:array<addr>=[]
-    loop argument in node.pos_args {positional.push(snapshot(expression(argument @state) @prefix @state))}
+    loop argument in node.pos_args {positional.push(snapshot(owned_value(argument @state) @prefix @state))}
     let keywords:dict<string addr>=[]
-    loop [name argument] in node.kw_args {keywords[name]=snapshot(expression(argument @state) @prefix @state)}
+    loop [name argument] in node.kw_args {keywords[name]=snapshot(owned_value(argument @state) @prefix @state)}
     let args:array<addr>=[]
     let index:addr=0
     loop parameter in signature.pos_or_kw {
@@ -346,14 +476,14 @@ ordinary_call = (node:hir.FunctionCall result_type:addr @state:State):>addr => {
 }
 function = (node:hir.FunctionLiteral @state:State):>addr => {
     if node.rest_args isnt? none return reject(node 'rest parameter legalization' @state)
-    if array_type(node.rettype state) isnt? none return reject(node 'array results need caller or arena storage' @state)
+    if array_type(node.rettype state) isnt? none and state.allocator is? none return reject(node 'array results need the prelude arena allocator' @state)
     let arguments:array<hir.Param>=[]
     let prologue:array<addr>=[]
     let void_type=types.primitive('void' @state.type_nodes)
     let boolean=types.primitive('bool' @state.type_nodes)
     loop argument in parameters(node) {
         if argument.place return reject(node 'place parameter legalization' @state)
-        if array_type(argument.value_type state) isnt? none return reject(node 'array parameter value isolation' @state)
+        if array_type(argument.value_type state) isnt? none and state.allocator is? none return reject(node 'array arguments need the prelude arena allocator' @state)
         let type=runtime_type(argument.value_type node @state)
         let name=symbol(argument.name argument.binding_id @state)
         if argument is? hir.BoundParam {
@@ -363,7 +493,7 @@ function = (node:hir.FunctionLiteral @state:State):>addr => {
             arguments.push(hir.Param[present boolean])
             let condition=put(hir.ExpressedIdentifier[node.loc boolean present] @state)
             let supplied=put(hir.ExpressedIdentifier[node.loc type incoming] @state)
-            let default=expression(argument.value @state)
+            let default=owned_value(argument.value @state)
             let arm=put(hir.IfArm[node.loc type condition supplied] @state)
             let selected=put(hir.Flow[node.loc type [arm] default] @state)
             prologue.push(put(hir.Declare[node.loc void_type 'let' name type selected argument.binding_id] @state))
@@ -378,8 +508,8 @@ function = (node:hir.FunctionLiteral @state:State):>addr => {
     return put(hir.FunctionLiteral[node.loc runtime_type(node.value_type node @state) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile):>Result|Error => {
-    let state=State[input source type_nodes=input.types]
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none):>Result|Error => {
+    let state=State[input source type_nodes=input.types allocator=allocator]
     let block=hir.node_at(input.nodes root)
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
     discover(root @state)
@@ -401,7 +531,7 @@ lower = (root:addr input:emit.Input source:SrcFile):>Result|Error => {
                 if node.name =? 'main' {main=name}
                 continue
             }
-            if array_type(value.value_type state) isnt? none {reject(node 'global array storage' @state); continue}
+            if array_type(value.value_type state) isnt? none and state.allocator is? none {reject(node 'global arrays need the prelude arena allocator' @state); continue}
             let declared=expression(id @state)
             let declaration=hir.node_at(state.nodes declared)
             if declaration isnt? hir.Declare continue

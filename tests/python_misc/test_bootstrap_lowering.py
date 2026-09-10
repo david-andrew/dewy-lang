@@ -1,4 +1,4 @@
-"""Native storage/legalization executes scalar and local array programs.
+"""Native storage/legalization executes scalar and array programs.
 
 This deliberately enters below the full validation driver; it is not a public
 compiler command and does not authorize arbitrary unchecked source emission.
@@ -49,12 +49,34 @@ CASES = [
 ]
 
 
+# Exercise the actual allocator source used by the prelude, through native
+# checking/lowering as well. Selecting its binding is this kernel driver's
+# explicit stand-in for the full module driver's runtime identity lookup.
+SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
+ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
+ARENA_CASES = [
+    ('let main=():>int64=>{let values:array<int64>=[] values.push(40) values.push(2) return values.pop+values.pop}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[20 9] values.reserve(12) values.insert(22 1) values.pop(idx=2); return values[0]+values[1]}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[40 2 9] values.truncate(2) values.truncate(100) let answer=values[0]+values[1] values.clear; values.push(answer) return values.pop}', 42),
+    ('let main=():>int64=>{let values:array<uint8>=[40 2] values.insert(idx=1 value=99) values.pop(1); return (values[0]+values[1]) as int64}', 42),
+    ('let main=():>int64=>{let values:array<bool>=[] values.push(true) values.insert(false 0) let first=values.pop(0) let last=values.pop return if not first and last 42 else 0}', 42),
+    ('let change=(values:array<int64>):>int64=>{values[0]=99 return values[1]}\nlet main=():>int64=>{let values:array<int64>=[40 2] return change(values)+values[0]}', 42),
+    ('let make=():>array<int64>=>[40 2]\nlet main=():>int64=>{let values=make() return values[0]+values[1]}', 42),
+    ('let identity=(values:array<int64>):>array<int64>=>values\nlet main=():>int64=>{let values:array<int64>=[40 2] let copy=identity(values) copy[0]=99 return values[0]+copy[1]}', 42),
+    ('let values:array<int64>=[40 2]\nlet main=():>int64=>{let copy=values copy[0]=99 return values[0]+copy[1]}', 42),
+    ('let values:array<int64>=[40 2]\nlet mutate=():>int64=>{values[0]=99 return 2}\nlet choose=(left:array<int64> right:int64):>int64=>left[0]+right\nlet main=():>int64=>choose(values mutate())', 42),
+    ('let values:array<int64>=[40 2]\nlet choose=(copy:array<int64>=values):>int64=>{copy[0]=99 return copy[1]}\nlet main=():>int64=>choose()+values[0]', 42),
+    ('let make=():>array<bool>=>[false true]\nlet main=():>int64=>{let values=make() return if values[1] and not values[0] 42 else 0}', 42),
+]
+
+
 def test_native_scalar_lowering(tmp_path):
     source = tmp_path / 'lowering.dewy'
     source.write_text(f'''
 from reporting import SrcFile, Error
 import p"{ROOT / 'dewy/bootstrap/parser/p0.dewy'}" as parser
 import p"{ROOT / 'dewy/bootstrap/semantic/context.dewy'}" as contexts
+import p"{ROOT / 'dewy/bootstrap/semantic/bindings.dewy'}" as bindings
 import p"{ROOT / 'dewy/bootstrap/semantic/check.dewy'}" as checking
 import p"{ROOT / 'dewy/bootstrap/backend/udewy/emit.dewy'}" as emit
 import p"{ROOT / 'dewy/bootstrap/backend/udewy/lower.dewy'}" as lower
@@ -71,7 +93,8 @@ main = (argv:array<string>):>int64 => {{
     let env=checking.begin(lexical @session)
     let root=checking.module(parsed.root env @session)
     if root is? Error {{root.fail}}
-    let lowered=lower.lower(root emit.Input[session.hir session.types] source)
+    let allocator=bindings.lookup(session.scopes env.lexical.scope '_arena_alloc')
+    let lowered=lower.lower(root emit.Input[session.hir session.types] source allocator=allocator)
     if lowered is? Error {{lowered.fail}}
     let code=program.render(lowered.program lowered.input)
     if code is? Error {{code.fail}}
@@ -83,7 +106,7 @@ main = (argv:array<string>):>int64 => {{
     seed.write_text(codegen(SrcFile.from_path(source)))
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
-    for index, (text, expected_exit) in enumerate(CASES):
+    for index, (text, expected_exit) in enumerate(CASES + [(ARENA + text, code) for text, code in ARENA_CASES]):
         case = tmp_path / f'case-{index}.dewy'
         case.write_text(text)
         native = subprocess.run([binary, case], capture_output=True, text=True, timeout=60, check=False)
