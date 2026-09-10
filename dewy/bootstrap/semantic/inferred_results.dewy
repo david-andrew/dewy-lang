@@ -1,0 +1,88 @@
+import p"context.dewy" as contexts
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+import p"propositions.dewy" as facts
+import p"bindings.dewy" as bindings
+import p"analyze/hir_facts.dewy" as expressions
+import p"analyze/value_bounds.dewy" as constants
+import p"../targets.dewy" as targets
+
+doc"""
+Facts inferred from a function's expressed boolean result. A single predicate
+about parameters promises what holds on each result; arbitrary boolean bodies
+remain plain bool. Explicit returns are handled by the function's collector,
+not by guessing which expression in a block eventually supplies a return.
+"""
+
+parameter = (id:addr names:dict<addr string> session:contexts.Session):>addr? => {
+    let node=hir.node_at(session.hir expressions.strip_casts(id session.hir))
+    if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id in? names return node.binding_id
+    return none
+}
+measured = (id:addr names:dict<addr string> session:contexts.Session):>addr? => {
+    let node=hir.node_at(session.hir expressions.strip_casts(id session.hir))
+    if node is? hir.ArrayLength return parameter(node.array names session)
+    if node is? hir.StringLength return parameter(node.string names session)
+    return none
+}
+integer = (id:addr session:contexts.Session):>bigint? => {
+    let value=constants.constant(id constants.Environment[session.hir session.types session.registry targets.max_length(session.target)])
+    if value is? none or value.lower is? none or value.upper is? none or value.lower not=? value.upper return none
+    return value.lower
+}
+predicate = (body:addr parameters:array<hir.Param> @session:contexts.Session):>addr? => {
+    let names:dict<addr string>=[]
+    loop param in parameters {if param.binding_id isnt? none {names[param.binding_id]=param.name}}
+    let id=body
+    loop true {
+        let node=hir.node_at(session.hir id)
+        if node is? hir.Block and node.items.length =? 1 {id=node.items[0]} else break
+    }
+    let node=hir.node_at(session.hir expressions.strip_casts(id session.hir))
+    let fact:facts.Proposition?=none
+    if node is? hir.TypeTest {
+        let subject_binding=parameter(node.value names session)
+        if subject_binding isnt? none {
+            $runtime_assert subject_binding in? names
+            fact=facts.Proposition["@{names[subject_binding]}" if node.negated 'isnt?' else 'is?' tested_type=node.test_type when=true subject_id=subject_binding]
+        }
+    }
+    if node is? hir.FunctionCall and node.pos_args.length =? 2 {
+        let function=hir.node_at(session.hir node.func)
+        if function isnt? hir.ExpressedIdentifier or function.binding_id is? none return none
+        let binding=bindings.binding_at(session.registry function.binding_id)
+        # The operation's binding, not a user's choice of function name,
+        # licenses a mathematical predicate fact.
+        if binding.syntax isnt? none or binding.declaration isnt? none return none
+        let operators:dict<string facts.Operator>=['__lt__'->'<?' '__le__'->'<=?' '__gt__'->'>?' '__ge__'->'>=?' '__eq__'->'=?' '__ne__'->'not=?']
+        let op=operators.get(function.name)
+        if op is? none return none
+        let left=node.pos_args[0]
+        let right=node.pos_args[1]
+        let left_length=measured(left names session)
+        let right_length=measured(right names session)
+        let left_value=parameter(left names session)
+        let right_value=parameter(right names session)
+        let a=integer(left session)
+        let b=integer(right session)
+        if left_length isnt? none and right_length isnt? none and op not=? 'not=?' {
+            $runtime_assert left_length in? names and right_length in? names
+            fact=facts.Proposition["@{names[left_length]}" op projection='length' term=names[right_length] term_id=right_length when=true subject_id=left_length]
+        } else if left_length isnt? none and b isnt? none {
+            $runtime_assert left_length in? names
+            fact=facts.Proposition["@{names[left_length]}" op b projection='length' when=true subject_id=left_length]
+        } else if left_value isnt? none and right_value isnt? none and op not=? 'not=?' {
+            $runtime_assert left_value in? names and right_value in? names
+            fact=facts.Proposition["@{names[left_value]}" op term=names[right_value] term_id=right_value term_projection='value' when=true subject_id=left_value]
+        } else if left_value isnt? none and b isnt? none {
+            $runtime_assert left_value in? names
+            fact=facts.Proposition["@{names[left_value]}" op b when=true subject_id=left_value]
+        } else if right_value isnt? none and a isnt? none {
+            $runtime_assert right_value in? names
+            let swapped:dict<facts.Operator facts.Operator>=['>?'->'<?' '<?'->'>?' '>=?'->'<=?' '<=?'->'>=?']
+            fact=facts.Proposition["@{names[right_value]}" swapped.get(op op) a when=true subject_id=right_value]
+        }
+    }
+    if fact is? none return none
+    return types.refined_type(types.primitive('bool' @session.types) [fact facts.negated(fact)] @session.types)
+}

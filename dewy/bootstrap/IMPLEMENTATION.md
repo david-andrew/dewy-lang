@@ -43,6 +43,17 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   HIR for the native lowering stage. Nested membership tests retain the key
   proof without assuming their search-position temporary escapes the test.
 
+- Function result inference now collects explicit return sites independently
+  for each function. It rejects mixed bare/valued returns, valued returns
+  with reachable fallthrough, and unused expressed values before returns.
+  Single boolean predicates retain parameter type, numeric, and length facts
+  on their inferred signatures; callers recover their branch implications.
+  Call expressions shed call-specific result refinements while signatures
+  retain their proof contracts, using the shared result-type view. Unannotated
+  functions remain order-dependent; complete signatures allow forward reads.
+  The focused comparison includes inferred and explicit refined results,
+  nested functions, predicate calls, and defining-scope parameter defaults.
+
 - `semantic/value_sets.dewy` supplies exact integer coverage for match arms.
   Sorted disjoint intervals retain holes, unlike the convex bounds used by
   flow analysis. Forty native comparisons exercise union, intersection,
@@ -374,7 +385,7 @@ No provisional language syntax or allocator design has been introduced yet.
 
 ## Verification checkpoint
 
-The committed initialization checkpoint (`0e5863b9`) passed **1,864 tests,
+The committed match checkpoint (`082455e4`) passed **1,876 tests,
 23 skipped** in a fresh checkout. Thirteen skips were SDL tests whose generated
 artifacts were absent from that checkout; all thirteen passed separately in
 the main workspace, leaving the usual ten unavailable-toolchain skips.

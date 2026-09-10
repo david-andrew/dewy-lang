@@ -267,8 +267,10 @@ ERROR_CASES = [
 ]
 
 
-def loop_summary(node):
+def loop_summary(node, *, function_types=False):
     parts = []
+    if function_types and isinstance(node, hir.FunctionLiteral):
+        parts.append(f'function:{type_to_dewy(node.type)};')
     if isinstance(node, hir.LoopArm):
         parts.append(f'loop:{type_to_dewy(node.type)};')
     if isinstance(node, hir.IndexAssign):
@@ -301,11 +303,11 @@ def loop_summary(node):
     if isinstance(node, (hir.Break, hir.Continue)):
         parts.append(f'{type(node).__name__.lower()}:{node.loop_levels};')
     for child in _iter_children(node):
-        parts.append(loop_summary(child))
+        parts.append(loop_summary(child, function_types=function_types))
     return ''.join(parts)
 
 
-def test_native_source_values(tmp_path, *, validate_matches=False):
+def test_native_source_values(tmp_path, *, validate_matches=False, function_types=False):
     expected = []
     for text in CASES:
         ty.reset_program_brands()
@@ -313,7 +315,7 @@ def test_native_source_values(tmp_path, *, validate_matches=False):
         module, context = check._typecheck_module(SrcFile(None, text))
         if validate_matches:
             check.validate_brand_matches()
-        expected.append(type_to_dewy(module.type) + "|" + loop_summary(module) + "|instances:" + ",".join(type_to_dewy(item.expr.type) for item in context.generic_instances))
+        expected.append(type_to_dewy(module.type) + "|" + loop_summary(module, function_types=function_types) + "|instances:" + ",".join(type_to_dewy(item.expr.type) for item in context.generic_instances))
     for text in ERROR_CASES:
         ty.reset_program_brands()
         check.pending_brand_matches.clear()
@@ -334,6 +336,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/match_patterns.dewy'}" as patterns
 loop_summary = (id:addr session:contexts.Session):>string => {{
     let node=checking.node_at(id session)
     let parts:array<string>=[]
+    if node is? hir.FunctionLiteral and {str(function_types).lower()} {{ parts.push("function:{{display.type_to_dewy(node.value_type session.types)}};") }}
     if node is? hir.LoopArm {{ parts.push("loop:{{display.type_to_dewy(node.value_type session.types)}};") }}
     if node is? hir.IndexAssign {{ parts.push('index_store;') }}
     if node is? hir.Index|hir.StringIndex {{

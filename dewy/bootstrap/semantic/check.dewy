@@ -26,6 +26,7 @@ import p"container_values.dewy" as container_values
 import p"container_state.dewy" as container_state
 import p"match_patterns.dewy" as patterns
 import p"propositions.dewy" as propositions
+import p"inferred_results.dewy" as inferred_results
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -41,7 +42,7 @@ loading, representation selection, and the final validation/lowering driver
 are separate work still needed by the compiler invocation.
 """
 
-Environment:type = const [lexical:contexts.Context state:addr return_type:addr?=none loop_depth:addr=0]
+Environment:type = const [lexical:contexts.Context state:addr return_type:addr?=none loop_depth:addr=0 return_collector:addr?=none]
 put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
 node_at = (id:addr session:contexts.Session):>hir.AST => hir.node_at(session.hir id)
 void_at = (id:addr env:Environment @session:contexts.Session):>addr => {
@@ -210,7 +211,10 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         let error = array_transition(func args kwargs id env @session)
         if error isnt? none return error
     }
-    let result = put(hir.FunctionCall[source.loc method.ret callee args kwargs selected] @session)
+    # Promises stay on the selected signature. The expressed result sheds
+    # call-specific facts while retaining named types such as addr/nat64.
+    let result_type = views.strip_result_refinement(method.ret @session.types)
+    let result = put(hir.FunctionCall[source.loc result_type callee args kwargs selected] @session)
     return if expected is? none result else against(result expected id env @session)
 }
 
@@ -418,12 +422,13 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             return put(if keyword.name =? 'break' hir.Break[node.loc bottom] else hir.Continue[node.loc bottom] @session)
         }
         if keyword is? tokens.Keyword and keyword.name =? 'return' {
-            if env.return_type is? none return problem(id '`return` outside a function' 'nothing here catches this return' env session)
+            if env.return_collector is? none return problem(id '`return` outside a function' 'nothing here catches this return' env session)
             let empty = void_at(id env @session)
             let value:addr|Error = empty
             if node.parts.length =? 2 { value = expression(node.parts[1] env @session expected=env.return_type) }
-            else { value = against(empty env.return_type id env @session) }
+            else if env.return_type isnt? none { value = against(empty env.return_type id env @session) }
             if value is? Error return value
+            record_return(node_at(value session).value_type node.loc env @session)
             return put(hir.Return[node.loc types.primitive('never' @session.types) value] @session)
         }
     }
@@ -552,7 +557,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
 block = (id:addr env:Environment @session:contexts.Session scoped:bool=false expected:addr?=none):>addr|Error => {
     let node = contexts.node_at(id env.lexical session)
     if node isnt? parser.Block return expression(id env @session expected=expected)
-    let inner = if scoped Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth] else env
+    let inner = if scoped Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector] else env
     loop statement in node.inner {
         let alias = declarations.predeclare_alias(statement inner.lexical @session)
         if alias is? Error return alias
@@ -611,7 +616,7 @@ fork = (env:Environment @session:contexts.Session):>Environment => {
     let copy = session.read_states[env.state]
     let state = session.read_states.length
     session.read_states.push(copy)
-    return Environment[env.lexical state env.return_type env.loop_depth]
+    return Environment[env.lexical state env.return_type env.loop_depth env.return_collector]
 }
 
 # Annotated functions reserve their signature before any body in the block
@@ -620,12 +625,14 @@ fork = (env:Environment @session:contexts.Session):>Environment => {
 function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session concrete:bool=false):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
     let signature = tokens.node_at(source.nodes literal.left)
-    if signature isnt? parser.BinOp or not syntax.is_operator(signature.op ':>' source.nodes) {
-        if signature is? parser.BinOp and syntax.is_operator(signature.op 'TypeParamJuxtapose' source.nodes) return problem(literal.left 'a generic function needs a declared result type' 'annotate the result with `:>T`' env session)
-        return pending(literal.left 'inferring a function result type' env session)
+    let parameter_id=literal.left
+    let result_id:addr?=none
+    if signature is? parser.BinOp and syntax.is_operator(signature.op ':>' source.nodes) {
+        parameter_id=signature.left result_id=signature.right
+    } else if signature is? parser.BinOp and syntax.is_operator(signature.op 'TypeParamJuxtapose' source.nodes) {
+        return problem(literal.left 'a generic function needs a declared result type' 'annotate the result with `:>T`' env session)
     }
     let lexical = env.lexical
-    let parameter_id = signature.left
     let generic:array<types.GenericParam> = []
     let prefix = tokens.node_at(source.nodes parameter_id)
     if prefix is? parser.BinOp and syntax.is_operator(prefix.op 'TypeParamJuxtapose' source.nodes) {
@@ -655,7 +662,7 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     loop arg in args {
         parameters.push(types.PosOrKwArg[arg.name declarations.word_element(arg.value_type @session) arg.required arg.place])
     }
-    let result = declarations.function_result(signature.right lexical @session)
+    let result=if result_id is? none types.primitive('untyped' @session.types) else declarations.function_result(result_id lexical @session)
     if result is? Error return result
     return types.function_type(parameters [] none declarations.word_element(result @session) generic @session.types)
 }
@@ -697,13 +704,16 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
         let reference = contexts.syntax_ref(id env.lexical @session)
         return put(hir.GenericFunction[literal.loc resolved name hir.GenericSource[reference env.state shape.type_params]] @session)
     }
-    let inner = Environment[contexts.child(env.lexical @session) fork(env @session).state shape.ret]
+    let infer=types.is_primitive(types.node_at(session.types shape.ret) 'untyped')
+    let collector=session.return_collectors.length
+    session.return_collectors.push(contexts.ReturnCollector[])
+    let annotation:addr?=if infer none else shape.ret
+    let inner = Environment[contexts.child(env.lexical @session) fork(env @session).state annotation return_collector=collector]
     container_state.set_facts(inner.state container_state.inherited(env.state session) @session)
     let parameters:array<hir.Param> = []
     let source = contexts.source_at(env.lexical session)
     let signature = tokens.node_at(source.nodes literal.left)
-    $runtime_assert signature is? parser.BinOp
-    let parameter_id = signature.left
+    let parameter_id=if signature is? parser.BinOp and syntax.is_operator(signature.op ':>' source.nodes) signature.left else literal.left
     let prefix = tokens.node_at(source.nodes parameter_id)
     if prefix is? parser.BinOp and syntax.is_operator(prefix.op 'TypeParamJuxtapose' source.nodes) { parameter_id = prefix.right }
     let arguments = tokens.node_at(source.nodes parameter_id)
@@ -733,12 +743,19 @@ function_literal = (id:addr literal:parser.BinOp env:Environment @session:contex
         if default is? none { parameters.push(hir.Param[param.name param.value_type binding_id place=param.place]) }
         else { parameters.push(hir.BoundParam[param.name param.value_type binding_id value=default place=param.place]) }
     }
-    let body = expression(literal.right inner @session expected=shape.ret)
+    let body=expression(literal.right inner @session expected=annotation)
     if body is? Error return body
-    let body_type = node_at(body session).value_type
-    if not subtyping.is_subtype(body_type shape.ret session.links @session.types) return problem(id 'function body does not provide its result' display.type_to_dewy(shape.ret session.types) env session)
-    let result = put(hir.FunctionLiteral[literal.loc resolved parameters [] none shape.ret body source=contexts.source_at(env.lexical session).srcfile] @session)
-    return result
+    let result=infer_function_result(body literal.right inner @session)
+    if result is? Error return result
+    if not infer and not subtyping.is_subtype(types.strip_refinement(result session.types) types.strip_refinement(shape.ret session.types) session.links @session.types) return problem(id 'function body does not provide its result' display.type_to_dewy(shape.ret session.types) env session)
+    let returns=if infer result else shape.ret
+    $runtime_assert collector <? session.return_collectors.length
+    if infer and session.return_collectors[collector].sites.length =? 0 and types.is_primitive(types.node_at(session.types returns) 'bool') {
+        let predicate=inferred_results.predicate(body parameters @session)
+        if predicate isnt? none {returns=predicate}
+    }
+    let function_type=types.function_type(shape.pos_or_kw shape.kw_only shape.rest returns [] @session.types)
+    return put(hir.FunctionLiteral[literal.loc function_type parameters [] none returns body source=contexts.source_at(env.lexical session).srcfile] @session)
 }
 
 # A type test selects a read alternative; it does not alter the binding's
@@ -779,6 +796,26 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
     if node is? hir.FunctionCall and node.pos_args.length =? 1 {
         let func = node_at(node.func session)
         if func is? hir.ExpressedIdentifier and func.name =? '__not__' return refined(node.pos_args[0] not truth result @session invalidated=invalidated moved=moved)
+    }
+    if node is? hir.FunctionCall {
+        # Promises name the callee's parameters; source reads must refine the
+        # corresponding caller binding, including named arguments and places.
+        loop returned in hir_facts.call_result_refinements(condition session.hir session.types) {
+            loop promise in returned.propositions {
+                if promise.when isnt? none and promise.when not=? truth continue
+                if promise.tested_type is? none or promise.op not in? ['is?' 'isnt?'] continue
+                let name=propositions.parameter(promise)
+                if name is? none continue
+                let actual=hir_facts.call_argument(condition name session.hir session.types)
+                if actual is? none continue
+                let value=node_at(hir_facts.strip_casts(actual session.hir) session)
+                if value is? hir.ExpressedIdentifier and value.binding_id isnt? none {
+                    let current=read_type(value.binding_id result session)
+                    $runtime_assert current isnt? none
+                    set_read_type(value.binding_id select_type(current promise.tested_type promise.op =? 'is?' @session) result @session)
+                }
+            }
+        }
     }
     if node is? hir.DictContains and truth {
         let array = node_at(node.keys session)
@@ -984,7 +1021,7 @@ index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:con
         if computed is? Error return computed
         last = computed
     }
-    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
     let binding_id = bindings.allocate_param(@session.registry 'end' node_at(last session).value_type loc)
     let binding = bindings.binding_at(session.registry binding_id)
     binding.replacement = last binding.read_only_reason = 'sequence index end'
@@ -1092,7 +1129,7 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
 # field values; they do not cause the initializer to run again.
 record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
-    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
     let wanted:types.Type = types.node_at(session.types if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types))
     let fields:array<hir.ObjectField> = []
     let layout:array<types.ObjectField> = []
@@ -1168,7 +1205,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment
     let source = contexts.source_at(env.lexical session)
     let arguments = tokens.node_at(source.nodes arguments_id)
     let items:array<addr> = if arguments is? parser.Block arguments.inner else [arguments_id]
-    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
     let given:dict<string addr> = []
     let positional:array<addr> = []
     loop item in items {
@@ -1211,7 +1248,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr id:addr env:Environment
             let default_scope = bindings.push_scope(@session.scopes reference.scope)
             loop [name binding] in scope.names { bindings.bind(@session.scopes default_scope name binding) }
             let lexical = contexts.Context[reference.source default_scope]
-            let default_env = Environment[lexical env.state env.return_type env.loop_depth]
+            let default_env = Environment[lexical env.state env.return_type env.loop_depth env.return_collector]
             let checked = expression(reference.node default_env @session expected=field.value_type)
             if checked is? Error return checked
             value = checked
@@ -1573,7 +1610,7 @@ iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|E
         if fits { target = types.primitive('int64' @session.types) }
     }
     $runtime_assert target isnt? none
-    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
     let binding_id = bindings.allocate_param(@session.registry name target node.loc)
     let binding = bindings.binding_at(session.registry binding_id)
     binding.store_type = target
@@ -1688,7 +1725,7 @@ loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Se
         body_env = refined(value true env @session)
     }
     $runtime_assert condition isnt? none
-    body_env = Environment[body_env.lexical body_env.state body_env.return_type body_env.loop_depth+1]
+    body_env = Environment[body_env.lexical body_env.state body_env.return_type body_env.loop_depth+1 body_env.return_collector]
     let checked_body = expression(arm.parts[2] body_env @session)
     if checked_body is? Error return checked_body
     let body:addr = checked_body
@@ -1946,7 +1983,7 @@ container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.Entry
         fields.push('values') elements.push(entry.value)
     } else if target_syntax is? parser.Block return problem(id 'a set iterator has one target' 'iterate the member directly' env session)
     container_state.forget_positions(iterable env.state @session)
-    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
     let values:array<addr> = []
     loop i in 0.. and i <? targets.length and i <? fields.length and i <? elements.length {
         let name = syntax.identifier(targets[i] source.nodes)
@@ -2106,7 +2143,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
 # Keep source diagnostics beside their proof obligation. Reporting is a
 # runtime-library operation, separate from checking the condition and from
 # carrying facts along the continuation that can actually be reached.
-const assertion_whitespace=set['\u0009' '\u000a' '\u000b' '\u000c' '\u000d' '\u001c' '\u001d' '\u001e' '\u001f' '\u0020' '\u0085' '\u00a0' '\u1680' '\u2000' '\u2001' '\u2002' '\u2003' '\u2004' '\u2005' '\u2006' '\u2007' '\u2008' '\u2009' '\u200a' '\u2028' '\u2029' '\u202f' '\u205f' '\u3000']
+const assertion_whitespace=set['\r\n' '\u0009' '\u000a' '\u000b' '\u000c' '\u000d' '\u001c' '\u001d' '\u001e' '\u001f' '\u0020' '\u0085' '\u00a0' '\u1680' '\u2000' '\u2001' '\u2002' '\u2003' '\u2004' '\u2005' '\u2006' '\u2007' '\u2008' '\u2009' '\u200a' '\u2028' '\u2029' '\u202f' '\u205f' '\u3000']
 assertion_source = (id:addr env:Environment session:contexts.Session):>string => {
     let source = contexts.source_at(env.lexical session)
     let span = tokens.node_at(source.nodes id).loc
@@ -2150,8 +2187,9 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
     if node.name =? 'abstract' return problem(id '`$abstract` marks a `type of` mint' 'it belongs on the value of a type alias' env session)
     if node.name =? 'breakpoint' return pending(id 'debugger binding snapshots and breakpoint reporting' env session)
     if node.name =? 'expect' or node.name =? 'fail' {
-        if env.return_type is? none return problem(id "`${node.name}` outside a function" 'a failed expectation returns from the enclosing void function' env session)
-        if not types.is_primitive(types.node_at(session.types env.return_type) 'void') return problem(id "`${node.name}` in a function that returns a value" 'expectations belong in void functions' env session)
+        if env.return_collector is? none return problem(id "`${node.name}` outside a function" 'a failed expectation returns from the enclosing void function' env session)
+        if env.return_type isnt? none and not types.is_primitive(types.node_at(session.types env.return_type) 'void') return problem(id "`${node.name}` in a function that returns a value" 'expectations belong in void functions' env session)
+        record_return(types.primitive('void' @session.types) node.loc env @session)
     }
     if node.name =? 'fail' return assertion_failure(id node none 'fail' env @session)
     if node.name not in? ['assert' 'runtime_assert' 'expect'] return pending(id "directive `${node.name}`" env session)
@@ -2422,7 +2460,7 @@ match_condition = (spec:FlowSpec env:Environment @session:contexts.Session):>add
     return combined
 }
 match_body = (spec:FlowSpec env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
-    let inner=Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth]
+    let inner=Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
     let declarations:array<addr>=[]
     # Read all subjects before introducing names, so binding a parameter named
     # like another scrutinee cannot redirect its lexical identity.
@@ -2499,4 +2537,47 @@ flow_value_type = (results:array<addr> id:addr env:Environment @session:contexts
         }
     }
     return subtyping.join(results session.links @session.types)
+}
+
+
+# Explicit returns share a collector across lexical branches, but nested
+# functions start a new one. A valued return cannot be mixed with a bare
+# return or fall through into an implicit expression result.
+record_return = (type:addr loc:Span env:Environment @session:contexts.Session):>void => {
+    $runtime_assert env.return_collector isnt? none and env.return_collector <? session.return_collectors.length
+    let collector=session.return_collectors[env.return_collector]
+    collector.sites.push(contexts.ReturnSite[type loc])
+    session.return_collectors[env.return_collector]=collector
+}
+discarded_expression = (id:addr session:contexts.Session):>bool => {
+    let node=node_at(id session)
+    if node is? hir.Block {
+        loop item in node.items {if discarded_expression(item session) return true}
+        return false
+    }
+    if node is? hir.Flow {
+        loop arm in node.arms {
+            let item=node_at(arm session)
+            if item is? hir.IfArm|hir.LoopArm and discarded_expression(item.body session) return true
+        }
+        return node.default isnt? none and discarded_expression(node.default session)
+    }
+    let type=types.node_at(session.types node.value_type)
+    return not types.is_primitive(type 'void') and not types.is_primitive(type 'never')
+}
+infer_function_result = (body:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    $runtime_assert env.return_collector isnt? none and env.return_collector <? session.return_collectors.length
+    let collector=session.return_collectors[env.return_collector]
+    let body_type=node_at(body session).value_type
+    if collector.sites.length =? 0 return body_type
+    let bare=false
+    let values:array<addr>=[]
+    loop site in collector.sites {
+        if types.is_primitive(types.node_at(session.types site.value_type) 'void') {bare=true}
+        else {values.push(site.value_type)}
+    }
+    if bare and values.length >? 0 return problem(id 'not all paths return a value' 'give every return a value, or none of them' env session)
+    if not bare and not types.is_primitive(types.node_at(session.types body_type) 'never') return problem(id 'not all paths return a value' 'control reaches the end of a body which explicitly returns values' env session)
+    if discarded_expression(body session) return problem(id 'expressed value is discarded' 'this body returns explicitly; use return or suppress the unused expression with a semicolon' env session)
+    return if bare types.primitive('void' @session.types) else subtyping.join(values session.links @session.types)
 }

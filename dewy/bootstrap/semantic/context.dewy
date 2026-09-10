@@ -1,4 +1,4 @@
-from reporting import SrcFile, Error, Pointer, Warning
+from reporting import SrcFile, Error, Pointer, Warning, Span
 import p"../targets.dewy" as targets
 import p"../parser/t1.dewy" as tokens
 import p"ty.dewy" as types
@@ -27,6 +27,8 @@ PendingBrandMatch:type = const [context:Context syntax:addr brand:string covered
 PendingAlias:type = const [expression:SyntaxRef]
 # Current read alternatives are separate from each binding's store contract.
 # A branch copies this state; declaration/type/HIR identities remain shared.
+ReturnSite:type = const [value_type:addr loc:Span]
+ReturnCollector:type = [sites:array<ReturnSite>=[]]
 ReadState:type = [types:dict<addr addr>=[] keys:array<keys.Fact>=[]]
 Session:type = [
     # Checking collects diagnostics; the invocation decides how to render them.
@@ -35,6 +37,7 @@ Session:type = [
     target:targets.Target=$target
     sources:array<Source>=[]
     read_states:array<ReadState>=[]
+    return_collectors:array<ReturnCollector>=[]
     prepared_imports:set<addr>=set[]
     next_key_position:addr=0
     syntax_refs:array<SyntaxRef>=[]

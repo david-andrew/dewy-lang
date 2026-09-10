@@ -23,6 +23,8 @@ from udewy.frontend import EntryPointOptions, entry_point
 ROOT = Path(__file__).resolve().parents[2]
 # Source, deferred failure branches, collected warnings.
 CASES = [
+    ('let f=(x:int64):>void=>{$assert (x\r\n >=? 0)}', 0, 0),
+    ('let f=()=>{$fail}\nf()', 1, 0),
     ('$assert true', 0, 0),
     ('$assert true, "checked"', 0, 0),
     ('$runtime_assert true, 7', 0, 0),  # dead messages are still checked as expressions
