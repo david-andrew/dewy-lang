@@ -134,6 +134,10 @@ let main=():>int64=>{{
 
     unicode_runtime = ROOT / 'library/unicode/runtime.dewy'
     for index, body in enumerate([
+        'let format=(value:int64|none flag:bool|none):>string=>"{value}:{flag}"\nlet main=():>int64=>if format(none true)=?"none:true" and format(42 none)=?"42:none" 42 else 0',
+        'let format=(value:int64|string|none):>string=>"{value}"\nlet main=():>int64=>if format(42)=?"42" and format("text")=?"text" and format(none)=?"none" 42 else 0',
+        'let calls:int64=0\nlet next=():>int64|none=>{calls+=1 return calls}\nlet main=():>int64=>{let text="{next()}:{next()}" return if text=?"1:2" and calls=?2 42 else 0}',
+        'let format=(record:[value:addr|none when:bool|none]):>string=>"{record.value}:{record.when}"\nlet main=():>int64=>if format([42 false])=?"42:false" and format([none none])=?"none:none" 42 else 0',
         'let combine=(left:string right:string):>string=>left+right\nlet main=():>int64=>{let joined=combine("e" "\\u0301x") return if joined.length=?2 and joined[0]=?"é" 42 else 0}',
         'let decode=(bytes:array<uint8>):>string|none=>bytes as string|none\nlet main=():>int64=>{let text=decode([0x68 0xc3 0xa9]) return if text is? string and text=?"hé" and text.length=?2 42 else 0}',
         'let decode=(bytes:array<uint8>):>string|none=>bytes as string|none\nlet main=():>int64=>{let bad=decode([0xed 0xa0 0x80]) let empty=decode([]) return if bad is? none and empty is? string and empty.length=?0 42 else 0}',

@@ -3790,33 +3790,70 @@ spelling_string = (value:addr @session:contexts.Session):>addr? => {
     if text is? none return none
     return put(hir.String[node.loc types.string_literal(text @session.types) text] @session)
 }
+# Formatting uses ordinary typed control flow. A union-valued field is
+# evaluated once into a hidden local, then each arm reads its narrowed member.
+# Keeping the declaration inside the expression preserves left-to-right
+# interpolation effects, including calls and fields of temporary records.
+text_part = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let node=node_at(value session)
+    let string=types.primitive('string' @session.types)
+    let spelled=spelling_string(value @session)
+    if spelled isnt? none return spelled
+    let type=types.node_at(session.types types.strip_refinement(node.value_type session.types))
+    if types.is_primitive(type 'none') return put(hir.String[node.loc types.string_literal('none' @session.types) 'none'] @session)
+    if types.is_primitive(type 'void') or types.is_primitive(type 'never') return problem(id 'string interpolation needs a value' 'this expression does not produce one' env session)
+    let converted=conversion_method(value string id env @session)
+    if converted is? Error return converted
+    if converted isnt? none return converted
+    if views.string_valued(node.value_type session.types) return value
+    let members=views.runtime_union_members(node.value_type @session.types)
+    let payload=views.optional_payload(node.value_type @session.types)
+    if payload isnt? none {members=[types.primitive('none' @session.types) payload]}
+    if members isnt? none {
+        let name="__dewy_text_{session.registry.next_id}"
+        let binding_id=bindings.allocate(@session.registry none name 'value' node.loc)
+        let binding=bindings.binding_at(session.registry binding_id)
+        binding.value_type=node.value_type binding.store_type=node.value_type
+        let declaration=put(hir.Declare[node.loc types.primitive('void' @session.types) 'let' name node.value_type value binding_id] @session)
+        binding.declaration=declaration
+        session.registry.by_id[binding_id]=binding
+        let reference=put(hir.ExpressedIdentifier[node.loc node.value_type name binding_id] @session)
+        let arms:array<addr>=[]
+        let otherwise:addr?=none
+        loop i in 0.. and i <? members.length {
+            let member=members[i]
+            let narrowed=put(hir.ExpressedIdentifier[node.loc member name binding_id] @session)
+            let part=text_part(narrowed id env @session)
+            if part is? Error return part
+            let body=if views.string_valued(node_at(part session).value_type session.types) part else put(hir.InterpolatedString[node.loc string [part]] @session)
+            if i+1 =? members.length {otherwise=body}
+            else {
+                let condition=put(hir.TypeTest[node.loc types.primitive('bool' @session.types) reference member false] @session)
+                arms.push(put(hir.IfArm[node.loc string condition body] @session))
+            }
+        }
+        let flow=put(hir.Flow[node.loc string arms otherwise] @session)
+        return put(hir.Block[node.loc string [declaration flow] false] @session)
+    }
+    if type is? types.ObjectType|types.ArrayType|types.TypeOr return pending(id 'structural string interpolation' env session)
+    return value
+}
 interpolated_string = (id:addr node:parser.IString env:Environment @session:contexts.Session):>addr|Error => {
     let parts:array<addr>=[]
     let string=types.primitive('string' @session.types)
     loop part_id in node.content {
         let part=contexts.node_at(part_id env.lexical session)
         if part is? tokens.StringChunk {
-            if part.content.length >? 0 {parts.push(put(hir.String[part.loc types.string_literal(part.content @session.types) part.content] @session))}
+            if part.content not=? '' {parts.push(put(hir.String[part.loc types.string_literal(part.content @session.types) part.content] @session))}
             continue
         }
         if part is? parser.ParametricEscape return pending(part_id 'parametric escape inside an interpolated string' env session)
         if part isnt? parser.Block or part.inner.length not=? 1 return problem(part_id 'string interpolation requires one expression' 'place exactly one expression between these braces' env session)
         let value=expression(part.inner[0] env @session)
         if value is? Error return value
-        let spelled=spelling_string(value @session)
-        if spelled isnt? none {parts.push(spelled) continue}
-        let type=types.node_at(session.types types.strip_refinement(node_at(value session).value_type session.types))
-        if types.is_primitive(type 'none') {parts.push(put(hir.String[part.loc types.string_literal('none' @session.types) 'none'] @session)) continue}
-        if types.is_primitive(type 'void') or types.is_primitive(type 'never') return problem(part_id 'string interpolation needs a value' 'this expression does not produce one' env session)
-        let converted=conversion_method(value string part_id env @session)
-        if converted is? Error return converted
-        if converted isnt? none {parts.push(converted) continue}
-        # A literal-string enum still contributes text. Retain its enum type
-        # so lowering selects the literal for its tag, just as for ordinary
-        # string arguments; it needs no structural object formatting.
-        if views.string_valued(node_at(value session).value_type session.types) {parts.push(value) continue}
-        if type is? types.ObjectType|types.ArrayType|types.TypeOr return pending(part_id 'structural and union string interpolation' env session)
-        parts.push(value)
+        let prepared=text_part(value part_id env @session)
+        if prepared is? Error return prepared
+        parts.push(prepared)
     }
     return put(hir.InterpolatedString[node.loc string parts] @session)
 }
