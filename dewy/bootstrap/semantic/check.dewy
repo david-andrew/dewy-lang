@@ -738,30 +738,34 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
     return pending(id "{node.kind} expression" env session)
 }
 
-# All arenas and flow facts belong to the candidate transaction. A rejected
-# call/product/index reading cannot leak a declaration, type mint, place
-# invalidation, or checked body into the winning reading. This explicit
-# value snapshot is deliberately simple; copying only changed arena tails
-# is an optimization once the complete checker has been profiled.
-Choice:type = const [result:addr state:contexts.Session]
+# Each interpretation runs against the same mutable checking state. The
+# source catalog is read-only during expression checking and is not copied.
+# Restore every mutable arena/fact field on rejection, on ambiguity, and on
+# success; a losing reading cannot leak declarations, mints, or place effects.
+Choice:type = const [result:addr state:contexts.CheckState]
 ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
+    let before=contexts.checkpoint(session)
     let winner:Choice? = none
     let rejected:array<Error> = []
     loop candidate in node.candidates {
-        let trial = session
-        let result = expression(candidate env @trial expected=expected call_target=call_target allow_place=allow_place)
+        contexts.restore(before @session)
+        let result = expression(candidate env @session expected=expected call_target=call_target allow_place=allow_place)
         if result is? Error { rejected.push(result) continue }
-        if winner isnt? none return problem(id 'ambiguous expression' 'multiple readings typecheck; add explicit operators or parentheses' env session)
-        winner = Choice[result trial]
+        if winner isnt? none {
+            contexts.restore(before @session)
+            return problem(id 'ambiguous expression' 'multiple readings typecheck; add explicit operators or parentheses' env session)
+        }
+        winner = Choice[result contexts.checkpoint(session)]
     }
     if winner is? none {
+        contexts.restore(before @session)
         # Keep implementation gaps visible when no supported reading wins.
         loop rejection in rejected { if rejection.title =? 'native checker implementation pending' return rejection }
         if rejected.length >? 0 return rejected[0]
         return problem(id 'no valid interpretation for ambiguous expression' 'no candidate expression typechecks' env session)
     }
     let result = winner.result
-    session = winner.state
+    contexts.restore(winner.state @session)
     return result
 }
 

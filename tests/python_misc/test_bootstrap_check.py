@@ -15,6 +15,9 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'let xs=[1 2 3]\nxs[0..2)',
+    '"abc"[0..2)',
+
     'let xs=[1 2]\nxs[0]=7\nxs.length',
     'let p=[values=[1 2]]\np.values[0]=7\np.values',
     'let xs=[[1 2] [3 4]]\nxs[0][1]=7\nxs[0]',
@@ -279,7 +282,7 @@ def loop_summary(node, *, function_types=False):
         slot = 'none' if node.constant_index is None else str(node.constant_index)
         parts.append(f'{kind}:{slot};')
     if isinstance(node, hir.StringSlice):
-        parts.append(f'slice:{type_to_dewy(node.type)};')
+        parts.append(f'slice:{type_to_dewy(node.type)}:{node.range.bounds or "[]"};')
     if isinstance(node, hir.RangeMembership):
         values = [node.first, node.step, node.last, node.count]
         parts.append('range_membership:' + ':'.join('none' if value is None else str(value) for value in values) + ';')

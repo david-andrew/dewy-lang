@@ -32,12 +32,10 @@ ReturnCollector:type = [sites:array<ReturnSite>=[]]
 ReadState:type = [types:dict<addr addr>=[] keys:array<keys.Fact>=[]]
 ConstructorSet:type = [bindings:array<addr>=[]]
 MethodEntry:type = const [binding:addr receiver_type:addr?=none place_self:bool=false]
-Session:type = [
+CheckState:type = [
     # Checking collects diagnostics; the invocation decides how to render them.
     warnings:array<Warning>=[]
     pending_brand_matches:array<PendingBrandMatch>=[]
-    target:targets.Target=$target
-    sources:array<Source>=[]
     read_states:array<ReadState>=[]
     return_collectors:array<ReturnCollector>=[]
     prepared_imports:set<addr>=set[]
@@ -65,6 +63,63 @@ Session:type = [
     resolving_aliases:set<addr>=set[]
     named_refs:dict<addr addr>=[]
 ]
+# Source forests are installed by the module loader, outside expression
+# transactions. Checking can only read them. Keep that immutable catalog
+# outside the copied state when trying alternative parser interpretations.
+Session:type = CheckState & [target:targets.Target=$target sources:array<Source>=[]]
+checkpoint = (session:Session):>CheckState => CheckState[
+    warnings=session.warnings
+    pending_brand_matches=session.pending_brand_matches
+    read_states=session.read_states
+    return_collectors=session.return_collectors
+    prepared_imports=session.prepared_imports
+    next_key_position=session.next_key_position
+    syntax_refs=session.syntax_refs
+    types=session.types
+    hir=session.hir
+    hoisted=session.hoisted
+    constructors=session.constructors
+    methods=session.methods
+    method_bindings=session.method_bindings
+    preparing_methods=session.preparing_methods
+    prepared_methods=session.prepared_methods
+    registry=session.registry
+    scopes=session.scopes
+    brands=session.brands
+    error_types=session.error_types
+    links=session.links
+    builtin_aliases=session.builtin_aliases
+    pending_aliases=session.pending_aliases
+    resolving_aliases=session.resolving_aliases
+    named_refs=session.named_refs
+]
+restore = (snapshot:CheckState @session:Session):>void => {
+    session.warnings=snapshot.warnings
+    session.pending_brand_matches=snapshot.pending_brand_matches
+    session.read_states=snapshot.read_states
+    session.return_collectors=snapshot.return_collectors
+    session.prepared_imports=snapshot.prepared_imports
+    session.next_key_position=snapshot.next_key_position
+    session.syntax_refs=snapshot.syntax_refs
+    session.types=snapshot.types
+    session.hir=snapshot.hir
+    session.hoisted=snapshot.hoisted
+    session.constructors=snapshot.constructors
+    session.methods=snapshot.methods
+    session.method_bindings=snapshot.method_bindings
+    session.preparing_methods=snapshot.preparing_methods
+    session.prepared_methods=snapshot.prepared_methods
+    session.registry=snapshot.registry
+    session.scopes=snapshot.scopes
+    session.brands=snapshot.brands
+    session.error_types=snapshot.error_types
+    session.links=snapshot.links
+    session.builtin_aliases=snapshot.builtin_aliases
+    session.pending_aliases=snapshot.pending_aliases
+    session.resolving_aliases=snapshot.resolving_aliases
+    session.named_refs=snapshot.named_refs
+}
+
 source_at = (context:Context session:Session):>Source => {
     $runtime_assert context.source <? session.sources.length
     return session.sources[context.source]

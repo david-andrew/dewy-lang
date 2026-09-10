@@ -17,7 +17,11 @@ loop_summary = (id:addr session:contexts.Session function_types:bool):>string =>
         let slot = if node.constant_index is? none 'none' else "{node.constant_index}"
         parts.push("{kind}:{slot};")
     }
-    if node is? hir.StringSlice { parts.push("slice:{display.type_to_dewy(node.value_type session.types)};") }
+    if node is? hir.StringSlice {
+        let range=checking.node_at(node.range session)
+        $runtime_assert range is? hir.Range
+        parts.push("slice:{display.type_to_dewy(node.value_type session.types)}:{if range.bounds is? none '[]' else range.bounds};")
+    }
     if node is? hir.SetAlgebra { parts.push("algebra:{node.op};") }
     if node is? hir.StringEqual { parts.push("string_equal:{node.negated};") }
     if node is? hir.StringConcat { parts.push('concat;') }
