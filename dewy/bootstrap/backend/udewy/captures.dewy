@@ -1,0 +1,121 @@
+import p"../../semantic/hir.dewy" as hir
+
+# Follow the hosted lambda-lifting boundary: direct calls pass the current
+# values of enclosing bindings as hidden parameters. Dependencies propagate
+# those parameters through callers, including mutually recursive functions.
+# Capturing functions used as values and writes through captures still need
+# closure storage; keep those cases explicit rather than silently copying.
+Function:type = [id:addr locals:set<addr>=set[] direct:set<addr>=set[] dependencies:set<addr>=set[] captures:set<addr>=set[] writes:set<addr>=set[]]
+Plan:type = [functions:dict<addr Function>=[] named:dict<addr addr>=[] globals:set<addr>=set[]]
+
+discover = (root:addr nodes:array<hir.AST> @plan:Plan @seen:set<addr>):>void => {
+    if root in? seen return void
+    seen.add(root)
+    let node=hir.node_at(nodes root)
+    if node is? hir.FunctionLiteral {plan.functions[root]=Function[root]}
+    if node is? hir.Declare and node.binding_id isnt? none {
+        if hir.node_at(nodes node.expr) is? hir.FunctionLiteral {plan.named[node.binding_id]=node.expr}
+    }
+    loop child in hir.children(node) {discover(child nodes @plan @seen)}
+}
+locals = (id:addr nodes:array<hir.AST> @result:set<addr> @seen:set<addr>):>void => {
+    if id in? seen return void
+    seen.add(id)
+    let node=hir.node_at(nodes id)
+    if node is? hir.FunctionLiteral return void
+    if node is? hir.Declare and node.binding_id isnt? none {result.add(node.binding_id)}
+    if node is? hir.ObjectLiteral {
+        loop field in node.fields {if field.binding_id isnt? none {result.add(field.binding_id)}}
+    }
+    if node is? hir.IteratorExpression {
+        let target=hir.node_at(nodes node.target)
+        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {result.add(target.binding_id)}
+    }
+    loop child in hir.children(node) {locals(child nodes @result @seen)}
+}
+references = (id:addr nodes:array<hir.AST> plan:Plan symbols:set<addr> @function:Function @seen:set<addr>):>void => {
+    if id in? seen return void
+    seen.add(id)
+    let node=hir.node_at(nodes id)
+    if node is? hir.FunctionLiteral {function.dependencies.add(id) return void}
+    let target:addr?=none
+    if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place {target=node.target}
+    if node is? hir.DictStore|hir.DictRemove {target=node.keys}
+    if node is? hir.FunctionCall {
+        let callee=hir.node_at(nodes node.func)
+        if callee is? hir.ArrayMethod and callee.name not=? 'join' {target=callee.array}
+    }
+    if target isnt? none {
+        let binding=root_binding(target nodes)
+        if binding isnt? none {function.writes.add(binding)}
+    }
+    if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+        let binding=node.binding_id
+        let code=plan.named.get(binding)
+        if code isnt? none {function.dependencies.add(code)}
+        else if binding in? symbols and binding not in? plan.globals and binding not in? function.locals {function.direct.add(binding)}
+    }
+    loop child in hir.children(node) {references(child nodes plan symbols @function @seen)}
+}
+root_binding = (id:addr nodes:array<hir.AST>):>addr? => {
+    let node=hir.node_at(nodes id)
+    if node is? hir.ExpressedIdentifier return node.binding_id
+    if node is? hir.MemberAccess return root_binding(node.value nodes)
+    if node is? hir.Index return root_binding(node.array nodes)
+    if node is? hir.ValueCast|hir.RepresentationCast|hir.Transmute return root_binding(node.expr nodes)
+    if node is? hir.Block and not node.scoped and node.items.length =? 1 return root_binding(node.items[0] nodes)
+    return none
+}
+analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
+    let result=Plan[]
+    let seen:set<addr>=set[]
+    discover(root nodes @result @seen)
+    let block=hir.node_at(nodes root)
+    if block is? hir.Block {
+        loop id in block.items {
+            let node=hir.node_at(nodes id)
+            if node is? hir.Declare and node.binding_id isnt? none {result.globals.add(node.binding_id)}
+        }
+    }
+    let functions=result.functions.keys
+    loop id in functions {
+        $runtime_assert id in? result.functions
+        let function=result.functions[id]
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let parameters=literal.pos_or_kw_args
+        loop parameter in literal.kw_only_args {parameters.push(parameter)}
+        loop parameter in parameters {if parameter.binding_id isnt? none {function.locals.add(parameter.binding_id)}}
+        seen=set[]
+        locals(literal.body nodes @function.locals @seen)
+        loop parameter in parameters {
+            if parameter is? hir.BoundParam {locals(parameter.value nodes @function.locals @seen)}
+        }
+        seen=set[]
+        references(literal.body nodes result symbols @function @seen)
+        loop parameter in parameters {
+            if parameter is? hir.BoundParam {references(parameter.value nodes result symbols @function @seen)}
+        }
+        function.captures=function.direct
+        result.functions[id]=function
+    }
+    let changed=true
+    loop changed {
+        changed=false
+        loop id in functions {
+            $runtime_assert id in? result.functions
+            let function=result.functions[id]
+            loop dependency in function.dependencies {
+                let other=result.functions.get(dependency)
+                if other is? none continue
+                loop binding in other.captures {
+                    if binding in? result.globals or binding in? function.locals or binding in? function.captures continue
+                    function.captures.add(binding)
+                    changed=true
+                }
+            }
+            result.functions[id]=function
+        }
+    }
+    return result
+}

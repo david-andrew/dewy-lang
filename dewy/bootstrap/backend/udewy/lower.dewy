@@ -3,6 +3,7 @@ import p"emit.dewy" as emit
 import p"program.dewy" as program
 import p"statements.dewy" as statements
 import p"layouts.dewy" as layouts
+import p"captures.dewy" as captures
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/type_queries.dewy" as views
@@ -26,8 +27,9 @@ conversions create independent storage. Iterator setup remains local to its
 flow arm, and advancing happens before each condition, including continue.
 
 Places share binding slots or inline record/cell storage through fields,
-indices, and forwarded parameters. Closure captures and runtime reporting
-remain subsequent legalization steps. Reaching an unsupported representation reports a
+indices, and forwarded parameters. Local functions are hoisted; direct calls
+pass read-only captures as hidden arguments, as in the hosted backend.
+Escaping closures remain a subsequent step. An unsupported representation reports a
 pending-implementation diagnostic before program emission.
 """
 State:type = [
@@ -42,6 +44,8 @@ State:type = [
     layout_context:layouts.Context=layouts.Context[]
     brand_numbers:array<brands.NumberedBrand>=[]
     storage_types:dict<addr addr>=[]
+    capture_plan:captures.Plan=captures.Plan[]
+    code_symbols:dict<addr string>=[]
     # A place is an address of the binding's storage, including the handle
     # slot for an aggregate. Replacing a record/array through @ must replace
     # that slot rather than merely mutate the old object's contents.
@@ -129,7 +133,10 @@ discover = (id:addr @state:State):>void => {
     }
     if node is? hir.ObjectLiteral {
         loop field in node.fields {
-            if field.binding_id isnt? none {state.symbols[field.binding_id]="__dewy_binding_{field.binding_id}_{field.name}"}
+            if field.binding_id isnt? none {
+                state.symbols[field.binding_id]="__dewy_binding_{field.binding_id}_{field.name}"
+                state.storage_types[field.binding_id]=hir.node_at(state.input.nodes field.value).value_type
+            }
         }
     }
     if node is? hir.FunctionLiteral {
@@ -217,6 +224,8 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Integer return put(hir.Integer[node.loc type node.prefix node.value] @state)
     if node is? hir.Bool return put(hir.Bool[node.loc type node.value] @state)
     if node is? hir.ExpressedIdentifier {
+        let function=if node.binding_id is? none none else state.capture_plan.named.get(node.binding_id)
+        if function isnt? none return function_value(function node @state)
         let stored=stored_type(id state)
         let raw=binding_storage(node stored @state)
         if node.binding_id isnt? none and node.binding_id in? state.boxed {raw=array_load(raw stored node @state)}
@@ -225,7 +234,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Transmute return put(hir.Transmute[node.loc type expression(node.expr @state)] @state)
     if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else owned_value(node.item @state)] @state)
     if node is? hir.Declare {
-        if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral return reject(node 'hoisting a local function and its captures' @state)
+        if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral return put(hir.Void[node.loc type] @state)
         let value=owned_value(node.expr @state)
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
         if node.binding_id isnt? none and node.binding_id in? state.boxed {
@@ -272,6 +281,7 @@ expression = (id:addr @state:State):>addr => {
         } else {return ordinary_call(node type @state)}
         return put(hir.FunctionCall[node.loc type function args [] node.selected_method_index node.integer_operation] @state)
     }
+    if node is? hir.FunctionLiteral return function_value(id node @state)
     if node is? hir.ShortCircuit return put(hir.ShortCircuit[node.loc type node.op expression(node.left @state) expression(node.right @state)] @state)
     if node is? hir.Block return put(hir.Block[node.loc type items(node.items @state) node.scoped] @state)
     if node is? hir.IfArm return put(hir.IfArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
@@ -804,6 +814,7 @@ string_bytes = (value:addr node:hir.AST @state:State):>addr => {
     prefix.push(memory.descriptor)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+
 representation = (node:hir.RepresentationCast @state:State):>addr => {
     let source=hir.node_at(state.input.nodes node.expr)
     if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) source.value_type node.value_type node @state)
@@ -1115,8 +1126,8 @@ ordinary_call = (node:hir.FunctionCall result_type:addr @state:State):>addr => {
     if signature isnt? types.FunctionType return reject(node 'a call requires its selected concrete signature' @state)
     if signature.rest isnt? none return reject(node 'rest argument legalization' @state)
     let prefix:array<addr>=[]
-    let function=expression(node.func @state)
-    if callee isnt? hir.ExpressedIdentifier or callee.name not in? emit.intrinsics {function=snapshot(function @prefix @state)}
+    let direct=if callee is? hir.FunctionLiteral node.func else if callee is? hir.ExpressedIdentifier and callee.binding_id isnt? none state.capture_plan.named.get(callee.binding_id) else none
+    let function=if direct is? none snapshot(expression(node.func @state) @prefix @state) else code_reference(direct callee @state)
     let positional:array<addr>=[]
     loop argument in node.pos_args {positional.push(snapshot(owned_value(argument @state) @prefix @state))}
     let keywords:dict<string addr>=[]
@@ -1137,16 +1148,65 @@ ordinary_call = (node:hir.FunctionCall result_type:addr @state:State):>addr => {
         call_slot(value parameter.value_type parameter.required node @args @state)
     }
     if keywords.length >? 0 return reject(node 'unknown keywords in a checked call' @state)
+    if direct isnt? none {
+        let capture=state.capture_plan.functions.get(direct)
+        $runtime_assert capture isnt? none
+        loop binding in capture.captures {
+            let stored=state.storage_types.get(binding)
+            $runtime_assert stored isnt? none
+            let read=hir.ExpressedIdentifier[node.loc stored symbol('capture' binding @state) binding]
+            # Captures are read at the call, after the explicit arguments.
+            # Aggregate handles are borrowed, matching the hosted lifting
+            # contract; captured writes are rejected when the unit is built.
+            args.push(snapshot(binding_storage(read stored @state) @prefix @state))
+        }
+    }
     prefix.push(put(hir.FunctionCall[node.loc result_type function args [] node.selected_method_index node.integer_operation] @state))
     return put(hir.Block[node.loc result_type prefix false] @state)
 }
-function = (node:hir.FunctionLiteral @state:State):>addr => {
+# Only the lifted code signature contains captures. Ordinary function values
+# retain the source callable ABI, so a capturing unit cannot masquerade as
+# a plain function pointer merely because its visible parameters match.
+code_type = (id:addr node:hir.AST @state:State):>addr => {
+    let literal=hir.node_at(state.input.nodes id)
+    let capture=state.capture_plan.functions.get(id)
+    $runtime_assert literal is? hir.FunctionLiteral and capture isnt? none
+    let runtime=runtime_type(literal.value_type node @state)
+    let signature=types.node_at(state.type_nodes runtime)
+    $runtime_assert signature is? types.FunctionType
+    let arguments=signature.pos_or_kw
+    loop binding in capture.captures {
+        let stored=state.storage_types.get(binding)
+        $runtime_assert stored isnt? none
+        let type=if binding in? state.boxed types.primitive('int64' @state.type_nodes) else runtime_type(stored node @state)
+        arguments.push(types.PosOrKwArg[none type])
+    }
+    return types.function_type(arguments [] none signature.ret [] @state.type_nodes)
+}
+code_reference = (id:addr node:hir.AST @state:State):>addr => {
+    let name=state.code_symbols.get(id)
+    $runtime_assert name isnt? none
+    return put(hir.ExpressedIdentifier[node.loc code_type(id node @state) name] @state)
+}
+function_value = (id:addr node:hir.AST @state:State):>addr => {
+    let capture=state.capture_plan.functions.get(id)
+    $runtime_assert capture isnt? none
+    if capture.captures.length >? 0 return reject(node 'a capturing function used as a value needs closure storage' @state)
+    return code_reference(id node @state)
+}
+function = (id:addr node:hir.FunctionLiteral @state:State):>addr => {
     if node.rest_args isnt? none return reject(node 'rest parameter legalization' @state)
     if aggregate(node.rettype state) and state.allocator is? none return reject(node 'aggregate results need the prelude arena allocator' @state)
     let arguments:array<hir.Param>=[]
     let prologue:array<addr>=[]
     let void_type=types.primitive('void' @state.type_nodes)
     let boolean=types.primitive('bool' @state.type_nodes)
+    let capture=state.capture_plan.functions.get(id)
+    $runtime_assert capture isnt? none
+    if node.object_receiver and capture.captures.length >? 0 return reject(node 'an object method reading enclosing locals needs closure storage' @state)
+    loop binding in capture.captures {
+        if binding in? capture.writes return reject(node 'writing to a binding from an enclosing function needs closure storage' @state)
+    }
     loop argument in parameters(node) {
         if not argument.place and aggregate(argument.value_type state) and state.allocator is? none return reject(node 'aggregate arguments need the prelude arena allocator' @state)
         let type=runtime_type(argument.value_type node @state)
@@ -1176,13 +1236,19 @@ function = (node:hir.FunctionLiteral @state:State):>addr => {
             prologue.push(put(hir.Declare[node.loc void_type 'let' name types.primitive('int64' @state.type_nodes) box_value(value argument.value_type node @state) argument.binding_id] @state))
         } else {arguments.push(hir.Param[name type argument.binding_id argument.position_only false])}
     }
+    loop binding in capture.captures {
+        let stored=state.storage_types.get(binding)
+        $runtime_assert stored isnt? none
+        let type=if binding in? state.boxed types.primitive('int64' @state.type_nodes) else runtime_type(stored node @state)
+        arguments.push(hir.Param[symbol('capture' binding @state) type binding])
+    }
     let body=expression(node.body @state)
     let result_type=runtime_type(node.rettype node @state)
     if prologue.length >? 0 {
         prologue.push(body)
         body=put(hir.Block[node.loc result_type prologue false] @state)
     }
-    return put(hir.FunctionLiteral[node.loc runtime_type(node.value_type node @state) arguments [] none result_type body source=node.source] @state)
+    return put(hir.FunctionLiteral[node.loc code_type(id node @state) arguments [] none result_type body source=node.source] @state)
 }
 
 lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr SrcFile>=[]):>Result|Error => {
@@ -1190,6 +1256,15 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let block=hir.node_at(input.nodes root)
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
     discover(root @state)
+    state.capture_plan=captures.analyze(root input.nodes state.symbols.keys)
+    let units=state.capture_plan.functions
+    let named=state.capture_plan.named
+    loop [id capture] in units {state.code_symbols[id]="__dewy_function_{id}"}
+    loop [binding id] in named {
+        let name=state.code_symbols.get(id)
+        $runtime_assert name isnt? none
+        state.symbols[binding]=name
+    }
     let functions:array<program.Function>=[]
     let globals:array<addr>=[]
     let startup:array<addr>=[]
@@ -1205,7 +1280,6 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             if value is? hir.GenericFunction|hir.TypeValue continue
             let name=symbol(node.name node.binding_id @state)
             if value is? hir.FunctionLiteral {
-                functions.push(program.Function[name function(value @state)])
                 if entry_binding isnt? none and node.binding_id =? entry_binding or entry_binding is? none and infer_entry and node.name =? 'main' {main=name}
                 continue
             }
@@ -1220,6 +1294,14 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             let target=put(hir.ExpressedIdentifier[node.loc type name node.binding_id] @state)
             startup.push(put(hir.Assign[node.loc void_type target '=' declaration.expr] @state))
         } else {startup.push(expression(id @state))}
+    }
+    loop [id capture] in units {
+        let node=hir.node_at(input.nodes id)
+        $runtime_assert node is? hir.FunctionLiteral
+        let name=state.code_symbols.get(id)
+        $runtime_assert name isnt? none
+        state.source=if node.source is? none source else node.source
+        functions.push(program.Function[name function(id node @state)])
     }
     if state.problem isnt? none return state.problem
     if entry_binding isnt? none and main is? none return Error[srcfile=source title='the entry binding is not a concrete function']

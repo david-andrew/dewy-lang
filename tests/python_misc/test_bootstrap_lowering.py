@@ -13,6 +13,13 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    ('let main=():>int64=>{let twice=(x:int64):>int64=>x*2 return twice(21)}', 42),
+    ('let main=():>int64=>{let n:int64=40 let read=():>int64=>n n=42 return read()}', 42),
+    ('let main=():>int64=>{let n:int64=40 let first=():>int64=>second() let second=():>int64=>n+2 return first()}', 42),
+    ('let main=():>int64=>{let n:int64=42 let read=(value:int64=n):>int64=>value return read()}', 42),
+    ('let main=():>int64=>{let n:int64=40 let outer=(x:int64):>int64=>{let inner=():>int64=>n+x return inner()} return outer(2)}', 42),
+    ('let main=():>int64=>{let base:int64=42 let even=(n:int64):>int64=>if n=?0 base else odd(n-1) let odd=(n:int64):>int64=>if n=?0 0 else even(n-1) return even(4)}', 42),
+    ('Fn:type=(x:int64):>int64\nlet apply=(f:Fn):>int64=>f(21)\nlet main=():>int64=>{let twice=(x:int64):>int64=>x*2 return apply(@twice)}', 42),
     ('Point:type=[x:int64 y:int64]\nlet main=():>int64=>{let value=Point[20 22] return value.x+value.y}', 42),
     ('let main=():>int64=>{let value=[x=20 y=x+2] return value.x+value.y}', 42),
     ('Outer:type=[tag:uint8 inner:[x:int64] tail:uint8]\nlet main=():>int64=>{let value=Outer[1 [x=40] 2] let copy=value copy.inner.x=99 return value.inner.x+(copy.tail as int64)}', 42),
@@ -63,6 +70,9 @@ CASES = [
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 ARENA_CASES = [
+    ('Box:type=[n:int64]\nlet main=():>int64=>{let box=Box[40] let read=():>int64=>box.n box.n=42 return read()}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[40] let read=():>int64=>values[0] values[0]=42 return read()}', 42),
+    ('let main=():>int64=>{let value:int64|none=42 let read=():>int64=>if value is? int64 value else 0 return read()}', 42),
     ('let add=(@n:int64):>void=>{n+=2}\nlet main=():>int64=>{let n:int64=40 add(@n); return n}', 42),
     ('let set=(@n:uint8 @yes:bool):>void=>{n=42 yes=true}\nlet main=():>int64=>{let n:uint8=0 let yes=false set(@n @yes); return if yes n as int64 else 0}', 42),
     ('let add=(@n:int64):>void=>{n+=2}\nlet forward=(@n:int64):>void=>{add(@n);}\nlet main=():>int64=>{let n:int64=40 forward(@n); return n}', 42),
@@ -264,3 +274,14 @@ main = (argv:array<string>):>int64 => {{
         native = subprocess.run([binary, case], capture_output=True, text=True, timeout=60, check=False)
         assert native.returncode != 0, text
         assert 'Obligation legalization' in native.stderr, native.stdout + native.stderr
+
+    for index, text in enumerate([
+        'let main=():>int64=>{let n:int64=40 let write=():>void=>{n=42} write(); return n}',
+        'Fn:type=():>int64\nlet take=(f:Fn):>int64=>f()\nlet main=():>int64=>{let n:int64=42 let read=():>int64=>n return take(@read)}',
+        'let main=():>int64=>{let values:array<int64>=[40] let write=():>void=>{values[0]=42} write(); return values[0]}',
+    ]):
+        case = tmp_path / f'closure-storage-{index}.dewy'
+        case.write_text(ARENA + text)
+        native = subprocess.run([binary, case], capture_output=True, text=True, timeout=60, check=False)
+        assert native.returncode != 0, text
+        assert 'closure storage' in native.stderr, native.stdout + native.stderr
