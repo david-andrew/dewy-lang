@@ -455,7 +455,10 @@ evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => 
         if error isnt? none {checker.problem=error}
     }
     if node is? hir.ValueCast {
-        let source=checker.data.snapshot.numbers.get(node.expr)
+        # A typed read contributes its representation's range even when no
+        # narrower flow interval was recorded (for example a uint8 element).
+        # This is the same evidence used by the cast's interval transfer.
+        let source=intervals.meet(checker.data.snapshot.numbers.get(node.expr) values.fixed_bounds(node_at(node.expr checker).value_type checker.data.env.types))
         let width=values.fixed_bounds(node.value_type checker.data.env.types)
         let target=types.node_at(checker.data.env.types types.strip_refinement(node.value_type checker.data.env.types))
         if width isnt? none and ranges.fits(source width) is? none and target is? types.Primitive {checker.unfit[id]=Unfit[source target.name]}

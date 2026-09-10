@@ -43,6 +43,10 @@ def test_native_expression_interval_transfers(tmp_path):
     array_length = hir.ArrayLength(LOC, 'int64', array)
     end = binary('__sub__', length, number(1))
     queries = [i, j, length, array_length, hir.ValueCast(LOC, 'uint8', i)]
+    bytes_ = reference('bytes', ty.ArrayType('uint8', None))
+    byte = hir.Index(LOC, 'uint8', bytes_, number(0), None)
+    record = reference('record', ty.ObjectType((ty.ObjectField('byte', 'uint8'),)))
+    queries.extend([byte, hir.ValueCast(LOC, 'int64', byte), hir.MemberAccess(LOC, 'uint8', record, 'byte')])
     for op in ['__add__', '__sub__', '__mul__', '__floordiv__', '__mod__']:
         queries.extend(binary(op, left, right) for left, right in [
             (i, j), (i, number(2)), (length, i), (number(-9), number(2)),

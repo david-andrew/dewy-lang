@@ -58,6 +58,9 @@ main=(argv:array<string>):>int64=>{{
             'dependency.dewy': 'let unused=():>array<int64>=>[1 2]',
             'entry.dewy': 'import p"dependency.dewy" as dependency\nlet main=():>int64=>42',
         }, 42),
+        ({
+            'entry.dewy': 'let main=():>int64=>{let bytes:array<uint8>=[42] return bytes[0] as int64}',
+        }, 42),
     ]
     for index, (files, expected) in enumerate(cases):
         folder = tmp_path / f'case-{index}'
@@ -83,6 +86,7 @@ main=(argv:array<string>):>int64=>{{
         ('let f=(n:int64):>int64=>{ $assert n >? 0\nreturn n }', 'cannot prove assertion'),
         ('let main=(n:int64):>int64=>n', '`main` must take no arguments'),
         ('let x:int=9223372036854775807\nlet main=():>int=>x+1', 'cannot prove this integer fits'),
+        ('let read=(values:array<uint64 length=1>):>int64=>values[0] as int64\nlet main=():>int64=>read([18446744073709551615])', 'cannot prove this integer fits'),
         ('call(); let call=():>int64=>42', 'before'),
     ]):
         path = tmp_path / f'rejected-{index}.dewy'
