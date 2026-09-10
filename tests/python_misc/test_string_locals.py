@@ -24,7 +24,9 @@ HEAD = (
 def test_an_owning_local_is_released_by_owner_word_at_scope_exit_and_before_reassignment() -> None:
     emitted = _compile(HEAD + 'let round = ():>int64 => {\n    let s:string = join2("a" "b")\n    s = join2(s "x")\n    return s.length\n}\nlet main = ():>int64 => round()\n')
     body = _function(emitted, 'round')
-    assert re.search(r'let __dewy_string_assigned_\d+:int64 = join2\(s ', body)   # the new value first …
+    assigned = re.search(r'let __dewy_string_assigned_\d+:int64 = join2\([^\n]+\)', body)
+    assert assigned is not None
+    assert assigned.start() < body.index('if __load_i64__(s + 40) =? 1 {')   # the new value first …
     assert body.count('if __load_i64__(s + 40) =? 1 {') == 2                      # … then the old one, and again at exit
 
 

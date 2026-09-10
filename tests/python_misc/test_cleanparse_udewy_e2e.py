@@ -22,12 +22,12 @@ ROUNDTRIP_CASES = [
     ('minimal2.udewy', 42),
     ('arith_locals.udewy', 42),
     ('direct_calls.udewy', 42),
-    ('assign_basic.udewy', 42),
     ('div_mod_scalar.udewy', 0),
     ('forward_calls.udewy', 42),
     ('recursive_symbol.udewy', 42),
 ]
 LOWERED_CASES = [
+    ('assign_basic.udewy', 42),   # compound updates now normalize through ordinary operator lowering
     ('runtime_container_contracts.dewy', 42),
     ('bootstrap_language_support.dewy', 42),
     ('overload_calls.dewy', 42),

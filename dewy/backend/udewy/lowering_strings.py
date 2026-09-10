@@ -3181,6 +3181,8 @@ class _StringLowering:
         if isinstance(node, hir.Block) and node.items:
             return self._string_storage(node.items[-1], visiting=visiting)
         if isinstance(node, (hir.StringSlice, hir.StringIndex)):
+            if self._string_storage(node.string, visiting=visiting) == 'element':
+                return 'element'   # a retained view must also survive replacement of its owner's bytes
             return 'frame'   # the descriptor is rebuilt, and loop regions reuse it
         if isinstance(node, hir.String) or isinstance(node.type, ty.StringLiteralType):
             return 'static'

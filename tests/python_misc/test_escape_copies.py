@@ -8,7 +8,7 @@ def _copies(source: str) -> list[str]:
     return [note.message for note in lower.last_copy_notes]
 
 
-def test_static_and_arena_strings_are_stored_without_copies() -> None:
+def test_static_literals_are_shared_but_temporary_views_and_owned_elements_are_copied() -> None:
     copies = _copies(
         'let collect = (names:array<string> bytes:array<uint8>):>array<string> => {\n'
         '    let found:array<string> = []\n'
@@ -23,8 +23,8 @@ def test_static_and_arena_strings_are_stored_without_copies() -> None:
         'let main = ():>int64 => collect(["p"] [104]).length\n'
     )
     # the join and the decoded string live in the frame region (no return reaches them): stored, they are copied
-    assert len(copies) == 3   # the join, the decoded string, and the element of `names`
-    assert sum('current frame' in message for message in copies) == 2 and sum('owned by the container' in message for message in copies) == 1
+    assert len(copies) == 4   # join, decode, temporary slice descriptor, and the element of `names`
+    assert sum('current frame' in message for message in copies) == 3 and sum('owned by the container' in message for message in copies) == 1
 
 
 def test_frame_and_caller_strings_are_copied_and_reported() -> None:
