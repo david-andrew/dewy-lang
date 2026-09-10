@@ -148,7 +148,13 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
             let layout=views.fixed_integer_layout(types.strip_refinement(node.value_type session.types) session.types)
             let unsigned=layout isnt? none and not layout.signed
             let helper=if unsigned (if nonzero '_bigint_from_uint_nonzero' else '_bigint_from_uint') else (if nonzero '_bigint_from_int_nonzero' else '_bigint_from_int')
-            let result=library_call(helper [value] id env @session)
+            # Library helpers accept a full signed/unsigned word. Select that
+            # representation explicitly before ordinary call dispatch; small
+            # widths are not subtype edges, and unsigned widening must retain
+            # the high bit. Value casts retain their source for bounds proofs.
+            let word=against(value types.primitive(if unsigned 'uint64' else 'int64' @session.types) id env @session)
+            if word is? Error return word
+            let result=library_call(helper [word] id env @session)
             if result is? Error return result
             let call=node_at(result session)
             $runtime_assert call is? hir.FunctionCall

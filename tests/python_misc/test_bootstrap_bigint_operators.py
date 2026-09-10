@@ -21,9 +21,13 @@ for suffix in ['eq', 'ne', 'lt', 'le', 'gt', 'ge']:
 
 CASES = [PREFIX + f'let operation=(a:BigInt b:{other}):>{result}=>{left} {op} {right}'
          for op in ['+', '-', '*', '=?', 'not=?', '<?', '<=?', '>?', '>=?']
-         for other, left, right in [('int64', 'a', 'b'), ('uint64', 'b', 'a')]
+         for other, left, right in [('int64', 'a', 'b'), ('uint64', 'b', 'a'), ('int8', 'a', 'b'), ('uint8', 'b', 'a')]
          for result in ['bool' if '?' in op else 'BigInt']]
 CASES += [PREFIX + body for body in [
+    'let operation=(a:int8):>BigInt=>a',
+    'let operation=(a:uint8):>BigInt=>a',
+    'let operation=(a:BigInt b:uint8 & ~0):>BigInt=>a // b',
+    'let operation=(a:BigInt b:int8 & ~0):>BigInt=>a % b',
     'let operation=(a:BigInt):>int64=>a as int64',
     'let operation=(a:BigInt):>uint8=>a as uint8',
     'let operation=(a:int64):>BigInt=>{let value:BigInt=a return value}',
