@@ -3290,7 +3290,7 @@ class _StringLowering:
         self.current_literal, self.frame_region, self.lowering_module_startup = None, None, False
         length = hir.ExpressedIdentifier(loc, 'int64', '__dewy_src_length')
         try:
-            copy, result = self._string_from_bytes(self._string_data_start(source, loc), length, loc, frame=False)
+            copy, result = self._string_from_bytes(self._string_data_start(source, loc), length, loc, frame=False, segmented_source=source)
         finally:
             self.current_literal, self.frame_region, self.lowering_module_startup = saved_literal, saved_region, saved_startup
         body = hir.Block(loc, ty.VOID_TYPE, [
@@ -3310,6 +3310,7 @@ class _StringLowering:
         *,
         frame: bool = False,
         node: hir.AST | None = None,
+        segmented_source: hir.AST | None = None,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         """Copy ``byte_length`` bytes into the arena (or the frame region) and build a segmented string."""
         statements: list[hir.AST] = []
@@ -3380,8 +3381,28 @@ class _StringLowering:
                 loc, frame=frame, node=node,
             ),
         )
-        segmentation, grapheme_count = self._utf8_segmentation(loc, data, byte_length, boundaries)
-        statements.extend(segmentation)
+        if segmented_source is None:
+            segmentation, grapheme_count = self._utf8_segmentation(loc, data, byte_length, boundaries)
+            statements.extend(segmentation)
+        else:
+            # Cloning valid immutable text preserves its existing segmentation.
+            # A view's table contains absolute byte offsets: normalize them to
+            # the copied byte base, including the terminal boundary. Allocation
+            # capacity stays byte_length + 1, matching the release contract.
+            grapheme_count = declare('grapheme_count', self._load_i64_field(segmented_source, STRING_GRAPHEME_LENGTH_OFFSET, loc))
+            start = declare('source_start', self._load_i64_field(segmented_source, STRING_START_OFFSET, loc))
+            boundary_index = declare('boundary_index', self._int64_literal(loc, 0))
+            offset = self._int64_binary('__mul__', boundary_index, self._int64_literal(loc, 4), loc)
+            absolute = hir.ValueCast(loc, 'int64', self._string_boundary(segmented_source, boundary_index, loc))
+            relative = hir.ValueCast(loc, 'uint32', self._int64_binary('__sub__', absolute, start, loc))
+            statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
+                loc, ty.VOID_TYPE,
+                self._int64_comparison('__le__', boundary_index, grapheme_count, loc),
+                hir.Block(loc, ty.VOID_TYPE, [
+                    self._intrinsic_call('__store_u32__', [relative, self._int64_binary('__add__', boundaries, offset, loc)], ty.VOID_TYPE, loc),
+                    hir.Assign(loc, ty.VOID_TYPE, boundary_index, '=', self._int64_binary('__add__', boundary_index, self._int64_literal(loc, 1), loc)),
+                ], True),
+            )], None))
         descriptor = self._new_string_temp(loc, ty.StringType())
         descriptor_word = replace(descriptor, type='int64')
         statements.extend([

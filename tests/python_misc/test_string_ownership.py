@@ -100,3 +100,48 @@ let main = ():>int64 => {
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10, check=False)
     assert result.returncode == 0, result.stderr
     assert result.stdout == '0123\n012123234345\n'
+
+
+def test_cloned_unicode_views_keep_relative_grapheme_boundaries(tmp_path) -> None:
+    import subprocess
+
+    from udewy.cache import cache_artifact
+    from udewy.frontend import EntryPointOptions, entry_point
+
+    source = r'''
+let inspect = (items:array<string>):>int64 => {
+    let copy=items
+    items.clear
+    $runtime_assert copy.length =? 3
+    let view=copy[0]
+    $runtime_assert view.length =? 5
+    $runtime_assert view[0] =? "e\u0301"
+    $runtime_assert view[1] =? "👩‍👩‍👧‍👦"
+    $runtime_assert view[2] =? "🇺🇸"
+    $runtime_assert view[3] =? "\r\n"
+    $runtime_assert view[4] =? "z"
+    $runtime_assert copy[1].length =? 0
+    let last=copy[2]
+    $runtime_assert last.length =? 1
+    $runtime_assert last[0] =? "🙂"
+    return 0
+}
+let main = ():>int64 => {
+    let text:string="!e\u0301👩‍👩‍👧‍👦🇺🇸\r\nz?"
+    let items:array<string>=[]
+    items.push(text[1..6))
+    items.push("")
+    items.push("🙂")
+    loop i in 0..20 {inspect(items);}
+    return inspect(items)
+}
+'''
+    emitted = _compile(source)
+    clone = _function(emitted, '__dewy_string_clone')
+    assert 'boundary_index' in clone
+    assert 'grapheme_break' not in clone
+    output = tmp_path / 'cloned_unicode_views.udewy'
+    output.write_text(emitted)
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
