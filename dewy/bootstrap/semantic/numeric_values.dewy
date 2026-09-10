@@ -1,0 +1,58 @@
+from reporting import Span
+import p"context.dewy" as contexts
+import p"bindings.dewy" as bindings
+import p"ty.dewy" as types
+import p"hir.dewy" as hir
+
+# Runtime numeric types are prelude declarations, not duplicate compiler-owned
+# records. Keep the binding identity supplied by the current lexical scope.
+# The source spellings bigint/fixed/rational resolve to these same declarations.
+family = (name:string context:contexts.Context session:contexts.Session):>addr? => {
+    let id=bindings.lookup(session.scopes context.scope name)
+    if id is? none return none
+    let value=bindings.binding_at(session.registry id).type_value
+    return if value is? addr value else none
+}
+object_member = (type:addr nodes:array<types.Type>):>addr => {
+    let node=types.node_at(nodes type)
+    if node isnt? types.TypeOr return type
+    let found:addr?=none
+    loop id in node.items {
+        if types.node_at(nodes id) isnt? types.ObjectType continue
+        if found isnt? none return type
+        found=id
+    }
+    return if found is? none type else found
+}
+is_family = (type:addr name:string context:contexts.Context session:contexts.Session):>bool => {
+    let declared=family(name context session)
+    if declared is? none return false
+    let plain=types.strip_refinement(type session.types)
+    return types.same_type(plain declared session.types) or types.same_type(plain object_member(declared session.types) session.types)
+}
+nonzero_form = (type:addr name:string context:contexts.Context session:contexts.Session):>bool => {
+    let declared=family(name context session)
+    if declared is? none return false
+    let member=object_member(declared session.types)
+    return member not=? declared and types.same_type(types.strip_refinement(type session.types) member session.types)
+}
+
+# Compile-time arithmetic uses exact integers; runtime BigInt uses little-endian
+# base-2^32 limbs. Zero is the literal union alternative and has no sign/limbs.
+# The mathematical payload is retained for subsequent proof and constant passes;
+# merely constructing a similarly shaped user record never grants that fact.
+bigint_literal = (value:bigint declared:addr loc:Span @session:contexts.Session):>addr => {
+    if value =? 0 return hir.append_node(@session.hir hir.Integer[loc types.integer_literal(0 @session.types) '0d' 0])
+    let magnitude=if value <? 0 (-value) else value
+    let limbs:array<addr>=[]
+    let word=types.primitive('uint64' @session.types)
+    loop magnitude >? 0 {
+        let limb=magnitude % 4294967296
+        limbs.push(hir.append_node(@session.hir hir.Integer[loc word '0d' limb]))
+        magnitude //= 4294967296
+    }
+    let sign:bigint=if value <? 0 (-1) else 1
+    let sign_node=hir.append_node(@session.hir hir.Integer[loc types.integer_literal(sign @session.types) '0d' sign])
+    let array=hir.append_node(@session.hir hir.ArrayLiteral[loc types.array_type(word limbs.length @session.types) limbs])
+    return hir.append_node(@session.hir hir.ObjectLiteral[loc object_member(declared session.types) [hir.ObjectField[loc 'sign' sign_node] hir.ObjectField[loc 'limbs' array]] value])
+}
