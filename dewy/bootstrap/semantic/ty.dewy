@@ -482,19 +482,44 @@ to_nnf = (id:addr @nodes:array<Type>):>addr => {
         if node is? SequenceType return sequence(items @nodes)
         return combine(items (node is? TypeAnd) @nodes)
     }
-    if node is? ArrayType return array_type(to_nnf(node.element @nodes) node.length @nodes)
-    if node is? QuantityType return quantity_type(to_nnf(node.number @nodes) node.dimension @nodes)
+    if node is? ArrayType {
+        let element=to_nnf(node.element @nodes)
+        return if element =? node.element id else array_type(element node.length @nodes)
+    }
+    if node is? QuantityType {
+        let number=to_nnf(node.number @nodes)
+        return if number =? node.number id else quantity_type(number node.dimension @nodes)
+    }
     if node is? PathType return id
     if node is? ObjectType {
+        # Most queries revisit a constructor whose children are already in
+        # normal form. Preserve its interned identity without reconstructing
+        # large metadata/shape strings just to intern the same record again.
+        let values:array<addr>=[]
+        let changed=false
+        loop f in node.fields {
+            let value=to_nnf(f.value_type @nodes)
+            values.push(value)
+            if value not=? f.value_type {changed=true}
+        }
+        if not changed return id
         let fields:array<ObjectField> = []
-        loop f in node.fields { fields.push(ObjectField[f.name to_nnf(f.value_type @nodes) f.mutable f.default f.refinement]) }
+        loop i in 0.. and i <? node.fields.length and i <? values.length {
+            let f=node.fields[i]
+            fields.push(ObjectField[f.name values[i] f.mutable f.default f.refinement])
+        }
         return object_type(fields node.brand node.immutable node.methods node.constructors @nodes minted=node.minted parent=node.parent abstract=node.abstract)
     }
     if node is? TypeParameterize {
         let head = to_nnf(node.head @nodes)
         let args:array<addr> = []
-        loop arg in node.args { args.push(to_nnf(arg @nodes)) }
-        return parameterize(head args @nodes)
+        let changed=head not=? node.head
+        loop arg in node.args {
+            let value=to_nnf(arg @nodes)
+            args.push(value)
+            if value not=? arg {changed=true}
+        }
+        return if changed parameterize(head args @nodes) else id
     }
     return id
 }
