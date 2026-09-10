@@ -195,8 +195,8 @@ verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<
                     }
                 }
                 else {
-                    let context=lengths.Context[data.env data.relations data.snapshot.numbers]
-                    held=if upper lengths.upper(target.expression p.term_id direction.gap state context @data.registry) else lengths.lower(target.expression p.term_id direction.gap state context @data.registry)
+                    let context=lengths.Context[data.env data.relations]
+                    held=if upper lengths.upper(target.expression p.term_id direction.gap state context data.snapshot.numbers @data.registry) else lengths.lower(target.expression p.term_id direction.gap state context data.snapshot.numbers @data.registry)
                 }
             }
             if not held {

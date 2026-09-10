@@ -41,7 +41,7 @@ constant = (interval:ranges.Interval):>Proven => Proven[
 
 # `length_interval` includes the evaluated sequence's field/parameter
 # invariants. A route's state entry alone need not contain those bounds.
-check_index = (node:hir.Index|hir.StringIndex interval:ranges.Interval? length_interval:ranges.Interval? state:facts.State context:proofs.Context srcfile:SrcFile @registry:bindings.Registry symbolic:bool=true):>Proven|Error => {
+check_index = (node:hir.Index|hir.StringIndex interval:ranges.Interval? length_interval:ranges.Interval? state:facts.State context:proofs.Context observed:dict<addr ranges.Interval> srcfile:SrcFile @registry:bindings.Registry symbolic:bool=true):>Proven|Error => {
     let sequence:addr = if node is? hir.Index node.array else node.string
     let sequence_type = hir.node_at(context.env.nodes sequence).value_type
     let length:addr? = none
@@ -65,7 +65,7 @@ check_index = (node:hir.Index|hir.StringIndex interval:ranges.Interval? length_i
                 if named isnt? none and named.projection =? 'value' and facts.index(named.binding_id array_id).key in? state return Proven[]
                 let offset = terms.length_offset(index array_id context.env @registry)
                 if offset isnt? none and minimum >=? offset return Proven[]
-                if proofs.upper(index array_id 1 state context @registry) return Proven[]
+                if proofs.upper(index array_id 1 state context observed @registry) return Proven[]
             }
         }
     }
@@ -83,7 +83,7 @@ check_index = (node:hir.Index|hir.StringIndex interval:ranges.Interval? length_i
     ]
 }
 
-check_method_index = (method:string index:addr interval:ranges.Interval? state:facts.State array_id:addr length:ranges.Interval allow_end:bool context:proofs.Context srcfile:SrcFile @registry:bindings.Registry symbolic:bool=true):>Error? => {
+check_method_index = (method:string index:addr interval:ranges.Interval? state:facts.State array_id:addr length:ranges.Interval allow_end:bool context:proofs.Context observed:dict<addr ranges.Interval> srcfile:SrcFile @registry:bindings.Registry symbolic:bool=true):>Error? => {
     if interval isnt? none and interval.lower isnt? none and interval.lower >=? 0 {
         let minimum:bigint = if length.lower is? none 0 else length.lower
         let limit = minimum + (if allow_end 1 else 0)
@@ -91,7 +91,7 @@ check_method_index = (method:string index:addr interval:ranges.Interval? state:f
         if symbolic {
             let named = terms.binding_term(index context.env @registry)
             if named isnt? none and named.projection =? 'value' and facts.index(named.binding_id array_id).key in? state return none
-            if proofs.upper(index array_id (if allow_end 0 else 1) state context @registry) return none
+            if proofs.upper(index array_id (if allow_end 0 else 1) state context observed @registry) return none
         }
     }
     let index_node = hir.node_at(context.env.nodes index)

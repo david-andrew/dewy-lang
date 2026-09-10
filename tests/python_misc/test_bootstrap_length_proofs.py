@@ -118,8 +118,9 @@ def test_native_length_proofs_match_hosted(tmp_path):
                    for key, value in state.items()]
         checks.append(f'''    state.clear
 {chr(10).join(entries)}
-    let context{state_index} = proofs.Context[env relation_context intervals=[{' '.join(snapshot)}]]
-    emit_queries({state_index} queries sequences gaps state context{state_index} @registry)''')
+    let context{state_index} = proofs.Context[env relation_context]
+    let observed{state_index}:dict<addr ranges.Interval>=[{' '.join(snapshot)}]
+    emit_queries({state_index} queries sequences gaps state context{state_index} observed{state_index} @registry)''')
         for query_index, query in enumerate(queries):
             for sequence in sequences:
                 for gap in gaps:
@@ -139,12 +140,12 @@ def test_native_length_proofs_match_hosted(tmp_path):
     ])
     source.write_text(f'''from reporting import Span
 {imports}
-emit_queries = (label:addr queries:array<addr> sequences:array<addr> gaps:array<bigint> state:flow.State context:proofs.Context @registry:bindings.Registry):>void => {{
+emit_queries = (label:addr queries:array<addr> sequences:array<addr> gaps:array<bigint> state:flow.State context:proofs.Context observed:dict<addr ranges.Interval> @registry:bindings.Registry):>void => {{
     loop index in 0.. and index <? queries.length {{
         loop sequence in sequences {{
             loop gap in gaps {{
-                let upper = proofs.upper(queries[index] sequence gap state context @registry)
-                let lower = proofs.lower(queries[index] sequence gap state context @registry)
+                let upper = proofs.upper(queries[index] sequence gap state context observed @registry)
+                let lower = proofs.lower(queries[index] sequence gap state context observed @registry)
                 printl("{{label}}|{{index}}|{{sequence}}|{{_bigint_as_string(gap)}}|{{upper}}|{{lower}}")
             }}
         }}

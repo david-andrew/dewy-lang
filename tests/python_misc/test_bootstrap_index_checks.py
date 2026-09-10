@@ -102,8 +102,9 @@ def test_native_index_checks_match_hosted(tmp_path):
         snapshot = ' '.join(f'{node} -> {native_interval(value)}' for node, value in evaluated.items() if value is not None)
         checks.append(f'''    state.clear
 {chr(10).join(entries)}
-    let context{state_index} = proofs.Context[env relation_context [{snapshot}]]
-    emit_cases({state_index} [{' '.join(cases)}] {array.binding_id} state context{state_index} srcfile @registry)''')
+    let context{state_index} = proofs.Context[env relation_context]
+    let observed{state_index}:dict<addr ranges.Interval>=[{snapshot}]
+    emit_cases({state_index} [{' '.join(cases)}] {array.binding_id} state context{state_index} observed{state_index} srcfile @registry)''')
     imports = '\n'.join(f'import p"{ROOT / "dewy/bootstrap/semantic" / path}" as {alias}' for alias, path in [
         ('hir', 'hir.dewy'), ('types', 'ty.dewy'), ('bindings', 'bindings.dewy'), ('facts', 'propositions.dewy'),
         ('values', 'analyze/value_bounds.dewy'), ('proofs', 'analyze/length_proofs.dewy'),
@@ -119,12 +120,12 @@ emit_error = (label:string error:Error):>void => {{
     let hint = if error.hint is? none 'None' else error.hint
     printl("{{label}}|error|{{error.title}}|{{error.pointers[0].message}}|{{hint}}|{{error.notes.join';'}}")
 }}
-emit_cases = (label:addr cases:array<Case> array:addr state:flow.State context:proofs.Context srcfile:SrcFile @registry:bindings.Registry):>void => {{
+emit_cases = (label:addr cases:array<Case> array:addr state:flow.State context:proofs.Context observed:dict<addr ranges.Interval> srcfile:SrcFile @registry:bindings.Registry):>void => {{
     loop index in 0.. and index <? cases.length {{
         let test = cases[index]
         let node = hir.node_at(context.env.nodes test.node)
         $runtime_assert node is? hir.Index|hir.StringIndex
-        let result = checks.check_index(node test.interval test.length state context srcfile @registry)
+        let result = checks.check_index(node test.interval test.length state context observed srcfile @registry)
         if result is? Error {{ emit_error("{{label}}|{{index}}" result) }}
         else {{
             let constant = if result.constant_index is? none 'None' else _bigint_as_string(result.constant_index)
@@ -136,7 +137,7 @@ emit_cases = (label:addr cases:array<Case> array:addr state:flow.State context:p
                 loop allow_end in [false true] {{
                     let method = if allow_end 'insert' else 'pop'
                     let length = if test.length is? none values.length_default(1024) else test.length
-                    let problem = checks.check_method_index(method node.index test.interval state array length allow_end context srcfile @registry)
+                    let problem = checks.check_method_index(method node.index test.interval state array length allow_end context observed srcfile @registry)
                     if problem is? none {{ printl("{{label}}|{{index}}|{{method}}|ok") }}
                     else {{ emit_error("{{label}}|{{index}}|{{method}}" problem) }}
                 }}
@@ -163,12 +164,12 @@ main = ():>int64 => {{
     state.clear
     flow.put(@state flow.index({i.binding_id} {array.binding_id}) ranges.UNKNOWN)
     let observed=ranges.Interval[0 none]
-    let current=proofs.Context[env relation_context []]
+    let current=proofs.Context[env relation_context]
     let stale=hir.node_at(nodes {names[id(queries[5])]})
     $runtime_assert stale is? hir.Index
-    let rejected=checks.check_index(stale observed none state current srcfile @registry symbolic=false)
+    let rejected=checks.check_index(stale observed none state current [] srcfile @registry symbolic=false)
     $runtime_assert rejected is? Error
-    let method_rejected=checks.check_method_index('pop' {names[id(i)]} observed state {array.binding_id} ranges.Interval[0 1024] false current srcfile @registry symbolic=false)
+    let method_rejected=checks.check_method_index('pop' {names[id(i)]} observed state {array.binding_id} ranges.Interval[0 1024] false current [] srcfile @registry symbolic=false)
     $runtime_assert method_rejected is? Error
     return 0
 }}

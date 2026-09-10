@@ -22,10 +22,11 @@ whereas `radix =? alphabet.length` needs the upper and lower proofs together.
 Failing to establish a bound means unknown, not that its opposite is true.
 """
 
+# Immutable module inputs can be shared across queries. Observed intervals
+# are a separate argument because they change as evaluation advances.
 Context:type = const [
     env:values.Environment
     relations:relations.Context
-    intervals:dict<addr ranges.Interval>
 ]
 subject = (id:addr context:Context @registry:bindings.Registry):>facts.Term? => {
     let named = terms.binding_term(id context.env @registry)
@@ -41,15 +42,15 @@ nonnegative = (id:addr state:facts.State context:Context):>bool => {
 # `sequence.length - expression >= gap`: an order/index fact, an end-relative
 # offset, arithmetic that preserves a bound, a remainder fact for a sum, or
 # a function result whose contract names the actual sequence argument.
-upper = (id:addr sequence:addr gap:bigint state:facts.State context:Context @registry:bindings.Registry):>bool => {
+upper = (id:addr sequence:addr gap:bigint state:facts.State context:Context observed:dict<addr ranges.Interval> @registry:bindings.Registry):>bool => {
     let current = expressions.strip_casts(id context.env.nodes)
     let node = hir.node_at(context.env.nodes current)
     if node is? hir.Transmute {
         # Reinterpreting signed bits preserves this number only after its
         # source has been shown nonnegative. The cast alone is not a proof.
-        let inner = context.intervals.get(node.expr)
+        let inner = observed.get(node.expr)
         if inner isnt? none and inner.lower isnt? none and inner.lower >=? 0 {
-            return upper(node.expr sequence gap state context @registry)
+            return upper(node.expr sequence gap state context observed @registry)
         }
         return false
     }
@@ -59,7 +60,7 @@ upper = (id:addr sequence:addr gap:bigint state:facts.State context:Context @reg
     let offset = terms.length_offset(current sequence context.env @registry)
     if offset isnt? none and offset >=? gap return true
     let minimum = relations.minimum_length(sequence state context.relations)
-    let interval = context.intervals.get(current)
+    let interval = observed.get(current)
     if interval isnt? none and interval.upper isnt? none and interval.upper <=? minimum-gap return true
     if node is? hir.FunctionCall and node.pos_args.length =? 2 {
         let function = hir.node_at(context.env.nodes node.func)
@@ -67,7 +68,7 @@ upper = (id:addr sequence:addr gap:bigint state:facts.State context:Context @reg
             if function.name =? '__sub__' {
                 let constant = values.constant(node.pos_args[1] context.env)
                 if constant isnt? none and constant.lower isnt? none and ranges.same_endpoint(constant.lower constant.upper) and constant.lower >=? 0 {
-                    return upper(node.pos_args[0] sequence gap-constant.lower state context @registry)
+                    return upper(node.pos_args[0] sequence gap-constant.lower state context observed @registry)
                 }
             }
             else if function.name =? '__add__' {
@@ -76,7 +77,7 @@ upper = (id:addr sequence:addr gap:bigint state:facts.State context:Context @reg
                     let other = if side =? 0 node.pos_args[1] else node.pos_args[0]
                     let constant = values.constant(other context.env)
                     if constant isnt? none and constant.lower isnt? none and ranges.same_endpoint(constant.lower constant.upper) and constant.lower >=? 0 {
-                        return upper(value sequence gap+constant.lower state context @registry)
+                        return upper(value sequence gap+constant.lower state context observed @registry)
                     }
                 }
                 let left = terms.binding_term(node.pos_args[0] context.env @registry)
@@ -106,13 +107,13 @@ upper = (id:addr sequence:addr gap:bigint state:facts.State context:Context @reg
 
 # `expression - sequence.length >= gap`: intervals above the known maximum,
 # the length plus a constant, a named order fact, or a lower result promise.
-lower = (id:addr sequence:addr gap:bigint state:facts.State context:Context @registry:bindings.Registry):>bool => {
+lower = (id:addr sequence:addr gap:bigint state:facts.State context:Context observed:dict<addr ranges.Interval> @registry:bindings.Registry):>bool => {
     let current = expressions.strip_casts(id context.env.nodes)
     let node = hir.node_at(context.env.nodes current)
     let length = facts.Term[sequence 'length']
     let known = facts.lookup(state facts.value(length))
     if known isnt? none and known.upper isnt? none {
-        let interval = context.intervals.get(current)
+        let interval = observed.get(current)
         if interval isnt? none and interval.lower isnt? none and interval.lower-known.upper >=? gap return true
     }
     let measured = expressions.sequence_of(current context.env.nodes)
@@ -127,7 +128,7 @@ lower = (id:addr sequence:addr gap:bigint state:facts.State context:Context @reg
                 let constant = values.constant(other context.env)
                 if constant isnt? none and constant.lower isnt? none and ranges.same_endpoint(constant.lower constant.upper) {
                     let shift = if function.name =? '__add__' constant.lower else -constant.lower
-                    return lower(value sequence gap-shift state context @registry)
+                    return lower(value sequence gap-shift state context observed @registry)
                 }
             }
         }

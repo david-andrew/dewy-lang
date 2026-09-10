@@ -36,6 +36,7 @@ Checker:type = [
     # or function; only current facts and the route registry evolve.
     refinement_context:refinements.Context=refinements.Context[data.env word_type]
     path_context:paths.Context=paths.Context[data.env.nodes data.relations.facts]
+    proof_context:proofs.Context=proofs.Context[data.env data.relations]
     declared:refinements.Declared=[] assigned:set<addr>=set[]
     mutable_globals:set<addr>=set[] checked:set<addr>=set[]
     root_items:set<addr>=set[] deferred:array<addr>=[]
@@ -55,6 +56,7 @@ configure = (@checker:Checker):>void => {
     }
     checker.data.relations=relations.Context[context]
     checker.path_context=paths.Context[env.nodes context]
+    checker.proof_context=proofs.Context[env checker.data.relations]
 }
 node_at = (id:addr checker:Checker):>hir.AST => hir.node_at(checker.data.env.nodes id)
 fail = (id:addr title:string message:string @checker:Checker hint:string=''):>void => {
@@ -268,8 +270,7 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
     let previous=facts.lookup(state facts.value(facts.Term[sequence 'length']))
     let before=if previous is? none values.length_default(checker.data.env.cap) else previous
     if validate and index isnt? none and method.name in? ['pop' 'insert'] {
-        let context=proofs.Context[checker.data.env checker.data.relations checker.data.snapshot.numbers]
-        let error=indices.check_method_index(method.name index count state sequence before method.name =? 'insert' context checker.srcfile @checker.data.registry symbolic=intervals.stable(index checker.data.snapshot checker.data.env.nodes))
+        let error=indices.check_method_index(method.name index count state sequence before method.name =? 'insert' checker.proof_context checker.data.snapshot.numbers checker.srcfile @checker.data.registry symbolic=intervals.stable(index checker.data.snapshot checker.data.env.nodes))
         if error isnt? none {checker.problem=error}
     }
     if validate and method.name =? 'truncate' and (count is? none or count.lower is? none or count.lower <? 0) {fail(id 'truncate length is not proven nonnegative' 'the count may be negative' @checker)}
@@ -493,8 +494,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
     if not validate return
     if node is? hir.Index|hir.StringIndex {
         let sequence=if node is? hir.Index node.array else node.string
-        let context=proofs.Context[checker.data.env checker.data.relations checker.data.snapshot.numbers]
-        let checked=indices.check_index(node checker.data.snapshot.numbers.get(node.index) checker.data.snapshot.lengths.get(sequence) state context checker.srcfile @checker.data.registry symbolic=intervals.stable(node.index checker.data.snapshot checker.data.env.nodes))
+        let checked=indices.check_index(node checker.data.snapshot.numbers.get(node.index) checker.data.snapshot.lengths.get(sequence) state checker.proof_context checker.data.snapshot.numbers checker.srcfile @checker.data.registry symbolic=intervals.stable(node.index checker.data.snapshot checker.data.env.nodes))
         if checked is? Error {checker.problem=checked}
         else if checked.constant_index isnt? none {checker.constant_indices[id]=checked.constant_index}
     }

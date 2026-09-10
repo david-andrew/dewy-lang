@@ -28,8 +28,8 @@ endpoint = (id:addr? interval:ranges.Interval? delta:bigint first:bool sequence:
     let lower=interval isnt? none and interval.lower isnt? none and interval.lower+delta >=? lowest
     let stable=intervals.stable(id data.snapshot data.env.nodes)
     if (unsigned or lower) and stable {
-        let context=lengths.Context[data.env data.relations data.snapshot.numbers]
-        if lengths.upper(id sequence gap state context @data.registry) return true
+        let context=lengths.Context[data.env data.relations]
+        if lengths.upper(id sequence gap state context data.snapshot.numbers @data.registry) return true
     }
     if not lower return false
     if interval isnt? none and interval.upper isnt? none and interval.upper+delta <? limit return true
