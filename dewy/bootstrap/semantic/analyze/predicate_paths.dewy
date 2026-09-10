@@ -7,6 +7,8 @@ import p"predicate_effects.dewy" as effects
 # type tests, and function result contracts all participate through one rule.
 # The callback carries its own typed analysis data by place (for route
 # allocation and snapshots), without storing a function inside that record.
+# Pass the existing path context to a leaf that recursively refines a
+# predicate, so negation need not construct another source-arena snapshot.
 # `none` means an impossible path; an empty state means no established facts.
 Context:type = const [nodes:array<hir.AST> facts:facts.Context]
 
@@ -24,7 +26,7 @@ join = (left:facts.State? right:facts.State? context:facts.Context):>facts.State
 # On the path that reaches the right operand, the left one did not decide
 # the chain. A write in the right operand makes the left predicate historical
 # even though it ran first. Forget its evidence before using either proof.
-let after = <Data>(state:facts.State left:addr right:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data:Data):>facts.State?>):>facts.State? => {
+let after = <Data>(state:facts.State left:addr right:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
     let first=refine(state left not truth merged_writes(invalidated right context.nodes) context @data @leaf)
     if first is? none return none
     return refine(first right truth invalidated context @data @leaf)
@@ -40,7 +42,7 @@ conjuncts = (left:addr right:addr nodes:array<hir.AST>):>array<addr> => {
     }
     return result
 }
-let conjunction = <Data>(state:facts.State left:addr right:addr invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data:Data):>facts.State?>):>facts.State? => {
+let conjunction = <Data>(state:facts.State left:addr right:addr invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
     let parts=conjuncts(left right context.nodes)
     let later:array<set<addr>>=[]
     let writes=invalidated
@@ -68,7 +70,7 @@ let conjunction = <Data>(state:facts.State left:addr right:addr invalidated:set<
     return current
 }
 
-let refine = <Data>(state:facts.State condition:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data:Data):>facts.State?>):>facts.State? => {
+let refine = <Data>(state:facts.State condition:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
     let node=hir.node_at(context.nodes condition)
     if node is? hir.ShortCircuit {
         if node.op =? 'and' or node.op =? 'nand' {
@@ -93,5 +95,5 @@ let refine = <Data>(state:facts.State condition:addr truth:bool invalidated:set<
         if binding in? invalidated return state
     }
     if node is? hir.Bool return if node.value =? truth state else none
-    return leaf(state condition truth context.nodes @data)
+    return leaf(state condition truth context @data)
 }

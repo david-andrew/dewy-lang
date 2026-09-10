@@ -18,12 +18,12 @@ import p"{module.parent / 'hir.dewy'}" as hir
 import p"{module / 'predicate_paths.dewy'}" as paths
 import p"{module / 'fact_state.dewy'}" as facts
 import p"{module / 'intervals.dewy'}" as ranges
-leaf=(state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data:bool):>facts.State?=>{{
+leaf=(state:facts.State condition:addr truth:bool context:paths.Context @data:bool):>facts.State?=>{{
         data=true
-        let node=hir.node_at(nodes condition)
+        let node=hir.node_at(context.nodes condition)
         if node is? hir.Block {{
             $runtime_assert node.items.length >? 0
-            node=hir.node_at(nodes node.items[node.items.length-1])
+            node=hir.node_at(context.nodes node.items[node.items.length-1])
     }}
         $runtime_assert node is? hir.ExpressedIdentifier and node.binding_id isnt? none
         let result=state

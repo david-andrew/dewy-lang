@@ -99,9 +99,9 @@ selected_member = (node:hir.TypeTest truth:bool state:facts.State @data:Data):>f
     return established
 }
 
-atomic = (state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data:Data):>facts.State? => {
-    let id=expressions.strip_casts(condition nodes)
-    let node=hir.node_at(nodes id)
+atomic = (state:facts.State condition:addr truth:bool context:paths.Context @data:Data):>facts.State? => {
+    let id=expressions.strip_casts(condition context.nodes)
+    let node=hir.node_at(context.nodes id)
     if node is? hir.Bool return if node.value =? truth state else none
     if node is? hir.TypeTest return selected_member(node truth state @data)
     if node is? hir.ExpressedIdentifier and types.is_primitive(types.node_at(data.env.types node.value_type) 'bool') {
@@ -109,11 +109,11 @@ atomic = (state:facts.State condition:addr truth:bool nodes:array<hir.AST> @data
         return comparisons.refine(state '=?' subject comparisons.Operand[interval=ranges.exact(if truth 1 else 0)] true data.relations)
     }
     if node isnt? hir.FunctionCall return state
-    let contracts=expressions.call_result_refinements(id nodes data.env.types)
+    let contracts=expressions.call_result_refinements(id context.nodes data.env.types)
     if contracts.length >? 0 return apply_call(state id truth @data)
-    let function=hir.node_at(nodes node.func)
+    let function=hir.node_at(context.nodes node.func)
     if function isnt? hir.ExpressedIdentifier return state
-    if function.name =? '__not__' and node.pos_args.length =? 1 return refine(state node.pos_args[0] not truth @data)
+    if function.name =? '__not__' and node.pos_args.length =? 1 return refine_with_context(state node.pos_args[0] not truth context @data)
     let name=if node.integer_operation is? none function.name else node.integer_operation
     let op=operators.get(name)
     if op is? none or node.pos_args.length not=? 2 return state
