@@ -25,6 +25,30 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- The native checker successfully checks the complete tokenizer source and
+  all 17 prelude modules (1,336 seconds in the measured run). This checks
+  source types; the paired native rebuild is still pending. Reflexive subtype
+  queries now bypass normalization, with the type-algebra differential suite
+  passing after that change.
+
+- The native bounds visitor now connects evaluation snapshots, refinements,
+  indexing, slices, array mutations, branches, function bodies, and loop fixed
+  points. Thirty source programs agree with hosted validation. Separate tests
+  cover 432 slice cases and index diagnostics, including saved indices whose
+  source binding changed later. Scoped breaks and continues discard local
+  facts. Module validation and representation selection are being connected
+  before executable emission; prototype check insertion remains pending.
+
+- Native union-field legalization passes the complete lowering test driver,
+  including exception forwarding, different record offsets, mixed result
+  types, and evaluating a receiver once. The driver executes 124 programs.
+
+- Hosted retained string reads now copy narrowed cell payloads before their
+  owner leaves scope. Dictionary lookup temporaries release their independent
+  payloads; fixed-length arrays release optional/union elements in both raw
+  and descriptor storage. Repeated-call memory regressions pass. The latest
+  non-bootstrap checkpoint passes **1,723 tests, with 10 skipped**.
+
 - The native checker now retains string methods after literal exclusions,
   accepts literal-string enums in interpolation, and emits common-field
   access for record unions, forwarding exception alternatives unchanged.
