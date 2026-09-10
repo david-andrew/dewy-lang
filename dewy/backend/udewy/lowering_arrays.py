@@ -1163,15 +1163,15 @@ class _ArrayLowering:
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, function.symbol), [block, size], {})
 
-    def _release_array_elements(self, descriptor: hir.AST, element: ty.Type, loc: Span, *, start: hir.AST | None = None) -> list[hir.AST]:
-        """Release the discarded suffix without freeing the array's capacity."""
+    def _release_array_elements(self, descriptor: hir.AST, element: ty.Type, loc: Span, *, start: hir.AST | None = None, stop: hir.AST | None = None) -> list[hir.AST]:
+        """Release an element range without freeing the array's capacity."""
         if self._is_string_valued(element):
-            return self._release_string_elements(descriptor, loc, start=start)
+            return self._release_string_elements(descriptor, loc, start=start, stop=stop)
         if self._is_optional_element(element) or self._is_union_element(element):
-            return self._release_cell_elements(descriptor, element, loc, start=start)
+            return self._release_cell_elements(descriptor, element, loc, start=start, stop=stop)
         unfolded = ty.unfold(element)
         if isinstance(unfolded, ty.ObjectType):
-            return self._release_object_elements(descriptor, unfolded, loc, start=start)
+            return self._release_object_elements(descriptor, unfolded, loc, start=start, stop=stop)
         return []
 
     def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, string_elements: bool = False, cell_element: ty.TypeExpr | None = None, object_element: ty.ObjectType | None = None) -> list[hir.AST]:
@@ -1339,7 +1339,7 @@ class _ArrayLowering:
         statements.extend(self._by_brand(base, object_type, loc, child_fields))
         return statements
 
-    def _release_object_elements(self, word: hir.ExpressedIdentifier, object_type: ty.ObjectType, loc, *, start: hir.AST | None = None) -> list[hir.AST]:
+    def _release_object_elements(self, word: hir.ExpressedIdentifier, object_type: ty.ObjectType, loc, *, start: hir.AST | None = None, stop: hir.AST | None = None) -> list[hir.AST]:
         """Give back each element object an owned array stores: its members, then its arena block."""
         size, _offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
 
@@ -1349,7 +1349,7 @@ class _ArrayLowering:
 
         one = self._int64_literal(loc, 1)
         index_declare, index = local('object_index', start if start is not None else self._int64_literal(loc, 0))
-        length_declare, length = local('object_length', self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
+        length_declare, length = local('object_length', stop if stop is not None else self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
         data_declare, data = local('object_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
         address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
         element_declare, element = local('object_element', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
@@ -1360,7 +1360,7 @@ class _ArrayLowering:
         loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)
         return [index_declare, length_declare, data_declare, loop]
 
-    def _release_cell_elements(self, word: hir.ExpressedIdentifier, element_type: ty.TypeExpr, loc, *, start: hir.AST | None = None) -> list[hir.AST]:
+    def _release_cell_elements(self, word: hir.ExpressedIdentifier, element_type: ty.TypeExpr, loc, *, start: hir.AST | None = None, stop: hir.AST | None = None) -> list[hir.AST]:
         """Release each owned cell's active payload, then its 16-byte block."""
         plain = ty.strip_refinement(element_type)
         payload = ty.optional_payload(plain)
@@ -1372,7 +1372,7 @@ class _ArrayLowering:
 
         one = self._int64_literal(loc, 1)
         index_declare, index = local('cell_index', start if start is not None else self._int64_literal(loc, 0))
-        length_declare, length = local('cell_length', self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
+        length_declare, length = local('cell_length', stop if stop is not None else self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
         data_declare, data = local('cell_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
         address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
         cell_declare, cell = local('cell', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
@@ -1382,7 +1382,7 @@ class _ArrayLowering:
         loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), hir.Block(loc, ty.VOID_TYPE, body, True))], None)
         return [index_declare, length_declare, data_declare, loop]
 
-    def _release_string_elements(self, word: hir.ExpressedIdentifier, loc, *, start: hir.AST | None = None) -> list[hir.AST]:
+    def _release_string_elements(self, word: hir.ExpressedIdentifier, loc, *, start: hir.AST | None = None, stop: hir.AST | None = None) -> list[hir.AST]:
         """Give back each element string an owned string array stores, by the element's owner word."""
         def local(suffix: str, value: hir.AST) -> tuple[hir.AST, hir.ExpressedIdentifier]:
             name = self._new_string_temp(loc, 'int64', suffix).name
@@ -1390,7 +1390,7 @@ class _ArrayLowering:
 
         one = self._int64_literal(loc, 1)
         index_declare, index = local('release_index', start if start is not None else self._int64_literal(loc, 0))
-        length_declare, length = local('release_length', self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
+        length_declare, length = local('release_length', stop if stop is not None else self._load_i64_field(word, ARRAY_LENGTH_OFFSET, loc))
         data_declare, data = local('release_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
         address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
         element_declare, element = local('release_element', self._intrinsic_call('__load_i64__', [address], 'int64', loc))

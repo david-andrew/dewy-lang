@@ -25,6 +25,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Hosted dictionary compaction releases dead entries and moves surviving
+  handles without releasing their old slots a second time. Fresh `.values`
+  arrays use the same temporary/ownership transfer as returned arrays.
+  Record, string, and optional-record dictionaries retain independent copies
+  through removals and reuse memory across repeated compactions; 57 focused
+  ownership, array-release, union-container, and dictionary-proof tests pass.
+  The full native prelude check now passes in 238 seconds with about 3 GB
+  peak RSS, down from roughly 32 GB before the preceding ownership fixes.
+
 - Native comparison transfer connects interval bounds with stable value and
   length routes, including affine offsets, index propagation, nonzero facts,
   and strictness recovered from excluded equality. A compiled test covers

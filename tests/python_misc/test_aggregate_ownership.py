@@ -100,6 +100,44 @@ let main=():>int64=>{
     run(source, tmp_path)
 
 
+@pytest.mark.parametrize('value_type,first,second,read', [
+    ('string', '"first-{42}"', '"second-{17}"', 'value =? "second-17"'),
+    ('Offset', 'Offset[Term[1 "first-{42}"] 0]', 'Offset[Term[2 "second-{17}"] 0]', 'value.term.projection =? "second-17"'),
+    ('Offset|none', 'none', 'Offset[Term[2 "second-{17}"] 0]', 'value isnt? none and value.term.projection =? "second-17"'),
+])
+def test_dictionary_compaction_moves_live_elements_and_releases_dead_ones(value_type, first, second, read, tmp_path):
+    source = f'''
+Term:type=const [binding:int64 projection:string]
+Offset:type=const [term:Term shift:int64]
+let exercise=():>void=>{{
+    let entries:dict<string {value_type}>=["a-{{1}}" -> {first} "b-{{2}}" -> {second} "c-{{3}}" -> {first}]
+    if 'a-1' in? entries {{entries.pop('a-1');}}
+    let copy=entries
+    # Iteration compacts a dead first entry, moving both later entries.
+    $runtime_assert entries.values.length =? 2
+    entries.clear
+    # The independent copy still owns both its live values and its tombstone
+    # until its own compaction. Reusing freed blocks must not change either.
+    let overwrite:array<string>=["reuse-{{99}}" "reuse-{{100}}"]
+    $runtime_assert copy.values.length =? 2
+    $runtime_assert 'b-2' in? copy
+    let value=copy['b-2']
+    $runtime_assert {read}
+    if 'c-3' in? copy {{copy.pop('c-3');}}
+    $runtime_assert copy.values.length =? 1
+}}
+let main=():>int64=>{{
+    exercise()
+    exercise()
+    loop i in 0..20 {{exercise() printl(_arena_cursor)}}
+    return 0
+}}
+'''
+    cursors = run(source, tmp_path).splitlines()
+    assert len(cursors) == 21
+    assert len(set(cursors[2:])) == 1, cursors
+
+
 @pytest.mark.parametrize('optional', [False, True])
 def test_local_union_payload_copies_and_replacements_reuse_storage(optional, tmp_path):
     source = '''

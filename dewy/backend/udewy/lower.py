@@ -3739,8 +3739,18 @@ class _Lowerer(
     def _consume_array_value(self, node: hir.AST) -> None:
         """A binding, a return, or a store takes this array call's result over: not a temporary."""
         node = self._copy_source_expression(node)
-        if isinstance(node, hir.FunctionCall):
+        if isinstance(node, (hir.FunctionCall, hir.DictView)):
             self.consumed_string_values.add(id(node))
+
+    def _array_result_temporary(self, node: hir.AST, value: hir.AST, prelude: list[hir.AST]) -> tuple[list[hir.AST], hir.AST]:
+        """Track a fresh array result until a binding, store, or return owns it."""
+        assert isinstance(node.type, ty.ArrayType)
+        if id(node) in self.consumed_string_values or self.lowering_module_startup:
+            return prelude, value
+        temp = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'array_temp').name)
+        self.statement_temporaries.append(('array', temp))
+        self.temporary_array_elements[temp.name] = node.type.element
+        return [*prelude, hir.Assign(node.loc, ty.VOID_TYPE, temp, '=', value)], replace(temp, type=node.type)
 
     def _consume_string_value(self, node: hir.AST) -> None:
         """A binding, a return, or a store takes this string call's result over: not a temporary."""
@@ -3880,7 +3890,7 @@ class _Lowerer(
                         expr=copied,
                     ),
                 ]
-            if isinstance(declared_type, ty.ArrayType) and isinstance(self._copy_source_expression(node.expr), (hir.ArrayLiteral, hir.FunctionCall)):
+            if isinstance(declared_type, ty.ArrayType) and isinstance(self._copy_source_expression(node.expr), (hir.ArrayLiteral, hir.FunctionCall, hir.DictView)):
                 # a literal or a call result: storage this local owns (a
                 # `bytes as …` view over a string's data is not: it borrows)
                 self._note_owned_array(node, declared_type)
@@ -4980,10 +4990,7 @@ class _Lowerer(
             call = replace(node, func=func, pos_args=pos_args, kw_args=kw_args)
             if self._is_named_array_call(node) and id(node) not in self.consumed_string_values and not self.lowering_module_startup and not place_postlude:
                 # a runtime-length array result nothing keeps (`text.split" ".length`, `g(f(x))`): a temporary of this statement
-                temp = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'array_temp').name)
-                self.statement_temporaries.append(('array', temp))
-                self.temporary_array_elements[temp.name] = node.type.element
-                return [*prelude, hir.Assign(node.loc, ty.VOID_TYPE, temp, '=', call)], replace(temp, type=node.type)
+                return self._array_result_temporary(node, call, prelude)
             if self._is_named_string_call(node) and id(node) not in self.consumed_string_values and not self.lowering_module_startup and not place_postlude:
                 # a string result nothing keeps (an argument, a receiver, a part): a
                 # temporary of this statement, given back after it by its owner word
@@ -5075,6 +5082,8 @@ class _Lowerer(
     def _array_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
         node = self._copy_source_expression(node)
         return isinstance(node, (hir.ArrayLiteral, hir.FunctionCall)) or (
+            isinstance(node, hir.DictView) and isinstance(node.type, ty.ArrayType)
+        ) or (
             isinstance(node, hir.RepresentationCast)
             and isinstance(node.type, ty.ArrayType)
         )

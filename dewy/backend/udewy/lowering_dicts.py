@@ -184,21 +184,30 @@ class _DictLowering:
                 self._typed_equality(self._dict_element(hashes, reader, 'int64', loc), self._int64_literal(loc, DEAD), 'int64', loc),
             )
             moved = self._int64_comparison('__lt__', writer, reader, loc)
+            # These are ownership moves within the same backing arrays.
+            # Release a dead entry before a later live entry overwrites its
+            # slot; truncating the moved-from suffix would free live handles
+            # a second time. The final length stores below only hide those
+            # stale slots, whose ownership has already moved or been released.
+            after_reader = self._int64_binary('__add__', reader, self._int64_literal(loc, 1), loc)
+            discard = self._release_array_elements(keys, parts.key_type, loc, start=reader, stop=after_reader)
+            if values is not None and parts.value_type is not None:
+                discard.extend(self._release_array_elements(values, parts.value_type, loc, start=reader, stop=after_reader))
             copy = [
                 self._dict_store_element(keys, writer, self._dict_element(keys, reader, parts.key_type, loc), parts.key_type, loc),
                 *([self._dict_store_element(values, writer, self._dict_element(values, reader, parts.value_type, loc), parts.value_type, loc)]
                   if values is not None and parts.value_type is not None else []),
                 self._if(has_hash, [self._dict_store_element(hashes, writer, self._dict_element(hashes, reader, 'int64', loc), 'int64', loc)], loc),
             ]
-            return [self._if(dead, [], loc, [
+            return [self._if(dead, discard, loc, [
                 self._if(moved, copy, loc),
                 self._assign(writer, self._int64_binary('__add__', writer, self._int64_literal(loc, 1), loc), loc),
             ])]
 
         statements.extend(self._counting('dict_read', entry_count, compact, loc))
-        statements.extend(self._dict_truncate(parts, 'keys', parts.key_type, writer, loc))
-        if parts.value_type is not None:
-            statements.extend(self._dict_truncate(parts, 'values', parts.value_type, writer, loc))
+        statements.append(self._store_i64_field(keys, ARRAY_LENGTH_OFFSET, writer, loc))
+        if values is not None:
+            statements.append(self._store_i64_field(values, ARRAY_LENGTH_OFFSET, writer, loc))
         statements.extend(self._dict_truncate(parts, 'hashes', 'int64', writer, loc))
         statements.append(self._dict_set_live(parts, writer, loc))
 
@@ -677,8 +686,9 @@ class _DictLowering:
             field = 'values' if value_type is not None else 'keys'
             copy_prelude, copied = self._clone_dynamic_array_value(
                 hir.MemberAccess(loc, ty.ArrayType(element, None), source, field), ty.ArrayType(element, None),
+                arena=True,
             )
-            return [*prelude, compact, *copy_prelude], copied
+            return self._array_result_temporary(node, copied, [*prelude, compact, *copy_prelude])
         # keys: a set over copies of the entries and their hashes (table rebuilt lazily)
         assert isinstance(node.type, ty.ObjectType)
         fresh = hir.ObjectLiteral(loc, node.type, [
