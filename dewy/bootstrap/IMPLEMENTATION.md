@@ -25,6 +25,24 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native module graphs accept an ordered prelude, retaining library binding
+  identities while allowing module declarations to shadow inherited names.
+  Target queries select platform branches and prepare their imports; ordinary
+  literal booleans keep ordinary flow semantics. File directives retain
+  no-prelude/prototype policy and enforce target restrictions. Prototype policy
+  still awaits the complete proof/representation driver. The graph comparison
+  checks exported declaration contracts, not the hosted registry's separately
+  retained singleton initializer types. The filesystem and process foundations
+  now both check through this loader. The complete prelude remains in progress.
+
+- Array membership and set conversions call their ordinary lexical library
+  helpers. Range membership shares exact step/open-bound normalization with
+  iteration, folds exact queries, and retains runtime membership HIR. Generic
+  instances precede the module statements that call them. Five native source
+  comparison groups pass together (targets, library calls, ranges, existing
+  source forms, and inference); the prelude and module checks pass in a separate
+  three-test run. These are HIR comparisons, not a native executable compiler.
+
 - Native text materialization tracks UTF-8 byte, scalar, and grapheme lengths;
   checked byte decoding, word-shape transmutes, fixed integer limits, and
   lexical string methods now reach checked HIR. Error mints denote singleton
@@ -42,6 +60,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   the repeated-read cases run under a 128 MiB memory limit. Related regressions
   pass in focused batches of 31 and 143 tests. This avoids unnecessary copies
   using the existing ownership model; it introduces no allocator design.
+  A subsequent fix distinguishes disjoint record fields for both array and
+  object value arguments. Unknown indices remain conservative; a place into
+  the same array field still forces a snapshot. Eight execution regressions
+  and related place checks pass in a 31-test batch, with 146 further array,
+  object, effect, method-barrier, and string-retention checks passing separately.
 
 - Native record methods now compile into hidden functions with lexical member
   bindings, static/instance receivers, direct mutation barriers, and inherited

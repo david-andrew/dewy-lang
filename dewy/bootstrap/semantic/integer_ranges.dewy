@@ -1,0 +1,33 @@
+doc"""
+Exact integer range normalization shared by iteration and membership.
+An open left bound advances by one whole step; an open right bound excludes
+its endpoint before computing the number of aligned elements. Empty ranges
+retain their direction and have a count of zero.
+"""
+
+Normalized:type = const [first:bigint step:bigint & ~0 last:bigint? count:bigint?]
+normalize = (anchor:bigint second:bigint? right:bigint? bounds:string):>Normalized? => {
+    let step:bigint=if second is? none 1 else second-anchor
+    if step =? 0 return none
+    let first=anchor
+    if bounds.startswith('(') {first += step}
+    let count:bigint?=none
+    let last:bigint?=none
+    if right isnt? none {
+        let distance=(if step >? 0 right-first else first-right) - (if bounds.endswith(']') 0 else 1)
+        let magnitude=if step >? 0 step else -step
+        $runtime_assert magnitude not=? 0
+        let size:bigint=if distance <? 0 0 else distance // magnitude + 1
+        count=size
+        last=first + (size-1)*step
+    }
+    return Normalized[first step last count]
+}
+contains = (value:bigint range:Normalized):>bool => {
+    let delta=value-range.first
+    let magnitude=if range.step >? 0 range.step else -range.step
+    $runtime_assert magnitude not=? 0
+    if delta % magnitude not=? 0 return false
+    let ordinal=delta // range.step
+    return ordinal >=? 0 and (range.count is? none or ordinal <? range.count)
+}

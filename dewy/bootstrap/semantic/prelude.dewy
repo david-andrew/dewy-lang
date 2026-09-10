@@ -1,0 +1,22 @@
+import p"../targets.dewy" as targets
+
+doc"""
+Installed source libraries in dependency order, matching semantic/prelude.py.
+Target foundations precede the portable layer; target services that consume
+portable types follow it. The invocation supplies the package's library root.
+"""
+
+const portable:array<string>=[
+    'strings' 'arrays' 'path' 'unicode' 'math' 'rational' 'fixed' 'bigint'
+    'bigrational' 'io' 'reporting' 'testing' 'time' 'doc'
+]
+files = (root:string target:targets.Target):>array<string> => {
+    let paths:array<string>=[]
+    if target not=? 'wasm32' {
+        paths.push("{root}/linux/files.dewy")
+        paths.push("{root}/linux/process.dewy")
+    }
+    loop name in portable {paths.push("{root}/{name}.dewy")}
+    if target not=? 'wasm32' {paths.push("{root}/linux/system.dewy")}
+    return paths
+}

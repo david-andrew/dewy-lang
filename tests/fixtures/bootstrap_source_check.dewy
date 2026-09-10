@@ -28,6 +28,12 @@ loop_summary = (id:addr session:contexts.Session function_types:bool):>string =>
     if node is? hir.DictRemove { parts.push("remove:{display.type_to_dewy(node.value_type session.types)}:{node.default isnt? none}:{node.lenient};") }
     if node is? hir.DictStore { parts.push(if node.values is? none 'store:set;' else 'store:dict;') }
     if node is? hir.DictView { parts.push("view:{node.name};") }
+    if node is? hir.RangeMembership {
+        let values:array<bigint?>=[node.first node.step node.last node.count]
+        let fields:array<string>=[]
+        loop value in values {fields.push(if value is? none 'none' else _bigint_as_string(value))}
+        parts.push("range_membership:{fields.join(':')};")
+    }
     if node is? hir.IteratorExpression {
         let target=checking.node_at(node.target session)
         let last=if node.last is? none 'none' else "{node.last}"

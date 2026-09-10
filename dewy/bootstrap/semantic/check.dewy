@@ -31,6 +31,8 @@ import p"method_syntax.dewy" as method_syntax
 import p"type_names.dewy" as type_names
 import p"function_contracts.dewy" as contracts
 import p"text_shapes.dewy" as text_shapes
+import p"target_values.dewy" as target_values
+import p"integer_ranges.dewy" as integer_ranges
 
 doc"""
 Resolve source values into checked HIR. Type expressions share the same
@@ -58,7 +60,7 @@ pending = (id:addr detail:string env:Environment session:contexts.Session):>Erro
 
 # Builtins are ordinary stable bindings. A lexical declaration may shadow a
 # source operator name; synthesized compiler helpers retain their own ids.
-begin = (source:contexts.Context @session:contexts.Session):>Environment => {
+begin = (source:contexts.Context @session:contexts.Session inherited:dict<string addr>=[]):>Environment => {
     let definitions = builtins.definitions(@session.types)
     let src = contexts.source_at(source session)
     $runtime_assert src.nodes.length >? 0
@@ -70,9 +72,17 @@ begin = (source:contexts.Context @session:contexts.Session):>Environment => {
         session.registry.by_id[binding_id] = binding
         bindings.bind(@session.scopes source.scope name binding_id)
     }
+    # Builtins and prelude exports are outer bindings. Module declarations
+    # can shadow either without replacing their shared declaration identity.
+    let parent=source
+    if inherited.length >? 0 {
+        parent=contexts.child(parent @session)
+        loop [name binding_id] in inherited {bindings.bind(@session.scopes parent.scope name binding_id)}
+    }
+    let lexical=contexts.child(parent @session)
     let state = session.read_states.length
     session.read_states.push(contexts.ReadState[])
-    return Environment[source state]
+    return Environment[lexical state]
 }
 
 # Conversion to a refinement adds an obligation, never an assumption. More
@@ -100,6 +110,7 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     if node.value_type =? expected return value
     let actual = types.node_at(session.types node.value_type)
     if actual is? types.StringLiteralType and target is? types.ArrayType return put(hir.RepresentationCast[node.loc text_shapes.materialization_target(node.value_type expected @session.types) value] @session)
+    if actual is? types.StringLiteralType and (target is? types.StringType or target is? types.Primitive and target.name in? ['string' 'char' 'grapheme']) return put(hir.RepresentationCast[node.loc expected value] @session)
     if actual is? types.ArrayType and target is? types.ArrayType and target.length is? none and actual.element =? target.element return value
     if actual is? types.FunctionType and target is? types.FunctionType return value
     if types.is_primitive(target 'any') return value
@@ -266,6 +277,15 @@ auto_call = (value:addr id:addr env:Environment @session:contexts.Session expect
     return call(value [] [] id env @session expected=expected)
 }
 
+# Library-backed operations use ordinary lexical lookup and generic call
+# checking. Their implementations, including equality dispatch and value
+# copying, remain source library code rather than compiler-only intrinsics.
+library_call = (name:string arguments:array<addr> id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    let function=identifier(name id env @session)
+    if function is? Error return function
+    return call(function arguments [] id env @session expected=expected)
+}
+
 expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
     let source = contexts.source_at(env.lexical session)
     let node = tokens.node_at(source.nodes id)
@@ -283,6 +303,7 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if atom is? tokens.Identifier { value = identifier(atom.name id env @session) }
         else if atom is? tokens.String { value = put(hir.String[node.loc types.string_literal(atom.content @session.types) atom.content] @session) }
         else if atom is? tokens.Bool { value = put(hir.Bool[node.loc types.primitive('bool' @session.types) atom.value] @session) }
+        else if atom is? tokens.Metatag and atom.name =? 'target' {value=put(hir.TargetString[node.loc types.string_literal(session.target @session.types) session.target] @session)}
         else return pending(id "{atom.kind} value" env session)
         if value is? Error return value
         if not call_target and types.node_at(session.types node_at(value session).value_type) is? types.CallableType return auto_call(value id env @session expected=expected)
@@ -343,6 +364,8 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if name isnt? none {
             let operand = expression(node.item env @session)
             if operand is? Error return operand
+            let target=target_values.unwrap(operand session.hir)
+            if op =? 'not' and target is? hir.TargetBool return put(hir.TargetBool[node.loc types.primitive('bool' @session.types) not target.value] @session)
             let func = identifier(name id env @session)
             if func is? Error return func
             return call(func [operand] [] id env @session expected=expected)
@@ -406,7 +429,12 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
         if adjacency is? post.Juxtapose and syntax.identifier(node.left source.nodes) =? 'set' and declarations.lookup('set' env.lexical session) is? none {
             let body = tokens.node_at(source.nodes node.right)
             if body is? parser.Block and body.delims =? '[]' return container_literal(id body env @session expected=expected is_set=true)
-            return pending(id 'set conversion through the string/array library helpers' env session)
+            let value=expression(node.right env @session)
+            if value is? Error return value
+            let type=node_at(value session).value_type
+            if views.string_valued(type session.types) return library_call('_set_of_graphemes' [value] id env @session expected=expected)
+            if types.node_at(session.types types.unfold(types.strip_refinement(type session.types) session.types)) is? types.ArrayType return library_call('_set_of_array' [value] id env @session expected=expected)
+            return problem(id '`set` takes a string or an array' display.type_to_dewy(type session.types) env session)
         }
         if adjacency is? post.Juxtapose and adjacency.options.length >? 1 {
             let left = expression(node.left env @session call_target=true)
@@ -444,6 +472,22 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             if key is? Error return key
             let container = expression(node.right env @session)
             if container is? Error return container
+            let selected=target_values.membership(key container session.hir)
+            if selected isnt? none return put(hir.TargetBool[node.loc types.primitive('bool' @session.types) selected not=? (op =? 'not in?')] @session)
+            let range=resolved_range(container session)
+            if range isnt? none {
+                let result=range_membership(key range id env @session)
+                if result is? Error return result
+                if op =? 'in?' return result
+                return library_call('__not__' [result] id env @session)
+            }
+            let type=types.node_at(session.types types.unfold(types.strip_refinement(node_at(container session).value_type session.types) session.types))
+            if type is? types.ArrayType {
+                let result=library_call('_array_contains' [key container] id env @session)
+                if result is? Error return result
+                if op =? 'in?' return result
+                return library_call('__not__' [result] id env @session)
+            }
             let entry = views.container_entry_types(node_at(container session).value_type session.types)
             if entry is? none return pending(id 'membership on this non-container type' env session)
             let checked = against(key entry.key node.left env @session)
@@ -467,6 +511,8 @@ expression = (id:addr env:Environment @session:contexts.Session expected:addr?=n
             let right_env = if logical refined(left continues env @session) else env
             let right = expression(node.right right_env @session)
             if right is? Error return right
+            let selected=target_values.logical(op left right session.hir)
+            if selected isnt? none return put(hir.TargetBool[node.loc types.primitive('bool' @session.types) selected] @session)
             let func = identifier(operator id env @session)
             if func is? Error return func
             let specialized = builtin_value(func [left right] id env @session)
@@ -683,7 +729,9 @@ block = (id:addr env:Environment @session:contexts.Session scoped:bool=false exp
         # below. Explicit returns use the enclosing function's own contract.
         let value = expression(item inner @session expected=if node.inner.length =? 1 expected else none)
         if value is? Error return value
-        items.push(value)
+        let checked=node_at(value session)
+        if checked is? hir.Block and not checked.scoped {loop item in checked.items {items.push(item)}}
+        else {items.push(value)}
         let type = node_at(value session).value_type
         let atom = types.node_at(session.types type)
         if types.is_primitive(atom 'never') { result = type break }
@@ -705,9 +753,13 @@ module = (id:addr env:Environment @session:contexts.Session):>addr|Error => {
     if checked is? Error return checked
     let root = node_at(checked session)
     $runtime_assert root is? hir.Block
-    let items = root.items
+    let items:array<addr>=[]
     let i = first
     loop i <? session.hoisted.length { items.push(session.hoisted[i]) i += 1 }
+    # Instances carry no module initialization state. Declare them before
+    # the source statements that call them; nested callees are already first
+    # in the hoisted list, matching the hosted module assembly.
+    loop item in root.items {items.push(item)}
     return put(hir.Block[root.loc root.value_type items root.scoped] @session)
 }
 
@@ -1067,9 +1119,25 @@ flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expec
     let arms:array<addr>=[]
     let results:array<addr>=[]
     let exits:array<Environment>=[]
+    let selected=false
     loop spec in specs {
         let condition=if spec.condition is? none match_condition(spec remaining @session) else expression(spec.condition remaining @session expected=types.primitive('bool' @session.types))
         if condition is? Error return condition
+        let decided=target_values.unwrap(condition session.hir)
+        if decided is? hir.TargetBool {
+            if not decided.value continue
+            # Platform declarations inhabit the surrounding lexical scope.
+            # Runtime flows and static type decisions keep their own scope.
+            let syntax=contexts.node_at(spec.body env.lexical session)
+            if expected is? none and syntax is? parser.Block and syntax.delims =? '\{}' {
+                let body=block(spec.body env @session)
+                if body is? Error return body
+                let contents=node_at(body session)
+                $runtime_assert contents is? hir.Block
+                return put(hir.Block[contents.loc types.primitive('void' @session.types) contents.items false] @session)
+            }
+            selected=true
+        }
         hoist_condition(condition @session)
         let positive=refined(condition true remaining @session)
         let body=if spec.condition is? none match_body(spec positive @session expected=expected) else expression(spec.body positive @session expected=expected)
@@ -1078,9 +1146,10 @@ flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expec
         arms.push(put(hir.IfArm[contexts.node_at(spec.syntax env.lexical session).loc type condition body] @session))
         if not types.is_primitive(types.node_at(session.types type) 'never') {results.push(type) exits.push(positive)}
         remaining=refined(condition false remaining @session)
+        if selected break
     }
     let default:addr?=none
-    if match_total and node.default is? none {
+    if selected or match_total and node.default is? none {
         $runtime_assert arms.length >? 0
         let last=node_at(arms.pop session)
         $runtime_assert last is? hir.IfArm
@@ -1779,6 +1848,67 @@ constant_integer = (id:addr session:contexts.Session):>bigint? => {
     return value.lower
 }
 
+# A named range is compile-time syntax retained by its declaration, as in
+# the hosted range resolver; there is no new runtime range descriptor here.
+resolved_range = (id:addr session:contexts.Session):>hir.Range? => {
+    let node=target_values.unwrap(id session.hir)
+    if node is? hir.Range return node
+    if node is? hir.RepresentationCast|hir.ValueCast return resolved_range(node.expr session)
+    if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+        let binding=bindings.binding_at(session.registry node.binding_id)
+        if binding.declaration isnt? none {
+            let declaration=node_at(binding.declaration session)
+            if declaration is? hir.Declare return resolved_range(declaration.expr session)
+        }
+    }
+    return none
+}
+range_membership = (value:addr range:hir.Range id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let candidate=constant_integer(value session)
+    let left=if range.left is? none none else constant_integer(range.left session)
+    let right=if range.right is? none none else constant_integer(range.right session)
+    let bounds=if range.bounds is? none '[]' else range.bounds
+    let boolean=types.primitive('bool' @session.types)
+    let loc=contexts.node_at(id env.lexical session).loc
+    if range.step_pair is? none {
+        if candidate isnt? none and (range.left is? none or left isnt? none) and (range.right is? none or right isnt? none) {
+            let included=true
+            if left isnt? none {included=if bounds.startswith('[') candidate >=? left else candidate >? left}
+            if included and right isnt? none {included=if bounds.endswith(']') candidate <=? right else candidate <? right}
+            return put(hir.Bool[loc boolean included] @session)
+        }
+        let word=types.primitive('int64' @session.types)
+        let checked=against(value word id env @session)
+        if checked is? Error return checked
+        let first:addr?=none
+        let last:addr?=none
+        if range.left isnt? none {
+            let bound=against(range.left word id env @session)
+            if bound is? Error return bound
+            first=bound
+        }
+        if range.right isnt? none {
+            let bound=against(range.right word id env @session)
+            if bound is? Error return bound
+            last=bound
+        }
+        let runtime=put(hir.Range[range.loc range.value_type range.bounds none first last] @session)
+        return put(hir.RangeMembership[loc boolean checked runtime] @session)
+    }
+    if range.left is? none return pending(id 'left-unbounded stepped range membership' env session)
+    let second=constant_integer(range.step_pair.second session)
+    if left is? none or second is? none or range.right isnt? none and right is? none return pending(id 'runtime range endpoint normalization' env session)
+    let normalized=integer_ranges.normalize(left second right bounds)
+    if normalized is? none return problem(id 'range step cannot be zero' 'choose a distinct second anchor' env session)
+    if candidate isnt? none return put(hir.Bool[loc boolean integer_ranges.contains(candidate normalized)] @session)
+    let components:array<bigint>=[normalized.first normalized.step]
+    if normalized.last isnt? none {components.push(normalized.last)}
+    loop component in components {if component <? -9223372036854775808 or component >? 9223372036854775807 return pending(id 'runtime stepped range membership requires bigint lowering' env session)}
+    let checked=against(value types.primitive('int64' @session.types) id env @session)
+    if checked is? Error return checked
+    return put(hir.RangeMembership[loc boolean checked put(range @session) normalized.first normalized.step normalized.last normalized.count] @session)
+}
+
 IteratorResult:type = const [values:array<addr> environment:Environment]
 iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|Error => {
     let source = contexts.source_at(env.lexical session)
@@ -1812,17 +1942,10 @@ iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|E
         if value.step_pair isnt? none { second = constant_integer(value.step_pair.second session) }
         if value.right isnt? none { right = constant_integer(value.right session) }
         if anchor is? none or (value.step_pair isnt? none and second is? none) or (value.right isnt? none and right is? none) return pending(id 'runtime range endpoint normalization' env session)
-        first = anchor
-        if second isnt? none { step = second-anchor }
-        if step =? 0 return problem(id 'range iterator step cannot be zero' 'choose a distinct second anchor' env session)
         let bounds = if value.bounds is? none '[]' else value.bounds
-        if bounds.startswith('(') { first += step }
-        if right isnt? none {
-            let distance = (if step >? 0 right-first else first-right) - (if bounds.endswith(']') 0 else 1)
-            let magnitude:bigint = if step >? 0 step else -step
-            $runtime_assert magnitude not=? 0
-            count = if distance <? 0 0 else distance // magnitude + 1
-        }
+        let normalized=integer_ranges.normalize(anchor second right bounds)
+        if normalized is? none return problem(id 'range iterator step cannot be zero' 'choose a distinct second anchor' env session)
+        first=normalized.first step=normalized.step count=normalized.count
         target = types.primitive('int' @session.types)
     } else return problem(id 'value is not iterable' display.type_to_dewy(value.value_type session.types) env session)
     if count isnt? none { last = first + (count-1)*step }
@@ -2268,7 +2391,10 @@ builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @se
     let b_type = types.node_at(session.types b.value_type)
     if name in? ['__eq__' '__ne__'] {
         let boolean = types.primitive('bool' @session.types)
-        if a_type is? types.StringLiteralType and b_type is? types.StringLiteralType return put(hir.Bool[loc boolean (a_type.value =? b_type.value) not=? (name =? '__ne__')] @session)
+        if a_type is? types.StringLiteralType and b_type is? types.StringLiteralType {
+            let equal=(a_type.value =? b_type.value) not=? (name =? '__ne__')
+            return put(if a is? hir.TargetString or b is? hir.TargetString hir.TargetBool[loc boolean equal] else hir.Bool[loc boolean equal] @session)
+        }
         return put(hir.StringEqual[loc boolean left right name =? '__ne__'] @session)
     }
     if name =? '__add__' {

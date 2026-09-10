@@ -1,0 +1,42 @@
+import p"hir.dewy" as hir
+
+doc"""
+Compile-time target queries retain their provenance through comparisons.
+An ordinary literal boolean does not acquire this status: only target
+queries select unchecked platform branches and splice declarations.
+"""
+
+unwrap = (id:addr nodes:array<hir.AST>):>hir.AST => {
+    let value=hir.node_at(nodes id)
+    loop value is? hir.Block and not value.scoped and value.items.length =? 1 {
+        value=hir.node_at(nodes value.items[0])
+    }
+    return value
+}
+
+membership = (left:addr right:addr nodes:array<hir.AST>):>bool? => {
+    let target=unwrap(left nodes)
+    let list=unwrap(right nodes)
+    if target isnt? hir.TargetString or list isnt? hir.ArrayLiteral return none
+    let found=false
+    loop item in list.items {
+        let value=hir.node_at(nodes item)
+        loop value is? hir.RepresentationCast {value=hir.node_at(nodes value.expr)}
+        if value isnt? hir.String return none
+        found=found or target.content =? value.content
+    }
+    return found
+}
+
+logical = (operator:string left:addr right:addr nodes:array<hir.AST>):>bool? => {
+    let a=unwrap(left nodes)
+    let b=unwrap(right nodes)
+    if a isnt? hir.TargetBool or b isnt? hir.TargetBool return none
+    if operator in? ['and' '&'] return a.value and b.value
+    if operator in? ['or' '|'] return a.value or b.value
+    if operator =? 'nand' return not (a.value and b.value)
+    if operator =? 'nor' return not (a.value or b.value)
+    if operator =? 'xor' return a.value not=? b.value
+    if operator =? 'xnor' return a.value =? b.value
+    return none
+}

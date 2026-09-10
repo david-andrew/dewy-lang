@@ -1,0 +1,68 @@
+from reporting import SrcFile, Error, Pointer
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"syntax.dewy" as syntax
+import p"../targets.dewy" as targets
+
+doc"""
+File-level policy is read before installing the prelude or checking values.
+Prototype settings remain attached to the module for the proof/representation
+driver; reading a directive alone never discharges a proof obligation.
+"""
+
+Options:type = const [no_prelude:bool=false prototype:bool=false prototype_warnings:bool=true]
+Parsed:type = const [statements:array<addr> options:Options]
+problem = (id:addr title:string message:string source:SrcFile nodes:array<tokens.Token>):>Error => {
+    let pointer=Pointer[span=tokens.node_at(nodes id).loc message=message]
+    return Error[srcfile=source title=title pointers=[pointer]]
+}
+metatag = (id:addr nodes:array<tokens.Token>):>string? => {
+    let node=tokens.node_at(nodes id)
+    if node isnt? parser.Atom return none
+    let atom=tokens.node_at(nodes node.item)
+    return if atom is? tokens.Metatag atom.name else none
+}
+read = (root:parser.Block source:SrcFile nodes:array<tokens.Token> target:targets.Target):>Parsed|Error => {
+    let statements:array<addr>=[]
+    let no_prelude:bool?=none
+    let prototype=false
+    let warnings=true
+    loop id in root.inner {
+        let bare=metatag(id nodes)
+        if bare =? 'prototype' {prototype=true continue}
+        # Retain the early bootstrap's bare no-prelude spelling as a shorthand.
+        if bare =? 'no_prelude' {
+            if no_prelude isnt? none return problem(id 'duplicate `$no_prelude` directive' 'this module already sets the directive' source nodes)
+            no_prelude=true continue
+        }
+        let node=tokens.node_at(nodes id)
+        if node isnt? parser.BinOp or not syntax.is_operator(node.op '=' nodes) {statements.push(id) continue}
+        let name=metatag(node.left nodes)
+        if name =? 'supported_targets' {
+            let value=tokens.node_at(nodes node.right)
+            let entries:array<addr>=if value is? parser.Block value.inner else [node.right]
+            let supported:array<string>=[]
+            loop entry in entries {
+                let value=tokens.node_at(nodes entry)
+                if value is? parser.Atom {
+                    let atom=tokens.node_at(nodes value.item)
+                    if atom is? tokens.String {supported.push(atom.content) continue}
+                }
+                return problem(entry '`$supported_targets` must list string target names' 'expected a string target name' source nodes)
+            }
+            let found=false
+            loop name in supported {if name =? target {found=true}}
+            if not found return problem(id "module does not support target `{target}`" "supported: {supported.join(', ')}" source nodes)
+            continue
+        }
+        if name not in? ['no_prelude' 'prototype' 'prototype_warnings'] {statements.push(id) continue}
+        if name =? 'no_prelude' and no_prelude isnt? none return problem(id 'duplicate `$no_prelude` directive' 'this module already sets the directive' source nodes)
+        let value=tokens.node_at(nodes node.right)
+        if value is? parser.Atom {value=tokens.node_at(nodes value.item)}
+        if value isnt? tokens.Bool return problem(node.right "`${name}` must be a boolean literal" 'expected `true` or `false`' source nodes)
+        if name =? 'no_prelude' {no_prelude=value.value}
+        else if name =? 'prototype' {prototype=value.value}
+        else {warnings=value.value}
+    }
+    return Parsed[statements Options[if no_prelude is? none false else no_prelude prototype warnings]]
+}

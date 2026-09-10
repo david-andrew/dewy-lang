@@ -280,6 +280,9 @@ def loop_summary(node, *, function_types=False):
         parts.append(f'{kind}:{slot};')
     if isinstance(node, hir.StringSlice):
         parts.append(f'slice:{type_to_dewy(node.type)};')
+    if isinstance(node, hir.RangeMembership):
+        values = [node.first, node.step, node.last, node.count]
+        parts.append('range_membership:' + ':'.join('none' if value is None else str(value) for value in values) + ';')
     if isinstance(node, hir.SetAlgebra):
         parts.append(f'algebra:{node.op};')
     if isinstance(node, hir.StringEqual):
