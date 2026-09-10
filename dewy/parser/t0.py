@@ -1485,8 +1485,10 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
         error_count += len(error_stack)
         for error in error_stack:
             print(error)
-        print("-"*80)
-        print(tokens_to_report(tokens, srcfile, {Whitespace}))
+        # The context reports already point to the opening and missing close.
+        # Rendering every token here can spend minutes laying out unrelated
+        # pointers in a large file. The explicit t0 inspection CLI below still
+        # supplies the full token report when that is what was requested.
 
     # if there were errors, exit with an error code
     if error_count > 0:
