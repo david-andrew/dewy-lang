@@ -25,6 +25,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Integer conversion contexts include a union's single available word or
+  bigint representation, including `addr | none` and `bigint | none`.
+  Constant nonzero evidence survives packing a bigint for compound division
+  and remainder; extracting the proven record alternative is a checked
+  payload read. Source comparisons retain rejection of zero and unproven
+  divisors, and native execution covers the converted compound operations.
+  These changes are undergoing the full paired self-build.
+
 - The paired native build is executable through `tools/bootstrap_native.sh`.
   Native checks of the compiler's own semantic sources exposed optional-value
   interpolation and compound dictionary stores. Optional/union interpolation
@@ -96,6 +104,19 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   tests, including retained strings/nested arrays, skipped short-circuit
   calls and repeated loop conditions. A new paired build is in progress.
   This is implementation work, not a new language-design decision.
+
+- Fresh nested array rows now transfer their owned elements into the stored
+  row. Callers release record argument snapshots after the protected call,
+  including snapshots required by overlapping place arguments. Fresh record
+  arguments use the same lifetime boundary. All 36 aggregate ownership tests
+  pass. Profiling localized most remaining full-invocation allocation growth
+  to validation, and the next seed includes these additional cleanup paths.
+  No allocator policy or language syntax changed.
+
+- Native version output embeds the shared `VERSION` at compilation. A native
+  full-library invocation compiled and ran that path independently of its
+  working directory. Release and installer candidates remain outside the
+  public pipeline until the compiler pair reaches a verified fixed point.
 
 - Source readers avoid copying complete token forests for individual nodes.
   Bounds analysis shares immutable module inputs across binding/refinement

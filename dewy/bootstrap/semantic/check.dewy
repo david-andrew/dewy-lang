@@ -123,7 +123,7 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     let inhabitant=unit_inhabitant(value expected id env @session)
     if inhabitant is? Error return inhabitant
     if inhabitant isnt? none return against(inhabitant expected id env @session)
-    if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and numeric_values.nonzero_form(expected 'BigInt' env.lexical session) {
+    if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and not numeric_values.nonzero_form(node.value_type 'BigInt' env.lexical session) and numeric_values.nonzero_form(expected 'BigInt' env.lexical session) {
         let constant=constant_integer(value session)
         if constant isnt? none and constant not=? 0 {
             # Contextual conversion may already have packed a known bigint
@@ -172,17 +172,20 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
         }
     }
     if not subtyping.is_subtype(node.value_type expected session.links @session.types) {
-        # A union with one machine-integer member supplies that member's
-        # representation, just as a plain word expectation does. Convert and
-        # prove its refinements before packing the union; subtyping alone
-        # cannot materialize an abstract loop index into `addr | none`.
+        # A union with one available integer representation supplies that
+        # context, just as a plain word or bigint expectation does. Convert
+        # and prove its refinements before packing the union; subtyping alone
+        # cannot materialize an abstract index into `addr | none`, or a word
+        # into the combined zero/record/none alternatives of `bigint?`.
         if target is? types.TypeOr and views.integer_valued(node.value_type session.types) {
-            let words:array<addr>=[]
+            let representations:array<addr>=[]
             loop member in target.items {
-                if views.fixed_integer_layout(types.strip_refinement(member session.types) session.types) isnt? none {words.push(member)}
+                if views.fixed_integer_layout(types.strip_refinement(member session.types) session.types) isnt? none {representations.push(member)}
             }
-            if words.length =? 1 {
-                let converted=against(value words[0] id env @session)
+            let big=numeric_values.family('BigInt' env.lexical session)
+            if big isnt? none and not types.same_type(big expected session.types) and subtyping.is_subtype(big expected session.links @session.types) {representations.push(big)}
+            if representations.length =? 1 {
+                let converted=against(value representations[0] id env @session)
                 if converted is? Error return converted
                 return put(hir.RepresentationCast[node.loc expected converted] @session)
             }

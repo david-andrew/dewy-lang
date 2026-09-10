@@ -1063,6 +1063,10 @@ representation = (node:hir.RepresentationCast @state:State):>addr => {
     if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) source.value_type node.value_type node @state)
     if enum_members(source.value_type state) isnt? none return enum_read(expression(node.expr @state) source.value_type node.value_type node @state)
     if cell_members(node.value_type @state) isnt? none return cell_pack(expression(node.expr @state) source.value_type node.value_type node @state)
+    # Checking may prove one alternative without a syntactic type-test read,
+    # for example a known nonzero bigint packed by contextual conversion.
+    # Preserve evaluation and load the already validated active payload.
+    if cell_members(source.value_type @state) isnt? none return cell_payload(expression(node.expr @state) node.value_type node @state)
     if string_type(source.value_type state) {
         let value=expression(node.expr @state)
         if string_type(node.value_type state) return value

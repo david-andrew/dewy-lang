@@ -72,6 +72,8 @@ ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 STRINGS = (ROOT / 'library/strings.dewy').read_text()
 SET_OF_ARRAY = STRINGS[STRINGS.index('let _set_of_array ='):STRINGS.index('# ---- loop capture:')]
 ARENA_CASES = [
+    ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_floordiv=(a:BigInt b:BigInt & ~0):>BigInt=>b\nlet main=():>int64=>{let result:BigInt=1 result //= 42 if result is? 0 return 0 return if result.limbs[0]=?42 42 else 0}', 42),
+    ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_mod=(a:BigInt b:BigInt & ~0):>BigInt=>b\nlet main=():>int64=>{let values:dict<string BigInt>=["value"->1] values["value"] %= 42 let result=values["value"] if result is? 0 return 0 return if result.limbs[0]=?42 42 else 0}', 42),
     ('Fn:type=(x:int64):>int64\nlet pointer:int64=0\nlet key=(x:int64):>int64=>{__store_i64__(99 pointer) return x}\nlet nested=(key:Fn):>int64=>{let other:array<int64>=[1] other.sort(key=@key) return 0}\nlet read=(values:array<int64> ignored:int64):>int64=>values[0]\nlet main=():>int64=>{let values:array<int64>=[42] pointer=__load_i64__(values) return read(values nested(@key))}', 42),
 
     ('let last=(values:array<int64>):>int64=>values.length-1\nlet read=(values:array<int64> index:int64):>int64=>values[index]\nlet main=():>int64=>{let values:array<int64>=[42] let before=_arena_cursor let answer=read(values last(values)) return if before=?_arena_cursor answer else 0}', 42),
