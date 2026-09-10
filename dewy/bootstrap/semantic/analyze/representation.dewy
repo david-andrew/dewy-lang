@@ -1,0 +1,358 @@
+from reporting import Error, Pointer, Span, SrcFile
+import p"../context.dewy" as contexts
+import p"../bindings.dewy" as bindings
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../type_queries.dewy" as views
+import p"../numeric_values.dewy" as numeric
+import p"../check.dewy" as checking
+import p"intervals.dewy" as ranges
+
+# Bounds analysis supplies the operations and conversions it could not fit
+# into a word. Representation selection consumes those decisions; absence of
+# a flag is not an independent proof that arbitrary unchecked HIR is safe.
+# Parameters/results retain their declared ABI. Only abstract local integer
+# storage can change to BigInt, and that decision propagates to a fixed point
+# because an accumulator may receive its own result on a later iteration.
+Unfit:type = const [interval:ranges.Interval? word:string]
+Note:type = const [loc:Span message:string]
+State:type = [
+    srcfile:SrcFile
+    prelude:dict<string addr>
+    big_type:addr
+    big_nonzero:addr
+    unfit:dict<addr Unfit>=[]
+    big_bindings:set<addr>=set[]
+    notes:array<Note>=[]
+    problem:Error?=none
+]
+const binary:dict<string string>=[
+    '__add__'->'_bigint_add' '__sub__'->'_bigint_sub' '__mul__'->'_bigint_mul'
+    '__floordiv__'->'_bigint_floordiv' '__mod__'->'_bigint_mod'
+    '__eq__'->'_bigint_eq' '__ne__'->'_bigint_ne' '__lt__'->'_bigint_lt'
+    '__le__'->'_bigint_le' '__gt__'->'_bigint_gt' '__ge__'->'_bigint_ge'
+]
+node_at = (id:addr session:contexts.Session):>hir.AST => hir.node_at(session.hir id)
+put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
+is_big = (id:addr state:State session:contexts.Session):>bool => {
+    let type=node_at(id session).value_type
+    return type =? state.big_type or type =? state.big_nonzero
+}
+fail = (node:hir.AST title:string message:string @state:State):>void => {
+    if state.problem isnt? none return void
+    let pointer=Pointer[span=node.loc message=message]
+    state.problem=Error[srcfile=state.srcfile title=title pointers=[pointer]]
+}
+note = (loc:Span message:string @state:State):>void => {state.notes.push(Note[loc message])}
+describe = (interval:ranges.Interval?):>string => {
+    if interval is? none or interval.lower is? none and interval.upper is? none return 'its range is unknown'
+    let lower=if interval.lower is? none '-∞' else _bigint_as_string(interval.lower)
+    let upper=if interval.upper is? none '∞' else _bigint_as_string(interval.upper)
+    return "its range is [{lower}, {upper}]"
+}
+prelude_call = (name:string args:array<addr> loc:Span @state:State @session:contexts.Session):>addr => {
+    let id=state.prelude.get(name)
+    $runtime_assert id isnt? none
+    let binding=bindings.binding_at(session.registry id)
+    $runtime_assert binding.value_type isnt? none
+    let signature=types.node_at(session.types binding.value_type)
+    $runtime_assert signature is? types.FunctionType
+    let func=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding.id] @session)
+    let operation:string?=none
+    loop [op helper] in binary {if helper =? name {operation=op break}}
+    if name in? ['_bigint_from_int' '_bigint_from_int_nonzero'] {operation='identity'}
+    else if name =? '_bigint_neg' {operation='__unary_sub__'}
+    return put(hir.FunctionCall[loc signature.ret func args [] none operation] @session)
+}
+to_big = (id:addr @state:State @session:contexts.Session nonzero:bool=false):>addr => {
+    if is_big(id state session) return id
+    let node=node_at(id session)
+    # A singleton type does not make its expression pure. Keep calls and
+    # other effects before materializing the known mathematical payload.
+    let value_type=types.node_at(session.types node.value_type)
+    if node is? hir.Integer return numeric.bigint_literal(node.value state.big_type node.loc @session)
+    if value_type is? types.IntegerLiteralType {
+        let literal=numeric.bigint_literal(value_type.value state.big_type node.loc @session)
+        return put(hir.Block[node.loc node_at(literal session).value_type [id literal] true] @session)
+    }
+    let word=types.primitive('int64' @session.types)
+    let converted=if node.value_type =? word id else put(hir.ValueCast[node.loc word id] @session)
+    return prelude_call(if nonzero '_bigint_from_int_nonzero' else '_bigint_from_int' [converted] node.loc @state @session)
+}
+abstract_integer = (id:addr session:contexts.Session literals:bool=false):>bool => {
+    let type=types.node_at(session.types id)
+    return types.is_primitive(type 'int') or types.is_primitive(type 'uint') or literals and type is? types.IntegerLiteralType
+}
+mark = (id:addr @seen:set<addr> @state:State @session:contexts.Session):>void => {
+    if id in? seen return void
+    seen.add(id)
+    let node=node_at(id session)
+    let binding_id:addr?=none
+    let initializer=false
+    if node is? hir.Declare and is_big(node.expr state session) {binding_id=node.binding_id initializer=true}
+    else if node is? hir.Assign and node.op =? '=' and is_big(node.value state session) {
+        let target=node_at(node.target session)
+        if target is? hir.ExpressedIdentifier {binding_id=target.binding_id}
+    }
+    if binding_id isnt? none and binding_id not in? state.big_bindings {
+        let binding=bindings.binding_at(session.registry binding_id)
+        if binding.kind =? 'value' and binding.value_type isnt? none and abstract_integer(binding.value_type session literals=initializer) {
+            state.big_bindings.add(binding_id)
+            binding.value_type=state.big_type binding.store_type=state.big_type
+            session.registry.by_id[binding_id]=binding
+            if binding.declaration isnt? none {
+                let declaration=node_at(binding.declaration session)
+                $runtime_assert declaration is? hir.Declare
+                declaration.annotation=state.big_type
+                $runtime_assert binding.declaration <? session.hir.length
+                session.hir[binding.declaration]=declaration
+            }
+            note(node.loc "`{binding.name}` is a big integer: {if initializer 'its initializer is one' else 'this assignment stores one'}" @state)
+        }
+    }
+    loop child in hir.children(node) {mark(child @seen @state @session)}
+}
+# Reuse the checker's cache and source scope when an instance argument changes
+# representation. Bare T parameters can be re-instantiated; nested contracts
+# retain their storage requirements and go through the boundary diagnostic.
+reinstantiate = (call:hir.FunctionCall func:hir.ExpressedIdentifier @state:State @session:contexts.Session):>addr? => {
+    if func.binding_id is? none return none
+    let instance=session.registry.generic_instances.get(func.binding_id)
+    if instance is? none return none
+    let original=bindings.binding_at(session.registry instance.generic)
+    if original.function is? none return none
+    let generic=node_at(original.function session)
+    if generic isnt? hir.GenericFunction return none
+    let signature=types.node_at(session.types generic.value_type)
+    $runtime_assert signature is? types.FunctionType
+    let positions:array<addr>=[]
+    let arguments:array<addr>=[]
+    loop i in 0.. and i <? call.pos_args.length {
+        let arg=node_at(call.pos_args[i] session)
+        if arg is? hir.ValueCast and is_big(arg.expr state session) {
+            if i >=? signature.pos_or_kw.length return none
+            let parameter=types.node_at(session.types signature.pos_or_kw[i].value_type)
+            if parameter isnt? types.TypeVariable return none
+            positions.push(i)
+            arguments.push(node_at(arg.expr session).value_type)
+        } else {arguments.push(arg.value_type)}
+    }
+    if positions.length =? 0 return none
+    $runtime_assert instance.context <? session.syntax_refs.length
+    let reference=session.syntax_refs[instance.context]
+    let env=checking.Environment[contexts.Context[reference.source reference.scope] generic.source.context]
+    let callee=hir.ExpressedIdentifier[func.loc generic.value_type original.name original.id]
+    let keyword:dict<string addr>=[]
+    loop [name value] in call.kw_args {keyword[name]=node_at(value session).value_type}
+    let replacement=checking.instantiate_call(callee signature arguments keyword none reference.node env @session)
+    if replacement is? Error {state.problem=replacement return none}
+    if replacement is? none return none
+    loop i in positions {
+        $runtime_assert i <? call.pos_args.length
+        let cast_id=call.pos_args[i]
+        let cast=node_at(cast_id session)
+        $runtime_assert cast is? hir.ValueCast
+        if cast_id in? state.unfit {state.unfit.pop(cast_id);}
+        call.pos_args[i]=cast.expr
+    }
+    let resolved=types.node_at(session.types node_at(replacement session).value_type)
+    $runtime_assert resolved is? types.FunctionType
+    call.func=replacement call.value_type=resolved.ret
+    note(call.loc "`{original.name}` is instantiated for a big integer here" @state)
+    return put(call @session)
+}
+rewrite_node = (id:addr @state:State @session:contexts.Session):>hir.AST => {
+    let node=node_at(id session)
+    if node is? hir.Integer and abstract_integer(node.value_type session literals=true) {
+        if node.value <? -9223372036854775808 or node.value >=? 18446744073709551616 {
+            note(node.loc "the literal `{_bigint_as_string(node.value)}` is a big integer: it does not fit a 64-bit word" @state)
+            return node_at(numeric.bigint_literal(node.value state.big_type node.loc @session) session)
+        }
+    } else if node is? hir.ExpressedIdentifier {
+        if node.binding_id isnt? none and node.binding_id in? state.big_bindings {node.value_type=state.big_type}
+    } else if node is? hir.Declare {
+        if node.binding_id isnt? none and node.binding_id in? state.big_bindings {node.expr=to_big(node.expr @state @session) node.annotation=state.big_type}
+    } else if node is? hir.Assign {
+        let target=node_at(node.target session)
+        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none and target.binding_id in? state.big_bindings {
+            if node.op =? '=' {node.value=to_big(node.value @state @session)}
+            else {
+                let helper=if node.op =? '+=' '_bigint_add' else '_bigint_sub'
+                $runtime_assert node.op in? ['+=' '-=']
+                node.value=prelude_call(helper [node.target to_big(node.value @state @session)] node.loc @state @session)
+                node.op='='
+            }
+        }
+    } else if node is? hir.FunctionCall return rewrite_call(id node @state @session)
+    return node
+}
+rewrite_call = (id:addr node:hir.FunctionCall @state:State @session:contexts.Session):>hir.AST => {
+    let func=node_at(node.func session)
+    if func isnt? hir.ExpressedIdentifier return node
+    let name=func.name
+    if name =? '_bigint_from_int' and node.pos_args.length =? 1 {
+        let inner=node.pos_args[0]
+        let casts:array<addr>=[]
+        loop true {
+            let cast=node_at(inner session)
+            if cast isnt? hir.ValueCast break
+            casts.push(inner) inner=cast.expr
+        }
+        if is_big(inner state session) {
+            loop cast in casts {if cast in? state.unfit {state.unfit.pop(cast);}}
+            return node_at(inner session)
+        }
+    }
+    let flagged=id in? state.unfit
+    let big_operand=false
+    loop arg in node.pos_args {if is_big(arg state session) {big_operand=true break}}
+    let helper=binary.get(name)
+    let result_type=types.node_at(session.types node.value_type)
+    if helper isnt? none and node.pos_args.length =? 2 and (flagged or big_operand) and (abstract_integer(node.value_type session) or types.is_primitive(result_type 'bool')) {
+        if id in? state.unfit {
+            let flag=state.unfit.pop(id)
+            note(node.loc "this `{name}` result is a big integer: {describe(flag.interval)}, so it may not fit `{flag.word}`" @state)
+        }
+        let left=to_big(node.pos_args[0] @state @session)
+        let right=to_big(node.pos_args[1] @state @session nonzero=name in? ['__floordiv__' '__mod__'])
+        return node_at(prelude_call(helper [left right] node.loc @state @session) session)
+    }
+    if name =? '__unary_sub__' and node.pos_args.length =? 1 and (flagged or big_operand) {
+        if id in? state.unfit {state.unfit.pop(id);}
+        return node_at(prelude_call('_bigint_neg' [to_big(node.pos_args[0] @state @session)] node.loc @state @session) session)
+    }
+    if name =? '__pow__' and node.pos_args.length =? 2 and (flagged or big_operand) {
+        if id in? state.unfit {state.unfit.pop(id);}
+        let exponent=node.pos_args[1]
+        let word=types.primitive('int64' @session.types)
+        if node_at(exponent session).value_type not=? word {exponent=put(hir.ValueCast[node_at(exponent session).loc word exponent] @session)}
+        return node_at(prelude_call('_bigint_pow' [to_big(node.pos_args[0] @state @session) exponent] node.loc @state @session) session)
+    }
+    let signature=types.node_at(session.types func.value_type)
+    if signature is? types.OverloadType {
+        loop i in 0.. and i <? node.pos_args.length {
+            let arg=node_at(node.pos_args[i] session)
+            if arg isnt? hir.ValueCast or not is_big(arg.expr state session) continue
+            loop j in 0.. and j <? signature.methods.length {
+                let method=types.node_at(session.types signature.methods[j])
+                $runtime_assert method is? types.FunctionType
+                if method.pos_or_kw.length >? 0 and method.pos_or_kw[0].value_type =? state.big_type {
+                    let cast_id=node.pos_args[i]
+                    if cast_id in? state.unfit {state.unfit.pop(cast_id);}
+                    node.pos_args[i]=arg.expr node.selected_method_index=j
+                    break
+                }
+            }
+        }
+    } else if signature is? types.FunctionType {
+        let replacement=reinstantiate(node func @state @session)
+        if replacement isnt? none return node_at(replacement session)
+    }
+    return node
+}
+rewrite = (id:addr @seen:set<addr> @state:State @session:contexts.Session):>void => {
+    if id in? seen or state.problem isnt? none return void
+    seen.add(id)
+    loop child in hir.children(node_at(id session)) {rewrite(child @seen @state @session)}
+    let rewritten=rewrite_node(id @state @session)
+    $runtime_assert id <? session.hir.length
+    session.hir[id]=rewritten
+}
+# Check boundaries after propagation has settled. Inspecting them during a
+# rewrite iteration would see a mixture of old and new binding types.
+returns = (id:addr @seen:set<addr> @state:State session:contexts.Session):>void => {
+    if id in? seen return void
+    seen.add(id)
+    let node=node_at(id session)
+    if node is? hir.FunctionLiteral return void
+    if node is? hir.Return and node.item isnt? none and is_big(node.item state session) {
+        fail(node 'a big integer is returned from a word-sized function' 'annotate the result as `bigint`, or prove the value fits with a comparison' @state)
+    }
+    loop child in hir.children(node) {returns(child @seen @state session)}
+}
+boundaries = (id:addr @seen:set<addr> @state:State session:contexts.Session):>void => {
+    if id in? seen return void
+    seen.add(id)
+    let node=node_at(id session)
+    if node is? hir.FunctionLiteral and abstract_integer(node.rettype session) {
+        let returned:set<addr>=set[]
+        returns(node.body @returned @state session)
+    }
+    if node is? hir.FunctionCall {
+        let func=node_at(node.func session)
+        let signature=types.node_at(session.types func.value_type)
+        if signature is? types.FunctionType {
+            loop i in 0.. and i <? node.pos_args.length and i <? signature.pos_or_kw.length {
+                let arg=node_at(node.pos_args[i] session)
+                if is_big(node.pos_args[i] state session) and signature.pos_or_kw[i].value_type not=? state.big_type and signature.pos_or_kw[i].value_type not=? state.big_nonzero and arg isnt? hir.Place {
+                    fail(arg 'a big integer is passed to a word-sized parameter' 'annotate the parameter as `bigint`, or prove the value fits with a comparison' @state)
+                }
+            }
+        }
+    }
+    loop child in hir.children(node) {boundaries(child @seen @state session)}
+}
+let run = (root:addr @state:State @session:contexts.Session):>array<Note>|Error => {
+    let original_hoisted=session.hoisted.length
+    loop true {
+        let visited:set<addr>=set[]
+        rewrite(root @visited @state @session)
+        if state.problem isnt? none return state.problem
+        let before=state.big_bindings.length
+        let marked:set<addr>=set[]
+        mark(root @marked @state @session)
+        if state.big_bindings.length =? before break
+    }
+    # New generic instances have no module startup state. Prepend them once,
+    # retaining the checker's declaration identities and initialization order.
+    if session.hoisted.length >? original_hoisted {
+        let block=node_at(root session)
+        $runtime_assert block is? hir.Block
+        let items:array<addr>=[]
+        let next=original_hoisted
+        loop next <? session.hoisted.length {items.push(session.hoisted[next]) next+=1}
+        loop item in block.items {items.push(item)}
+        block.items=items
+        $runtime_assert root <? session.hir.length
+        session.hir[root]=block
+    }
+    let visited:set<addr>=set[]
+    boundaries(root @visited @state session)
+    if state.problem isnt? none return state.problem
+    let remaining:addr?=none
+    loop [id flag] in state.unfit {remaining=id break}
+    if remaining isnt? none {
+        let flag=state.unfit.get(remaining)
+        $runtime_assert flag isnt? none
+        let node=node_at(remaining session)
+        let width=views.fixed_integer_bounds(types.primitive(flag.word @session.types) session.types)
+        let interval=flag.interval
+        let refuted=interval isnt? none and interval.lower isnt? none and interval.upper isnt? none and interval.lower =? interval.upper and width isnt? none and (interval.lower <? width.minimum or interval.lower >? width.maximum)
+        let title=if refuted "this integer does not fit `{flag.word}`" else "cannot prove this integer fits `{flag.word}`"
+        fail(node title "{describe(interval)}; annotate a fixed width, prove its range, or use `bigint`" @state)
+        $runtime_assert state.problem isnt? none
+        return state.problem
+    }
+    # Stable source order, independent of the order fixed-point propagation
+    # discovered the representations. Equal locations keep discovery order.
+    let i:addr=1
+    loop i <? state.notes.length {
+        let current=state.notes[i]
+        let j=i
+        loop j >? 0 and state.notes[j-1].loc.start >? current.loc.start {
+            state.notes[j]=state.notes[j-1] j-=1
+        }
+        state.notes[j]=current
+        i+=1
+    }
+    return state.notes
+}
+select = (root:addr srcfile:SrcFile prelude:dict<string addr> unfit:dict<addr Unfit> @session:contexts.Session):>array<Note>|Error => {
+    let id=prelude.get('BigInt')
+    if id is? none return []
+    let binding=bindings.binding_at(session.registry id)
+    let declared=binding.type_value
+    if declared isnt? addr return []
+    let state=State[srcfile prelude declared numeric.object_member(declared session.types) unfit]
+    return run(root @state @session)
+}

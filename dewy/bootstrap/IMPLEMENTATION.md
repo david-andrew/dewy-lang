@@ -72,6 +72,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   exhaustion from multi-megabyte value copies without changing explicit
   source `__alloca__` calls. Thirty-one ownership/region regressions pass,
   including large arrays and records under a 1 MiB native stack limit.
+  Ambiguity trials now skip restoring the untouched first candidate and
+  retain a final successful candidate directly; all 242 source comparisons
+  pass. String clones copy established grapheme boundaries instead of
+  re-segmenting their bytes, with 42 focused string regressions passing.
+  The resulting checker reaches time-unit scales through the ordered prelude
+  in 263 seconds; exact constant quantity arithmetic is the next gap.
 
 - Native layout queries match the hosted layouts for primitive and nested
   fields, scalar/handle array strides, inline union cells, and brand storage
@@ -104,7 +110,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   unsigned words call the ordinary prelude conversion helpers. Oversized
   unannotated integers retain their abstract type for representation analysis.
   The native constant and boundary comparisons pass. Runtime arithmetic
-  dispatch and the whole-program representation pass remain pending.
+  dispatch and integration with the complete proof driver remain pending.
+  The native representation pass now promotes oversized literals and flagged
+  arithmetic, propagates abstract local storage through accumulators, retains
+  word parameter/result boundaries, and reports refuted narrowing. A native
+  HIR fixture agrees with hosted binding propagation and checks these errors
+  and preservation of effectful singleton expressions. Generic re-instantiation
+  is carried over through the checker's cache and still needs execution coverage.
 
 - Literal-member equality now uses ordinary union tag narrowing, so an early
   `if value =? 0 return 0` excludes BigInt's zero alternative afterward.

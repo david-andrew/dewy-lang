@@ -786,14 +786,21 @@ ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Ses
     let before=contexts.checkpoint(session)
     let winner:Choice? = none
     let rejected:array<Error> = []
+    let next:addr=0
     loop candidate in node.candidates {
-        contexts.restore(before @session)
+        # The first reading already has the original state. Restoring it
+        # would only copy the checkpoint back over identical arenas.
+        if next >? 0 {contexts.restore(before @session)}
+        next+=1
         let result = expression(candidate env @session expected=expected call_target=call_target allow_place=allow_place)
         if result is? Error { rejected.push(result) continue }
         if winner isnt? none {
             contexts.restore(before @session)
             return problem(id 'ambiguous expression' 'multiple readings typecheck; add explicit operators or parentheses' env session)
         }
+        # A final successful reading is already installed, with every earlier
+        # reading rejected. Keep it without copying and restoring a winner.
+        if next =? node.candidates.length return result
         winner = Choice[result contexts.checkpoint(session)]
     }
     if winner is? none {
