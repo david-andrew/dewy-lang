@@ -24,6 +24,8 @@ CASES = [
     'int64<i => i >=? 0>', 'string<length >? 0>', 'array<int64 1 <=? length <=? 8>',
     'int64 & ~0', '~0 & int64', 'int64 & ~(0|1)', 'nat64 & ~0',
     '(0|[value:int64]) & ~0',
+    'Big:type=0|[sign:int64]\nBig<sign =? 1>',
+    'Big:type=0|[sign:int64]\nBig<sign >? 0 and sign <? 2>',
     'int64<n => n not=? 0>', 'uint8<radix => radix =? alphabet.length>',
     'const [alphabet:string radix:uint8<radix =? alphabet.length> = alphabet.length]',
     'Box:type = <T>[item:T]\nBox<int64>',
@@ -53,6 +55,8 @@ ERROR_CASES = [
     'Box:type = <T>[item:T]\nBox',
     'Box:type = <T of int>[item:T]\nBox<string>',
     '(0|[value:int64]) & ~1',
+    'Big:type=0|[sign:int64]\nBig<missing =? 1>',
+    'Choice:type=0|[sign:int64]|[other:int64]\nChoice<sign =? 1>',
 ]
 
 

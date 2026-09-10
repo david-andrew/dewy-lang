@@ -298,6 +298,23 @@ bind_subjects = (base:addr propositions:array<facts.Proposition> id:addr context
     return result
 }
 
+# The numeric union convention is a literal zero beside one record. A
+# field-only refinement of that alias selects its unique record alternative:
+# BigInt<sign =? 1> cannot contain the zero alternative, which has no sign.
+# Multiple record alternatives still require an explicit type selection.
+field_refinement_base = (base:addr promises:array<facts.Proposition> nodes:array<types.Type>):>addr => {
+    let union=types.node_at(nodes types.strip_refinement(base nodes))
+    if union isnt? types.TypeOr or promises.length =? 0 return base
+    loop promise in promises {if facts.field(promise) is? none return base}
+    let selected:addr?=none
+    loop member in union.items {
+        if types.node_at(nodes member) isnt? types.ObjectType continue
+        if selected isnt? none return base
+        selected=member
+    }
+    return if selected is? none base else selected
+}
+
 function_args = (id:addr context:contexts.Context @session:contexts.Session):>array<types.PosOrKwArg>|Error => {
     let source = contexts.source_at(context session)
     let node = tokens.node_at(source.nodes id)
@@ -699,9 +716,10 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
     if arguments.length =? 0 and promises.length >? 0 {
         let base = resolve(node.left context @session)
         if base is? Error return base
-        let bound = bind_subjects(base promises id context @session)
+        let selected=field_refinement_base(base promises session.types)
+        let bound = bind_subjects(selected promises id context @session)
         if bound is? Error return bound
-        return refine(base bound @session)
+        return refine(selected bound @session)
     }
     if name =? 'set' and arguments.length =? 1 return views.set_type(word_element(arguments[0] @session) @session.types)
     if (name =? 'dict' or name =? 'totaldict') and arguments.length =? 2 {
