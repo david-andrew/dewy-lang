@@ -132,17 +132,16 @@ resolve_name = (name:string id:addr context:contexts.Context @session:contexts.S
 
 # A literal bound also admits a fixed-width min/max and a boolean (1/0).
 literal_bound = (id:addr context:contexts.Context @session:contexts.Session):>bigint? => {
-    let source = contexts.source_at(context session)
-    let literal = syntax.integer(id source.nodes)
+    let literal = source_views.integer(id context session)
     if literal isnt? none return literal
-    let node = tokens.node_at(source.nodes id)
+    let node = contexts.node_at(id context session)
     if node is? parser.Atom {
-        let atom = tokens.node_at(source.nodes node.item)
+        let atom = contexts.node_at(node.item context session)
         if atom is? tokens.Bool return if atom.value 1 else 0
     }
-    if node is? parser.BinOp and syntax.is_operator(node.op '.' source.nodes) {
-        let owner = syntax.identifier(node.left source.nodes)
-        let member = syntax.identifier(node.right source.nodes)
+    if node is? parser.BinOp and source_views.is_operator(node.op '.' context session) {
+        let owner = source_views.identifier(node.left context session)
+        let member = source_views.identifier(node.right context session)
         if owner isnt? none and member isnt? none and (member =? 'min' or member =? 'max') {
             let bounds = views.fixed_integer_bounds(types.primitive(owner @session.types) session.types)
             if bounds isnt? none return if member =? 'min' bounds.minimum else bounds.maximum
@@ -151,6 +150,10 @@ literal_bound = (id:addr context:contexts.Context @session:contexts.Session):>bi
     return none
 }
 Subject:type = const [name:string projection:facts.Projection='value']
+source_subject = (id:addr name:string subject:string fields:bool context:contexts.Context session:contexts.Session):>Subject? => {
+    $runtime_assert context.source <? session.sources.length
+    return subject_of(id name subject fields session.sources[context.source].nodes)
+}
 subject_of = (id:addr name:string subject:string fields:bool nodes:array<tokens.Token>):>Subject? => {
     let direct = syntax.identifier(id nodes)
     if direct isnt? none {
@@ -169,12 +172,11 @@ subject_of = (id:addr name:string subject:string fields:bool nodes:array<tokens.
     return none
 }
 comparison = (left:addr right:addr op:facts.Operator name:string subject:string fields:bool context:contexts.Context @session:contexts.Session):>facts.Proposition|none|Error => {
-    let source = contexts.source_at(context session)
-    let target = subject_of(left name subject fields source.nodes)
+    let target = source_subject(left name subject fields context session)
     let bound = right
     let operator = op
     if target is? none {
-        target = subject_of(right name subject fields source.nodes)
+        target = source_subject(right name subject fields context session)
         bound = left
         if op =? '<?' { operator = '>?' }
         else if op =? '>?' { operator = '<?' }
@@ -184,11 +186,11 @@ comparison = (left:addr right:addr op:facts.Operator name:string subject:string 
     if target is? none return none
     let literal = literal_bound(bound context @session)
     if literal isnt? none return facts.Proposition[target.name operator literal projection=target.projection]
-    let term = syntax.identifier(bound source.nodes)
+    let term = source_views.identifier(bound context session)
     let bound_projection:facts.Projection = 'value'
-    let node = tokens.node_at(source.nodes bound)
-    if node is? parser.BinOp and syntax.is_operator(node.op '.' source.nodes) and syntax.identifier(node.right source.nodes) =? 'length' {
-        term = syntax.identifier(node.left source.nodes)
+    let node = contexts.node_at(bound context session)
+    if node is? parser.BinOp and source_views.is_operator(node.op '.' context session) and source_views.identifier(node.right context session) =? 'length' {
+        term = source_views.identifier(node.left context session)
         bound_projection = 'length'
     }
     if term isnt? none and term not=? name and term not=? 'length' {
@@ -201,13 +203,12 @@ comparison = (left:addr right:addr op:facts.Operator name:string subject:string 
 # Conjunctions and chains are expanded while retaining the same subject.
 # A chain has one direction; equality may occur between its ordered links.
 conditions = (id:addr context:contexts.Context @session:contexts.Session name:string?=none):>array<facts.Proposition>|none|Error => {
-    let source = contexts.source_at(context session)
-    let current = syntax.unparen(id source.nodes)
-    let node = tokens.node_at(source.nodes current)
+    let current = source_views.unparen(id context session)
+    let node = contexts.node_at(current context session)
     if node isnt? parser.BinOp return none
-    let op = syntax.symbol(node.op source.nodes)
+    let op = source_views.symbol(node.op context session)
     if op =? '=>' {
-        let parameter = syntax.identifier(node.left source.nodes)
+        let parameter = source_views.identifier(node.left context session)
         if parameter is? none return none
         let result = conditions(node.right context @session name=parameter)
         return if result is? none contexts.unsupported(node.right 'this refinement proposition' context session) else result
@@ -223,21 +224,21 @@ conditions = (id:addr context:contexts.Context @session:contexts.Session name:st
     }
     if op is? facts.Operator and op not=? 'is?' and op not=? 'isnt?' {
         # Flatten the left-associated parser tree into adjacent comparisons.
-        let preceding = tokens.node_at(source.nodes node.left)
+        let preceding = contexts.node_at(node.left context session)
         if preceding is? parser.BinOp {
-            let previous = syntax.symbol(preceding.op source.nodes)
+            let previous = source_views.symbol(preceding.op context session)
             if previous is? facts.Operator {
                 if op =? 'not=?' or previous =? 'not=?' return contexts.problem(node.op 'comparison does not chain' "`{op}` cannot be part of a comparison chain" context session hint='combine the conditions with `and`')
                 let rising = false
                 let falling = false
                 let cursor:tokens.Token = node
                 loop cursor is? parser.BinOp {
-                    let link = syntax.symbol(cursor.op source.nodes)
+                    let link = source_views.symbol(cursor.op context session)
                     if link isnt? facts.Operator break
                     if link =? '<?' or link =? '<=?' { rising = true }
                     if link =? '>?' or link =? '>=?' { falling = true }
                     if rising and falling return contexts.problem(node.op 'comparison chain changes direction' 'a chain must read one way, including across equality links' context session)
-                    cursor = tokens.node_at(source.nodes cursor.left)
+                    cursor = contexts.node_at(cursor.left context session)
                 }
                 let first = conditions(node.left context @session name=name)
                 if first is? Error return first
@@ -254,7 +255,7 @@ conditions = (id:addr context:contexts.Context @session:contexts.Session name:st
         return if result is? none none else [result]
     }
     if op is? 'is?' | 'isnt?' {
-        let subject = syntax.identifier(node.left source.nodes)
+        let subject = source_views.identifier(node.left context session)
         if subject is? none return contexts.unsupported(node.left 'a type fact about anything but a name' context session)
         let tested = resolve(node.right context @session)
         if tested is? Error return tested
@@ -322,35 +323,34 @@ field_refinement_base = (base:addr promises:array<facts.Proposition> nodes:array
 }
 
 function_args = (id:addr context:contexts.Context @session:contexts.Session):>array<types.PosOrKwArg>|Error => {
-    let source = contexts.source_at(context session)
-    let node = tokens.node_at(source.nodes id)
+    let node = contexts.node_at(id context session)
     let items:array<addr> = if node is? parser.Block and node.delims =? '()' node.inner else [id]
     let result:array<types.PosOrKwArg> = []
     loop item in items {
-        let row = tokens.node_at(source.nodes item)
+        let row = contexts.node_at(item context session)
         let target_id = item
         let default:addr? = none
-        if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
+        if row is? parser.BinOp and source_views.is_operator(row.op '=' context session) {
             default = row.right target_id = row.left
-            row = tokens.node_at(source.nodes target_id)
+            row = contexts.node_at(target_id context session)
         }
         let place = false
-        if row is? parser.Prefix and syntax.is_operator(row.op '@' source.nodes) {
+        if row is? parser.Prefix and source_views.is_operator(row.op '@' context session) {
             place = true target_id = row.item
-            row = tokens.node_at(source.nodes target_id)
+            row = contexts.node_at(target_id context session)
         }
-        let name = syntax.identifier(target_id source.nodes)
+        let name = source_views.identifier(target_id context session)
         let type = types.primitive('any' @session.types)
         if default isnt? none and name isnt? none {
             let inferred = infer_default(default context @session)
             if inferred is? Error return inferred
             type = inferred
         }
-        if row is? parser.BinOp and syntax.is_operator(row.op ':' source.nodes) {
-            let target = tokens.node_at(source.nodes row.left)
+        if row is? parser.BinOp and source_views.is_operator(row.op ':' context session) {
+            let target = contexts.node_at(row.left context session)
             let target_id = row.left
-            if target is? parser.Prefix and syntax.is_operator(target.op '@' source.nodes) { place = true target_id = target.item }
-            name = syntax.identifier(target_id source.nodes)
+            if target is? parser.Prefix and source_views.is_operator(target.op '@' context session) { place = true target_id = target.item }
+            name = source_views.identifier(target_id context session)
             let inner = contexts.Context[context.source context.scope name]
             let declared = resolve(row.right inner @session)
             if declared is? Error return declared
@@ -413,16 +413,15 @@ function_result = (id:addr context:contexts.Context @session:contexts.Session):>
 # Defaults remain syntax. Infer their storage shape here when the expression
 # itself supplies it; arbitrary calls need the value checker's resolution.
 infer_default = (id:addr context:contexts.Context @session:contexts.Session singleton:bool=false):>addr|Error => {
-    let source = contexts.source_at(context session)
-    let node = tokens.node_at(source.nodes syntax.unparen(id source.nodes))
-    let number = syntax.integer(id source.nodes)
+    let node = contexts.node_at(source_views.unparen(id context session) context session)
+    let number = source_views.integer(id context session)
     if number isnt? none {
         if singleton return types.integer_literal(number @session.types)
         if number >=? -9223372036854775808 and number <=? 9223372036854775807 return types.primitive('int64' @session.types)
         return contexts.unsupported(id 'materializing a large default through the numeric prelude' context session)
     }
     if node is? parser.Atom {
-        let atom = tokens.node_at(source.nodes node.item)
+        let atom = contexts.node_at(node.item context session)
         if atom is? tokens.String return if singleton types.string_literal(atom.content @session.types) else types.primitive('string' @session.types)
         if atom is? tokens.Bool return types.primitive('bool' @session.types)
         if atom is? tokens.Identifier {
@@ -448,37 +447,36 @@ infer_default = (id:addr context:contexts.Context @session:contexts.Session sing
 }
 
 field = (id:addr context:contexts.Context @session:contexts.Session):>types.ObjectField|Error => {
-    let source = contexts.source_at(context session)
     let current = id
-    let row = tokens.node_at(source.nodes current)
+    let row = contexts.node_at(current context session)
     let mutable = true
     if row is? parser.KeywordExpr and row.parts.length =? 2 {
-        let keyword = tokens.node_at(source.nodes row.parts[0])
+        let keyword = contexts.node_at(row.parts[0] context session)
         if keyword is? tokens.Keyword and keyword.name in? ['const' 'let'] {
             mutable = keyword.name not=? 'const'
             current = row.parts[1]
-            row = tokens.node_at(source.nodes current)
+            row = contexts.node_at(current context session)
         }
     }
     let default:addr? = none
     let default_node:addr? = none
-    if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
+    if row is? parser.BinOp and source_views.is_operator(row.op '=' context session) {
         default = contexts.syntax_ref(row.right context @session)
         default_node = row.right
         current = row.left
-        row = tokens.node_at(source.nodes current)
+        row = contexts.node_at(current context session)
     }
-    let bare_name = syntax.identifier(current source.nodes)
+    let bare_name = source_views.identifier(current context session)
     if bare_name isnt? none and default_node isnt? none {
         let inferred = infer_default(default_node context @session)
         if inferred is? Error return inferred
         return types.ObjectField[bare_name inferred mutable default]
     }
     # `fn:(x:T):>U` parses with :> outside the field's colon.
-    if row is? parser.BinOp and syntax.is_operator(row.op ':>' source.nodes) {
-        let target = tokens.node_at(source.nodes row.left)
-        if target is? parser.BinOp and syntax.is_operator(target.op ':' source.nodes) {
-            let name = syntax.identifier(target.left source.nodes)
+    if row is? parser.BinOp and source_views.is_operator(row.op ':>' context session) {
+        let target = contexts.node_at(row.left context session)
+        if target is? parser.BinOp and source_views.is_operator(target.op ':' context session) {
+            let name = source_views.identifier(target.left context session)
             if name isnt? none {
                 let args = function_args(target.right context @session)
                 if args is? Error return args
@@ -488,8 +486,8 @@ field = (id:addr context:contexts.Context @session:contexts.Session):>types.Obje
             }
         }
     }
-    if row isnt? parser.BinOp or not syntax.is_operator(row.op ':' source.nodes) return contexts.problem(id 'object type fields must be `name:type`' 'this is not a named field type' context session)
-    let name = syntax.identifier(row.left source.nodes)
+    if row isnt? parser.BinOp or not source_views.is_operator(row.op ':' context session) return contexts.problem(id 'object type fields must be `name:type`' 'this is not a named field type' context session)
+    let name = source_views.identifier(row.left context session)
     if name is? none return contexts.problem(id 'object type fields must be `name:type`' 'this is not a named field type' context session)
     let inner = contexts.Context[context.source context.scope name]
     let declared = resolve(row.right inner @session)
@@ -524,14 +522,13 @@ attach_facts = (base:addr promises:array<facts.Proposition> id:addr context:cont
 }
 BoolArm:type = const [truth:bool propositions:array<facts.Proposition>]
 bool_arm = (id:addr context:contexts.Context @session:contexts.Session):>BoolArm?|Error => {
-    let source = contexts.source_at(context session)
-    let node = tokens.node_at(source.nodes id)
+    let node = contexts.node_at(id context session)
     if node is? parser.Atom {
-        let item = tokens.node_at(source.nodes node.item)
+        let item = contexts.node_at(node.item context session)
         if item is? tokens.Bool return BoolArm[item.value []]
     }
-    if node is? parser.BinOp and syntax.symbol(node.op source.nodes) in? ['&' 'and'] {
-        let block = tokens.node_at(source.nodes node.right)
+    if node is? parser.BinOp and source_views.symbol(node.op context session) in? ['&' 'and'] {
+        let block = contexts.node_at(node.right context session)
         if block is? parser.Block and block.delims =? '<>' {
             let arm = bool_arm(node.left context @session)
             if arm is? Error return arm
@@ -696,18 +693,17 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
 }
 
 parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
-    let source = contexts.source_at(context session)
-    let parameters = tokens.node_at(source.nodes node.right)
+    let parameters = contexts.node_at(node.right context session)
     if parameters isnt? parser.Block or parameters.delims not=? '<>' return contexts.unsupported(id 'this type application' context session)
-    let name = syntax.identifier(node.left source.nodes)
+    let name = source_views.identifier(node.left context session)
     let arguments:array<addr> = []
     let promises:array<facts.Proposition> = []
     let length:addr? = none
     loop item in parameters.inner {
-        let entry = tokens.node_at(source.nodes item)
-        if name =? 'array' and entry is? parser.BinOp and syntax.is_operator(entry.op '=' source.nodes) and syntax.identifier(entry.left source.nodes) =? 'length' {
+        let entry = contexts.node_at(item context session)
+        if name =? 'array' and entry is? parser.BinOp and source_views.is_operator(entry.op '=' context session) and source_views.identifier(entry.left context session) =? 'length' {
             if length isnt? none return contexts.problem(item 'duplicate array length parameter' '`length` was already specified' context session)
-            let value = syntax.integer(entry.right source.nodes)
+            let value = source_views.integer(entry.right context session)
             if value is? none or value <? 0 return contexts.problem(entry.right 'array length must be an integer literal' 'expected a non-negative integer' context session)
             if value >? targets.max_length(session.target) return contexts.unsupported(entry.right 'array length beyond the target address space' context session)
             length = value as addr
@@ -759,7 +755,7 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
             if binding.type_value is? none and binding_id not in? session.pending_aliases return contexts.problem(id "`{name}` does not name a type" 'this binding has a runtime value' context session)
             let value = resolve_alias(binding_id @session)
             if value is? Error return value
-            if value is? types.GenericTypeAlias return aliases.instantiate(value arguments session.links @session.types source.srcfile node.loc)
+            if value is? types.GenericTypeAlias return aliases.instantiate(value arguments session.links @session.types source_views.srcfile(context session) node.loc)
             return contexts.problem(node.left 'type alias is not generic' 'this alias takes no arguments' context session)
         }
     }
@@ -770,18 +766,17 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
 # This permits forward references and gives a cycle a stable binding identity.
 # Value/function declarations are reserved by the expression checker.
 predeclare_alias = (id:addr context:contexts.Context @session:contexts.Session):>addr?|Error => {
-    let source = contexts.source_at(context session)
-    let node = tokens.node_at(source.nodes id)
+    let node = contexts.node_at(id context session)
     if node is? parser.KeywordExpr and node.parts.length =? 2 {
-        let keyword = tokens.node_at(source.nodes node.parts[0])
-        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] { node = tokens.node_at(source.nodes node.parts[1]) }
+        let keyword = contexts.node_at(node.parts[0] context session)
+        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] { node = contexts.node_at(node.parts[1] context session) }
     }
-    if node isnt? parser.BinOp or syntax.symbol(node.op source.nodes) not in? ['=' '::' ':='] return none
-    let target = tokens.node_at(source.nodes node.left)
+    if node isnt? parser.BinOp or source_views.symbol(node.op context session) not in? ['=' '::' ':='] return none
+    let target = contexts.node_at(node.left context session)
     let name:string? = none
-    if target is? parser.BinOp and syntax.is_operator(target.op ':' source.nodes) and syntax.identifier(target.right source.nodes) =? 'type' {
-        name = syntax.identifier(target.left source.nodes)
-    } else if syntax.is_mint(node.right source.nodes) { name = syntax.identifier(node.left source.nodes) }
+    if target is? parser.BinOp and source_views.is_operator(target.op ':' context session) and source_views.identifier(target.right context session) =? 'type' {
+        name = source_views.identifier(target.left context session)
+    } else if source_views.is_mint(node.right context session) { name = source_views.identifier(node.left context session) }
     else return none
     if name is? none return contexts.problem(id 'type alias needs a name' 'use `Name:type = ...`' context session)
     let scope = bindings.scope_at(session.scopes context.scope)
@@ -801,16 +796,15 @@ GenericParameters:type = const [params:array<types.GenericParam> context:context
 # Type aliases and function literals use the same sequential parameter scope:
 # a later bound may mention an earlier parameter, never a caller's shadow.
 generic_parameters = (parameters:parser.Block context:contexts.Context @session:contexts.Session):>GenericParameters|Error => {
-    let source = contexts.source_at(context session)
     let inner = contexts.child(context @session)
     let params:array<types.GenericParam> = []
     let names:set<string> = set[]
     loop item in parameters.inner {
-        let node = tokens.node_at(source.nodes item)
-        let name = syntax.identifier(item source.nodes)
+        let node = contexts.node_at(item context session)
+        let name = source_views.identifier(item context session)
         let bound = types.primitive('any' @session.types)
-        if node is? parser.BinOp and syntax.is_operator(node.op 'of' source.nodes) {
-            name = syntax.identifier(node.left source.nodes)
+        if node is? parser.BinOp and source_views.is_operator(node.op 'of' context session) {
+            name = source_views.identifier(node.left context session)
             let resolved = resolve(node.right inner @session)
             if resolved is? Error return resolved
             bound = resolved
@@ -906,8 +900,8 @@ resolve_alias = (binding_id:addr @session:contexts.Session):>types.TypeAliasValu
     session.resolving_aliases.add(binding_id)
     let expression = contexts.node_at(pending.expression.node context session)
     let value:types.TypeAliasValue|Error = types.primitive('never' @session.types)
-    if syntax.is_mint(pending.expression.node contexts.source_at(context session).nodes) { value = mint(binding_id pending.expression.node context @session) }
-    else if expression is? parser.BinOp and syntax.is_operator(expression.op 'TypeParamJuxtapose' contexts.source_at(context session).nodes) {
+    if source_views.is_mint(pending.expression.node context session) { value = mint(binding_id pending.expression.node context @session) }
+    else if expression is? parser.BinOp and source_views.is_operator(expression.op 'TypeParamJuxtapose' context session) {
         let parameters = contexts.node_at(expression.left context session)
         if parameters is? parser.Block and parameters.delims =? '<>' { value = generic_alias(parameters expression.right context @session) }
         else { value = resolve(pending.expression.node context @session) }
@@ -932,21 +926,20 @@ resolve_alias = (binding_id:addr @session:contexts.Session):>types.TypeAliasValu
 # Minting is the one generative type operation. Keep it attached to a lexical
 # binding: resolving the same alias twice returns the original identity.
 mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
-    let source = contexts.source_at(context session)
     let binding = bindings.binding_at(session.registry binding_id)
     let expression = id
     let abstract = false
-    let directive = tokens.node_at(source.nodes id)
+    let directive = contexts.node_at(id context session)
     if directive is? parser.Directive and directive.name =? 'abstract' and directive.condition isnt? none {
         expression = directive.condition abstract = true
     }
-    let operands = syntax.intersection_operands(expression source.nodes)
+    let operands = source_views.intersection_operands(expression context session)
     let parent:addr? = none
     let additions:array<addr> = []
     let default_only:set<string> = set[]
     loop operand in operands {
-        let node = tokens.node_at(source.nodes operand)
-        if node is? parser.Prefix and syntax.is_operator(node.op 'type of' source.nodes) {
+        let node = contexts.node_at(operand context session)
+        if node is? parser.Prefix and source_views.is_operator(node.op 'type of' context session) {
             if parent isnt? none return contexts.problem(operand 'an alias mints once' 'a second `type of` in the same intersection' context session)
             let resolved = resolve(node.item context @session)
             if resolved is? Error return resolved
@@ -957,9 +950,9 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
             additions.push(resolved)
             if node is? parser.Block and node.delims =? '[]' {
                 loop item in node.inner {
-                    let row = tokens.node_at(source.nodes item)
-                    if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
-                        let name = syntax.identifier(row.left source.nodes)
+                    let row = contexts.node_at(item context session)
+                    if row is? parser.BinOp and source_views.is_operator(row.op '=' context session) {
+                        let name = source_views.identifier(row.left context session)
                         if name isnt? none { default_only.add(name) }
                     }
                 }

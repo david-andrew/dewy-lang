@@ -1,6 +1,8 @@
 from reporting import SrcFile
 import p"context.dewy" as contexts
 import p"syntax.dewy" as syntax
+import p"loop_syntax.dewy" as loop_syntax
+import p"method_syntax.dewy" as methods
 import p"binary_literals.dewy" as binary_literals
 import p"path_values.dewy" as path_values
 import p"../parser/p0.dewy" as parser
@@ -33,4 +35,47 @@ include_arguments = (id:addr context:contexts.Context session:contexts.Session):
 path_parameter = (function:parser.BinOp context:contexts.Context session:contexts.Session):>string? => {
     $runtime_assert context.source <? session.sources.length
     return path_values.parameter(function session.sources[context.source].nodes)
+}
+
+is_mint = (id:addr context:contexts.Context session:contexts.Session):>bool => {
+    $runtime_assert context.source <? session.sources.length
+    return syntax.is_mint(id session.sources[context.source].nodes)
+}
+
+unparen = (id:addr context:contexts.Context session:contexts.Session):>addr => {
+    $runtime_assert context.source <? session.sources.length
+    return syntax.unparen(id session.sources[context.source].nodes)
+}
+
+intersection_operands = (id:addr context:contexts.Context session:contexts.Session):>array<addr> => {
+    $runtime_assert context.source <? session.sources.length
+    return syntax.intersection_operands(id session.sources[context.source].nodes)
+}
+
+contains_iterator = (id:addr context:contexts.Context session:contexts.Session):>bool => {
+    $runtime_assert context.source <? session.sources.length
+    return loop_syntax.contains_iterator(id session.sources[context.source].nodes)
+}
+
+conjuncts = (id:addr context:contexts.Context session:contexts.Session):>array<addr> => {
+    $runtime_assert context.source <? session.sources.length
+    return loop_syntax.conjuncts(id session.sources[context.source].nodes)
+}
+
+mutations = (id:addr context:contexts.Context session:contexts.Session replacements:bool=false):>set<string> => {
+    $runtime_assert context.source <? session.sources.length
+    return loop_syntax.mutations(id session.sources[context.source].nodes replacements)
+}
+
+method_parameters = (literal:parser.BinOp context:contexts.Context session:contexts.Session):>set<string> => {
+    $runtime_assert context.source <? session.sources.length
+    return methods.parameter_names(literal session.sources[context.source].nodes)
+}
+method_locals = (id:addr context:contexts.Context session:contexts.Session):>set<string> => {
+    $runtime_assert context.source <? session.sources.length
+    return methods.locals(id session.sources[context.source].nodes)
+}
+method_scan = (id:addr names:set<string> context:contexts.Context session:contexts.Session):>methods.Analysis => {
+    $runtime_assert context.source <? session.sources.length
+    return methods.scan(id names session.sources[context.source].nodes)
 }

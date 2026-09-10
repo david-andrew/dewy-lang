@@ -17,7 +17,6 @@ import p"analyze/predicate_effects.dewy" as predicate_effects
 import p"array_methods.dewy" as array_methods
 import p"../targets.dewy" as targets
 import p"namespaces.dewy" as namespaces
-import p"loop_syntax.dewy" as loop_syntax
 import p"type_queries.dewy" as views
 import p"analyze/value_bounds.dewy" as constants
 import p"analyze/hir_facts.dewy" as hir_facts
@@ -28,7 +27,6 @@ import p"container_state.dewy" as container_state
 import p"match_patterns.dewy" as patterns
 import p"propositions.dewy" as propositions
 import p"inferred_results.dewy" as inferred_results
-import p"method_syntax.dewy" as method_syntax
 import p"type_names.dewy" as type_names
 import p"function_contracts.dewy" as contracts
 import p"text_shapes.dewy" as text_shapes
@@ -69,9 +67,7 @@ pending = (id:addr detail:string env:Environment session:contexts.Session):>Erro
 # source operator name; synthesized compiler helpers retain their own ids.
 begin = (source:contexts.Context @session:contexts.Session inherited:dict<string addr>=[]):>Environment => {
     let definitions = builtins.definitions(@session.types)
-    let src = contexts.source_at(source session)
-    $runtime_assert src.nodes.length >? 0
-    let loc = src.nodes[0].loc
+    let loc = contexts.node_at(0 source session).loc
     loop [name value_type] in definitions {
         let binding_id = bindings.allocate(@session.registry none name 'function' loc)
         let binding = bindings.binding_at(session.registry binding_id)
@@ -198,9 +194,8 @@ include_bytes = (arguments:addr id:addr env:Environment @session:contexts.Sessio
     if value is? Error return value
     let path=path_values.literal(value session)
     if path is? none return problem(items[0] '`$include_bytes` needs a compile-time path' display.type_to_dewy(node_at(value session).value_type session.types) env session)
-    let source=contexts.source_at(env.lexical session)
-    let loc=tokens.node_at(source.nodes id).loc
-    let included=binary_literals.read_file(path source.srcfile loc)
+    let loc=contexts.node_at(id env.lexical session).loc
+    let included=binary_literals.read_file(path source_views.srcfile(env.lexical session) loc)
     if included is? Error return included
     return put(hir.BasedString[loc types.binary_literal(included.packed.bytes @session.types) '0x' included.packed.digits included.packed.bytes included.path] @session)
 }
@@ -1226,11 +1221,10 @@ join_reads = (exits:array<Environment> env:Environment @session:contexts.Session
     session.read_states[env.state] = joined
 }
 flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
     if node.arms.length =? 1 and node.default is? none {
-        let arm = tokens.node_at(source.nodes node.arms[0])
+        let arm = contexts.node_at(node.arms[0] env.lexical session)
         if arm is? parser.KeywordExpr and arm.parts.length =? 3 {
-            let keyword = tokens.node_at(source.nodes arm.parts[0])
+            let keyword = contexts.node_at(arm.parts[0] env.lexical session)
             if keyword is? tokens.Keyword and keyword.name =? 'loop' return loop_flow(id arm env @session)
         }
     }
@@ -1240,9 +1234,9 @@ flow = (id:addr node:parser.Flow env:Environment @session:contexts.Session expec
     let match_total=false
     let uncovered:string?=none
     loop arm_id in node.arms {
-        let arm=tokens.node_at(source.nodes arm_id)
+        let arm=contexts.node_at(arm_id env.lexical session)
         if arm isnt? parser.KeywordExpr or arm.parts.length not=? 3 return pending(arm_id 'this conditional arm' env session)
-        let keyword=tokens.node_at(source.nodes arm.parts[0])
+        let keyword=contexts.node_at(arm.parts[0] env.lexical session)
         if keyword isnt? tokens.Keyword return pending(arm_id 'this conditional keyword' env session)
         if keyword.name =? 'match' {
             has_match=true
@@ -1348,15 +1342,14 @@ source_arguments = (id:addr? env:Environment session:contexts.Session):>array<ad
     return if arguments is? parser.Block arguments.inner else [id]
 }
 call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
     let items=source_arguments(arguments_id env session)
     let signature = types.node_at(session.types node_at(function session).value_type)
     let positional:array<addr> = []
     let keyword:dict<string addr> = []
     loop item in items {
-        let row = tokens.node_at(source.nodes item)
-        if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
-            let name = syntax.identifier(row.left source.nodes)
+        let row = contexts.node_at(item env.lexical session)
+        if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) {
+            let name = source_views.identifier(row.left env.lexical session)
             if name is? none return problem(item 'named argument needs a name' 'use `name=value`' env session)
             if name in? keyword return problem(item 'duplicate named argument' name env session)
             let wanted:addr? = none
@@ -1387,8 +1380,7 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
 index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     sequence=binary_array(sequence @session)
     if views.container_entry_types(node_at(sequence session).value_type session.types) isnt? none return container_index(sequence index_id id env @session)
-    let source = contexts.source_at(env.lexical session)
-    let arguments = tokens.node_at(source.nodes index_id)
+    let arguments = contexts.node_at(index_id env.lexical session)
     let item = index_id
     if arguments is? parser.Block {
         if arguments.inner.length not=? 1 return problem(id 'index requires one expression' 'select one element, or use a range for a slice' env session)
@@ -1401,7 +1393,7 @@ index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:con
     let length:addr? = none
     if type is? types.ArrayType|types.StringType { length = type.length }
     else if type is? types.StringLiteralType { length = type.value.length }
-    let loc = tokens.node_at(source.nodes id).loc
+    let loc = contexts.node_at(id env.lexical session).loc
     let word = types.primitive('int64' @session.types)
     let last:addr = 0
     if length isnt? none {
@@ -1479,8 +1471,7 @@ sequence_slice = (sequence:addr index:addr range:hir.Range type:types.Type lengt
 # Field reads preserve their receiver expression. The route registry can later
 # attach stable fact identities without evaluating the receiver a second time.
 member = (receiver:addr name_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
-    let name = syntax.identifier(name_id source.nodes)
+    let name = source_views.identifier(name_id env.lexical session)
     if name is? none return problem(id 'member access needs a name' 'expected a field or method name' env session)
     return member_named(receiver name id env @session)
 }
@@ -1681,17 +1672,16 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
     let overload=constructor_overload(constructor arguments_id id env @session expected=expected)
     if overload is? Error return overload
     if overload isnt? none return overload
-    let source = contexts.source_at(env.lexical session)
     let items=source_arguments(arguments_id env session)
     let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
     let given:dict<string addr> = []
     let positional:array<addr> = []
     loop item in items {
-        let row = tokens.node_at(source.nodes item)
+        let row = contexts.node_at(item env.lexical session)
         let name:string? = none
         let value_id = item
-        if row is? parser.BinOp and syntax.is_operator(row.op '=' source.nodes) {
-            name = syntax.identifier(row.left source.nodes)
+        if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) {
+            name = source_views.identifier(row.left env.lexical session)
             value_id = row.right
             if name is? none return problem(item 'constructor argument needs a field name' 'use `name=value`' env session)
         } else {
@@ -1756,7 +1746,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
         let binding = bind_field(field.name field.value_type node_at(value session).loc inner @session)
         fields.push(hir.ObjectField[node_at(value session).loc field.name value binding field.mutable and not shape.immutable])
     }
-    let loc = tokens.node_at(source.nodes id).loc
+    let loc = contexts.node_at(id env.lexical session).loc
     let value = put(hir.ObjectLiteral[loc type fields] @session)
     return if expected is? none value else against(value expected id env @session)
 }
@@ -1953,10 +1943,9 @@ array_transition = (method:hir.ArrayMethod positional:array<addr> keyword:dict<s
 }
 
 compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contexts.Session):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
-    let op = tokens.node_at(source.nodes node.op)
+    let op = contexts.node_at(node.op env.lexical session)
     $runtime_assert op is? post.CombinedAssignment
-    let symbol = syntax.symbol(op.op source.nodes)
+    let symbol = source_views.symbol(op.op env.lexical session)
     let name = builtins.binary_operators.get(symbol)
     if name is? none return pending(id "compound operator `{symbol}=`" env session)
     let target = expression(node.left env @session call_target=true)
@@ -1995,12 +1984,11 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
 # Normalizing an iterator is a separate operation: an unbounded value is
 # legal even when it has no first element from which a loop could start.
 range_value = (id:addr node:parser.Flat env:Environment @session:contexts.Session bounds:string?=none):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
     let left:addr? = none
     let right:addr? = none
     let before = true
     loop item in node.items {
-        if syntax.identifier(item source.nodes) =? '..' { before = false continue }
+        if source_views.identifier(item env.lexical session) =? '..' { before = false continue }
         if before { left = item } else { right = item }
     }
     let pair:hir.RangeStep? = none
@@ -2010,8 +1998,8 @@ range_value = (id:addr node:parser.Flat env:Environment @session:contexts.Sessio
     loop side in [true false] {
         let item = if side left else right
         if item is? none continue
-        let value = tokens.node_at(source.nodes item)
-        if value is? parser.Flat and syntax.is_operator(value.op ',' source.nodes) {
+        let value = contexts.node_at(item env.lexical session)
+        if value is? parser.Flat and source_views.is_operator(value.op ',' env.lexical session) {
             if value.items.length not=? 2 return problem(item 'range step syntax requires exactly two anchors' 'expected `first,second..last`' env session)
             if not side and left_pair return problem(item 'range cannot specify step anchors on both sides' 'choose one step-pair form' env session)
             if not side and left isnt? none return problem(item 'trailing range step pairs require an unbounded left side' 'write `first,second..last` instead' env session)
@@ -2112,14 +2100,13 @@ range_membership = (value:addr range:hir.Range id:addr env:Environment @session:
 
 IteratorResult:type = const [values:array<addr> environment:Environment]
 iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|Error => {
-    let source = contexts.source_at(env.lexical session)
-    let node = tokens.node_at(source.nodes syntax.unparen(id source.nodes))
-    if node isnt? parser.BinOp or not syntax.is_operator(node.op 'in' source.nodes) return pending(id 'non-conjunctive iterator formula' env session)
+    let node = contexts.node_at(source_views.unparen(id env.lexical session) env.lexical session)
+    if node isnt? parser.BinOp or not source_views.is_operator(node.op 'in' env.lexical session) return pending(id 'non-conjunctive iterator formula' env session)
     let iterable = expression(node.right env @session)
     if iterable is? Error return iterable
     let entry = views.container_entry_types(node_at(iterable session).value_type session.types)
     if entry isnt? none return container_iterators(id node iterable entry env @session)
-    let name = syntax.identifier(node.left source.nodes)
+    let name = source_views.identifier(node.left env.lexical session)
     if name is? none return pending(id 'iterator target unpacking over non-container values' env session)
     let value = node_at(iterable session)
     let shape = types.node_at(session.types types.strip_refinement(value.value_type session.types))
@@ -2163,7 +2150,7 @@ iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|E
     if types.node_at(session.types types.strip_refinement(target session.types)) is? types.ObjectType { binding.read_only_reason = 'borrows the array element; copy it with `let` to change it' }
     session.registry.by_id[binding_id] = binding
     bindings.bind(@session.scopes inner.lexical.scope name binding_id)
-    let target_node = put(hir.ExpressedIdentifier[tokens.node_at(source.nodes node.left).loc target name binding_id] @session)
+    let target_node = put(hir.ExpressedIdentifier[contexts.node_at(node.left env.lexical session).loc target name binding_id] @session)
     let type = types.parameterize(types.primitive('iterator' @session.types) [target] @session.types)
     return IteratorResult[[put(hir.IteratorExpression[node.loc type target_node iterable first step last count] @session)] inner]
 }
@@ -2197,22 +2184,21 @@ breaks_loop = (id:addr depth:addr session:contexts.Session):>bool => {
 }
 loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Session):>addr|Error => {
     $runtime_assert arm.parts.length =? 3
-    let source = contexts.source_at(env.lexical session)
-    let changed = loop_syntax.mutations(arm.parts[2] source.nodes)
-    let replaced = loop_syntax.mutations(arm.parts[2] source.nodes true)
-    loop name in loop_syntax.mutations(arm.parts[1] source.nodes) { changed.add(name) }
-    loop name in loop_syntax.mutations(arm.parts[1] source.nodes true) { replaced.add(name) }
+    let changed = source_views.mutations(arm.parts[2] env.lexical session)
+    let replaced = source_views.mutations(arm.parts[2] env.lexical session true)
+    loop name in source_views.mutations(arm.parts[1] env.lexical session) { changed.add(name) }
+    loop name in source_views.mutations(arm.parts[1] env.lexical session true) { replaced.add(name) }
     invalidate_loop_names(changed replaced env @session)
     let body_env = fork(env @session)
     let condition:addr? = none
     let prefix:array<addr> = []
-    if loop_syntax.contains_iterator(arm.parts[1] source.nodes) {
+    if source_views.contains_iterator(arm.parts[1] env.lexical session) {
         let iterators:array<addr> = []
         let predicates:array<addr> = []
         let names:set<string> = set[]
         let formula:array<hir.IteratorFormulaToken> = []
-        loop part in loop_syntax.conjuncts(arm.parts[1] source.nodes) {
-            if not loop_syntax.contains_iterator(part source.nodes) { predicates.push(part) continue }
+        loop part in source_views.conjuncts(arm.parts[1] env.lexical session) {
+            if not source_views.contains_iterator(part env.lexical session) { predicates.push(part) continue }
             let result = iterator(part body_env @session)
             if result is? Error return result
             loop iterator_id in result.values {
@@ -2252,7 +2238,7 @@ loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Se
                     session.hir[item] = hir.IteratorExpression[iter.loc iter.value_type iter.target iter.iterable iter.first iter.step iter.last iter.count true]
                 }
             }
-            let loc = tokens.node_at(source.nodes predicate_id).loc
+            let loc = contexts.node_at(predicate_id env.lexical session).loc
             let empty = put(hir.Void[loc types.primitive('void' @session.types)] @session)
             let guard = put(hir.IfArm[loc node_at(empty session).value_type predicate empty] @session)
             let stop = put(hir.Break[loc types.primitive('never' @session.types)] @session)
@@ -2320,16 +2306,15 @@ container_array = (items:array<addr> wanted:addr? id:addr env:Environment @sessi
     return put(hir.ArrayLiteral[loc types.array_type(element converted.length @session.types) converted] @session)
 }
 container_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none is_set:bool=false):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
     let annotation = if expected is? none none else views.container_entry_types(expected session.types)
     let key_nodes:array<addr> = []
     let value_nodes:array<addr> = []
     if is_set { key_nodes = node.inner }
     else {
         loop row_id in node.inner {
-            let row = tokens.node_at(source.nodes row_id)
+            let row = contexts.node_at(row_id env.lexical session)
             if row isnt? parser.BinOp return problem(row_id 'dictionary literal needs pairs' 'write `key -> value` for every entry' env session)
-            let op = syntax.symbol(row.op source.nodes)
+            let op = source_views.symbol(row.op env.lexical session)
             if op =? '<->' return pending(row_id 'bidirectional dictionary literals' env session)
             if op not=? '->' return problem(row_id 'dictionary literal needs pairs' 'write `key -> value` for every entry' env session)
             key_nodes.push(row.left) value_nodes.push(row.right)
@@ -2464,8 +2449,7 @@ key_position = (@session:contexts.Session):>string => {
     return "__dewy_key_pos_{position}"
 }
 container_index = (receiver:addr index_id:addr id:addr env:Environment @session:contexts.Session store:addr?=none):>addr|Error => {
-    let source = contexts.source_at(env.lexical session)
-    let indices = tokens.node_at(source.nodes index_id)
+    let indices = contexts.node_at(index_id env.lexical session)
     if indices isnt? parser.Block or indices.inner.length not=? 1 return problem(id 'dictionary index needs one key' 'write `dictionary[key]`' env session)
     let entry = views.container_entry_types(node_at(receiver session).value_type session.types)
     $runtime_assert entry isnt? none
@@ -2518,8 +2502,7 @@ prove_total = (value:addr key_type:addr id:addr env:Environment @session:context
 # entry arrays. This uses the same iterator HIR as arrays, preserving the
 # binding identity of the key so `d[key]` is proven inside the body.
 container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.EntryTypes env:Environment @session:contexts.Session):>IteratorResult|Error => {
-    let source = contexts.source_at(env.lexical session)
-    let target_syntax = tokens.node_at(source.nodes node.left)
+    let target_syntax = contexts.node_at(node.left env.lexical session)
     let targets:array<addr> = [node.left]
     let fields:array<string> = ['keys']
     let elements:array<addr> = [entry.key]
@@ -2532,7 +2515,7 @@ container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.Entry
     let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.loop_depth env.return_collector]
     let values:array<addr> = []
     loop i in 0.. and i <? targets.length and i <? fields.length and i <? elements.length {
-        let name = syntax.identifier(targets[i] source.nodes)
+        let name = source_views.identifier(targets[i] env.lexical session)
         if name is? none return pending(id 'nested iterator target unpacking' env session)
         let scope = bindings.scope_at(session.scopes inner.lexical.scope)
         if name in? scope.names return problem(id 'duplicate iterator target' name env session)
@@ -2543,7 +2526,7 @@ container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.Entry
         if types.node_at(session.types types.strip_refinement(element session.types)) is? types.ObjectType { binding.read_only_reason = 'borrows the array element; copy it with `let` to change it' }
         session.registry.by_id[binding_id] = binding
         bindings.bind(@session.scopes inner.lexical.scope name binding_id)
-        let target = put(hir.ExpressedIdentifier[tokens.node_at(source.nodes targets[i]).loc element name binding_id] @session)
+        let target = put(hir.ExpressedIdentifier[contexts.node_at(targets[i] env.lexical session).loc element name binding_id] @session)
         let entries = put(hir.DictEntries[node.loc types.array_type(element none @session.types) iterable fields[i]] @session)
         let type = types.parameterize(types.primitive('iterator' @session.types) [element] @session.types)
         values.push(put(hir.IteratorExpression[node.loc type target entries 0 1 none none] @session))
@@ -2753,9 +2736,8 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
 # carrying facts along the continuation that can actually be reached.
 const assertion_whitespace=set['\r\n' '\u0009' '\u000a' '\u000b' '\u000c' '\u000d' '\u001c' '\u001d' '\u001e' '\u001f' '\u0020' '\u0085' '\u00a0' '\u1680' '\u2000' '\u2001' '\u2002' '\u2003' '\u2004' '\u2005' '\u2006' '\u2007' '\u2008' '\u2009' '\u200a' '\u2028' '\u2029' '\u202f' '\u205f' '\u3000']
 assertion_source = (id:addr env:Environment session:contexts.Session):>string => {
-    let source = contexts.source_at(env.lexical session)
-    let span = tokens.node_at(source.nodes id).loc
-    let text = source.srcfile.body
+    let span = contexts.node_at(id env.lexical session).loc
+    let text = source_views.srcfile(env.lexical session).body
     $runtime_assert span.start <=? span.stop and span.stop <=? text.length
     if span.start =? span.stop return ''
     # Match the hosted diagnostic's whitespace normalization, including
@@ -2789,7 +2771,7 @@ assertion_failure = (id:addr node:parser.Directive condition:addr? text:string e
         }
     }
     let mode:'assert'|'expect'|'fail' = if node.name =? 'expect' 'expect' else if node.name =? 'fail' 'fail' else 'assert'
-    return put(hir.RuntimeFailure[node.loc types.primitive('never' @session.types) contexts.source_at(env.lexical session).srcfile text mode condition message dimmed] @session)
+    return put(hir.RuntimeFailure[node.loc types.primitive('never' @session.types) source_views.srcfile(env.lexical session) text mode condition message dimmed] @session)
 }
 directive = (id:addr node:parser.Directive env:Environment @session:contexts.Session):>addr|Error => {
     if node.name =? 'abstract' return problem(id '`$abstract` marks a `type of` mint' 'it belongs on the value of a type alias' env session)
@@ -2836,7 +2818,7 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
             let literal = if syntax is? parser.Atom contexts.node_at(syntax.item env.lexical session) is? tokens.Bool else false
             if not literal {
                 let pointer=Pointer[span=syntax.loc message='this condition is false']
-                session.warnings.push(Warning[srcfile=contexts.source_at(env.lexical session).srcfile title='expectation refuted at compile time' pointers=[pointer] hint='the test will fail when it runs'])
+                session.warnings.push(Warning[srcfile=source_views.srcfile(env.lexical session) title='expectation refuted at compile time' pointers=[pointer] hint='the test will fail when it runs'])
             }
             return assertion_failure(id node condition text env @session)
         }
@@ -2915,7 +2897,7 @@ match_plan = (arm:parser.KeywordExpr env:Environment @session:contexts.Session):
     let total=false
     loop row in rows {
         let clause=contexts.node_at(row env.lexical session)
-        if clause isnt? parser.BinOp or not syntax.is_operator(clause.op '=>' contexts.source_at(env.lexical session).nodes) return problem(row 'match arm must be `pattern => body`' 'not an arm' env session)
+        if clause isnt? parser.BinOp or not source_views.is_operator(clause.op '=>' env.lexical session) return problem(row 'match arm must be `pattern => body`' 'not an arm' env session)
         let parsed=patterns.parse(clause.left env.lexical @session)
         if parsed is? Error return parsed
         let selected:array<patterns.Pattern>=[]
@@ -3217,8 +3199,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         $runtime_assert method.literal <? session.syntax_refs.length
         let reference=session.syntax_refs[method.literal]
         let lexical=contexts.Context[reference.source reference.scope]
-        let nodes=contexts.source_at(lexical session).nodes
-        let literal=tokens.node_at(nodes reference.node)
+        let literal=contexts.node_at(reference.node lexical session)
         $runtime_assert literal is? parser.BinOp
         # A minted child's inherited body belongs to its declaring family.
         # Reuse that family's receiver type and hidden binding.
@@ -3236,11 +3217,11 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
                 }
             }
         }
-        let hidden=method_syntax.parameter_names(literal nodes)
-        loop name in method_syntax.locals(literal.right nodes) {hidden.add(name)}
+        let hidden=source_views.method_parameters(literal lexical session)
+        loop name in source_views.method_locals(literal.right lexical session) {hidden.add(name)}
         let visible:set<string>=set[]
         loop name in names {if name not in? hidden {visible.add(name)}}
-        let analysis=method_syntax.scan(literal.right visible nodes)
+        let analysis=source_views.method_scan(literal.right visible lexical session)
         let instance=false
         loop name in analysis.references {if name in? fields {instance=true}}
         if instance {instances.add(method.name)}
@@ -3365,9 +3346,7 @@ method_member = (owner:addr receiver:addr? name:string id:addr env:Environment @
 bind_method_members = (owner:addr receiver:addr? lexical:contexts.Context env:Environment @session:contexts.Session):>Error? => {
     let type=types.node_at(session.types owner)
     $runtime_assert type is? types.ObjectType
-    let source=contexts.source_at(lexical session)
-    $runtime_assert source.nodes.length >? 0
-    let loc=source.nodes[0].loc
+    let loc=contexts.node_at(0 lexical session).loc
     if receiver isnt? none {
         let name_value=type_names.instance(receiver loc @session)
         bind_member_proxy('typename' name_value lexical @session);
@@ -3481,11 +3460,10 @@ spelling_string = (value:addr @session:contexts.Session):>addr? => {
     return put(hir.String[node.loc types.string_literal(text @session.types) text] @session)
 }
 interpolated_string = (id:addr node:parser.IString env:Environment @session:contexts.Session):>addr|Error => {
-    let source=contexts.source_at(env.lexical session)
     let parts:array<addr>=[]
     let string=types.primitive('string' @session.types)
     loop part_id in node.content {
-        let part=tokens.node_at(source.nodes part_id)
+        let part=contexts.node_at(part_id env.lexical session)
         if part is? tokens.StringChunk {
             if part.content.length >? 0 {parts.push(put(hir.String[part.loc types.string_literal(part.content @session.types) part.content] @session))}
             continue
@@ -3518,7 +3496,7 @@ declare_constructor = (constructor:hir.TypeValue literal_id:addr id:addr env:Env
     let owner=views.structural_base(constructor.value session.types)
     if types.node_at(session.types owner) isnt? types.ObjectType return problem(id 'constructor overload needs a record type' 'the left side names a record type' env session)
     let literal=contexts.node_at(literal_id env.lexical session)
-    if literal isnt? parser.BinOp or not syntax.is_operator(literal.op '=>' contexts.source_at(env.lexical session).nodes) return problem(id 'a constructor overload must be a function literal' 'use `(params):>Type => ...`' env session)
+    if literal isnt? parser.BinOp or not source_views.is_operator(literal.op '=>' env.lexical session) return problem(id 'a constructor overload must be a function literal' 'use `(params):>Type => ...`' env session)
     let overloads=session.constructors.get(owner contexts.ConstructorSet[])
     let alias=if constructor.name is? none display.type_to_dewy(owner session.types) else constructor.name
     let name="{alias}__new_{overloads.bindings.length + 1}"
