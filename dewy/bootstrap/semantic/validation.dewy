@@ -41,7 +41,7 @@ discharge = (root:addr constants:dict<addr bigint> @session:contexts.Session):>v
             session.hir[id]=hir.Void[node.loc void_type]
         } else if node is? hir.Index|hir.StringIndex {
             let constant=constants.get(id)
-            if constant isnt? none and constant >=? 0 and constant <=? targets.max_length($target) {
+            if constant isnt? none and constant >=? 0 and constant <=? targets.max_length(session.target) {
                 if node is? hir.Index {node.constant_index=constant as addr}
                 else {node.constant_index=constant as addr}
                 $runtime_assert id <? session.hir.length

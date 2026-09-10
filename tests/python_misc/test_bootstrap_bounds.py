@@ -16,6 +16,14 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    # Contracts apply before branch guards are joined away, and scoped
+    # result bindings retain their evidence until their obligation is checked.
+    'let min=(a:int64 b:int64):>int64<v=>v <=? a and v <=? b>=>if a <? b a else b',
+    'let max=(a:int64 b:int64):>int64<v=>v >=? a and v >=? b>=>if a >? b a else b',
+    'let min=(a:int64 b:int64):>int64<v=>v <=? a and v <=? b>=>if a <? b {let answer=a answer} else {let answer=b answer}',
+    'let wrong=(a:int64 b:int64):>int64<v=>v <=? a and v <=? b>=>if a <? b b else a',
+    'let choose=(a:int64 b:int64 c:int64):>int64<v=>v <=? a and v <=? b and v <=? c>=>if a <? b {if a <? c a else c} else {if b <? c b else c}',
+
     'let n:int64=3\n$assert n >? 0',
     'let n:int64=3\nn=0\n$assert n >? 0',
     'let f=(x:int64):>int64=>{ $assert x >? 0\nreturn x }',

@@ -36,6 +36,7 @@ Checker:type = [
     element_intervals:values.ElementIntervals=[]
     unfit:dict<addr Unfit>=[] constant_indices:dict<addr bigint>=[] problem:Error?=none
     warnings:array<Warning>=[]
+    result_obligations:dict<addr array<addr>>=[]
 ]
 # Construct the same declared-width environment for every invocation. Tests
 # and module drivers must not quietly use different loop-widening contracts.
@@ -106,8 +107,10 @@ validate_assert = (id:addr node:hir.Assert state:facts.State @checker:Checker):>
 value_body = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
     let node=node_at(id checker)
     if node is? hir.Block {
-        loop item in node.items {
-            let transfer=analyze(item state @checker validate)
+        loop index in 0.. and index <? node.items.length {
+            let item=node.items[index]
+            let required:array<addr>=if index+1 =? node.items.length checker.result_obligations.get(id []) else []
+            let transfer=analyze_result(item state required @checker validate)
             if transfer.normal is? none return
             state=transfer.normal
         }
@@ -129,11 +132,13 @@ analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer =
     if node is? hir.Block {
         let output=Transfer[current]
         let locals:set<addr>=set[]
-        loop item in node.items {
+        loop index in 0.. and index <? node.items.length {
+            let item=node.items[index]
             if output.normal is? none break
             let declared=node_at(item checker)
             if declared is? hir.Declare and declared.binding_id isnt? none {locals.add(declared.binding_id)}
-            let transfer=analyze(item output.normal @checker validate)
+            let required:array<addr>=if index+1 =? node.items.length checker.result_obligations.get(id []) else []
+            let transfer=analyze_result(item output.normal required @checker validate)
             output.normal=transfer.normal
             append_exits(@output transfer)
         }
@@ -301,9 +306,50 @@ length_contract = (id:addr method:hir.ArrayMethod array:addr after:ranges.Interv
     }
 }
 
+# A contract on an expression-valued branch belongs to each live result,
+# before joining away its guard. For `min(a b)`, each branch proves both
+# inequalities with its own returned operand. No condition or body is replayed.
+attach_result_obligation = (id:addr refined:addr @checker:Checker):>void => {
+    let node=node_at(id checker)
+    if types.is_primitive(types.node_at(checker.data.env.types node.value_type) 'never') return
+    let required=checker.result_obligations.get(id [])
+    if refined not in? required {required.push(refined)}
+    checker.result_obligations[id]=required
+}
+# Install only around evaluation of the selected result, not its condition
+# or preceding statements. Shared HIR leaves may also occur in those places.
+analyze_result = (id:addr state:facts.State required:array<addr> @checker:Checker validate:bool):>Transfer => {
+    if not validate or required.length =? 0 return analyze(id state @checker validate)
+    let previous=checker.result_obligations
+    loop refined in required {attach_result_obligation(id refined @checker)}
+    let result=analyze(id state @checker validate)
+    checker.result_obligations=previous
+    return result
+}
+evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
+    let node=node_at(id checker)
+    if node is? hir.Obligation {
+        let previous=checker.result_obligations
+        if validate {
+            attach_result_obligation(node.value node.refined @checker)
+            loop required in previous.get(id []) {attach_result_obligation(node.value required @checker)}
+        }
+        evaluate(node.value @state @checker validate)
+        record(id state @checker)
+        checker.result_obligations=previous
+    } else {evaluate_inner(id @state @checker validate)}
+    if not validate or checker.problem isnt? none or node is? hir.Block|hir.Flow|hir.Obligation return
+    let required=checker.result_obligations.get(id [])
+    loop refined in required {
+        let obligation=hir.Obligation[node.loc node.value_type id refined 'result contract']
+        let error=obligations.check(obligation state checker.assigned checker.srcfile @checker.data)
+        if error isnt? none {checker.problem=error return}
+    }
+}
+
 # All children execute in source order. Short circuits, functions and flows
 # have their own paths, so the generic child walk must not visit their bodies.
-evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
+evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
     if checker.problem isnt? none and validate return
     let node=node_at(id checker)
     if node is? hir.Block {value_body(id @state @checker validate) return}
@@ -439,10 +485,6 @@ evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => 
     }
     record(id state @checker)
     if not validate return
-    if node is? hir.Obligation {
-        let error=obligations.check(node state checker.assigned checker.srcfile @checker.data)
-        if error isnt? none {checker.problem=error}
-    }
     if node is? hir.Index|hir.StringIndex {
         let sequence=if node is? hir.Index node.array else node.string
         let context=proofs.Context[checker.data.env checker.data.relations checker.data.snapshot.numbers]
@@ -491,14 +533,14 @@ flow = (id:addr node:hir.Flow state:facts.State @checker:Checker validate:bool):
         let positive=refine(current arm.condition true @checker)
         remaining=refine(current arm.condition false @checker)
         if positive isnt? none {
-            let body=analyze(arm.body positive @checker validate)
+            let body=analyze_result(arm.body positive checker.result_obligations.get(id []) @checker validate)
             append_exits(@output body)
             if body.normal isnt? none {exits.push(body.normal) results.push(last_value(arm.body checker))}
         }
     }
     if remaining isnt? none {
         if node.default isnt? none {
-            let body=analyze(node.default remaining @checker validate)
+            let body=analyze_result(node.default remaining checker.result_obligations.get(id []) @checker validate)
             append_exits(@output body)
             if body.normal isnt? none {exits.push(body.normal) results.push(last_value(node.default checker))}
         } else {exits.push(remaining)}
