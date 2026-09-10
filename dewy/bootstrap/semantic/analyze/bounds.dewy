@@ -1,0 +1,664 @@
+from reporting import SrcFile, Error, Pointer, Warning, Span
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"../propositions.dewy" as propositions
+import p"../type_queries.dewy" as views
+import p"hir_facts.dewy" as expressions
+import p"value_bounds.dewy" as values
+import p"expression_intervals.dewy" as intervals
+import p"predicate_facts.dewy" as predicates
+import p"refinement_facts.dewy" as refinements
+import p"binding_facts.dewy" as stores
+import p"element_facts.dewy" as elements
+import p"length_facts.dewy" as lengths
+import p"length_proofs.dewy" as proofs
+import p"term_facts.dewy" as terms
+import p"fact_state.dewy" as facts
+import p"relations.dewy" as relations
+import p"intervals.dewy" as ranges
+import p"obligations.dewy" as obligations
+import p"index_checks.dewy" as indices
+import p"slice_checks.dewy" as slices
+
+# The visitor owns evaluation order; the smaller modules own individual
+# transfer and proof rules. Loop iterations compute evidence without issuing
+# diagnostics, then the stabilized body is checked once. Neither successful
+# typechecking nor an exploratory transfer discharges an obligation.
+Unfit:type = const [interval:ranges.Interval? word:string]
+Exit:type = const [levels:addr state:facts.State]
+Transfer:type = [normal:facts.State? breaks:array<Exit>=[] continues:array<Exit>=[]]
+Checker:type = [
+    data:predicates.Data srcfile:SrcFile word_type:addr
+    declared:refinements.Declared=[] assigned:set<addr>=set[]
+    mutable_globals:set<addr>=set[] checked:set<addr>=set[]
+    root_items:set<addr>=set[] deferred:array<addr>=[]
+    element_intervals:values.ElementIntervals=[]
+    unfit:dict<addr Unfit>=[] constant_indices:dict<addr bigint>=[] problem:Error?=none
+    warnings:array<Warning>=[]
+]
+node_at = (id:addr checker:Checker):>hir.AST => hir.node_at(checker.data.env.nodes id)
+fail = (id:addr title:string message:string @checker:Checker hint:string=''):>void => {
+    if checker.problem isnt? none return
+    checker.problem=Error[srcfile=checker.srcfile title=title pointers=[Pointer[span=node_at(id checker).loc message=message]] hint=hint]
+}
+record = (id:addr state:facts.State @checker:Checker):>void => {
+    intervals.record(@checker.data.snapshot id state checker.data.env @checker.data.registry)
+}
+refine = (state:facts.State id:addr truth:bool @checker:Checker):>facts.State? => predicates.refine(state id truth @checker.data)
+joined = (states:array<facts.State> checker:Checker):>facts.State? => {
+    if states.length =? 0 return none
+    return facts.join(states checker.data.relations.facts)
+}
+append_exits = (@target:Transfer source:Transfer):>void => {
+    loop exit in source.breaks {target.breaks.push(exit)}
+    loop exit in source.continues {target.continues.push(exit)}
+}
+install = (@state:facts.State subject:addr value:addr annotation:addr? loc:Span @checker:Checker):>void => {
+    stores.install(@state subject value annotation checker.word_type loc @checker.declared @checker.data)
+    if obligations.nonzero(value checker.data.snapshot.numbers.get(value) state checker.data) {facts.put(@state facts.nonzero(subject) ranges.exact(1))}
+}
+
+# A child write changes the containing value's mathematical meaning (a BigInt
+# is no longer the same integer after writing a limb), while unrelated field
+# and length evidence remains useful.
+forget_value = (id:addr @state:facts.State @checker:Checker):>void => {
+    let path=bindings.access_path(id checker.data.env.nodes facts=true)
+    let ids:array<addr>=[path.root]
+    loop step in path.steps {ids.push(step)}
+    loop value in ids {
+        let term=terms.binding_term(value checker.data.env @checker.data.registry)
+        if term isnt? none {facts.forget(@state term)}
+    }
+}
+forget_place = (id:addr @state:facts.State @checker:Checker):>void => {
+    let access=bindings.access_path(id checker.data.env.nodes facts=true)
+    let root=node_at(access.root checker)
+    if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {stores.forget(@state root.binding_id @checker.data)}
+}
+
+validate_assert = (id:addr node:hir.Assert state:facts.State @checker:Checker):>void => {
+    if refine(state node.condition false @checker) is? none return
+    let refuted=refine(state node.condition true @checker) is? none
+    if node.runtime and not refuted return
+    let message=if node.message isnt? none node.message else if refuted 'this condition is false for every value the analysis admits' else 'no compile-time fact establishes this condition (neither proven nor refuted)'
+    if node.expect {
+        checker.warnings.push(Warning[srcfile=checker.srcfile title='expectation refuted at compile time' pointers=[Pointer[span=node_at(node.condition checker).loc message=message]] hint='the test will fail when it runs'])
+        return
+    }
+    fail(node.condition (if refuted 'assertion refuted' else 'cannot prove assertion') message @checker hint=if refuted '' else 'check it at runtime with `$runtime_assert`, or establish the fact with a guard')
+}
+
+# Expression-valued branches bind their result on each live path before the
+# join. This retains `let n = if p 1 else 2` and relations common to both
+# values, without inventing an expression that re-executes either branch.
+value_body = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
+    let node=node_at(id checker)
+    if node is? hir.Block {
+        loop item in node.items {
+            let transfer=analyze(item state @checker validate)
+            if transfer.normal is? none return
+            state=transfer.normal
+        }
+        if node.items.length >? 0 {
+            let last=node.items[node.items.length-1]
+            let interval=checker.data.snapshot.numbers.get(last)
+            let length=checker.data.snapshot.lengths.get(last)
+            if interval isnt? none {checker.data.snapshot.numbers[id]=interval}
+            if length isnt? none {checker.data.snapshot.lengths[id]=length}
+        }
+        return
+    }
+    evaluate(id @state @checker validate)
+}
+
+analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer => {
+    let node=node_at(id checker)
+    let current=state
+    if node is? hir.Block {
+        let output=Transfer[current]
+        let locals:set<addr>=set[]
+        loop item in node.items {
+            if output.normal is? none break
+            let declared=node_at(item checker)
+            if declared is? hir.Declare and declared.binding_id isnt? none {locals.add(declared.binding_id)}
+            let transfer=analyze(item output.normal @checker validate)
+            output.normal=transfer.normal
+            append_exits(@output transfer)
+        }
+        if node.scoped and output.normal isnt? none {
+            let remaining=output.normal
+            loop local in locals {stores.forget(@remaining local @checker.data)}
+            output.normal=remaining
+        }
+        return output
+    }
+    if node is? hir.Break return Transfer[none breaks=[Exit[node.loop_levels current]]]
+    if node is? hir.Continue return Transfer[none continues=[Exit[node.loop_levels current]]]
+    if node is? hir.Flow return flow(id node current @checker validate)
+    if node is? hir.Declare {
+        let value=node_at(node.expr checker)
+        if id in? checker.root_items and value is? hir.FunctionLiteral|hir.OverloadedFunction {
+            if value is? hir.FunctionLiteral {checker.deferred.push(node.expr)}
+            else {loop alternate in value.alternates {if node_at(alternate checker) is? hir.FunctionLiteral {checker.deferred.push(alternate)}}}
+            return Transfer[current]
+        }
+        evaluate(node.expr @current @checker validate)
+        if node.binding_id isnt? none {
+            # Save the observed value before removing last iteration's slot.
+            stores.forget(@current node.binding_id @checker.data)
+            install(@current node.binding_id node.expr node.annotation node.loc @checker)
+            if node.binding_id not in? checker.assigned {values.record_elements(@checker.element_intervals node.binding_id node.expr checker.data.env)}
+        }
+        return Transfer[current]
+    }
+    if node is? hir.Assign {
+        evaluate(node.value @current @checker validate)
+        let target=node_at(node.target checker)
+        $runtime_assert target is? hir.ExpressedIdentifier
+        if target.binding_id is? none return Transfer[current]
+        let subject=target.binding_id
+        let interval=checker.data.snapshot.numbers.get(node.value)
+        let shift=terms.assignment_shift(node checker.data.env @checker.data.registry)
+        let shifted:facts.State=[]
+        if shift isnt? none {shifted=facts.shifted(current facts.Term[subject] shift)}
+        if node.op in? ['+=' '-='] {interval=values.binary(if node.op =? '+=' '__add__' else '__sub__' facts.lookup(current facts.value(facts.Term[subject])) interval target.value_type checker.data.env.types)}
+        else if node.op not=? '=' {interval=none}
+        stores.forget(@current subject @checker.data)
+        facts.set_value(@current facts.Term[subject] interval)
+        loop entry in shifted.values {facts.put(@current entry.fact entry.interval)}
+        if node.op =? '=' {
+            let length=checker.data.snapshot.lengths.get(node.value)
+            if length isnt? none {facts.set_value(@current facts.Term[subject 'length'] length)}
+            if shift is? none {stores.seed(@current subject node.value checker.word_type node.loc @checker.data)}
+        }
+        let declared=checker.declared.get(subject)
+        if declared isnt? none {refinements.seed_binding(@current @checker.declared subject declared refinements.Context[checker.data.env checker.word_type] node.loc @checker.data.registry)}
+        return Transfer[current]
+    }
+    if node is? hir.Assert {
+        evaluate(node.condition @current @checker validate)
+        if validate {validate_assert(id node current @checker)}
+        if not node.runtime {
+            let held=refine(current node.condition true @checker)
+            if held isnt? none {current=held}
+        }
+        return Transfer[current]
+    }
+    if node is? hir.Return {
+        if node.item isnt? none {evaluate(node.item @current @checker validate)}
+        return Transfer[none]
+    }
+    evaluate(id @current @checker validate)
+    if types.is_primitive(types.node_at(checker.data.env.types node.value_type) 'never') return Transfer[none]
+    return Transfer[current]
+}
+
+function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Checker validate:bool):>void => {
+    if id in? checker.checked return
+    # Exploratory loop passes must not mark a body validated.
+    if validate {checker.checked.add(id)}
+    let enclosing=state
+    let globals=checker.mutable_globals
+    loop global in globals {stores.forget(@enclosing global @checker.data)}
+    let saved=checker.data.snapshot
+    checker.data.snapshot=intervals.Snapshot[]
+    let source=checker.srcfile
+    if node.source isnt? none {checker.srcfile=node.source}
+    let parameters=node.pos_or_kw_args
+    loop parameter in node.kw_only_args {parameters.push(parameter)}
+    if node.rest_args isnt? none {parameters.push(node.rest_args)}
+    loop parameter in parameters {if parameter is? hir.BoundParam {evaluate(parameter.value @enclosing @checker validate)}}
+    let context=refinements.Context[checker.data.env checker.word_type]
+    refinements.seed_parameters(@enclosing @checker.declared node context @checker.data.registry)
+    analyze(node.body enclosing @checker validate);
+    checker.srcfile=source
+    checker.data.snapshot=saved
+}
+
+array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.State @checker:Checker validate:bool):>void => {
+    evaluate(method.array @state @checker validate)
+    loop argument in call.pos_args {evaluate(argument @state @checker validate)}
+    loop argument in call.kw_args.values {evaluate(argument @state @checker validate)}
+    let sequence=terms.sequence_id(method.array checker.data.env @checker.data.registry)
+    if sequence is? none return
+    let index:addr?=none
+    if method.name in? ['pop' 'truncate'] {
+        index=if call.pos_args.length >? 0 call.pos_args[0] else call.kw_args.get(if method.name =? 'pop' 'idx' else 'count')
+    } else if method.name =? 'insert' {index=if call.pos_args.length >? 1 call.pos_args[1] else call.kw_args.get('idx')}
+    let count:ranges.Interval?=none
+    if index isnt? none {count=checker.data.snapshot.numbers.get(index)}
+    let previous=facts.lookup(state facts.value(facts.Term[sequence 'length']))
+    let before=if previous is? none values.length_default(checker.data.env.cap) else previous
+    if validate and index isnt? none and method.name in? ['pop' 'insert'] {
+        let context=proofs.Context[checker.data.env checker.data.relations checker.data.snapshot.numbers]
+        let error=indices.check_method_index(method.name index count state sequence before method.name =? 'insert' context checker.srcfile @checker.data.registry)
+        if error isnt? none {checker.problem=error}
+    }
+    if validate and method.name =? 'truncate' and (count is? none or count.lower is? none or count.lower <? 0) {fail(id 'truncate length is not proven nonnegative' 'the count may be negative' @checker)}
+    if method.name in? ['push' 'insert'] {
+        let value=if call.pos_args.length >? 0 call.pos_args[0] else call.kw_args.get('value')
+        if value isnt? none {elements.store(@state sequence value checker.word_type call.loc checker.data.env @checker.data.registry)}
+    }
+    if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear'] {
+        let name:lengths.Method=if method.name =? 'push' 'push' else if method.name =? 'insert' 'insert' else if method.name =? 'pop' 'pop' else if method.name =? 'truncate' 'truncate' else 'clear'
+        intervals.forget(@checker.data.snapshot sequence)
+        let after=lengths.apply(@state sequence name count checker.data.env.cap)
+        checker.data.snapshot.lengths[method.array]=after
+        if validate {length_contract(id method array=sequence after=after state=state @checker)}
+    }
+    if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear' 'sort' 'reverse'] {forget_value(method.array @state @checker)}
+}
+length_contract = (id:addr method:hir.ArrayMethod array:addr after:ranges.Interval state:facts.State @checker:Checker):>void => {
+    let conditions=expressions.member_invariant(method.array checker.data.env.nodes checker.data.env.types)
+    let declared=checker.declared.get(array)
+    if declared isnt? none {loop p in declared.propositions {conditions.push(p)}}
+    # Selecting an optional array payload preserves its storage contract.
+    let binding=checker.data.registry.by_id.get(array)
+    if binding isnt? none and binding.store_type isnt? none {
+        let storage=types.node_at(checker.data.env.types binding.store_type)
+        if storage is? types.TypeOr {
+            loop member in storage.items {
+                let alternative=types.node_at(checker.data.env.types member)
+                if alternative is? types.RefinedType and types.node_at(checker.data.env.types alternative.base) is? types.ArrayType {
+                    loop p in alternative.propositions {conditions.push(p)}
+                }
+            }
+        }
+    }
+    loop p in conditions {
+        if p.subject not=? 'length' continue
+        if obligations.verdict(p method.array state checker.assigned @checker.data) not=? true {
+            fail(id 'cannot prove the array keeps its declared length' "`{method.name}` may leave a length that does not satisfy `{obligations.describe(p)}`" @checker hint='guard the operation or declare storage without that length fact')
+            return
+        }
+    }
+}
+
+# All children execute in source order. Short circuits, functions and flows
+# have their own paths, so the generic child walk must not visit their bodies.
+evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
+    if checker.problem isnt? none and validate return
+    let node=node_at(id checker)
+    if node is? hir.Block {value_body(id @state @checker validate) return}
+    if node is? hir.Flow {
+        let output=flow(id node state @checker validate)
+        if output.normal isnt? none {state=output.normal}
+        return
+    }
+    if node is? hir.FunctionLiteral {function_body(id node state @checker validate) return}
+    if node is? hir.OverloadedFunction {
+        loop alternate in node.alternates {evaluate(alternate @state @checker validate)}
+        return
+    }
+    if node is? hir.ShortCircuit {
+        evaluate(node.left @state @checker validate)
+        let truth=node.op in? ['and' 'nand']
+        let right=refine(state node.left truth @checker)
+        let shortcut=refine(state node.left not truth @checker)
+        let paths:array<facts.State>=[]
+        if shortcut isnt? none {paths.push(shortcut)}
+        if right isnt? none {
+            let continuing=right
+            evaluate(node.right @continuing @checker validate)
+            paths.push(continuing)
+        }
+        let merged=joined(paths checker)
+        if merged isnt? none {state=merged}
+        record(id state @checker)
+        return
+    }
+    if node is? hir.Place {
+        evaluate(node.target @state @checker validate)
+        forget_place(node.target @state @checker)
+        return
+    }
+    if node is? hir.FunctionCall {
+        let function=node_at(node.func checker)
+        if function is? hir.ExpressedIdentifier and (function.name.startswith('_capture_push') or function.name.startswith('_capture_add')) and node.pos_args.length =? 2 {
+            let target=node_at(node.pos_args[0] checker)
+            if target is? hir.Place {
+                evaluate(node.pos_args[1] @state @checker validate)
+                let sequence=terms.sequence_id(target.target checker.data.env @checker.data.registry)
+                if sequence isnt? none {
+                    elements.store(@state sequence node.pos_args[1] checker.word_type node.loc checker.data.env @checker.data.registry)
+                    intervals.forget(@checker.data.snapshot sequence)
+                    lengths.apply(@state sequence 'push' none checker.data.env.cap);
+                }
+                return
+            }
+        }
+        if function is? hir.ArrayMethod {array_call(id node function @state @checker validate) record(id state @checker) return}
+        evaluate(node.func @state @checker validate)
+        loop argument in node.pos_args {evaluate(argument @state @checker validate)}
+        loop argument in node.kw_args.values {evaluate(argument @state @checker validate)}
+        if function is? hir.ExpressedIdentifier and function.binding_id isnt? none {
+            let globals=checker.mutable_globals
+            loop global in globals {stores.forget(@state global @checker.data)}
+        }
+        let applied=predicates.apply_call(state id none @checker.data)
+        if applied isnt? none {state=applied}
+        record(id state @checker)
+        let name=if node.integer_operation isnt? none node.integer_operation else if function is? hir.ExpressedIdentifier function.name else ''
+        if validate and name in? ['__floordiv__' '__mod__'] and node.integer_operation is? none and node.pos_args.length =? 2 {
+            let divisor=node.pos_args[1]
+            if not obligations.nonzero(divisor checker.data.snapshot.numbers.get(divisor) state checker.data) {fail(divisor 'cannot prove the divisor is nonzero' 'establish that the divisor cannot be zero' @checker)}
+        }
+        if validate and name in? ['__add__' '__sub__' '__mul__' '__floordiv__' '__mod__' '__lshift__' '__unary_sub__' 'narrow'] {
+            let type=types.node_at(checker.data.env.types node.value_type)
+            if types.is_primitive(type 'int') or types.is_primitive(type 'uint') or name =? 'narrow' {
+                let known=checker.data.snapshot.numbers.get(id)
+                let word=if name =? 'narrow' and type is? types.Primitive type.name else if types.is_primitive(type 'uint') 'uint64' else 'int64'
+                let width=if name =? 'narrow' values.result_width(node.value_type checker.data.env.types) else if word =? 'uint64' ranges.Interval[0 18446744073709551615] else ranges.Interval[(-9223372036854775808) 9223372036854775807]
+                if ranges.fits(known width) is? none {checker.unfit[id]=Unfit[known word]}
+            }
+        }
+        return
+    }
+    if node is? hir.ObjectLiteral {
+        let object=expressions.object_of(node.value_type checker.data.env.types)
+        loop field in node.fields {
+            evaluate(field.value @state @checker validate)
+            if field.binding_id isnt? none {
+                install(@state field.binding_id field.value none field.loc @checker)
+                let declaration=if object is? none none else types.object_field(object field.name)
+                if declaration isnt? none and declaration.refinement.length >? 0 {
+                    let refined=types.RefinedType[key="field-contract:{field.binding_id}" base=declaration.value_type propositions=declaration.refinement]
+                    refinements.seed_binding(@state @checker.declared field.binding_id refined refinements.Context[checker.data.env checker.word_type] field.loc @checker.data.registry)
+                }
+            }
+        }
+        record(id state @checker)
+        return
+    }
+    if node is? hir.Assign|hir.Declare|hir.Assert|hir.Return|hir.Break|hir.Continue {
+        let output=analyze(id state @checker validate)
+        if output.normal isnt? none {state=output.normal}
+        return
+    }
+    loop child in hir.children(node) {evaluate(child @state @checker validate)}
+    if node is? hir.MemberAccess {refinements.seed_siblings(@state node checker.data.env @checker.data.registry)}
+    if node is? hir.MemberAssign {
+        let target=node_at(node.target checker)
+        $runtime_assert target is? hir.MemberAccess
+        forget_value(target.value @state @checker)
+        let access=bindings.access_path(node.target checker.data.env.nodes facts=true)
+        let root=node_at(access.root checker)
+        let path=bindings.member_fields(access checker.data.env.nodes)
+        if root is? hir.ExpressedIdentifier and root.binding_id isnt? none and path isnt? none {
+            stores.forget(@state root.binding_id @checker.data prefix=path)
+            let route=bindings.route_id(@checker.data.registry root.binding_id path target.value_type target.loc)
+            install(@state route node.value none node.loc @checker)
+        }
+    }
+    if node is? hir.IndexAssign {
+        let target=node_at(node.target checker)
+        $runtime_assert target is? hir.Index
+        forget_value(target.array @state @checker)
+        let array=terms.sequence_id(target.array checker.data.env @checker.data.registry)
+        if array isnt? none {elements.store(@state array node.value checker.word_type node.loc checker.data.env @checker.data.registry)}
+    }
+    if node is? hir.DictStore|hir.DictRemove {
+        let arrays:array<addr>=[node.keys]
+        let payload=node.values
+        if payload isnt? none {arrays.push(payload)}
+        loop array in arrays {
+            let sequence=terms.sequence_id(array checker.data.env @checker.data.registry)
+            if sequence isnt? none {
+                facts.forget(@state facts.Term[sequence 'length'])
+                intervals.forget(@checker.data.snapshot sequence)
+                if node is? hir.DictRemove and node.key is? none {facts.set_value(@state facts.Term[sequence 'length'] ranges.exact(0))}
+            }
+        }
+    }
+    record(id state @checker)
+    if not validate return
+    if node is? hir.Obligation {
+        let error=obligations.check(node state checker.assigned checker.srcfile @checker.data)
+        if error isnt? none {checker.problem=error}
+    }
+    if node is? hir.Index|hir.StringIndex {
+        let sequence=if node is? hir.Index node.array else node.string
+        let context=proofs.Context[checker.data.env checker.data.relations checker.data.snapshot.numbers]
+        let checked=indices.check_index(node checker.data.snapshot.numbers.get(node.index) checker.data.snapshot.lengths.get(sequence) state context checker.srcfile @checker.data.registry)
+        if checked is? Error {checker.problem=checked}
+        else if checked.constant_index isnt? none {checker.constant_indices[id]=checked.constant_index}
+    }
+    if node is? hir.StringSlice {
+        let error=slices.check(node state checker.srcfile @checker.data)
+        if error isnt? none {checker.problem=error}
+    }
+    if node is? hir.ValueCast {
+        let source=checker.data.snapshot.numbers.get(node.expr)
+        let width=values.fixed_bounds(node.value_type checker.data.env.types)
+        let target=types.node_at(checker.data.env.types types.strip_refinement(node.value_type checker.data.env.types))
+        if width isnt? none and ranges.fits(source width) is? none and target is? types.Primitive {checker.unfit[id]=Unfit[source target.name]}
+    }
+}
+
+last_value = (id:addr checker:Checker):>addr => {
+    let current=id
+    loop true {
+        let node=node_at(current checker)
+        if node is? hir.Block and node.items.length >? 0 {current=node.items[node.items.length-1] continue}
+        return current
+    }
+}
+flow = (id:addr node:hir.Flow state:facts.State @checker:Checker validate:bool):>Transfer => {
+    if node.arms.length =? 1 {
+        let arm=node_at(node.arms[0] checker)
+        if arm is? hir.LoopArm return loop_body(arm state @checker validate)
+    }
+    let remaining:facts.State?=state
+    let exits:array<facts.State>=[]
+    let output=Transfer[none]
+    let results:array<addr>=[]
+    loop arm_id in node.arms {
+        if remaining is? none break
+        let arm=node_at(arm_id checker)
+        $runtime_assert arm is? hir.IfArm|hir.LoopArm
+        let current=remaining
+        evaluate(arm.condition @current @checker validate)
+        let positive=refine(current arm.condition true @checker)
+        remaining=refine(current arm.condition false @checker)
+        if positive isnt? none {
+            let body=analyze(arm.body positive @checker validate)
+            append_exits(@output body)
+            if body.normal isnt? none {exits.push(body.normal) results.push(last_value(arm.body checker))}
+        }
+    }
+    if remaining isnt? none {
+        if node.default isnt? none {
+            let body=analyze(node.default remaining @checker validate)
+            append_exits(@output body)
+            if body.normal isnt? none {exits.push(body.normal) results.push(last_value(node.default checker))}
+        } else {exits.push(remaining)}
+    }
+    output.normal=joined(exits checker)
+    let numeric:ranges.Interval?=none
+    let length:ranges.Interval?=none
+    let numbers_complete=true
+    let lengths_complete=true
+    loop result in results {
+        let known=checker.data.snapshot.numbers.get(result)
+        let measured=checker.data.snapshot.lengths.get(result)
+        if known is? none {numbers_complete=false}
+        else {numeric=if numeric is? none known else ranges.union(numeric known)}
+        if measured is? none {lengths_complete=false}
+        else {length=if length is? none measured else ranges.union(length measured)}
+    }
+    if numeric isnt? none and numbers_complete {checker.data.snapshot.numbers[id]=numeric}
+    if length isnt? none and lengths_complete {checker.data.snapshot.lengths[id]=length}
+    return output
+}
+
+same_state = (left:facts.State right:facts.State):>bool => {
+    if left.length not=? right.length return false
+    loop [key entry] in left {
+        let other=right.get(key)
+        if other is? none or not ranges.same_bounds(entry.interval other.interval) return false
+    }
+    return true
+}
+iterators_of = (id:addr checker:Checker):>array<addr> => {
+    let node=node_at(id checker)
+    if node is? hir.IteratorExpression return [id]
+    if node is? hir.MultiIteratorExpression return node.iterators
+    return []
+}
+enter_iterators = (iterators:array<addr> state:facts.State @checker:Checker):>facts.State => {
+    let current=state
+    loop id in iterators {
+        let node=node_at(id checker)
+        $runtime_assert node is? hir.IteratorExpression
+        if node.count =? 0 continue
+        let target=node_at(node.target checker)
+        $runtime_assert target is? hir.ExpressedIdentifier
+        if target.binding_id is? none continue
+        facts.set_value(@current facts.Term[target.binding_id] values.loop_counter_interval(node checker.element_intervals checker.data.env))
+        let sequence=terms.sequence_id(node.iterable checker.data.env @checker.data.registry)
+        if sequence isnt? none {elements.read(@current sequence target.binding_id checker.word_type node.loc @checker.data.registry)}
+        let iterable=types.node_at(checker.data.env.types node_at(node.iterable checker).value_type)
+        if iterable is? types.ArrayType {
+            let element=types.node_at(checker.data.env.types iterable.element)
+            if element is? types.RefinedType {refinements.seed_binding(@current @checker.declared target.binding_id element refinements.Context[checker.data.env checker.word_type] node.loc @checker.data.registry)}
+        }
+    }
+    return current
+}
+remove_targets = (@state:facts.State iterators:array<addr> @checker:Checker):>void => {
+    loop id in iterators {
+        let node=node_at(id checker)
+        $runtime_assert node is? hir.IteratorExpression
+        let target=node_at(node.target checker)
+        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {stores.forget(@state target.binding_id @checker.data)}
+    }
+}
+loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool):>Transfer => {
+    let iterators=iterators_of(arm.condition checker)
+    let incoming=state
+    loop id in iterators {
+        let iterator=node_at(id checker)
+        $runtime_assert iterator is? hir.IteratorExpression
+        evaluate(iterator.iterable @incoming @checker validate)
+        if iterators.length =? 1 and iterator.count =? 0 return Transfer[incoming]
+    }
+    let head=incoming
+    # Widening prevents an accumulator from retaining the entry interval
+    # forever. Narrowing then recovers bounds imposed by a while guard.
+    let pass:addr=0
+    loop pass <? 11 {
+        if pass >=? 8 and iterators.length >? 0 break
+        checker.data.snapshot=intervals.Snapshot[]
+        let current=if iterators.length >? 0 enter_iterators(iterators head @checker) else head
+        let positive:facts.State?=current
+        if iterators.length =? 0 {
+            evaluate(arm.condition @current @checker false)
+            positive=refine(current arm.condition true @checker)
+        }
+        if positive is? none break
+        let body=analyze(arm.body positive @checker false)
+        let candidates:array<facts.State>=[incoming]
+        if body.normal isnt? none {
+            let next=body.normal
+            remove_targets(@next iterators @checker)
+            candidates.push(next)
+        }
+        loop exit in body.continues {
+            if exit.levels =? 0 {
+                let next=exit.state
+                remove_targets(@next iterators @checker)
+                candidates.push(next)
+            }
+        }
+        let candidate=facts.join(candidates checker.data.relations.facts)
+        let next=if pass <? 8 facts.widen(head candidate checker.data.relations.facts) else facts.narrow(head candidate checker.data.relations.facts)
+        if same_state(head next) {
+            if pass <? 8 and iterators.length =? 0 {pass=8 continue}
+            break
+        }
+        head=next
+        pass += 1
+    }
+    checker.data.snapshot=intervals.Snapshot[]
+    let current=if iterators.length >? 0 enter_iterators(iterators head @checker) else head
+    let positive:facts.State?=current
+    let negative:facts.State?=none
+    if iterators.length =? 0 {
+        evaluate(arm.condition @current @checker validate)
+        positive=refine(current arm.condition true @checker)
+        negative=refine(current arm.condition false @checker)
+    }
+    let exits:array<facts.State>=[]
+    let output=Transfer[none]
+    if iterators.length >? 0 {exits.push(incoming)}
+    if negative isnt? none {exits.push(negative)}
+    if positive isnt? none {
+        let body=analyze(arm.body positive @checker validate)
+        if iterators.length >? 0 and body.normal isnt? none {exits.push(body.normal)}
+        loop exit in body.breaks {
+            if exit.levels >? 0 {output.breaks.push(Exit[exit.levels-1 exit.state])}
+            else {exits.push(exit.state)}
+        }
+        loop exit in body.continues {if exit.levels >? 0 {output.continues.push(Exit[exit.levels-1 exit.state])}}
+    }
+    loop i in 0.. and i <? exits.length {
+        let exit=exits[i]
+        remove_targets(@exit iterators @checker)
+        exits[i]=exit
+    }
+    output.normal=joined(exits checker)
+    return output
+}
+
+collect = (root:addr @checker:Checker):>void => {
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=node_at(id checker)
+        let target:addr?=none
+        if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place {target=node.target}
+        else if node is? hir.DictStore|hir.DictRemove {target=node.keys}
+        else if node is? hir.FunctionCall {
+            let method=node_at(node.func checker)
+            if method is? hir.ArrayMethod and method.name not=? 'join' {target=method.array}
+        }
+        if target isnt? none {
+            let access=bindings.access_path(target checker.data.env.nodes facts=true)
+            let owner=node_at(access.root checker)
+            if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.assigned.add(owner.binding_id)}
+        }
+        loop child in hir.children(node) {pending.push(child)}
+    }
+    let node=node_at(root checker)
+    $runtime_assert node is? hir.Block
+    loop id in node.items {
+        checker.root_items.add(id)
+        let item=node_at(id checker)
+        if item is? hir.Declare and item.decltype =? 'let' and item.binding_id isnt? none and item.binding_id in? checker.assigned {checker.mutable_globals.add(item.binding_id)}
+    }
+}
+validate = (root:addr @checker:Checker):>void => {
+    collect(root @checker)
+    let node=node_at(root checker)
+    $runtime_assert node is? hir.Block
+    let state:facts.State=[]
+    loop item in node.items {
+        let result=analyze(item state @checker true)
+        if checker.problem isnt? none return
+        if result.normal is? none break
+        state=result.normal
+    }
+    let deferred=checker.deferred
+    checker.deferred.clear
+    checker.root_items.clear
+    loop id in deferred {
+        let function=node_at(id checker)
+        $runtime_assert function is? hir.FunctionLiteral
+        function_body(id function state @checker true)
+        if checker.problem isnt? none return
+    }
+}
