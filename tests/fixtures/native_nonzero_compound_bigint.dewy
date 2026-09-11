@@ -1,0 +1,29 @@
+# Packing a nonzero bigint for a compound operator must preserve its proof.
+# The helper result and counter also check that unwrapping evaluates once.
+let calls:int64=0
+let divisor=(hex:bool):>bigint & ~0=>{
+    calls+=1
+    return if hex 16 else 2
+}
+let quotient=(value:bigint radix:bigint & ~0):>bigint=>{
+    value //= radix
+    return value
+}
+let remainder=(value:bigint radix:bigint & ~0):>bigint=>{
+    value %= radix
+    return value
+}
+let main=():>int64=>{
+    let radix:bigint & ~0=divisor(true)
+    let q=quotient(672 radix)
+    let r=remainder(683 radix)
+    let values:dict<string bigint>=['value'->672]
+    values['value'] //= radix
+    let remaining:bigint=4096
+    let steps:int64=0
+    loop remaining >? 0 {remaining //= radix steps+=1}
+    let single:bigint=672
+    single //= divisor(true)
+    printl("{q}|{r}|{values['value']}|{steps}|{calls}")
+    return if q =? 42 and r =? 11 and values['value'] =? 42 and steps =? 4 and calls =? 2 and single =? 42 42 else 0
+}

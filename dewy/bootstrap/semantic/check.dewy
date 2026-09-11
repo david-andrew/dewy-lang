@@ -128,11 +128,12 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     if materialized isnt? none return materialized
     if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and not numeric_values.nonzero_form(node.value_type 'BigInt' env.lexical session) and numeric_values.nonzero_form(expected 'BigInt' env.lexical session) {
         let constant=constant_integer(value session)
-        if constant isnt? none and constant not=? 0 {
+        let proven=numeric_values.nonzero_form(stored_read_type(value @session) 'BigInt' env.lexical session)
+        if proven or constant isnt? none and constant not=? 0 {
             # Contextual conversion may already have packed a known bigint
-            # into its zero/object union. The numeric literal evidence still
-            # proves the nonzero alternative; unwrap without reevaluating or
-            # replacing the original expression.
+            # into its zero/object union. Its original nonzero type or literal
+            # evidence still proves that alternative. Unwrap without
+            # reevaluating or replacing the original expression.
             return put(hir.RepresentationCast[node.loc expected value] @session)
         }
     }
@@ -433,7 +434,10 @@ bigint_operation = (name:string arguments:array<addr> expected:addr? id:addr env
         if i =? 1 and name in? ['__floordiv__' '__mod__'] {
             let constant=constant_integer(arguments[i] session)
             if constant =? 0 return problem(id 'division by zero' 'the divisor is the constant `0`' env session)
-            let type=node_at(arguments[i] session).value_type
+            # A contextual union pack changes the ABI, not the divisor's
+            # established nonzero fact. Actual conversions retain their
+            # result type through this same provenance query.
+            let type=stored_read_type(arguments[i] @session)
             if constant is? none and numeric_values.is_family(type 'BigInt' env.lexical session) and not numeric_values.nonzero_form(type 'BigInt' env.lexical session) return problem(id 'cannot prove the divisor is nonzero' 'guard the division or take a nonzero divisor' env session)
             target=numeric_values.object_member(family session.types)
         }
@@ -1392,8 +1396,8 @@ set_read_type = (id:addr type:addr env:Environment @session:contexts.Session):>v
     session.read_states[env.state] = state
 }
 # Packing a value into its wider store union changes storage, not which
-# alternatives this assignment can produce. Keep that evidence for the next
-# read; actual conversions (such as decoding bytes to string|none) retain
+# alternatives this value can contain. Keep that evidence for reads and
+# operator proofs; conversions (such as decoding bytes to string|none) retain
 # their result type because the input is not a subtype of that result.
 stored_read_type = (value:addr @session:contexts.Session):>addr => {
     let node=node_at(value session)

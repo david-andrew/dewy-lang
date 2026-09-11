@@ -115,3 +115,12 @@ let _test_summary=(json:bool brief:bool):>int64=>
     )
     assert numeric.returncode == 42, numeric.stdout + numeric.stderr
     assert numeric.stdout == 'none|0|18446744073709551615|-9223372036854775808|4\n'
+
+    nonzero = subprocess.run(
+        [compiler, ROOT / 'tests/fixtures/native_nonzero_compound_bigint.dewy'],
+        cwd=tmp_path,
+        env=env | {'DEWY_LIBRARY_ROOT': str(ROOT / 'library'), 'DEWY_UDEWY': str(micro)},
+        capture_output=True, text=True, timeout=900, check=False,
+    )
+    assert nonzero.returncode == 42, nonzero.stdout + nonzero.stderr
+    assert nonzero.stdout == '42|11|42|4|2\n'

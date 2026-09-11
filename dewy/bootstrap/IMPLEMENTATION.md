@@ -25,6 +25,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Nonzero bigint evidence survives contextual packing into the general
+  zero/record representation. Compound division and remainder can use a
+  nonzero parameter, local, dictionary operand, or call result without
+  reevaluating it. Zero and unproven divisors still reject. All 32 source
+  comparison groups pass; a real-library native fixture matches hosted
+  arithmetic and checks a divisor call's evaluation count.
+
 - Array literals receive element context from a union's unique array
   alternative, including empty results in `array<T> | Error` functions.
   Optional array initializers retain their exact length as a read fact while

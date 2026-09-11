@@ -25,6 +25,11 @@ CASES = [PREFIX + f'let operation=(a:BigInt b:{other}):>{result}=>{left} {op} {r
          for other, left, right in [('int64', 'a', 'b'), ('uint64', 'b', 'a'), ('int8', 'a', 'b'), ('uint8', 'b', 'a')]
          for result in ['bool' if '?' in op else 'BigInt']]
 CASES += [PREFIX + body for body in [
+    'let operation=(value:BigInt divisor:BigInt & ~0):>BigInt=>{let result=value result //= divisor return result}',
+    'let operation=(value:BigInt divisor:BigInt & ~0):>BigInt=>{let result=value result %= divisor return result}',
+    'let operation=(value:BigInt flag:bool):>BigInt=>{let divisor:BigInt & ~0=if flag 16 else 2 let result=value result //= divisor return result}',
+    'let operation=(value:BigInt divisor:BigInt & ~0):>BigInt=>{let values:dict<string BigInt>=["value"->value] values["value"] //= divisor return values["value"]}',
+    'let divisor=():>BigInt & ~0=>[sign=1 limbs=[2]]\nlet operation=(value:BigInt):>BigInt=>{let result=value result //= divisor() return result}',
     'const result=-(9223372036854775808 as BigInt)\nresult',
     'let operation=(value:BigInt|none flag:bool):>bool=>{if value isnt? none {if flag {value += 1} return value <? 0} return false}',
     'let operation=(value:BigInt|none flag:bool):>bool=>{if value isnt? none {if flag {value=1} return value <? 0} return false}',
@@ -59,6 +64,7 @@ CASES += [PREFIX + body for body in [
     'let operation=(a:BigInt b:BigInt):>BigInt=>if b not=? 0 a // b else 0',
 ]]
 ERRORS = [PREFIX + body for body in [
+    'let operation=(value:BigInt divisor:BigInt):>BigInt=>{let result=value if divisor not=? 0 {divisor=0 result //= divisor} return result}',
     'let operation=(value:BigInt|none):>bool=>{if value isnt? none {value=none return value <? 0} return false}',
     'let operation=(value:BigInt):>BigInt=>{let result=value result //= 0 return result}',
     'let operation=(value:BigInt divisor:BigInt):>BigInt=>{let result=value result //= divisor return result}',
