@@ -48,6 +48,9 @@ main=():>int64=>{{
     let measure_type=types.function_type([types.PosOrKwArg['src' string]] [] none returned [] @type_nodes)
     let measure=hir.append_node(@nodes hir.ExpressedIdentifier[span measure_type 'measure'])
     let measured=hir.append_node(@nodes hir.FunctionCall[span result_type measure [text] []])
+    let ordinary_type=types.function_type([types.PosOrKwArg['src' string]] [] none result_type [] @type_nodes)
+    let ordinary=hir.append_node(@nodes hir.ExpressedIdentifier[span ordinary_type 'ordinary'])
+    let unpromised=hir.append_node(@nodes hir.FunctionCall[span result_type ordinary [text] []])
     let result=hir.append_node(@nodes hir.ExpressedIdentifier[span result_type 'result' 4])
     let selected=hir.append_node(@nodes hir.TypeTest[span boolean result absent true])
     let registry=bindings.Registry[]
@@ -93,6 +96,15 @@ main=():>int64=>{{
     $runtime_assert bound isnt? none and bound.lower =? 1
     bound=facts.lookup(refined facts.value(facts.Term[4]))
     $runtime_assert bound isnt? none and bound.lower =? 0
+    # An ordinary optional result has no conditional return contract. Neither
+    # branch establishes a new argument-length or result-value promise.
+    data.member_calls[4]=unpromised
+    loop truth in [true false] {{
+        refined=predicates.refine(state selected truth @data)
+        $runtime_assert refined isnt? none
+        $runtime_assert facts.value(facts.Term[3 'length']).key not in? refined
+        $runtime_assert facts.value(facts.Term[4]).key not in? refined
+    }}
     return 0
 }}
 ''')

@@ -75,6 +75,13 @@ selected_member = (node:hir.TypeTest truth:bool state:facts.State @data:Data):>f
     if signature is? none return state
     let result=types.node_at(data.env.types signature.ret)
     if result isnt? types.TypeOr return state
+    # Only a refined result alternative can add conditional call evidence.
+    # Ordinary optional/union results need no private subtype-analysis arena.
+    let promised=false
+    loop member in result.items {
+        if types.node_at(data.env.types member) is? types.RefinedType {promised=true break}
+    }
+    if not promised return state
     let survivors:array<addr>=[]
     let type_nodes=data.env.types
     let matches=truth not=? node.negated

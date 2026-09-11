@@ -25,6 +25,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Conditional call-result facts avoid copying the type arena when a union
+  has no refined alternatives. Ordinary optional results establish no new
+  return promises; refined alternatives still propagate their argument and
+  result bounds. The native predicate regression checks both paths.
+
 - Type interning keeps checked position hints across calls. Each hint must
   match both the bounds and the key of the supplied arena; independent,
   forked, and cleared arenas retain their own identities. Native type-algebra
