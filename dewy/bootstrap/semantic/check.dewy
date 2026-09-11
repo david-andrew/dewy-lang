@@ -411,6 +411,17 @@ bigint_operation = (name:string arguments:array<addr> expected:addr? id:addr env
         if constant isnt? none and (constant <? -9223372036854775808 or constant >? 18446744073709551615) {selected=true}
     }
     if not selected return none
+    if name =? '__unary_sub__' and arguments.length =? 1 {
+        let constant=constant_integer(arguments[0] session)
+        if constant isnt? none {
+            let negated=-constant
+            let loc=contexts.node_at(id env.lexical session).loc
+            if negated >=? -9223372036854775808 and negated <=? 9223372036854775807 and not (expected isnt? none and numeric_values.is_family(expected 'BigInt' env.lexical session)) {
+                return put(hir.Integer[loc types.integer_literal(negated @session.types) '0d' negated] @session)
+            }
+            return numeric_values.bigint_literal(negated family loc @session)
+        }
+    }
     if name =? '__truediv__' return pending(id 'runtime rational arithmetic materialization' env session)
     let helper=numeric_values.bigint_binary.get(name)
     if name =? '__unary_sub__' and arguments.length =? 1 {helper='_bigint_neg'}
@@ -537,6 +548,29 @@ union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:E
     return none
 }
 
+# Assignment facts may narrow an optional binding all the way to none.
+# If ordinary dispatch then fails, its declared union still supplies tagged
+# equality. Restore that storage view only for this comparison, preserving
+# ordinary operators on successfully dispatched narrowed payloads.
+stored_union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    let restored:array<addr>=[]
+    let changed=false
+    loop argument in arguments {
+        let value=node_at(argument session)
+        let replacement=argument
+        if value is? hir.ExpressedIdentifier and value.binding_id isnt? none {
+            let binding=bindings.binding_at(session.registry value.binding_id)
+            let stored=if binding.store_type is? none binding.value_type else binding.store_type
+            if stored isnt? none and types.node_at(session.types types.unfold(types.strip_refinement(value.value_type session.types) session.types)) isnt? types.TypeOr and types.node_at(session.types types.unfold(types.strip_refinement(stored session.types) session.types)) is? types.TypeOr and subtyping.is_subtype(value.value_type stored session.links @session.types) {
+                replacement=put(hir.ExpressedIdentifier[value.loc stored value.name value.binding_id] @session)
+                changed=true
+            }
+        }
+        restored.push(replacement)
+    }
+    return if changed union_equality(function restored negated id env @session) else none
+}
+
 call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session expected:addr?=none order:array<string?>=[]):>addr|Error => {
     let func = node_at(function session)
     if func is? hir.ExpressedIdentifier and func.binding_id isnt? none {
@@ -623,7 +657,14 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     let system = dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session)]
     let hint=call_hint(expected function positional env session)
     let matched = if order.length =? 0 dispatch.match_best_function(methods pos_types kw_types hint system @session.types) else dispatch.match_ordered(methods pos_types kw_types order hint system @session.types)
-    if matched is? dispatch.DispatchError return problem(id 'no matching function' matched.message env session)
+    if matched is? dispatch.DispatchError {
+        if keyword.length =? 0 and positional.length =? 2 and func is? hir.ExpressedIdentifier and func.binding_id isnt? none and bindings.binding_at(session.registry func.binding_id).builtin and func.name in? ['__eq__' '__ne__'] {
+            let comparison=stored_union_equality(function positional func.name =? '__ne__' id env @session)
+            if comparison is? Error return comparison
+            if comparison isnt? none return if expected is? none comparison else against(comparison expected id env @session)
+        }
+        return problem(id 'no matching function' matched.message env session)
+    }
     let callee = function
     let method = dispatch.method_at(session.types matched.method)
     if order.length >? 0 {
@@ -2565,11 +2606,12 @@ compound_container = (lookup:hir.DictLookup right_id:addr operator:string id:add
     let original_key=lookup.key
     lookup.key=local
     let read=put(lookup @session)
-    let right=expression(right_id env @session expected=lookup.value_type)
+    let operand_type=types.strip_refinement(lookup.value_type session.types)
+    let right=expression(right_id env @session expected=operand_type)
     if right is? Error return right
     let function=identifier(operator id env @session)
     if function is? Error return function
-    let result=call(function [read right] [] id env @session expected=lookup.value_type)
+    let result=call(function [read right] [] id env @session expected=operand_type)
     if result is? Error return result
     result=against(result lookup.value_type id env @session)
     if result is? Error return result
@@ -2607,11 +2649,15 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     # The hosted placeholder remains until lowering preserves one evaluation
     # of the array route and index across both the read and the write.
     if read is? hir.Index return pending(id 'compound indexed assignment' env session)
-    let right = expression(node.right env @session expected=read.value_type)
+    # The RHS supplies an operand, not a replacement value. For `x >= 5`,
+    # `x += 1` need not prove `1 >= 5`; only the computed store must satisfy
+    # the contract. Retain the representation hint while shedding its facts.
+    let operand_type=types.strip_refinement(read.value_type session.types)
+    let right = expression(node.right env @session expected=operand_type)
     if right is? Error return right
     let func = identifier(name id env @session)
     if func is? Error return func
-    let result = call(func [target right] [] id env @session expected=read.value_type)
+    let result = call(func [target right] [] id env @session expected=operand_type)
     if result is? Error return result
     result = against(result required id env @session)
     if result is? Error return result

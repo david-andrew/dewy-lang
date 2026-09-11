@@ -25,6 +25,17 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Operators retain their contracts as value facts become more precise.
+  Compound RHS operands use the representation hint; only the computed store
+  must satisfy the destination refinement. This proves an index increment
+  under a dynamic array-length guard. When ordinary equality dispatch fails
+  after narrowing, a binding's original union supplies its tagged equality.
+  Bigint literal materialization also retains the value needed by unary
+  constant folding. All 31 native source-comparison groups pass, along with
+  seven native execution cases and invalid-store rejection. The surrounding
+  hosted suite passes 1,773 tests with 10 skips. General refined dictionary
+  value arithmetic still has proof gaps shared with the hosted compiler.
+
 - Local refinement annotations resolve their named terms to lexical binding
   ids, matching hosted declaration checking. This lets an index bound name
   its array while keeping a shadowed array distinct. All 30 source comparison

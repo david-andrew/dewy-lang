@@ -242,22 +242,24 @@ let check = (tok:Tok src:string n:uint64):> Ok & <tok is? Word n <=? src.length>
     if n >? src.length return Trouble[why="too long"]
     return Ok
 }
-let main = ():>int64 => {
-    let t:Tok = Word[text="hi"]
-    let text = "hello world"
-    let n:uint64 = 4
+let forget = ():> Ok | Trouble => Trouble[why="later"]
+let use = (t:Tok text:string n:uint64):>int64 => {
     let r = check(t text n)
     if r isnt? exception { let w:Word = t  let head = text[0..n) }
     return 0
 }
+let main = ():>int64 => use(Word[text="hi"] "hello world" 4)
 '''
     _check(program)
     with pytest.raises(UserError, match='cannot prove refinement'):   # `return Ok` without the length guard
         _check(program.replace('    if n >? src.length return Trouble[why="too long"]\n', ''))
     with pytest.raises(UserError, match='cannot prove type fact'):
         _check(program.replace('    if tok isnt? Word return Trouble[why="not a word"]\n', ''))
-    with pytest.raises(TypeCheckError, match='type mismatch'):        # reassigned: the remembered call no longer speaks for `r`
-        _check(program.replace('    if r isnt? exception', '    r = Trouble[why="later"]\n    if r isnt? exception'))
+    # A known Trouble makes the success arm unreachable. An unknown member
+    # from a new, unrefined call must not inherit the old call's facts.
+    _check(program.replace('    if r isnt? exception', '    r = Trouble[why="later"]\n    if r isnt? exception'))
+    with pytest.raises(TypeCheckError, match='type mismatch'):
+        _check(program.replace('    if r isnt? exception', '    r = forget()\n    if r isnt? exception'))
 
 
 def test_an_error_object_is_an_exception_for_a_type_test() -> None:

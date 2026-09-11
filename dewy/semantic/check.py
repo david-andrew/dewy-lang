@@ -10920,6 +10920,29 @@ def _dispatch_builtin(
                 expected_return = None
         result = ctx.type_system.match_best_function(methods, arg_types, expected_return=expected_return)
     except ty.DispatchError as e:
+        if fname in ('__eq__', '__ne__') and len(args) == 2:
+            # Flow knowledge must not remove equality provided by a binding's
+            # union storage. Try its tagged view only when ordinary operand
+            # dispatch failed; a narrowed payload's valid operator keeps its
+            # usual behavior, and recursive payload comparisons terminate.
+            restored = []
+            for arg in args:
+                value = _unwrap_parens(arg)
+                binding = ctx.binding_registry.by_id.get(value.binding_id) if isinstance(value, hir.ExpressedIdentifier) else None
+                stored = (binding.store_type or binding.type) if binding is not None else None
+                if binding is not None and binding.store_type is None and isinstance(binding.declaration, hir.Declare):
+                    stored = binding.declaration.annotation or binding.declaration.expr.type
+                if (stored is not None and isinstance(value, hir.ExpressedIdentifier)
+                        and not isinstance(ty.unfold(ty.strip_refinement(value.type)), ty.TypeOr)
+                        and isinstance(ty.unfold(ty.strip_refinement(stored)), ty.TypeOr)
+                        and ctx.type_system.is_subtype(value.type, stored)):
+                    restored.append(replace(value, type=stored))
+                else:
+                    restored.append(arg)
+            if any(before is not after for before, after in zip(args, restored)):
+                comparison = _union_member_equality(restored, negated=fname == '__ne__', loc=loc, source_name=source_name, ctx=ctx)
+                if comparison is not None:
+                    return comparison
         pointers = [Pointer(span=op_loc, message=str(e))]
         pointers.extend(
             Pointer(span=arg.loc, message=f'operand has type `{type_to_dewy(arg.type)}`')
@@ -11133,10 +11156,13 @@ def _constant_integer(
 ) -> int | None:
     """Evaluate the small pure integer subset accepted for Stage 4a indices."""
 
+    node = _unwrap_parens(node)
     if isinstance(node.type, ty.IntegerLiteralType):
         return node.type.value
     if isinstance(node, hir.Integer):
         return node.value
+    if isinstance(node, hir.ObjectLiteral) and node.integer_value is not None:
+        return node.integer_value
     if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
         return _constant_integer(node.expr, ctx=ctx, seen_bindings=seen_bindings)
     if isinstance(node, hir.ArrayLength) and isinstance(node.array.type, ty.ArrayType):

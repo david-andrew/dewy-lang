@@ -39,7 +39,8 @@ main=(argv:array<string>):>int64=>{{
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [
-        ({'entry.dewy': 'let main=():>int64=>{let names:array<int64>=[] let at:addr<i => i <=? names.length>=0 names.insert(42 idx=at) return names[0]}'}, 42),
+        ({'entry.dewy': 'let main=():>int64=>{let x:int64<n=>n>=?5>=5 x+=1 return x+36}'}, 42),
+        ({'entry.dewy': 'let main=():>int64=>{let x:int64|none=1 x=none return if x =? 1 0 else if x not=? 1 42 else 0}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let names:array<int64>=[10 20] let at:addr<i => i <=? names.length>=0 loop at <? names.length {at+=1} return at+40}'}, 42),
         ({'entry.dewy': 'let combine=(left:int64 scale:int64=2 right:int64):>int64=>left+right*scale\nlet main=():>int64=>combine(scale=2 10 16)'}, 42),
         ({'entry.dewy': 'let combine=(left:int64 scale:int64=2 right:int64):>int64=>left+right*scale\nlet main=():>int64=>combine(right=16 10)'}, 42),
@@ -120,6 +121,7 @@ main=(argv:array<string>):>int64=>{{
     assert str(bad / 'dependency.dewy') in result.stderr
 
     for index, (body, title) in enumerate([
+        ('let main=():>int64=>{let x:int64<n=>n>=?5>=5 x-=1 return x}', 'refinement'),
         ('let main=():>int64=>{let names:array<int64>=[42] let at:addr<i => i <? names.length>=0 names=[] return names[at]}', 'bounds'),
         ('let main=():>int64=>{let names:array<int64>=[42] let at:addr<i => i <? names.length>=0 return {let names:array<int64>=[] names[at]}}', 'bounds'),
         ('let main=():>int64=>{let left:uint8=7 let right:uint16=256 if left <? right return 1 return 0}', 'cannot prove this integer fits'),
@@ -179,6 +181,10 @@ let main=():>int64=>{{
 
     unicode_runtime = ROOT / 'library/unicode/runtime.dewy'
     for index, body in enumerate([
+        'BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet main=():>int64=>{const value=-(9223372036854775808 as BigInt) return if value =? -9223372036854775808 42 else 0}',
+        'let main=():>int64=>{let names:array<int64>=[] let at:addr<i => i <=? names.length>=0 names.insert(42 idx=at) return names[0]}',
+        'let f=(names:array<int64>):>int64=>{let at:addr<i=>i<=?names.length>=0 loop at <? names.length {at+=1} return at+40}\nlet main=():>int64=>f([10 20])',
+        'let before=(left:int64 right:int64):>bool=>left <? right\nlet f=(names:array<int64>):>int64=>{let at:addr<i=>i<=?names.length>=0 loop at <? names.length {if before(names[at] 0) break at+=1} return at+40}\nlet main=():>int64=>f([10 20])',
         'T:type=[x:int64 add=(left:int64 right:int64):>int64=>x+left+right]\nlet main=():>int64=>T[20].add(right=2 20)',
         'let format=(value:int64|none flag:bool|none):>string=>"{value}:{flag}"\nlet main=():>int64=>if format(none true)=?"none:true" and format(42 none)=?"42:none" 42 else 0',
         'let format=(value:int64|string|none):>string=>"{value}"\nlet main=():>int64=>if format(42)=?"42" and format("text")=?"text" and format(none)=?"none" 42 else 0',

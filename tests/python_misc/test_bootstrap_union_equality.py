@@ -4,6 +4,9 @@ import subprocess
 import test_bootstrap_check as source_values
 
 CASES = [
+    'let x:int64|none=1\nx=none\nx =? 1',
+    'let x:int64|none=1\nx=none\nx not=? 1',
+    'let x:int64|string=1\nx="a"\nx =? 1',
     'let same=(a:string|none b:string):>bool=>a =? b',
     'let same=(a:string b:string|none):>bool=>a not=? b',
     'let same=(a:int64|none b:int64):>bool=>a =? b',
