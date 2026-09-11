@@ -308,6 +308,74 @@ ARENA_CASES = [
 # Replacing a field or an ancestor invalidates its narrowed read type.
 REJECTED_CASES = ['Box:type=[value:int64|none]\nlet main=():>int64=>{let box=Box[40] if box.value is? int64 {box.value=none return box.value+2} return 0}', 'Box:type=[value:int64|none]\nlet main=():>int64=>{let box=Box[40] if box.value is? int64 {box=Box[none] return box.value+2} return 0}', 'Box:type=[value:int64|none]\nOuter:type=[box:Box]\nlet main=():>int64=>{let outer=Outer[Box[40]] if outer.box.value is? int64 {outer.box=Box[none] return outer.box.value+2} return 0}']
 
+# Scope exits reclaim independent aggregate storage after copying escaping
+# results. Include loop exits, dynamic brands, nested/optional storage, and
+# arena reuse; checking only final values would miss unbounded retention.
+CLEANUP_CASES = [('Box:type=[values:array<int64>]\n'
+  'let create=():>Box=>{let local=Box[[40 2]] return local}\n'
+  'let main=():>int64=>{let x=create() let y=create() y.values[0]=99 return '
+  'x.values[0]+x.values[1]}',
+  42),
+ ('Box:type=[values:array<int64>]\n'
+  'let create=():>Box=>{let local=Box[[40 2]] local}\n'
+  'let main=():>int64=>{let x=create() let y=create() y.values[0]=99 return '
+  'x.values[0]+x.values[1]}',
+  42),
+ ('let main=():>int64=>{let total:int64=0 loop i in 0..42 {let values:array<int64>=[i 1] if i <? '
+  '41 {total+=values[1] continue} total+=values[1] break} return total}',
+  42),
+ ('let main=():>int64=>{let total:int64=0 loop i in 0..5 {let values:array<int64>=[i 1] loop j in '
+  '0..6 {let row:array<int64>=[j 1] total+=row[1]}} return total}',
+  42),
+ ('Box:type=[values:array<int64>]\n'
+  'let main=():>int64=>{let outside=Box[[40 2]] let inside={let local=outside local} let '
+  'churn=Box[[9 8]] return inside.values[0]+inside.values[1]}',
+  42),
+ ('Node:type=[rows:array<array<int64>>]\n'
+  'let build=():>Node=>{let result=Node[[[40 2] [3 4]]] return result}\n'
+  'let main=():>int64=>{let a=build() let b=build() let changed=b.rows[0] changed[0]=99 let '
+  'row=a.rows[0] return row[0]+row[1]}',
+  42),
+ ('Box:type=[values:array<int64>]\n'
+  'let build=(yes:bool):>Box|none=>{let result:Box|none=if yes Box[[40 2]] else none return '
+  'result}\n'
+  'let main=():>int64=>{let a=build(true) let b=build(false) if a is? none return 0 return '
+  'a.values[0]+a.values[1]}',
+  42),
+ ('Base=$abstract type of [value:int64]\n'
+  'Child=type of Base & [values:array<int64>]\n'
+  'let build=():>Base=>{let x:Base=Child[40 [2]] return x}\n'
+  'let main=():>int64=>{let a=build() let b=build() if a is? Child return a.value+a.values[0] '
+  'return 0}',
+  42),
+ ('Box:type=[values:array<int64>]\n'
+  'let exercise=(count:int64):>void=>{loop i in 0.. and i <? count {let local=Box[[i 2]]}}\n'
+  'let main=():>int64=>{exercise(1) let before=_arena_cursor exercise(10000) return if '
+  '_arena_cursor-before <? 4096 42 else 0}',
+  42),
+ ('let exercise=(count:int64):>void=>{loop i in 0.. and i <? count {let local:array<int64>=[i '
+  '2]}}\n'
+  'let main=():>int64=>{exercise(1) let before=_arena_cursor exercise(10000) return if '
+  '_arena_cursor-before <? 4096 42 else 0}',
+  42),
+ ('let choose=(flag:bool):>void=>{if flag let values:array<int64>=[42]}\n'
+  'let main=():>int64=>{choose(false) choose(true) choose(false) return 42}',
+  42),
+ ('\n'
+  'Base=$abstract type of [value:int64]\n'
+  'Small=type of Base & []\n'
+  'Wide=type of Base & [a:int64 b:int64 c:int64 d:int64 e:int64 f:int64]\n'
+  'let exercise=():>void=>{let value:Base=Small[42]}\n'
+  'let main=():>int64=>{\n'
+  '    _arena_alloc(8);\n'
+  '    exercise()\n'
+  '    let reclaimed=_arena_alloc(64)\n'
+  '    return if reclaimed+64 <=? _arena_cursor 42 else 0\n'
+  '}\n',
+  42)]
+ARENA_CASES += CLEANUP_CASES
+
+
 def test_native_scalar_lowering(tmp_path):
     source = tmp_path / 'lowering.dewy'
     source.write_text(f'''

@@ -25,6 +25,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native lowering reclaims owned local arrays, records, and union cells on
+  normal scope exits, returns, and loop exits. Escaping aggregate results are
+  copied before local storage is reclaimed. Shared strings, exposed places,
+  captures, and reassigned locals still use the process arena conservatively.
+  The complete native graph/lowering regression passes. Focused execution
+  also covers nested and branded records, optional payloads, non-block arms,
+  and 10,000 local allocations with less than 4 KiB of additional arena use.
+  Full paired self-build verification remains in progress.
+
 - Conditional call-result facts avoid copying the type arena when a union
   has no refined alternatives. Ordinary optional results establish no new
   return promises; refined alternatives still propagate their argument and

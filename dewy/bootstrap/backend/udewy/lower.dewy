@@ -33,6 +33,7 @@ pass read-only captures as hidden arguments, as in the hosted backend.
 Escaping closures remain a subsequent step. An unsupported representation reports a
 pending-implementation diagnostic before program emission.
 """
+OwnedLocal:type = const [value:addr value_type:addr]
 State:type = [
     input:emit.Input
     source:SrcFile
@@ -59,6 +60,11 @@ State:type = [
     union_tags:dict<string addr>=[]
     next_tag:addr=1
     copy_helpers:dict<string string>=[]
+    release_helpers:dict<string string>=[]
+    cleanup_enabled:bool=false
+    cleanup_frames:array<array<OwnedLocal>>=[]
+    cleanup_loops:array<addr>=[]
+    cleanup_excluded:set<addr>=set[]
     generated:array<program.Function>=[]
     problem:Error?=none
 ]
@@ -261,6 +267,7 @@ expression = (id:addr @state:State):>addr => {
         return read_value(raw stored node.value_type node @state)
     }
     if node is? hir.Transmute return put(hir.Transmute[node.loc type expression(node.expr @state)] @state)
+    if node is? hir.Return and state.cleanup_enabled return cleanup_return(node @state)
     if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else owned_value(node.item @state)] @state)
     if node is? hir.Declare {
         if compile_time_binding(node state) return put(hir.Void[node.loc type] @state)
@@ -270,6 +277,16 @@ expression = (id:addr @state:State):>addr => {
         if node.binding_id isnt? none and node.binding_id in? state.boxed {
             value=box_value(value if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
             annotation=types.primitive('int64' @state.type_nodes)
+        }
+        if state.cleanup_enabled and node.binding_id isnt? none and node.binding_id not in? state.cleanup_excluded and state.cleanup_frames.length >? 0 {
+            let stored=if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation
+            if releasable(stored @state) {
+                let read=put(hir.ExpressedIdentifier[node.loc annotation symbol(node.name node.binding_id @state) node.binding_id] @state)
+                $runtime_assert state.cleanup_frames.length >? 0
+                let frame=state.cleanup_frames.pop
+                frame.push(OwnedLocal[read stored])
+                state.cleanup_frames.push(frame)
+            }
         }
         return put(hir.Declare[node.loc type node.decltype symbol(node.name node.binding_id @state) annotation value node.binding_id] @state)
     }
@@ -322,10 +339,19 @@ expression = (id:addr @state:State):>addr => {
     }
     if node is? hir.FunctionLiteral return function_value(id node @state)
     if node is? hir.ShortCircuit return put(hir.ShortCircuit[node.loc type node.op expression(node.left @state) expression(node.right @state)] @state)
+    if node is? hir.Block and state.cleanup_enabled return cleanup_block(node @state)
     if node is? hir.Block return put(hir.Block[node.loc type items(node.items @state) node.scoped] @state)
     if node is? hir.IfArm return put(hir.IfArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
     if node is? hir.LoopArm return put(hir.LoopArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
     if node is? hir.Flow return lower_flow(node 0 @state)
+    if state.cleanup_enabled and node is? hir.Break|hir.Continue and node.loop_levels <? state.cleanup_loops.length {
+        let index=state.cleanup_loops.length-1-node.loop_levels
+        $runtime_assert index >=? 0 and index <? state.cleanup_loops.length
+        let first=state.cleanup_loops[index]
+        let prefix=cleanup_since(first node @state)
+        prefix.push(put(if node is? hir.Break hir.Break[node.loc type node.label node.loop_levels] else hir.Continue[node.loc type node.label node.loop_levels] @state))
+        return put(hir.Block[node.loc type prefix false] @state)
+    }
     if node is? hir.Break return put(hir.Break[node.loc type node.label node.loop_levels] @state)
     if node is? hir.Continue return put(hir.Continue[node.loc type node.label node.loop_levels] @state)
     return reject(node "{node.typename} legalization" @state)
@@ -393,6 +419,7 @@ owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     let value=expression(id @state)
     if node is? hir.Place return value
+    if node is? hir.Block and state.cleanup_enabled return value
     # Ordinary Dewy calls already return independent aggregate storage: both
     # explicit returns and implicit function results pass through this value
     # boundary. Adopt that result instead of cloning it and abandoning its
@@ -1753,7 +1780,34 @@ function = (id:addr node:hir.FunctionLiteral @state:State):>addr => {
     # An implicit result crosses the same value boundary as `return`. This
     # matters when a read-only parameter was borrowed: a returned aggregate
     # must own its storage even when the caller immediately mutates the result.
+    let enabled=state.allocator isnt? none and '_arena_release' in? state.runtime_helpers
+    let excluded=state.addressed | state.boxed
+    loop nested in state.capture_plan.functions.values {excluded=excluded|nested.captures}
+    let pending:array<addr>=[node.body]
+    let visited:set<addr>=set[]
+    loop pending.length >? 0 {
+        let child=pending.pop
+        if child in? visited continue
+        visited.add(child)
+        let current=hir.node_at(state.input.nodes child)
+        if current is? hir.FunctionLiteral continue
+        if current is? hir.Transmute and (aggregate(current.value_type state) or aggregate(hir.node_at(state.input.nodes current.expr).value_type state)) {enabled=false}
+        # A raw place may outlive a call. Retain its root conservatively.
+        if current is? hir.Place {
+            let route=borrowing.route(current.target state.input.nodes)
+            if route isnt? none {excluded.add(route.binding)}
+        }
+        # Reassignment needs disposal of the previous value at that boundary.
+        # Until that is lowered, leave reassigned locals in the process arena.
+        if current is? hir.Assign {
+            let target=hir.node_at(state.input.nodes current.target)
+            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {excluded.add(target.binding_id)}
+        }
+        loop item in hir.children(current) {pending.push(item)}
+    }
+    state.cleanup_enabled=enabled state.cleanup_excluded=excluded
     let body=owned_value(node.body @state)
+    state.cleanup_enabled=false
     let result_type=runtime_type(node.rettype node @state)
     if prologue.length >? 0 {
         prologue.push(body)
@@ -1921,7 +1975,7 @@ iterator_step = (node:hir.IteratorExpression @state:State):>IteratorStep => {
 # rule that `else` runs only when that loop arm never entered.
 lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     let type=runtime_type(node.value_type node @state)
-    if position >=? node.arms.length return if node.default is? none put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state) else expression(node.default @state)
+    if position >=? node.arms.length return if node.default is? none put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state) else if state.cleanup_enabled cleanup_scoped(node.default @state) else expression(node.default @state)
     let arm=hir.node_at(state.input.nodes node.arms[position])
     $runtime_assert arm is? hir.IfArm|hir.LoopArm
     let fallback:addr?=none
@@ -1933,7 +1987,12 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
         let step=iterator_condition(test @state)
         prefix=step.prefix condition=step.condition
     } else {condition=expression(arm.condition @state)}
-    let body=expression(arm.body @state)
+    if state.cleanup_enabled and arm is? hir.LoopArm {state.cleanup_loops.push(state.cleanup_frames.length)}
+    let body=if state.cleanup_enabled cleanup_scoped(arm.body @state) else expression(arm.body @state)
+    if state.cleanup_enabled and arm is? hir.LoopArm {
+        $runtime_assert state.cleanup_loops.length >? 0
+        state.cleanup_loops.pop;
+    }
     let arm_type=runtime_type(arm.value_type arm @state)
     let lowered=put(if arm is? hir.IfArm hir.IfArm[arm.loc arm_type condition body] else hir.LoopArm[arm.loc arm_type condition body] @state)
     let flow=put(hir.Flow[node.loc type [lowered] fallback] @state)
@@ -2506,4 +2565,171 @@ set_algebra = (node:hir.SetAlgebra @state:State):>addr => {
     } else return reject(node 'an unknown container algebra operation' @state)
     prefix.push(output.pointer)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+
+
+# Each ordinary aggregate value owns its record/array/cell storage. Strings
+# still share immutable bytes and descriptors, so this pass leaves them to
+# the process arena. No raw-address lifetime is inferred here.
+releasable = (type:addr @state:State):>bool => not string_type(type state) and (cell_members(type @state) isnt? none or array_valued(type state) or object_valued(type state))
+release_block = (pointer:addr size:addr node:hir.AST @state:State):>addr => {
+    let binding=state.runtime_helpers.get('_arena_release')
+    if state.allocator is? none or binding is? none return sequence([] node @state)
+    let name=state.symbols.get(binding)
+    $runtime_assert name isnt? none
+    return intrinsic(name [pointer size] types.primitive('void' @state.type_nodes) node @state)
+}
+release_value = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+    if not releasable(type @state) return sequence([] node @state)
+    let key=types.shape_of(type state.type_nodes)
+    let name=state.release_helpers.get(key)
+    if name is? none {
+        let generated=fresh('release' @state)
+        name=generated state.release_helpers[key]=generated
+        let parameter=fresh('released' @state)
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let empty=types.primitive('void' @state.type_nodes)
+        let source=put(hir.ExpressedIdentifier[node.loc word_type parameter] @state)
+        let body=release_body(source type node @state)
+        let signature=types.function_type([types.PosOrKwArg[parameter word_type]] [] none empty [] @state.type_nodes)
+        let literal=put(hir.FunctionLiteral[node.loc signature [hir.Param[parameter word_type]] [] none empty body source=state.source] @state)
+        state.generated.push(program.Function[generated literal])
+    }
+    $runtime_assert name isnt? none
+    return intrinsic(name [pointer] types.primitive('void' @state.type_nodes) node @state)
+}
+release_record_fields = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+    let record=object_type(type state)
+    $runtime_assert record isnt? none
+    let layout=object_layout(type node @state)
+    let prefix:array<addr>=[]
+    loop field in record.fields {
+        let offset=layout.offsets.get(field.name)
+        $runtime_assert offset isnt? none
+        let value=field_read(address(pointer offset node @state) field.value_type node @state)
+        if object_valued(field.value_type state) {prefix.push(release_record(value field.value_type node @state))}
+        else if cell_members(field.value_type @state) isnt? none {prefix.push(release_cell(value field.value_type node @state))}
+        else if array_valued(field.value_type state) {prefix.push(release_value(value field.value_type node @state))}
+    }
+    return sequence(prefix node @state)
+}
+release_record = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+    let layout=object_layout(type node @state)
+    let brand=layout.offsets.get(layouts.brand_field)
+    if brand is? none return release_record_fields(pointer type node @state)
+    let prefix:array<addr>=[]
+    let tag=snapshot(read_word(pointer brand node @state) @prefix @state)
+    let arms:array<addr>=[]
+    loop entry in state.layout_context.brands.entries {
+        if not subtyping.is_subtype(entry.value_type type state.links @state.type_nodes) continue
+        let number=brand_number(entry.name state)
+        $runtime_assert number isnt? none
+        let condition=intrinsic('__eq__' [tag word(number.first node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition release_record_fields(pointer entry.value_type node @state)] @state))
+    }
+    prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms release_record_fields(pointer type node @state)] @state))
+    return sequence(prefix node @state)
+}
+release_cell = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+    let members=cell_members(type @state)
+    $runtime_assert members isnt? none
+    let prefix:array<addr>=[]
+    let tag=snapshot(read_word(pointer 0 node @state) @prefix @state)
+    let payload=snapshot(read_word(pointer 8 node @state) @prefix @state)
+    let arms:array<addr>=[]
+    let optional=views.optional_payload(type @state.type_nodes)
+    loop member in members {
+        if not releasable(member @state) continue
+        let condition=intrinsic(if optional isnt? none '__ne__' else '__eq__' [tag word(if optional isnt? none 0 else member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition release_value(payload member node @state)] @state))
+    }
+    prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms none] @state))
+    return sequence(prefix node @state)
+}
+release_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let array=array_type(type state)
+    if array isnt? none {
+        let data=snapshot(read_word(pointer layouts.array_descriptor.data node @state) @prefix @state)
+        let owner=snapshot(read_word(pointer layouts.array_descriptor.owner node @state) @prefix @state)
+        let owned:array<addr>=[]
+        if releasable(array.element @state) {
+            let length=snapshot(read_word(pointer layouts.array_descriptor.length node @state) @owned @state)
+            let index=snapshot(word(0 node @state) @owned @state)
+            let element=array_load(word_op('__add__' data word_op('__mul__' index word(8 node @state) node @state) node @state) array.element node @state)
+            owned.push(loop_while(intrinsic('__lt__' [index length] types.primitive('bool' @state.type_nodes) node @state) [release_value(element array.element node @state) assign_value(index word_op('__add__' index word(1 node @state) node @state) node @state)] node @state))
+        }
+        let size=word_op('__mul__' read_word(pointer layouts.array_descriptor.capacity node @state) read_word(pointer layouts.array_descriptor.stride node @state) node @state)
+        owned.push(release_block(data size node @state))
+        prefix.push(conditional(intrinsic('__ne__' [owner word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) sequence(owned node @state) node @state))
+        let flags=read_word(pointer layouts.array_descriptor.flags node @state)
+        let arena=word_op('__and__' flags word(layouts.array_flags.arena_descriptor node @state) node @state)
+        prefix.push(conditional(intrinsic('__ne__' [arena word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) release_block(pointer word(layouts.array_descriptor.size node @state) node @state) node @state))
+    } else if object_valued(type state) {
+        prefix.push(release_record(pointer type node @state))
+        prefix.push(release_block(pointer word(object_layout(type node @state).size node @state) node @state))
+    } else if cell_members(type @state) isnt? none {
+        prefix.push(release_cell(pointer type node @state))
+        prefix.push(release_block(pointer word(16 node @state) node @state))
+    }
+    return sequence(prefix node @state)
+}
+
+# Cleanup entries refer only to declarations already evaluated on this path.
+# The outer frames survive loop exits; returns unwind every active frame.
+cleanup_since = (first:addr node:hir.AST @state:State):>array<addr> => {
+    let prefix:array<addr>=[]
+    let cursor=state.cleanup_frames.length
+    loop cursor >? first {
+        cursor-=1
+        $runtime_assert cursor <? state.cleanup_frames.length
+        let frame=state.cleanup_frames[cursor]
+        let index=frame.length
+        loop index >? 0 {
+            index-=1
+            $runtime_assert index <? frame.length
+            let owned=frame[index]
+            prefix.push(release_value(owned.value owned.value_type node @state))
+        }
+    }
+    return prefix
+}
+cleanup_block = (node:hir.Block @state:State):>addr => {
+    let start=state.cleanup_frames.length
+    state.cleanup_frames.push([])
+    let prefix:array<addr>=[]
+    let result:addr?=none
+    loop index in 0.. and index <? node.items.length {
+        let item=node.items[index]
+        if index+1 =? node.items.length and not types.is_primitive(types.node_at(state.type_nodes node.value_type) 'void') {
+            let value=owned_value(item @state)
+            let actual=hir.node_at(state.nodes value)
+            if types.is_primitive(types.node_at(state.type_nodes actual.value_type) 'never') {prefix.push(value)}
+            else {result=snapshot(value @prefix @state)}
+        } else {prefix.push(expression(item @state))}
+    }
+    loop released in cleanup_since(start node @state) {prefix.push(released)}
+    $runtime_assert state.cleanup_frames.length >? 0
+    state.cleanup_frames.pop;
+    if result isnt? none {prefix.push(result)}
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix node.scoped] @state)
+}
+cleanup_return = (node:hir.Return @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let result:addr?=none
+    if node.item isnt? none {
+        let value=owned_value(node.item @state)
+        let type=types.node_at(state.type_nodes hir.node_at(state.nodes value).value_type)
+        if types.is_primitive(type 'void') or types.is_primitive(type 'never') {prefix.push(value)}
+        else {result=snapshot(value @prefix @state)}
+    }
+    loop released in cleanup_since(0 node @state) {prefix.push(released)}
+    prefix.push(put(hir.Return[node.loc runtime_type(node.value_type node @state) result] @state))
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+}
+
+cleanup_scoped = (id:addr @state:State):>addr => {
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Block return expression(id @state)
+    return cleanup_block(hir.Block[node.loc node.value_type [id] false] @state)
 }
