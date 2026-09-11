@@ -71,11 +71,18 @@ def test_native_aggregate_layouts(tmp_path, monkeypatch):
     brands.register(child @registry type_nodes)
     let family=layouts.Context[registry]
     loop id in [base root child holder] {{printl("brand|{{record_text(layouts.record(id family @type_nodes))}}")}}
+    # Excluding a descendant preserves the family's physical representation.
+    let remaining=types.intersect([root types.negate(child @type_nodes)] @type_nodes)
+    printl("excluded|{{record_text(layouts.record(remaining family @type_nodes))}}")
+    printl("excluded-element|{{element_text(layouts.element(remaining @type_nodes))}}")
 """
     for type_ in [base, root, child, holder]:
         size, offsets = lowerer._object_layout(type_, node)
         description = ';'.join(f'{name}:{offset}' for name, offset in offsets.items())
         expected.append(f'brand|{size}|{description}')
+    size, offsets = lowerer._object_layout(root, node)
+    description = ';'.join(f'{name}:{offset}' for name, offset in offsets.items())
+    expected.extend([f'excluded|{size}|{description}', 'excluded-element|8|true'])
     source = tmp_path / 'layouts.dewy'
     source.write_text(f'''
 import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types

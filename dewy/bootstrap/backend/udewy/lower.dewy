@@ -84,7 +84,9 @@ unit_type = (id:addr state:State):>bool => {
     return plain in? state.layout_context.nominals or types.is_primitive(types.node_at(state.type_nodes plain) 'none')
 }
 runtime_type = (id:addr node:hir.AST @state:State):>addr => {
-    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    # A negative type test restricts values without changing the positive
+    # family's storage. Keep those exclusions out of representation queries.
+    let plain=views.structural_base(id state.type_nodes)
     let type=types.node_at(state.type_nodes plain)
     if type is? types.QuantityType return runtime_type(type.number node @state)
     if type is? types.IntegerLiteralType {
@@ -335,7 +337,7 @@ expression = (id:addr @state:State):>addr => {
 # buffer to the arena; element handles move into the replacement buffer.
 # Releasing complete values at their last use remains a lifetime pass.
 array_type = (id:addr state:State):>types.ArrayType? => {
-    let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
+    let type=types.node_at(state.type_nodes views.structural_base(id state.type_nodes))
     return if type is? types.ArrayType type else none
 }
 word = (value:bigint node:hir.AST @state:State):>addr => put(hir.Integer[node.loc types.primitive('int64' @state.type_nodes) '0d' value] @state)
@@ -1346,28 +1348,28 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
 # ObjectType just to test for presence would copy its fields, methods and
 # identity strings, then discard all of that metadata at every value use.
 object_valued = (id:addr state:State):>bool => {
-    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    let plain=views.structural_base(id state.type_nodes)
     $runtime_assert plain <? state.type_nodes.length
     return state.type_nodes[plain] is? types.ObjectType
 }
 array_valued = (id:addr state:State):>bool => {
-    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    let plain=views.structural_base(id state.type_nodes)
     $runtime_assert plain <? state.type_nodes.length
     return state.type_nodes[plain] is? types.ArrayType
 }
 object_type = (id:addr state:State):>types.ObjectType? => {
-    let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
+    let type=types.node_at(state.type_nodes views.structural_base(id state.type_nodes))
     return if type is? types.ObjectType type else none
 }
 aggregate = (id:addr state:State):>bool => {
-    let plain=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
+    let plain=types.node_at(state.type_nodes views.structural_base(id state.type_nodes))
     return (plain is? types.TypeOr and enum_members(id state) is? none) or string_type(id state) or array_valued(id state) or object_valued(id state)
 }
 object_layout = (id:addr node:hir.AST @state:State):>layouts.Record => {
     # Lowering only appends types, and the compilation's brand registry is
     # already complete. A normalized record's offsets cannot change while
     # legalizing another expression; retain them across loads and copy helpers.
-    let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
+    let plain=views.structural_base(id state.type_nodes)
     let cached=state.record_layouts.get(plain)
     if cached isnt? none return cached
     let layout=layouts.record(plain state.layout_context @state.type_nodes)

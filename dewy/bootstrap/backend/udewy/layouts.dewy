@@ -32,7 +32,7 @@ handle = (type:types.Type):>bool => type is? types.ArrayType|types.FunctionType|
 # inline. Keeping these queries separate prevents an array stride from being
 # mistaken for the size of a record stored behind its element handle.
 element = (id:addr @nodes:array<types.Type> nominals:set<addr>=set[]):>Storage|Pending => {
-    let plain=types.unfold(types.strip_refinement(id nodes) nodes)
+    let plain=views.structural_base(id nodes)
     let type=types.node_at(nodes plain)
     if types.is_primitive(type 'bool') return Storage[1 1 false]
     let word=views.fixed_integer_layout(plain nodes)
@@ -45,7 +45,7 @@ element = (id:addr @nodes:array<types.Type> nominals:set<addr>=set[]):>Storage|P
     return Pending['array element has no selected runtime representation']
 }
 field = (id:addr context:Context @nodes:array<types.Type> active:set<addr>=set[]):>Storage|Pending => {
-    let plain=types.unfold(types.strip_refinement(id nodes) nodes)
+    let plain=views.structural_base(id nodes)
     let type=types.node_at(nodes plain)
     if types.is_primitive(type 'bool') return Storage[1 1]
     let word=views.fixed_integer_layout(plain nodes)
@@ -79,7 +79,7 @@ field = (id:addr context:Context @nodes:array<types.Type> active:set<addr>=set[]
 # carries reserves the same word and descendant storage (brand zero for a
 # plain structural value).
 record = (id:addr context:Context @nodes:array<types.Type> active:set<addr>=set[]):>Record|Pending => {
-    let plain=types.unfold(types.strip_refinement(id nodes) nodes)
+    let plain=views.structural_base(id nodes)
     if plain in? active return Pending['recursive record storage needs an indirection']
     active.add(plain)
     let type=types.node_at(nodes plain)
