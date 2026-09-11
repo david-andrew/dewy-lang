@@ -316,12 +316,14 @@ function_decl = (name:string function:hir.FunctionLiteral scope:Scope input:Inpu
     }
     let body=hir.node_at(input.nodes function.body)
     let text:string=''
-    if contains_return(function.body input) {text=ast(function.body @inner input @state)}
-    else if types.is_primitive(types.node_at(input.types function.rettype) 'void') or types.is_primitive(types.node_at(input.types function.rettype) 'never') {
+    # An early return in one branch does not close the other branch. Void
+    # functions always have an explicit fallthrough return for the µDewy ABI.
+    if types.is_primitive(types.node_at(input.types function.rettype) 'void') or types.is_primitive(types.node_at(input.types function.rettype) 'never') {
         let items:array<addr>=if body is? hir.Block body.items else [function.body]
         let lines=statements(items @inner input @state)
         lines.push('return void')
         text="\{\n{indent(lines.join('\n'))}\n}"
-    } else {text="\{\n{indent("return {ast(function.body @inner input @state)}")}\n}"}
+    } else if contains_return(function.body input) {text=ast(function.body @inner input @state)}
+    else {text="\{\n{indent("return {ast(function.body @inner input @state)}")}\n}"}
     return "let {name} = ({arguments.join(' ')}):>{annotation(function.rettype input)} => {text}"
 }

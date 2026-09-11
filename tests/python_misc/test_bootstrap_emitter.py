@@ -174,3 +174,59 @@ let main=():>int64=>{{
         assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
         result = subprocess.run([cache_artifact(output).resolve()], timeout=10, check=False)
         assert result.returncode == 42
+
+
+def test_native_function_tails_preserve_early_and_implicit_returns(tmp_path):
+    flag = hir.ExpressedIdentifier(LOC, 'bool', 'flag')
+    void_signature = ty.FunctionType([ty.PosOrKwArg('flag', 'bool')], [], None, 'void')
+    value_signature = ty.FunctionType([ty.PosOrKwArg('flag', 'bool')], [], None, 'int64')
+    early_void = hir.Flow(LOC, 'void', [hir.IfArm(
+        LOC, 'void', flag, hir.Return(LOC, 'never'))], None)
+    early_value = hir.Flow(LOC, 'void', [hir.IfArm(
+        LOC, 'void', flag, hir.Return(LOC, 'never', integer(40)))], None)
+    empty = hir.FunctionLiteral(LOC, void_signature, [hir.Param('flag', 'bool')],
+        [], None, 'void', hir.Block(LOC, 'void', [early_void, hir.Void(LOC, 'void')], True))
+    choose = hir.FunctionLiteral(LOC, value_signature, [hir.Param('flag', 'bool')],
+        [], None, 'int64', hir.Block(LOC, 'int64', [early_value, integer(2)], True))
+    yes, no = hir.Bool(LOC, 'bool', True), hir.Bool(LOC, 'bool', False)
+    answer = call('__add__', [call('choose', [yes]), call('choose', [no])])
+    main = hir.FunctionLiteral(LOC, ty.FunctionType([], [], None, 'int64'), [], [],
+        None, 'int64', hir.Block(LOC, 'int64', [
+            call('early_void', [yes], 'void'), call('early_void', [no], 'void'), answer], True))
+    functions = [('early_void', empty), ('choose', choose), ('main', main)]
+    root = hir.Block(LOC, 'void', [function for _, function in functions], True)
+    type_lines = []
+    node_lines, _, names = emit_hir(root, type_value=type_builder(type_lines), with_names=True)
+    source = tmp_path / 'tails.dewy'
+    source.write_text(f'''from reporting import Span, SrcFile, Error
+import p"{ROOT / 'dewy/bootstrap/semantic/hir.dewy'}" as hir
+import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
+import p"{ROOT / 'dewy/bootstrap/semantic/propositions.dewy'}" as facts
+import p"{ROOT / 'dewy/bootstrap/backend/udewy/emit.dewy'}" as emit
+import p"{ROOT / 'dewy/bootstrap/backend/udewy/program.dewy'}" as program
+import p"{ROOT / 'dewy/bootstrap/backend/udewy/statements.dewy'}" as statements
+let main=():>int64=>{{
+    let span=Span[0 0]
+    let nodes:array<hir.AST>=[]
+    let type_nodes:array<types.Type>=[]
+{chr(10).join(type_lines)}
+{chr(10).join(node_lines)}
+    let units:array<program.Function>=[{' '.join(f"program.Function['{name}' {names[id(function)]}]" for name, function in functions)}]
+    let lowered=statements.normalize(program.Program[units] emit.Input[nodes type_nodes])
+    let text=program.render(lowered.program lowered.input)
+    if text is? Error {{text.fail}}
+    printl(text)
+    return 0
+}}
+''')
+    seed = source.with_suffix('.udewy')
+    seed.write_text(codegen(SrcFile.from_path(source)))
+    assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
+    emitted = subprocess.run([cache_artifact(seed).resolve()], capture_output=True,
+                             text=True, timeout=60, check=False)
+    assert emitted.returncode == 0, emitted.stdout + emitted.stderr
+    output = tmp_path / 'native-tails.udewy'
+    output.write_text(emitted.stdout)
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], timeout=10, check=False)
+    assert result.returncode == 42

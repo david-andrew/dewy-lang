@@ -25,6 +25,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Function fallthrough retains its implicit result even when an earlier branch
+  returns explicitly. Void functions always receive a fallthrough return in
+  emitted µDewy. Native emitter execution covers both paths of early void and
+  value returns; this fixes a missing-return diagnostic in the test runner.
+
 - Native lowering reclaims owned local arrays, records, and union cells on
   normal scope exits, returns, and loop exits. Escaping aggregate results are
   copied before local storage is reclaimed. Shared strings, exposed places,

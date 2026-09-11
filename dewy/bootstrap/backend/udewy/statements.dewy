@@ -199,7 +199,11 @@ normalize = (source:program.Program input:emit.Input):>Result => {
         let function=node_at(entry.literal state)
         $runtime_assert function is? hir.FunctionLiteral
         let body=function.body
-        if not emit.contains_return(body input) and not types.is_primitive(types.node_at(input.types function.rettype) 'void') and not types.is_primitive(types.node_at(input.types function.rettype) 'never') {body=put(hir.Return[function.loc void_type(@state) body] @state)}
+        let result=types.node_at(input.types function.rettype)
+        let tail=types.node_at(input.types node_at(body state).value_type)
+        # The body's value type describes its fallthrough path. Earlier
+        # returns remain exits when `write` lifts this implicit result.
+        if not types.is_primitive(result 'void') and not types.is_primitive(result 'never') and not types.is_primitive(tail 'void') and not types.is_primitive(tail 'never') {body=put(hir.Return[function.loc void_type(@state) body] @state)}
         let lowered=block(function statement(body @state) @state)
         functions.push(program.Function[entry.symbol put(hir.FunctionLiteral[function.loc function.value_type function.pos_or_kw_args function.kw_only_args function.rest_args function.rettype lowered source=function.source] @state)])
     }
