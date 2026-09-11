@@ -1,4 +1,5 @@
 """The native Dewy command invokes a native µDewy executable directly."""
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -124,3 +125,31 @@ let _test_summary=(json:bool brief:bool):>int64=>
     )
     assert nonzero.returncode == 42, nonzero.stdout + nonzero.stderr
     assert nonzero.stdout == '42|11|42|4|2\n'
+
+    # The real test library exercises early void returns in expectation
+    # helpers, output capture, case expansion, and directory exit status.
+    suite = tmp_path / 'native test suite'
+    suite.mkdir()
+    passing = suite / 'passing_test.dewy'
+    passing.write_text('''let identity=(value:int64):>int64=>value
+$test
+let exact=():>void=>{$expect identity(42) =? 42}
+$test(cases=(20 22))
+let copied=(value:int64):>void=>{$expect identity(value) =? value}
+let main=():>int64=>99
+''')
+    real_env = env | {'DEWY_LIBRARY_ROOT': str(ROOT / 'library'), 'DEWY_UDEWY': str(micro)}
+
+    def run_tests(path, status, summary):
+        result = subprocess.run([compiler, 'test', '--json', path], cwd=tmp_path,
+                                env=real_env, capture_output=True, text=True,
+                                timeout=1800, check=False)
+        assert result.returncode == status, result.stdout + result.stderr
+        records = [json.loads(line) for line in result.stdout.splitlines()
+                   if line.startswith('{')]
+        assert records[-1] == summary
+
+    run_tests(passing, 0, {'passed': 3, 'failed': 0})
+    (suite / 'failing_test.dewy').write_text(
+        '$test\nlet wrong=():>void=>{$expect false, "deliberate failure"}\n')
+    run_tests(suite, 1, {'files': 2, 'failed_files': 1, 'failed': 1})
