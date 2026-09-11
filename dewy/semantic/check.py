@@ -8120,7 +8120,7 @@ def _tcr_object_literal(
             continue
         field_expected: ty.Type | None = None
         if annotation_ast is not None:
-            field_expected = ast_to_type(annotation_ast, ctx=ctx)
+            field_expected = ast_to_type(annotation_ast, ctx=replace(ctx, refinement_subject=name))
         elif expected_object is not None:
             field_expected = _field_expectation(expected_object.fields[index])
         prechecked = entries[index][2]
@@ -8163,7 +8163,7 @@ def _tcr_object_literal(
             continue
         field_expected = field_bindings[index].type
         if annotation_ast is not None:
-            field_expected = ast_to_type(annotation_ast, ctx=ctx)
+            field_expected = ast_to_type(annotation_ast, ctx=replace(ctx, refinement_subject=name))
         elif expected_object is not None:
             field_expected = _field_expectation(expected_object.fields[index])
         value = typecheck_and_resolve_inner(value_ast, ctx=ctx, expected=field_expected)

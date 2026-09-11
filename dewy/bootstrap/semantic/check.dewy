@@ -2264,9 +2264,13 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
         let annotation:addr? = none
         if target is? parser.BinOp and source_views.is_operator(target.op ':' env.lexical session) {
             name_id = target.left
-            let resolved = declarations.resolve(target.right inner.lexical @session)
+            let subject=source_views.identifier(target.left env.lexical session)
+            let field_context=contexts.Context[inner.lexical.source inner.lexical.scope subject]
+            let resolved = declarations.resolve(target.right field_context @session)
             if resolved is? Error return resolved
-            annotation = resolved
+            let bound=declarations.resolve_scope_terms(resolved target.right inner.lexical @session)
+            if bound is? Error return bound
+            annotation = bound
         }
         let name = source_views.identifier(name_id env.lexical session)
         if name is? none return problem(row_id 'record field needs a name' 'use `name=value` or `name:Type=value`' env session)
@@ -2284,7 +2288,8 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
         if value is? Error return value
         let type = if annotation is? none node_at(value session).value_type else annotation
         if field isnt? none and field.refinement.length >? 0 {
-            let required = types.refined_type(type field.refinement @session.types)
+            let required=declarations.resolve_scope_terms(types.refined_type(type field.refinement @session.types) row_id inner.lexical @session)
+            if required is? Error return required
             value = against(value required row_id inner @session)
             if value is? Error return value
         }
@@ -2408,8 +2413,12 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
         }
         $runtime_assert value isnt? none
         if field.refinement.length >? 0 {
-            let required = types.refined_type(field.value_type field.refinement @session.types)
-            let checked = against(value required id env @session)
+            # Earlier fields are real bindings in this construction. Resolve
+            # sibling promises against that scope, including defaults read
+            # from another module; a spelling alone is not proof evidence.
+            let required=declarations.resolve_scope_terms(types.refined_type(field.value_type field.refinement @session.types) id inner.lexical @session)
+            if required is? Error return required
+            let checked = against(value required id inner @session)
             if checked is? Error return checked
             value = checked
         }
