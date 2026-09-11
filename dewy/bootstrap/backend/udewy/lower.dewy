@@ -37,6 +37,7 @@ OwnedLocal:type = const [value:addr value_type:addr]
 State:type = [
     input:emit.Input
     source:SrcFile
+    source_index:addr?=none
     nodes:array<hir.AST>=[]
     type_nodes:array<types.Type>=[]
     symbols:dict<addr string>=[]
@@ -515,7 +516,7 @@ array_index = (node:hir.Index @state:State):>addr => {
 finish_copy = (name:string parameter:string body:addr node:hir.AST @state:State):>void => {
     let word_type=types.primitive('int64' @state.type_nodes)
     let type=types.function_type([types.PosOrKwArg[parameter word_type]] [] none word_type [] @state.type_nodes)
-    let literal=put(hir.FunctionLiteral[node.loc type [hir.Param[parameter word_type]] [] none word_type body source=state.source] @state)
+    let literal=put(hir.FunctionLiteral[node.loc type [hir.Param[parameter word_type]] [] none word_type body source=state.source_index] @state)
     state.generated.push(program.Function[name literal])
 }
 array_copy = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr => {
@@ -1820,7 +1821,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State):>addr => {
     return put(hir.FunctionLiteral[node.loc code_type(id node @state) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr SrcFile>=[] runtime_helpers:dict<string addr>=[] links:array<subtyping.Link>=subtyping.default_links):>Result|Error => {
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:array<subtyping.Link>=subtyping.default_links):>Result|Error => {
     let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links brand_numbers=brands.numbered(layout_context.brands)]
     let block=hir.node_at(input.nodes root)
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
@@ -1842,7 +1843,8 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let entry_literal:addr?=none
     let void_type=types.primitive('void' @state.type_nodes)
     loop id in block.items {
-        state.source=source_by_item.get(id source)
+        state.source_index=source_by_item.get(id)
+        state.source=if state.source_index is? none source else hir.source_at(state.source_index input.source_files)
         let node=hir.node_at(input.nodes id)
         if node is? hir.Declare {
             let value=hir.node_at(input.nodes node.expr)
@@ -1871,7 +1873,8 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         $runtime_assert node is? hir.FunctionLiteral
         let name=state.code_symbols.get(id)
         $runtime_assert name isnt? none
-        state.source=if node.source is? none source else node.source
+        state.source_index=node.source
+        state.source=if node.source is? none source else hir.source_at(node.source input.source_files)
         functions.push(program.Function[name function(id node @state)])
     }
     if state.problem isnt? none return state.problem
@@ -1884,7 +1887,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     }
     if state.problem isnt? none return state.problem
     loop function in state.generated {functions.push(function)}
-    let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value] emit.Input[state.nodes state.type_nodes])
+    let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value] emit.Input[state.nodes state.type_nodes input.source_files])
     return Result[normalized.program normalized.input]
 }
 
@@ -2596,7 +2599,7 @@ release_value = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
         let source=put(hir.ExpressedIdentifier[node.loc word_type parameter] @state)
         let body=release_body(source type node @state)
         let signature=types.function_type([types.PosOrKwArg[parameter word_type]] [] none empty [] @state.type_nodes)
-        let literal=put(hir.FunctionLiteral[node.loc signature [hir.Param[parameter word_type]] [] none empty body source=state.source] @state)
+        let literal=put(hir.FunctionLiteral[node.loc signature [hir.Param[parameter word_type]] [] none empty body source=state.source_index] @state)
         state.generated.push(program.Function[generated literal])
     }
     $runtime_assert name isnt? none

@@ -31,6 +31,7 @@ Exit:type = const [levels:addr state:facts.State]
 Transfer:type = [normal:facts.State? breaks:array<Exit>=[] continues:array<Exit>=[]]
 Checker:type = [
     data:predicates.Data srcfile:SrcFile word_type:addr
+    source_files:array<SrcFile>=[]
     # The HIR/type environment and default word do not change during this
     # module's validation. Build their refinement view once, not per binding
     # or function; only current facts and the route registry evolve.
@@ -244,7 +245,7 @@ function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Che
     let saved=checker.data.snapshot
     checker.data.snapshot=intervals.Snapshot[]
     let source=checker.srcfile
-    if node.source isnt? none {checker.srcfile=node.source}
+    if node.source isnt? none {checker.srcfile=hir.source_at(node.source checker.source_files)}
     let parameters=node.pos_or_kw_args
     loop parameter in node.kw_only_args {parameters.push(parameter)}
     if node.rest_args isnt? none {parameters.push(node.rest_args)}

@@ -111,7 +111,8 @@ summary = (id:addr session:contexts.Session @failures:addr):>string => {{
     if node is? hir.RuntimeFailure {{
         failures += 1
         $runtime_assert display.type_to_dewy(node.value_type session.types) =? 'never'
-        $runtime_assert node.srcfile.body.length >? 0
+        $runtime_assert node.source_file <? session.sources.length
+        $runtime_assert session.sources[node.source_file].srcfile.body.length >? 0
     }}
     loop child in hir.children(node) {{ parts.push(summary(child session @failures)) }}
     return parts.join

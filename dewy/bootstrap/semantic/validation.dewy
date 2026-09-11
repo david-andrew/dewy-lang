@@ -50,13 +50,13 @@ discharge = (root:addr constants:dict<addr bigint> @session:contexts.Session):>v
         }
     }
 }
-validate_module = (module:modules.Module @engine:modules.Engine):>Result|Error => {
+validate_module = (module:modules.Module source_files:array<SrcFile> @engine:modules.Engine):>Result|Error => {
     let source=sources.srcfile(module.context engine.session)
     let word=types.primitive('int64' @engine.session.types)
     let cap:bigint=targets.max_length(engine.session.target)
     let env=values.Environment[engine.session.hir engine.session.types engine.session.registry cap]
     let data=predicates.Data[env relations.Context[facts.Context[cap]] intervals.Snapshot[] engine.session.registry]
-    let checker=bounds.Checker[data source word]
+    let checker=bounds.Checker[data source word source_files=source_files]
     bounds.configure(@checker)
     checker.data.links=engine.session.links
     bounds.validate(module.root @checker)
@@ -82,8 +82,9 @@ validate_module = (module:modules.Module @engine:modules.Engine):>Result|Error =
 validate = (@engine:modules.Engine):>Result|Error => {
     let result=Result[]
     let loaded=engine.modules
+    let source_files=sources.files(engine.session)
     loop module in loaded {
-        let checked=validate_module(module @engine)
+        let checked=validate_module(module source_files @engine)
         if checked is? Error return checked
         loop warning in checked.warnings {result.warnings.push(warning)}
         loop note in checked.notes {result.notes.push(note)}

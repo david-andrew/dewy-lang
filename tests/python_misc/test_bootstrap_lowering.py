@@ -404,7 +404,7 @@ main = (argv:array<string>):>int64 => {{
     let helpers:dict<string addr>=[]
     let release=bindings.lookup(session.scopes env.lexical.scope '_arena_release')
     if release isnt? none {{helpers['_arena_release']=release}}
-    let lowered=lower.lower(root emit.Input[session.hir session.types] source allocator=allocator layout_context=layouts.Context[session.brands session.error_types] runtime_helpers=helpers links=session.links)
+    let lowered=lower.lower(root emit.Input[session.hir session.types [source]] source allocator=allocator layout_context=layouts.Context[session.brands session.error_types] runtime_helpers=helpers links=session.links)
     if lowered is? Error {{lowered.fail}}
     let code=program.render(lowered.program lowered.input)
     if code is? Error {{code.fail}}

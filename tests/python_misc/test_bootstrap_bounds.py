@@ -101,7 +101,7 @@ def test_native_bounds_visitor_matches_hosted(tmp_path):
     let word=types.primitive('int64' @type_nodes)
     let env=values.Environment[nodes type_nodes registry {validator.max_length}]
     let data=predicates.Data[env relations.Context[facts.Context[{validator.max_length}]] intervals.Snapshot[] registry]
-    let checker=bounds.Checker[data srcfile word]
+    let checker=bounds.Checker[data srcfile word source_files=[srcfile]]
     bounds.configure(@checker)
     bounds.validate({root_id} @checker)
     let problem=checker.problem

@@ -129,7 +129,7 @@ Assert = type of AST & [
 # metadata referring to the guard's already evaluated operands: lowering
 # must retain those values, never evaluate the condition a second time.
 RuntimeFailure = type of AST & [
-    srcfile:SrcFile
+    source_file:addr
     source:string
     mode:'assert'|'expect'|'fail'
     condition:addr?=none
@@ -516,9 +516,10 @@ FunctionLiteral = type of AST & [
     object_receiver:bool=false
     object_fields:array<FieldBinding>=[]
     object_type:addr?=none
-    source:(SrcFile)?=none
-    # The file the literal (and so every span in its body) was written in:
-    #     debug locations point there. None for compiler-synthesized functions.
+    source:addr?=none
+    # Index into the compilation source table, shared by diagnostics and
+    # debug locations. Copying HIR never copies the complete source text.
+    # None for compiler-synthesized functions without a source origin.
 ]
 
 # A callable value formed by combining callable operands with `&`.
@@ -888,4 +889,11 @@ children = (node:AST):>array<addr> => {
     # A newly added HIR variant must make its traversal policy explicit.
     printl("internal compiler error: no HIR traversal for {node.typename}")
     exit(101)
+}
+
+# Source identities remain stable while HIR is copied, normalized, and lowered.
+# The owning compilation carries the matching table across these boundaries.
+source_at = (id:addr files:array<SrcFile>):>SrcFile => {
+    $runtime_assert id <? files.length
+    return files[id]
 }

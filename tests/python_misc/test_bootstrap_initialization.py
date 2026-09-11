@@ -153,7 +153,7 @@ case_{index} = ():>void => {{
     let type_nodes:array<types.Type> = []
     let registry = bindings.Registry[]
 {chr(10).join(type_lines + hir_lines + binding_lines)}
-    let result = initialization.validate_initialization({root_id} nodes type_nodes registry srcfile)
+    let result = initialization.validate_initialization({root_id} nodes type_nodes registry srcfile source_files=[srcfile])
     if result is? none {{ printl('{index}|ok') }}
     else {{ printl("{index}|{{result.title}}") }}
 }}

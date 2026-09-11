@@ -25,6 +25,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- HIR functions and runtime failures refer to a compilation source table by
+  index. Module initialization, validation, lowering, and emission preserve
+  that table, so analysis snapshots no longer duplicate complete source files
+  for every HIR node. Native execution checks imported-function debug locations,
+  proof diagnostics, and runtime assertion excerpts. The complete native
+  lowering regression passes; paired self-build verification is in progress.
+
 - Runtime failure nodes retain their installed reporting code separately from
   the source message. Borrow analysis follows source-call dependencies, so
   generated diagnostic I/O no longer makes ordinary guarded arena readers

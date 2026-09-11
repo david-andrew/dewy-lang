@@ -106,7 +106,9 @@ def emit_hir(root, *, type_value=None, with_names=False):
         if field == 'object_fields':
             return '[' + ' '.join(f'hir.FieldBinding[{binding} {json.dumps(name)}]' for binding, name in item) + ']'
         if isinstance(item, SrcFile):
-            return 'srcfile'
+            # Checked-module fixtures supply their sole source at index zero.
+            # The native HIR stores its identity, not another copy of the file.
+            return '0'
         if item is None:
             return 'none'
         if isinstance(item, bool):

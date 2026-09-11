@@ -221,5 +221,5 @@ normalize = (source:program.Program input:emit.Input):>Result => {
         }
         argv_prologue=prologue
     }
-    return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup argv_prologue argv_value source.source] emit.Input[state.nodes state.types]]
+    return Result[program.Program[functions source.globals startup source.user_main_symbol source.startup_symbol source.needs_startup argv_prologue argv_value source.source] emit.Input[state.nodes state.types input.source_files]]
 }

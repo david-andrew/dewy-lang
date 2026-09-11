@@ -1,5 +1,6 @@
 from reporting import Error, Pointer
 import p"context.dewy" as contexts
+import p"source_views.dewy" as sources
 import p"bindings.dewy" as bindings
 import p"hir.dewy" as hir
 import p"ty.dewy" as types
@@ -11,12 +12,12 @@ import p"ty.dewy" as types
 # compiler-generated constants, and it must not create fresh user obligations.
 helper = (name:string arguments:array<addr> node:hir.RuntimeFailure helpers:dict<string addr> @session:contexts.Session):>addr|Error => {
     let id=helpers.get(name)
-    if id is? none return Error[srcfile=node.srcfile title='runtime reporting needs the prelude' pointers=[Pointer[node.loc "the helper `{name}` is unavailable"]]]
+    if id is? none return Error[srcfile=sources.file_at(node.source_file session) title='runtime reporting needs the prelude' pointers=[Pointer[node.loc "the helper `{name}` is unavailable"]]]
     let binding=bindings.binding_at(session.registry id)
     let signature=binding.value_type
-    if signature is? none return Error[srcfile=node.srcfile title='runtime reporting helper has no signature']
+    if signature is? none return Error[srcfile=sources.file_at(node.source_file session) title='runtime reporting helper has no signature']
     let type=types.node_at(session.types signature)
-    if type isnt? types.FunctionType or type.pos_or_kw.length not=? arguments.length return Error[srcfile=node.srcfile title='runtime reporting helper has an incompatible signature']
+    if type isnt? types.FunctionType or type.pos_or_kw.length not=? arguments.length return Error[srcfile=sources.file_at(node.source_file session) title='runtime reporting helper has an incompatible signature']
     let function=hir.append_node(@session.hir hir.ExpressedIdentifier[node.loc signature name id])
     return hir.append_node(@session.hir hir.FunctionCall[node.loc type.ret function arguments []])
 }
@@ -25,7 +26,7 @@ integer = (value:int64 node:hir.RuntimeFailure @session:contexts.Session):>addr 
 
 materialize = (node:hir.RuntimeFailure helpers:dict<string addr> @session:contexts.Session):>addr|Error => {
     let span=if node.condition is? none node.loc else hir.node_at(session.hir node.condition).loc
-    let source=node.srcfile
+    let source=sources.file_at(node.source_file session)
     let line=source.line_of(span.start)
     let begin=source.line_start(line)
     let limit=source.line_end(line)

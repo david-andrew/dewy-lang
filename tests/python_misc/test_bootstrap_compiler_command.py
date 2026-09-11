@@ -64,6 +64,25 @@ def test_native_compiler_command(tmp_path):
     assert Path(result.stdout.splitlines()[-1]).is_file()
     result = invoke('analyze', program)
     assert result.returncode == 0 and 'representation decisions' in result.stdout
+
+    # HIR carries source indices across module assembly and normalization.
+    # Both the imported function and entry retain their own debug locations;
+    # a failed proof in the import must also resolve the original excerpt.
+    origin = tmp_path / 'origin.dewy'
+    origin.write_text('$no_prelude\nlet answer=(value:int64):>int64=>value+2\n')
+    program.write_text('$no_prelude\nfrom p"origin.dewy" import answer\nlet main=():>int64=>answer(40)\n')
+    result = invoke('debug', '--build', program)
+    assert result.returncode == 0, result.stdout + result.stderr
+    debug_binary = Path(result.stdout.splitlines()[-1])
+    assert subprocess.run([debug_binary], timeout=30, check=False).returncode == 42
+    emitted = (tmp_path / cache_artifact(program, '.debug.udewy', cwd=tmp_path)).read_text()
+    assert f'# @loc {origin}:2:' in emitted
+    assert f'# @loc {program}:3:' in emitted
+    origin.write_text('$no_prelude\nlet answer=(value:int64):>addr=>value\n')
+    result = invoke('-c', program)
+    assert result.returncode != 0 and str(origin) in result.stderr
+    assert 'cannot prove refinement' in result.stderr and 'value' in result.stderr
+
     program.write_text('let main=(value:int64):>int64=>value')
     result = invoke(program)
     assert result.returncode != 0 and '`main` must take' in result.stderr
@@ -135,6 +154,13 @@ let _test_summary=(json:bool brief:bool):>int64=>
     failed = subprocess.run([guarded_binary, 'fail'], cwd=tmp_path, env=real_env,
                             capture_output=True, text=True, timeout=30, check=False)
     assert failed.returncode == 101 and 'assertion failed' in failed.stderr
+
+    origin.write_text('let answer=(value:int64):>int64=>{\n    $runtime_assert value >? 0\n    return 42\n}\n')
+    program.write_text('from p"origin.dewy" import answer\nlet main=():>int64=>answer(0)\n')
+    failed = subprocess.run([compiler, program], cwd=tmp_path, env=real_env,
+                            capture_output=True, text=True, timeout=900, check=False)
+    assert failed.returncode == 101 and 'assertion failed' in failed.stderr
+    assert str(origin) in failed.stderr and 'value >? 0' in failed.stderr
 
     # The real test library exercises early void returns in expectation
     # helpers, output capture, case expansion, and directory exit status.

@@ -84,3 +84,15 @@ method_scan = (id:addr names:set<string> context:contexts.Context session:contex
     $runtime_assert context.source <? session.sources.length
     return methods.scan(id names session.sources[context.source].nodes)
 }
+
+file_at = (id:addr session:contexts.Session):>SrcFile => {
+    $runtime_assert id <? session.sources.length
+    return session.sources[id].srcfile
+}
+# Analysis and emission need source geometry, not the parser's token forests.
+# Keep one file per source identity instead of embedding it in every HIR node.
+files = (session:contexts.Session):>array<SrcFile> => {
+    let result:array<SrcFile>=[]
+    loop source in session.sources {result.push(source.srcfile)}
+    return result
+}

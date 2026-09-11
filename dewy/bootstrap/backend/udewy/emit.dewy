@@ -16,7 +16,7 @@ Debug locations and variable formatters belong to the program emitter;
 this module handles expressions, statements, and concrete function units.
 """
 
-Input:type = const [nodes:array<hir.AST> types:array<types.Type>]
+Input:type = const [nodes:array<hir.AST> types:array<types.Type> source_files:array<SrcFile>=[]]
 Scope:type = [
     direct_functions:set<string>=set[]
     locals:set<string>=set[]
@@ -307,8 +307,8 @@ contains_return = (id:addr input:Input):>bool => {
 function_decl = (name:string function:hir.FunctionLiteral scope:Scope input:Input @state:State):>string => {
     if function.kw_only_args.length >? 0 or function.rest_args isnt? none return reject(function 'function parameters require positional legalization' scope @state)
     let arguments:array<string>=[]
-    let inner=Scope[scope.direct_functions set[] if function.source is? none scope.source else function.source]
-    if scope.debug_locations and function.source isnt? none {inner.debug_locations=true inner.debug_source=debug.prepare(function.source)}
+    let inner=Scope[scope.direct_functions set[] if function.source is? none scope.source else hir.source_at(function.source input.source_files)]
+    if scope.debug_locations and function.source isnt? none {inner.debug_locations=true inner.debug_source=debug.prepare(hir.source_at(function.source input.source_files))}
     loop arg in function.pos_or_kw_args {
         if arg is? hir.BoundParam return reject(function 'default parameters require legalization' scope @state)
         arguments.push("{arg.name}:{annotation(arg.value_type input)}")

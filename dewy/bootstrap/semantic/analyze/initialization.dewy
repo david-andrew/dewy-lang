@@ -24,7 +24,8 @@ CheckedCall:type = const [key:string required:set<addr> assumed_calls:set<addr>]
 Checker:type = [
     nodes:array<hir.AST> type_nodes:array<types.Type>
     registry:bindings.Registry srcfile:SrcFile
-    source_by_item:dict<addr SrcFile>=[]
+    source_by_item:dict<addr addr>=[]
+    source_files:array<SrcFile>=[]
     functions:array<addr>=[]
     reassigned_callables:set<addr>=set[] reassigned_objects:set<addr>=set[]
     reassigned_members:array<MemberRoute>=[]
@@ -331,7 +332,7 @@ check_block = (block:hir.Block initialized:set<addr> parameters:dict<addr Callab
         let item = hir.node_at(checker.nodes id)
         let source=checker.srcfile
         let origin=checker.source_by_item.get(id)
-        if origin isnt? none {checker.srcfile=origin}
+        if origin isnt? none {checker.srcfile=hir.source_at(origin checker.source_files)}
         if item is? hir.Declare {
             let expr = hir.node_at(checker.nodes item.expr)
             if expr is? hir.FunctionLiteral { current = check_defaults(expr current parameters stack @checker) }
@@ -505,7 +506,7 @@ check_function = (id:addr initialized:set<addr> arguments:array<addr> keywords:d
     checker.frames.push(CheckFrame[id available])
     stack.add(id)
     let source=checker.srcfile
-    if function.source isnt? none {checker.srcfile=function.source}
+    if function.source isnt? none {checker.srcfile=hir.source_at(function.source checker.source_files)}
     let body = hir.node_at(checker.nodes function.body)
     if body is? hir.Block { check_block(body available parameter_effects stack @checker); }
     else { check_eager(function.body available parameter_effects stack @checker); }
@@ -542,8 +543,8 @@ validate_main = (declaration:hir.Declare @checker:Checker):>void => {
     if result is? types.Primitive { valid = result.name in? ['void' 'never' 'int' 'uint' 'uint8' 'uint16' 'uint32' 'uint64' 'int8' 'int16' 'int32' 'int64'] }
     if not valid { main_error(declaration '`main` must return an integer or `void`' "`main` returns `{types.describe(function.rettype checker.type_nodes)}`" @checker) }
 }
-validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry srcfile:SrcFile entry:'named'|addr|none='named' source_by_item:dict<addr SrcFile>=[]):>Error? => {
-    let checker = Checker[nodes type_nodes registry srcfile source_by_item=source_by_item]
+validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry srcfile:SrcFile entry:'named'|addr|none='named' source_by_item:dict<addr addr>=[] source_files:array<SrcFile>=[]):>Error? => {
+    let checker = Checker[nodes type_nodes registry srcfile source_by_item=source_by_item source_files=source_files]
     collect(root @checker)
     let block = hir.node_at(nodes root)
     $runtime_assert block is? hir.Block

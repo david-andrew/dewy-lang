@@ -1641,7 +1641,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     if method isnt? none and method.receiver_type isnt? none {slots.push(types.PosOrKwArg['__dewy_receiver' method.receiver_type true method.place_self])}
     loop slot in shape.pos_or_kw {slots.push(slot)}
     let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types)
-    let value=put(hir.FunctionLiteral[literal.loc function_type parameters [] none returns body source=source_views.srcfile(env.lexical session)] @session)
+    let value=put(hir.FunctionLiteral[literal.loc function_type parameters [] none returns body source=env.lexical.source] @session)
     return if expected_signature is? none value else against(value expected_signature id env @session)
 }
 
@@ -3547,7 +3547,7 @@ assertion_failure = (id:addr node:parser.Directive condition:addr? text:string e
         }
     }
     let mode:'assert'|'expect'|'fail' = if node.name =? 'expect' 'expect' else if node.name =? 'fail' 'fail' else 'assert'
-    return put(hir.RuntimeFailure[node.loc types.primitive('never' @session.types) source_views.srcfile(env.lexical session) text mode condition message dimmed] @session)
+    return put(hir.RuntimeFailure[node.loc types.primitive('never' @session.types) env.lexical.source text mode condition message dimmed] @session)
 }
 directive = (id:addr node:parser.Directive env:Environment @session:contexts.Session):>addr|Error => {
     if node.name =? 'abstract' return problem(id '`$abstract` marks a `type of` mint' 'it belongs on the value of a type alias' env session)

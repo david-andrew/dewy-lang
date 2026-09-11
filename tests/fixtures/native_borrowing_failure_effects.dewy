@@ -1,5 +1,5 @@
 # Internal HIR fixture: analyze failure support code and source-message effects.
-from reporting import Span, SrcFile
+from reporting import Span
 import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
 import p"../../dewy/bootstrap/semantic/ty.dewy" as types
 import p"../../dewy/bootstrap/backend/udewy/captures.dewy" as captures
@@ -30,7 +30,7 @@ let main=():>int64=>{
         let parameter:addr=10+index
         let input=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' parameter])
         let length=hir.append_node(@nodes hir.ArrayLength[loc word input])
-        let failure=hir.append_node(@nodes hir.RuntimeFailure[loc empty SrcFile['input' ''] 'guard' 'assert' message=(if index =? 2 installed else none) lowered=installed])
+        let failure=hir.append_node(@nodes hir.RuntimeFailure[loc empty 0 'guard' 'assert' message=(if index =? 2 installed else none) lowered=installed])
         let body=hir.append_node(@nodes hir.Block[loc word [if index =? 1 installed else failure length] true])
         let literal=hir.append_node(@nodes hir.FunctionLiteral[loc read_type [hir.Param['values' array parameter]] [] none word body])
         let binding:addr=200+index
