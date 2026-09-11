@@ -1,0 +1,25 @@
+# A grapheme can contain several Unicode scalars. Conversion also respects
+# the byte offset of a slice and returns independently mutable array storage.
+let scalars=(text:string):>array<uint32>=>text as array<uint32>
+let folded=(text:string):>string=>text.casefold
+let calls:int64=0
+let next=():>string=>{calls+=1 return 'é'}
+
+let main=():>int64=>{
+    let text:string='xe\u0301€😀z'
+    let values=scalars(text[1..4))
+    if values.length not=? 4 return 1
+    if values[0] not=? 101 or values[1] not=? 769 return 2
+    if values[2] not=? 8364 or values[3] not=? 128512 return 3
+    let once=scalars(next())
+    if calls not=? 1 or once.length not=? 1 or once[0] not=? 233 return 4
+    once[0]=42
+    let empty=scalars('')
+    empty.push(42)
+    if empty.length not=? 1 or empty[0] not=? 42 return 5
+    if folded('Straße') not=? 'strasse' return 6
+    if folded('Σςσ') not=? 'σσσ' return 7
+    if folded('İ') not=? 'i\u0307' return 8
+    printl('Unicode scalars and casefold passed')
+    return 42
+}

@@ -71,7 +71,21 @@ SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
 ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
 STRINGS = (ROOT / 'library/strings.dewy').read_text()
 SET_OF_ARRAY = STRINGS[STRINGS.index('let _set_of_array ='):STRINGS.index('# ---- loop capture:')]
+# UTF-8 decoding produces Unicode scalars, independently of grapheme boundaries.
+SCALAR_CASES = [
+    ('let convert=(text:string):>array<uint32>=>text as array<uint32>\nlet main=():>int64=>{let values=convert("") return if values.length=?0 42 else 0}', 42),
+    ('let convert=(text:string):>array<uint32>=>text as array<uint32>\nlet main=():>int64=>{let values=convert("A\\u0000z") return if values.length=?3 and values[0]=?65 and values[1]=?0 and values[2]=?122 42 else 0}', 42),
+    ('let convert=(text:string):>array<uint32>=>text as array<uint32>\nlet main=():>int64=>{let values=convert("é€😀") return if values.length=?3 and values[0]=?233 and values[1]=?8364 and values[2]=?128512 42 else 0}', 42),
+    ('let convert=(text:string):>array<uint32>=>text as array<uint32>\nlet main=():>int64=>{let values=convert("é") return if values.length=?2 and values[0]=?101 and values[1]=?769 42 else 0}', 42),
+    ('let convert=(text:string):>array<uint32>=>text as array<uint32>\nlet main=():>int64=>{let values=convert("\U0010ffff") return if values.length=?1 and values[0]=?1114111 42 else 0}', 42),
+    ('let convert=(text:string):>array<uint32>=>text as array<uint32>\nlet main=():>int64=>{let text:string="xé€😀z" let values=convert(text[1..4)) return if values.length=?3 and values[0]=?233 and values[1]=?8364 and values[2]=?128512 42 else 0}', 42),
+    ('let convert=(text:string):>array<uint32>=>text as array<uint32>\nlet main=():>int64=>{let values=convert("") values.push(42) return values[0] as int64}', 42),
+    ('let convert=(text:string):>array<uint32>=>text as array<uint32>\nlet count:int64=0\nlet next=():>string=>{count+=1 return "é"}\nlet main=():>int64=>{let values=convert(next()) if values.length not=? 1 return 0 values[0]=42 return if count=?1 values[0] as int64 else 0}', 42),
+]
+
+
 ARENA_CASES = [
+    *SCALAR_CASES,
     ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_ge=(a:BigInt b:BigInt):>bool=>b is? 0\nlet _bigint_as_string=(value:BigInt):>string=>if value is? 0 "zero" else "value"\nlet main=():>int64=>{let value:BigInt=1 let zero:BigInt=0 let converted=value as string let zero_text=zero as string return if value >=? 0 and zero_text=?"zero" and converted=?"value" 42 else 0}', 42),
     ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_floordiv=(a:BigInt b:BigInt & ~0):>BigInt=>b\nlet main=():>int64=>{let result:BigInt=1 result //= 42 if result is? 0 return 0 return if result.limbs[0]=?42 42 else 0}', 42),
     ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_mod=(a:BigInt b:BigInt & ~0):>BigInt=>b\nlet main=():>int64=>{let values:dict<string BigInt>=["value"->1] values["value"] %= 42 let result=values["value"] if result is? 0 return 0 return if result.limbs[0]=?42 42 else 0}', 42),

@@ -886,6 +886,52 @@ string_bytes = (value:addr node:hir.AST @state:State):>addr => {
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 
+# Strings already contain valid UTF-8. Decode scalar values, not grapheme
+# clusters: a combining sequence yields several uint32 elements. A slice's
+# data starts at its byte offset, and its byte length bounds this traversal.
+Utf8Width:type = const [limit:int64 width:int64 mask:int64]
+string_scalars = (value:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let source=snapshot(value @prefix @state)
+    let data=snapshot(string_data(source node @state) @prefix @state)
+    let length=snapshot(read_word(source layouts.string_descriptor.byte_length node @state) @prefix @state)
+    # The byte count is a safe capacity; the final length counts scalars.
+    let memory=array_memory(length 4 node @state)
+    loop item in memory.prefix {prefix.push(item)}
+    let cursor=snapshot(word(0 node @state) @prefix @state)
+    let count=snapshot(word(0 node @state) @prefix @state)
+    let scalar=snapshot(word(0 node @state) @prefix @state)
+    let empty=types.primitive('void' @state.type_nodes)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let pointer=word_op('__add__' data cursor node @state)
+    let leading=intrinsic('__load_u8__' [pointer] types.primitive('int64' @state.type_nodes) node @state)
+    let arms:array<addr>=[]
+    loop encoding in [Utf8Width[128 1 127] Utf8Width[224 2 31] Utf8Width[240 3 15] Utf8Width[256 4 7]] {
+        let limit=encoding.limit
+        let width=encoding.width
+        let mask=encoding.mask
+        let decoded=word_op('__and__' leading word(mask node @state) node @state)
+        loop delta in 1.. and delta <? width {
+            let byte=intrinsic('__load_u8__' [word_op('__add__' pointer word(delta node @state) node @state)] types.primitive('int64' @state.type_nodes) node @state)
+            decoded=word_op('__add__' word_op('__lshift__' decoded word(6 node @state) node @state) word_op('__and__' byte word(63 node @state) node @state) node @state)
+        }
+        let save=put(hir.Assign[node.loc empty scalar '=' decoded] @state)
+        let advance=put(hir.Assign[node.loc empty cursor '=' word_op('__add__' cursor word(width node @state) node @state)] @state)
+        let selected=intrinsic('__lt__' [leading word(limit node @state)] boolean node @state)
+        arms.push(put(hir.IfArm[node.loc empty selected sequence([save advance] node @state)] @state))
+    }
+    let decode=put(hir.Flow[node.loc empty arms none] @state)
+    let destination=word_op('__add__' memory.data word_op('__mul__' count word(4 node @state) node @state) node @state)
+    let store=intrinsic('__store_u32__' [scalar destination] empty node @state)
+    let advance=put(hir.Assign[node.loc empty count '=' word_op('__add__' count word(1 node @state) node @state)] @state)
+    let running=intrinsic('__lt__' [cursor length] boolean node @state)
+    let loop_arm=put(hir.LoopArm[node.loc empty running sequence([decode store advance] node @state)] @state)
+    prefix.push(put(hir.Flow[node.loc empty [loop_arm] none] @state))
+    prefix.push(store_word(count memory.descriptor layouts.array_descriptor.length node @state))
+    prefix.push(memory.descriptor)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+
 # Raw literal bytes and compiler-created borrowed byte views use the same
 # descriptor as arrays. A later value copy makes independently mutable
 # storage; merely describing embedded data must not allocate a second copy.
@@ -1096,6 +1142,7 @@ representation = (node:hir.RepresentationCast @state:State):>addr => {
         if string_type(node.value_type state) return value
         let array=array_type(node.value_type state)
         if array isnt? none and types.is_primitive(types.node_at(state.type_nodes array.element) 'uint8') return string_bytes(value node @state)
+        if array isnt? none and types.is_primitive(types.node_at(state.type_nodes array.element) 'uint32') return string_scalars(value node @state)
     }
     return reject(node 'this representation conversion' @state)
 }
