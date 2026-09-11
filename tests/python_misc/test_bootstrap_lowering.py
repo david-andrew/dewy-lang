@@ -84,7 +84,20 @@ SCALAR_CASES = [
 ]
 
 
+# Runtime class predicates share one observed value and guard optional payloads.
+BRAND_CASES = [
+    ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base):>bool=>x is? A|B\nlet main=():>int64=>if choose(A[1]) and choose(B[2]) and choose(Child[3]) and not choose(C[4]) 42 else 0', 42),
+    ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base):>bool=>x isnt? A|B\nlet main=():>int64=>if not choose(A[1]) and not choose(B[2]) and choose(C[4]) 42 else 0', 42),
+    ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base):>bool=>x is? (Base & ~A)\nlet main=():>int64=>if choose(B[2]) and not choose(Child[3]) and choose(C[4]) 42 else 0', 42),
+    ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base):>bool=>x is? ((A|B) & ~Child)\nlet main=():>int64=>if choose(A[1]) and choose(B[2]) and not choose(Child[3]) and not choose(C[4]) 42 else 0', 42),
+    ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base|none):>bool=>x is? A|B\nlet main=():>int64=>if not choose(none) and choose(A[1]) and not choose(C[4]) 42 else 0', 42),
+    ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base|int64|string):>bool=>x is? A|int64\nlet main=():>int64=>if choose(42) and choose(Child[1]) and not choose("text") and not choose(B[2]) 42 else 0', 42),
+    ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet calls:int64=0\nlet next=():>Base=>{calls+=1 return A[42]}\nlet main=():>int64=>{let yes=next() is? A|B return if yes and calls=?1 42 else 0}', 42),
+]
+
+
 ARENA_CASES = [
+    *BRAND_CASES,
     *SCALAR_CASES,
     ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_ge=(a:BigInt b:BigInt):>bool=>b is? 0\nlet _bigint_as_string=(value:BigInt):>string=>if value is? 0 "zero" else "value"\nlet main=():>int64=>{let value:BigInt=1 let zero:BigInt=0 let converted=value as string let zero_text=zero as string return if value >=? 0 and zero_text=?"zero" and converted=?"value" 42 else 0}', 42),
     ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_floordiv=(a:BigInt b:BigInt & ~0):>BigInt=>b\nlet main=():>int64=>{let result:BigInt=1 result //= 42 if result is? 0 return 0 return if result.limbs[0]=?42 42 else 0}', 42),

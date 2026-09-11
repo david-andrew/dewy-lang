@@ -4,7 +4,7 @@ from pathlib import Path
 
 from test_bootstrap_field_defaults import CASES as FIELD_DEFAULTS
 from test_bootstrap_field_defaults import ERRORS as INVALID_FIELD_DEFAULTS
-from test_bootstrap_lowering import ARENA, SCALAR_CASES
+from test_bootstrap_lowering import ARENA, BRAND_CASES, SCALAR_CASES
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
@@ -184,6 +184,7 @@ let main=():>int64=>{{
 
     unicode_runtime = ROOT / 'library/unicode/runtime.dewy'
     for index, body in enumerate([
+        *(body for body, _ in BRAND_CASES),
         *FIELD_DEFAULTS,
         *(body for body, _ in SCALAR_CASES),
         'AST=$abstract type of [position:addr]\nLeaf=type of AST & []\nOther=type of AST & []\nlet read=(node:AST):>addr=>{if node is? Other return 0 return node.position}\nlet main=():>int64=>read(Leaf[42])',

@@ -692,9 +692,10 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State):>ad
 test_has_refinement = (id:addr state:State):>bool => {
     let type=types.node_at(state.type_nodes types.unfold(id state.type_nodes))
     if type is? types.RefinedType return true
-    if type is? types.TypeOr {
+    if type is? types.TypeOr|types.TypeAnd {
         loop member in type.items {if test_has_refinement(member state) return true}
     }
+    if type is? types.TypeNot return test_has_refinement(type.item state)
     return false
 }
 runtime_test = (node:hir.TypeTest @state:State):>addr => {
@@ -764,6 +765,11 @@ runtime_test = (node:hir.TypeTest @state:State):>addr => {
         } else if subtyping.is_subtype(member node.test_type state.links @state.type_nodes) {
             let matches=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] boolean node @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)
+        } else if object_valued(member state) and not type_tests.disjoint(member node.test_type state.links @state.type_nodes) {
+            let active=intrinsic('__eq__' [tag word(tag_number node @state)] boolean node @state)
+            let matches=object_matches(cell_payload(source member node @state) member node.test_type node @state)
+            let selected=put(hir.ShortCircuit[node.loc boolean 'and' active matches] @state)
+            result=put(hir.ShortCircuit[node.loc boolean 'or' result selected] @state)
         } else if not type_tests.disjoint(member node.test_type state.links @state.type_nodes) {
             return reject(node 'a runtime test within one union payload alternative' @state)
         }
@@ -1539,25 +1545,54 @@ object_literal = (node:hir.ObjectLiteral @state:State):>addr => {
     prefix.push(destination)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
-object_test = (node:hir.TypeTest @state:State):>addr => {
-    let tested=object_type(node.test_type state)
-    let actual=object_type(hir.node_at(state.input.nodes node.value).value_type state)
-    if tested is? none or actual is? none return reject(node 'this runtime type test representation' @state)
-    if tested.brand is? none return reject(node 'a structural runtime record test' @state)
-    let brand=brand_number(tested.brand state)
-    if brand is? none return reject(node 'the tested type has no runtime brand number' @state)
-    let layout=object_layout(hir.node_at(state.input.nodes node.value).value_type node @state)
-    let offset=layout.offsets.get(layouts.brand_field)
-    if offset is? none return reject(node 'the tested value has no brand storage' @state)
-    let prefix:array<addr>=[]
-    let tag=snapshot(read_word(expression(node.value @state) offset node @state) @prefix @state)
+# Boolean type expressions combine predicates on the same runtime brand.
+# Evaluate the source once; a tagged union must also select its record payload
+# before reading that brand, since an inactive payload may be none or a scalar.
+object_predicate = (tag:addr actual:addr tested:addr node:hir.AST @state:State):>addr => {
     let boolean=types.primitive('bool' @state.type_nodes)
+    let type=types.node_at(state.type_nodes types.unfold(tested state.type_nodes))
+    if type is? types.TypeOr|types.TypeAnd {
+        let conjunction=type is? types.TypeAnd
+        let result=put(hir.Bool[node.loc boolean conjunction] @state)
+        loop member in type.items {
+            let matches=object_predicate(tag actual member node @state)
+            result=put(hir.ShortCircuit[node.loc boolean if conjunction 'and' else 'or' result matches] @state)
+        }
+        return result
+    }
+    if type is? types.TypeNot return intrinsic('__not__' [object_predicate(tag actual type.item node @state)] boolean node @state)
+    let decided=type_tests.decide(actual tested state.links @state.type_nodes)
+    if decided isnt? none return put(hir.Bool[node.loc boolean decided] @state)
+    let record=object_type(tested state)
+    if record is? none return reject(node 'this runtime type test representation' @state)
+    if record.brand is? none return reject(node 'a structural runtime record test' @state)
+    let brand=brand_number(record.brand state)
+    if brand is? none return reject(node 'the tested type has no runtime brand number' @state)
     let lower=intrinsic('__ge__' [tag word(brand.first node @state)] boolean node @state)
     let upper=intrinsic('__lt__' [tag word(brand.end node @state)] boolean node @state)
-    let result=put(hir.ShortCircuit[node.loc boolean 'and' lower upper] @state)
-    if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
-    prefix.push(result)
+    return put(hir.ShortCircuit[node.loc boolean 'and' lower upper] @state)
+}
+object_matches = (value:addr actual:addr tested:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let source=snapshot(value @prefix @state)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let decided=type_tests.decide(actual tested state.links @state.type_nodes)
+    if decided isnt? none {
+        prefix.push(put(hir.Bool[node.loc boolean decided] @state))
+        return put(hir.Block[node.loc boolean prefix false] @state)
+    }
+    if not object_valued(actual state) return reject(node 'this runtime type test representation' @state)
+    let layout=object_layout(actual node @state)
+    let offset=layout.offsets.get(layouts.brand_field)
+    if offset is? none return reject(node 'the tested value has no brand storage' @state)
+    let tag=snapshot(read_word(source offset node @state) @prefix @state)
+    prefix.push(object_predicate(tag actual tested node @state))
     return put(hir.Block[node.loc boolean prefix false] @state)
+}
+object_test = (node:hir.TypeTest @state:State):>addr => {
+    let actual=hir.node_at(state.input.nodes node.value).value_type
+    let result=object_matches(expression(node.value @state) actual node.test_type node @state)
+    return if node.negated intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state) else result
 }
 
 # Function defaults are callee expressions. The ABI passes an ordinary value
