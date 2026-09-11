@@ -33,7 +33,9 @@ nominal_subtype = (child:string parent:string links:array<Link>):>bool => {
     return false
 }
 
-IntegerLayout:type = const [name:string bits:uint8 signed:bool]
+# Every integer representation has at least one bit. Keep that evidence in
+# the table's element type so removing the sign bit preserves an addr width.
+IntegerLayout:type = const [name:string bits:uint8<n => n >? 0> signed:bool]
 const integer_layouts:array<IntegerLayout> = [
     ['int8' 8 true] ['int16' 16 true] ['int32' 32 true] ['int64' 64 true]
     ['uint8' 8 false] ['uint16' 16 false] ['uint32' 32 false] ['uint64' 64 false]

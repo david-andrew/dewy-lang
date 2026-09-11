@@ -181,6 +181,7 @@ let main=():>int64=>{{
 
     unicode_runtime = ROOT / 'library/unicode/runtime.dewy'
     for index, body in enumerate([
+        'Layout:type=const[bits:uint8<n=>n >? 0> signed:bool]\nlet f=(layout:Layout):>addr=>{let bits:addr=layout.bits if layout.signed {bits-=1} return bits}\nlet main=():>int64=>f(Layout[43 true])',
         'BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet main=():>int64=>{const value=-(9223372036854775808 as BigInt) return if value =? -9223372036854775808 42 else 0}',
         'let main=():>int64=>{let names:array<int64>=[] let at:addr<i => i <=? names.length>=0 names.insert(42 idx=at) return names[0]}',
         'let f=(names:array<int64>):>int64=>{let at:addr<i=>i<=?names.length>=0 loop at <? names.length {at+=1} return at+40}\nlet main=():>int64=>f([10 20])',
