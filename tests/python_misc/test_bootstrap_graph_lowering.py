@@ -39,6 +39,10 @@ main=(argv:array<string>):>int64=>{{
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [
+        ({'entry.dewy': 'let main=():>int64=>{let left:uint8=7 let right:int64=9 if left <? right return 42 return 1}'}, 42),
+        ({'entry.dewy': 'let main=():>int64=>{let left:uint64=18446744073709551615 let right:int64=7 if left >? right return 42 return 1}'}, 42),
+        ({'entry.dewy': 'let main=():>int64=>{let left:int64=-9223372036854775808 let right:uint64=7 if left <? right return 42 return 1}'}, 42),
+        ({'entry.dewy': 'let compare=(value:addr limit:uint64<n => n <=? 281474976710655>):>bool=>{let length:addr?=value return if length isnt? none length >=? limit else false}\nlet main=():>int64=>if compare(1 2) 1 else 42'}, 42),
         ({'entry.dewy': 'let read=():>int64=>ANSWER\nconst ANSWER=42\nlet main=():>int64=>read()'}, 42),
         ({'entry.dewy': 'let outer=():>int64=>{let read=():>int64=>answer\nlet answer:int64=42\nreturn read()}\nlet main=():>int64=>outer()'}, 42),
         # Native HIR must retain a literal field as the subject of its proof.
@@ -110,6 +114,9 @@ main=(argv:array<string>):>int64=>{{
     assert str(bad / 'dependency.dewy') in result.stderr
 
     for index, (body, title) in enumerate([
+        ('let main=():>int64=>{let left:uint8=7 let right:uint16=256 if left <? right return 1 return 0}', 'cannot prove this integer fits'),
+        ('let main=():>int64=>{let left:uint64=7 let right:int64=-1 if left >? right return 1 return 0}', 'cannot prove this integer fits'),
+        ('let compare=(left:int64 right:uint64):>bool=>left <? right', 'cannot prove this integer fits'),
         ('let read=():>int64=>answer\nread()\nlet answer:int64=42', 'before initialization'),
         ('let read=(value:int64):>int64=>{let narrow:uint8|none=value return 0}', 'cannot prove this integer fits'),
         ('let main=():>int64=>{let position:addr|none=-1 return 0}', 'refinement refuted'),

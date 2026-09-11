@@ -521,6 +521,19 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
                 if equality is? Error return equality
                 if equality isnt? none return if expected is? none equality else against(equality expected id env @session)
             }
+            if func.name in? ['__lt__' '__le__' '__gt__' '__ge__' '__eq__' '__ne__'] and positional.length =? 2 {
+                let left=types.strip_refinement(node_at(positional[0] session).value_type session.types)
+                let right=types.strip_refinement(node_at(positional[1] session).value_type session.types)
+                if left not=? right and views.fixed_integer_layout(left session.types) isnt? none and views.fixed_integer_layout(right session.types) isnt? none {
+                    # Comparisons use the left operand's representation, as
+                    # in the hosted checker. This is a checked value cast:
+                    # bounds analysis must prove the right operand fits,
+                    # including signedness and narrowing, before lowering.
+                    let converted=against(positional[1] left id env @session)
+                    if converted is? Error return converted
+                    positional[1]=converted
+                }
+            }
         }
     }
     if func is? hir.BoundMethod {

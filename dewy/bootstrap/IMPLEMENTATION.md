@@ -25,6 +25,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Mixed-width integer comparisons use a checked conversion of the right
+  operand to the left operand's representation, matching hosted dispatch.
+  Source comparisons cover all six operators across signed/unsigned widths;
+  native execution covers word limits and rejects negative-to-unsigned,
+  narrowing and unbounded unsigned-to-signed conversions. The address-limit
+  result contract now proves the cast needed by the checker's own array
+  transition. All 26 source-comparison groups pass with this checkpoint.
+
 - Native blocks postpone function bodies whose complete signatures are known
   until eager declarations have supplied their value types. The resulting HIR
   retains the original statement order, so early calls still fail initialization
