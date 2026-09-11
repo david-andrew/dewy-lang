@@ -69,9 +69,22 @@ let boundaries = (bytes:array<uint8>):>array<int64>|none => {
             index+=1
         }
         if scalar <? minimum or scalar >? 0x10ffff or scalar >=? 0xd800 and scalar <=? 0xdfff return none
-        let current=property(break_table scalar)
-        let indic=property(indic_table scalar)
-        let pictographic=property(pictographic_table scalar) =? 1
+        # ASCII has no Indic or pictographic properties. Resolve its four
+        # grapheme classes directly; CR/LF still follows GB3 below. Besides
+        # avoiding binary searches, this keeps ordinary compiler text out of
+        # the generic table argument-copy path.
+        let current:int64=GCB.other
+        let indic:int64=INCB.none
+        let pictographic:bool=false
+        if scalar <? 128 {
+            if scalar =? 13 {current=GCB.cr}
+            else if scalar =? 10 {current=GCB.lf}
+            else if scalar <? 32 or scalar =? 127 {current=GCB.control}
+        } else {
+            current=property(break_table scalar)
+            indic=property(indic_table scalar)
+            pictographic=property(pictographic_table scalar) =? 1
+        }
         let boundary:bool=true
         if previous =? GCB.cr and current =? GCB.lf {boundary=false}
         else if previous =? GCB.cr or previous =? GCB.lf or previous =? GCB.control or current =? GCB.cr or current =? GCB.lf or current =? GCB.control {}

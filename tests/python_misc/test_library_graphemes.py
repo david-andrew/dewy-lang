@@ -29,6 +29,8 @@ def test_dewy_utf8_grapheme_boundaries(tmp_path):
         tokens = line.split('#')[0].split()
         if tokens:
             texts.append(''.join(chr(int(token, 16)) for token in tokens if token not in {'÷', '×'}))
+    # Every ASCII pair checks the shortcut and its CR/LF boundary exception.
+    texts.extend(chr(left) + chr(right) for left in range(128) for right in range(128))
     cases = [text.encode('utf8') for text in texts]
     expected = [','.join(map(str, grapheme_boundary_byte_offsets(text))) for text in texts]
     invalid = [b'\x80', b'\xc0\xaf', b'\xc1\xbf', b'\xc2', b'\xe0\x80\x80', b'\xed\xa0\x80', b'\xf0\x80\x80\x80', b'\xf4\x90\x80\x80', b'\xf5\x80\x80\x80', b'\xe2\x82', b'\xc2A', b'\xff']
