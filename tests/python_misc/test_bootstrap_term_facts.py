@@ -46,7 +46,9 @@ def test_native_term_facts_match_hosted(tmp_path):
     fixed = reference('fixed', ty.ArrayType('int64', 5))
     length = hir.StringLength(LOC, 'int64', text)
     end = binary('__sub__', length, number(1))
-    arguments = [text, other, member, fixed, i, length]
+    refined_text = reference('refined_text', ty.RefinedType(ty.StringType(None),
+                            (ty.Proposition('length', '>=?', 2),)))
+    arguments = [text, other, member, fixed, i, length, refined_text]
     for left, right, delimiters in [
         (i, None, None), (i, j, '[)'), (i, j, '[]'),
         (i, length, '[)'), (i, end, '[]'), (None, j, '[)'),

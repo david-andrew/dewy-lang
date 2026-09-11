@@ -423,12 +423,15 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
             let divisor=node.pos_args[1]
             if not obligations.nonzero(divisor checker.data.snapshot.numbers.get(divisor) state checker.data) {fail(divisor 'cannot prove the divisor is nonzero' 'establish that the divisor cannot be zero' @checker)}
         }
-        if validate and name in? ['__add__' '__sub__' '__mul__' '__floordiv__' '__mod__' '__lshift__' '__unary_sub__' 'narrow'] {
+        # `narrow` is also an ordinary user function name. Only the checked
+        # operation tag identifies an integer narrowing conversion.
+        let narrowing=node.integer_operation =? 'narrow'
+        if validate and (narrowing or name in? ['__add__' '__sub__' '__mul__' '__floordiv__' '__mod__' '__lshift__' '__unary_sub__']) {
             let type=types.node_at(checker.data.env.types node.value_type)
-            if types.is_primitive(type 'int') or types.is_primitive(type 'uint') or name =? 'narrow' {
+            if types.is_primitive(type 'int') or types.is_primitive(type 'uint') or narrowing {
                 let known=checker.data.snapshot.numbers.get(id)
-                let word=if name =? 'narrow' and type is? types.Primitive type.name else if types.is_primitive(type 'uint') 'uint64' else 'int64'
-                let width=if name =? 'narrow' values.result_width(node.value_type checker.data.env.types) else if word =? 'uint64' ranges.Interval[0 18446744073709551615] else ranges.Interval[(-9223372036854775808) 9223372036854775807]
+                let word=if narrowing and type is? types.Primitive type.name else if types.is_primitive(type 'uint') 'uint64' else 'int64'
+                let width=if narrowing values.result_width(node.value_type checker.data.env.types) else if word =? 'uint64' ranges.Interval[0 18446744073709551615] else ranges.Interval[(-9223372036854775808) 9223372036854775807]
                 if ranges.fits(known width) is? none {checker.unfit[id]=Unfit[known word]}
             }
         }

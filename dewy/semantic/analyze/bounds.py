@@ -185,8 +185,11 @@ def _call_argument(node: hir.AST, name: str) -> hir.AST | None:
 
 
 def _object_of(type_: ty.Type) -> ty.ObjectType | None:
-    """The object type a value's type denotes, looking through `0 | [...]`."""
+    """The unique positive record shape, including optional values and exclusions."""
     unfolded = ty.unfold(ty.strip_refinement(type_))
+    if isinstance(unfolded, ty.TypeAnd):
+        positive = [item for item in unfolded.items if not isinstance(item, ty.TypeNot)]
+        return _object_of(positive[0]) if len(positive) == 1 else None
     if isinstance(unfolded, ty.TypeOr):
         objects = [item for item in unfolded.items if isinstance(item, ty.ObjectType)]
         unfolded = objects[0] if len(objects) == 1 else None
@@ -534,7 +537,8 @@ def _sequence_of(node: hir.AST) -> hir.AST | None:
 def _runtime_array_id(node: hir.AST, registry: sb.BindingRegistry | None = None) -> int | None:
     """The fact id of a runtime-length array or string expression (binding or member route)."""
     node = _strip_casts(node)
-    if not ((isinstance(node.type, ty.ArrayType) and node.type.length is None) or _is_runtime_string(node.type)):
+    plain = ty.unfold(ty.strip_refinement(node.type))
+    if not ((isinstance(plain, ty.ArrayType) and plain.length is None) or _is_runtime_string(plain)):
         return None
     if isinstance(node, hir.ExpressedIdentifier):
         return node.binding_id
@@ -2260,8 +2264,10 @@ class _BoundsValidator:
                 self._report_unfit(node, inner, node.type)
             return fitted
         if isinstance(node, hir.RepresentationCast):
-            self._eval(node.expr, state, validate=validate)
-            return None
+            # Packing or extracting a representation preserves this observed
+            # value. Numeric conversions and bit reinterpretation have their
+            # own ValueCast/Transmute rules below and above this boundary.
+            return self._eval(node.expr, state, validate=validate)
         if isinstance(node, hir.Transmute):
             self._eval(node.expr, state, validate=validate)
             return None

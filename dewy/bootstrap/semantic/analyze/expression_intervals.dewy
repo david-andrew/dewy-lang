@@ -173,6 +173,9 @@ call = (id:addr node:hir.FunctionCall state:facts.State snapshot:Snapshot env:va
 transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
     let node=hir.node_at(env.nodes id)
     if node is? hir.Obligation return snapshot.numbers.get(node.value)
+    # Packing/unpacking a representation preserves the observed mathematical
+    # value. Actual numeric conversions remain checked ValueCast/narrow nodes.
+    if node is? hir.RepresentationCast return snapshot.numbers.get(node.expr)
     let type=types.node_at(env.types node.value_type)
     if type is? types.IntegerLiteralType return ranges.exact(type.value)
     if node is? hir.Integer return ranges.exact(node.value)
@@ -195,16 +198,18 @@ transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @
         let route=bindings.array_route_id(id env.nodes @registry)
         let interval=if route is? none none else facts.lookup(state facts.value(facts.Term[route]))
         interval=meet(interval values.bounds_of(expressions.member_invariant(id env.nodes env.types) env.cap))
-        return meet(interval refinements.field_interval(node state env @registry))
+        # The read's declared type still carries facts such as `addr`, even
+        # when a negative type test leaves no single recoverable owner shape.
+        return meet(own_bounds(node.value_type env) meet(interval refinements.field_interval(node state env @registry)))
     }
-    if node is? hir.ForwardingAccess return values.bounds_of(expressions.member_invariant(id env.nodes env.types) env.cap)
+    if node is? hir.ForwardingAccess return meet(own_bounds(node.value_type env) values.bounds_of(expressions.member_invariant(id env.nodes env.types) env.cap))
     if node is? hir.Index|hir.DictLookup|hir.DictRemove return own_bounds(node.value_type env)
     if node is? hir.Block and node.items.length >? 0 return snapshot.numbers.get(node.items[node.items.length-1])
     return none
 }
 affine = (id:addr snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>terms.Offset? => {
     let node=hir.node_at(env.nodes id)
-    if node is? hir.ValueCast return snapshot.terms.get(node.expr)
+    if node is? hir.ValueCast|hir.RepresentationCast return snapshot.terms.get(node.expr)
     if node is? hir.Obligation return snapshot.terms.get(node.value)
     if node is? hir.ArrayLength|hir.StringLength {
         let source=if node is? hir.ArrayLength node.array else node.string

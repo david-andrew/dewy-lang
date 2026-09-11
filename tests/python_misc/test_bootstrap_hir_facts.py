@@ -50,7 +50,9 @@ def test_native_hir_fact_views_match_hosted(tmp_path):
     nested_type = ty.ObjectType((ty.ObjectField('value', field_type, refinement=(ty.Proposition('.count', '=?', 4),)),))
     parent = hir.MemberAccess(LOC, field_type, identifier('nested', nested_type, 7), 'value')
     nested = hir.MemberAccess(LOC, 'int64', parent, 'count')
-    accesses = [ordinary, forwarded, exception, nested]
+    excluded_type = ty.TypeAnd([field_type, ty.TypeNot(second_type)])
+    excluded = hir.MemberAccess(LOC, 'int64', identifier('excluded', excluded_type, 10), 'count')
+    accesses = [ordinary, forwarded, exception, nested, excluded]
     contract = ty.RefinedType('int64', (positive,))
     signature = ty.FunctionType([ty.PosOrKwArg('n', 'int64')], [], None, ty.optional(contract))
     overload = ty.OverloadType([ty.FunctionType([], [], None, 'bool'), signature])

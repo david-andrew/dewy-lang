@@ -47,6 +47,10 @@ def test_native_expression_interval_transfers(tmp_path):
     byte = hir.Index(LOC, 'uint8', bytes_, number(0), None)
     record = reference('record', ty.ObjectType((ty.ObjectField('byte', 'uint8'),)))
     queries.extend([byte, hir.ValueCast(LOC, 'int64', byte), hir.MemberAccess(LOC, 'uint8', record, 'byte')])
+    address_record = reference('addresses', ty.ObjectType((ty.ObjectField('position', ty.addr_type()),)))
+    queries.append(hir.MemberAccess(LOC, ty.addr_type(), address_record, 'position'))
+    packed = hir.RepresentationCast(LOC, ty.TypeOr(['int64', 'none']), i)
+    queries.extend([packed, hir.RepresentationCast(LOC, 'int64', packed)])
     for op in ['__add__', '__sub__', '__mul__', '__floordiv__', '__mod__']:
         queries.extend(binary(op, left, right) for left, right in [
             (i, j), (i, number(2)), (length, i), (number(-9), number(2)),

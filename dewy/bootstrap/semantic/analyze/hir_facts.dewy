@@ -64,7 +64,9 @@ call_argument = (id:addr name:string nodes:array<hir.AST> type_nodes:array<types
     return none
 }
 object_of = (id:addr nodes:array<types.Type>):>types.ObjectType? => {
-    let node = types.node_at(nodes types.unfold(types.strip_refinement(id nodes) nodes))
+    # Excluding a descendant preserves the positive record's field contracts,
+    # just as the source checker preserves its available member structure.
+    let node = types.node_at(nodes views.structural_base(id nodes))
     if node is? types.ObjectType return node
     if node isnt? types.TypeOr return none
     let object:types.ObjectType? = none

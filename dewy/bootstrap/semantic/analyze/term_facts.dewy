@@ -24,7 +24,9 @@ environment supplies constant evidence and is otherwise read-only.
 sequence_id = (id:addr env:values.Environment @registry:bindings.Registry):>addr? => {
     let current = expressions.strip_casts(id env.nodes)
     let node = hir.node_at(env.nodes current)
-    let type = types.node_at(env.types node.value_type)
+    # Refinements constrain the sequence without changing its storage route.
+    # Keep the route so parameter length contracts survive a constructor/call.
+    let type = types.node_at(env.types types.unfold(types.strip_refinement(node.value_type env.types) env.types))
     let runtime = (type is? types.ArrayType | types.StringType and type.length is? none) or types.is_primitive(type 'string')
     if not runtime return none
     return bindings.array_route_id(current env.nodes @registry)

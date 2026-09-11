@@ -1,5 +1,6 @@
 # Packing a nonzero bigint for a compound operator must preserve its proof.
 # The helper result and counter also check that unwrapping evaluates once.
+const alphabet='0123456789abcdef'
 let calls:int64=0
 let divisor=(hex:bool):>bigint & ~0=>{
     calls+=1
@@ -17,6 +18,10 @@ let main=():>int64=>{
     let radix:bigint & ~0=divisor(true)
     let q=quotient(672 radix)
     let r=remainder(683 radix)
+    # Numeric evidence survives union packing on comparisons and extraction.
+    # This is the emitter's guarded bigint-to-word indexing path.
+    $runtime_assert r >=? 0 and r <? 16
+    $runtime_assert alphabet[r as int64] =? 'b'
     let values:dict<string bigint>=['value'->672]
     values['value'] //= radix
     let remaining:bigint=4096
