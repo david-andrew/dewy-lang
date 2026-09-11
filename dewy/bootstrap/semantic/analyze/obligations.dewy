@@ -8,6 +8,7 @@ import p"hir_facts.dewy" as expressions
 import p"value_bounds.dewy" as values
 import p"expression_intervals.dewy" as intervals
 import p"predicate_facts.dewy" as predicates
+import p"predicate_paths.dewy" as paths
 import p"term_facts.dewy" as terms
 import p"fact_state.dewy" as facts
 import p"intervals.dewy" as ranges
@@ -243,12 +244,12 @@ describe = (p:propositions.Proposition):>string => {
     let right=if p.term is? none _bigint_as_string(p.value) else "{p.term}{if p.term_projection =? 'length' '.length' else ''}"
     return "{name} {p.op} {right}"
 }
-check = (node:hir.Obligation state:facts.State assigned:set<addr> srcfile:SrcFile @data:predicates.Data):>Error? => {
+check = (node:hir.Obligation state:facts.State assigned:set<addr> srcfile:SrcFile context:paths.Context @data:predicates.Data):>Error? => {
     let refined=types.node_at(data.env.types node.refined)
     $runtime_assert refined is? types.RefinedType
     loop p in refined.propositions {
         let current:facts.State?=state
-        if p.when isnt? none {current=predicates.refine(state node.value p.when @data)}
+        if p.when isnt? none {current=predicates.refine_with_context(state node.value p.when context @data)}
         if current is? none continue
         let decided=verdict(p node.value current assigned @data)
         if decided =? true continue

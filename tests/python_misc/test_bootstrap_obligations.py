@@ -16,7 +16,7 @@ def test_native_obligation_discharge(tmp_path):
         ('values', 'analyze/value_bounds.dewy'), ('predicates', 'analyze/predicate_facts.dewy'),
         ('facts', 'analyze/fact_state.dewy'), ('ranges', 'analyze/intervals.dewy'),
         ('intervals', 'analyze/expression_intervals.dewy'), ('relations', 'analyze/relations.dewy'),
-        ('obligations', 'analyze/obligations.dewy'),
+        ('obligations', 'analyze/obligations.dewy'), ('paths', 'analyze/predicate_paths.dewy'),
     ])
     source = tmp_path / 'obligations.dewy'
     source.write_text(f'''from reporting import Span, SrcFile
@@ -65,15 +65,16 @@ main=():>int64=>{{
     $runtime_assert obligations.verdict(props.Proposition['self' '<=?' 7] i state assigned @data) =? true
     $runtime_assert obligations.verdict(props.Proposition['self' '=?' 99] i state assigned @data) =? false
     let src=SrcFile[path='<obligation test>' body='']
-    $runtime_assert obligations.check(hir.Obligation[span word i positive 'positive argument'] state assigned src @data) is? none
+    let context=paths.Context[data.env.nodes data.relations.facts]
+    $runtime_assert obligations.check(hir.Obligation[span word i positive 'positive argument'] state assigned src context @data) is? none
     # A conditional promise is vacuous on an impossible result path; it is
     # still refuted when that result is possible and the promise is false.
-    $runtime_assert obligations.check(hir.Obligation[span boolean no conditional 'conditional result'] state assigned src @data) is? none
-    let failed=obligations.check(hir.Obligation[span boolean yes conditional 'conditional result'] state assigned src @data)
+    $runtime_assert obligations.check(hir.Obligation[span boolean no conditional 'conditional result'] state assigned src context @data) is? none
+    let failed=obligations.check(hir.Obligation[span boolean yes conditional 'conditional result'] state assigned src context @data)
     $runtime_assert failed isnt? none and failed.title =? 'refinement refuted'
     let unknown=types.refined_type(word [props.Proposition['self' '=?' 5]] @type_nodes)
     data.env=values.Environment[nodes type_nodes registry 1024]
-    failed=obligations.check(hir.Obligation[span word i unknown 'unknown value'] state assigned src @data)
+    failed=obligations.check(hir.Obligation[span word i unknown 'unknown value'] state assigned src context @data)
     $runtime_assert failed isnt? none and failed.title =? 'cannot prove refinement'
     return 0
 }}

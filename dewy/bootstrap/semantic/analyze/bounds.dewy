@@ -349,7 +349,7 @@ evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => 
     let required=checker.result_obligations.get(id [])
     loop refined in required {
         let obligation=hir.Obligation[node.loc node.value_type id refined 'result contract']
-        let error=obligations.check(obligation state checker.assigned checker.srcfile @checker.data)
+        let error=obligations.check(obligation state checker.assigned checker.srcfile checker.path_context @checker.data)
         if error isnt? none {checker.problem=error return}
     }
 }
