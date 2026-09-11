@@ -75,45 +75,43 @@ main=():>int64=>{{
     snapshot.terms[{names[id(text)]}]=terms.Offset[flow.Term[{text.binding_id}] 0]
     snapshot.terms[{names[id(flag)]}]=terms.Offset[flow.Term[{flag.binding_id}] 0]
     snapshot.sequences[{names[id(text)]}]={text.binding_id}
-    let context=calls.Context[env relations.Context[flow.Context[1024]] snapshot]
+    let relation=relations.Context[flow.Context[1024]]
     let initial:flow.State=[]
     flow.set_value(@initial flow.Term[{i.binding_id}] ranges.Interval[0 8])
-    let result=calls.apply(initial {names[id(calls[0])]} none context @registry)
+    let result=calls.apply(initial {names[id(calls[0])]} none env relation snapshot @registry)
     $runtime_assert result.state isnt? none
     let value=flow.lookup(result.state flow.value(flow.Term[{i.binding_id}]))
     $runtime_assert value isnt? none and value.lower =? 3 and value.upper =? 8
-    result=calls.apply(initial {names[id(calls[1])]} false context @registry)
+    result=calls.apply(initial {names[id(calls[1])]} false env relation snapshot @registry)
     $runtime_assert result.state isnt? none
     $runtime_assert flow.index({i.binding_id} {text.binding_id}).key not in? result.state
-    result=calls.apply(initial {names[id(calls[1])]} true context @registry)
+    result=calls.apply(initial {names[id(calls[1])]} true env relation snapshot @registry)
     $runtime_assert result.state isnt? none
     $runtime_assert flow.index({i.binding_id} {text.binding_id}).key in? result.state
-    result=calls.apply(initial {names[id(calls[2])]} true context @registry)
+    result=calls.apply(initial {names[id(calls[2])]} true env relation snapshot @registry)
     $runtime_assert result.state isnt? none
     let gap=flow.lookup(result.state flow.order(flow.Term[{i.binding_id}] flow.Term[{text.binding_id} 'length']))
     $runtime_assert gap isnt? none and gap.lower =? 3
-    result=calls.apply(initial {names[id(calls[3])]} true context @registry)
+    result=calls.apply(initial {names[id(calls[3])]} true env relation snapshot @registry)
     $runtime_assert result.conditions.length =? 1
     $runtime_assert result.conditions[0].expression =? {names[id(flag)]} and result.conditions[0].truth
-    result=calls.apply(initial {names[id(calls[3])]} none context @registry)
+    result=calls.apply(initial {names[id(calls[3])]} none env relation snapshot @registry)
     $runtime_assert result.conditions.length =? 0
     # A later argument write changes the current binding, not the earlier
     # value argument. Its result promise must not constrain that replacement.
     intervals.forget(@snapshot {i.binding_id})
     intervals.forget(@snapshot {flag.binding_id})
-    context=calls.Context[env context.relations snapshot]
-    result=calls.apply(initial {names[id(calls[1])]} true context @registry)
+    result=calls.apply(initial {names[id(calls[1])]} true env relation snapshot @registry)
     $runtime_assert result.state isnt? none
     $runtime_assert flow.index({i.binding_id} {text.binding_id}).key not in? result.state
-    result=calls.apply(initial {names[id(calls[2])]} true context @registry)
+    result=calls.apply(initial {names[id(calls[2])]} true env relation snapshot @registry)
     $runtime_assert result.state isnt? none
     $runtime_assert flow.order(flow.Term[{i.binding_id}] flow.Term[{text.binding_id} 'length']).key not in? result.state
-    result=calls.apply(initial {names[id(calls[3])]} true context @registry)
+    result=calls.apply(initial {names[id(calls[3])]} true env relation snapshot @registry)
     $runtime_assert result.conditions.length =? 0
     flow.set_value(@initial flow.Term[{i.binding_id}] ranges.exact(1))
     snapshot.numbers[{names[id(i)]}]=ranges.exact(1)
-    context=calls.Context[env context.relations snapshot]
-    result=calls.apply(initial {names[id(calls[0])]} none context @registry)
+    result=calls.apply(initial {names[id(calls[0])]} none env relation snapshot @registry)
     $runtime_assert result.state is? none
     return 0
 }}

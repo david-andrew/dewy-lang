@@ -53,8 +53,9 @@ apply_call = (state:facts.State call:addr truth:bool? @data:Data member:types.Re
     # Most calls have no result promises. Do not snapshot the whole checked
     # module and its fact tables merely to discover an empty contract list.
     if member is? none and expressions.call_result_refinements(call data.env.nodes data.env.types).length =? 0 return state
-    let context=calls.Context[data.env data.relations data.snapshot]
-    let applied=calls.apply(state call truth context @data.registry member=member)
+    # These inputs are read-only arguments; constructing a context here would
+    # copy the checked syntax/type arenas for every promised call.
+    let applied=calls.apply(state call truth data.env data.relations data.snapshot @data.registry member=member)
     let current=applied.state
     loop condition in applied.conditions {
         if current is? none return none
