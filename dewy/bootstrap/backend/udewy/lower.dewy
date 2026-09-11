@@ -641,9 +641,13 @@ cell_write = (destination:addr source:addr type:addr node:hir.AST @state:State):
     let tag=snapshot(read_word(source 0 node @state) @prefix @state)
     let payload=snapshot(read_word(source 8 node @state) @prefix @state)
     let arms:array<addr>=[]
+    let optional=views.optional_payload(type @state.type_nodes)
     loop member in members {
         if not aggregate(member state) continue
-        let condition=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        # An optional has one possible present payload. Its read may retain
+        # a more precise length/shape than its stored tag; any nonzero tag
+        # still denotes that payload, which must receive an independent copy.
+        let condition=if optional isnt? none intrinsic('__ne__' [tag word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) else intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
         let copy=owned_copy(payload member node @state)
         arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition store_word(copy destination 8 node @state)] @state))
     }
@@ -694,6 +698,24 @@ test_has_refinement = (id:addr state:State):>bool => {
 runtime_test = (node:hir.TypeTest @state:State):>addr => {
     if test_has_refinement(node.test_type state) return reject(node 'runtime refinement predicates' @state)
     let actual=hir.node_at(state.input.nodes node.value).value_type
+    let optional=views.optional_payload(actual @state.type_nodes)
+    if optional isnt? none {
+        let present=subtyping.is_subtype(optional node.test_type state.links @state.type_nodes)
+        if present or type_tests.disjoint(optional node.test_type state.links @state.type_nodes) {
+            # Shape facts about the sole payload do not replace the tag
+            # already written into this optional's storage. Tests that cover
+            # or exclude that payload need only presence, as in hosted
+            # optional lowering. Preserve evaluation of the source once.
+            let absent=subtyping.is_subtype(types.primitive('none' @state.type_nodes) node.test_type state.links @state.type_nodes)
+            let prefix:array<addr>=[]
+            let source=snapshot(expression(node.value @state) @prefix @state)
+            let boolean=types.primitive('bool' @state.type_nodes)
+            let result=if present =? absent put(hir.Bool[node.loc boolean present] @state) else intrinsic(if present '__ne__' else '__eq__' [read_word(source 0 node @state) word(0 node @state)] boolean node @state)
+            if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
+            prefix.push(result)
+            return put(hir.Block[node.loc boolean prefix false] @state)
+        }
+    }
     let enum=enum_members(actual state)
     if enum isnt? none {
         let prefix:array<addr>=[]

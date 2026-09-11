@@ -181,6 +181,13 @@ let main=():>int64=>{{
 
     unicode_runtime = ROOT / 'library/unicode/runtime.dewy'
     for index, body in enumerate([
+        'let choose=(empty:bool):>array<int64>|none=>{if empty return [] return [42]}\nlet main=():>int64=>{let empty=choose(true) let full=choose(false) if empty isnt? none and full isnt? none and empty.length=?0 and full.length=?1 return full[0] return 0}',
+        "Note:type=[text:string]\nFailure:type=[why:string]\nlet choose=(empty:bool):>array<Note>|Failure=>{if empty return [] return Failure[why='missing']}\nlet main=():>int64=>{let value=choose(true) return if value is? array<Note> and value.length=?0 42 else 0}",
+        'let count=(values:array<uint8>|none):>int64=>if values is? none 0 else values.length\nlet main=():>int64=>count([])+count([42])+41',
+        'let main=():>int64=>{let values:array<int64>|none=[] if values isnt? none {values.push(42) return values[0]} return 0}',
+        'let main=():>int64=>{let values:array<int64>|none=[] return if values is? array<int64> and not (values isnt? array<int64>) 42 else 0}',
+        'let main=():>int64=>{let values:array<int64>|none=[42] let other=values if other isnt? none and values isnt? none {other[0]=0 return values[0]} return 0}',
+        'let calls:int64=0\nlet get=():>array<int64>|none=>{calls+=1 return []}\nlet main=():>int64=>{if get() is? array<int64> return calls+41 return 0}',
         'Layout:type=const[bits:uint8<n=>n >? 0> signed:bool]\nlet f=(layout:Layout):>addr=>{let bits:addr=layout.bits if layout.signed {bits-=1} return bits}\nlet main=():>int64=>f(Layout[43 true])',
         'BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet main=():>int64=>{const value=-(9223372036854775808 as BigInt) return if value =? -9223372036854775808 42 else 0}',
         'let main=():>int64=>{let names:array<int64>=[] let at:addr<i => i <=? names.length>=0 names.insert(42 idx=at) return names[0]}',

@@ -25,6 +25,16 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Array literals receive element context from a union's unique array
+  alternative, including empty results in `array<T> | Error` functions.
+  Optional array initializers retain their exact length as a read fact while
+  mutation uses the original store contract. Optional tests and copies use
+  presence when the sole payload's shape becomes more precise; tests keep
+  source evaluation once and copies keep independent storage. All 32 native
+  source-comparison groups, seven native execution cases, and the complete
+  graph/lowering regression pass. Full paired self-build verification is
+  still in progress.
+
 - Operators retain their contracts as value facts become more precise.
   Compound RHS operands use the representation hint; only the computed store
   must satisfy the destination refinement. This proves an index increment

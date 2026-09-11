@@ -859,6 +859,20 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
                 let constructor=hir.TypeValue[node.loc types.primitive('type' @session.types) types.strip_refinement(expected session.types) display.type_to_dewy(expected session.types)]
                 return construct(constructor id id env @session expected=expected)
             }
+            # A union supplies an array context only through a unique array
+            # alternative. This includes empty result literals such as [] in
+            # an array<T>|Error function; the full union remains the checked
+            # storage boundary below. Multiple array alternatives are not an
+            # invitation to pick an element representation arbitrarily.
+            if target is? types.TypeOr {
+                let candidates:array<types.ArrayType>=[]
+                loop member in target.items {
+                    let shape=types.node_at(session.types types.unfold(types.strip_refinement(member session.types) session.types))
+                    if shape is? types.ArrayType {candidates.push(shape)}
+                }
+                if candidates.length not=? 1 return problem(id 'type mismatch' 'the expected type must select one array alternative' env session)
+                target=candidates[0]
+            }
             let element:addr? = if target is? types.ArrayType target.element else none
             if node.inner.length =? 0 and element is? none return problem(id 'cannot infer empty array element type' 'provide an array annotation' env session)
             let value = container_array(node.inner element id env @session)
@@ -1246,6 +1260,16 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     binding.value_type = if annotation is? none checked.value_type else annotation
     binding.store_type = binding.value_type
     let read=if annotation isnt? none and numeric_values.is_family(annotation 'BigInt' env.lexical session) annotation else checked.value_type
+    if annotation isnt? none {
+        let payload=views.optional_payload(annotation @session.types)
+        let actual=stored_read_type(value @session)
+        if payload isnt? none and types.node_at(session.types payload) is? types.ArrayType and types.node_at(session.types actual) is? types.ArrayType {
+            # Optional storage keeps its tag, but the present initializer
+            # still proves an exact length. Mutation continues to use the
+            # separately recorded store contract, never this initial fact.
+            read=views.optional(actual @session.types)
+        }
+    }
     set_read_type(binding_id read env @session)
     if constant { binding.read_only_reason = 'const binding' }
     session.registry.by_id[binding_id] = binding
