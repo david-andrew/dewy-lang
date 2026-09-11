@@ -5070,15 +5070,17 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
                     [hir.IfArm(predicate_ast.loc, ty.VOID_TYPE, predicate, hir.Void(predicate_ast.loc, ty.VOID_TYPE))],
                     hir.Break(predicate_ast.loc, ty.BOTTOM_TYPE, None, 0),
                 )
-        iterated_containers = _iterated_container_names(condition)
-        for mutated_name in mutated_names:
-            if mutated_name in iterated_containers:
-                # Python raises "changed size during iteration" at runtime;
-                # entries may move (compaction, resize), so it is rejected here
+        iterated_containers = _iterated_container_routes(condition)
+        written_routes = _mutated_container_routes(body_ast) | _mutated_container_routes(condition_ast)
+        for name, path in iterated_containers:
+            if any(name == other and path[:len(fields)] == fields[:len(path)] for other, fields in written_routes):
+                # Entries may move on resize/compaction. Sibling record fields
+                # are separate storage; parent writes and uncertain indices
+                # still overlap the container the iterator is traversing.
                 user_error(
                     ctx.srcfile,
-                    f'cannot mutate `{mutated_name}` while iterating it',
-                    Pointer(span=body_ast.loc, message=f'this loop body changes `{mutated_name}`, the container it iterates'),
+                    f'cannot mutate `{name}` while iterating it',
+                    Pointer(span=body_ast.loc, message=f'this loop changes the storage iterated through `{name}`'),
                     hint='collect the changes and apply them after the loop',
                 )
         if not ctx.label_scopes:
@@ -8365,23 +8367,87 @@ def _grown_array_names(ast: p0.AST) -> frozenset[str]:
     return frozenset(names)
 
 
-def _iterated_container_names(condition: hir.AST) -> set[str]:
-    """Names of dictionaries and sets a loop condition iterates."""
+def _iterated_container_routes(condition: hir.AST) -> set[tuple[str, tuple[str, ...]]]:
+    """Container storage prefixes, stopping precision at an unknown index."""
     iterators: list[hir.IteratorExpression] = []
     if isinstance(condition, hir.IteratorExpression):
         iterators.append(condition)
     elif isinstance(condition, hir.MultiIteratorExpression):
         iterators.extend(condition.iterators)
-    names: set[str] = set()
+    routes: set[tuple[str, tuple[str, ...]]] = set()
     for iterator in iterators:
-        iterable = iterator.iterable
-        if isinstance(iterable, hir.DictEntries):
-            root = iterable.dictionary
-            while isinstance(root, hir.MemberAccess):
+        if not isinstance(iterator.iterable, hir.DictEntries):
+            continue
+        root = iterator.iterable.dictionary
+        fields: list[str] = []
+        while isinstance(root, (hir.MemberAccess, hir.Index)):
+            if isinstance(root, hir.MemberAccess):
+                fields.insert(0, root.name)
                 root = root.value
-            if isinstance(root, hir.ExpressedIdentifier):
-                names.add(root.name)
-    return names
+            else:
+                fields.clear()
+                root = root.array
+        if isinstance(root, hir.ExpressedIdentifier):
+            routes.add((root.name, tuple(fields)))
+    return routes
+
+
+def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
+    """Separate sibling writes without assuming different indices are disjoint.
+
+    This is an iterator exclusion check, not a replacement for conservative
+    loop fact invalidation. Nested function bodies execute at their own call
+    boundary and do not mutate storage merely by being declared here.
+    """
+    routes: set[tuple[str, tuple[str, ...]]] = set()
+
+    def route(node: p0.AST) -> tuple[str, tuple[str, ...], bool] | None:
+        if isinstance(node, p0.Block) and node.kind == '()' and len(node.inner) == 1:
+            return route(node.inner[0])
+        if isinstance(node, p0.Atom) and isinstance(node.item, t1.Identifier):
+            return node.item.name, (), False
+        if isinstance(node, p0.BinOp):
+            indexed = isinstance(node.op, t2.IndexJuxtapose)
+            if isinstance(node.op, t2.QJuxtapose):
+                indexed = any(isinstance(option, t2.IndexJuxtapose) for option in node.op.options)
+            member = isinstance(node.op, t1.Operator) and node.op.symbol == '.'
+            if indexed or member:
+                base = route(node.left)
+                if base is None:
+                    return None
+                name, path, stopped = base
+                if indexed or stopped:
+                    return name, path, True
+                if isinstance(node.right, p0.Atom) and isinstance(node.right.item, t1.Identifier):
+                    return name, (*path, node.right.item.name), False
+        return None
+
+    def walk(node: object) -> None:
+        target: p0.AST | None = None
+        if isinstance(node, p0.Prefix) and isinstance(node.op, t1.Operator) and node.op.symbol == '@':
+            target = node.item
+        if isinstance(node, p0.BinOp):
+            if isinstance(node.op, t1.Operator) and node.op.symbol == '=>':
+                return
+            if (isinstance(node.op, t1.Operator) and node.op.symbol in {'=', ':=', '::'}) or isinstance(node.op, t2.CombinedAssignmentOp):
+                target = node.left
+            if (isinstance(node.op, t1.Operator) and node.op.symbol == '.'
+                and isinstance(node.right, p0.Atom) and isinstance(node.right.item, t1.Identifier)
+                and node.right.item.name in _MUTATING_METHOD_NAMES):
+                target = node.left
+        if target is not None:
+            found = route(target)
+            if found is not None:
+                routes.add(found[:2])
+        if is_dataclass(node) and not isinstance(node, type):
+            for field_ in fields(node):
+                walk(getattr(node, field_.name))
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+
+    walk(ast)
+    return routes
 
 
 _MUTATING_METHOD_NAMES = frozenset({*(_ARRAY_METHOD_NAMES - _READ_ONLY_ARRAY_METHOD_NAMES), 'add'})  # arrays, dictionaries, sets

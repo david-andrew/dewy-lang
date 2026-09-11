@@ -2936,7 +2936,15 @@ loop_flow_inner = (id:addr arm:parser.KeywordExpr env:Environment @session:conte
                 let route = bindings.access_path(if owner is? hir.DictEntries owner.dictionary else iter.iterable session.hir)
                 let root = node_at(route.root session)
                 if owner is? hir.DictEntries {
-                    if root is? hir.ExpressedIdentifier and root.name in? changed return problem(part 'cannot mutate a container while iterating it' root.name env session)
+                    if root is? hir.ExpressedIdentifier and root.name in? changed {
+                        let fields:array<string>=[]
+                        loop step in route.steps {
+                            let access=node_at(step session)
+                            if access isnt? hir.MemberAccess break
+                            fields.push(access.name)
+                        }
+                        if source_views.mutates_route(arm.parts[2] root.name fields env.lexical session) or source_views.mutates_route(arm.parts[1] root.name fields env.lexical session) return problem(part 'cannot mutate a container while iterating it' root.name env session)
+                    }
                     container_state.forget_positions(owner.dictionary env.state @session)
                 }
                 formula.push(iterators.length)

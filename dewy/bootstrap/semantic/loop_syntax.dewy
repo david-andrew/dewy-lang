@@ -42,30 +42,77 @@ root_name = (id:addr nodes:array<tokens.Token>):>string? => {
     }
     return syntax.identifier(syntax.unparen(id nodes) nodes)
 }
-mutations = (id:addr nodes:array<tokens.Token> replacements:bool=false):>set<string> => {
-    let node = tokens.node_at(nodes id)
-    let names:set<string> = set[]
-    let target:addr? = none
-    if node is? parser.Prefix and syntax.is_operator(node.op '@' nodes) { target = node.item }
+# Keep storage fields for iterator exclusion. Fact invalidation still uses
+# the conservative root name, but writing a sibling field cannot resize the
+# container being traversed. An index ends field precision: unknown entries
+# may alias, including a write to the indexed container itself.
+MutationRoute:type = [name:string fields:array<string>=[] indexed:bool=false]
+mutation_route = (id:addr nodes:array<tokens.Token>):>MutationRoute? => {
+    let current=syntax.unparen(id nodes)
+    let node=tokens.node_at(nodes current)
     if node is? parser.BinOp {
-        let op = syntax.symbol(node.op nodes)
-        if op =? '=>' return names
+        let op=syntax.symbol(node.op nodes)
+        let token=tokens.node_at(nodes node.op)
+        let indexed=op =? 'IndexJuxtapose' or (token is? post.Juxtapose and 'IndexJuxtapose' in? token.options)
+        if op =? '.' or indexed {
+            let route=mutation_route(node.left nodes)
+            if route is? none return none
+            if indexed {route.indexed=true}
+            else if not route.indexed {
+                let field=syntax.identifier(node.right nodes)
+                if field is? none return none
+                route.fields.push(field)
+            }
+            return route
+        }
+    }
+    let name=syntax.identifier(current nodes)
+    return if name is? none none else MutationRoute[name]
+}
+mutation_target = (node:tokens.Token nodes:array<tokens.Token> replacements:bool=false):>addr? => {
+    if node is? parser.Prefix and syntax.is_operator(node.op '@' nodes) return node.item
+    if node is? parser.BinOp {
+        let op=syntax.symbol(node.op nodes)
         if op in? ['=' ':=' '::'] or tokens.node_at(nodes node.op) is? post.CombinedAssignment {
-            if not replacements or syntax.identifier(node.left nodes) isnt? none { target = node.left }
+            if not replacements or syntax.identifier(node.left nodes) isnt? none return node.left
         }
         if not replacements and op =? '.' {
-            let method = syntax.identifier(node.right nodes)
-            if method in? ['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'add' 'remove'] { target = node.left }
+            let method=syntax.identifier(node.right nodes)
+            if method in? ['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'add' 'remove'] return node.left
         }
     }
+    return none
+}
+mutations = (id:addr nodes:array<tokens.Token> replacements:bool=false):>set<string> => {
+    let node=tokens.node_at(nodes id)
+    let names:set<string>=set[]
+    if node is? parser.BinOp and syntax.symbol(node.op nodes) =? '=>' return names
+    let target=mutation_target(node nodes replacements)
     if target isnt? none {
-        let name = root_name(target nodes)
-        if name isnt? none { names.add(name) }
+        let name=root_name(target nodes)
+        if name isnt? none {names.add(name)}
     }
     loop child in children(node) {
-        loop name in mutations(child nodes replacements) { names.add(name) }
+        loop name in mutations(child nodes replacements) {names.add(name)}
     }
     return names
+}
+mutates_route = (id:addr name:string fields:array<string> nodes:array<tokens.Token>):>bool => {
+    let node=tokens.node_at(nodes id)
+    if node is? parser.BinOp and syntax.symbol(node.op nodes) =? '=>' return false
+    let target=mutation_target(node nodes)
+    if target isnt? none {
+        let route=mutation_route(target nodes)
+        if route isnt? none and route.name =? name {
+            let overlaps=true
+            loop i in 0.. and i <? fields.length and i <? route.fields.length {
+                if fields[i] not=? route.fields[i] {overlaps=false break}
+            }
+            if overlaps return true
+        }
+    }
+    loop child in children(node) {if mutates_route(child name fields nodes) return true}
+    return false
 }
 contains_iterator = (id:addr nodes:array<tokens.Token>):>bool => {
     let node = tokens.node_at(nodes syntax.unparen(id nodes))

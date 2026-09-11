@@ -25,6 +25,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Iterator mutation checks distinguish storage fields in both compilers.
+  Writing a sibling set or dictionary is allowed; writes to the traversed
+  field, its parents, a place argument, or potentially aliasing indexed
+  storage remain rejected. Loop fact invalidation stays conservative. The
+  hosted suite passes 1,773 tests with 10 skips, 47 focused hosted checks
+  pass, all 33 native source-comparison groups pass, and native execution
+  copies entries between sibling sets and dictionaries successfully.
+
 - Nonzero bigint evidence survives contextual packing into the general
   zero/record representation. Compound division and remainder can use a
   nonzero parameter, local, dictionary operand, or call result without

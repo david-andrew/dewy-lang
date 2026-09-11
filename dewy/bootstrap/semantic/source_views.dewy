@@ -67,6 +67,11 @@ mutations = (id:addr context:contexts.Context session:contexts.Session replaceme
     return loop_syntax.mutations(id session.sources[context.source].nodes replacements)
 }
 
+mutates_route = (id:addr name:string fields:array<string> context:contexts.Context session:contexts.Session):>bool => {
+    $runtime_assert context.source <? session.sources.length
+    return loop_syntax.mutates_route(id name fields session.sources[context.source].nodes)
+}
+
 method_parameters = (literal:parser.BinOp context:contexts.Context session:contexts.Session):>set<string> => {
     $runtime_assert context.source <? session.sources.length
     return methods.parameter_names(literal session.sources[context.source].nodes)

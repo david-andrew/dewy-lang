@@ -181,6 +181,8 @@ let main=():>int64=>{{
 
     unicode_runtime = ROOT / 'library/unicode/runtime.dewy'
     for index, body in enumerate([
+        'State:type=[input:set<int64> output:set<int64>]\nlet main=():>int64=>{let state=State[set[20 22] set[]] loop value in state.input {state.output.add(value)} let sum:int64=0 loop value in state.output {sum+=value} return sum}',
+        "State:type=[input:dict<string int64> output:dict<string int64>]\nlet main=():>int64=>{let state=State[['a'->20 'b'->22] []] loop [key value] in state.input {state.output[key]=value} let sum:int64=0 loop [key value] in state.output {sum+=value} return sum}",
         'let choose=(empty:bool):>array<int64>|none=>{if empty return [] return [42]}\nlet main=():>int64=>{let empty=choose(true) let full=choose(false) if empty isnt? none and full isnt? none and empty.length=?0 and full.length=?1 return full[0] return 0}',
         "Note:type=[text:string]\nFailure:type=[why:string]\nlet choose=(empty:bool):>array<Note>|Failure=>{if empty return [] return Failure[why='missing']}\nlet main=():>int64=>{let value=choose(true) return if value is? array<Note> and value.length=?0 42 else 0}",
         'let count=(values:array<uint8>|none):>int64=>if values is? none 0 else values.length\nlet main=():>int64=>count([])+count([42])+41',
