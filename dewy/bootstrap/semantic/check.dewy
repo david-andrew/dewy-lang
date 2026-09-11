@@ -537,7 +537,7 @@ union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:E
     return none
 }
 
-call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session expected:addr?=none order:array<string?>=[]):>addr|Error => {
     let func = node_at(function session)
     if func is? hir.ExpressedIdentifier and func.binding_id isnt? none {
         let binding=bindings.binding_at(session.registry func.binding_id)
@@ -606,7 +606,12 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
             arguments.push(receiver)
         }
         loop argument in positional {arguments.push(argument)}
-        return call(func.function arguments keyword id env @session expected=expected)
+        if order.length >? 0 and func.receiver isnt? none {
+            let with_receiver:array<string?>=[none]
+            loop name in order {with_receiver.push(name)}
+            order=with_receiver
+        }
+        return call(func.function arguments keyword id env @session expected=expected order=order)
     }
     let shape = types.node_at(session.types func.value_type)
     if shape isnt? types.CallableType return problem(id 'value is not callable' display.type_to_dewy(func.value_type session.types) env session)
@@ -617,10 +622,20 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     loop [name argument] in keyword { kw_types[name] = node_at(argument session).value_type }
     let system = dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session)]
     let hint=call_hint(expected function positional env session)
-    let matched = dispatch.match_best_function(methods pos_types kw_types hint system @session.types)
+    let matched = if order.length =? 0 dispatch.match_best_function(methods pos_types kw_types hint system @session.types) else dispatch.match_ordered(methods pos_types kw_types order hint system @session.types)
     if matched is? dispatch.DispatchError return problem(id 'no matching function' matched.message env session)
     let callee = function
     let method = dispatch.method_at(session.types matched.method)
+    if order.length >? 0 {
+        let bound=dispatch.bind_ordered(method positional keyword order)
+        $runtime_assert bound isnt? none
+        positional=bound.pos
+        keyword=bound.kw
+        pos_types=[]
+        kw_types=[]
+        loop argument in positional {pos_types.push(node_at(argument session).value_type)}
+        loop [name argument] in keyword {kw_types[name]=node_at(argument session).value_type}
+    }
     if func is? hir.ExpressedIdentifier and func.binding_id isnt? none and shape is? types.FunctionType and shape.type_params.length >? 0 {
         let instance = instantiate_call(func shape pos_types kw_types hint id env @session)
         if instance is? Error return instance
@@ -1862,6 +1877,9 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
     let signature = types.node_at(session.types node_at(function session).value_type)
     let positional:array<addr> = []
     let keyword:dict<string addr> = []
+    let order:array<string?>=[]
+    let bound:set<addr>=set[]
+    let interleaved=false
     loop item in items {
         let row = contexts.node_at(item env.lexical session)
         if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) {
@@ -1876,19 +1894,27 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
             let value = expression(row.right env @session expected=wanted allow_place=true)
             if value is? Error return value
             keyword[name] = value
+            order.push(name)
+            if signature is? types.FunctionType {
+                loop i in 0.. and i <? signature.pos_or_kw.length {if signature.pos_or_kw[i].name =? name {bound.add(i)}}
+            }
         } else {
-            if keyword.length >? 0 return pending(item 'interleaved named and positional argument normalization' env session)
+            if keyword.length >? 0 {interleaved=true}
+            let index:addr=0
+            if signature is? types.FunctionType {loop index <? signature.pos_or_kw.length and index in? bound {index+=1}}
             let wanted:addr? = none
-            if signature is? types.FunctionType and signature.type_params.length =? 0 and positional.length <? signature.pos_or_kw.length {
-                let param = signature.pos_or_kw[positional.length]
+            if signature is? types.FunctionType and signature.type_params.length =? 0 and index <? signature.pos_or_kw.length {
+                let param = signature.pos_or_kw[index]
                 if not param.place { wanted = param.value_type }
             }
             let value = expression(item env @session expected=wanted allow_place=true)
             if value is? Error return value
             positional.push(value)
+            order.push(none)
+            bound.add(index)
         }
     }
-    return call(function positional keyword id env @session expected=expected)
+    return call(function positional keyword id env @session expected=expected order=if interleaved order else [])
 }
 
 # The index scope binds `end` to this sequence's last position. Its binding

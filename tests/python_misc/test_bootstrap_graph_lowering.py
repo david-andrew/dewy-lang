@@ -39,6 +39,10 @@ main=(argv:array<string>):>int64=>{{
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [
+        ({'entry.dewy': 'let combine=(left:int64 scale:int64=2 right:int64):>int64=>left+right*scale\nlet main=():>int64=>combine(scale=2 10 16)'}, 42),
+        ({'entry.dewy': 'let combine=(left:int64 scale:int64=2 right:int64):>int64=>left+right*scale\nlet main=():>int64=>combine(right=16 10)'}, 42),
+        ({'entry.dewy': 'let change=(value:int64 @target:int64):>void=>{target=value}\nlet main=():>int64=>{let x:int64=0 change(value=42 @x) return x}'}, 42),
+        ({'entry.dewy': 'let choose=<T>(first:T second:T):>T=>first\nlet main=():>int64=>choose(second=0 42)'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let left:uint8=7 let right:int64=9 if left <? right return 42 return 1}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let left:uint64=18446744073709551615 let right:int64=7 if left >? right return 42 return 1}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let left:int64=-9223372036854775808 let right:uint64=7 if left <? right return 42 return 1}'}, 42),
@@ -171,6 +175,7 @@ let main=():>int64=>{{
 
     unicode_runtime = ROOT / 'library/unicode/runtime.dewy'
     for index, body in enumerate([
+        'T:type=[x:int64 add=(left:int64 right:int64):>int64=>x+left+right]\nlet main=():>int64=>T[20].add(right=2 20)',
         'let format=(value:int64|none flag:bool|none):>string=>"{value}:{flag}"\nlet main=():>int64=>if format(none true)=?"none:true" and format(42 none)=?"42:none" 42 else 0',
         'let format=(value:int64|string|none):>string=>"{value}"\nlet main=():>int64=>if format(42)=?"42" and format("text")=?"text" and format(none)=?"none" 42 else 0',
         'let calls:int64=0\nlet next=():>int64|none=>{calls+=1 return calls}\nlet main=():>int64=>{let text="{next()}:{next()}" return if text=?"1:2" and calls=?2 42 else 0}',

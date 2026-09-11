@@ -6,9 +6,10 @@ Call-shape matching and overload dispatch, corresponding to TypeSystem's
 call operations in semantic/ty.py. Matching a shape produces argument pairs;
 both generic inference and concrete acceptance consume those same pairs.
 
-The caller has already processed source arguments left to right, removing
-named slots from the remaining positional sequence. This layer operates on
-that normalized call, retaining each method's original declaration index.
+The caller retains source argument order. Interleaved calls bind against
+each candidate here, removing named slots from the remaining positional
+sequence. Ordinary matching then consumes the canonical call shape while
+retaining each method's original declaration index.
 """
 
 Promotion:type = const [left:string right:string result:string]
@@ -24,6 +25,107 @@ Inference:type = [bindings:dict<string addr>=[] contextual:set<string>=set[]]
 Candidate:type = const [index:addr method:addr]
 DispatchResult:type = [method:addr method_index:addr promote_pos:array<addr?>]
 DispatchError:type = [message:string]
+Arguments:type = [pos:array<addr> kw:dict<string addr>]
+
+# Argument ids may designate either HIR values or types. Binding is a call
+# shape operation in both cases: a named argument consumes its slot, and the
+# next positional argument claims the first slot still available. Canonical
+# output retains gaps for omitted defaults as keyword arguments.
+bind_ordered = (method:types.FunctionType pos:array<addr> kw:dict<string addr> order:array<string?>):>Arguments? => {
+    let slots:dict<addr addr>=[]
+    let keywords:dict<string addr>=[]
+    let extra:array<addr>=[]
+    let cursor:addr=0
+    loop name in order {
+        if name is? none {
+            if cursor >=? pos.length return none
+            let value=pos[cursor]
+            cursor+=1
+            let slot:addr=0
+            loop slot <? method.pos_or_kw.length and slot in? slots {slot+=1}
+            if slot <? method.pos_or_kw.length {slots[slot]=value}
+            else if method.rest isnt? none {extra.push(value)}
+            else return none
+        } else {
+            let supplied=kw.get(name)
+            if supplied is? none return none
+            let value=supplied
+            let found=false
+            loop i in 0.. and i <? method.pos_or_kw.length {
+                if method.pos_or_kw[i].name not=? name continue
+                if i in? slots return none
+                slots[i]=value
+                found=true
+                break
+            }
+            if found continue
+            loop parameter in method.kw_only {if parameter.name =? name {found=true break}}
+            if not found and method.rest is? none return none
+            if name in? keywords return none
+            keywords[name]=value
+        }
+    }
+    let canonical:array<addr>=[]
+    let gap=false
+    loop i in 0.. and i <? method.pos_or_kw.length {
+        let parameter=method.pos_or_kw[i]
+        let value=slots.get(i)
+        if value is? none {
+            if parameter.required return none
+            gap=true
+        } else if not gap {canonical.push(value)}
+        else if parameter.name isnt? none {keywords[parameter.name]=value}
+        else return none
+    }
+    loop parameter in method.kw_only {if parameter.required and parameter.name not in? keywords return none}
+    loop value in extra {canonical.push(value)}
+    return Arguments[canonical keywords]
+}
+
+# Overloads can name their slots differently, so bind separately for each
+# candidate. As in ordinary dispatch, try exact applicability for every
+# candidate before considering numeric promotion.
+match_ordered = (methods:array<addr> pos:array<addr> kw:dict<string addr> order:array<string?> expected:addr? system:System @nodes:array<types.Type>):>DispatchResult|DispatchError => {
+    loop i in 0.. and i <? pos.length {pos[i]=types.strip_refinement(pos[i] nodes)}
+    let named:dict<string addr>=[]
+    loop [name type] in kw {named[name]=types.strip_refinement(type nodes)}
+    let apps:array<DispatchResult>=[]
+    loop promote in [false true] {
+        loop index in 0.. and index <? methods.length {
+            let bound=bind_ordered(method_at(nodes methods[index]) pos named order)
+            if bound is? none continue
+            let arguments=bound.pos
+            let promotions:array<addr?>=[]
+            loop argument in arguments {promotions.push(none)}
+            if promote {
+                if arguments.length =? 0 continue
+                let common:addr?=arguments[0]
+                loop argument in arguments {if common isnt? none {common=promote_type(common argument system @nodes)}}
+                if common is? none continue
+                promotions=[]
+                loop i in 0.. and i <? arguments.length {
+                    promotions.push(if arguments[i] =? common none else common)
+                    arguments[i]=common
+                }
+            }
+            let concrete=try_instantiate_for_call(methods[index] arguments bound.kw expected system @nodes)
+            if concrete isnt? none {apps.push(DispatchResult[concrete index promotions])}
+        }
+        if apps.length >? 0 break
+    }
+    if apps.length =? 0 return DispatchError['no matching method for arguments in this order']
+    let winners:array<DispatchResult>=[]
+    loop candidate in apps {
+        let shadowed=false
+        loop other in apps {
+            if other.method_index =? candidate.method_index continue
+            if more_specific(method_at(nodes other.method) method_at(nodes candidate.method) system @nodes) {shadowed=true break}
+        }
+        if not shadowed {winners.push(candidate)}
+    }
+    if winners.length not=? 1 return DispatchError["ambiguous call among {apps.length} applicable methods"]
+    return winners[0]
+}
 
 method_at = (nodes:array<types.Type> id:addr):>types.FunctionType => {
     let method = types.node_at(nodes id)

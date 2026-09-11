@@ -25,6 +25,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Calls accept positional arguments after named arguments. Named arguments
+  consume their slots, and later positional arguments claim the next free
+  slot; omitted defaults retain their positions. Each overload gets its own
+  normalization, and methods include the hidden receiver. All 29 source
+  comparison groups pass, and five native execution cases cover defaults,
+  places, generics and an instance method. Position-only parameter declaration
+  syntax (`<name:type>`) remains a separate unimplemented source feature.
+
 - Union materialization preserves optional word-to-bigint conversions.
   A hidden value binding evaluates the source once, and only its present
   branch performs the conversion. Native HIR explicitly packs both branches
