@@ -98,6 +98,38 @@ intersection = (left:addr right:addr id:addr context:contexts.Context @session:c
     return records.intersect(left right id context @session)
 }
 lookup = (name:string context:contexts.Context session:contexts.Session):>addr? => bindings.lookup(session.scopes context.scope name)
+
+# A local annotation names values in its lexical scope. Keep their binding
+# identities in the proof, rather than leaving an unresolved spelling that
+# bounds analysis cannot relate to a sequence or distinguish from a shadow.
+# Function contracts bind their own parameters separately, after allocation.
+resolve_scope_terms = (annotation:addr id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+    let node=types.node_at(session.types annotation)
+    if node is? types.TypeOr {
+        let members:array<addr>=[]
+        loop member in node.items {
+            let resolved=resolve_scope_terms(member id context @session)
+            if resolved is? Error return resolved
+            members.push(resolved)
+        }
+        return types.union(members @session.types)
+    }
+    if node isnt? types.RefinedType return annotation
+    let propositions:array<facts.Proposition>=[]
+    loop p in node.propositions {
+        let term_id=p.term_id
+        if p.term isnt? none and term_id is? none {
+            let found=lookup(p.term context session)
+            if found is? none return contexts.problem(id 'fact names an unknown binding' "no value binding `{p.term}` is in scope" context session)
+            let binding=bindings.binding_at(session.registry found)
+            if binding.kind not in? ['value' 'param'] return contexts.problem(id 'fact names an unknown binding' "`{p.term}` does not name a value or parameter" context session)
+            term_id=found
+        }
+        if facts.parameter(p) isnt? none and p.subject_id is? none return contexts.unsupported(id 'a declaration fact about another binding' context session)
+        propositions.push(facts.Proposition[p.subject p.op p.value p.projection p.term term_id p.term_projection p.tested_type p.when p.subject_id p.axiom])
+    }
+    return types.refined_type(node.base propositions @session.types)
+}
 resolve_name = (name:string id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
     let binding_id = lookup(name context session)
     if binding_id isnt? none {

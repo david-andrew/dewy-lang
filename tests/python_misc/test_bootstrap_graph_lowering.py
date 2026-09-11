@@ -39,6 +39,8 @@ main=(argv:array<string>):>int64=>{{
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [
+        ({'entry.dewy': 'let main=():>int64=>{let names:array<int64>=[] let at:addr<i => i <=? names.length>=0 names.insert(42 idx=at) return names[0]}'}, 42),
+        ({'entry.dewy': 'let main=():>int64=>{let names:array<int64>=[10 20] let at:addr<i => i <=? names.length>=0 loop at <? names.length {at+=1} return at+40}'}, 42),
         ({'entry.dewy': 'let combine=(left:int64 scale:int64=2 right:int64):>int64=>left+right*scale\nlet main=():>int64=>combine(scale=2 10 16)'}, 42),
         ({'entry.dewy': 'let combine=(left:int64 scale:int64=2 right:int64):>int64=>left+right*scale\nlet main=():>int64=>combine(right=16 10)'}, 42),
         ({'entry.dewy': 'let change=(value:int64 @target:int64):>void=>{target=value}\nlet main=():>int64=>{let x:int64=0 change(value=42 @x) return x}'}, 42),
@@ -118,6 +120,8 @@ main=(argv:array<string>):>int64=>{{
     assert str(bad / 'dependency.dewy') in result.stderr
 
     for index, (body, title) in enumerate([
+        ('let main=():>int64=>{let names:array<int64>=[42] let at:addr<i => i <? names.length>=0 names=[] return names[at]}', 'bounds'),
+        ('let main=():>int64=>{let names:array<int64>=[42] let at:addr<i => i <? names.length>=0 return {let names:array<int64>=[] names[at]}}', 'bounds'),
         ('let main=():>int64=>{let left:uint8=7 let right:uint16=256 if left <? right return 1 return 0}', 'cannot prove this integer fits'),
         ('let main=():>int64=>{let left:uint64=7 let right:int64=-1 if left >? right return 1 return 0}', 'cannot prove this integer fits'),
         ('let compare=(left:int64 right:uint64):>bool=>left <? right', 'cannot prove this integer fits'),

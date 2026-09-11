@@ -1118,7 +1118,9 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         target_id = target.left
         let type = declarations.resolve(target.right env.lexical @session)
         if type is? Error return type
-        annotation = type
+        let resolved=declarations.resolve_scope_terms(type target.right env.lexical @session)
+        if resolved is? Error return resolved
+        annotation = resolved
     }
     let name = source_views.identifier(target_id env.lexical session)
     if name is? none {

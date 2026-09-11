@@ -25,6 +25,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Local refinement annotations resolve their named terms to lexical binding
+  ids, matching hosted declaration checking. This lets an index bound name
+  its array while keeping a shadowed array distinct. All 30 source comparison
+  groups pass; native execution covers zero/incremented indices and rejects
+  reads after replacing the array or shadowing it. Full self-build validation
+  is still in progress.
+
 - Calls accept positional arguments after named arguments. Named arguments
   consume their slots, and later positional arguments claim the next free
   slot; omitted defaults retain their positions. Each overload gets its own
