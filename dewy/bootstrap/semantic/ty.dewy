@@ -145,14 +145,25 @@ contains_type = (items:array<addr> id:addr nodes:array<Type>):>bool => {
     return false
 }
 
+# Tables contain one description per key. Read states may copy a table and
+# then append different descriptions, so a remembered position is only a
+# hint: check both its bounds and the key in this particular table before
+# using it. No pointer identity or lifetime of a previous table is assumed.
+let intern_positions:dict<string addr>=[]
+
 # Return evidence about the current table on both paths, including reuse.
-# Interning avoids assigning new identities to structurally equal descriptions.
 intern = (@nodes:array<Type> value:Type):>addr<i => i <? nodes.length> => {
+    let known=intern_positions.get(value.key)
+    if known isnt? none and known <? nodes.length and nodes[known].key =? value.key return known
     loop i in 0.. and i <? nodes.length {
-        if nodes[i].key =? value.key return i
+        if nodes[i].key =? value.key {
+            intern_positions[value.key]=i
+            return i
+        }
     }
-    let id = nodes.length
+    let id=nodes.length
     nodes.push(value)
+    intern_positions[value.key]=id
     return id
 }
 

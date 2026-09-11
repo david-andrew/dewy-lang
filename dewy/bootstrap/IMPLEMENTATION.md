@@ -25,6 +25,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Type interning keeps checked position hints across calls. Each hint must
+  match both the bounds and the key of the supplied arena; independent,
+  forked, and cleared arenas retain their own identities. Native type-algebra
+  comparisons and a dedicated arena regression pass. A focused repeated-key
+  benchmark improved from 0.90 s to 0.18 s; this is not an end-to-end compiler
+  speedup claim.
+
 - Iterator mutation checks distinguish storage fields in both compilers.
   Writing a sibling set or dictionary is allowed; writes to the traversed
   field, its parents, a place argument, or potentially aliasing indexed
