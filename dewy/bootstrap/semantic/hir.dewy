@@ -135,6 +135,8 @@ RuntimeFailure = type of AST & [
     condition:addr?=none
     message:addr?=none
     dimmed:Span?=none
+    # Installed helper code remains distinct from source-message effects.
+    lowered:addr?=none
 ]
 
 # Exit an enclosing loop, optionally selected through a scope metatag.
@@ -757,6 +759,7 @@ children = (node:AST):>array<addr> => {
         return result
     }
     if node is? RuntimeFailure {
+        if node.lowered isnt? none return [node.lowered]
         if node.message isnt? none { result.push(node.message) }
         return result
     }

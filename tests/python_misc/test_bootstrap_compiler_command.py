@@ -126,6 +126,16 @@ let _test_summary=(json:bool brief:bool):>int64=>
     assert nonzero.returncode == 42, nonzero.stdout + nonzero.stderr
     assert nonzero.stdout == '42|11|42|4|2\n'
 
+    guarded_source = ROOT / 'tests/fixtures/native_guarded_array_borrow.dewy'
+    real_env = env | {'DEWY_LIBRARY_ROOT': str(ROOT / 'library'), 'DEWY_UDEWY': str(micro)}
+    guarded = subprocess.run([compiler, guarded_source], cwd=tmp_path, env=real_env,
+                             capture_output=True, text=True, timeout=900, check=False)
+    assert guarded.returncode == 42, guarded.stdout + guarded.stderr
+    guarded_binary = tmp_path / cache_artifact(guarded_source, cwd=tmp_path)
+    failed = subprocess.run([guarded_binary, 'fail'], cwd=tmp_path, env=real_env,
+                            capture_output=True, text=True, timeout=30, check=False)
+    assert failed.returncode == 101 and 'assertion failed' in failed.stderr
+
     # The real test library exercises early void returns in expectation
     # helpers, output capture, case expansion, and directory exit status.
     suite = tmp_path / 'native test suite'
@@ -138,7 +148,6 @@ $test(cases=(20 22))
 let copied=(value:int64):>void=>{$expect identity(value) =? value}
 let main=():>int64=>99
 ''')
-    real_env = env | {'DEWY_LIBRARY_ROOT': str(ROOT / 'library'), 'DEWY_UDEWY': str(micro)}
 
     def run_tests(path, status, summary):
         result = subprocess.run([compiler, 'test', '--json', path], cwd=tmp_path,
@@ -150,6 +159,14 @@ let main=():>int64=>99
         assert records[-1] == summary
 
     run_tests(passing, 0, {'passed': 3, 'failed': 0})
-    (suite / 'failing_test.dewy').write_text(
-        '$test\nlet wrong=():>void=>{$expect false, "deliberate failure"}\n')
+    (suite / 'failing_test.dewy').write_text('''let calls:int64=0
+let failed=():>bool=>{calls+=1 return false}
+$test
+let wrong=():>void=>{
+    $expect failed(), 'deliberate failure'
+    calls+=100
+}
+$test
+let once=():>void=>{$expect calls =? 1}
+''')
     run_tests(suite, 1, {'files': 2, 'failed_files': 1, 'failed': 1})

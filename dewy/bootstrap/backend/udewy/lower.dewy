@@ -215,6 +215,10 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.StringIndex return string_index(node @state)
     if node is? hir.StringSlice return string_slice(node @state)
     if node is? hir.StringEqual return string_equal(node @state)
+    if node is? hir.RuntimeFailure {
+        if node.lowered is? none return reject(node 'runtime failure without installed reporting helpers' @state)
+        return expression(node.lowered @state)
+    }
     if node is? hir.RepresentationCast return representation(node @state)
     if node is? hir.ObjectLiteral return object_literal(node @state)
     if node is? hir.TypeTest return runtime_test(node @state)

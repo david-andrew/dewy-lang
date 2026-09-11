@@ -25,6 +25,21 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Runtime failure nodes retain their installed reporting code separately from
+  the source message. Borrow analysis follows source-call dependencies, so
+  generated diagnostic I/O no longer makes ordinary guarded arena readers
+  copy their entire input. Explicit raw calls and effectful messages remain
+  conservative. Native execution verifies 10,000 guarded reads with no arena
+  growth, private raw-pointer copies, and assertion/expectation failure exits.
+  The complete native lowering regression passes.
+
+- Unicode grapheme segmentation classifies ASCII directly, retaining CR/LF
+  rules and using the generated tables for other scalars. The conformance
+  corpus and all 16,384 ASCII pairs pass. With these two changes, native-built
+  t0 tokenizes and dumps its own source with 10,882 matching token/pair rows
+  in about five seconds at 433 MiB peak memory. The previous run was stopped
+  above 25 GiB. Full compiler fixed-point verification remains in progress.
+
 - Function fallthrough retains its implicit result even when an earlier branch
   returns explicitly. Void functions always receive a fallthrough return in
   emitted µDewy. Native emitter execution covers both paths of early void and

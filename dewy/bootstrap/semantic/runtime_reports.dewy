@@ -74,11 +74,12 @@ lower = (root:addr helpers:dict<string addr> @session:contexts.Session):>Error? 
         seen.add(id)
         let node=hir.node_at(session.hir id)
         loop child in hir.children(node) {pending.push(child)}
-        if node isnt? hir.RuntimeFailure continue
+        if node isnt? hir.RuntimeFailure or node.lowered isnt? none continue
         let result=materialize(node helpers @session)
         if result is? Error return result
         $runtime_assert id <? session.hir.length
-        session.hir[id]=hir.node_at(session.hir result)
+        node.lowered=result
+        session.hir[id]=node
     }
     return none
 }

@@ -81,10 +81,12 @@ word_value = (id:addr type_nodes:array<types.Type>):>bool => {
 }
 ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<types.Type> opaque_only:bool=false):>set<addr> => {
     let dirty:set<addr>=set[]
+    let dependencies:dict<addr set<addr>>=[]
     loop [id function] in plan.functions {
         if not opaque_only {loop binding in function.writes {if binding in? plan.globals {dirty.add(id)}}}
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
+        let called:set<addr>=set[]
         let pending:array<addr>=[literal.body]
         let seen:set<addr>=set[]
         loop pending.length >? 0 {
@@ -93,6 +95,14 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
             seen.add(child)
             let node=hir.node_at(nodes child)
             if node is? hir.FunctionLiteral|hir.GenericFunction continue
+            # Reporting is an intrinsic failure operation at the source level.
+            # Its installed allocator/I/O calls do not expose a source argument.
+            # A user-written message still runs on this path and keeps all of
+            # its effects; explicit source calls to reporters remain ordinary.
+            if node is? hir.RuntimeFailure {
+                if node.message isnt? none {pending.push(node.message)}
+                continue
+            }
             # Reinterpreting scalar bits does not expose aggregate storage.
             # Pointer/aggregate transmutes and raw memory calls still prevent
             # borrowing: they can escape or mutate an otherwise read-only value.
@@ -100,24 +110,27 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
             if node is? hir.FunctionCall {
                 let callee=hir.node_at(nodes node.func)
                 if callee is? hir.ExpressedIdentifier {
-                    if captures.resolve(node.func node.selected_method_index plan nodes) isnt? none {}
+                    let target=captures.resolve(node.func node.selected_method_index plan nodes)
+                    if target isnt? none {called.add(target)}
                     else if (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix) or callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') {dirty.add(id)}
                 } else if callee is? hir.ArrayMethod {
                     # A sort invokes its key inside the method. In particular
                     # a function-valued parameter can hide ambient writes;
                     # it is not an ordinary HIR call with a known dependency.
                     if callee.name =? 'sort' and 'key' in? node.kw_args {dirty.add(id)}
-                } else if callee isnt? hir.FunctionLiteral {dirty.add(id)}
+                } else if callee is? hir.FunctionLiteral {called.add(node.func)}
+                else {dirty.add(id)}
             }
             loop next in hir.children(node) {pending.push(next)}
         }
+        dependencies[id]=called
     }
     let changed=true
     loop changed {
         changed=false
         loop [id function] in plan.functions {
             if id in? dirty continue
-            loop dependency in function.dependencies {
+            loop dependency in dependencies.get(id set[]) {
                 if dependency in? dirty {dirty.add(id) changed=true break}
             }
         }

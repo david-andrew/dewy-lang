@@ -1,0 +1,54 @@
+# Internal HIR fixture: analyze failure support code and source-message effects.
+from reporting import Span, SrcFile
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/backend/udewy/captures.dewy" as captures
+import p"../../dewy/bootstrap/backend/udewy/borrowing.dewy" as borrowing
+let main=():>int64=>{
+    let nodes:array<hir.AST>=[]
+    let ts:array<types.Type>=[]
+    let loc=Span[0 0]
+    let empty=types.primitive('void' @ts)
+    let word=types.primitive('int64' @ts)
+    let text=types.string_type(none @ts)
+    let array=types.array_type(word none @ts)
+    let helper_type=types.function_type([] [] none text [] @ts)
+    let read_type=types.function_type([types.PosOrKwArg['values' array]] [] none word [] @ts)
+    let zero=hir.append_node(@nodes hir.Integer[loc word '0d' 0])
+    let intrinsic=hir.append_node(@nodes hir.ExpressedIdentifier[loc helper_type '__store_i64__'])
+    let raw=hir.append_node(@nodes hir.FunctionCall[loc empty intrinsic [zero zero] []])
+    let message=hir.append_node(@nodes hir.String[loc text 'message'])
+    let helper_body=hir.append_node(@nodes hir.Block[loc text [raw message] true])
+    let helper=hir.append_node(@nodes hir.FunctionLiteral[loc helper_type [] [] none text helper_body])
+    let helper_decl=hir.append_node(@nodes hir.Declare[loc empty 'let' 'helper' helper_type helper 100])
+    let helper_read=hir.append_node(@nodes hir.ExpressedIdentifier[loc helper_type 'helper' 100])
+    let installed=hir.append_node(@nodes hir.FunctionCall[loc text helper_read [] []])
+    let items:array<addr>=[helper_decl]
+    let checks:array<addr>=[]
+    let arguments:array<addr>=[]
+    loop index in 0..2 {
+        let parameter:addr=10+index
+        let input=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' parameter])
+        let length=hir.append_node(@nodes hir.ArrayLength[loc word input])
+        let failure=hir.append_node(@nodes hir.RuntimeFailure[loc empty SrcFile['input' ''] 'guard' 'assert' message=(if index =? 2 installed else none) lowered=installed])
+        let body=hir.append_node(@nodes hir.Block[loc word [if index =? 1 installed else failure length] true])
+        let literal=hir.append_node(@nodes hir.FunctionLiteral[loc read_type [hir.Param['values' array parameter]] [] none word body])
+        let binding:addr=200+index
+        items.push(hir.append_node(@nodes hir.Declare[loc empty 'let' "read{index}" read_type literal binding]))
+        let actual_binding:addr=300+index
+        let actual=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'actual' actual_binding])
+        let reader=hir.append_node(@nodes hir.ExpressedIdentifier[loc read_type "read{index}" binding])
+        let call=hir.append_node(@nodes hir.FunctionCall[loc word reader [actual] []])
+        checks.push(call) arguments.push(actual)
+        let caller=hir.append_node(@nodes hir.FunctionLiteral[loc read_type [hir.Param['actual' array actual_binding]] [] none word call])
+        items.push(hir.append_node(@nodes hir.Declare[loc empty 'let' "caller{index}" read_type caller 400+index]))
+    }
+    let root=hir.append_node(@nodes hir.Block[loc empty items true])
+    let plan=captures.analyze(root nodes set[100 200 201 202 400 401 402])
+    let allowed=borrowing.analyze(root nodes ts plan)
+    if checks.length not=? 3 or arguments.length not=? 3 return 1
+    if arguments[0] not in? allowed.get(checks[0] set[]) return 2
+    if arguments[1] in? allowed.get(checks[1] set[]) return 3
+    if arguments[2] in? allowed.get(checks[2] set[]) return 4
+    return 42
+}

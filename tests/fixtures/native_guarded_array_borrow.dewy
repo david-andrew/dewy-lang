@@ -1,0 +1,23 @@
+# Successful guards retain read-only borrowing; raw addresses retain value copies.
+let read=(values:array<int64> index:addr):>int64=>{
+    $runtime_assert index <? values.length
+    return values[index]
+}
+let forwarded=(@values:array<int64>):>int64=>{
+    let before=_arena_cursor
+    let answer=read(values 0)
+    return if before =? _arena_cursor answer else 0
+}
+let expose=(values:array<int64>):>int64=>{
+    $runtime_assert values.length >? 0
+    return __load_i64__(values)
+}
+let main=(argv:array<string>):>int64=>{
+    let values:array<int64>=[42]
+    if argv.length >? 1 return read(values 9)
+    let pointer=expose(values)
+    __store_i64__(99 pointer)
+    if values[0] not=? 42 return 1
+    loop i in 0..9999 {if forwarded(@values) not=? 42 return 2}
+    return 42
+}
