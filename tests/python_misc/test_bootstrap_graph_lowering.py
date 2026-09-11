@@ -2,7 +2,9 @@
 import subprocess
 from pathlib import Path
 
-from test_bootstrap_lowering import ARENA
+from test_bootstrap_field_defaults import CASES as FIELD_DEFAULTS
+from test_bootstrap_field_defaults import ERRORS as INVALID_FIELD_DEFAULTS
+from test_bootstrap_lowering import ARENA, SCALAR_CASES
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
@@ -39,6 +41,7 @@ main=(argv:array<string>):>int64=>{{
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     cases = [
+        ({'entry.dewy': 'let narrow=():>bool=>true\nlet main=():>int64=>if narrow() 42 else 0'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let x:int64<n=>n>=?5>=5 x+=1 return x+36}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let x:int64|none=1 x=none return if x =? 1 0 else if x not=? 1 42 else 0}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let names:array<int64>=[10 20] let at:addr<i => i <=? names.length>=0 loop at <? names.length {at+=1} return at+40}'}, 42),
@@ -181,6 +184,9 @@ let main=():>int64=>{{
 
     unicode_runtime = ROOT / 'library/unicode/runtime.dewy'
     for index, body in enumerate([
+        *FIELD_DEFAULTS,
+        *(body for body, _ in SCALAR_CASES),
+        'AST=$abstract type of [position:addr]\nLeaf=type of AST & []\nOther=type of AST & []\nlet read=(node:AST):>addr=>{if node is? Other return 0 return node.position}\nlet main=():>int64=>read(Leaf[42])',
         'State:type=[input:set<int64> output:set<int64>]\nlet main=():>int64=>{let state=State[set[20 22] set[]] loop value in state.input {state.output.add(value)} let sum:int64=0 loop value in state.output {sum+=value} return sum}',
         "State:type=[input:dict<string int64> output:dict<string int64>]\nlet main=():>int64=>{let state=State[['a'->20 'b'->22] []] loop [key value] in state.input {state.output[key]=value} let sum:int64=0 loop [key value] in state.output {sum+=value} return sum}",
         'let choose=(empty:bool):>array<int64>|none=>{if empty return [] return [42]}\nlet main=():>int64=>{let empty=choose(true) let full=choose(false) if empty isnt? none and full isnt? none and empty.length=?0 and full.length=?1 return full[0] return 0}',
@@ -219,6 +225,12 @@ let main=():>int64=>{{
         assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
         run = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=15, check=False)
         assert run.returncode == 42, run.stdout + run.stderr
+
+    for index, body in enumerate(INVALID_FIELD_DEFAULTS):
+        source = tmp_path / f'invalid-field-default-{index}.dewy'
+        source.write_text(body)
+        result = subprocess.run([binary, source, reporting, unicode_runtime], capture_output=True, text=True, timeout=120, check=False)
+        assert result.returncode != 0 and 'refinement' in result.stderr, result.stdout + result.stderr
 
     source = tmp_path / 'command-line.dewy'
     source.write_text('let initialized:int64=41\nlet main=(argv:array<string>):>int64=>{if argv.length=?4 and argv[1]=?"a" and argv[2].length=?1 and argv[3]=?"" return initialized+1 return 0}')

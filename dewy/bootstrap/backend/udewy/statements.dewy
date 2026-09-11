@@ -104,21 +104,24 @@ expression = (id:addr @state:State):>Expression => {
     if node is? hir.FunctionCall {
         let function=expression(node.func @state)
         let arguments:array<Expression>=[]
-        let pending:addr=0
+        # Only the last argument with lifted statements matters: earlier
+        # values need snapshots, later values do not. This avoids maintaining
+        # a count whose decrement depends on a previous traversal's predicate.
+        let last_prefix:addr?=none
         loop argument in node.pos_args {
             let value=expression(argument @state)
-            if value.prefix.length >? 0 {pending+=1}
+            if value.prefix.length >? 0 {last_prefix=arguments.length}
             arguments.push(value)
         }
         let prefix=function.prefix
         let callee=node_at(function.value state)
         let intrinsic=callee is? hir.ExpressedIdentifier and (callee.name in? emit.binary or callee.name in? emit.prefix or callee.name in? emit.intrinsics)
-        if pending >? 0 and not intrinsic {function.value=snapshot(function.value @prefix @state)}
+        if last_prefix isnt? none and not intrinsic {function.value=snapshot(function.value @prefix @state)}
         let values:array<addr>=[]
-        loop argument in arguments {
+        loop i in 0.. and i <? arguments.length {
+            let argument=arguments[i]
             append(@prefix argument.prefix)
-            if argument.prefix.length >? 0 {pending-=1}
-            values.push(if pending >? 0 snapshot(argument.value @prefix @state) else argument.value)
+            values.push(if last_prefix isnt? none and i <? last_prefix snapshot(argument.value @prefix @state) else argument.value)
         }
         return Expression[prefix put(hir.FunctionCall[node.loc node.value_type function.value values [] node.selected_method_index node.integer_operation] @state)]
     }
