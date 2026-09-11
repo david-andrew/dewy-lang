@@ -123,6 +123,9 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     let inhabitant=unit_inhabitant(value expected id env @session)
     if inhabitant is? Error return inhabitant
     if inhabitant isnt? none return against(inhabitant expected id env @session)
+    let materialized=union_bigint_materialization(value expected id env @session)
+    if materialized is? Error return materialized
+    if materialized isnt? none return materialized
     if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and not numeric_values.nonzero_form(node.value_type 'BigInt' env.lexical session) and numeric_values.nonzero_form(expected 'BigInt' env.lexical session) {
         let constant=constant_integer(value session)
         if constant isnt? none and constant not=? 0 {
@@ -230,6 +233,58 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     if node is? hir.Integer return put(hir.Integer[node.loc expected node.prefix node.value] @session)
     return put(hir.ValueCast[node.loc expected value] @session)
 }
+# Subtyping alone cannot put a machine word into a bigint's limb record.
+# Preserve the hosted union conversion without adding an overload preference:
+# an already compatible word alternative keeps the source representation,
+# and another numeric object alternative leaves the choice to dispatch.
+union_bigint_materialization = (value:addr expected:addr id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    let target=types.node_at(session.types expected)
+    if target isnt? types.TypeOr or numeric_values.is_family(expected 'BigInt' env.lexical session) return none
+    let node=node_at(value session)
+    let payload=views.optional_payload(node.value_type @session.types)
+    let source=if payload is? none node.value_type else payload
+    if not views.integer_valued(source session.types) return none
+    loop member in target.items {
+        if views.integer_valued(member session.types) and subtyping.is_subtype(source member session.links @session.types) return none
+    }
+    let big=numeric_values.family('BigInt' env.lexical session)
+    if big is? none return none
+    let family=types.node_at(session.types big)
+    let members:array<addr>=if family is? types.TypeOr family.items else [big]
+    loop member in members {
+        let found=false
+        loop alternative in target.items {if types.same_type(member alternative session.types) {found=true break}}
+        if not found return none
+    }
+    loop member in target.items {
+        loop name in ['Rational' 'BigRational' 'Fixed'] {
+            if numeric_values.is_family(member name env.lexical session) return none
+        }
+    }
+    if payload is? none {
+        let converted=against(value big id env @session)
+        if converted is? Error return converted
+        return put(hir.RepresentationCast[node.loc expected converted] @session)
+    }
+    let absent_type=types.primitive('none' @session.types)
+    if not subtyping.is_subtype(absent_type expected session.links @session.types) return none
+    # The hidden binding owns the one evaluation. Only the present branch
+    # reads its payload and invokes the ordinary integer-to-bigint conversion.
+    let saved=snapshot_value(value @session)
+    let present=snapshot_read(saved.read payload @session)
+    let converted=against(present big id env @session)
+    if converted is? Error return converted
+    # Native HIR makes union storage boundaries explicit. Both arms must
+    # carry the destination's tags, including distinct none and bigint zero.
+    let present_value=put(hir.RepresentationCast[node.loc expected converted] @session)
+    let absent=put(hir.NoneValue[node.loc absent_type] @session)
+    let absent_value=put(hir.RepresentationCast[node.loc expected absent] @session)
+    let condition=put(hir.TypeTest[node.loc types.primitive('bool' @session.types) saved.read absent_type false] @session)
+    let arm=put(hir.IfArm[node.loc expected condition absent_value] @session)
+    let flow=put(hir.Flow[node.loc expected [arm] present_value] @session)
+    return put(hir.Block[node.loc expected [saved.declaration flow] true] @session)
+}
+
 widen = (value:addr id:addr env:Environment @session:contexts.Session strings:bool=true):>addr|Error => {
     let node = node_at(value session)
     let type=types.node_at(session.types node.value_type)
@@ -382,23 +437,24 @@ bigint_operation = (name:string arguments:array<addr> expected:addr? id:addr env
     return put(hir.FunctionCall[called.loc called.value_type called.func called.pos_args called.kw_args called.selected_method_index name] @session)
 }
 
+# Capture an expression once for a conditional conversion or equality.
 # Equality first evaluates both operands, then selects a payload comparison
 # through ordinary typed short-circuit branches. A simple binding can keep
 # its identity so the condition also narrows it; effectful operands need
 # hidden snapshots in source order, even when their tags will differ.
-EqualityValue:type = const [declaration:addr read:addr]
-equality_snapshot = (value:addr @session:contexts.Session):>EqualityValue => {
+SnapshotValue:type = const [declaration:addr read:addr]
+snapshot_value = (value:addr @session:contexts.Session):>SnapshotValue => {
     let node=node_at(value session)
-    let name="__dewy_eq_{session.registry.next_id}"
+    let name="__dewy_snapshot_{session.registry.next_id}"
     let binding_id=bindings.allocate(@session.registry none name 'value' node.loc)
     let binding=bindings.binding_at(session.registry binding_id)
     binding.value_type=node.value_type binding.store_type=node.value_type
     let declaration=put(hir.Declare[node.loc types.primitive('void' @session.types) 'let' name node.value_type value binding_id] @session)
     binding.declaration=declaration
     session.registry.by_id[binding_id]=binding
-    return EqualityValue[declaration put(hir.ExpressedIdentifier[node.loc node.value_type name binding_id] @session)]
+    return SnapshotValue[declaration put(hir.ExpressedIdentifier[node.loc node.value_type name binding_id] @session)]
 }
-equality_read = (value:addr member:addr @session:contexts.Session):>addr => {
+snapshot_read = (value:addr member:addr @session:contexts.Session):>addr => {
     let node=node_at(value session)
     $runtime_assert node is? hir.ExpressedIdentifier
     return put(hir.ExpressedIdentifier[node.loc member node.name node.binding_id] @session)
@@ -418,8 +474,8 @@ union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:E
         let other_node=types.node_at(session.types other_type)
         if types.is_primitive(other_node 'none') {
             if node_at(other session) is? hir.NoneValue return put(hir.TypeTest[loc boolean value other_type negated] @session)
-            let left=equality_snapshot(arguments[0] @session)
-            let right=equality_snapshot(arguments[1] @session)
+            let left=snapshot_value(arguments[0] @session)
+            let right=snapshot_value(arguments[1] @session)
             let test=put(hir.TypeTest[loc boolean if index =? 0 left.read else right.read other_type negated] @session)
             return put(hir.Block[loc boolean [left.declaration right.declaration test] false] @session)
         }
@@ -432,16 +488,16 @@ union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:E
             let matching=left_members.items.length =? right_members.items.length
             loop member in left_members.items {if not types.contains_type(right_members.items member session.types) {matching=false}}
             if not matching return pending(id 'equality between unions with different alternatives (narrow one side with `is?` first)' env session)
-            let left=equality_snapshot(arguments[0] @session)
-            let right=equality_snapshot(arguments[1] @session)
+            let left=snapshot_value(arguments[0] @session)
+            let right=snapshot_value(arguments[1] @session)
             let combined:addr?=none
             loop member in left_members.items {
                 let left_test=put(hir.TypeTest[loc boolean left.read member negated] @session)
                 let right_test=put(hir.TypeTest[loc boolean right.read member negated] @session)
                 let branch=put(hir.ShortCircuit[loc boolean if negated 'or' else 'and' left_test right_test] @session)
                 if not types.is_primitive(types.node_at(session.types member) 'none') and member not in? session.error_types {
-                    let a=equality_read(left.read member @session)
-                    let b=equality_read(right.read member @session)
+                    let a=snapshot_read(left.read member @session)
+                    let b=snapshot_read(right.read member @session)
                     let payload=call(function [a b] [] id env @session)
                     if payload is? Error return payload
                     branch=put(hir.ShortCircuit[loc boolean if negated 'or' else 'and' branch payload] @session)
@@ -463,13 +519,13 @@ union_equality = (function:addr arguments:array<addr> negated:bool id:addr env:E
         let simple=node_at(value session) is? hir.ExpressedIdentifier
         loop argument in arguments {if node_at(argument session) isnt? hir.ExpressedIdentifier|hir.Integer|hir.Bool|hir.String|hir.NoneValue {simple=false}}
         if not simple {
-            let left=equality_snapshot(arguments[0] @session)
-            let right=equality_snapshot(arguments[1] @session)
+            let left=snapshot_value(arguments[0] @session)
+            let right=snapshot_value(arguments[1] @session)
             prefix=[left.declaration right.declaration]
             tested=if index =? 0 left.read else right.read
             other=if index =? 0 right.read else left.read
         }
-        let narrowed=equality_read(tested member @session)
+        let narrowed=snapshot_read(tested member @session)
         let payload=call(function [narrowed other] [] id env @session)
         if payload is? Error return payload
         let test=put(hir.TypeTest[loc boolean tested member negated] @session)

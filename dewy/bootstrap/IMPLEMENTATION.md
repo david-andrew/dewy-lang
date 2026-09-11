@@ -25,6 +25,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Union materialization preserves optional word-to-bigint conversions.
+  A hidden value binding evaluates the source once, and only its present
+  branch performs the conversion. Native HIR explicitly packs both branches
+  into the destination union, keeping none distinct from bigint zero. Existing
+  word alternatives keep their representation; another numeric object does not
+  acquire an implicit preference. All 28 source-comparison groups pass. The
+  real-library fixture matches hosted output for none, zero, uint64.max and
+  int64.min, with one evaluation per source call and the expected exit 42.
+
 - Mixed-width integer comparisons use a checked conversion of the right
   operand to the left operand's representation, matching hosted dispatch.
   Source comparisons cover all six operators across signed/unsigned widths;

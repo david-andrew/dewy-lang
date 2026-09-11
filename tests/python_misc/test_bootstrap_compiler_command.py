@@ -104,3 +104,14 @@ let _test_summary=(json:bool brief:bool):>int64=>
     program.write_text('$test\nlet bad=(value:int64):>void=>{}')
     result = invoke('test', program)
     assert result.returncode == 102, result.stdout + result.stderr
+
+    # Real numeric helpers must receive the present payload, while a missing
+    # value stays none. The fixture's counter catches repeated source calls.
+    numeric = subprocess.run(
+        [compiler, ROOT / 'tests/fixtures/native_optional_bigint.dewy'],
+        cwd=tmp_path,
+        env=env | {'DEWY_LIBRARY_ROOT': str(ROOT / 'library'), 'DEWY_UDEWY': str(micro)},
+        capture_output=True, text=True, timeout=900, check=False,
+    )
+    assert numeric.returncode == 42, numeric.stdout + numeric.stderr
+    assert numeric.stdout == 'none|0|18446744073709551615|-9223372036854775808|4\n'

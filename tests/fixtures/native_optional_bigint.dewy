@@ -1,0 +1,14 @@
+# Exercise the same optional-word materialization the native checker needs
+# for array lengths. The source calls must happen once even for none/zero.
+let unsigned_source=(@calls:int64 value:uint64?):>uint64?=>{calls+=1 return value}
+let signed_source=(@calls:int64 value:int64?):>int64?=>{calls+=1 return value}
+
+let main=():>int64=>{
+    let calls:int64=0
+    let absent:bigint?=unsigned_source(@calls none)
+    let zero:bigint?=unsigned_source(@calls 0)
+    let maximum:bigint?=unsigned_source(@calls 18446744073709551615)
+    let minimum:bigint?=signed_source(@calls (-9223372036854775808))
+    printl("{absent}|{zero}|{maximum}|{minimum}|{calls}")
+    return if calls =? 4 42 else 1
+}
