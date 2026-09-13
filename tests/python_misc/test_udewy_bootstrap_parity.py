@@ -406,14 +406,15 @@ let main = ():>int => {{
     assert subprocess.run([binary], check=False).returncode == 1
 
 
-def test_c_short_circuit_matches_between_compilers(bootstrap_binary, tmp_path) -> None:
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_short_circuit_contexts_match_between_compilers(bootstrap_binary, tmp_path, target) -> None:
     if which('cc') is None:
         pytest.skip('cc not installed')
     source = (REPO_ROOT / 'udewy/tests/test_guarded_calls.udewy').read_text()
     for name, compiler in [('hosted', ['python', '-m', 'udewy']), ('native', [str(bootstrap_binary)])]:
         work = tmp_path / name
         work.mkdir()
-        binary = _compile_with(compiler, source, 'c', work)
+        binary = _compile_with(compiler, source, target, work)
         assert subprocess.run([str(binary)], check=False, timeout=5).returncode == 0
 
 

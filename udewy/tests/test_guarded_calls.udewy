@@ -1,6 +1,7 @@
 # RHS calls/loads belong inside the short-circuit branch, including loop guards.
 let calls:int = 0
 let tick = ():>int => { calls = calls + 1 return true }
+let identity = (value:int):>int => { return value }
 let main = ():>int => {
     let missing:int = 0
     if (missing not=? 0) and (__load__(missing) =? 42) { return 1 }
@@ -9,5 +10,20 @@ let main = ():>int => {
     if calls not=? 0 { return 4 }
     if (missing =? 0) and (tick() or tick()) { } else { return 5 }
     if calls not=? 1 { return 6 }
+    # Outside a condition, AND/OR are eager bitwise operators even for
+    # boolean bit patterns. Function arguments keep expression semantics
+    # when the call itself appears in an if/loop condition.
+    let a:int = false and tick()
+    let b:int = true or tick()
+    if calls not=? 3 { return 7 }
+    if a not=? 0 { return 8 }
+    if b not=? true { return 9 }
+    let bits_and:int = 6 and 3
+    let bits_or:int = 6 or 3
+    if bits_and not=? 2 { return 10 }
+    if bits_or not=? 7 { return 11 }
+    if identity(false and tick()) { return 12 }
+    loop identity(false and tick()) { return 13 }
+    if calls not=? 5 { return 14 }
     return 0
 }
