@@ -345,3 +345,32 @@ def test_c_backend_builds_sdl_demo_when_artifacts_are_available() -> None:
         )
 
     assert output_path.name == "race_c"
+
+
+@pytest.mark.skipif(not cc_available(), reason='C compiler unavailable')
+def test_c_backend_linux_syscalls_preserve_kernel_results() -> None:
+    import platform
+    if platform.system() != 'Linux' or platform.machine() != 'x86_64':
+        pytest.skip('raw syscall fixture uses the Linux x86_64 ABI')
+    source = '''
+let main = ():>int => {
+    if __syscall0__(39) <=? 0 { return 1 }
+    if __syscall1__(3 (-1)) not=? -9 { return 2 }
+    let memory:int = __syscall6__(9 0 4096 3 34 (-1) 0)
+    if memory <? 0 { return 3 }
+    __store__(42 memory)
+    if __load__(memory) not=? 42 { return 4 }
+    if __syscall2__(11 memory 4096) not=? 0 { return 5 }
+    return 0
+}
+'''
+    code, result = compile_and_run(source, 'linux_syscalls')
+    assert 'udewy_linux_syscall(' in code
+    assert result == 0
+
+
+@pytest.mark.skipif(not cc_available(), reason='C compiler unavailable')
+def test_c_backend_short_circuit_guards_rhs_statements() -> None:
+    source = (Path(__file__).resolve().parents[2] / 'udewy/tests/test_guarded_calls.udewy').read_text()
+    _, result = compile_and_run(source, 'guarded_calls')
+    assert result == 0

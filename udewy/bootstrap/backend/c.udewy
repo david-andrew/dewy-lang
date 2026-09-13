@@ -30,6 +30,7 @@ const CH_STORE_U16:int        = 2097152
 const CH_STORE_U32:int        = 4194304
 const CH_STORE_U64:int        = 8388608
 const CH_ALLOCA:int           = 16777216
+const CH_LINUX_SYSCALL:int    = 33554432
 
 # Helpers whose body depends on the target byte order. If any of these are
 # requested, we emit the endian-detection prelude before the helpers.
@@ -80,7 +81,6 @@ let c_current_indent:int = 0
 let c_current_temp_count:int = 0
 let c_current_expr:int = 0       # current expression string, 0 if none
 let c_current_saved:int = 0      # vec of saved value expressions (strings)
-let c_cond_lhs_stack:int = 0     # vec of strings (for cond_and/cond_or)
 
 let c_alloc_state = ():>void => {
     c_fn_names = intmap_new()
@@ -104,7 +104,6 @@ let c_alloc_state = ():>void => {
     c_current_indent = 1
     c_current_expr = 0
     c_current_saved = vec_new(8)
-    c_cond_lhs_stack = vec_new(4)
     return void
 }
 
@@ -391,6 +390,8 @@ let c_known_extern_capability = (name:int):>int => {
     if str_eq(name "chdir") { return CAP_POSIX }
     if str_eq(name "fork") { return CAP_POSIX }
     if str_eq(name "execve") { return CAP_POSIX }
+    if str_eq(name "getcwd") { return CAP_POSIX }
+    if str_eq(name "setsid") { return CAP_POSIX }
     if str_eq(name "waitpid") { return CAP_POSIX }
     return 0
 }
@@ -979,43 +980,33 @@ let c_emit_return = ():>void => {
     return void
 }
 
+# Guard all RHS statements, including calls and loads. Selecting only the
+# final expression would eagerly evaluate invalid guarded memory accesses.
 let c_cond_and_split = ():>int => {
-    vec_push(c_cond_lhs_stack c_current_expr)
-    return 0
+    let result:int = c_emit_temp(c_current_expr)
+    c_emit_line(c_concat3("if (" result " != UINT64_C(0)) \{"))
+    c_current_indent = c_current_indent + 1
+    return result
 }
 
-let c_cond_and_join = (false_label:int):>void => {
-    let rhs:int = c_current_expr
-    let lhs:int = vec_get(c_cond_lhs_stack vec_len(c_cond_lhs_stack) - 1)
-    vec_pop(c_cond_lhs_stack)
-    let bb:int = bb_new(32 + str_len(lhs) + str_len(rhs))
-    bb_push_str(bb "((")
-    bb_push_str(bb lhs)
-    bb_push_str(bb ") ? (")
-    bb_push_str(bb rhs)
-    bb_push_str(bb ") : UINT64_C(0))")
-    c_set_current(bb_finalize_as_string(bb))
+let c_cond_and_join = (result:int):>void => {
+    let assignment:int = c_concat3(result " = " c_current_expr)
+    c_emit_line(c_concat3(assignment ";" ""))
+    c_current_indent = c_current_indent - 1
+    c_emit_line("\}")
+    c_set_current(result)
     return void
 }
 
 let c_cond_or_split = ():>int => {
-    vec_push(c_cond_lhs_stack c_current_expr)
-    return 0
+    let result:int = c_emit_temp(c_current_expr)
+    c_emit_line(c_concat3("if (" result " == UINT64_C(0)) \{"))
+    c_current_indent = c_current_indent + 1
+    return result
 }
 
-let c_cond_or_join = (done_label:int):>void => {
-    let rhs:int = c_current_expr
-    let lhs:int = vec_get(c_cond_lhs_stack vec_len(c_cond_lhs_stack) - 1)
-    vec_pop(c_cond_lhs_stack)
-    let bb:int = bb_new(32 + str_len(lhs) * 2 + str_len(rhs))
-    bb_push_str(bb "((")
-    bb_push_str(bb lhs)
-    bb_push_str(bb ") ? (")
-    bb_push_str(bb lhs)
-    bb_push_str(bb ") : (")
-    bb_push_str(bb rhs)
-    bb_push_str(bb "))")
-    c_set_current(bb_finalize_as_string(bb))
+let c_cond_or_join = (result:int):>void => {
+    c_cond_and_join(result)
     return void
 }
 
@@ -1041,6 +1032,13 @@ let c_init_intrinsics = ():>void => {
     map_put_str(m "__i64_to_f64_bits__" 1)
     map_put_str(m "__f32_bits_to_i64__" 1)
     map_put_str(m "__f64_bits_to_i64__" 1)
+    map_put_str(m "__syscall0__" 1)
+    map_put_str(m "__syscall1__" 2)
+    map_put_str(m "__syscall2__" 3)
+    map_put_str(m "__syscall3__" 4)
+    map_put_str(m "__syscall4__" 5)
+    map_put_str(m "__syscall5__" 6)
+    map_put_str(m "__syscall6__" 7)
     g_c_intrinsics = m
     return void
 }
@@ -1158,7 +1156,24 @@ let c_mixed_extern_type_tags = (name:int static_args_map:int):>int => {
 }
 
 let c_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
-    if str_eq(name "__load_u8__")        { c_load_mem(8 0) }
+    if str_prefix(name "__syscall") {
+        c_helpers = c_helpers or CH_LINUX_SYSCALL
+        let args:int = c_pop_saved_n(num_args - 1)
+        let i:int = 0
+        vec_push(args c_current_expr)
+        loop vec_len(args) <? 7 { vec_push(args "UINT64_C(0)") }
+        let call:int = bb_new(128)
+        bb_push_str(call "udewy_linux_syscall(")
+        i = 0
+        loop i <? 7 {
+            if i >? 0 { bb_push_str(call ", ") }
+            bb_push_str(call vec_get(args i))
+            i = i + 1
+        }
+        bb_push_str(call ")")
+        c_set_current(c_emit_temp(bb_finalize_as_string(call)))
+    }
+    else if str_eq(name "__load_u8__")   { c_load_mem(8 0) }
     else if str_eq(name "__load_u16__")  { c_load_mem(16 0) }
     else if str_eq(name "__load_u32__")  { c_load_mem(32 0) }
     else if str_eq(name "__load_u64__")  { c_load_mem(64 0) }
@@ -1367,6 +1382,10 @@ let c_extern_wrapper_def = (out:int name:int wrapper:int):>void => {
         bb_push_str(out "(void) \{ return (udewy_word)(int64_t)fork(); \}\n")
     } else if str_eq(name "execve") {
         bb_push_str(out "(udewy_word arg0, udewy_word arg1, udewy_word arg2) \{ return (udewy_word)(int64_t)execve((const char *)(uintptr_t)arg0, (char *const *)(uintptr_t)arg1, (char *const *)(uintptr_t)arg2); \}\n")
+    } else if str_eq(name "getcwd") {
+        bb_push_str(out "(udewy_word arg0, udewy_word arg1) \{ return (udewy_word)(uintptr_t)getcwd((char *)(uintptr_t)arg0, (size_t)arg1); \}\n")
+    } else if str_eq(name "setsid") {
+        bb_push_str(out "(void) \{ return (udewy_word)(int64_t)setsid(); \}\n")
     } else if str_eq(name "waitpid") {
         bb_push_str(out "(udewy_word arg0, udewy_word arg1, udewy_word arg2) \{ return (udewy_word)(int64_t)waitpid((pid_t)(int64_t)arg0, (int *)(uintptr_t)arg1, (int)arg2); \}\n")
     }
@@ -1410,6 +1429,9 @@ let c_finish_module = ():>int => {
     bb_push_str(out "typedef char udewy_slot_must_be_word_sized[\n    sizeof(udewy_slot) == sizeof(udewy_word) ? 1 : -1\n];\n")
     bb_push_str(out "#define UDEWY_TRUE (~UINT64_C(0))\n\n")
 
+    if (c_helpers and CH_LINUX_SYSCALL) not=? 0 {
+        bb_push_str(out "#if !defined(__linux__) || !defined(__x86_64__)\n#error \"raw Linux syscall intrinsics require a Linux x86_64 C target\"\n#endif\n/* Preserve the kernel ABI, including negative errno results. The ordinary\n   portable C capability wrappers continue using their libc contracts. */\nstatic udewy_word udewy_linux_syscall(udewy_word n, udewy_word a, udewy_word b,\n    udewy_word c, udewy_word d, udewy_word e, udewy_word f) \{\n    register udewy_word r10 __asm__(\"r10\") = d;\n    register udewy_word r8 __asm__(\"r8\") = e;\n    register udewy_word r9 __asm__(\"r9\") = f;\n    udewy_word result;\n    __asm__ volatile (\"syscall\" : \"=a\"(result)\n        : \"a\"(n), \"D\"(a), \"S\"(b), \"d\"(c), \"r\"(r10), \"r\"(r8), \"r\"(r9)\n        : \"rcx\", \"r11\", \"memory\", \"cc\");\n    return result;\n\}\n")
+    }
     if (c_helpers and CH_ALLOCA) not=? 0 {
         bb_push_str(out "#if defined(__GNUC__) || defined(__clang__)\n#define UDEWY_ALLOCA(size) __builtin_alloca(size)\n#elif defined(_MSC_VER)\n#include <malloc.h>\n#define UDEWY_ALLOCA(size) _alloca(size)\n#elif defined(__has_include)\n#if __has_include(<alloca.h>)\n#include <alloca.h>\n#define UDEWY_ALLOCA(size) alloca(size)\n#endif\n#endif\n#ifndef UDEWY_ALLOCA\n#error \"udewy C backend requires alloca support from the selected C compiler\"\n#endif\n\n")
     }
@@ -1687,6 +1709,7 @@ let c_compile_and_link = (code:int input_name:int cache_dir:int options:int):>in
     let argv:int = vec_new(16)
     vec_push(argv c_str("cc"))
     vec_push(argv c_str("-std=c99"))
+    vec_push(argv c_str("-O2"))
     vec_push(argv c_str("-o"))
     vec_push(argv exe_path)
     vec_push(argv c_path)

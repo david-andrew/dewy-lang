@@ -1,0 +1,13 @@
+# RHS calls/loads belong inside the short-circuit branch, including loop guards.
+let calls:int = 0
+let tick = ():>int => { calls = calls + 1 return true }
+let main = ():>int => {
+    let missing:int = 0
+    if (missing not=? 0) and (__load__(missing) =? 42) { return 1 }
+    if (missing =? 0) or tick() { } else { return 2 }
+    loop (calls <? 0) and tick() { return 3 }
+    if calls not=? 0 { return 4 }
+    if (missing =? 0) and (tick() or tick()) { } else { return 5 }
+    if calls not=? 1 { return 6 }
+    return 0
+}

@@ -52,7 +52,28 @@ _HELPER_DEPS: dict[str, set[str]] = {
     "load_i64": {"load_u64"},
 }
 
+_LINUX_SYSCALL_HELPER = """\
+#if !defined(__linux__) || !defined(__x86_64__)
+#error "raw Linux syscall intrinsics require a Linux x86_64 C target"
+#endif
+/* Preserve the kernel ABI, including negative errno results. The ordinary
+   portable C capability wrappers continue using their libc contracts. */
+static udewy_word udewy_linux_syscall(udewy_word n, udewy_word a, udewy_word b,
+    udewy_word c, udewy_word d, udewy_word e, udewy_word f) {
+    register udewy_word r10 __asm__("r10") = d;
+    register udewy_word r8 __asm__("r8") = e;
+    register udewy_word r9 __asm__("r9") = f;
+    udewy_word result;
+    __asm__ volatile ("syscall" : "=a"(result)
+        : "a"(n), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8), "r"(r9)
+        : "rcx", "r11", "memory", "cc");
+    return result;
+}
+"""
+
+
 _PLATFORM_INTRINSIC_ARITIES = {
+    **{f"__syscall{count}__": count + 1 for count in range(7)},
     "__i64_to_f32_bits__": 1,
     "__i64_to_f64_bits__": 1,
     "__f32_bits_to_i64__": 1,
@@ -134,7 +155,6 @@ class CBackend(Backend):
         self._reachable_fn_label_ids: set[int] | None = None
         self._c_capabilities: set[str] = set()
         self._required_helpers: set[str] = set()
-        self._cond_lhs_stack: list[str] = []
 
         self._fn_names: dict[int, str] = {}
         self._fn_source_names: dict[int, str] = {}
@@ -918,6 +938,8 @@ class CBackend(Backend):
             "#define UDEWY_TRUE (~UINT64_C(0))",
             "",
         ]
+        if "linux_syscall" in self._required_helpers:
+            sections.append(_LINUX_SYSCALL_HELPER)
         sections.extend(self._render_helpers())
 
         data_defs = self._render_data_defs()
@@ -1239,23 +1261,28 @@ class CBackend(Backend):
         fn.indent -= 1
         self._emit("}")
 
-    def cond_and_split(self) -> str:
-        self._cond_lhs_stack.append(self._current_expr())
-        return ""
+    def _cond_split(self, *, when_zero: bool) -> str:
+        # RHS emission produces statements (calls and loads), so it must be
+        # guarded here, not merely selected by a ternary after evaluation.
+        result = self._emit_temp(self._current_expr())
+        self._emit(f"if ({result} {'==' if when_zero else '!='} UINT64_C(0)) {{")
+        self._current().indent += 1
+        return result
 
-    def cond_and_join(self, false_label: str) -> None:
-        rhs = self._current_expr()
-        lhs = self._cond_lhs_stack.pop()
-        self._set_current(f"(({lhs}) ? ({rhs}) : UINT64_C(0))")
+    def cond_and_split(self) -> str:
+        return self._cond_split(when_zero=False)
+
+    def cond_and_join(self, result: str) -> None:
+        self._emit(f"{result} = {self._current_expr()};")
+        self._current().indent -= 1
+        self._emit("}")
+        self._set_current(result)
 
     def cond_or_split(self) -> str:
-        self._cond_lhs_stack.append(self._current_expr())
-        return ""
+        return self._cond_split(when_zero=True)
 
-    def cond_or_join(self, done_label: str) -> None:
-        rhs = self._current_expr()
-        lhs = self._cond_lhs_stack.pop()
-        self._set_current(f"(({lhs}) ? ({lhs}) : ({rhs}))")
+    def cond_or_join(self, result: str) -> None:
+        self.cond_and_join(result)
 
     def begin_loop(self) -> None:
         fn = self._current()
@@ -1369,7 +1396,13 @@ class CBackend(Backend):
         self._set_current(self._emit_temp(call_expr))
 
     def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
-        if name == "__load_u8__":
+        if name.startswith("__syscall"):
+            self._require_helper("linux_syscall")
+            current = self._current_expr()
+            args = [*self._pop_saved_values(num_args - 1), current]
+            args.extend(["UINT64_C(0)"] * (7 - num_args))
+            self._set_current(self._emit_temp(f"udewy_linux_syscall({', '.join(args)})"))
+        elif name == "__load_u8__":
             self.load_mem(8, signed=False)
         elif name == "__load_u16__":
             self.load_mem(16, signed=False)
@@ -1477,7 +1510,7 @@ class CBackend(Backend):
 
         c_path.write_text(code)
 
-        command = ["cc", "-std=c99", "-o", str(exe_path), str(c_path), *link_artifacts, *link_args]
+        command = ["cc", "-std=c99", "-O2", "-o", str(exe_path), str(c_path), *link_artifacts, *link_args]
         subprocess.run(command, check=True)
         return exe_path
 
