@@ -45,6 +45,7 @@ for check_target in x86_64 c; do
     expect_exit 42 "$check_pair/dewy" --target "$check_target" tests/fixtures/native_sibling_field_facts.dewy
     expect_exit 42 "$check_pair/dewy" --target "$check_target" tests/fixtures/native_refined_tag_tests.dewy
     expect_exit 42 "$check_pair/dewy" --target "$check_target" tests/fixtures/native_array_sharing.dewy
+    expect_exit 42 "$check_pair/dewy" --target "$check_target" tests/fixtures/native_array_sharing_raw.dewy
     expect_exit 42 "$check_pair/dewy" --target "$check_target" tests/fixtures/native_borrowed_string_arrays.dewy
     expect_exit 42 "$check_pair/dewy" --target "$check_target" tests/fixtures/native_shared_element_replacement.dewy
 done
