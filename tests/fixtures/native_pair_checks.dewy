@@ -4,6 +4,7 @@ import p"native_sibling_field_facts.dewy" as sibling
 import p"native_refined_tag_tests.dewy" as tags
 import p"native_stored_refinement_contracts.dewy" as stores
 import p"native_parameter_defaults.dewy" as defaults
+import p"native_diverging_tails.dewy" as tails
 import p"native_array_sharing.dewy" as sharing
 import p"native_array_sharing_raw.dewy" as raw
 import p"native_borrowed_string_arrays.dewy" as borrowed
@@ -26,5 +27,7 @@ let main=():>int64=>{
     if replacements.main() not=? 42 return 7
     printl('Checking parameter defaults')
     if defaults.main() not=? 42 return 8
+    printl('Checking diverging function tails')
+    if tails.main() not=? 42 return 9
     return 42
 }

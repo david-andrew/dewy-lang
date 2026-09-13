@@ -1,0 +1,8 @@
+# The final path never returns, although µDewy checks returns syntactically.
+# Lowering must keep the exit call and make that path's termination explicit.
+let stop=():>never=>{__syscall1__(60 87); __unreachable__()}
+let choose=(flag:bool):>int64=>{
+    if flag return 42
+    stop()
+}
+let main=():>int64=>choose(true)
