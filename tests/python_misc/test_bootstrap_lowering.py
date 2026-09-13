@@ -90,7 +90,7 @@ GRAPHEME_CASES = [
     ('let convert=(text:string):>array<grapheme>=>text as array<grapheme>\nlet main=():>int64=>{let values=convert("") values.push("z") return if values.length=?1 and values[0]=?"z" 42 else 0}', 42),
     ('let convert=(text:string):>array<grapheme>=>text as array<grapheme>\nlet main=():>int64=>{let values=convert("é👩‍👩‍👧‍👦z") return if values.length=?3 and values[0]=?"é" and values[1]=?"👩‍👩‍👧‍👦" and values[2]=?"z" 42 else 0}', 42),
     ('let convert=(text:string):>array<grapheme>=>text as array<grapheme>\nlet main=():>int64=>{let text:string="xé👩‍👩‍👧‍👦z" let values=convert(text[1..3)) return if values.length=?2 and values[0]=?"é" and values[1]=?"👩‍👩‍👧‍👦" 42 else 0}', 42),
-    ('let convert=(text:string):>array<grapheme>=>text as array<grapheme>\nlet main=():>int64=>{let text:string="éz" let values=convert(text) let before=values values[0]="x" values.push("y") return if text=?"éz" and before.length=?2 and before[0]=?"é" and values.length=?3 and values[0]=?"x" and values[2]=?"y" 42 else 0}', 42),
+    ('let convert=(text:string):>array<grapheme>=>text as array<grapheme>\nlet main=():>int64=>{let text:string="éz" let values=convert(text) if values.length not=?2 return 0 let before=values values[0]="x" values.push("y") return if text=?"éz" and before.length=?2 and before[0]=?"é" and values.length=?3 and values[0]=?"x" and values[2]=?"y" 42 else 0}', 42),
     ('let calls:int64=0\nlet next=():>string=>{calls+=1 return "az"}\nlet main=():>int64=>{let values=next() as array<char> return if calls=?1 and values.length=?2 and values[1]=?"z" 42 else 0}', 42),
 ]
 
