@@ -1,6 +1,10 @@
 # dewy compiler
 This is the Dewy compiler. It targets udewy, which then targets specific backends.
 
+## Roadmap
+
+[ROADMAP.md](ROADMAP.md) is the high-level roadmap for after the native bootstrap is closed: the order in which the remaining language pieces land and why. [status.md](status.md) tracks feature-by-feature implementation status; [bootstrap/IMPLEMENTATION.md](bootstrap/IMPLEMENTATION.md) logs the bootstrap effort itself.
+
 ## Design notes
 
 [Idiomatic facts and user-defined invariants](semantic/idiomatic_facts.md) explores

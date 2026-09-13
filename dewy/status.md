@@ -52,6 +52,8 @@ This document tracks language features in the cleanparse compiler. Checked items
 
 ## Roadmap
 
+> The roadmap below is the pre-bootstrap implementation sequence for the hosted compiler. The high-level roadmap for after the native bootstrap loop is closed and reasonably performant (ownership model, proof engine, effects, generics, numerics, reach, ecosystem) is [ROADMAP.md](ROADMAP.md).
+
 The current focus above is phase 1 of this roadmap. Two named milestones anchor the sequencing: **Milestone A** — every example on the site front page compiles and runs as shown; **Milestone B** — the language is comfortable enough to write a compiler in, without the bootstrap itself being part of this roadmap. A good acceptance test for Milestone B is writing the udewy tokenizer in Dewy: it exercises files, growable arrays, dictionaries, unions with matching, strings, and error handling without committing to the full bootstrap.
 
 ### Phase 0 — hygiene

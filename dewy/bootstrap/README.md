@@ -4,7 +4,9 @@ The parsing pipeline is implemented in Dewy, using the hosted
 `dewy/parser/{t0,t1,t2,p0}.py` stages as its behavioral reference. Semantic
 analysis and code generation are being ported in executable slices; the
 whole Dewy compiler is not yet self-hosting. See
-[IMPLEMENTATION.md](IMPLEMENTATION.md) for the current boundary.
+[IMPLEMENTATION.md](IMPLEMENTATION.md) for the current boundary, and
+[../ROADMAP.md](../ROADMAP.md) for what follows once the pair is verified
+and performant.
 
 ## Implementation progress
 
