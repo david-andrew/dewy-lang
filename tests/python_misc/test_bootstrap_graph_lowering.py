@@ -57,6 +57,7 @@ main=(argv:array<string>):>int64=>{{
     cases = [
         ({'entry.dewy': 'let narrow=():>bool=>true\nlet main=():>int64=>if narrow() 42 else 0'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let x:int64<n=>n>=?5>=5 x+=1 return x+36}'}, 42),
+        ({'entry.dewy': 'let main=():>int64=>{let x:int64<n=>n>=?5>=6 x+=1 x-=1 return (x as int64)+36}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let x:int64|none=1 x=none return if x =? 1 0 else if x not=? 1 42 else 0}'}, 42),
         ({'entry.dewy': 'let main=():>int64=>{let names:array<int64>=[10 20] let at:addr<i => i <=? names.length>=0 loop at <? names.length {at+=1} return at+40}'}, 42),
         ({'entry.dewy': 'let combine=(left:int64 scale:int64=2 right:int64):>int64=>left+right*scale\nlet main=():>int64=>combine(scale=2 10 16)'}, 42),
