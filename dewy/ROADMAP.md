@@ -149,24 +149,52 @@ union alternatives, effects describe evaluation behavior.
 
 A short pass over small surface questions that get more expensive every
 month and block documentation and library code. None needs a large
-implementation; the value is in closing them. The cases, each with a
-minimal example, options, and a recommendation, were presented to David on
-2026-09-13 and await his decisions:
+implementation; the value is in closing them. The cases were presented to
+David with examples and options on 2026-09-13; his decisions:
 
-1. juxtaposition with two precedences and union-typed operands, including
-   whether a number on the right (`x 2`) stays legal;
-2. based byte literals: non-power-of-two bases, separators, digit order;
-3. which of `extern`, `intrinsic`, `none`, `void`, `untyped`, `end`, `new`
-   are keywords versus ordinary or contextual identifiers;
-4. `<>` versus `[]`/`()` for parametric types (recommendation: keep `<>`);
-5. explicit export control versus public-by-default with an opt-out;
-6. the Unicode identifier repertoire and source normalization policy;
-7. whether a unit-like nominal type and its sole inhabitant are one object;
-8. `s.add` versus `push` on sets (recommendation: keep `add`).
+1. **Juxtaposition with union-typed operands (decided).** The type system
+   allows a union of a callable and a multipliable. If a value of such a
+   type reaches a juxtaposition, that is a compile error as ambiguous. The
+   diagnostic must show the explicit forms: `A |> B` or `B <| A` for a
+   call, `A * B` for a multiplication. Parenthesizing is not offered as a
+   fix, since the parentheses are gone by the time the operation is chosen.
+   The two precedences themselves (call tighter than `^`, multiply looser)
+   stay. A number on the right of a name (`x 2`) is never a call and is
+   not a multiplication either: it is two separate expressions. The
+   right-side multiply-juxtapose case for numbers is dropped.
+2. **Based byte literals.** The remaining sub-decisions (non-power-of-two
+   bases, separators, digit order) stay open; low priority.
+3. **Keywords (decided).** `extern`, `intrinsic`, `none`, `void`, `end`,
+   and `new` are all reserved. `new` is the NumPy `newaxis` idiom:
+   `myarray[new]` yields an array (or view) with an extra singleton
+   dimension at the front, `myarray[... new]` at the end, following NumPy
+   exactly. `untyped` was an internal inference marker (`ty.INFERRED_TYPE`
+   still uses the string internally); it is not reserved as surface syntax.
+4. **Parametric type brackets (decided).** `T<>` stays.
+5. **Export control (decided).** Python's convention: everything public,
+   a leading underscore marks a private binding by convention, no
+   enforcement. Left alone until people demand more.
+6. **Unicode identifiers.** Repertoire open, low priority. Decided rule
+   for normalization: subscript digits stay distinct from plain digits
+   (`x₁` and `x1` are different names) but `x₁` and `x_1` are the same
+   name. Superscripts and the confusable-letter table (micro sign versus
+   mu) are not yet decided.
+7. **Unit-like nominal types (decided).** `Overflow` is usable as both the
+   type and its sole value; the shared spelling is the language rule.
+   Whether the implementation represents them as one object or two is
+   internal.
+8. **Container method names (decided).** `push` is the uniform name for
+   adding to any container, sets included (their insertion order is
+   guaranteed); `pop` is the uniform name for removing. Uniform names may
+   take container-specific parameters, but the name and the broad
+   signature are the same everywhere. `length` is the uniform accessor for
+   both length and shape: on a multidimensional array `myarr.length`
+   returns an array of dimensions.
 
-Not decisions: the three precedence adjustments still listed as open in
-`design-status.md` landed on 2026-08-31 and that appendix needs a doc fix.
-Multidimensional shape syntax is a real design but belongs to Phase 3.
+Not decisions: the three precedence adjustments listed as open in
+`design-status.md` landed on 2026-08-31 (see `semantic/precedence.md` and
+the 2026-08-31 entry in `status.md`). Multidimensional shape syntax is a
+real design but belongs to Phase 3.
 
 ## Phase 2: expressiveness on top of the foundations
 
