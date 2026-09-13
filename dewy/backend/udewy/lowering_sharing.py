@@ -23,6 +23,31 @@ from .lowering_shared import (
 
 
 class _ArraySharing:
+    def _raw_aggregate_intrinsic(self, node):
+        callee = node.func
+        if not isinstance(callee, hir.ExpressedIdentifier):
+            return None
+        if not (callee.name.startswith(('__load_', '__store_', '__syscall')) or callee.name in {'__load__', '__store__'}):
+            return None
+        if id(callee) in self.identifier_bindings:
+            return None
+        if not any(self._pin_type(arg.type) for arg in node.pos_args):
+            return None
+        prefix, arguments = [], []
+        for argument in node.pos_args:
+            before, value = self._extract_expression(argument)
+            prefix.extend(before)
+            held = self._name('raw_argument', argument.loc)
+            prefix.append(self._declare(held, replace(value, type='int64'), argument.loc))
+            prefix.extend(self._pin_aggregate_call(held, argument.type, argument.loc))
+            arguments.append(held)
+        return prefix, self._intrinsic_call(callee.name, arguments, self._lower_runtime_value_type(node.type), node.loc)
+
+    @staticmethod
+    def _pin_type(type_):
+        unfolded = ty.unfold(ty.strip_refinement(type_))
+        return isinstance(unfolded, (ty.ArrayType, ty.ObjectType)) or ty.runtime_union_members(type_) is not None or ty.optional_payload(type_) is not None
+
     def _extract_write_route(self, node):
         """Evaluate a nested place once, detaching enclosing array buffers."""
         if isinstance(node, hir.Index) and self._array_use_representation(node.array) is None:

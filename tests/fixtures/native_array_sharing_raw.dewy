@@ -18,5 +18,13 @@ let main=():>int64=>{
     __store_i64__(99 __load_i64__(raw))
     $runtime_assert values.length >? 0 and grown.length >? 0
     $runtime_assert values[0]=?99 and grown[0]=?42
+    # Intrinsic aggregate operands expose storage without a transmute too.
+    let direct:array<int64>=[]
+    direct.push(1)
+    let address=__load_i64__(direct)
+    let isolated=snapshot(direct)
+    __store_i64__(2 address)
+    $runtime_assert direct.length >? 0 and isolated.length >? 0
+    $runtime_assert direct[0]=?2 and isolated[0]=?1
     return 42
 }

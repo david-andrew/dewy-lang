@@ -4821,6 +4821,9 @@ class _Lowerer(
         if isinstance(node, hir.DictView):
             return self._extract_dict_view(node)
         if isinstance(node, hir.FunctionCall):
+            raw = self._raw_aggregate_intrinsic(node)
+            if raw is not None:
+                return raw
             if isinstance(node.func, hir.ArrayMethod):
                 return self._extract_array_method_call(node)
             if self._is_object_method_func(node.func):
