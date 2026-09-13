@@ -3,10 +3,11 @@ import test_bootstrap_check as source_values
 
 CASES = [
     # Native reads retain the proved store contract; hosted reads erase its
-    # anonymous predicates. Compare an explicit base-type result, while
+    # anonymous predicates. Compare an arithmetic base-type result, while
     # exercising small operands that need not meet the destination's bound.
-    'let x:int64<n=>n>=?5>=5\nx+=1\nx as int64',
-    'let x:int64<n=>n>=?5>=6\nx+=1\nx-=1\nx as int64',
+    # A no-op `as int64` may retain the already-proved source refinement.
+    'let x:int64<n=>n>=?5>=5\nx+=1\nx+0',
+    'let x:int64<n=>n>=?5>=6\nx+=1\nx-=1\nx+0',
     'let box:[x:int64<n=>n>=?5>]=[x=5]\nbox.x+=1\nbox.x',
     "let d:dict<string int64<n=>n>=?5>>=['x'->5]\nd['x']+=1\nd['x']",
     'let f=(names:array<int64>):>int64=>{let at:addr<i=>i<=?names.length>=0 loop at <? names.length {at+=1} return at}',
