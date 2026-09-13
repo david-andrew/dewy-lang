@@ -881,13 +881,16 @@ class _OptionalLowering:
             return self._union_write(cell, replace(value, type=ty.IntegerLiteralType(value.value)), members, prepared=prepared)
         stored_members = self._stored_union_members(value)
         possible = self._field_union_members(value.type)
-        if stored_members is not None and stored_members != members and possible is not None and all(any(self._union_same_storage_member(member, target) for target in members) for member in possible):
+        if stored_members is not None and stored_members != members and possible is not None and all(self._union_target_member(member, members) is not None for member in possible):
             # a narrowed union (`length` after `isnt? none`): its cell still
             # carries the declaration's tags, so the copy retags by those (a
             # narrowed-away member gets no arm: it cannot be the live one)
             prelude, source = self._extract_expression(value)
             source_word = replace(source, type='int64') if isinstance(source, hir.ExpressedIdentifier) else source
-            return [*prelude, *self._union_retag(cell, source_word, stored_members, members, value.loc, prepared=prepared)]
+            # Parent-family reads have already built a borrowed child-tagged
+            # view. Copy its active child's tree, not the obsolete parent tag.
+            source_tags = possible if self._union_family_conversions(stored_members, possible) else stored_members
+            return [*prelude, *self._union_retag(cell, source_word, source_tags, members, value.loc, prepared=prepared)]
         if self._field_union_members(value.type) == members:
             # Same-union copy: tag, payload word, and the active aggregate
             # tree — moved rather than cloned when the source is a call's
@@ -913,7 +916,7 @@ class _OptionalLowering:
             return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc, prepared=prepared, move=dead_temporary)]
         source_members = self._field_union_members(value.type)
         if source_members is not None:
-            if not all(any(self._union_same_storage_member(member, target) for target in members) for member in source_members):
+            if not all(self._union_target_member(member, members) is not None for member in source_members):
                 self._target_error(
                     value,
                     'a union value whose members are not all members of the target union',
@@ -990,6 +993,21 @@ class _OptionalLowering:
         # All string spellings share one canonical tag and handle layout.
         return source == target or (self._is_string_valued(source) and self._is_string_valued(target))
 
+    def _union_target_member(self, source: ty.TypeExpr, targets: tuple[ty.TypeExpr, ...]) -> int | None:
+        for index, target in enumerate(targets):
+            if self._union_same_storage_member(source, target):
+                return index
+        # A child record fits its ancestor's reserved family storage. It
+        # keeps its dynamic brand, but the enclosing union uses the ancestor
+        # tag. Other representation conversions keep their existing rules.
+        if isinstance(source, ty.ObjectType):
+            system = ty.TypeSystem()
+            candidates = [index for index, target in enumerate(targets)
+                          if isinstance(target, ty.ObjectType) and system.is_subtype(source, target)]
+            if len(candidates) == 1:
+                return candidates[0]
+        return None
+
     def _union_retag(
         self,
         dest: hir.AST,
@@ -1001,9 +1019,10 @@ class _OptionalLowering:
         prepared: bool = True,
     ) -> list[hir.AST]:
         """Copy a union cell into a cell of another union holding its members.
-        Tags are program-wide, so the tag copies as it is; an aggregate live
-        member is copied into the destination's own tree (a source member the
-        destination lacks cannot be live — narrowing ruled it out)."""
+        Unchanged members retain their program-wide tags. A child widened
+        into its parent receives the parent's tag and reserved family tree,
+        retaining its dynamic brand. Members absent from the destination
+        cannot be live — narrowing ruled them out."""
         dest_slots = self._union_tree_slots(dest_members, prepared=prepared)
         tag = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('tag'))
         statements: list[hir.AST] = [
@@ -1018,18 +1037,21 @@ class _OptionalLowering:
         )
         arms: list[hir.IfArm | hir.LoopArm] = []
         for member in source_members:
-            dest_index = next((index for index, target in enumerate(dest_members) if self._union_same_storage_member(member, target)), None)
+            dest_index = self._union_target_member(member, dest_members)
             if dest_index is None:
                 continue
+            target = dest_members[dest_index]
             if self._is_string_valued(member) and self._has_arena():
                 body = self._copy_string_element(
                     self._optional_load_payload(source, member, loc),
                     self._optional_payload_address(dest, loc), member, loc, may_be_frame=True,
                 )
             elif self._union_member_kind(member, prepared=prepared) != 'word':
-                body = self._union_aggregate_copy_into(dest, self._union_source_pointer(source, loc), member, dest_slots.get(dest_index), loc)
+                body = self._union_aggregate_copy_into(dest, self._union_source_pointer(source, loc), target, dest_slots.get(dest_index), loc)
             else:
                 continue
+            if not self._union_same_storage_member(member, target):
+                body.append(self._tag_write(dest, target, loc))
             arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._tag_is(tag, member, loc), hir.Block(loc, ty.VOID_TYPE, body, True)))
         if not arms:
             return [*statements, word_copy]

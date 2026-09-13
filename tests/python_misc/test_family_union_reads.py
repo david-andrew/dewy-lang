@@ -54,6 +54,50 @@ Box:type=[node:Token]
 
 
 @pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_child_union_widens_into_parent_union(tmp_path, target):
+    source = tmp_path / 'widen.dewy'
+    source.write_text(FIELD_FAMILY + '''
+Descendant=type of Left & [extra:int64]
+let widen=(value:Left|Right):>Token|int64=>value
+let read=(node:Token|int64):>int64=>{if node is? Left|Right return node.value return 0}
+let main=():>int64=>read(widen(Descendant[0 20 777]))+read(widen(Right[0 999 22]))
+''')
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), target=target))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_narrowed_parent_union_returns_owned_children(tmp_path, target):
+    source = tmp_path / 'owned.dewy'
+    source.write_text('''
+Token=$abstract type of [loc:int64]
+Left=type of Token & [items:array<int64>]
+Right=type of Token & [padding:int64 items:array<int64>]
+let select=(node:Token|int64):>Left|Right=>{
+    if node is? Left|Right return node
+    return Left[0 [0 0]]
+}
+let main=():>int64=>{
+    let original:Token|int64=Left[0 [20 22]]
+    let selected=select(original)
+    if selected is? Left and selected.items.length>?0 {selected.items[0]=99}
+    let again=select(original)
+    let values=again.items
+    if values.length not=?2 return 1
+    return values[0]+values[1]
+}
+''')
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), target=target))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
 def test_parent_fields_use_their_proven_child_union(tmp_path, target):
     source = tmp_path / 'fields.dewy'
     source.write_text(FIELD_FAMILY + '''

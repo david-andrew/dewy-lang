@@ -59,6 +59,48 @@ class _ObjectLowering:
         statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
         return statements, cell
 
+    @staticmethod
+    def _union_family_conversions(
+        stored: tuple[ty.TypeExpr, ...], members: tuple[ty.TypeExpr, ...],
+    ) -> list[tuple[ty.ObjectType, tuple[ty.ObjectType, ...]]]:
+        """Parent alternatives whose checked read uses child tags."""
+        if stored == members:
+            return []
+        system = ty.TypeSystem()
+        conversions = []
+        for parent in stored:
+            if not isinstance(parent, ty.ObjectType) or parent in members:
+                continue
+            children = tuple(member for member in members
+                             if isinstance(member, ty.ObjectType) and system.is_subtype(member, parent))
+            if children:
+                conversions.append((parent, children))
+        return conversions
+
+    def _union_family_view(
+        self, pointer: hir.AST, stored: tuple[ty.TypeExpr, ...],
+        members: tuple[ty.TypeExpr, ...], node: hir.AST,
+    ) -> tuple[list[hir.AST], hir.AST]:
+        """Split a stored parent alternative into checked child alternatives."""
+        conversions = self._union_family_conversions(stored, members)
+        if not conversions:
+            return [], pointer
+        loc = node.loc
+        source = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('family_source'))
+        result = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('family_result'))
+        statements = [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', source.name, 'int64', pointer),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', result.name, 'int64', source),
+        ]
+        arms = []
+        for parent, children in conversions:
+            extra, view = self._family_union_view(self._optional_load_payload(source, parent, loc), parent, children, node)
+            body = [*extra, hir.Assign(loc, ty.VOID_TYPE, result, '=', view)]
+            arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._tag_is(self._optional_tag(source, loc), parent, loc),
+                                  hir.Block(loc, ty.VOID_TYPE, body, True)))
+        statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
+        return statements, result
+
     def _object_copy_call(self, dest: hir.AST, src: hir.AST, object_type: ty.ObjectType, loc: Span,
                           *, prepared: bool, move: bool | str, borrowed: set[str] = frozenset()) -> hir.FunctionCall:
         """Share copy code by structural type and ownership mode.

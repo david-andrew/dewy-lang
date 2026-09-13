@@ -4481,10 +4481,9 @@ class _Lowerer(
             if members is not None:
                 cell = replace(node, type='int64', binding_id=None)
                 if ty.runtime_union_members(node.type) is not None or ty.optional_payload(node.type) is not None:
-                    # Full or subset union view: tags are physical (the
-                    # storage union's numbering), so the cell passes through
-                    # and consumers consult the storage members.
-                    return [], cell
+                    # Ordinary subsets retain their physical tags. Splitting
+                    # a parent alternative requires a borrowed child view.
+                    return self._union_family_view(cell, members, self._field_union_members(node.type), node)
                 # Fully narrowed: load the payload as the matching member.
                 system = ty.TypeSystem()
                 member = next(
