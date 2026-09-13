@@ -30,6 +30,35 @@ def _flow_values(flow: hir.Flow) -> list[hir.AST]:
     return values
 
 class _ObjectLowering:
+    def _family_union_view(
+        self, pointer: hir.AST, stored: ty.ObjectType,
+        members: tuple[ty.TypeExpr, ...], node: hir.AST,
+    ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
+        """Borrow a parent record through the tags of its checked child union.
+
+        The record may be a binding or an optional's loaded payload. Both
+        need the same conversion; an object pointer is never a union cell.
+        """
+        loc = node.loc
+        source = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('family_pointer'))
+        cell = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('family_view'))
+        statements = [
+            hir.Declare(loc, ty.VOID_TYPE, 'let', source.name, 'int64', replace(pointer, type='int64')),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(loc)),
+        ]
+        brand_word = self._brand_word_load(source, stored, loc)
+        arms = []
+        for member in members:
+            brand = self._brand_under_test(member)
+            if brand is None:
+                self._target_error(node, 'non-object member in a narrowed object family')
+            body = [self._tag_write(cell, member, loc),
+                    self._intrinsic_call('__store_i64__', [source, self._optional_payload_address(cell, loc)], ty.VOID_TYPE, loc)]
+            arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._brand_range_test(brand_word, brand, loc),
+                                  hir.Block(loc, ty.VOID_TYPE, body, True)))
+        statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
+        return statements, cell
+
     def _object_copy_call(self, dest: hir.AST, src: hir.AST, object_type: ty.ObjectType, loc: Span,
                           *, prepared: bool, move: bool | str, borrowed: set[str] = frozenset()) -> hir.FunctionCall:
         """Share copy code by structural type and ownership mode.

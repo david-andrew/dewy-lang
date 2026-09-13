@@ -39,9 +39,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   mixed scalar storage, field reads, and saved/returned unions. Reads with
   unchanged types skip this conversion analysis.
 
-- Related hosted gaps remain: `Token | none` tested for `Left | Right` can
-  incorrectly evaluate false, and disjunctive child tests on object fields
-  do not yet establish the same read facts as tests on local bindings.
+- Hosted optional family tests now use the same guarded tag/brand checks as
+  general unions, including negated tests. Narrowed parent payloads reuse the
+  existing child-union view conversion. Helper-generated lazy predicates
+  pass through ordinary flow lowering before appearing in value positions.
+  Disjunctive child tests on object fields still do not establish the same
+  hosted read facts as tests on local bindings.
   Neither compiler currently propagates that narrowing directly through an
   array index; snapshotting the element into a local works. These are proof
   and representation followups, not proposals for new language semantics.

@@ -4416,6 +4416,17 @@ class _Lowerer(
 
     def _extract_expression(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         """Extract statement-valued subexpressions and return a scalar expression."""
+        prelude, value = self._extract_expression_inner(node)
+        if isinstance(value, hir.ShortCircuit):
+            # Helpers can synthesize a guarded predicate after their input
+            # has already been extracted (e.g. an optional's tag and brand).
+            # µDewy is eager outside conditions, so such a result must pass
+            # through the same flow lowering as a source boolean expression.
+            extra, value = self._extract_expression(value)
+            prelude = [*prelude, *extra]
+        return prelude, value
+
+    def _extract_expression_inner(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
             for base, object_type, field_names in reversed(self.object_literal_contexts):
                 if node.binding_id in field_names:
@@ -4439,18 +4450,7 @@ class _Lowerer(
                 # object pointer. Make a borrowed union view for consumers
                 # that dispatch through a cell; never read the object as one.
                 pointer = replace(node, type='int64', binding_id=None)
-                cell = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('family_view'))
-                statements = [hir.Declare(node.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(node.loc))]
-                brand_word = self._brand_word_load(pointer, stored_object, node.loc)
-                arms = []
-                for member in narrowed_members:
-                    brand = self._brand_under_test(member)
-                    if brand is None:
-                        self._target_error(node, 'non-object member in a narrowed object family')
-                    body = [self._tag_write(cell, member, node.loc), self._intrinsic_call('__store_i64__', [pointer, self._optional_payload_address(cell, node.loc)], ty.VOID_TYPE, node.loc)]
-                    arms.append(hir.IfArm(node.loc, ty.VOID_TYPE, self._brand_range_test(brand_word, brand, node.loc), hir.Block(node.loc, ty.VOID_TYPE, body, True)))
-                statements.append(hir.Flow(node.loc, ty.VOID_TYPE, arms, None))
-                return statements, cell
+                return self._family_union_view(pointer, stored_object, narrowed_members, node)
             enum = self.enum_words.get(node.binding_id)
             if enum is not None:
                 word = replace(node, type='int64')
@@ -4468,6 +4468,8 @@ class _Lowerer(
                 if ty.optional_payload(node.type) is not None:
                     return [], cell
                 loaded = self._optional_load_payload(cell, payload, node.loc)
+                if narrowed_members is not None and isinstance(ty.unfold(payload), ty.ObjectType):
+                    return self._family_union_view(loaded, ty.unfold(payload), narrowed_members, node)
                 if isinstance(ty.unfold(payload), (ty.ObjectType, ty.ArrayType)):
                     # an aggregate payload: bind the handle to a temporary so the
                     # copies that re-walk their source (an array field clone) see
@@ -4573,7 +4575,7 @@ class _Lowerer(
             # fold statically below. A union-typed identifier uses its
             # storage members, whose indexes stay physical even when the
             # static type is a narrowed subset union.
-            members = ty.runtime_union_members(node.value.type)
+            members = self._field_union_members(node.value.type)
             if (
                 isinstance(node.value.type, ty.TypeOr)
                 and isinstance(node.value, hir.ExpressedIdentifier)
@@ -4593,19 +4595,21 @@ class _Lowerer(
             if members is not None:
                 union_prelude, union_value = self._extract_expression(node.value)
                 system = ty.TypeSystem()
-                matching = [
-                    index
-                    for index, member in enumerate(members)
-                    if system.is_subtype(member, node.test_type) != node.negated
-                ]
                 # a minted member the test descends from (`Token | none` tested
                 # `is? Name`): its tag, and then the brand word of the payload
                 branded = [
                     index
                     for index, member in enumerate(members)
-                    if index not in matching and tested_brand is not None
+                    if tested_brand is not None and not system.is_subtype(member, node.test_type)
                     and isinstance(ty.unfold(member), ty.ObjectType)
                     and (ty.user_brand_descends(ty.unfold(node.test_type), ty.unfold(member)) or ty.user_brand_carries(ty.unfold(node.test_type), ty.unfold(member)))
+                ]
+                # A parent only partially overlaps the tested child. Negation
+                # still needs its dynamic brand test, not a static true tag.
+                matching = [
+                    index
+                    for index, member in enumerate(members)
+                    if index not in branded and system.is_subtype(member, node.test_type) != node.negated
                 ]
                 if len(matching) == len(members):
                     return union_prelude, hir.Bool(node.loc, 'bool', True)
