@@ -1,0 +1,32 @@
+# Validate complete source graphs without lowering or emitting a program.
+# Report the first proof failure in each module so one regression does not
+# hide failures elsewhere. An invalid graph never reaches code generation.
+from reporting import Error
+import p"../../dewy/bootstrap/semantic/modules.dewy" as modules
+import p"../../dewy/bootstrap/semantic/validation.dewy" as validation
+import p"../../dewy/bootstrap/semantic/analyze/bounds.dewy" as bounds
+import p"../../dewy/bootstrap/semantic/analyze/value_bounds.dewy" as values
+import p"../../dewy/bootstrap/semantic/source_views.dewy" as sources
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/targets.dewy" as targets
+
+main=(argv:array<string>):>int64=>{
+    $runtime_assert argv.length >=? 2
+    let prelude:array<string>=[]
+    loop i in 2.. and i <? argv.length {prelude.push(argv[i])}
+    # This repository test driver runs from the checkout root, including
+    # when its input imports standard modules by name.
+    let engine=modules.Engine[library_roots=['library'] prelude_files=prelude]
+    let entry=modules.load(argv[1] @engine)
+    if entry is? Error {entry.fail}
+    let word=types.primitive('int64' @engine.session.types)
+    let env=values.Environment[engine.session.hir engine.session.types engine.session.registry targets.max_length(engine.session.target)]
+    let prepared=bounds.prepare(env)
+    let files=sources.files(engine.session)
+    let failures:int64=0
+    loop module in engine.modules {
+        let result=validation.validate_module(module files env prepared word engine)
+        if result is? Error {result.render(result.srcfile) failures+=1}
+    }
+    return if failures =? 0 0 else 1
+}

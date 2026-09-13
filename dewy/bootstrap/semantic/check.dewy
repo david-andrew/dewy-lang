@@ -1401,6 +1401,11 @@ set_read_type = (id:addr type:addr env:Environment @session:contexts.Session):>v
 # their result type because the input is not a subtype of that result.
 stored_read_type = (value:addr @session:contexts.Session):>addr => {
     let node=node_at(value session)
+    # A store conversion must prove this contract before installation. Its
+    # base-typed representation is not the read type of the stored value:
+    # otherwise assigning addr into addr|Error makes a branch join forget
+    # the nonnegative payload even when every surviving arm supplies addr.
+    if node is? hir.Obligation return node.refined
     if node is? hir.RepresentationCast and types.node_at(session.types node.value_type) is? types.TypeOr {
         let source=node_at(node.expr session)
         if subtyping.is_subtype(source.value_type node.value_type session.links @session.types) return stored_read_type(node.expr @session)

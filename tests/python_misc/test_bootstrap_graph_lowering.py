@@ -5,6 +5,7 @@ from pathlib import Path
 from test_bootstrap_field_defaults import CASES as FIELD_DEFAULTS
 from test_bootstrap_field_defaults import ERRORS as INVALID_FIELD_DEFAULTS
 from test_bootstrap_lowering import ARENA, BRAND_CASES, SCALAR_CASES
+from test_bootstrap_source_validation import STORED_HANDLE
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # These need validation before lowering: even a literal addr argument carries
 # the address-space proof obligation. The tag then suffices at runtime.
 REFINED_TAG_CASES = [
+    STORED_HANDLE,
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(Record[0]) 42 else 1",
     "let test=(value:addr?):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(none) 42 else 1",
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value isnt? addr\nlet main=():>int64=>if not test(42) and test(Record[0]) 42 else 1",
