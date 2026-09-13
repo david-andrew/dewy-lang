@@ -37,6 +37,31 @@ if [[ $bootstrap_target == c ]] && ! command -v cc >/dev/null; then
     exit 2
 fi
 mkdir -p -- "$bootstrap_output"
+# Optional GCC accelerator for the large generated translation units. Keep
+# the same compiler/options in both generations; byte comparison still
+# decides whether the pair has reached a fixed point. Other C compilers and
+# the direct backend retain the ordinary route unless explicitly selected.
+bootstrap_lto_jobs=${DEWY_BOOTSTRAP_LTO_JOBS:-}
+if [[ -n $bootstrap_lto_jobs ]]; then
+    if [[ $bootstrap_target != c || ! $bootstrap_lto_jobs =~ ^[1-9][0-9]*$ ]]; then
+        echo 'DEWY_BOOTSTRAP_LTO_JOBS needs a positive job count and --target c' >&2
+        exit 2
+    fi
+    export DEWY_BOOTSTRAP_REAL_CC
+    DEWY_BOOTSTRAP_REAL_CC=$(command -v cc)
+    bootstrap_cc_tools=$(mktemp -d "$bootstrap_output/.cc-tools.XXXXXX")
+    trap 'rm -rf -- "$bootstrap_cc_tools"' EXIT
+    # Check support before starting either expensive compiler generation.
+    "$DEWY_BOOTSTRAP_REAL_CC" -flto="$bootstrap_lto_jobs" -x c -o "$bootstrap_cc_tools/probe" - <<'EOF'
+int main(void) { return 0; }
+EOF
+    cat > "$bootstrap_cc_tools/cc" <<'EOF'
+#!/usr/bin/env bash
+exec "$DEWY_BOOTSTRAP_REAL_CC" "-flto=$DEWY_BOOTSTRAP_LTO_JOBS" "$@"
+EOF
+    chmod +x "$bootstrap_cc_tools/cc"
+    export PATH="$bootstrap_cc_tools:$PATH"
+fi
 printf '%s\n' "$bootstrap_target" > "$bootstrap_output/BACKEND"
 cp -- "$bootstrap_dewy" "$bootstrap_output/dewy-stage0"
 cp -- "$bootstrap_udewy" "$bootstrap_output/udewy-stage0"

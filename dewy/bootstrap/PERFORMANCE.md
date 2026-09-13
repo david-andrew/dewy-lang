@@ -85,3 +85,13 @@ took approximately 13 minutes. C compilation is consequently a separate
 remaining cost from executing the native compiler. An `-O1` experiment
 exceeded a five-minute cap and provides no evidence yet for changing the
 default optimization level.
+
+Parallel GCC link-time optimization reduces that build cost without changing
+the generated C. On the 80 MiB source-validation driver, `-O2 -flto=8` built
+in 4 minutes 15 seconds; ordinary `-O2` took 10 minutes 52 seconds. These
+development-machine builds overlapped, and LTO used more total CPU time
+(819 versus 618 seconds). Both native validator variants preserve the
+stored-contract acceptance/rejection checks. Set `DEWY_BOOTSTRAP_LTO_JOBS=8`
+for the opt-in bootstrap-script accelerator; the script probes support and
+uses the same options for both generations. This does not replace the
+required fixed-point comparison or establish native self-hosting by itself.

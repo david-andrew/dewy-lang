@@ -162,6 +162,12 @@ The C route requires `cc` and accelerates execution of the compiler. Omit
 development. See [PERFORMANCE.md](PERFORMANCE.md) for measured gates and the
 open storage-cost design question.
 
+With GCC, prefix the build command with `DEWY_BOOTSTRAP_LTO_JOBS=8` to
+parallelize link-time optimization of the generated C. The script checks
+support before rebuilding and applies the same option to both generations.
+Choose the job count for the build machine; leaving it unset uses ordinary
+C compilation.
+
 The build script compares compiler binaries and checks that the compiler and
 library sources stayed unchanged. The execution check separately exercises
 both output backends, including µDewy's conditional-only short-circuit rules,
