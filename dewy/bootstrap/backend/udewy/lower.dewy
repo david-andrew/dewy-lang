@@ -364,7 +364,7 @@ expression = (id:addr @state:State):>addr => {
                 let yes=put(hir.Bool[node.loc types.primitive('bool' @state.type_nodes) true] @state)
                 let body=put(hir.Block[node.loc empty [] true] @state)
                 let arm=put(hir.LoopArm[node.loc empty yes body] @state)
-                return put(hir.Flow[node.loc empty [arm] none] @state)
+                return put(hir.Flow[node.loc types.primitive('never' @state.type_nodes) [arm] none] @state)
             }
             # Builtins and intrinsics have already converted their operands. Their
             # concrete runtime signature records the selected word width;

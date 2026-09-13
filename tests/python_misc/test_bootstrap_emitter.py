@@ -188,12 +188,24 @@ def test_native_function_tails_preserve_early_and_implicit_returns(tmp_path):
         [], None, 'void', hir.Block(LOC, 'void', [early_void, hir.Void(LOC, 'void')], True))
     choose = hir.FunctionLiteral(LOC, value_signature, [hir.Param('flag', 'bool')],
         [], None, 'int64', hir.Block(LOC, 'int64', [early_value, integer(2)], True))
+    stop_signature = ty.FunctionType([], [], None, 'never')
+    stop = hir.FunctionLiteral(LOC, stop_signature, [], [], None, 'never',
+        hir.Block(LOC, 'never', [call('__syscall1__', [integer(60), integer(87)])], True))
+    diverging = hir.FunctionLiteral(LOC, value_signature, [hir.Param('flag', 'bool')],
+        [], None, 'int64', hir.Block(LOC, 'never', [
+            hir.Flow(LOC, 'void', [hir.IfArm(LOC, 'void', flag,
+                hir.Return(LOC, 'never', integer(42)))], None),
+            call('stop', [], 'never')], True))
     yes, no = hir.Bool(LOC, 'bool', True), hir.Bool(LOC, 'bool', False)
     answer = call('__add__', [call('choose', [yes]), call('choose', [no])])
-    main = hir.FunctionLiteral(LOC, ty.FunctionType([], [], None, 'int64'), [], [],
+    argc = hir.ExpressedIdentifier(LOC, 'int64', 'argc')
+    normal = call('__eq__', [argc, integer(1)], 'bool')
+    answer = call('__add__', [answer, call('__sub__', [call('diverging', [normal]), integer(42)])])
+    main_signature = ty.FunctionType([ty.PosOrKwArg('argc', 'int64'), ty.PosOrKwArg('argv', 'int64')], [], None, 'int64')
+    main = hir.FunctionLiteral(LOC, main_signature, [hir.Param('argc', 'int64'), hir.Param('argv', 'int64')], [],
         None, 'int64', hir.Block(LOC, 'int64', [
             call('early_void', [yes], 'void'), call('early_void', [no], 'void'), answer], True))
-    functions = [('early_void', empty), ('choose', choose), ('main', main)]
+    functions = [('early_void', empty), ('choose', choose), ('stop', stop), ('diverging', diverging), ('main', main)]
     root = hir.Block(LOC, 'void', [function for _, function in functions], True)
     type_lines = []
     node_lines, _, names = emit_hir(root, type_value=type_builder(type_lines), with_names=True)
@@ -227,6 +239,8 @@ let main=():>int64=>{{
     assert emitted.returncode == 0, emitted.stdout + emitted.stderr
     output = tmp_path / 'native-tails.udewy'
     output.write_text(emitted.stdout)
-    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-    result = subprocess.run([cache_artifact(output).resolve()], timeout=10, check=False)
-    assert result.returncode == 42
+    for target in ['x86_64', 'c']:
+        assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+        executable = cache_artifact(output).resolve()
+        assert subprocess.run([executable], timeout=10, check=False).returncode == 42
+        assert subprocess.run([executable, 'stop'], timeout=10, check=False).returncode == 87

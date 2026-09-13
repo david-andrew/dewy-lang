@@ -7,7 +7,7 @@ import p"../../semantic/ty.dewy" as types
 # enclosing statement list, retaining the source ordering and branch where
 # each step runs. This is scalar legalization; ownership-aware aggregate
 # extraction will use the same boundary when its storage rules are added.
-State:type = [nodes:array<hir.AST> types:array<types.Type> serial:addr=0]
+State:type = [nodes:array<hir.AST> types:array<types.Type> serial:addr=0 in_function:bool=false]
 Expression:type = [prefix:array<addr> value:addr]
 Result:type = const [program:program.Program input:emit.Input]
 put = (node:hir.AST @state:State):>addr => hir.append_node(@state.nodes node)
@@ -166,6 +166,18 @@ flow = (node:hir.Flow position:addr @state:State):>array<addr> => {
     return result
 }
 statement = (id:addr @state:State):>array<addr> => {
+    let result=statement_inner(id @state)
+    let node=node_at(id state)
+    # µDewy's must-return check does not infer that a callee never returns.
+    # Match the hosted lowering: retain the diverging operation, followed by
+    # a dead return that makes its exit visible to the target's syntax check.
+    # Break/continue leave a loop path, not the surrounding function.
+    if state.in_function and types.is_primitive(types.node_at(state.types node.value_type) 'never') and node isnt? hir.Return|hir.Break|hir.Continue {
+        result.push(put(hir.Return[node.loc node.value_type none] @state))
+    }
+    return result
+}
+statement_inner = (id:addr @state:State):>array<addr> => {
     let node=node_at(id state)
     if node is? hir.Block {
         let output:array<addr>=[]
@@ -195,6 +207,7 @@ statement = (id:addr @state:State):>array<addr> => {
 normalize = (source:program.Program input:emit.Input):>Result => {
     let state=State[input.nodes input.types]
     let functions:array<program.Function>=[]
+    state.in_function=true
     loop entry in source.functions {
         let function=node_at(entry.literal state)
         $runtime_assert function is? hir.FunctionLiteral
@@ -207,6 +220,7 @@ normalize = (source:program.Program input:emit.Input):>Result => {
         let lowered=block(function statement(body @state) @state)
         functions.push(program.Function[entry.symbol put(hir.FunctionLiteral[function.loc function.value_type function.pos_or_kw_args function.kw_only_args function.rest_args function.rettype lowered source=function.source] @state)])
     }
+    state.in_function=false
     let startup:array<addr>=[]
     loop item in source.startup_items {append(@startup statement(item @state))}
     let argv_prologue:array<addr>|none=none
