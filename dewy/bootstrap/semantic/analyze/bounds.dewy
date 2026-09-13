@@ -48,16 +48,21 @@ Checker:type = [
 ]
 # Construct the same declared-width environment for every invocation. Tests
 # and module drivers must not quietly use different loop-widening contracts.
-configure = (@checker:Checker):>void => {
-    let env=checker.data.env
-    let context=facts.Context[env.cap element_roots=elements.roots(checker.data.registry)]
+# Immutable declaration facts belong to the program, not to a module's flow
+# state. The driver prepares these once while the checked graph is frozen.
+prepare = (env:values.Environment):>facts.Context => {
+    let context=facts.Context[env.cap element_roots=elements.roots(env.registry)]
     loop [id binding] in env.registry.by_id {
         let interval=values.type_interval(id env)
         if interval isnt? none {context.widths[id]=interval}
     }
+    return context
+}
+configure = (@checker:Checker prepared:facts.Context?=none):>void => {
+    let context=if prepared is? none prepare(checker.data.env) else prepared
     checker.data.relations=relations.Context[context]
-    checker.path_context=paths.Context[env.nodes context]
-    checker.proof_context=proofs.Context[env checker.data.relations]
+    checker.path_context=paths.Context[checker.data.env.nodes context]
+    checker.proof_context=proofs.Context[checker.data.env checker.data.relations]
 }
 node_at = (id:addr checker:Checker):>hir.AST => hir.node_at(checker.data.env.nodes id)
 fail = (id:addr title:string message:string @checker:Checker hint:string=''):>void => {

@@ -50,44 +50,66 @@ discharge = (root:addr constants:dict<addr bigint> @session:contexts.Session):>v
         }
     }
 }
-validate_module = (module:modules.Module source_files:array<SrcFile> @engine:modules.Engine):>Result|Error => {
+# A validation result retains only decisions that must survive into rewriting.
+# Checker contexts, predicate snapshots, and branch facts die with the module.
+Decision:type = const [
+    unfit:dict<addr representation.Unfit>
+    constants:dict<addr bigint>
+    warnings:array<Warning>
+]
+validate_module = (module:modules.Module source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr engine:modules.Engine):>Decision|Error => {
     let source=sources.srcfile(module.context engine.session)
-    let word=types.primitive('int64' @engine.session.types)
-    let cap:bigint=targets.max_length(engine.session.target)
-    let env=values.Environment[engine.session.hir engine.session.types engine.session.registry cap]
-    let data=predicates.Data[env relations.Context[facts.Context[cap]] intervals.Snapshot[] engine.session.registry]
+    let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry]
     let checker=bounds.Checker[data source word source_files=source_files]
-    bounds.configure(@checker)
+    bounds.configure(@checker prepared)
     checker.data.links=engine.session.links
     bounds.validate(module.root @checker)
     if checker.problem isnt? none return checker.problem
-    let result=Result[warnings=checker.warnings]
     let strict=module.prelude or module.no_prelude or 'BigInt' not in? engine.prelude_bindings
     let unfit:dict<addr representation.Unfit>=[]
     loop [id flag] in checker.unfit {
         if strict {
-            let node=hir.node_at(engine.session.hir id)
+            let node=hir.node_at(env.nodes id)
             return Error[srcfile=source title="cannot prove this integer fits `{flag.word}`" pointers=[Pointer[span=node.loc message=representation.describe(flag.interval)]] hint='annotate a fixed width or establish its range with a comparison']
         }
         unfit[id]=representation.Unfit[flag.interval flag.word]
     }
-    if not strict {
-        let selected=representation.select(module.root source engine.prelude_bindings unfit @engine.session)
-        if selected is? Error return selected
-        result.notes=selected
+    return Decision[unfit checker.constant_indices checker.warnings]
+}
+# All modules read the same immutable graph. Representation selection and
+# proof discharge happen after this scope returns, so no analysis can observe
+# a partly rewritten graph and no old snapshot survives the first write.
+analyze_modules = (word:addr engine:modules.Engine):>array<Decision>|Error => {
+    let source_files=sources.files(engine.session)
+    let env=values.Environment[engine.session.hir engine.session.types engine.session.registry targets.max_length(engine.session.target)]
+    let prepared=bounds.prepare(env)
+    let decisions:array<Decision>=[]
+    loop module in engine.modules {
+        let checked=validate_module(module source_files env prepared word engine)
+        if checked is? Error return checked
+        decisions.push(checked)
     }
-    discharge(module.root checker.constant_indices @engine.session)
-    return result
+    return decisions
 }
 validate = (@engine:modules.Engine):>Result|Error => {
+    let word=types.primitive('int64' @engine.session.types)
+    let decisions=analyze_modules(word engine)
+    if decisions is? Error return decisions
     let result=Result[]
     let loaded=engine.modules
-    let source_files=sources.files(engine.session)
-    loop module in loaded {
-        let checked=validate_module(module source_files @engine)
-        if checked is? Error return checked
+    $runtime_assert decisions.length =? loaded.length
+    loop index in 0.. and index <? loaded.length {
+        let module=loaded[index]
+        let checked=decisions[index]
         loop warning in checked.warnings {result.warnings.push(warning)}
-        loop note in checked.notes {result.notes.push(note)}
+        let strict=module.prelude or module.no_prelude or 'BigInt' not in? engine.prelude_bindings
+        if not strict {
+            let source=sources.srcfile(module.context engine.session)
+            let selected=representation.select(module.root source engine.prelude_bindings checked.unfit @engine.session)
+            if selected is? Error return selected
+            loop note in selected {result.notes.push(note)}
+        }
+        discharge(module.root checked.constants @engine.session)
     }
     # Install diagnostic helper calls after all user proof obligations have
     # been decided. Graph assembly can then retain the reachable reporters.
