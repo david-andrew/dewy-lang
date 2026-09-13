@@ -1,0 +1,45 @@
+# Mutation must detach each enclosing array, including a projected place.
+Box:type=[items:array<int64>]
+set_first=(@value:array<int64>):>void=>{if value.length >? 0 {value[0]=99}}
+set_second=(@value:array<int64>):>void=>{if value.length >? 1 {value[1]=88}}
+at=(values:array<int64> index:addr):>int64=>{if index <? values.length return values[index] return -1}
+let main=():>int64=>{
+    let values:array<int64>=[]
+    loop i in 0.. and i <? 16 {values.push(i as int64)}
+    $runtime_assert values.length=?16
+    let copied=values
+    $runtime_assert copied.length >? 1
+    copied[0]=42
+    $runtime_assert values[0]=?0 and copied[0]=?42
+    $runtime_assert copied.length >? 1
+    copied.pop;
+    copied.insert(77 1)
+    $runtime_assert values.length=?16 and values[1]=?1 and copied[1]=?77
+    let rows:array<array<int64>>=[]
+    rows.push(values)
+    let other=rows
+    $runtime_assert other.length >? 0
+    if 0 <? other.length {set_second(@other[0])}
+    else {return 1}
+    $runtime_assert rows.length >? 0 and other.length >? 0
+    $runtime_assert at(rows[0] 1)=?1 and at(other[0] 1)=?88
+    let boxes:array<Box>=[]
+    boxes.push(Box[values])
+    let changed=boxes
+    $runtime_assert changed.length >? 0
+    if 0 <? changed.length {set_first(@changed[0].items)}
+    else {return 2}
+    $runtime_assert boxes.length >? 0 and changed.length >? 0
+    $runtime_assert at(boxes[0].items 0)=?0 and at(changed[0].items 0)=?99
+    let map:dict<int64 array<int64>>=[]
+    map[1]=values
+    let mapped=map
+    mapped[1]=copied
+    let original=map.get(1)
+    let updated=mapped.get(1)
+    $runtime_assert original isnt? none and updated isnt? none
+    $runtime_assert at(original 0)=?0 and at(updated 0)=?42
+    copied.clear
+    $runtime_assert values.length=?16 and values[2]=?2
+    return 42
+}

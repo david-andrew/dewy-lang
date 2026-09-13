@@ -1,0 +1,22 @@
+# Exposing raw storage must isolate existing and future ordinary snapshots.
+snapshot=(values:array<int64>):>array<int64>=>values
+copied_bytes=():>int64=>_arena_copied_bytes
+let main=():>int64=>{
+    let values:array<int64>=[]
+    values.push(1)
+    let before=values
+    let raw:int64=values transmute int64
+    let copied:int64=copied_bytes()
+    let after=snapshot(values)
+    printl(copied_bytes()-copied)
+    __store_i64__(42 __load_i64__(raw))
+    $runtime_assert values.length >? 0 and before.length >? 0 and after.length >? 0
+    $runtime_assert values[0]=?42 and before[0]=?1 and after[0]=?1
+    # Growing the exposed descriptor must preserve its pinned status.
+    loop i in 0.. and i <? 100 {values.push(i)}
+    let grown=values
+    __store_i64__(99 __load_i64__(raw))
+    $runtime_assert values.length >? 0 and grown.length >? 0
+    $runtime_assert values[0]=?99 and grown[0]=?42
+    return 42
+}

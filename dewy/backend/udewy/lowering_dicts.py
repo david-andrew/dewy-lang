@@ -57,7 +57,7 @@ class _DictLowering:
         if not isinstance(object_type, ty.ObjectType) or entry_types is None:
             raise TypeError('INTERNAL ERROR: dictionary node on a non-container')
         key_type, value_type = entry_types
-        prelude, pointer = self._extract_object_pointer(dictionary)
+        prelude, pointer = self._extract_write_route(dictionary)
         name = hir.ExpressedIdentifier(keys.loc, 'int64', self._new_array_name('dict'))
         _size, offsets = self._object_layout(object_type, dictionary)
         return [*prelude, hir.Declare(keys.loc, ty.VOID_TYPE, 'let', name.name, 'int64', pointer)], _DictParts(name, offsets, object_type, key_type, value_type)
@@ -78,7 +78,7 @@ class _DictLowering:
         return self._array_load(self._array_element_address(descriptor, index, element, loc), element, loc)
 
     def _dict_store_element(self, descriptor: hir.AST, index: hir.AST, value: hir.AST, element: ty.TypeExpr, loc: Span) -> hir.AST:
-        return self._array_store(value, self._array_element_address(descriptor, index, element, loc), element, loc)
+        return self._if(hir.Bool(loc, 'bool', True), [*self._ensure_unique_array(descriptor, element, loc), self._array_store(value, self._array_element_address(descriptor, index, element, loc), element, loc)], loc)
 
     def _dict_push(self, parts: _DictParts, field: str, element: ty.TypeExpr, value: hir.AST, loc: Span) -> list[hir.AST]:
         member = hir.MemberAccess(loc, ty.ArrayType(element, None), self._dict_object_node(parts, loc), field)
@@ -173,7 +173,10 @@ class _DictLowering:
         entry_count = self._dict_length_of(keys, loc)
         hash_count = self._dict_length_of(hashes, loc)
         writer = self._name('dict_write', loc)
-        statements: list[hir.AST] = [self._declare(writer, self._int64_literal(loc, 0), loc)]
+        statements: list[hir.AST] = [*self._ensure_unique_array(keys, parts.key_type, loc), *self._ensure_unique_array(hashes, 'int64', loc), *self._ensure_unique_array(indices, 'int64', loc)]
+        if values is not None:
+            statements.extend(self._ensure_unique_array(values, parts.value_type, loc))
+        statements.append(self._declare(writer, self._int64_literal(loc, 0), loc))
 
         # 1. compact: keep entries whose hash is not DEAD (entries without a
         #    hash yet are live)
@@ -467,6 +470,8 @@ class _DictLowering:
     def _extract_dict_store(self, node: hir.DictStore) -> tuple[list[hir.AST], hir.AST]:
         loc = node.loc
         prelude, parts = self._dict_parts(node.keys)
+        if parts.value_type is not None:
+            prelude.extend(self._ensure_unique_array(self._dict_descriptor(parts, 'values', loc), parts.value_type, loc))
         key_prelude, key = self._extract_expression(node.key)
         # Hashing, probing, and insertion reuse the key. Give the already
         # lowered value a fresh runtime name: lowering it again can repeat a
@@ -528,6 +533,8 @@ class _DictLowering:
         """`d.pop(key)` tombstones the entry; `d.clear` empties everything."""
         loc = node.loc
         prelude, parts = self._dict_parts(node.keys)
+        if parts.value_type is not None:
+            prelude.extend(self._ensure_unique_array(self._dict_descriptor(parts, 'values', loc), parts.value_type, loc))
         if node.key is None:
             statements: list[hir.AST] = [*prelude]
             fields: list[tuple[str, ty.TypeExpr]] = [('keys', parts.key_type)]

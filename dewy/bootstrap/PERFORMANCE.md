@@ -25,3 +25,28 @@ branch snapshots, nested mutations and repeated module analysis. Account for
 copied bytes, allocations and peak live storage; test scaling and reclamation,
 not just elapsed time. A full self-build is a final integration check, not the
 inner development loop.
+
+The first bounded sharing gate is `tests/python_misc/test_array_sharing.py`.
+Its compiler-shaped context fixture constructs 500 checkers over graphs of
+1,000 and 100,000 elements. Hosted-generated code on both x86_64 and C routes
+allocates the same 196,000 bytes at either size, retains zero bytes, and
+copies zero dynamic-array payload bytes during those constructions. This is
+a kernel result, not evidence of a completed native self-build. Mutation and
+raw-exposure fixtures separately verify value independence, including nested
+places and growth after exposure. A forced dynamic copy checks that the copy
+counter actually increases.
+
+Internal `_arena_*_bytes` counters measure size-class payload allocation,
+live and peak payload storage, and dynamic-array fallback copies. They do not
+measure RSS, frame/static copies, or string-region bytes independently. These
+are backend diagnostics: source analysis does not model implicit allocator
+calls as language-visible effects. Read counters across an explicit function
+boundary in fixtures; don't use their values as source-level proof facts.
+
+Array descriptors remain private. The owner word currently distinguishes
+frame/static storage (0), unique arena storage (1), a shared count pointer
+(>1), and raw-exposed pinned storage (-1). Exposing raw aggregate storage
+first detaches existing snapshots and prevents subsequent sharing of the
+exposed tree. Without a tracked raw-pointer lifetime, that tree is retained
+conservatively. This is an implementation fallback, not a new ownership
+feature or a change to value semantics.

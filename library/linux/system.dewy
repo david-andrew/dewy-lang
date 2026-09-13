@@ -27,6 +27,15 @@ let sleep = (duration:(rational<int64> * Time)):>void => {
 let _arena_cursor:int64 = 0
 let _arena_end:int64 = 0
 let _arena_free_lists:int64 = 0     # 48 list heads, one per size class, allocated on first use
+# Internal performance counters count size-class payload bytes, not mmap
+# metadata or resident pages. They make copy/reclamation regressions visible
+# on bounded workloads without another full bootstrap run.
+let _arena_allocated_bytes:int64 = 0
+let _arena_live_bytes:int64 = 0
+let _arena_peak_bytes:int64 = 0
+let _arena_copied_bytes:int64 = 0
+let _arena_note_copy = (size:int64):>void => {_arena_copied_bytes+=size}
+
 
 let _arena_class = (size:int64):>int64 => {
     let class:int64 = 0
@@ -63,6 +72,9 @@ let _arena_alloc = (size:int64):>int64 => {
     let head_address:int64 = _arena_free_lists + class * 8
     let block:int64 = __load_i64__(head_address)
     let width:int64 = _arena_width(class)
+    _arena_allocated_bytes += width
+    _arena_live_bytes += width
+    if _arena_live_bytes >? _arena_peak_bytes {_arena_peak_bytes=_arena_live_bytes}
     if block =? 0 { return _arena_bump(width) }
     __store_i64__(__load_i64__(block) head_address)     # pop: the block's first word is the next free block
     let cursor:int64 = block
@@ -75,6 +87,7 @@ let _arena_release = (block:int64 size:int64):>void => {
     if block =? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
     let class:int64 = _arena_class(size)
+    _arena_live_bytes -= _arena_width(class)
     let head_address:int64 = _arena_free_lists + class * 8
     __store_i64__(__load_i64__(head_address) block)
     __store_i64__(block head_address)

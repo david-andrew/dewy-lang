@@ -3961,7 +3961,7 @@ class _Lowerer(
                 ),
             ]
         if isinstance(node, hir.IndexAssign):
-            target_prelude, target = self._extract_expression(node.target.array)
+            target_prelude, target = self._extract_write_route(node.target.array)
             stack_data = (
                 self._array_use_representation(node.target.array) == 'stack_data'
             )
@@ -3990,7 +3990,8 @@ class _Lowerer(
                     node.loc,
                 )
             )
-            cow = (
+            cow = self._ensure_unique_array(target, node.target.type, node.loc) if not stack_data else []
+            cow += (
                 self._ensure_mutable_byte_array(target, node.loc)
                 if node.target.type == 'uint8' and not stack_data
                 else []
@@ -5092,6 +5093,12 @@ class _Lowerer(
                 if enum is not None:
                     return self._enum_numeric_of(node.expr, enum, node.type)
             prelude, expr = self._extract_expression(node.expr)
+            if isinstance(node, hir.Transmute) and ty.fixed_integer_layout(node.type) is not None and self._has_arena():
+                raw = self._name('raw_exposure', node.loc)
+                pins = self._pin_aggregate_call(raw, node.expr.type, node.loc)
+                if pins:
+                    prelude.extend([self._declare(raw, replace(expr, type='int64'), node.loc), *pins])
+                    expr = raw
             return prelude, replace(node, expr=expr)
         if isinstance(node, hir.Block) and node.scoped:
             # A value block is one always-selected branch. Reuse the flow

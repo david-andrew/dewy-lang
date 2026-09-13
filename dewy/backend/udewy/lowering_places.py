@@ -130,7 +130,7 @@ class _PlaceLowering:
         """Evaluate a place route once and return its final storage address."""
 
         if isinstance(target, hir.MemberAccess):
-            prelude, obj = self._extract_object_pointer(target.value)
+            prelude, obj = self._extract_write_route(target.value)
             if not isinstance(target.value.type, ty.ObjectType):
                 self._target_error(target, 'projected member place requires an object')
             _size, offsets = self._object_layout(target.value.type, target)
@@ -141,7 +141,7 @@ class _PlaceLowering:
             )
 
         raw_representation = self._array_use_representation(target.array)
-        prelude, array = self._extract_expression(target.array)
+        prelude, array = self._extract_write_route(target.array)
         index: int | hir.AST = target.constant_index
         if index is None:
             index_prelude, index = self._extract_expression(target.index)
@@ -161,6 +161,8 @@ class _PlaceLowering:
                 target.loc,
             )
         )
+        if raw_representation is None:
+            prelude.extend(self._ensure_unique_array(array, target.type, target.loc))
         if target.type == 'uint8' and raw_representation is None:
             cow = self._ensure_mutable_byte_array(array, target.loc)
             if cow:

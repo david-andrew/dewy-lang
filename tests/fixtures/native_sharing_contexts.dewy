@@ -1,0 +1,38 @@
+# Compiler-shaped immutable graph snapshots and a mutable per-module checker.
+# The graph grows 100x; constructing a checker must keep fixed-size costs.
+Env:type=const [nodes:array<int64>]
+Paths:type=const [env:Env extra:array<int64>=[]]
+Data:type=[env:Env]
+Checker:type=[data:Data paths:Paths=Paths[data.env] saved:Env=data.env]
+configure=(@checker:Checker):>void=>{
+    checker.paths=Paths[checker.data.env]
+    checker.saved=checker.data.env
+}
+exercise=(env:Env count:int64):>void=>{
+    loop i in 0.. and i <? count {
+        let checker=Checker[Data[env]]
+        configure(@checker)
+        $runtime_assert checker.saved.nodes.length =? env.nodes.length
+    }
+}
+measure=(size:int64):>void=>{
+    let nodes:array<int64>=[]
+    loop i in 0.. and i <? size {nodes.push(i)}
+    let env=Env[nodes]
+    exercise(env 2)
+    let live:int64=_arena_live_bytes
+    let allocated:int64=_arena_allocated_bytes
+    let copied:int64=_arena_copied_bytes
+    exercise(env 500)
+    let retained:int64=_arena_live_bytes-live
+    let allocations:int64=_arena_allocated_bytes-allocated
+    let copies:int64=_arena_copied_bytes-copied
+    printl("{size} {retained} {allocations} {copies}")
+    $runtime_assert retained =? 0
+    $runtime_assert copies <? 100000
+}
+let main=():>int64=>{
+    measure(1000)
+    measure(100000)
+    return 42
+}

@@ -99,10 +99,12 @@ class _ObjectLowering:
         startup = self.lowering_module_startup
         self.lowering_module_startup = False
         try:
-            while self.pending_named_copies or self.pending_object_copies or self.pending_object_releases:
+            while self.pending_named_copies or self.pending_object_copies or self.pending_object_releases or getattr(self, 'pending_pins', []) or getattr(self, 'pending_uniques', []):
                 result.extend(self._synthesize_named_copies())
                 result.extend(self._synthesize_object_copies())
                 result.extend(self._synthesize_object_releases())
+                result.extend(self._synthesize_pins())
+                result.extend(self._synthesize_uniques())
         finally:
             self.lowering_module_startup = startup
         return result
@@ -1176,7 +1178,7 @@ class _ObjectLowering:
         return False
 
     def _lower_member_assign(self, node: hir.MemberAssign) -> list[hir.AST]:
-        prelude, obj = self._extract_object_pointer(node.target.value)
+        prelude, obj = self._extract_write_route(node.target.value)
         if not isinstance(node.target.value.type, ty.ObjectType):
             self._target_error(node, 'member assignment requires an object')
         _size, offsets = self._object_layout(node.target.value.type, node)

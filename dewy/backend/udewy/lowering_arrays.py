@@ -40,7 +40,10 @@ from .lowering_shared import (
 )
 
 
-class _ArrayLowering:
+from .lowering_sharing import _ArraySharing
+
+
+class _ArrayLowering(_ArraySharing):
     def _array_representation(
         self,
         declaration: hir.Declare,
@@ -1174,7 +1177,7 @@ class _ArrayLowering:
             return self._release_nested_array_elements(descriptor, unfolded, loc, start=start, stop=stop)
         return []
 
-    def _release_owned_array(self, descriptor: hir.ExpressedIdentifier, loc, *, element: ty.TypeExpr | None = None) -> list[hir.AST]:
+    def _release_unique_array(self, descriptor: hir.ExpressedIdentifier, loc, *, element: ty.TypeExpr | None = None) -> list[hir.AST]:
         """Release an array's data when the descriptor owns it (`owner` = 1), and mark it released.
 
         The `owner` word is 1 for arena-owned data (set by growth and by
@@ -1594,7 +1597,9 @@ class _ArrayLowering:
                     self._int64_binary('__or__', self._load_i64_field(descriptor, ARRAY_FLAGS_OFFSET, loc), self._int64_literal(loc, ARRAY_MUTABLE), loc),
                     loc,
                 ),
-                self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc),
+                self._if(self._int64_comparison('__lt__', self._load_i64_field(descriptor, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 0), loc),
+                         [self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, -1), loc)], loc,
+                         [self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc)]),
             ],
             True,
         )
@@ -1661,9 +1666,10 @@ class _ArrayLowering:
         if not self._is_growable_element(element_type):
             self._target_error(node, 'growing an array whose elements are not word scalars, string handles, or objects')
         loc = node.loc
-        prelude, descriptor = self._extract_expression(method.array)
+        prelude, descriptor = self._extract_write_route(method.array)
         if isinstance(descriptor, hir.ExpressedIdentifier):
             descriptor = replace(descriptor, type='int64')
+        prelude.extend(self._ensure_unique_array(descriptor, element_type, loc))
         element_bytes, _signed = self._array_element_layout(element_type, node)
         length = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('method_length'))
         length_declare = hir.Declare(
@@ -2173,7 +2179,7 @@ class _ArrayLowering:
             return self._independent_array_value(node, array_type, move=fresh)
         return self._clone_dynamic_array_value(node, array_type, arena=True, move=fresh)
 
-    def _clone_dynamic_array_value(
+    def _clone_dynamic_array_storage(
         self,
         node: hir.AST,
         array_type: ty.ArrayType,
@@ -2352,6 +2358,7 @@ class _ArrayLowering:
                 'int64',
                 self._int64_literal(node.loc, 0),
             ),
+            *self._note_array_copy(allocation_bytes, node.loc),
             copy_loop,
         ]
         if move:
@@ -2443,7 +2450,9 @@ class _ArrayLowering:
                 self._store_i64_field(descriptor, ARRAY_CAPACITY_OFFSET, length, loc),
                 self._store_i64_field(descriptor, ARRAY_STRIDE_OFFSET, self._int64_literal(loc, element_bytes), loc),
                 self._store_i64_field(descriptor, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE | ARRAY_ARENA_DESCRIPTOR), loc),   # an arena block: released with the data
-                self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc),   # arena data: releasable
+                self._if(self._int64_comparison('__lt__', self._load_i64_field(descriptor, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 0), loc),
+                         [self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, -1), loc)], loc,
+                         [self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc)]),   # arena data: releasable
             ])
         data_pointer = self._load_i64_field(descriptor, ARRAY_DATA_OFFSET, loc)
         cursor = declare('spread_cursor', self._int64_literal(loc, 0))

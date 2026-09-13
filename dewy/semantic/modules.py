@@ -510,7 +510,7 @@ class ModuleCompiler:
                 self._collect_referenced_binding_ids(getattr(value, field.name), found)
 
     # Prelude declarations the backend may call without a source reference.
-    BACKEND_RUNTIME_HELPERS = frozenset({'_arena_alloc', '_arena_release', '_region_new', '_region_alloc', '_region_reset', '_region_release', '_union_tree'})
+    BACKEND_RUNTIME_HELPERS = frozenset({'_arena_alloc', '_arena_release', '_arena_note_copy', '_region_new', '_region_alloc', '_region_reset', '_region_release', '_union_tree'})
 
     def _needed_prelude_binding_ids(self) -> set[int]:
         needed: set[int] = set()
