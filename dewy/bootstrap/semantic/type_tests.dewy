@@ -17,9 +17,10 @@ disjoint = (left:addr right:addr links:array<subtyping.Link> @nodes:array<types.
             let y=types.node_at(nodes types.unfold(b nodes))
             if x is? types.ObjectType and y is? types.ObjectType {
                 if subtyping.is_subtype(a b links @nodes) or subtyping.is_subtype(b a links @nodes) return false
-            } else if x is? types.ObjectType or y is? types.ObjectType {
-                if subtyping.is_subtype(a b links @nodes) or subtyping.is_subtype(b a links @nodes) return false
             } else {
+                # A compound type can overlap a record without either being
+                # its subtype: (Token & ~Child) still contains other Records.
+                # Only two record atoms admit the shortcut above.
                 let overlap=types.intersect([a b] @nodes)
                 if not subtyping.is_empty(overlap links @nodes) return false
             }

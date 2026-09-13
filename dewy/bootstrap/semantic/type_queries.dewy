@@ -234,8 +234,10 @@ is_zero_arg_function = (id:addr nodes:array<types.Type>):>bool => {
 
 # Excluding a descendant narrows the possible values, not the remaining
 # family's field layout. Keep exclusions in the read type and use this view
-# only to locate structure. Multiple positive conjuncts still need their
-# ordinary composition rules; this is not a general intersection erasure.
+# only to locate structure. Comparable record conjuncts use the most specific
+# record: `Token & Record & ~Path` has Record's layout, while its logical type
+# still excludes Path. Unrelated positive structures retain their ordinary
+# composition rules; this is not a general intersection erasure.
 structural_base = (id:addr nodes:array<types.Type>):>addr => {
     let base=types.unfold(types.strip_refinement(id nodes) nodes)
     let node=types.node_at(nodes base)
@@ -243,8 +245,14 @@ structural_base = (id:addr nodes:array<types.Type>):>addr => {
     let positive:addr?=none
     loop member in node.items {
         if types.node_at(nodes member) is? types.TypeNot continue
-        if positive isnt? none return base
-        positive=member
+        let candidate=structural_base(member nodes)
+        if positive is? none {positive=candidate continue}
+        if types.same_type(positive candidate nodes) continue
+        let prior=types.node_at(nodes positive)
+        let next=types.node_at(nodes candidate)
+        if prior isnt? types.ObjectType or next isnt? types.ObjectType return base
+        if subtyping.object_subtype(next prior nodes) {positive=candidate}
+        else if not subtyping.object_subtype(prior next nodes) return base
     }
-    return if positive is? none base else structural_base(positive nodes)
+    return if positive is? none base else positive
 }

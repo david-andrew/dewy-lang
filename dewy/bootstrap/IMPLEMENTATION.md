@@ -38,6 +38,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Regression cases cover differing field offsets, descendants, optional and
   mixed scalar storage, field reads, and saved/returned unions. Reads with
   unchanged types skip this conversion analysis.
+  Comparable positive record conjuncts use their most specific layout while
+  retaining exclusions in the logical type. Logical upcasts also convert
+  storage: a narrowed child union must unwrap when passed as its parent,
+  and widening child alternatives into a parent union replaces their tags.
+  Compound type tests use intersection emptiness to decide overlap; neither
+  direction of subtyping alone settles `Token & ~Child` versus `Record`.
+  Copying, release, and exposed-storage traversal dispatch on exact runtime
+  brands within the storage family, preserving fields after exclusions.
 
 - Hosted optional family tests now use the same guarded tag/brand checks as
   general unions, including negated tests. Narrowed parent payloads reuse the
@@ -50,6 +58,16 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Neither compiler currently propagates that narrowing directly through an
   array index; snapshotting the element into a local works. These are proof
   and representation followups, not proposals for new language semantics.
+  Child unions can also widen into a parent union, retaining dynamic brands
+  and replacing member tags. General parent unions use borrowed child views
+  on narrowed reads; escaping copies use those views' actual tags.
+
+- Hosted prepared parent-record storage still has a fixed-array gap:
+  constructing `Child[0 [20 22]]` in `Parent | int64`, where Child adds an
+  `array<int64 length=2>` field, reserves the child's bytes but does not
+  initialize its nested array descriptor. Growable array fields work. The
+  fixed-array path needs preparation of the selected descendant's nested
+  storage; initializing every descendant at once would overlap their fields.
 
 - Checked function defaults are children of native HIR function literals.
   Proof discharge, helper reachability, representation selection, and nested

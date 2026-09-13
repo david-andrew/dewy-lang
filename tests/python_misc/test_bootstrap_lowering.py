@@ -105,6 +105,41 @@ Other=type of Token & []
 Descendant=type of Left & [extra:int64]
 '''
 BRAND_READ_CASES = [
+    # Earlier exclusions plus a two-variable condition retain a logical
+    # union such as (Token & Record & ~Nested) | Nested. The intersection
+    # arm still has Record storage; it is not a non-record payload.
+    '''
+Token=$abstract type of [loc:int64]
+Record=type of Token & [value:int64]
+Nested=type of Record & []
+Variable=type of Token & []
+Named=type of Token & []
+Refined=type of Token & []
+let add=(a:Record b:Record):>int64=>a.value+b.value
+let read=(a:Token b:Token):>int64=>{
+    if a is? Variable return 0
+    if b is? Variable return 0
+    if a is? Named or b is? Named return 0
+    if a is? Refined return 0
+    if b is? Refined return 0
+    if a is? Nested and b is? Record return 0
+    if a is? Record and b is? Record return add(a b)
+    return 0
+}
+let main=():>int64=>{
+    if read(Nested[0 20] Record[0 22]) not=?0 return 1
+    if read(Record[0 20] Nested[0 22]) not=?42 return 2
+    if read(Named[0] Record[0 22]) not=?0 return 3
+    return read(Record[0 20] Record[0 22])
+}
+''',
+    # Widening child alternatives back into a parent union must replace
+    # their tags as well as preserve the dynamically branded payload.
+    BRAND_READ_TYPES + '''
+let widen=(value:Left|Right):>Token|int64=>value
+let read=(node:Token|int64):>int64=>{if node is? Left|Right return node.value return 0}
+let main=():>int64=>read(widen(Descendant[0 20 777]))+read(widen(Right[0 999 22]))
+''',
     BRAND_READ_TYPES + '''
 let read=(node:Token):>int64=>{if node is? Left|Right return node.value return 0}
 let main=():>int64=>read(Descendant[0 20 777])+read(Right[0 999 22])+read(Other[0])
