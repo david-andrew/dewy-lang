@@ -2849,7 +2849,7 @@ class _ArrayLowering(_ArraySharing):
                 members = ('none', payload)
             if members is not None:
                 return all(
-                    member == 'none' or cls._is_word_element_static(member) or isinstance(member, ty.NamedType) or ty.is_user_nominal(member)
+                    member == 'none' or cls._is_word_element_static(member) or isinstance(member, (ty.NamedType, ty.IntegerLiteralType)) or ty.is_user_nominal(member)
                     or (isinstance(member, ty.ObjectType) and cls._object_result_fields_are_returnable(member))
                     for member in map(ty.strip_refinement, members)
                 )

@@ -1,14 +1,27 @@
 # Proof refinements change admissible values, not their storage support.
-Decision:type=const [constants:dict<addr bigint>]
+from reporting import Warning
+Interval:type=const [lower:bigint? upper:bigint? capped:bool]
+Unfit:type=const [interval:Interval? word:string]
+Decision:type=const [constants:dict<addr bigint> unfit:dict<addr Unfit>=[] warnings:array<Warning>=[]]
 choose=(yes:bool):>Decision|none=>{
     let constants:dict<addr bigint>=[]
     constants[0]=123456789012345678901234567890
     return if yes Decision[constants] else none
 }
+# A resolved bigint also contains a singleton zero alternative. It occupies
+# a tag just like an ordinary integer member and must remain returnable.
+LiteralCell:type=0|[value:int64]
+LiteralBag:type=const [values:array<LiteralCell>]
+retain=(input:LiteralBag):>LiteralBag|none=>input
 let main=():>int64=>{
     let decision=choose(true)
     if decision is? none return 1
     let value=decision.constants.get(0)
     if value is? none return 2
-    return if value =? 123456789012345678901234567890 42 else 3
+    if value not=? 123456789012345678901234567890 return 3
+    let held=retain(LiteralBag[[0 [value=42]]])
+    if held is? none return 4
+    $runtime_assert held.values.length >? 1
+    let last=held.values[1]
+    return if last is? 0 5 else last.value
 }
