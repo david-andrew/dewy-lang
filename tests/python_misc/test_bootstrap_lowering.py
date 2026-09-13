@@ -148,7 +148,7 @@ ARENA_CASES = [
     ('let read=(values:array<int64>):>int64=>{let bits=values[0] transmute uint64 return bits transmute int64}\nlet main=():>int64=>{let values:array<int64>=[42] let before=_arena_cursor let answer=read(values) return if before =? _arena_cursor answer else 0}', 42),
     # Growing a descriptor moves its element handles and returns only the
     # obsolete data block. The allocator must be able to reuse that block.
-    ('let main=():>int64=>{let values:array<int64>=[40] let old=__load_i64__(values) values.push(2) let reused=_arena_alloc(8) return if reused =? old values[0]+values[1] else 0}', 42),
+    ('let main=():>int64=>{let values:array<int64>=[40] let before=_arena_live_bytes values.push(2) return if _arena_live_bytes-before =? 8 values[0]+values[1] else 0}', 42),
     ('let main=():>int64=>{let values:array<int64>=[40] let saved=values values.push(2) let reused=_arena_alloc(8) __store_i64__(99 reused) return saved[0]+values[1]}', 42),
     ('let identity=(values:array<int64>):>array<int64>=>values\nlet main=():>int64=>{let values:array<int64>=[42] let pointer=__load_i64__(identity(values)) __store_i64__(99 pointer) return values[0]}', 42),
     ('Box:type=[values:array<int64>]\nlet identity=(box:Box):>Box=>box\nlet main=():>int64=>{let box=Box[[42]] let pointer=__load_i64__(identity(box).values) __store_i64__(99 pointer) return box.values[0]}', 42),
@@ -373,6 +373,26 @@ CLEANUP_CASES = [('Box:type=[values:array<int64>]\n'
   '    return if reclaimed+64 <=? _arena_cursor 42 else 0\n'
   '}\n',
   42)]
+# Mutable parameter copies are caller-owned temporaries. Their contents must
+# be reclaimed after a non-escaping call, alongside replaced fields/locals.
+CLEANUP_CASES += [
+    ("let mutate=(values:array<int64>):>int64=>{values.push(42) return values.length}\n"
+     "let exercise=(values:array<int64> count:int64):>void=>{loop i in 0.. and i <? count {mutate(values);}}\n"
+     "let main=():>int64=>{let values:array<int64>=[] loop i in 0.. and i <? 1000 {values.push(i)} exercise(values 2) let before=_arena_live_bytes exercise(values 500) return if _arena_live_bytes=?before 42 else 0}", 42),
+    ("Box:type=[values:array<int64>]\n"
+     "let replace=(@box:Box value:array<int64>):>void=>{box.values=value}\n"
+     "let exercise=(count:int64):>void=>{loop i in 0.. and i <? count {let box=Box[[40 2]] replace(@box [9 8]) box=Box[[42]]}}\n"
+     "let main=():>int64=>{exercise(2) let before=_arena_live_bytes exercise(1000) return if _arena_live_bytes=?before 42 else 0}", 42),
+]
+CLEANUP_CASES += [(
+    "Env:type=const [nodes:array<int64>]\n"
+    "Paths:type=const [env:Env extra:array<int64>=[]]\n"
+    "Data:type=[env:Env]\n"
+    "Checker:type=[data:Data paths:Paths=Paths[data.env] saved:Env=data.env]\n"
+    "let configure=(@checker:Checker):>void=>{checker.paths=Paths[checker.data.env] checker.saved=checker.data.env}\n"
+    "let exercise=(env:Env count:int64):>void=>{loop i in 0.. and i <? count {let checker=Checker[Data[env]] configure(@checker)}}\n"
+    "let measure=(size:int64):>bool=>{let nodes:array<int64>=[] loop i in 0.. and i <? size {nodes.push(i)} let env=Env[nodes] exercise(env 2) let before=_arena_live_bytes let copied=_arena_copied_bytes exercise(env 500) return _arena_live_bytes=?before and _arena_copied_bytes=?copied}\n"
+    "let main=():>int64=>if measure(1000) and measure(100000) 42 else 0", 42)]
 ARENA_CASES += CLEANUP_CASES
 
 
@@ -404,6 +424,8 @@ main = (argv:array<string>):>int64 => {{
     let helpers:dict<string addr>=[]
     let release=bindings.lookup(session.scopes env.lexical.scope '_arena_release')
     if release isnt? none {{helpers['_arena_release']=release}}
+    let copied=bindings.lookup(session.scopes env.lexical.scope '_arena_note_copy')
+    if copied isnt? none {{helpers['_arena_note_copy']=copied}}
     let lowered=lower.lower(root emit.Input[session.hir session.types [source]] source allocator=allocator layout_context=layouts.Context[session.brands session.error_types] runtime_helpers=helpers links=session.links)
     if lowered is? Error {{lowered.fail}}
     let code=program.render(lowered.program lowered.input)

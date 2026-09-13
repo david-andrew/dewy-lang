@@ -8,7 +8,7 @@ import p"../../semantic/subtyping.dewy" as subtyping
 # type of the elements or their mutability contract.
 ArrayDescriptor:type = const [data:addr length:addr capacity:addr stride:addr flags:addr owner:addr size:addr]
 const array_descriptor:ArrayDescriptor=[0 8 16 24 32 40 48]
-const array_flags=[mutable=1 borrowed_static=2 arena_descriptor=4]
+const array_flags=[mutable=1 borrowed_static=2 arena_descriptor=4 shared=8]
 StringDescriptor:type = const [data:addr byte_length:addr boundaries:addr grapheme_length:addr start:addr owner:addr size:addr]
 const string_descriptor:StringDescriptor=[0 8 16 24 32 40 48]
 const brand_field='__brand__'
