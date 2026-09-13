@@ -16,6 +16,13 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = [
+    'Store:type=const[key:addr]\nRemove:type=const[key:addr?]\nlet read=(node:Store|Remove):>addr=>{let key=node.key\nif key is? none return 0\nreturn key}',
+    'Store:type=const[key:int64]\nRemove:type=const[key:addr?]\nlet read=(node:Store|Remove):>addr=>{let key=node.key\nif key is? none return 0\nreturn key}',
+    # Optional record fields retain their numeric payload contract when a
+    # branch selects them. An unconstrained alternative must still prevent
+    # proving the entire result nonnegative.
+    "Parts:type=const[key:addr value:addr?]\nlet word=():>addr=>0\nlet f=(parts:Parts name:string):>addr=>{let element=if name=?'keys' parts.key else if name=?'values' parts.value else word()\nif element is? none return 0\nreturn element}",
+    "Parts:type=const[key:addr value:addr?]\nlet word=(raw:int64):>int64=>raw\nlet f=(parts:Parts name:string raw:int64):>addr=>{let element=if name=?'keys' parts.key else if name=?'values' parts.value else word(raw)\nif element is? none return 0\nreturn element}",
     'let narrow=():>bool=>true\nlet f=():>int64=>if narrow() 42 else 0',
     'Thing:type=[position:addr]\nlet read=(thing:Thing):>addr=>thing.position',
     'Thing:type=[position:int64]\nlet read=(thing:Thing):>addr=>thing.position',
@@ -82,6 +89,10 @@ def test_native_bounds_visitor_matches_hosted(tmp_path):
             expected.append(f'{index}|unfit' if validator.unfit else f'{index}|ok')
         except UserError as error:
             expected.append(f'{index}|{error.report.title}')
+        if index in (0, 2):
+            assert expected[-1] == f'{index}|ok', 'optional field payload contract must establish addr'
+        elif index in (1, 3):
+            assert expected[-1] == f'{index}|cannot prove refinement', 'an unconstrained alternative must prevent the proof'
         type_lines = []
         build = type_builder(type_lines)
         hir_lines, root_id, names = emit_hir(root, type_value=build, with_names=True)

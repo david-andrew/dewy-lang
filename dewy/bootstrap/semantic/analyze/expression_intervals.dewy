@@ -202,7 +202,13 @@ transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @
         # when a negative type test leaves no single recoverable owner shape.
         return meet(own_bounds(node.value_type env) meet(interval refinements.field_interval(node state env @registry)))
     }
-    if node is? hir.ForwardingAccess return meet(own_bounds(node.value_type env) values.bounds_of(expressions.member_invariant(id env.nodes env.types) env.cap))
+    if node is? hir.ForwardingAccess {
+        let interval = meet(own_bounds(node.value_type env) values.bounds_of(expressions.member_invariant(id env.nodes env.types) env.cap))
+        if types.is_primitive(types.node_at(env.types node.exception_type) 'never') {
+            interval = meet(interval values.declared_field_interval(hir.node_at(env.nodes node.value).value_type node.field env))
+        }
+        return interval
+    }
     if node is? hir.Index|hir.DictLookup|hir.DictRemove return own_bounds(node.value_type env)
     if node is? hir.Block and node.items.length >? 0 return snapshot.numbers.get(node.items[node.items.length-1])
     return none

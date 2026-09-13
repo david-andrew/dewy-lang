@@ -3626,7 +3626,7 @@ match_bind = (name:string value:addr id:addr env:Environment @session:contexts.S
     let loc=contexts.node_at(id env.lexical session).loc
     # Pattern bindings are sequential declarations, including repeated `_`
     # parameters. A later binding shadows the earlier name, not its HIR id.
-    let checked=if hidden value else widen(value id env @session strings=false)
+    let checked:addr|Error=if hidden value else widen(value id env @session strings=false)
     if checked is? Error return checked
     let type=node_at(checked session).value_type
     let binding_id=bindings.allocate(@session.registry none name 'value' loc)

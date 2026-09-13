@@ -2698,7 +2698,7 @@ dict_remove = (node:hir.DictRemove @state:State):>addr => {
         let fields:array<string>=['keys' 'hashes' 'indices']
         if parts.value isnt? none {fields.push('values')}
         loop name in fields {
-            let element=if name =? 'keys' parts.key else if name =? 'values' parts.value else types.primitive('int64' @state.type_nodes)
+            let element:addr?=if name =? 'keys' parts.key else if name =? 'values' parts.value else types.primitive('int64' @state.type_nodes)
             $runtime_assert element isnt? none
             prefix.push(array_trim(dict_field(parts name node @state) word(0 node @state) element node @state))
         }

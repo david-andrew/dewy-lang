@@ -95,7 +95,7 @@ def emit_hir(root, *, type_value=None, with_names=False):
     def value(item, field=None):
         if isinstance(item, hir.AST):
             return node(item)
-        if field in ('type', 'rettype', 'exception_type', 'refined'):
+        if field in ('type', 'rettype', 'exception_type', 'refined', 'test_type'):
             if type_value is not None:
                 return type_value(item)
             return 'callable' if isinstance(item, (ty.FunctionType, ty.OverloadType)) else 'scalar'

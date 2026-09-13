@@ -1279,20 +1279,43 @@ class _BoundsValidator:
             return True if self._nonzero_proven(subject_node, subject, state) else None
         return None
 
+    def _declared_field_interval(self, receiver: ty.Type, name: str) -> Interval | None:
+        """Common fields must satisfy the bounds of every possible owner."""
+        receiver = ty.unfold(ty.strip_refinement(receiver))
+        if isinstance(receiver, ty.TypeAnd):
+            positive = [item for item in receiver.items if not isinstance(item, ty.TypeNot)]
+            return self._declared_field_interval(positive[0], name) if len(positive) == 1 else None
+        if isinstance(receiver, ty.ObjectType):
+            field = receiver.field(name)
+            if field is None:
+                return None
+            interval = self._declared_type_interval(field.type)
+            constraint = self._bounds_of([p for p in field.refinement if p.term is None and p.field is None])
+            if constraint is None:
+                return interval
+            return constraint if interval is None else interval.intersect(constraint)
+        if not isinstance(receiver, ty.TypeOr):
+            return None
+        interval = None
+        for member in receiver.items:
+            candidate = self._declared_field_interval(member, name)
+            if candidate is None:
+                return None
+            interval = candidate if interval is None else interval.union(candidate)
+        return interval
+
     def _field_declared_interval(self, node: hir.MemberAccess, state: State) -> Interval | None:
         """What a field read is known to be from its declaration: the range of
         its width (`radix:uint8` is `[0, 255]`), narrowed by its relations to
         sibling fields on an immutable record (`radix =? alphabet.length` with
         `alphabet:string<2 <=? length <=? uint8.max>` is `[2, 255]`)."""
         object_type = _object_of(node.value.type)
+        if object_type is None:
+            return self._declared_field_interval(node.value.type, node.name)
         field = object_type.field(node.name) if object_type is not None else None
         if field is None:
             return None
-        interval: Interval | None = None
-        layout = ty.fixed_integer_layout(field.type)
-        if layout is not None:
-            width, signed = layout
-            interval = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+        interval = self._declared_type_interval(field.type)
         if not object_type.immutable:
             return interval
         located = sb.member_path(node)
@@ -1872,21 +1895,35 @@ class _BoundsValidator:
             return None
         # `let i:uint64 = 0` records the initializer's type (`0`) on the binding; the annotation is the width
         declared = binding.store_type or (binding.declaration.annotation if isinstance(binding.declaration, hir.Declare) and binding.declaration.annotation is not None else binding.type)
-        layout = ty.fixed_integer_layout(ty.strip_refinement(declared)) if declared is not None else None
-        if layout is None and isinstance(declared, ty.TypeOr):
-            # `uint64 | none`: read as a number, the value is the one fixed-width member
-            layouts = {ty.fixed_integer_layout(ty.strip_refinement(item)) for item in declared.items} - {None}
-            layout = layouts.pop() if len(layouts) == 1 else None
+        return self._declared_type_interval(declared) if declared is not None else None
+
+    def _declared_type_interval(self, declared: ty.Type) -> Interval | None:
+        """Bounds of a numeric payload, independent of optional presence.
+
+        Combine all alternatives; a refined alternative must not constrain
+        an unrefined one. Non-numeric alternatives contribute no evidence.
+        """
+        if isinstance(declared, ty.TypeOr):
+            interval = None
+            for member in declared.items:
+                if member == 'none':
+                    continue
+                candidate = self._declared_type_interval(member)
+                if candidate is None:
+                    return None
+                interval = candidate if interval is None else interval.union(candidate)
+            return interval
+        if isinstance(declared, ty.RefinedType):
+            interval = self._declared_type_interval(declared.base)
+            constraint = self._bounds_of([p for p in declared.propositions if p.term is None and p.field is None])
+            if constraint is None:
+                return interval
+            return constraint if interval is None else interval.intersect(constraint)
+        layout = ty.fixed_integer_layout(declared)
         if layout is None:
             return None
         width, signed = layout
-        interval = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
-        refined = declared if isinstance(declared, ty.RefinedType) else next((item for item in declared.items if isinstance(item, ty.RefinedType)), None) if isinstance(declared, ty.TypeOr) else None
-        if refined is not None:
-            bounds = self._bounds_of([p for p in refined.propositions if p.term is None and p.field is None])
-            if bounds is not None:
-                interval = interval.intersect(bounds)   # `n:addr`, `n:nat64`: what the declaration promises
-        return interval
+        return Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
 
     def _proof_failure(self, node: hir.AST, kind: str, report: Error) -> None:
         """An unproven obligation: a compile error, or in `$prototype` a
@@ -2646,7 +2683,12 @@ class _BoundsValidator:
         if isinstance(node, hir.ForwardingAccess):
             # `remaining[0].length` on a union of objects: the field's invariant, when every member declares it
             self._eval(node.value, state, validate=validate)
-            return self._bounds_of(_member_invariant(node))
+            interval = self._bounds_of(_member_invariant(node))
+            if node.exception_type == ty.BOTTOM_TYPE:
+                declared = self._declared_field_interval(node.value.type, node.field)
+                if declared is not None:
+                    interval = declared if interval is None else interval.intersect(declared)
+            return interval
         if isinstance(node, hir.MemberAssign):
             self._eval(node.target, state, validate=validate)
             value = self._eval(node.value, state, validate=validate)

@@ -146,10 +146,10 @@ seed_siblings = (@state:facts.State node:hir.MemberAccess env:values.Environment
 
 field_interval = (node:hir.MemberAccess state:facts.State env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
     let object = expressions.object_of(hir.node_at(env.nodes node.value).value_type env.types)
-    if object is? none return none
+    if object is? none return values.declared_field_interval(hir.node_at(env.nodes node.value).value_type node.name env)
     let field = types.object_field(object node.name)
     if field is? none return none
-    let interval = values.fixed_bounds(field.value_type env.types)
+    let interval = values.declared_interval(field.value_type env)
     if not object.immutable return interval
     let member = locate(node env)
     if member is? none return interval

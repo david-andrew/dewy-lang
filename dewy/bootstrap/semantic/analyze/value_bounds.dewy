@@ -57,43 +57,63 @@ binding_type = (binding:bindings.Binding nodes:array<hir.AST>):>addr? => {
     }
     return binding.value_type
 }
+declared_interval = (id:addr env:Environment):>ranges.Interval? => {
+    let node = types.node_at(env.types id)
+    if node is? types.TypeOr {
+        # This describes the numeric payload, not whether an optional is
+        # present. Every non-none alternative must supply numeric evidence.
+        # A refinement on one alternative cannot constrain the others.
+        let result:ranges.Interval? = none
+        loop member in node.items {
+            if types.is_primitive(types.node_at(env.types member) 'none') continue
+            let candidate = declared_interval(member env)
+            if candidate is? none return none
+            result = if result is? none candidate else ranges.union(result candidate)
+        }
+        return result
+    }
+    let interval = fixed_bounds(id env.types)
+    if node is? types.RefinedType {
+        interval = declared_interval(node.base env)
+        let direct:array<propositions.Proposition> = []
+        loop p in node.propositions {
+            if p.term is? none and propositions.field(p) is? none { direct.push(p) }
+        }
+        let constrained = bounds_of(direct env.cap)
+        if constrained isnt? none { interval = if interval is? none constrained else ranges.intersect(interval constrained) }
+    }
+    return interval
+}
 type_interval = (binding_id:addr env:Environment):>ranges.Interval? => {
     let binding = env.registry.by_id.get(binding_id)
     if binding is? none return none
     let declared = binding_type(binding env.nodes)
-    if declared is? none return none
-    let node = types.node_at(env.types declared)
-    let interval = fixed_bounds(declared env.types)
-    if interval is? none and node is? types.TypeOr {
-        # Numeric reads of an optional can use its unique concrete integer
-        # width. Two different widths do not establish either one's range.
-        let differing = false
-        loop member in node.items {
-            let candidate = fixed_bounds(member env.types)
-            if candidate is? none continue
-            if interval is? none { interval = candidate }
-            else if not ranges.same_bounds(interval candidate) { differing = true }
-        }
-        if differing return none
-    }
-    if interval is? none return none
-    let refined:types.RefinedType? = none
-    if node is? types.RefinedType { refined = node }
-    else if node is? types.TypeOr {
-        loop member in node.items {
-            let item = types.node_at(env.types member)
-            if item is? types.RefinedType { refined = item break }
-        }
-    }
-    if refined isnt? none {
+    return if declared is? none none else declared_interval(declared env)
+}
+declared_field_interval = (id:addr name:string env:Environment):>ranges.Interval? => {
+    let node = types.node_at(env.types views.structural_base(id env.types))
+    if node is? types.ObjectType {
+        let field = types.object_field(node name)
+        if field is? none return none
+        let interval = declared_interval(field.value_type env)
         let direct:array<propositions.Proposition> = []
-        loop p in refined.propositions {
+        loop p in field.refinement {
             if p.term is? none and propositions.field(p) is? none { direct.push(p) }
         }
         let constrained = bounds_of(direct env.cap)
-        if constrained isnt? none { interval = ranges.intersect(interval constrained) }
+        if constrained isnt? none { interval = if interval is? none constrained else ranges.intersect(interval constrained) }
+        return interval
     }
-    return interval
+    if node isnt? types.TypeOr return none
+    # Common fields inherit bounds from every possible owner, including
+    # optional payloads. Missing fields or unknown alternatives give no bound.
+    let result:ranges.Interval? = none
+    loop member in node.items {
+        let candidate = declared_field_interval(member name env)
+        if candidate is? none return none
+        result = if result is? none candidate else ranges.union(result candidate)
+    }
+    return result
 }
 binding_interval = (term:facts.Term state:facts.State env:Environment):>ranges.Interval => {
     let known = facts.lookup(state facts.value(term))

@@ -18,6 +18,16 @@ ROOT = Path(__file__).resolve().parents[2]
 LOC = Span(0, 0)
 
 
+def test_union_bounds_do_not_apply_one_members_refinement_to_another():
+    validator = bounds._BoundsValidator(bindings.BindingRegistry(), SrcFile(None, ''), hir.Block(LOC, 'void', [], False))
+    validator.max_length = 1024
+    optional = validator._declared_type_interval(ty.optional(ty.addr_type()))
+    assert optional is not None and (optional.lower, optional.upper) == (0, 1024)
+    mixed = validator._declared_type_interval(ty.TypeOr([ty.addr_type(), 'int64', 'none']))
+    assert mixed is not None and (mixed.lower, mixed.upper) == (-(1 << 63), (1 << 63) - 1)
+    assert validator._declared_type_interval(ty.TypeOr([ty.addr_type(), 'string', 'none'])) is None
+
+
 def test_native_value_bounds_match_hosted(tmp_path):
     registry = bindings.BindingRegistry()
     declarations = []
@@ -35,7 +45,11 @@ def test_native_value_bounds_match_hosted(tmp_path):
         return hir.ExpressedIdentifier(LOC, type_, name, binding_id=binding.id)
 
     scalar_types = ['int8', 'uint8', 'uint64', 'int', ty.addr_type(), ty.nat_type('nat32'),
-                    ty.optional('int16'), ty.union('int8', 'int64', 'none'), ty.optional(ty.addr_type())]
+                    ty.optional('int16'), ty.union('int8', 'int64', 'none'), ty.optional(ty.addr_type()),
+                    ty.TypeOr([ty.addr_type(), 'int64', 'none']),
+                    ty.TypeOr([ty.addr_type(), 'string', 'none']),
+                    ty.TypeOr([ty.RefinedType('int64', (ty.Proposition('self', '>=?', 3),)),
+                               ty.RefinedType('int64', (ty.Proposition('self', '<=?', -3),)), 'none'])]
     references = [declare(f'v{i}', type_, number(0)) for i, type_ in enumerate(scalar_types)]
     references.append(declare('place', 'int64', number(1), store_type=ty.RefinedType('int64', (ty.Proposition('self', '>=?', 3),))))
     saved = declare('saved', 'int64', number(7), const=True)

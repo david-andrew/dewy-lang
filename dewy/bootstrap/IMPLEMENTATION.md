@@ -25,6 +25,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Numeric payload bounds now combine every alternative of an optional or
+  numeric union. A field may carry its contract in its type or its field
+  metadata; common fields combine the contracts of all possible record
+  owners. A nonnegative alternative cannot constrain an unrestricted
+  integer alternative. Both analyzers preserve these distinctions.
+  Inferred conditionals that combine a numeric result with an exception can
+  still lose payload facts; explicit result contracts such as
+  `let checked:addr|Error = ...` keep the bootstrap's intent available.
+
 - A remaining proof-propagation gap affects both compilers: for immutable
   `BaseInfo` with `radix:uint8<radix =? alphabet.length>`, a loop guarded by
   `i <? (info.radix as addr)` does not currently recover the bound needed to

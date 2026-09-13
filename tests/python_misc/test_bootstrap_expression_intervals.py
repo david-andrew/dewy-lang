@@ -49,6 +49,18 @@ def test_native_expression_interval_transfers(tmp_path):
     queries.extend([byte, hir.ValueCast(LOC, 'int64', byte), hir.MemberAccess(LOC, 'uint8', record, 'byte')])
     address_record = reference('addresses', ty.ObjectType((ty.ObjectField('position', ty.addr_type()),)))
     queries.append(hir.MemberAccess(LOC, ty.addr_type(), address_record, 'position'))
+    optional_address = ty.optional(ty.addr_type())
+    optional_record = reference('optional_address', ty.ObjectType((ty.ObjectField('position', optional_address),)))
+    queries.append(hir.MemberAccess(LOC, optional_address, optional_record, 'position'))
+    mixed_address = ty.TypeOr([ty.addr_type(), 'int64', 'none'])
+    mixed_record = reference('mixed_address', ty.ObjectType((ty.ObjectField('position', mixed_address),)))
+    queries.append(hir.MemberAccess(LOC, mixed_address, mixed_record, 'position'))
+    # A common field is bounded by all receiver variants, even when the
+    # joined result representation has erased the individual refinements.
+    field_metadata = ty.ObjectType((ty.ObjectField('position', 'int64', refinement=ty.addr_type().propositions),))
+    for other in [optional_record.type, mixed_record.type]:
+        receiver = reference('variant', ty.TypeOr([field_metadata, other]))
+        queries.append(hir.ForwardingAccess(LOC, mixed_address, receiver, 'position', 'held', receiver.binding_id, ty.BOTTOM_TYPE))
     packed = hir.RepresentationCast(LOC, ty.TypeOr(['int64', 'none']), i)
     queries.extend([packed, hir.RepresentationCast(LOC, 'int64', packed)])
     for op in ['__add__', '__sub__', '__mul__', '__floordiv__', '__mod__']:
