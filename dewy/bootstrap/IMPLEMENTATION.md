@@ -25,6 +25,16 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- A remaining proof-propagation gap affects both compilers: for immutable
+  `BaseInfo` with `radix:uint8<radix =? alphabet.length>`, a loop guarded by
+  `i <? (info.radix as addr)` does not currently recover the bound needed to
+  index `info.alphabet[i]`. Comparing the unannotated counter directly with
+  `radix` instead selects a uint8 obligation that may also be unprovable.
+  Guarding on `info.alphabet.length` directly works. Preserve the relationship
+  across widening conversions in a later analysis pass; this needs no new
+  source syntax. The sibling-field crash regression tests field comparison
+  separately from this known limitation.
+
 - HIR functions and runtime failures refer to a compilation source table by
   index. Module initialization, validation, lowering, and emission preserve
   that table, so analysis snapshots no longer duplicate complete source files

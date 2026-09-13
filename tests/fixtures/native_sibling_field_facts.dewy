@@ -1,0 +1,11 @@
+# Bounds validation constructs sibling member paths while recovering the
+# immutable relationship between radix and alphabet.length. This also checks
+# the compiler's own shared array<string> replacement during that analysis.
+BaseInfo:type=const[
+    alphabet:string<2 <=? length <=? uint8.max>
+    radix:uint8<radix =? alphabet.length>=alphabet.length
+]
+let check=(info:BaseInfo):>int64=>{
+    return if (info.radix as addr) =? info.alphabet.length 42 else 1
+}
+let main=():>int64=>check(BaseInfo['01'])

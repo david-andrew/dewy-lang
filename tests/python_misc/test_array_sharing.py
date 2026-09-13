@@ -13,7 +13,15 @@ from udewy.frontend import EntryPointOptions, entry_point
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize('fixture', ['native_array_sharing', 'native_array_sharing_raw', 'native_sharing_contexts', 'native_refined_union_storage', 'native_borrowed_string_arrays', 'native_shared_element_replacement'])
+@pytest.mark.parametrize('fixture', [
+    'native_array_sharing',
+    'native_array_sharing_raw',
+    'native_sharing_contexts',
+    'native_refined_union_storage',
+    'native_borrowed_string_arrays',
+    'native_shared_element_replacement',
+    'native_sibling_field_facts',
+])
 def test_array_sharing(tmp_path, fixture):
     seed = tmp_path / f'{fixture}.udewy'
     seed.write_text(codegen(SrcFile.from_path(ROOT / 'tests/fixtures' / f'{fixture}.dewy')))
