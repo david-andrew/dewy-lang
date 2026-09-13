@@ -47,8 +47,9 @@ if [[ -n $bootstrap_lto_jobs ]]; then
         echo 'DEWY_BOOTSTRAP_LTO_JOBS needs a positive job count and --target c' >&2
         exit 2
     fi
-    export DEWY_BOOTSTRAP_REAL_CC
+    export DEWY_BOOTSTRAP_REAL_CC DEWY_BOOTSTRAP_CC_PATH
     DEWY_BOOTSTRAP_REAL_CC=$(command -v cc)
+    DEWY_BOOTSTRAP_CC_PATH=$PATH
     bootstrap_cc_tools=$(mktemp -d "$bootstrap_output/.cc-tools.XXXXXX")
     trap 'rm -rf -- "$bootstrap_cc_tools"' EXIT
     # Check support before starting either expensive compiler generation.
@@ -57,6 +58,9 @@ int main(void) { return 0; }
 EOF
     cat > "$bootstrap_cc_tools/cc" <<'EOF'
 #!/usr/bin/env bash
+# Launchers such as ccache search PATH for the underlying compiler. Exclude
+# this accelerator wrapper from that search so they cannot invoke it again.
+export PATH="$DEWY_BOOTSTRAP_CC_PATH"
 exec "$DEWY_BOOTSTRAP_REAL_CC" "-flto=$DEWY_BOOTSTRAP_LTO_JOBS" "$@"
 EOF
     chmod +x "$bootstrap_cc_tools/cc"
