@@ -857,8 +857,47 @@ cell_payload = (cell:addr type:addr node:hir.AST @state:State):>addr => {
     return put(hir.Transmute[node.loc runtime value] @state)
 }
 read_value = (value:addr stored:addr read:addr node:hir.AST @state:State):>addr => {
+    # Most reads keep their declared type. In particular, do not compare all
+    # pairs of alternatives in a large AST union when no narrowing occurred.
+    if stored =? read return value
     if enum_members(stored state) isnt? none return enum_read(value stored read node @state)
-    if cell_members(stored @state) isnt? none and cell_members(read @state) is? none return cell_payload(value read node @state)
+    # Narrowing a branded parent to several children changes the read's
+    # representation: the parent is one record handle, the child union is a
+    # tagged cell. Its first record field must never be mistaken for a tag.
+    if object_valued(stored state) and cell_members(read @state) isnt? none return cell_pack(value stored read node @state)
+    let original=cell_members(stored @state)
+    let narrowed=cell_members(read @state)
+    if original isnt? none and narrowed isnt? none {
+        # A parent may itself occupy a union cell (e.g. Token|none). Keeping
+        # several child alternatives then needs new tags, not just the old
+        # parent tag with a narrower logical annotation.
+        let retag=false
+        let tags:set<addr>=set[]
+        loop target in narrowed {tags.add(member_tag(target @state))}
+        loop member in original {
+            if member_tag(member @state) in? tags continue
+            if not type_tests.disjoint(member read state.links @state.type_nodes) {retag=true}
+        }
+        if retag {
+            let prefix:array<addr>=[]
+            let source=snapshot(value @prefix @state)
+            let tag=snapshot(read_word(source 0 node @state) @prefix @state)
+            let arms:array<addr>=[]
+            let output=types.primitive('int64' @state.type_nodes)
+            loop member in original {
+                if type_tests.disjoint(member read state.links @state.type_nodes) continue
+                let converted=cell_pack(cell_payload(source member node @state) member read node @state)
+                let condition=compare('__eq__' tag word(member_tag(member @state) node @state) node @state)
+                arms.push(put(hir.IfArm[node.loc output condition converted] @state))
+            }
+            $runtime_assert arms.length >? 0
+            let last=hir.node_at(state.nodes arms.pop)
+            $runtime_assert last is? hir.IfArm
+            prefix.push(put(hir.Flow[node.loc output arms last.body] @state))
+            return put(hir.Block[node.loc output prefix false] @state)
+        }
+    }
+    if original isnt? none and narrowed is? none return cell_payload(value read node @state)
     return value
 }
 cell_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
@@ -919,7 +958,29 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State):>ad
             selected=member
         }
     }
-    if selected is? none return reject(node 'the value has no member in this union storage' @state)
+    if selected is? none {
+        # A checked parent-to-child-union read needs dynamic brand selection.
+        # Every branch packs the chosen child's layout and the union's tag;
+        # this also preserves fields whose offsets differ between children.
+        if not object_valued(actual state) return reject(node 'the value has no member in this union storage' @state)
+        let prefix:array<addr>=[]
+        let source=snapshot(value @prefix @state)
+        let arms:array<addr>=[]
+        let output=types.primitive('int64' @state.type_nodes)
+        loop member in members {
+            if type_tests.disjoint(actual member state.links @state.type_nodes) continue
+            if not object_valued(member state) return reject(node 'a narrowed record union has a non-record payload' @state)
+            let condition=object_matches(source actual member node @state)
+            let packed=cell_pack(source member expected node @state)
+            arms.push(put(hir.IfArm[node.loc output condition packed] @state))
+        }
+        if arms.length =? 0 return reject(node 'the value has no member in this union storage' @state)
+        # The checked read/representation conversion already proves coverage.
+        let last=hir.node_at(state.nodes arms.pop)
+        $runtime_assert last is? hir.IfArm
+        prefix.push(put(hir.Flow[node.loc output arms last.body] @state))
+        return put(hir.Block[node.loc output prefix false] @state)
+    }
     let prefix:array<addr>=[]
     let payload=snapshot(owned_copy(value selected node @state) @prefix @state)
     let word_value=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) payload] @state)

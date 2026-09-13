@@ -94,8 +94,73 @@ GRAPHEME_CASES = [
     ('let calls:int64=0\nlet next=():>string=>{calls+=1 return "az"}\nlet main=():>int64=>{let values=next() as array<char> return if calls=?1 and values.length=?2 and values[1]=?"z" 42 else 0}', 42),
 ]
 
+# The narrowed union must use child tags/layouts even when its original slot
+# holds a parent record, directly or as the payload of another union. The
+# children deliberately put the common field at different offsets.
+BRAND_READ_TYPES = '''
+Token=$abstract type of [loc:int64]
+Left=type of Token & [value:int64]
+Right=type of Token & [padding:int64 value:int64]
+Other=type of Token & []
+Descendant=type of Left & [extra:int64]
+'''
+BRAND_READ_CASES = [
+    BRAND_READ_TYPES + '''
+let read=(node:Token):>int64=>{if node is? Left|Right return node.value return 0}
+let main=():>int64=>read(Descendant[0 20 777])+read(Right[0 999 22])+read(Other[0])
+''',
+    BRAND_READ_TYPES + '''
+let read=(node:Token|none):>int64=>{if node is? Left|Right return node.value return 0}
+let main=():>int64=>read(Left[0 20])+read(Right[0 999 22])+read(none)+read(Other[0])
+''',
+    BRAND_READ_TYPES + '''
+Box:type=[node:Token]
+let read=(box:Box):>int64=>{if box.node is? Left|Right return box.node.value return 0}
+let main=():>int64=>read(Box[Left[0 20]])+read(Box[Right[0 999 22]])
+''',
+    BRAND_READ_TYPES + '''
+let read=(nodes:array<Token length=1>):>int64=>{let node=nodes[0] if node is? Left|Right return node.value return 0}
+let main=():>int64=>read([Left[0 20]])+read([Right[0 999 22]])
+''',
+    BRAND_READ_TYPES + '''
+let select=(node:Token):>Left|Right=>{if node is? Left|Right {let saved=node return saved} return Left[0 0]}
+let read=(node:Left|Right):>int64=>node.value
+let main=():>int64=>read(select(Left[0 20]))+read(select(Right[0 999 22]))
+''',
+    BRAND_READ_TYPES + '''
+let read=(node:Token|int64):>int64=>{
+    if node is? Left|Right|int64 {
+        let saved=node
+        if saved is? int64 return saved
+        return saved.value
+    }
+    return 0
+}
+let main=():>int64=>read(Left[0 20])+read(Right[0 999 22])+read(0)+read(Other[0])
+''',
+    '''
+Token=$abstract type of [loc:int64]
+Left=type of Token & [items:array<int64>]
+Right=type of Token & [padding:int64 items:array<int64>]
+let read=(node:Token):>array<int64>=>{if node is? Left|Right return node.items return []}
+let main=():>int64=>{
+    let original:Token=Left[0 [20 22]]
+    let values=read(original)
+    let saved=values
+    let other=read(Right[0 999 [42]])
+    if values.length not=?2 or saved.length not=?2 or other.length not=?1 return 0
+    values[0]=99
+    values.push(100)
+    let again=read(original)
+    if again.length not=?2 or again[0] not=?20 or other[0] not=?42 return 0
+    return saved[0]+saved[1]
+}
+''',
+]
+
 # Runtime class predicates share one observed value and guard optional payloads.
 BRAND_CASES = [
+    *((body, 42) for body in BRAND_READ_CASES),
     ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base):>bool=>x is? A|B\nlet main=():>int64=>if choose(A[1]) and choose(B[2]) and choose(Child[3]) and not choose(C[4]) 42 else 0', 42),
     ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base):>bool=>x isnt? A|B\nlet main=():>int64=>if not choose(A[1]) and not choose(B[2]) and choose(C[4]) 42 else 0', 42),
     ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base):>bool=>x is? (Base & ~A)\nlet main=():>int64=>if choose(B[2]) and not choose(Child[3]) and choose(C[4]) 42 else 0', 42),
@@ -473,9 +538,11 @@ def test_native_scalar_lowering(tmp_path):
         assert native.returncode == 0, native.stdout + native.stderr
         output = case.with_suffix('.udewy')
         output.write_text(native.stdout)
-        assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-        result = subprocess.run([cache_artifact(output).resolve()], timeout=10, check=False)
-        assert result.returncode == expected_exit, text
+        targets = ['x86_64', 'c'] if text.removeprefix(ARENA) in BRAND_READ_CASES else ['x86_64']
+        for target in targets:
+            assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+            result = subprocess.run([cache_artifact(output).resolve()], timeout=10, check=False)
+            assert result.returncode == expected_exit, text
 
     for index,text in enumerate(REJECTED_CASES):
         case=tmp_path/f'rejected-{index}.dewy'

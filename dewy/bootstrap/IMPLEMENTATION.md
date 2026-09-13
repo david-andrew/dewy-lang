@@ -25,6 +25,27 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native lowering makes a diverging function tail explicit for µDewy's
+  syntactic return check. Calls to `never` functions keep their behavior;
+  lowering appends an unreachable return, as the hosted backend does. This
+  does not change µDewy's control-flow or boolean semantics. Tests exercise
+  both an ordinary return and the actual process-exit path on both backends.
+
+- Branded-parent narrowing can change storage representation. A `Token`
+  record read as `Left | Right` needs a child-tagged cell; a `Token | none`
+  cell narrowed to those children needs its parent tag replaced. Native
+  lowering now selects the child's dynamic brand and layout at that boundary.
+  Regression cases cover differing field offsets, descendants, optional and
+  mixed scalar storage, field reads, and saved/returned unions. Reads with
+  unchanged types skip this conversion analysis.
+
+- Related hosted gaps remain: `Token | none` tested for `Left | Right` can
+  incorrectly evaluate false, and disjunctive child tests on object fields
+  do not yet establish the same read facts as tests on local bindings.
+  Neither compiler currently propagates that narrowing directly through an
+  array index; snapshotting the element into a local works. These are proof
+  and representation followups, not proposals for new language semantics.
+
 - Checked function defaults are children of native HIR function literals.
   Proof discharge, helper reachability, representation selection, and nested
   function discovery now traverse them. Native execution accepts refined
