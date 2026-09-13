@@ -54,3 +54,26 @@ feature or a change to value semantics.
 Borrowed byte/grapheme arrays can retain a string descriptor in their owner
 slot. The explicit shared flag distinguishes that pointer from a reference
 count; raw exposure first gives such a view independent array storage.
+
+## Native gates after sharing and temporary reclamation
+
+The same checker-construction kernel compiled through native lowering now
+allocates 616,000 bytes for 500 constructions, at both graph sizes, retains
+zero bytes and copies zero dynamic-array payload bytes. The allocation count
+differs from hosted lowering; the important properties are independence from
+graph size and reclamation after the construction scope ends.
+
+A hosted-generated native C seed successfully compiled and ran the sharing,
+raw-exposure, checker-context and refined-union fixtures through its full
+command-line pipeline. Each prelude-using fixture took approximately 35–36
+seconds on the development machine; the sharing fixture peaked at about
+2.5 GB RSS. The no-prelude literal took 0.07 seconds. These are bounded
+integration results, not a claim that compiler self-hosting is complete.
+The direct x86_64 seed passed the literal gate but exceeded the 90-second
+limit on the first prelude-using fixture. Its performance remains unfinished.
+
+Building the large C seed itself with the current C backend and `cc -O2`
+took approximately 13 minutes. C compilation is consequently a separate
+remaining cost from executing the native compiler. An `-O1` experiment
+exceeded a five-minute cap and provides no evidence yet for changing the
+default optimization level.
