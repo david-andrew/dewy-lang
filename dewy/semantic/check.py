@@ -8843,10 +8843,13 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             hint=f'available fields: {", ".join(item.name for item in value.type.fields) or "(none)"}',
         )
     access = hir.MemberAccess(binop.loc, field.type, value, name, field.mutable)
-    if isinstance(field.type, ty.TypeOr):
-        # a union field narrowed by an earlier `is?` on this route reads as
-        # the narrowed member (the route's refinement, dropped on assignment)
-        route_id = sb.array_route_id(access, ctx.binding_registry)
+    if isinstance(field.type, (ty.ObjectType, ty.TypeOr)):
+        # Membership tests refine a record family just as they refine a
+        # union. Consume its existing route fact without allocating a new
+        # identity on ordinary reads; root/prefix writes discard the fact.
+        # Array shape facts have a separate declared growth contract and
+        # cannot replace the field's ArrayType here.
+        route_id = sb.array_route_id(access, ctx.binding_registry, create=False)
         refined = ctx.refinements.get(route_id) if route_id is not None else None
         if refined is not None:
             access = replace(access, type=ty.unfold(refined))

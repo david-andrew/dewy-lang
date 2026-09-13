@@ -5,6 +5,8 @@ import pytest
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
+from dewy.semantic import check
+from dewy.semantic.errors import UserError
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
 
@@ -40,3 +42,52 @@ let main=():>int64=>{
     assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10)
     assert result.returncode == 42, result.stdout + result.stderr
+
+
+FIELD_FAMILY = '''
+Token=$abstract type of [loc:int64]
+Left=type of Token & [value:int64]
+Right=type of Token & [padding:int64 value:int64]
+Other=type of Token & []
+Box:type=[node:Token]
+'''
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_parent_fields_use_their_proven_child_union(tmp_path, target):
+    source = tmp_path / 'fields.dewy'
+    source.write_text(FIELD_FAMILY + '''
+let read=(box:Box):>int64=>{
+    if box.node is? Left|Right {
+        let saved=box.node
+        return saved.value+box.node.value
+    }
+    return 0
+}
+let main=():>int64=>read(Box[Left[0 10]])+read(Box[Right[0 999 11]])+read(Box[Other[0]])
+''')
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), target=target))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('mutation', [
+    'box.node=Other[0]',
+    'box=Box[Other[0]]',
+    'replace_node(@box)',
+])
+def test_parent_field_narrowing_is_invalidated_by_writes(mutation):
+    source = FIELD_FAMILY + '''
+let replace_node=(@box:Box):>void=>{box.node=Other[0];}
+let read=(box:Box):>int64=>{
+    if box.node is? Left|Right {
+''' + mutation + '''
+        return box.node.value
+    }
+    return 0
+}
+'''
+    with pytest.raises(UserError, match='unknown object field `value`'):
+        check.typecheck_and_resolve(SrcFile(None, source))

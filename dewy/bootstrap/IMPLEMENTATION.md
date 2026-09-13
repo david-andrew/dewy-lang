@@ -43,8 +43,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   general unions, including negated tests. Narrowed parent payloads reuse the
   existing child-union view conversion. Helper-generated lazy predicates
   pass through ordinary flow lowering before appearing in value positions.
-  Disjunctive child tests on object fields still do not establish the same
-  hosted read facts as tests on local bindings.
+  Record fields consume existing route facts just as union fields do;
+  field/root assignments and mutating place calls invalidate those facts.
+  This substitution does not extend to array shapes: a current length fact
+  must not replace the field's declared growth contract.
   Neither compiler currently propagates that narrowing directly through an
   array index; snapshotting the element into a local works. These are proof
   and representation followups, not proposals for new language semantics.

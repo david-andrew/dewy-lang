@@ -746,6 +746,10 @@ class _ObjectLowering:
         field = node.value.type.field(node.name)
         field_type = field.type if field is not None else node.type
         if isinstance(field_type, ty.ObjectType):
+            narrowed = ty.runtime_union_members(node.type)
+            if narrowed is not None:
+                extra, view = self._family_union_view(address, field_type, narrowed, node)
+                return [*prelude, *extra], view
             return prelude, address
         members = self._field_union_members(field_type)
         if members is not None:

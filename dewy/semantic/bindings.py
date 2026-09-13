@@ -187,8 +187,11 @@ def _unwrap_fact_route(node: hir.AST) -> hir.AST:
     return node
 
 
-def array_route_id(node: hir.AST, registry: BindingRegistry) -> int | None:
-    """The fact id of a named sequence or its pure member-access route."""
+def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = True) -> int | None:
+    """The fact id of a named sequence or its pure member-access route.
+
+    Use ``create=False`` for reads that only consume an existing route fact.
+    """
     path = access_path(node, unwrap=_unwrap_fact_route)
     root_id, fields = path.binding_id, path.fields
     if root_id is None or fields is None:
@@ -197,6 +200,8 @@ def array_route_id(node: hir.AST, registry: BindingRegistry) -> int | None:
         return root_id
     if root_id not in registry.by_id:
         return None
+    if not create:
+        return registry.route_ids.get((root_id, fields))
     return registry.route_id(root_id, fields, node.type, node.loc)
 
 
