@@ -13,7 +13,7 @@ from udewy.frontend import EntryPointOptions, entry_point
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize('fixture', ['native_array_sharing', 'native_array_sharing_raw', 'native_sharing_contexts', 'native_refined_union_storage'])
+@pytest.mark.parametrize('fixture', ['native_array_sharing', 'native_array_sharing_raw', 'native_sharing_contexts', 'native_refined_union_storage', 'native_borrowed_string_arrays'])
 def test_array_sharing(tmp_path, fixture):
     seed = tmp_path / f'{fixture}.udewy'
     seed.write_text(codegen(SrcFile.from_path(ROOT / 'tests/fixtures' / f'{fixture}.dewy')))
@@ -23,6 +23,8 @@ def test_array_sharing(tmp_path, fixture):
         assert entry_point(seed, [], EntryPointOptions(compile_only=True, target=target)) == 0
         result = subprocess.run([cache_artifact(seed).resolve()], capture_output=True, text=True, timeout=10, check=False)
         assert result.returncode == 42, result.stdout + result.stderr
+        if fixture == 'native_borrowed_string_arrays':
+            assert result.stdout == ('abc' * 64 + '\n') * 2
         if fixture == 'native_array_sharing_raw':
             assert int(result.stdout.strip()) > 0  # Positive control for the copy counter.
         if fixture == 'native_sharing_contexts':

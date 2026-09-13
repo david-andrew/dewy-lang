@@ -1,0 +1,16 @@
+# Byte and grapheme views retain a string in their owner slot. That pointer
+# must never be interpreted as an array sharing counter or written through.
+show=(text:string):>void=>{printl(text) printl(text)}
+let main=():>int64=>{
+    let parts:array<string>=[]
+    loop i in 0.. and i <? 64 {parts.push('abc')}
+    let text=parts.join('')
+    show(text)
+    let graphemes=text as array<grapheme>
+    let copied=graphemes
+    $runtime_assert copied.length >? 0
+    copied[0]='z'
+    $runtime_assert text.length >? 0
+    $runtime_assert text[0]=?'a'
+    return 42
+}

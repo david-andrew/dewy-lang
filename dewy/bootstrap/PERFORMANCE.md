@@ -45,8 +45,12 @@ boundary in fixtures; don't use their values as source-level proof facts.
 
 Array descriptors remain private. The owner word currently distinguishes
 frame/static storage (0), unique arena storage (1), a shared count pointer
-(>1), and raw-exposed pinned storage (-1). Exposing raw aggregate storage
+(>1, explicitly marked by the shared flag), and raw-exposed pinned storage (-1). Exposing raw aggregate storage
 first detaches existing snapshots and prevents subsequent sharing of the
 exposed tree. Without a tracked raw-pointer lifetime, that tree is retained
 conservatively. This is an implementation fallback, not a new ownership
 feature or a change to value semantics.
+
+Borrowed byte/grapheme arrays can retain a string descriptor in their owner
+slot. The explicit shared flag distinguishes that pointer from a reference
+count; raw exposure first gives such a view independent array storage.

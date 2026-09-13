@@ -1,7 +1,8 @@
 """Provisional copy-on-write backing storage; source values stay independent.
 
 Descriptors remain private. Owner 0 denotes frame/static data, 1 uniquely
-owned arena data, and an aligned pointer >1 a shared reference-count word.
+owned arena data, and, only with ARRAY_SHARED, an aligned pointer >1 a shared count.
+Borrowed string views can instead keep their source string in owner.
 Only arena data can be shared. Mutation detaches before exposing an element
 place; final release visits the elements exactly once. See bootstrap/PERFORMANCE.md
 for the open long-term predictability/zero-cost design question.
@@ -18,6 +19,7 @@ from .lowering_shared import (
     ARRAY_LENGTH_OFFSET,
     ARRAY_MUTABLE,
     ARRAY_OWNER_OFFSET,
+    ARRAY_SHARED,
     ARRAY_STRIDE_OFFSET,
 )
 
@@ -67,6 +69,11 @@ class _ArraySharing:
             return [*prelude, *before], result
         return self._extract_expression(node)
 
+    def _array_is_shared(self, descriptor, owner, loc):
+        flags = self._load_i64_field(descriptor, ARRAY_FLAGS_OFFSET, loc)
+        tagged = self._int64_comparison('__ne__', self._int64_binary('__and__', flags, self._int64_literal(loc, ARRAY_SHARED), loc), self._int64_literal(loc, 0), loc)
+        return hir.ShortCircuit(loc, 'bool', 'and', tagged, self._int64_comparison('__gt__', owner, self._int64_literal(loc, 1), loc))
+
     def _note_array_copy(self, size, loc):
         helper = next((candidate for candidate in self.functions if candidate.logical_name.endswith('_arena_note_copy')), None)
         if helper is None:
@@ -98,15 +105,16 @@ class _ArraySharing:
                 self._assign(owner, self._arena_allocation(size, loc), loc),
                 self._store_i64_field(owner, 0, one, loc),
                 self._store_i64_field(source, ARRAY_OWNER_OFFSET, owner, loc),
+                self._store_i64_field(source, ARRAY_FLAGS_OFFSET, self._int64_binary('__or__', self._load_i64_field(source, ARRAY_FLAGS_OFFSET, loc), self._int64_literal(loc, ARRAY_SHARED), loc), loc),
             ], loc),
             self._store_i64_field(owner, 0, self._int64_binary('__add__', self._load_i64_field(owner, 0, loc), one, loc), loc),
             self._assign(target, self._arena_allocation(self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc), loc),
             *[self._store_i64_field(target, offset, self._load_i64_field(source, offset, loc), loc)
               for offset in (ARRAY_DATA_OFFSET, ARRAY_LENGTH_OFFSET, ARRAY_CAPACITY_OFFSET, ARRAY_STRIDE_OFFSET, ARRAY_OWNER_OFFSET)],
-            self._store_i64_field(target, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE | ARRAY_ARENA_DESCRIPTOR), loc),
+            self._store_i64_field(target, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE | ARRAY_ARENA_DESCRIPTOR | ARRAY_SHARED), loc),
         ]
         return [*before, self._declare(target, self._int64_literal(loc, 0), loc),
-                self._if(self._int64_comparison('__gt__', self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 0), loc),
+                self._if(hir.ShortCircuit(loc, 'bool', 'or', self._int64_comparison('__eq__', self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), one, loc), self._array_is_shared(source, self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), loc)),
                          shared, loc, [*cloned, self._assign(target, result, loc)])], target
 
     def _ensure_unique_array(self, descriptor, element, loc):
@@ -153,7 +161,7 @@ class _ArraySharing:
         shared = self._if(self._int64_comparison('__gt__', self._load_i64_field(owner, 0, loc), one, loc), detach, loc, unique)
         return [self._declare(source, descriptor, loc),
                 self._declare(owner, self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), loc),
-                self._if(self._int64_comparison('__gt__', owner, one, loc), [shared, self._store_i64_field(source, ARRAY_OWNER_OFFSET, one, loc)], loc)]
+                self._if(self._array_is_shared(source, owner, loc), [shared, self._store_i64_field(source, ARRAY_OWNER_OFFSET, one, loc), self._store_i64_field(source, ARRAY_FLAGS_OFFSET, self._int64_binary('__and__', self._load_i64_field(source, ARRAY_FLAGS_OFFSET, loc), self._int64_literal(loc, ~ARRAY_SHARED), loc), loc)], loc)]
 
     def _release_owned_array(self, descriptor, loc, *, element=None):
         if not self._has_arena():
@@ -171,7 +179,7 @@ class _ArraySharing:
         ]
         last = [self._arena_release_call(owner, self._int64_literal(loc, 8), loc),
                 self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, one, loc), *original]
-        release = self._if(self._int64_comparison('__gt__', owner, one, loc),
+        release = self._if(self._array_is_shared(descriptor, owner, loc),
                            [self._if(self._int64_comparison('__gt__', self._load_i64_field(owner, 0, loc), one, loc), retained, loc, last)], loc, original)
         return [self._declare(owner, self._load_i64_field(descriptor, ARRAY_OWNER_OFFSET, loc), loc),
                 self._if(self._int64_comparison('__ne__', owner, self._int64_literal(loc, -1), loc), [release], loc)]
@@ -214,6 +222,14 @@ class _ArraySharing:
         unfolded = ty.unfold(ty.strip_refinement(type_))
         if isinstance(unfolded, ty.ArrayType):
             body = self._ensure_unique_array(source, unfolded.element, loc)
+            # A borrowed byte/grapheme view may keep a string descriptor in
+            # owner. It is not a reference count, nor owned array storage.
+            copied, fresh = self._clone_dynamic_array_storage(replace(source, type=unfolded), unfolded, arena=True)
+            adopt = [*copied,
+                     *[self._store_i64_field(source, offset, self._load_i64_field(fresh, offset, loc), loc)
+                       for offset in (ARRAY_DATA_OFFSET, ARRAY_LENGTH_OFFSET, ARRAY_CAPACITY_OFFSET, ARRAY_STRIDE_OFFSET)],
+                     self._arena_release_call(fresh, self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc)]
+            body.append(self._if(self._int64_comparison('__ne__', self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 1), loc), adopt, loc))
             body.append(self._store_i64_field(source, ARRAY_OWNER_OFFSET, self._int64_literal(loc, -1), loc))
             index = self._name('pin_index', loc)
             child = self._array_load(self._array_element_address(source, index, unfolded.element, loc), unfolded.element, loc)

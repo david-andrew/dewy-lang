@@ -43,6 +43,8 @@ ARRAY_MUTABLE = 1
 ARRAY_BORROWED_STATIC = 2
 # the descriptor block itself came from the arena: an owned local releases it with its data
 ARRAY_ARENA_DESCRIPTOR = 4
+# Only with this flag does owner point at an array reference count.
+ARRAY_SHARED = 8
 
 type ArrayRepresentation = Literal[
     'descriptor',

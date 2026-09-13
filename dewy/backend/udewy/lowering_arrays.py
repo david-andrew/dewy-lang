@@ -2450,9 +2450,7 @@ class _ArrayLowering(_ArraySharing):
                 self._store_i64_field(descriptor, ARRAY_CAPACITY_OFFSET, length, loc),
                 self._store_i64_field(descriptor, ARRAY_STRIDE_OFFSET, self._int64_literal(loc, element_bytes), loc),
                 self._store_i64_field(descriptor, ARRAY_FLAGS_OFFSET, self._int64_literal(loc, ARRAY_MUTABLE | ARRAY_ARENA_DESCRIPTOR), loc),   # an arena block: released with the data
-                self._if(self._int64_comparison('__lt__', self._load_i64_field(descriptor, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 0), loc),
-                         [self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, -1), loc)], loc,
-                         [self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc)]),   # arena data: releasable
+                self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, self._int64_literal(loc, 1), loc),   # arena data: releasable
             ])
         data_pointer = self._load_i64_field(descriptor, ARRAY_DATA_OFFSET, loc)
         cursor = declare('spread_cursor', self._int64_literal(loc, 0))
