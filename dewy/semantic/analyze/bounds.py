@@ -4007,6 +4007,13 @@ class _BoundsValidator:
         bare = _strip_casts(condition)
         if isinstance(bare, hir.TypeTest) and isinstance(_strip_casts(bare.value), hir.ExpressedIdentifier):
             tested = _strip_casts(bare.value)
+            if truth != bare.negated and tested.binding_id is not None:
+                selected = self._declared_type_interval(bare.test_type)
+                if selected is not None:
+                    narrowed = self._binding_interval(refined, tested.binding_id).intersect(selected)
+                    if narrowed.is_empty:
+                        return None
+                    refined[tested.binding_id] = narrowed
             remembered = self.member_facts.get(tested.binding_id) if tested.binding_id is not None else None
             if remembered is not None:
                 called = _call_function_type(remembered)
@@ -4021,8 +4028,9 @@ class _BoundsValidator:
                             survivors.append(item)
                     if len(survivors) == 1 and isinstance(survivors[0], ty.RefinedType):
                         self._apply_call_facts(refined, remembered, None, member=survivors[0])
-                        # the member's own bounds (`nat64<…>`: `>= 0`) hold of the narrowed binding
-                        own = self._bounds_of([p for p in survivors[0].propositions if p.term is None and p.field is None])
+                        # The selected member contributes its base width too:
+                        # uint64<n <= src.length> still establishes n >= 0.
+                        own = self._declared_type_interval(survivors[0])
                         if own is not None and tested.binding_id is not None:
                             refined[tested.binding_id] = self._binding_interval(refined, tested.binding_id).intersect(own)
             return refined

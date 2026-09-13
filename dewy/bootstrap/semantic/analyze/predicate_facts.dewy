@@ -97,7 +97,9 @@ selected_member = (node:hir.TypeTest truth:bool state:facts.State @data:Data):>f
     let current=apply_call(state remembered none @data member=survivor)
     if current is? none return none
     let established=current
-    let own=intervals.own_bounds(survivors[0] data.env)
+    # Once the tag selects a member, its base width is evidence as well as
+    # its explicit predicates (uint64<n <= src.length> also has n >= 0).
+    let own=values.declared_interval(survivors[0] data.env)
     if own isnt? none {
         let known=relations.interval_of(facts.Term[tested.binding_id] established data.relations)
         let narrowed=ranges.intersect(known own)
@@ -111,7 +113,23 @@ atomic = (state:facts.State condition:addr truth:bool context:paths.Context @dat
     let id=expressions.strip_casts(condition context.nodes)
     let node=hir.node_at(context.nodes id)
     if node is? hir.Bool return if node.value =? truth state else none
-    if node is? hir.TypeTest return selected_member(node truth state @data)
+    if node is? hir.TypeTest {
+        let current=state
+        let tested_id=expressions.strip_casts(node.value data.env.nodes)
+        let tested=hir.node_at(data.env.nodes tested_id)
+        # A successful type test contributes its numeric width even when
+        # the value has no remembered call-result contract.
+        if truth not=? node.negated and tested is? hir.ExpressedIdentifier and tested.binding_id isnt? none and tested_id in? data.snapshot.terms {
+            let selected=values.declared_interval(node.test_type data.env)
+            if selected isnt? none {
+                let known=relations.interval_of(facts.Term[tested.binding_id] current data.relations)
+                let narrowed=ranges.intersect(known selected)
+                if ranges.is_empty(narrowed) return none
+                facts.set_value(@current facts.Term[tested.binding_id] narrowed)
+            }
+        }
+        return selected_member(node truth current @data)
+    }
     if node is? hir.ExpressedIdentifier and types.is_primitive(types.node_at(data.env.types node.value_type) 'bool') {
         let subject=operand(id state data)
         return comparisons.refine(state '=?' subject comparisons.Operand[interval=ranges.exact(if truth 1 else 0)] true data.relations)

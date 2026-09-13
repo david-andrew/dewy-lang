@@ -24,6 +24,7 @@ main=():>int64=>{{
     let span=Span[0 0]
     let type_nodes:array<types.Type>=[]
     let word=types.primitive('int64' @type_nodes)
+    let unsigned=types.primitive('uint64' @type_nodes)
     let boolean=types.primitive('bool' @type_nodes)
     let string=types.primitive('string' @type_nodes)
     let absent=types.primitive('none' @type_nodes)
@@ -53,6 +54,7 @@ main=():>int64=>{{
     let unpromised=hir.append_node(@nodes hir.FunctionCall[span result_type ordinary [text] []])
     let result=hir.append_node(@nodes hir.ExpressedIdentifier[span result_type 'result' 4])
     let selected=hir.append_node(@nodes hir.TypeTest[span boolean result absent true])
+    let unsigned_selected=hir.append_node(@nodes hir.TypeTest[span boolean result unsigned false])
     let registry=bindings.Registry[]
     registry.by_id[1]=bindings.Binding[1 'i' 'value' span value_type=word]
     registry.by_id[2]=bindings.Binding[2 'j' 'value' span value_type=word]
@@ -105,6 +107,15 @@ main=():>int64=>{{
         $runtime_assert facts.value(facts.Term[3 'length']).key not in? refined
         $runtime_assert facts.value(facts.Term[4]).key not in? refined
     }}
+    # Numeric tag selection supplies a width without any call provenance.
+    data.member_calls.clear
+    refined=predicates.refine(state unsigned_selected true @data)
+    $runtime_assert refined isnt? none
+    bound=facts.lookup(refined facts.value(facts.Term[4]))
+    $runtime_assert bound isnt? none and bound.lower =? 0 and bound.upper =? 18446744073709551615
+    refined=predicates.refine(state unsigned_selected false @data)
+    $runtime_assert refined isnt? none
+    $runtime_assert facts.value(facts.Term[4]).key not in? refined
     return 0
 }}
 ''')

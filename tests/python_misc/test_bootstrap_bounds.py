@@ -76,6 +76,9 @@ CASES = [
 ]
 
 
+FIELD_EXPECTATIONS = dict(zip(CASES[:4], ['ok', 'cannot prove refinement', 'ok', 'cannot prove refinement']))
+
+
 def test_native_bounds_visitor_matches_hosted(tmp_path):
     functions, expected = [], []
     for index, body in enumerate(CASES):
@@ -89,10 +92,9 @@ def test_native_bounds_visitor_matches_hosted(tmp_path):
             expected.append(f'{index}|unfit' if validator.unfit else f'{index}|ok')
         except UserError as error:
             expected.append(f'{index}|{error.report.title}')
-        if index in (0, 2):
-            assert expected[-1] == f'{index}|ok', 'optional field payload contract must establish addr'
-        elif index in (1, 3):
-            assert expected[-1] == f'{index}|cannot prove refinement', 'an unconstrained alternative must prevent the proof'
+        if body in FIELD_EXPECTATIONS:
+            # Other proof suites reuse this driver with their own CASES.
+            assert expected[-1] == f'{index}|{FIELD_EXPECTATIONS[body]}'
         type_lines = []
         build = type_builder(type_lines)
         hir_lines, root_id, names = emit_hir(root, type_value=build, with_names=True)
