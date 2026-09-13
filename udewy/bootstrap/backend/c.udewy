@@ -840,13 +840,13 @@ let c_load_mem = (width:int signed:int):>void => {
         if signed { helper_flag = CH_LOAD_I8  name = "udewy_load_i8" }
         else      { helper_flag = CH_LOAD_U8  name = "udewy_load_u8" }
     } else if width =? 16 {
-        if signed { helper_flag = CH_LOAD_I16  name = "udewy_load_i16" }
+        if signed { helper_flag = CH_LOAD_I16 or CH_LOAD_U16  name = "udewy_load_i16" }
         else      { helper_flag = CH_LOAD_U16  name = "udewy_load_u16" }
     } else if width =? 32 {
-        if signed { helper_flag = CH_LOAD_I32  name = "udewy_load_i32" }
+        if signed { helper_flag = CH_LOAD_I32 or CH_LOAD_U32  name = "udewy_load_i32" }
         else      { helper_flag = CH_LOAD_U32  name = "udewy_load_u32" }
     } else {
-        if signed { helper_flag = CH_LOAD_I64  name = "udewy_load_i64" }
+        if signed { helper_flag = CH_LOAD_I64 or CH_LOAD_U64  name = "udewy_load_i64" }
         else      { helper_flag = CH_LOAD_U64  name = "udewy_load_u64" }
     }
     c_helpers = c_helpers or helper_flag

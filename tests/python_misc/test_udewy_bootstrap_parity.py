@@ -415,3 +415,17 @@ def test_c_short_circuit_matches_between_compilers(bootstrap_binary, tmp_path) -
         work.mkdir()
         binary = _compile_with(compiler, source, 'c', work)
         assert subprocess.run([str(binary)], check=False, timeout=5).returncode == 0
+
+
+@pytest.mark.parametrize('width', [16, 32, 64])
+def test_c_signed_load_supplies_unsigned_helper(bootstrap_binary, tmp_path, width) -> None:
+    if which('cc') is None:
+        pytest.skip('cc not installed')
+    source = f'''let main=():>int=>{{
+        let memory:int=__alloca__(8)
+        __store_i{width}__(-1 memory)
+        if __load_i{width}__(memory) not=? -1 {{return 1}}
+        return 0
+    }}'''
+    binary = _compile_with([str(bootstrap_binary)], source, 'c', tmp_path)
+    assert subprocess.run([str(binary)], check=False, timeout=5).returncode == 0
