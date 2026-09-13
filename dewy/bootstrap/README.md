@@ -143,3 +143,27 @@ all four parser-stage source files through both t2 and p0. The native p0
 self-parses took approximately 1–3 seconds per file in the development run.
 Compiler regressions cover the storage, narrowing, bounds, and debug-info
 issues encountered while building the parser.
+
+## Native pair verification
+
+Given native seed executables, rebuild both compilers twice without invoking
+Python and compare the two resulting generations:
+
+```sh
+bash tools/bootstrap_native.sh --target c /path/to/dewy-seed /path/to/udewy-seed /path/to/native-pair
+bash tools/check_native.sh /path/to/native-pair
+bash tools/package_native.sh /path/to/native-pair /path/to/dewy-linux-x86_64.tar.gz
+```
+
+The C route requires `cc` and accelerates execution of the compiler. Omit
+`--target c` to use direct x86_64 generation; its performance is still under
+development. See [PERFORMANCE.md](PERFORMANCE.md) for measured gates and the
+open storage-cost design question.
+
+The build script compares compiler binaries and checks that the compiler and
+library sources stayed unchanged. The execution check separately exercises
+both output backends, including µDewy's conditional-only short-circuit rules,
+Dewy calls and loops, aggregate value independence, and borrowed string
+views. Run it after a successful fixed-point build: matching generations
+alone do not establish correct program behavior. Packaging verifies the
+generation and source checksums before bundling the pair and its library.
