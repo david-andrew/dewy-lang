@@ -1,0 +1,22 @@
+# Presence belongs to the optional cell, even when read facts give its
+# array payload a more precise length than the declaration's storage type.
+let present=(values:array<int64>|none):>bool=>values is? array<int64>
+let absent=(values:array<int64>|none):>bool=>values isnt? array<int64>
+let grow=():>int64=>{
+    let values:array<int64>|none=[]
+    if values isnt? none {
+        values.push(42)
+        return values[0]
+    }
+    return 1
+}
+let main=():>int64=>{
+    let values:array<int64>|none=[42]
+    if values isnt? array<int64> return 2
+    if not present(values) or absent(values) return 3
+    if present(none) or not absent(none) return 4
+    let empty:array<int64>|none=[]
+    if empty isnt? array<int64> return 5
+    if not present(empty) or absent(empty) return 6
+    return grow()
+}

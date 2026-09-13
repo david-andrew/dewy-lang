@@ -4620,9 +4620,19 @@ class _Lowerer(
                     else union_value
                 )
                 tag = self._optional_tag(cell, node.loc)
+                optional = ty.optional_payload(node.value.type) is not None
+
+                def member_test(member: ty.TypeExpr) -> hir.AST:
+                    # An optional has exactly one present alternative. Read
+                    # facts can refine its array length without changing the
+                    # stored tag; presence does not depend on that annotation.
+                    if optional and member != 'none':
+                        return self._tag_present(tag, node.loc)
+                    return self._tag_is(tag, member, node.loc)
+
                 test: hir.AST | None = None
                 for index in matching:
-                    comparison = self._tag_is(tag, members[index], node.loc)
+                    comparison = member_test(members[index])
                     test = (
                         comparison
                         if test is None
@@ -4637,7 +4647,7 @@ class _Lowerer(
                     in_brand = self._brand_range_test(self._brand_word_load(pointer, member_type, node.loc), tested_brand, node.loc)
                     if node.negated:
                         in_brand = hir.FunctionCall(node.loc, 'bool', hir.ExpressedIdentifier(node.loc, ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', []), '__not__'), [in_brand], {})
-                    comparison = hir.ShortCircuit(node.loc, 'bool', 'and', self._tag_is(tag, members[index], node.loc), in_brand)
+                    comparison = hir.ShortCircuit(node.loc, 'bool', 'and', member_test(members[index]), in_brand)
                     test = comparison if test is None else hir.ShortCircuit(node.loc, 'bool', 'or', test, comparison)
                 assert test is not None
                 return union_prelude, test
