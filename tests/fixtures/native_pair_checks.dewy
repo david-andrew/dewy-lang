@@ -1,0 +1,27 @@
+# Share one checked prelude across the integration cases. Each module keeps
+# its own bindings and entry function; every case still has to return 42.
+import p"native_sibling_field_facts.dewy" as sibling
+import p"native_refined_tag_tests.dewy" as tags
+import p"native_stored_refinement_contracts.dewy" as stores
+import p"native_array_sharing.dewy" as sharing
+import p"native_array_sharing_raw.dewy" as raw
+import p"native_borrowed_string_arrays.dewy" as borrowed
+import p"native_shared_element_replacement.dewy" as replacements
+
+let main=():>int64=>{
+    printl('Checking sibling field facts')
+    if sibling.main() not=? 42 return 1
+    printl('Checking refined union tags')
+    if tags.main() not=? 42 return 2
+    printl('Checking stored refinement contracts')
+    if stores.main() not=? 42 return 3
+    printl('Checking aggregate sharing')
+    if sharing.main() not=? 42 return 4
+    printl('Checking exposed array storage')
+    if raw.main() not=? 42 return 5
+    printl('Checking borrowed string arrays')
+    if borrowed.main() not=? 42 return 6
+    printl('Checking shared element replacement')
+    if replacements.main() not=? 42 return 7
+    return 42
+}

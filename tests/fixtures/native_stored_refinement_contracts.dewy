@@ -1,0 +1,17 @@
+# A proved store keeps its contract across later branch joins.
+Trouble:type=[message:string]
+let word=(x:addr):>addr|Trouble=>x
+let maybe=(x:addr):>addr|none|Trouble=>x
+let use=(x:addr):>addr=>x
+let check=(x:addr flag:bool):>addr|Trouble=>{
+    let value=if flag word(x) else word(x)
+    if value is? Trouble return value
+    if flag {
+        let inhabitant=maybe(value)
+        if inhabitant is? Trouble return inhabitant
+        if inhabitant isnt? none {value=inhabitant}
+    }
+    if value is? Trouble return value
+    return use(value)
+}
+let main=():>int64=>{let result=check(42 true) return if result is? Trouble 1 else result}

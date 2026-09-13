@@ -8,25 +8,7 @@ from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
-PREFIX = '''Trouble:type=[message:string]
-let word=(x:addr):>addr|Trouble=>x
-let maybe=(x:addr):>addr|none|Trouble=>x
-let use=(x:addr):>addr=>x
-'''
-STORED_HANDLE = PREFIX + '''
-let check=(x:addr flag:bool):>addr|Trouble=>{
-    let value=if flag word(x) else word(x)
-    if value is? Trouble return value
-    if flag {
-        let inhabitant=maybe(value)
-        if inhabitant is? Trouble return inhabitant
-        if inhabitant isnt? none {value=inhabitant}
-    }
-    if value is? Trouble return value
-    return use(value)
-}
-let main=():>int64=>{let result=check(42 true) return if result is? Trouble 1 else result}
-'''
+STORED_HANDLE = (ROOT / 'tests/fixtures/native_stored_refinement_contracts.dewy').read_text()
 
 
 def test_native_stored_refinement_contracts(tmp_path):
