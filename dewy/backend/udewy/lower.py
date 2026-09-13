@@ -4620,7 +4620,7 @@ class _Lowerer(
                     else union_value
                 )
                 tag = self._optional_tag(cell, node.loc)
-                optional = ty.optional_payload(node.value.type) is not None
+                optional = len(members) == 2 and 'none' in members
 
                 def member_test(member: ty.TypeExpr) -> hir.AST:
                     # An optional has exactly one present alternative. Read

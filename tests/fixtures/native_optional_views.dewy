@@ -2,6 +2,11 @@
 # array payload a more precise length than the declaration's storage type.
 let present=(values:array<int64>|none):>bool=>values is? array<int64>
 let absent=(values:array<int64>|none):>bool=>values isnt? array<int64>
+# A general union narrowed to an optional still carries its original tags.
+let other=(value:array<int64>|int64|none):>bool=>{
+    if value is? int64 return false
+    return value isnt? array<int64>
+}
 let grow=():>int64=>{
     let values:array<int64>|none=[]
     if values isnt? none {
@@ -18,5 +23,6 @@ let main=():>int64=>{
     let empty:array<int64>|none=[]
     if empty isnt? array<int64> return 5
     if not present(empty) or absent(empty) return 6
+    if other([42]) or not other(none) return 7
     return grow()
 }
