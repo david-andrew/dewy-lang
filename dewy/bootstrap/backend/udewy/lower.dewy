@@ -957,10 +957,19 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State):>ad
     $runtime_assert members isnt? none
     if cell_members(actual @state) isnt? none return read_value(value actual expected node @state)
     let selected:addr?=none
+    # Preserve an existing member before considering other types it fits.
+    # Proof joins can retain both a narrowed record arm and a broader arm;
+    # repacking the former keeps its own tag. This does not select between
+    # ambiguous source conversions that have no exact member identity.
     loop member in members {
-        if subtyping.is_subtype(actual member state.links @state.type_nodes) {
-            if selected isnt? none return reject(node 'overlapping union payload representations' @state)
-            selected=member
+        if actual =? member {selected=member break}
+    }
+    if selected is? none {
+        loop member in members {
+            if subtyping.is_subtype(actual member state.links @state.type_nodes) {
+                if selected isnt? none return reject(node 'overlapping union payload representations' @state)
+                selected=member
+            }
         }
     }
     if selected is? none {

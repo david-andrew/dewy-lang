@@ -46,6 +46,10 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   direction of subtyping alone settles `Token & ~Child` versus `Record`.
   Copying, release, and exposed-storage traversal dispatch on exact runtime
   brands within the storage family, preserving fields after exclusions.
+  Packing prefers an exact existing union member before subtype candidates:
+  overlapping proof-join arms can share values without making a known
+  member's tag ambiguous. Source-level ambiguous materializations keep their
+  existing diagnostic.
 
 - Hosted optional family tests now use the same guarded tag/brand checks as
   general unions, including negated tests. Narrowed parent payloads reuse the

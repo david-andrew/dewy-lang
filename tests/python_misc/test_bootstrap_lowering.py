@@ -105,6 +105,34 @@ Other=type of Token & []
 Descendant=type of Left & [extra:int64]
 '''
 BRAND_READ_CASES = [
+    # A join after nested conditions keeps overlapping logical record arms.
+    # Repacking an arm that is already a union member must retain that tag,
+    # even when it also fits a broader arm of the same union.
+    '''
+Token=$abstract type of [loc:int64]
+Variable=type of Token & [value:int64]
+Atom=type of Token & [value:int64]
+Text=type of Token & [value:int64]
+Child=type of Text & [extra:int64]
+Other=type of Token & [value:int64]
+let read=(a:Token b:Token):>int64=>{
+    if a is? Variable return 0
+    if b is? Variable return 0
+    if a is? Text {
+        if b is? Text return 0
+        if b is? Atom return 0
+    }
+    if a is? Atom and b is? Text return a.value+b.value
+    return 0
+}
+let main=():>int64=>{
+    if read(Text[0 20] Atom[0 22]) not=?0 return 1
+    if read(Atom[0 20] Other[0 22]) not=?0 return 2
+    if read(Variable[0 20] Text[0 22]) not=?0 return 3
+    if read(Atom[0 20] Variable[0 22]) not=?0 return 4
+    return read(Atom[0 20] Child[0 22 999])
+}
+''',
     # Earlier exclusions plus a two-variable condition retain a logical
     # union such as (Token & Record & ~Nested) | Nested. The intersection
     # arm still has Record storage; it is not a non-record payload.
