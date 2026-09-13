@@ -3,6 +3,7 @@
 import p"native_sibling_field_facts.dewy" as sibling
 import p"native_refined_tag_tests.dewy" as tags
 import p"native_stored_refinement_contracts.dewy" as stores
+import p"native_parameter_defaults.dewy" as defaults
 import p"native_array_sharing.dewy" as sharing
 import p"native_array_sharing_raw.dewy" as raw
 import p"native_borrowed_string_arrays.dewy" as borrowed
@@ -23,5 +24,7 @@ let main=():>int64=>{
     if borrowed.main() not=? 42 return 6
     printl('Checking shared element replacement')
     if replacements.main() not=? 42 return 7
+    printl('Checking parameter defaults')
+    if defaults.main() not=? 42 return 8
     return 42
 }

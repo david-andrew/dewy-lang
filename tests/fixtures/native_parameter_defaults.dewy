@@ -1,0 +1,16 @@
+# Defaults carry checked expressions, including proofs and function bodies.
+# Keep helpers referenced only by a default, and evaluate each default only
+# when its argument is absent.
+let calls:int64=0
+let seed=():>addr=>{calls+=1 return 42}
+let choose=(depth:addr=seed()):>addr=>depth
+let literal=(depth:addr=2):>addr=>depth
+let invoke=(fn:<():>int64>=(():>int64=>42)):>int64=>fn()
+
+let main=():>int64=>{
+    if choose(40) not=? 40 or calls not=? 0 return 1
+    if choose() not=? 42 or calls not=? 1 return 2
+    if literal() not=? 2 or literal(3) not=? 3 return 3
+    if invoke() not=? 42 return 5
+    return 42
+}

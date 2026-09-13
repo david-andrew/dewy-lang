@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # the address-space proof obligation. The tag then suffices at runtime.
 REFINED_TAG_CASES = [
     STORED_HANDLE,
+    (ROOT / 'tests/fixtures/native_parameter_defaults.dewy').read_text(),
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(Record[0]) 42 else 1",
     "let test=(value:addr?):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(none) 42 else 1",
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value isnt? addr\nlet main=():>int64=>if not test(42) and test(Record[0]) 42 else 1",
@@ -137,6 +138,8 @@ main=(argv:array<string>):>int64=>{{
     assert str(bad / 'dependency.dewy') in result.stderr
 
     for index, (body, title) in enumerate([
+        ('let value=(depth:addr=-1):>addr=>depth\nlet main=():>int64=>value()', 'refinement refuted'),
+        ('let seed=():>int64=>42\nlet value=(depth:addr=seed()):>addr=>depth\nlet main=():>int64=>value()', 'cannot prove refinement'),
         ('let main=():>int64=>{let x:int64<n=>n>=?5>=5 x-=1 return x}', 'refinement'),
         ('let main=():>int64=>{let names:array<int64>=[42] let at:addr<i => i <? names.length>=0 names=[] return names[at]}', 'bounds'),
         ('let main=():>int64=>{let names:array<int64>=[42] let at:addr<i => i <? names.length>=0 return {let names:array<int64>=[] names[at]}}', 'bounds'),

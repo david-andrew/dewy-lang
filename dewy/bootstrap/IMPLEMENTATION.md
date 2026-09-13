@@ -25,6 +25,22 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Checked function defaults are children of native HIR function literals.
+  Proof discharge, helper reachability, representation selection, and nested
+  function discovery now traverse them. Native execution accepts refined
+  defaults and helpers used only by defaults, preserves lazy evaluation,
+  and still rejects negative or unproved address defaults.
+
+- Keyword-only source signatures remain a native parity gap. For example,
+  `let value=(... depth:addr=2):>addr=>depth` followed by `value()` currently
+  fails overload selection. `type_check.function_args` and the literal checker
+  still collect only positional-or-keyword parameters, despite keyword slots
+  already existing in the type, dispatch, and lowering representations.
+  Port the hosted signature partitioning, required/default flags, and checked
+  default expressions together, using `dewy/tests/keyword_default_calls.dewy`
+  as an execution regression. This is settled syntax, not a design question;
+  the compiler sources do not currently require it to bootstrap.
+
 - Native type-test lowering keeps the logical alternatives long enough to
   decide whether their tags establish a refined test. For `addr | Record`,
   testing `is? addr` needs only the numeric tag: that alternative already

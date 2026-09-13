@@ -719,10 +719,11 @@ append_node = (@nodes:array<AST> node:AST):>addr<i => i <? nodes.length> => {
     return id
 }
 
-# Immediate expression children in evaluation/source order. Types, source
-# syntax, parameter metadata, and binding ids are not HIR children. As in
-# the hosted walker, function bodies are children but default parameter
-# syntax is not; analyses decide when to enter a nested function body.
+# Immediate expression children in source order. Types, source syntax,
+# parameter metadata, and binding ids are not HIR children. Checked defaults
+# are HIR expressions: structural passes must visit their proofs, references,
+# and nested functions alongside the body. Evaluation analyses still decide
+# when to enter a function and which defaults a particular call evaluates.
 children = (node:AST):>array<addr> => {
     let result:array<addr> = []
     if node is? Void | NoneValue | ErrorValue | GenericFunction | ScopeMetatag | Break | Continue | ExpressedIdentifier | Bool | TargetBool | DecidedBool | Integer | RationalConstant | TypeValue | BrandValue | ModuleNamespace | String | TargetString | BasedString | Partial {
@@ -862,6 +863,9 @@ children = (node:AST):>array<addr> => {
         return result
     }
     if node is? FunctionLiteral {
+        loop parameter in node.pos_or_kw_args {if parameter is? BoundParam {result.push(parameter.value)}}
+        loop parameter in node.kw_only_args {if parameter is? BoundParam {result.push(parameter.value)}}
+        if node.rest_args is? BoundParam {result.push(node.rest_args.value)}
         result.push(node.body)
         return result
     }
