@@ -14,6 +14,17 @@ from udewy.frontend import EntryPointOptions, entry_point
 ROOT = Path(__file__).resolve().parents[2]
 
 
+# These need validation before lowering: even a literal addr argument carries
+# the address-space proof obligation. The tag then suffices at runtime.
+REFINED_TAG_CASES = [
+    "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(Record[0]) 42 else 1",
+    "let test=(value:addr?):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(none) 42 else 1",
+    "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value isnt? addr\nlet main=():>int64=>if not test(42) and test(Record[0]) 42 else 1",
+    "let test=(value:addr|string|none):>bool=>value is? addr|none\nlet main=():>int64=>if test(42) and test(none) and not test('word') 42 else 1",
+    "Record:type=const[value:int64]\nlet count:int64=0\nlet next=():>addr|Record=>{count+=1 return 42}\nlet main=():>int64=>if next() is? addr and count=?1 42 else 1",
+]
+
+
 def test_native_graph_initialization_and_entry(tmp_path):
     driver = tmp_path / 'graph.dewy'
     driver.write_text(f'''
@@ -186,6 +197,7 @@ let main=():>int64=>{{
     for index, body in enumerate([
         *(body for body, _ in BRAND_CASES),
         *FIELD_DEFAULTS,
+        *REFINED_TAG_CASES,
         *(body for body, _ in SCALAR_CASES),
         'AST=$abstract type of [position:addr]\nLeaf=type of AST & []\nOther=type of AST & []\nlet read=(node:AST):>addr=>{if node is? Other return 0 return node.position}\nlet main=():>int64=>read(Leaf[42])',
         'State:type=[input:set<int64> output:set<int64>]\nlet main=():>int64=>{let state=State[set[20 22] set[]] loop value in state.input {state.output.add(value)} let sum:int64=0 loop value in state.output {sum+=value} return sum}',

@@ -1,0 +1,13 @@
+# The numeric alternative already promises addr. Its runtime type test is
+# decided by the union tag, while an effectful operand still runs once.
+Alias:type=const[arity:addr]
+let calls:int64=0
+let next=():>addr|Alias=>{calls+=1 return 42}
+let numeric=(value:addr|Alias|none):>bool=>value is? addr
+let nonnumeric=(value:addr|Alias|none):>bool=>value isnt? addr
+let main=():>int64=>{
+    if not numeric(42) or numeric(Alias[0]) or numeric(none) return 1
+    if nonnumeric(42) or not nonnumeric(Alias[0]) or not nonnumeric(none) return 2
+    if next() is? addr and calls =? 1 return 42
+    return 3
+}

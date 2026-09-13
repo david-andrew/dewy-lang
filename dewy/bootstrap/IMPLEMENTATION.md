@@ -25,6 +25,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native type-test lowering keeps the logical alternatives long enough to
+  decide whether their tags establish a refined test. For `addr | Record`,
+  testing `is? addr` needs only the numeric tag: that alternative already
+  guarantees the predicate. `int64 | Record` tested for `addr` still needs a
+  numeric payload predicate and retains an explicit pending diagnostic.
+  General runtime refinement predicates remain unfinished; this optimization
+  must not treat applicability to a base type as proof of its refinements.
+
 - Numeric payload bounds now combine every alternative of an optional or
   numeric union. A field may carry its contract in its type or its field
   metadata; common fields combine the contracts of all possible record

@@ -940,9 +940,31 @@ test_has_refinement = (id:addr state:State):>bool => {
     if type is? types.TypeNot return test_has_refinement(type.item state)
     return false
 }
+test_refinements_implied = (actual:addr tested:addr @state:State):>bool => {
+    let required=types.node_at(state.type_nodes types.unfold(tested state.type_nodes))
+    if required is? types.RefinedType {
+        # Storage alternatives omit facts, but the read's logical alternatives
+        # still carry them. An addr | Record tested for addr needs only a tag;
+        # an int64 | Record tested for addr still needs a payload predicate.
+        let input=types.node_at(state.type_nodes types.unfold(actual state.type_nodes))
+        let variants:array<addr>=if input is? types.TypeOr input.items else [actual]
+        loop variant in variants {
+            if not type_tests.covers(variant tested state.links @state.type_nodes) and not type_tests.disjoint(variant required.base state.links @state.type_nodes) return false
+        }
+        return test_refinements_implied(actual required.base @state)
+    }
+    if required is? types.TypeOr|types.TypeAnd {
+        loop member in required.items {if not test_refinements_implied(actual member @state) return false}
+    }
+    if required is? types.TypeNot return test_refinements_implied(actual required.item @state)
+    return true
+}
 runtime_test = (node:hir.TypeTest @state:State):>addr => {
-    if test_has_refinement(node.test_type state) return reject(node 'runtime refinement predicates' @state)
     let actual=hir.node_at(state.input.nodes node.value).value_type
+    if test_has_refinement(node.test_type state) {
+        if not test_refinements_implied(actual node.test_type @state) return reject(node 'runtime refinement predicates' @state)
+        node=hir.TypeTest[node.loc node.value_type node.value views.strip_all_refinements(node.test_type @state.type_nodes) node.negated]
+    }
     let optional=views.optional_payload(actual @state.type_nodes)
     if optional isnt? none {
         let present=subtyping.is_subtype(optional node.test_type state.links @state.type_nodes)
@@ -984,8 +1006,6 @@ runtime_test = (node:hir.TypeTest @state:State):>addr => {
         }
         return object_test(node @state)
     }
-    let tested=types.node_at(state.type_nodes node.test_type)
-    if tested is? types.RefinedType return reject(node 'runtime refinement predicates on a union payload' @state)
     let prefix:array<addr>=[]
     let source=snapshot(expression(node.value @state) @prefix @state)
     let tag=snapshot(read_word(source 0 node @state) @prefix @state)

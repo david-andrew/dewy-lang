@@ -396,7 +396,7 @@ CLEANUP_CASES += [(
 ARENA_CASES += CLEANUP_CASES
 
 
-def test_native_scalar_lowering(tmp_path):
+def build_native_lowering_driver(tmp_path):
     source = tmp_path / 'lowering.dewy'
     source.write_text(f'''
 from reporting import SrcFile, Error
@@ -437,7 +437,24 @@ main = (argv:array<string>):>int64 => {{
     seed = source.with_suffix('.udewy')
     seed.write_text(codegen(SrcFile.from_path(source)))
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
-    binary = cache_artifact(seed).resolve()
+    return cache_artifact(seed).resolve()
+
+
+def test_native_unproven_refined_type_tests(tmp_path):
+    binary = build_native_lowering_driver(tmp_path)
+    for index, text in enumerate([
+        'Record:type=const[value:int64]\nlet test=(value:int64|Record):>bool=>value is? addr\nlet main=():>int64=>if test(-1) 1 else 42',
+        'let test=(value:int64?):>bool=>value is? addr\nlet main=():>int64=>if test(-1) 1 else 42',
+    ]):
+        source = tmp_path / f'predicate-{index}.dewy'
+        source.write_text(ARENA + text)
+        native = subprocess.run([binary, source], capture_output=True, text=True, timeout=60, check=False)
+        assert native.returncode != 0, text
+        assert 'runtime refinement predicates' in native.stderr, native.stdout + native.stderr
+
+
+def test_native_scalar_lowering(tmp_path):
+    binary = build_native_lowering_driver(tmp_path)
     for index, (text, expected_exit) in enumerate(CASES + [(ARENA + text, code) for text, code in ARENA_CASES]):
         case = tmp_path / f'case-{index}.dewy'
         case.write_text(text)
