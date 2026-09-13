@@ -26,6 +26,23 @@ let main=():>int64=>{
 }
 EOF
 
+# Exercise discovery and the per-file runner together. The nonzero result
+# is intentional: one failed expectation must reach the directory's exit
+# status, while parameterized cases each contribute a passing result.
+mkdir -p "$check_work/tests/.hidden" "$check_work/tests/__dewycache__" "$check_work/tests/node_modules"
+cat > "$check_work/tests/passing.dewy" <<'EOF'
+$test(cases=(1 2 3))
+let positive=(n:int64)=>{$expect n>?0}
+let main=():>int64=>99
+EOF
+cat > "$check_work/tests/failing.dewy" <<'EOF'
+$test
+let fails=()=>{$expect false}
+EOF
+for ignored in .hidden __dewycache__ node_modules; do
+    cp "$check_work/tests/failing.dewy" "$check_work/tests/$ignored/ignored.dewy"
+done
+
 expect_exit() {
     local expected=$1
     shift
@@ -43,5 +60,16 @@ for check_target in x86_64 c; do
     expect_exit 0 "$check_pair/udewy" --target "$check_target" udewy/tests/test_guarded_calls.udewy
     expect_exit 42 "$check_pair/dewy" --target "$check_target" "$check_work/scalar.dewy"
     expect_exit 42 "$check_pair/dewy" --target "$check_target" tests/fixtures/native_pair_checks.dewy
+    echo "Checking native test discovery with $check_target output"
+    test_status=0
+    test_output=$(timeout 180s "$check_pair/dewy" test --target "$check_target" --json "$check_work/tests" 2>&1) || test_status=$?
+    if [[ $test_status != 1 ||
+          $test_output != *'{"passed": 3, "failed": 0}'* ||
+          $test_output != *'{"passed": 0, "failed": 1}'* ||
+          $test_output != *'{"files": 2, "failed_files": 1, "failed": 1}'* ]]; then
+        printf '%s\n' "$test_output" >&2
+        echo "Native test discovery returned $test_status or incorrect counts" >&2
+        exit 1
+    fi
 done
 echo 'Native pair execution checks passed'
