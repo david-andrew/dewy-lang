@@ -244,6 +244,7 @@ class _Lowerer(
         self.declare_bindings: dict[int, _Binding] = {}
         self.binding_by_semantic_id: dict[int, _Binding] = {}
         self.identifier_bindings: dict[int, _Binding | None] = {}
+        self.source_intrinsic_calls: set[int] = set()
         self.captures: dict[int, list[tuple[hir.ExpressedIdentifier, _Binding]]] = defaultdict(list)
         self.source_names: set[str] = set()
         self.next_flow_temp = 1
@@ -2020,6 +2021,9 @@ class _Lowerer(
             self.direct_calls.append((current_function, node))
             self.callee_nodes.add(id(node.func))
             self._discover_node(node.func, scope, current_function)
+            if isinstance(node.func, hir.ExpressedIdentifier) and self.identifier_bindings.get(id(node.func)) is None:
+                self.source_intrinsic_calls.add(id(node))
+            raw = id(node) in self.source_intrinsic_calls and self._raw_memory_intrinsic_name(node.func.name)
             if any(
                 isinstance(arg.type, ty.ArrayType)
                 for arg in [*node.pos_args, *node.kw_args.values()]
@@ -2030,14 +2034,14 @@ class _Lowerer(
                     arg,
                     scope,
                     current_function,
-                    array_use='call_boundary_pending',
+                    array_use='representation' if raw else 'call_boundary_pending',
                 )
             for arg in node.kw_args.values():
                 self._discover_node(
                     arg,
                     scope,
                     current_function,
-                    array_use='call_boundary_pending',
+                    array_use='representation' if raw else 'call_boundary_pending',
                 )
             return
         if isinstance(node, hir.Assign):
@@ -2849,6 +2853,8 @@ class _Lowerer(
                 selected_method_index=None,
             )
             self._keyed_nodes_keepalive.append(transformed)
+            if id(node) in self.source_intrinsic_calls:
+                self.source_intrinsic_calls.add(id(transformed))
             for index, (argument, source_position) in enumerate(zip(
                 transformed.pos_args,
                 source_positions,

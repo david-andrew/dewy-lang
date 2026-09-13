@@ -55,6 +55,14 @@ Borrowed byte/grapheme arrays can retain a string descriptor in their owner
 slot. The explicit shared flag distinguishes that pointer from a reference
 count; raw exposure first gives such a view independent array storage.
 
+That conservative lifetime also applies to source-level raw I/O buffers.
+Ownership tests collect live-byte samples into reserved storage and print
+them afterward, so the observer's pinned output buffers do not look like
+retention by the operation being measured. Scoped borrowing for synchronous
+I/O is a remaining opportunity to avoid this cost without weakening raw
+pointer validity. Compiler-generated representation loads are internal reads;
+they must not trigger the source-level exposure rule.
+
 ## Native gates after sharing and temporary reclamation
 
 The same checker-construction kernel compiled through native lowering now

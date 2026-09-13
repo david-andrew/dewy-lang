@@ -327,7 +327,7 @@ def test_array_value_semantics_fixture_copies_mutable_bindings() -> None:
     assert 'let snapshot:int64 = copy' not in emitted
     assert '__dewy_array_copy_length_' in emitted
     assert '__alloca__(__dewy_array_copy_length_' not in emitted
-    assert '_region_alloc(' in emitted
+    assert '_arena_alloc(' in emitted
     assert 'loop __dewy_array_copy_index_' in emitted
 
 
@@ -356,7 +356,6 @@ def test_bare_metal_dewy_hello_world(
     capfd: pytest.CaptureFixture[str],
 ) -> None:
     emitted = codegen(SrcFile.from_path(fixtures / 'hello_world_syscall.dewy'))
-    assert '__load_i64__(message)' in emitted
     assert '__syscall3__(1 1 data 14)' in emitted
 
     udewy_path = tmp_path / 'hello_world_syscall.udewy'

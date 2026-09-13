@@ -1,5 +1,7 @@
 """Owned union payloads are independent values and return their storage on exit."""
+import re
 import subprocess
+from itertools import pairwise
 
 import pytest
 
@@ -11,11 +13,40 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 def run(source, tmp_path):
     output = tmp_path / 'ownership.udewy'
-    output.write_text(codegen(SrcFile(None, source)))
+    # Printing exposes byte buffers to raw I/O, whose current conservative
+    # lifetime is intentionally pinned. Measure the exercise independently:
+    # reserve the recorder first, collect live bytes, then print after it ends.
+    source, renamed = re.subn(r'\blet main\s*=', 'let _ownership_case =', source, count=1)
+    assert renamed == 1
+    observer = '''
+let _owned_samples:array<int64>=[]
+let _record_owned_bytes=():>void=>_owned_samples.push(_arena_live_bytes)
+'''
+    wrapper = '''
+let main=():>int64=>{
+    _owned_samples.reserve(256)
+    let status=_ownership_case()
+    loop value in _owned_samples {printl(value)}
+    return status
+}
+'''
+    output.write_text(codegen(SrcFile(None, observer + source + wrapper)))
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=15, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     return result.stdout
+
+
+def test_measurement_detects_retained_allocations(tmp_path):
+    source = '''
+let main=():>int64=>{
+    loop i in 0..3 {_arena_alloc(32); _record_owned_bytes()}
+    return 0
+}
+'''
+    samples = [int(value) for value in run(source, tmp_path).splitlines()]
+    assert len(samples) == 4
+    assert all(right > left for left, right in pairwise(samples))
 
 
 def test_returned_record_owns_nested_dynamic_array_rows(tmp_path):
@@ -38,13 +69,13 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     exercise(); exercise();
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_returned_dictionary_owns_array_values(tmp_path):
@@ -62,13 +93,13 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     exercise(); exercise();
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_container_algebra_reads_left_before_effectful_right(tmp_path):
@@ -84,13 +115,13 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     exercise(); exercise();
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_module_algebra_owns_string_members_and_values(tmp_path):
@@ -113,13 +144,13 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     exercise(); exercise();
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('payload', ['Bag', 'array<int64>', 'Node'])
@@ -149,15 +180,15 @@ let main=():>int64=>{{
     loop i in 0..20 {{
         snapshot(value);
         snapshot(Box[none]);
-        printl(_arena_cursor)
+        _record_owned_bytes()
     }}
     return 0
 }}
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 21
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 21
     # Printing itself warms a function region on the first two iterations.
-    assert len(set(cursors[2:])) == 1, cursors
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('discard', ['clear', 'truncate(0)'])
@@ -177,14 +208,14 @@ let main=():>int64=>{
     snapshot(value);
     loop i in 0..20 {
         $runtime_assert snapshot(value) =? 2
-        printl(_arena_cursor)
+        _record_owned_bytes()
     }
     return 0
 }
 '''
-    cursors = run(source.replace('copy.clear', 'copy.' + discard), tmp_path).splitlines()
+    live_bytes = run(source.replace('copy.clear', 'copy.' + discard), tmp_path).splitlines()
     # Printing itself warms a function region on the first two iterations.
-    assert len(set(cursors[2:])) == 1, cursors
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_optional_string_array_copies_own_their_payload(tmp_path):
@@ -233,13 +264,13 @@ let exercise=():>void=>{{
 let main=():>int64=>{{
     exercise()
     exercise()
-    loop i in 0..20 {{exercise() printl(_arena_cursor)}}
+    loop i in 0..20 {{exercise() _record_owned_bytes()}}
     return 0
 }}
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 21
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 21
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('optional', [False, True])
@@ -262,15 +293,15 @@ let main=():>int64=>{
     let value:array<Payload>=[Bag[[loop i in 0..128 {i}]]]
     loop i in 0..20 {
         $runtime_assert snapshot(value) =? 129
-        printl(_arena_cursor)
+        _record_owned_bytes()
     }
     return 0
 }
 '''
     if optional:
         source = source.replace('Payload:type=Bag|Other', 'Payload:type=Bag|none').replace('first=Other["empty"]', 'first=none')
-    cursors = run(source, tmp_path).splitlines()
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_returning_a_local_union_keeps_its_payload_alive(tmp_path):
@@ -292,13 +323,13 @@ let main=():>int64=>{
     loop i in 0..20 {
         $runtime_assert inspect(42) =? 2
         $runtime_assert inspect(-1) =? 8
-        printl(_arena_cursor)
+        _record_owned_bytes()
     }
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_returned_match_payload_survives_reuse_of_its_cell_storage(tmp_path):
@@ -343,13 +374,13 @@ let main=():>int64=>{
         $runtime_assert target.values.length =? 129
         $runtime_assert target.nested.values.length =? 129
         $runtime_assert target.text =? "snapshot-42"
-        printl(_arena_cursor)
+        _record_owned_bytes()
     }
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_array_call_result_transfers_elements_before_temporary_cleanup(tmp_path):
@@ -365,13 +396,13 @@ let main=():>int64=>{
         let first=shape.args[0]
         $runtime_assert first.name isnt? none
         $runtime_assert first.name =? "x"
-        printl(_arena_cursor)
+        _record_owned_bytes()
     }
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('source', ['table.get(1)', 'values[0]', 'selected_value()'])
@@ -397,14 +428,14 @@ let main=():>int64=>{
     loop i in 0..20 {
         $runtime_assert inspect(true) =? 42
         $runtime_assert inspect(false) =? 42
-        printl(_arena_cursor)
+        _record_owned_bytes()
     }
     return 0
 }
 '''.replace('SOURCE', source)
-    cursors = run(program, tmp_path).splitlines()
-    assert len(cursors) == 21
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(program, tmp_path).splitlines()
+    assert len(live_bytes) == 21
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('element,value', [
@@ -423,13 +454,13 @@ let main=():>int64=>{
     loop i in 0..20 {
         let source:array<ELEMENT length=1>=[VALUE]
         $runtime_assert inspect(source) =? 1
-        printl(_arena_cursor)
+        _record_owned_bytes()
     }
     return 0
 }
 """.replace('ELEMENT', element).replace('VALUE', value)
-    cursors = run(source, tmp_path).splitlines()
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_record_field_takes_ownership_of_fresh_call_result(tmp_path):
@@ -447,13 +478,13 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     loop warmup in 0..12 {exercise();}
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('replacement', ['Box[value.words]', 'copy(value)'])
@@ -477,13 +508,13 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     exercise(); exercise();
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''.replace('FIELD_REPLACEMENT', replacement.replace('value', 'outer.box')).replace('REPLACEMENT', replacement)
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('result_type', ['Box', 'Box|none', 'Box|string', 'array<string>|none'])
@@ -508,13 +539,13 @@ let exercise=():>void=>{{
 }}
 let main=():>int64=>{{
     loop warmup in 0..12 {{exercise();}}
-    loop i in 0..12 {{exercise(); printl(_arena_cursor)}}
+    loop i in 0..12 {{exercise(); _record_owned_bytes()}}
     return 0
 }}
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('value_type', ['Box', 'Box|none', 'Box|string'])
@@ -548,13 +579,13 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     exercise(); exercise();
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''.replace('VALUE_TYPE', value_type)
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_optional_argument_decoding_retains_conversion_and_owned_result(tmp_path):
@@ -569,13 +600,13 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     exercise(); exercise();
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('result_type', ['Box|none', 'Box|string', 'array<string>|none'])
@@ -598,13 +629,13 @@ let exercise=():>void=>{{
 }}
 let main=():>int64=>{{
     exercise(); exercise();
-    loop i in 0..12 {{exercise(); printl(_arena_cursor)}}
+    loop i in 0..12 {{exercise(); _record_owned_bytes()}}
     return 0
 }}
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_discarded_base_record_type_test_releases_dynamic_child_fields(tmp_path):
@@ -628,7 +659,7 @@ let exercise=(nodes:array<Node>):>void=>{
 let main=():>int64=>{
     let nodes:array<Node>=[Child["key" "shape" [["payload"]]]]
     exercise(nodes); exercise(nodes);
-    loop i in 0..12 {exercise(nodes); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(nodes); _record_owned_bytes()}
     let original=read(nodes)
     $runtime_assert original is? Child and original.key=?"key" and original.shape=?"shape"
     let parts=original.parts
@@ -639,9 +670,9 @@ let main=():>int64=>{
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('interpolated', [False, True])
@@ -678,7 +709,7 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     exercise(); exercise();
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''
@@ -689,9 +720,9 @@ let main=():>int64=>{
         source = source.replace('shape=?"shape"', 'shape=?"shape-{before+2}"')
         source = source.replace('returned=?"key"', 'returned=?"key-{before+3}"')
         source = source.replace('words[0]=?"payload"', 'words[0]=?"payload-{before+4}"')
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 @pytest.mark.parametrize('array', [False, True])
@@ -719,13 +750,13 @@ let exercise=():>void=>{{
 }}
 let main=():>int64=>{{
     exercise(); exercise();
-    loop i in 0..12 {{exercise(); printl(_arena_cursor)}}
+    loop i in 0..12 {{exercise(); _record_owned_bytes()}}
     return 0
 }}
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes
 
 
 def test_record_call_snapshots_and_fresh_arguments_release_after_the_call(tmp_path):
@@ -756,10 +787,10 @@ let exercise=():>void=>{
 }
 let main=():>int64=>{
     exercise(); exercise();
-    loop i in 0..12 {exercise(); printl(_arena_cursor)}
+    loop i in 0..12 {exercise(); _record_owned_bytes()}
     return 0
 }
 '''
-    cursors = run(source, tmp_path).splitlines()
-    assert len(cursors) == 13
-    assert len(set(cursors[2:])) == 1, cursors
+    live_bytes = run(source, tmp_path).splitlines()
+    assert len(live_bytes) == 13
+    assert len(set(live_bytes[2:])) == 1, live_bytes

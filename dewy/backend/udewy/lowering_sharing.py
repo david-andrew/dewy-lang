@@ -25,13 +25,20 @@ from .lowering_shared import (
 
 
 class _ArraySharing:
+    @staticmethod
+    def _raw_memory_intrinsic_name(name):
+        return name.startswith(('__load_', '__store_', '__syscall')) or name in {'__load__', '__store__'}
+
     def _raw_aggregate_intrinsic(self, node):
         callee = node.func
         if not isinstance(callee, hir.ExpressedIdentifier):
             return None
-        if not (callee.name.startswith(('__load_', '__store_', '__syscall')) or callee.name in {'__load__', '__store__'}):
+        if not self._raw_memory_intrinsic_name(callee.name):
             return None
-        if id(callee) in self.identifier_bindings:
+        # Discovery distinguishes source intrinsics (known, unbound names)
+        # from user functions and loads/stores synthesized by lowering. An
+        # internal load may address inline fixed-array data, not a descriptor.
+        if id(node) not in self.source_intrinsic_calls:
             return None
         if not any(self._pin_type(arg.type) for arg in node.pos_args):
             return None

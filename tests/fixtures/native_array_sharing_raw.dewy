@@ -26,5 +26,11 @@ let main=():>int64=>{
     __store_i64__(2 address)
     $runtime_assert direct.length >? 0 and isolated.length >? 0
     $runtime_assert direct[0]=?2 and isolated[0]=?1
+    # Source raw access also forces a descriptor for an inferred fixed array.
+    let fixed=[1 2]
+    let fixed_address=__load_i64__(fixed)
+    let fixed_copy=fixed
+    __store_i64__(9 fixed_address)
+    $runtime_assert fixed[0]=?9 and fixed_copy[0]=?1
     return 42
 }
