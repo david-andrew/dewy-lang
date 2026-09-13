@@ -2,6 +2,8 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
@@ -10,7 +12,8 @@ from udewy.frontend import EntryPointOptions, entry_point
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_native_invocation_options(tmp_path):
+@pytest.mark.parametrize('compiler_target', ['x86_64', 'c'])
+def test_native_invocation_options(tmp_path, compiler_target):
     source = tmp_path / 'options.dewy'
     source.write_text(f'''
 from reporting import Error
@@ -28,7 +31,7 @@ let main=(argv:array<string>):>int64=>{{
 }}
 ''')
     seed = source.with_suffix('.udewy')
-    seed.write_text(codegen(SrcFile.from_path(source)))
+    seed.write_text(codegen(SrcFile.from_path(source), target=compiler_target))
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
     binary = cache_artifact(seed).resolve()
     for args, expected in [

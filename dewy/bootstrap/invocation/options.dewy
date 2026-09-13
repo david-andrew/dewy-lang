@@ -10,7 +10,9 @@ Request:type = [
     command:Command='run'
     source:string?=none
     arguments:array<string>=[]
-    target:targets.Target=$target
+    # The C accelerator builds a Linux x86_64 compiler. Its implementation
+    # backend does not make users' ordinary compilations require cc.
+    target:targets.Target=if $target =? 'c' 'x86_64' else $target
     compile_only:bool=false
     help:bool=false
     version:bool=false
