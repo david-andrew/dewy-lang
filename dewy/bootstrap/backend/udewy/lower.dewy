@@ -1154,6 +1154,26 @@ string_bytes = (value:addr node:hir.AST @state:State):>addr => {
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 
+# Materialize an independent array of immutable one-grapheme views. Reuse
+# the string's boundary table (including a slice's shifted boundary pointer),
+# rather than decoding scalars or segmenting the same UTF-8 bytes again.
+# Native string storage currently has arena lifetime; the ordinary array
+# descriptor owns only the array's pointer buffer, never the string bytes.
+string_graphemes = (value:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let source=snapshot(value @prefix @state)
+    let length=snapshot(read_word(source layouts.string_descriptor.grapheme_length node @state) @prefix @state)
+    let memory=array_memory(length 8 node @state)
+    loop item in memory.prefix {prefix.push(item)}
+    let index=snapshot(word(0 node @state) @prefix @state)
+    let destination=word_op('__add__' memory.data word_op('__mul__' index word(8 node @state) node @state) node @state)
+    let store=store_word(string_view(source index word(1 node @state) node @state) destination 0 node @state)
+    let advance=assign_value(index word_op('__add__' index word(1 node @state) node @state) node @state)
+    prefix.push(loop_while(compare('__lt__' index length node @state) [store advance] node @state))
+    prefix.push(memory.descriptor)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+
 # Strings already contain valid UTF-8. Decode scalar values, not grapheme
 # clusters: a combining sequence yields several uint32 elements. A slice's
 # data starts at its byte offset, and its byte length bounds this traversal.
@@ -1411,6 +1431,7 @@ representation = (node:hir.RepresentationCast @state:State):>addr => {
         let array=array_type(node.value_type state)
         if array isnt? none and types.is_primitive(types.node_at(state.type_nodes array.element) 'uint8') return string_bytes(value node @state)
         if array isnt? none and types.is_primitive(types.node_at(state.type_nodes array.element) 'uint32') return string_scalars(value node @state)
+        if array isnt? none and (types.is_primitive(types.node_at(state.type_nodes array.element) 'grapheme') or types.is_primitive(types.node_at(state.type_nodes array.element) 'char')) return string_graphemes(value node @state)
     }
     return reject(node 'this representation conversion' @state)
 }

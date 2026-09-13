@@ -84,6 +84,16 @@ SCALAR_CASES = [
 ]
 
 
+# Grapheme conversion uses existing segmentation, including shifted slices,
+# and produces mutable array storage independent of the source and snapshots.
+GRAPHEME_CASES = [
+    ('let convert=(text:string):>array<grapheme>=>text as array<grapheme>\nlet main=():>int64=>{let values=convert("") values.push("z") return if values.length=?1 and values[0]=?"z" 42 else 0}', 42),
+    ('let convert=(text:string):>array<grapheme>=>text as array<grapheme>\nlet main=():>int64=>{let values=convert("é👩‍👩‍👧‍👦z") return if values.length=?3 and values[0]=?"é" and values[1]=?"👩‍👩‍👧‍👦" and values[2]=?"z" 42 else 0}', 42),
+    ('let convert=(text:string):>array<grapheme>=>text as array<grapheme>\nlet main=():>int64=>{let text:string="xé👩‍👩‍👧‍👦z" let values=convert(text[1..3)) return if values.length=?2 and values[0]=?"é" and values[1]=?"👩‍👩‍👧‍👦" 42 else 0}', 42),
+    ('let convert=(text:string):>array<grapheme>=>text as array<grapheme>\nlet main=():>int64=>{let text:string="éz" let values=convert(text) let before=values values[0]="x" values.push("y") return if text=?"éz" and before.length=?2 and before[0]=?"é" and values.length=?3 and values[0]=?"x" and values[2]=?"y" 42 else 0}', 42),
+    ('let calls:int64=0\nlet next=():>string=>{calls+=1 return "az"}\nlet main=():>int64=>{let values=next() as array<char> return if calls=?1 and values.length=?2 and values[1]=?"z" 42 else 0}', 42),
+]
+
 # Runtime class predicates share one observed value and guard optional payloads.
 BRAND_CASES = [
     ('Base=$abstract type of [value:int64]\nA=type of Base & []\nB=type of Base & []\nC=type of Base & []\nChild=type of A & []\nlet choose=(x:Base):>bool=>x is? A|B\nlet main=():>int64=>if choose(A[1]) and choose(B[2]) and choose(Child[3]) and not choose(C[4]) 42 else 0', 42),
@@ -99,6 +109,7 @@ BRAND_CASES = [
 ARENA_CASES = [
     *BRAND_CASES,
     *SCALAR_CASES,
+    *GRAPHEME_CASES,
     ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_ge=(a:BigInt b:BigInt):>bool=>b is? 0\nlet _bigint_as_string=(value:BigInt):>string=>if value is? 0 "zero" else "value"\nlet main=():>int64=>{let value:BigInt=1 let zero:BigInt=0 let converted=value as string let zero_text=zero as string return if value >=? 0 and zero_text=?"zero" and converted=?"value" 42 else 0}', 42),
     ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_floordiv=(a:BigInt b:BigInt & ~0):>BigInt=>b\nlet main=():>int64=>{let result:BigInt=1 result //= 42 if result is? 0 return 0 return if result.limbs[0]=?42 42 else 0}', 42),
     ('BigInt:type=0|[sign:-1|1 limbs:array<uint64 length >? 0>]\nlet _bigint_mod=(a:BigInt b:BigInt & ~0):>BigInt=>b\nlet main=():>int64=>{let values:dict<string BigInt>=["value"->1] values["value"] %= 42 let result=values["value"] if result is? 0 return 0 return if result.limbs[0]=?42 42 else 0}', 42),
