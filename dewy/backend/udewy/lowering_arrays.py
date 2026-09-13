@@ -2851,10 +2851,10 @@ class _ArrayLowering(_ArraySharing):
                 return all(
                     member == 'none' or cls._is_word_element_static(member) or isinstance(member, ty.NamedType) or ty.is_user_nominal(member)
                     or (isinstance(member, ty.ObjectType) and cls._object_result_fields_are_returnable(member))
-                    for member in members
+                    for member in map(ty.strip_refinement, members)
                 )
             return False
-        element_type = array_type.element
+        element_type = ty.strip_refinement(array_type.element)
         return (
             array_type.length == 0
             or element_type == 'bool'

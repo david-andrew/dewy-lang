@@ -324,6 +324,7 @@ class _OptionalLowering:
     # present, matching optional tags) and one payload word at offset 8.
 
     def _union_member_supported(self, member: ty.TypeExpr) -> bool:
+        member = ty.strip_refinement(member)
         if isinstance(member, ty.NamedType):
             return True  # a recursive reference is always a handle member
         if ty.is_user_nominal(member):

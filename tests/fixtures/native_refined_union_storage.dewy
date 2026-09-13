@@ -1,0 +1,14 @@
+# Proof refinements change admissible values, not their storage support.
+Decision:type=const [constants:dict<addr bigint>]
+choose=(yes:bool):>Decision|none=>{
+    let constants:dict<addr bigint>=[]
+    constants[0]=123456789012345678901234567890
+    return if yes Decision[constants] else none
+}
+let main=():>int64=>{
+    let decision=choose(true)
+    if decision is? none return 1
+    let value=decision.constants.get(0)
+    if value is? none return 2
+    return if value =? 123456789012345678901234567890 42 else 3
+}
