@@ -4023,8 +4023,10 @@ class _Lowerer(
                 *target_prelude,
                 *index_prelude,
                 *value_prelude,
-                *old_release,
                 *cow,
+                # Detachment copies the old elements. They must remain live
+                # until the destination owns its independent backing buffer.
+                *old_release,
                 self._array_store(value, address, node.target.type, node.loc),
             ]
         if isinstance(node, hir.MemberAssign):

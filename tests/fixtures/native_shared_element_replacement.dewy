@@ -1,0 +1,31 @@
+# Replacing a shared element must detach before releasing its old contents.
+# Dynamic strings exercise ownership; literals alone would mask the failure.
+sibling=(path:array<string> name:string):>array<string>=>{
+    $runtime_assert path.length >? 0
+    let result=path
+    result[result.length-1]=name
+    return result
+}
+let main=():>int64=>{
+    let parts:array<string>=['first' 'field']
+    let path:array<string>=[]
+    path.push(parts.join('.'))
+    loop i in 0.. and i <? 64 {
+        let changed=sibling(path 'other')
+        $runtime_assert changed.length >? 0 and path.length >? 0
+        $runtime_assert changed[0]=?'other' and path[0]=?'first.field'
+    }
+    let values:array<int64>=[]
+    values.push(42)
+    let rows:array<array<int64>>=[]
+    rows.push(values)
+    let changed=rows
+    $runtime_assert changed.length >? 0
+    changed[0]=[17]
+    $runtime_assert rows.length >? 0 and changed.length >? 0
+    let original=rows[0]
+    let updated=changed[0]
+    $runtime_assert original.length >? 0 and updated.length >? 0
+    $runtime_assert original[0]=?42 and updated[0]=?17
+    return 42
+}
