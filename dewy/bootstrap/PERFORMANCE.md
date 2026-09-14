@@ -174,3 +174,10 @@ match an independently constructed expected result, including every space
 and newline. `native_emitter_scaling.dewy` and its emitter regression test
 preserve this workload. These measurements justify another bounded-gated
 self-build; they do not establish that the native bootstrap loop is closed.
+
+The same fixture also passes after native Dewy compiles it to direct x86_64:
+0.04, 0.06 and 0.22 seconds respectively, with peak RSS of 8.4, 12.3 and
+35.1 MiB. Its outputs match the hosted-built writer exactly. Compiling that
+fixture through the native C seed took 90.6 seconds. This separately checks
+the writer's mutable buffer under native lowering, without a C backend in
+the emitted fixture's execution route.
