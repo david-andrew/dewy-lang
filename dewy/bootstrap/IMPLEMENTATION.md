@@ -25,6 +25,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Every returning flow arm now materializes the inferred join's storage.
+  A narrowed optional payload or nonzero bigint record cannot occupy the
+  same result slot as an optional/union cell without conversion. Regression
+  cases cover bare and block arms, absent values, record-family layouts,
+  and the compiler's positive/negative integer range normalization.
+
 - Dictionary insertion detaches shared entry storage before reserving
   capacity. Detaching can reduce capacity to the live length, so reversing
   that order could append beyond the replacement buffer. A regression copies

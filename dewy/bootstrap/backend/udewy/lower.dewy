@@ -2355,9 +2355,23 @@ iterator_step = (node:hir.IteratorExpression @state:State):>IteratorStep => {
 }
 # Nested defaults retain lazy setup for later loop arms and the existing
 # rule that `else` runs only when that loop arm never entered.
+flow_value = (id:addr expected:addr @state:State):>addr => {
+    let source=hir.node_at(state.input.nodes id)
+    let value=if state.cleanup_enabled cleanup_scoped(id @state) else expression(id @state)
+    if source.value_type =? expected return value
+    if types.is_primitive(types.node_at(state.type_nodes expected) 'void') return value
+    let actual=types.node_at(state.type_nodes types.unfold(source.value_type state.type_nodes))
+    if types.is_primitive(actual 'void') or types.is_primitive(actual 'never') return value
+    # Inferred joins need the same representation on every returning path.
+    # A narrowed optional payload is a word; the other arm may still be a
+    # cell. The flow result must materialize the word into the joined cell.
+    if enum_members(expected state) isnt? none return enum_pack(value source.value_type expected source @state)
+    if cell_members(expected @state) isnt? none return cell_pack(value source.value_type expected source @state)
+    return read_value(value source.value_type expected source @state)
+}
 lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     let type=runtime_type(node.value_type node @state)
-    if position >=? node.arms.length return if node.default is? none put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state) else if state.cleanup_enabled cleanup_scoped(node.default @state) else expression(node.default @state)
+    if position >=? node.arms.length return if node.default is? none put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state) else flow_value(node.default node.value_type @state)
     let arm=hir.node_at(state.input.nodes node.arms[position])
     $runtime_assert arm is? hir.IfArm|hir.LoopArm
     let fallback:addr?=none
@@ -2370,7 +2384,7 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
         prefix=step.prefix condition=step.condition
     } else {condition=expression(arm.condition @state)}
     if state.cleanup_enabled and arm is? hir.LoopArm {state.cleanup_loops.push(state.cleanup_frames.length)}
-    let body=if state.cleanup_enabled cleanup_scoped(arm.body @state) else expression(arm.body @state)
+    let body=flow_value(arm.body node.value_type @state)
     if state.cleanup_enabled and arm is? hir.LoopArm {
         $runtime_assert state.cleanup_loops.length >? 0
         state.cleanup_loops.pop;

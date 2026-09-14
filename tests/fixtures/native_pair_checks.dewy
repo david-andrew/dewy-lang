@@ -9,6 +9,10 @@ import p"native_array_sharing.dewy" as sharing
 import p"native_array_sharing_raw.dewy" as raw
 import p"native_borrowed_string_arrays.dewy" as borrowed
 import p"native_shared_element_replacement.dewy" as replacements
+import p"native_optional_views.dewy" as optionals
+import p"native_dict_detach_growth.dewy" as dictionaries
+import p"native_optional_flow_join.dewy" as flows
+import p"native_range_normalization.dewy" as ranges
 
 let main=():>int64=>{
     printl('Checking sibling field facts')
@@ -29,5 +33,13 @@ let main=():>int64=>{
     if defaults.main() not=? 42 return 8
     printl('Checking diverging function tails')
     if tails.main() not=? 42 return 9
+    printl('Checking optional array views')
+    if optionals.main() not=? 42 return 10
+    printl('Checking shared dictionary growth')
+    if dictionaries.main() not=? 42 return 11
+    printl('Checking joined flow representations')
+    if flows.main() not=? 42 return 12
+    printl('Checking native range normalization')
+    if ranges.main() not=? 42 return 13
     return 42
 }

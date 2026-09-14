@@ -1,0 +1,31 @@
+# An inferred flow join must give every returning arm the same optional
+# representation, including a field narrowed to its present payload.
+Binding:type=[store:int64? value:int64?]
+let choose=(binding:Binding):>int64=>{
+    let result=if binding.store is? none binding.value else binding.store
+    return if result isnt? none result else 0
+}
+let choose_block=(binding:Binding):>int64=>{
+    let result=if binding.store is? none {binding.value} else {binding.store}
+    return if result isnt? none result else 0
+}
+Record:type=[value:int64]
+let pick=(value:Record|none):>Record|none=>{
+    let result=if value isnt? none value else none
+    return result
+}
+Family=$abstract type of []
+Left=type of Family & [value:int64]
+Right=type of Family & [padding:int64 value:int64]
+let pick_family=(condition:bool):>int64=>{
+    let value=if condition Left[20] else Right[999 22]
+    return value.value
+}
+let main=():>int64=>{
+    if choose(Binding[20 none])+choose(Binding[none 22])+choose(Binding[none none]) not=?42 return 1
+    if pick(none) isnt? none return 2
+    let record=pick(Record[42])
+    if record is? none or record.value not=?42 return 3
+    if pick_family(true)+pick_family(false) not=?42 return 4
+    return choose_block(Binding[20 none])+choose_block(Binding[none 22])+choose_block(Binding[none none])
+}

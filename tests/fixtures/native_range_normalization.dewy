@@ -1,0 +1,17 @@
+import p"../../dewy/bootstrap/semantic/integer_ranges.dewy" as ranges
+
+# A positive step is narrowed to a nonzero bigint record. The magnitude's
+# join with the negative-step branch must still produce a bigint cell.
+let main=():>int64=>{
+    let ascending=ranges.normalize(0 none 6 '[]')
+    if ascending is? none return 1
+    if ascending.first not=?0 or ascending.step not=?1 return 2
+    if ascending.last is? none or ascending.count is? none return 3
+    if ascending.last not=?6 or ascending.count not=?7 return 4
+    let descending=ranges.normalize(6 4 0 '[]')
+    if descending is? none return 5
+    if descending.first not=?6 or descending.step not=?-2 return 6
+    if descending.last is? none or descending.count is? none return 7
+    if descending.last not=?0 or descending.count not=?4 return 8
+    return 42
+}
