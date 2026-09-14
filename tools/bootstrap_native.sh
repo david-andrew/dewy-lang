@@ -124,6 +124,11 @@ for bootstrap_generation in 1 2; do
     "$bootstrap_output/dewy-stage$bootstrap_generation" --version
     echo "Generation $bootstrap_generation completed in $((SECONDS - bootstrap_started)) seconds"
     sha256sum --check --status "$bootstrap_output/SOURCE_SHA256SUMS"
+    if [[ $bootstrap_generation == 1 ]]; then
+        # A matching fixed point alone can hide consistent miscompilation.
+        # Check the new compiler before spending another self-build on it.
+        bash tools/check_native.sh "$bootstrap_output" 1
+    fi
 done
 
 cmp -- "$bootstrap_output/udewy-stage1" "$bootstrap_output/udewy-stage2"

@@ -2,16 +2,19 @@
 # Exercise an already-built native pair without invoking the hosted compiler.
 # Fixed-point comparison alone cannot detect a consistently miscompiled pair.
 set -euo pipefail
-if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 NATIVE_PAIR_DIRECTORY" >&2
+if [[ $# -lt 1 || $# -gt 2 || (${2:-1} != 1 && ${2:-1} != 2) ]]; then
+    echo "Usage: $0 NATIVE_PAIR_DIRECTORY [1|2]" >&2
     exit 2
 fi
 check_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 check_pair=$(realpath -- "$1")
+check_suffix=${2:+-stage$2}
+check_dewy="$check_pair/dewy$check_suffix"
+check_udewy="$check_pair/udewy$check_suffix"
 check_work=$(mktemp -d "${TMPDIR:-/tmp}/dewy-native-check.XXXXXX")
 trap 'rm -rf -- "$check_work"' EXIT
 export DEWY_LIBRARY_ROOT="$check_root/library"
-export DEWY_UDEWY="$check_pair/udewy"
+export DEWY_UDEWY="$check_udewy"
 cd -- "$check_root"
 
 cat > "$check_work/scalar.dewy" <<'EOF'
@@ -57,12 +60,12 @@ expect_exit() {
 for check_target in x86_64 c; do
     echo "Checking native pair with $check_target output"
     # Ordinary AND/OR stay eager; only if/loop conditions short-circuit.
-    expect_exit 0 "$check_pair/udewy" --target "$check_target" udewy/tests/test_guarded_calls.udewy
-    expect_exit 42 "$check_pair/dewy" --target "$check_target" "$check_work/scalar.dewy"
-    expect_exit 42 "$check_pair/dewy" --target "$check_target" tests/fixtures/native_pair_checks.dewy
+    expect_exit 0 "$check_udewy" --target "$check_target" udewy/tests/test_guarded_calls.udewy
+    expect_exit 42 "$check_dewy" --target "$check_target" "$check_work/scalar.dewy"
+    expect_exit 42 "$check_dewy" --target "$check_target" tests/fixtures/native_pair_checks.dewy
     echo "Checking native test discovery with $check_target output"
     test_status=0
-    test_output=$(timeout 180s "$check_pair/dewy" test --target "$check_target" --json "$check_work/tests" 2>&1) || test_status=$?
+    test_output=$(timeout 180s "$check_dewy" test --target "$check_target" --json "$check_work/tests" 2>&1) || test_status=$?
     if [[ $test_status != 1 ||
           $test_output != *'{"passed": 3, "failed": 0}'* ||
           $test_output != *'{"passed": 0, "failed": 1}'* ||

@@ -102,3 +102,10 @@ handoff records the seed's exact compile-only arguments; the script invokes
 arena before µDewy and any C compiler need memory. Backend failures still
 stop generation construction and prevent certification. The handoff uses no
 hosted compiler and applies to both output backends.
+
+Generation one must pass `tools/check_native.sh PAIR 1` before the bootstrap
+script starts generation two. This exercises the new compiler's scalar,
+library, value-independence and retention cases on both output backends,
+along with native test discovery. A failing compiler cannot launch another
+self-build or receive a fixed-point certificate. The same checker accepts a
+completed pair without a generation argument.
