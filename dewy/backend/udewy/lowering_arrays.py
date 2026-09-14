@@ -1228,6 +1228,9 @@ class _ArrayLowering(_ArraySharing):
                 [], None, ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, body, True))
             result.append(LoweredFunction(symbol, literal))
 
+        while self.pending_array_releases:
+            element, symbol = self.pending_array_releases.pop(0)
+            function(symbol, self._release_owned_array(value, loc, element=element, inline=True))
         while self.pending_cell_releases:
             members, prepared, strings, symbol = self.pending_cell_releases.pop(0)
             function(symbol, self._release_cell_payload(value, members, loc,

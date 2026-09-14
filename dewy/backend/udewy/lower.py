@@ -282,6 +282,8 @@ class _Lowerer(
         self.pending_string_release = False
         self.cell_release_symbols: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
         self.pending_cell_releases: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
+        self.array_release_symbols: list[tuple[ty.TypeExpr | None, str]] = []
+        self.pending_array_releases: list[tuple[ty.TypeExpr | None, str]] = []
         self.cell_copy_symbols: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
         self.pending_cell_copies: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
         # bindings whose value is an enum (a union of singletons): a word

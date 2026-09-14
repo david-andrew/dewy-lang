@@ -207,9 +207,20 @@ class _ArraySharing:
                 self._declare(owner, self._load_i64_field(source, ARRAY_OWNER_OFFSET, loc), loc),
                 self._if(self._array_is_shared(source, owner, loc), [shared, self._store_i64_field(source, ARRAY_OWNER_OFFSET, one, loc), self._store_i64_field(source, ARRAY_FLAGS_OFFSET, self._int64_binary('__and__', self._load_i64_field(source, ARRAY_FLAGS_OFFSET, loc), self._int64_literal(loc, ~ARRAY_SHARED), loc), loc)], loc)]
 
-    def _release_owned_array(self, descriptor, loc, *, element=None):
+    def _release_owned_array(self, descriptor, loc, *, element=None, inline=False):
         if not self._has_arena():
             return self._release_unique_array(descriptor, loc, element=element)
+        if not inline:
+            # Owner/refcount dispatch and recursive element cleanup depend
+            # only on the element representation. Keep descriptor evaluation
+            # in the caller and share the complete release operation. No
+            # helper-local allocation or value escapes this void call.
+            symbol = next((name for existing, name in self.array_release_symbols if existing == element), None)
+            if symbol is None:
+                symbol = self._internal_symbol(f'__dewy_release_array_{len(self.array_release_symbols)}')
+                self.array_release_symbols.append((element, symbol))
+                self.pending_array_releases.append((element, symbol))
+            return [self._release_value_call(symbol, descriptor, loc)]
         owner = self._name('release_owner', loc)
         one = self._int64_literal(loc, 1)
         original = self._release_unique_array(descriptor, loc, element=element)

@@ -451,3 +451,18 @@ The native kernel passes the value checks but fails this new retention
 budget; that remains a native ownership follow-up, not a parity success.
 Artifacts: `active-union-{t0,final-gates,lifetimes}.log` and
 `active-union/{probes,native-gates}.log`.
+
+## Shared array release operations
+
+Hosted array cleanup now shares the complete owner/refcount dispatch and
+recursive element cleanup once per element representation, matching the
+native lowerer's existing helper strategy. Descriptor evaluation stays at
+the call site; release ordering, pinned storage and descriptor ownership
+remain unchanged. Twenty selected sharing, popped-element, union-retention
+and record-family checks pass on direct and C routes.
+
+With all other current changes held fixed, outlining reduces t0 output from
+**3,619,080 to 3,283,675 bytes (9.3%)**. In-process samples were
+5.16/5.45 s inline and 4.94/5.42 s outlined; the separate C toolchain
+experiment overlapped, so no close latency improvement is claimed.
+Artifacts: `array-release-{gates,t0}.log` and retained emitted programs.
