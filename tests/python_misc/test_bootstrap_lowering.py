@@ -535,6 +535,7 @@ CLEANUP_CASES += [(
 ARENA_CASES += CLEANUP_CASES
 ARENA_CASES += [((ROOT / 'tests/fixtures/native_record_operations.dewy').read_text(), 42)]
 ARENA_CASES += [((ROOT / 'tests/fixtures/native_set_pop_defaults.dewy').read_text(), 42)]
+ARENA_CASES += [((ROOT / 'tests/fixtures/native_record_array_replacement.dewy').read_text(), 42)]
 RECORD_FAMILY = (ROOT / 'tests/fixtures/native_record_family_helpers.dewy').read_text()
 ARENA_CASES += [(RECORD_FAMILY, 42)]
 

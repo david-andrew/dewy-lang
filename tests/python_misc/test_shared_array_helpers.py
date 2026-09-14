@@ -1,5 +1,6 @@
 """Array snapshot fallbacks are shared across callers, including wide unions."""
 import subprocess
+from pathlib import Path
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
@@ -94,43 +95,7 @@ main=():>int64=>{
 
 
 def test_replacing_records_reclaims_roots_and_descendant_fields(tmp_path):
-    text = '''
-Base=type of [value:int64]
-Leaf=type of Base & [items:array<int64>]
-fixed=():>array<Base length=1>=>[Leaf[42 [20 22]]]
-exercise=():>bool=>{
-    let original:array<Base>=[Leaf[42 [20 22]]]
-    let copied=original
-    if copied.length =? 0 return false
-    copied[0]=copied[0]
-    copied[0]=Leaf[7 [1 2 3]]
-    if original.length =? 0 return false
-    let first=original[0]
-    if first isnt? Leaf return false
-    let exact=fixed()
-    exact[0]=exact[0]
-    exact[0]=Leaf[19 [4 5]]
-    return first.value =? 42 and first.items.length =? 2 and exact[0].value =? 19
-}
-main=():>int64=>{
-    if not exercise() return 1
-    let before:int64=_arena_live_bytes
-    loop i in 0.. and i <? 32 {if not exercise() return 2}
-    if _arena_live_bytes not=? before return 3
-    let pinned:array<Base>=[Leaf[42 [20 22]]]
-    let raw:int64=pinned transmute int64
-    let previous:int64=__load_i64__(__load_i64__(raw))
-    let word0:int64=__load_i64__(previous)
-    let word1:int64=__load_i64__(previous+8)
-    if pinned.length =? 0 return 4
-    pinned[0]=Leaf[7 [1 2 3]]
-    let other:array<Base>=[Leaf[11 [3 4]] Leaf[12 [5 6]]]
-    # Preserve both the brand and value without assuming their layout order.
-    # The old record is still reachable through an untracked raw pointer.
-    if __load_i64__(previous) not=? word0 or __load_i64__(previous+8) not=? word1 return 5
-    return 42
-}
-'''
+    text = (Path(__file__).resolve().parents[1] / 'fixtures/native_record_array_replacement.dewy').read_text()
     output = tmp_path / 'replace-records.udewy'
     output.write_text(codegen(SrcFile(None, text), debug_locations=False))
     for target in ['x86_64', 'c']:

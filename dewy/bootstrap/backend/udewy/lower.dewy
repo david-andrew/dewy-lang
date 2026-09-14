@@ -293,10 +293,16 @@ expression = (id:addr @state:State):>addr => {
         let target=hir.node_at(state.input.nodes node.target)
         if target isnt? hir.Index return reject(node 'a non-array index assignment' @state)
         let prefix:array<addr>=[]
-        let pointer=snapshot(array_index(target @state writable=true) @prefix @state)
+        let descriptor=snapshot(write_route(target.array @state) @prefix @state)
+        let index=snapshot(expression(target.index @state) @prefix @state)
         let stored=stored_type(node.target state)
+        prefix.push(array_unique(descriptor stored node @state))
+        let pointer=snapshot(array_element_address(descriptor index target @state) @prefix @state)
         let replacement=snapshot(owned_value(node.value @state) @prefix @state)
-        prefix.push(release_value(array_load(pointer stored node @state) stored node @state))
+        # Raw exposure pins the entire container tree. An untracked pointer
+        # can still name the previous record or cell after this replacement.
+        let tracked=compare('__ne__' read_word(descriptor layouts.array_descriptor.owner node @state) word(-1 node @state) node @state)
+        prefix.push(conditional(tracked release_value(array_load(pointer stored node @state) stored node @state) node @state))
         prefix.push(array_store(replacement pointer stored node @state))
         return put(hir.Block[node.loc type prefix false] @state)
     }
