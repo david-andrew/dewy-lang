@@ -1,19 +1,21 @@
 # Dewy roadmap after the native bootstrap
 
 This is the high-level roadmap for taking the language from "a native
-compiler pair exists and is reasonably performant" to the language as it was
-intended. It is deliberately not a task list. It records the order in which
-the remaining pieces should land, why that order, and the strategy for the
-pieces where the project has previously bogged down.
+compiler pair exists" to a practical compiler and the language as it was
+intended. It records the order in which the remaining pieces should land,
+why that order, and the strategy for the pieces where the project has
+previously bogged down.
 
 How this relates to the other documents:
 
 - [`status.md`](status.md) is the feature-by-feature implementation tracker
   and the home of the detailed design essays (liquid refinements, ownership
   tiers, nominal/structural construction). This document orders that work.
-- [`bootstrap/IMPLEMENTATION.md`](bootstrap/IMPLEMENTATION.md) is the log of
-  the native bootstrap effort. That effort continues as mandated until a
-  verified, packaged, installable pair exists. Nothing here changes it.
+- [`bootstrap/IMPLEMENTATION.md`](bootstrap/IMPLEMENTATION.md) records the
+  verified, published, installable native pair reached on 2026-09-14 and
+  the remaining hosted-parity gaps. The C-accelerated fixed point is complete;
+  full language parity and practical compile-time performance remain Phase 0
+  work. A full bootstrap without C acceleration remains unverified.
 - [`semantic/*.md`](semantic/) are the design notes for individual areas.
   Where this document says a design is open, the note is where the options
   live.
@@ -24,6 +26,8 @@ How this relates to the other documents:
 Recorded 2026-09-13. The ordering and the phase 1.1 strategy were reviewed
 and accepted by David for phases 1.1 through 1.3; later phases are a
 preliminary proposal and will be revised as earlier phases land.
+The immediate parity and performance sequence below was reviewed and
+accepted on 2026-09-14 after the native fixed point completed.
 
 ## Organizing principle
 
@@ -46,9 +50,9 @@ what it buys and when it stops being worth paying.
 
 ## The hosted compiler's role
 
-The Python compiler is not only the bootstrap seed. It is the one
-implementation of the language that shares nothing with the native compiler
-(different language, different code generator), which makes it:
+The Python compiler is not only the bootstrap seed. It has independently
+implemented parsing, checking, and lowering, in a different language from
+the native compiler, which makes it:
 
 - an independent oracle for miscompilation. A self-hosting compiler can
   miscompile itself consistently and still reach a byte-identical fixed
@@ -64,12 +68,22 @@ implementation of the language that shares nothing with the native compiler
   own source will use each new feature, and a hosted compiler that already
   supports it avoids a two-generation staging dance for every change.
 
+That independence has limits: the compilers share the µDewy execution layer
+and runtime library. Keep explicit expected-result tests alongside
+differential comparisons, so agreement between implementations cannot hide
+a shared bug.
+
 Its role changes in three steps, decided 2026-09-14:
 
 1. **Full parity (now, and through the period of frequent language
-   change).** Features and fixes land in both compilers. Parity is
-   semantic: a program both accept behaves identically. It is not parity in
-   cost; the native lowering already reclaims storage the hosted lowering
+   change).** Features and semantic fixes land in both compilers. Parity
+   includes agreement on acceptance and rejection of programs under the
+   settled language rules, and identical behavior for accepted programs.
+   Exact diagnostic wording need not match. Work is bidirectional: port
+   native-only semantic fixes back to Python, and close native gaps in
+   features the hosted compiler already supports. Most currently recorded
+   language-coverage gaps are in the latter direction. Parity is not parity
+   in cost; the native lowering already reclaims storage the hosted lowering
    does not, and the hosted side is not required to match that.
 2. **Pinned reference.** When the language changes slowly enough that
    staging is cheap, the hosted compiler is pinned at a language version N
@@ -85,25 +99,64 @@ Its role changes in three steps, decided 2026-09-14:
 Exit criteria that the later phases depend on:
 
 - verified fixed point: two native generations of both compilers, byte
-  identical, built without Python (`tools/bootstrap_native.sh`);
+  identical, built without Python (`tools/bootstrap_native.sh`); achieved
+  with C acceleration on 2026-09-14;
 - the native pair passes the full end-to-end corpus, the differential
   `test_bootstrap_*` groups, and the `$test` runner;
-- installer and release wired to the verified package; CI green;
+- installer and release wired to the verified package (achieved); CI green
+  remains a separate gate;
 - the Python compiler remains the behavioral reference and stays in
   parity (see "The hosted compiler's role"); its retirement is not a Phase
   0 exit criterion;
-- compile-time performance adequate for dogfooding. Full-source checking
-  measured in hundreds of seconds and multi-gigabyte peaks makes the language
-  unusable regardless of features. A serialized checked-prelude cache on the
-  native side (the counterpart of the hosted resident prelude) is likely the
-  single largest available win and is independent of any language work.
-- the size of the generated µDewy, and the time spent generating it
-  (measured 2026-09-14 on `bootstrap/parser/t0.dewy`, 873 lines: 5.7 MB /
+- compile-time performance adequate for dogfooding, measured against explicit
+  time and memory budgets. Record cold and warm compilation separately for a
+  small program, a representative compiler module, and the full compiler.
+  Record checking, lowering, emission, and backend timings; peak memory;
+  generated µDewy size; and copied bytes, shared snapshots, and detachments.
+  Establish the baselines and workload budgets before accepting optimization
+  batches, rather than treating a successful self-build as sufficient.
+
+### Immediate work order
+
+1. Establish a bidirectional semantic parity inventory and isolated
+   regressions for acceptance, rejection, and execution. A first unsupported
+   construct must not conceal the rest of a corpus bundle. Use
+   `bootstrap/IMPLEMENTATION.md` as the starting inventory, not an exhaustive
+   list of gaps.
+2. Close those gaps while batching straightforward, measured performance
+   fixes, especially repeated pure type queries and expensive cache keys.
+   Keep the hosted and native measurements separate. Validate each coherent
+   batch on bounded workloads; full self-builds remain integration gates,
+   not the inner edit/test loop.
+3. Implement native checked-prelude caching. This should particularly improve
+   ordinary edit/run cycles; measure its effect on full self-builds separately.
+   Restore binding and type identities correctly, and invalidate cached state
+   when compiler/cache format, library inputs, target, or relevant options
+   change. Cached and uncached compilation must agree semantically.
+4. Reduce remaining generated-code expansion, then proceed into the
+   ownership, proof, and effects work. Small proof or effect improvements
+   needed to justify a particular borrow can accompany ownership work;
+   ownership does not wait for the complete solver.
+
+### Performance measurements and candidates
+
+The measurements below describe the hosted Python route. They identify
+candidate work, not the native compiler's current profile. Native lowering
+already caches record layouts, shares copy/release helpers, and emits static
+string descriptors. Measure the remaining costs of those mechanisms before
+porting an optimization or expanding it further. Cache pure queries only
+within the compilation state where their inputs and dependencies are stable;
+frozen type objects alone do not justify caching queries that depend on
+changing registries or facts.
+
+- Generated µDewy size and the time spent generating it
+  (hosted measurement, 2026-09-14, `bootstrap/parser/t0.dewy`, 873 lines: 5.7 MB /
   79k lines of µDewy; 17.9 s to check, lower, and emit against 4.6 s for the
   µDewy stage to parse, assemble, and link). The text is large, but the time
   is mostly in *building* it — lowering is about three quarters, checking a
   seventh, emission a ninth (a third of that the source-position markers).
   In order of payoff per risk:
+
   1. cache the pure type functions the lowering recomputes per site
      (`_object_layout` ran 24k times, the union-member computation 18k, for
      that one program; ninety union result writes cost 9 s between them) —
@@ -119,12 +172,15 @@ Exit criteria that the later phases depend on:
      rather than store by store;
   4. emit source-position markers (12.7k lines) only for debug builds, or
      thin them to statement starts.
-  Expected together: about half the text and a further slice off lowering;
-  measure after each, since the profile shifts. The checker's share is
-  analysis proportional to the program, not the output, and is a separate
-  problem (the proof engine's bounded traversals, 1.2).
-- further mechanical wins the self-time profile of that compile shows, none
-  of which changes output (recorded 2026-09-14):
+
+  The original estimate of about half the text and a further slice off
+  lowering is a hypothesis from this hosted profile, not an established
+  speedup or a native target. Measure after each batch, since the profile
+  shifts. The checker's share is analysis proportional to the program, not
+  the output, and is a separate problem (the proof engine's bounded
+  traversals, 1.2).
+- Further candidates from that hosted self-time profile, intended to preserve
+  output (recorded 2026-09-14):
   - `repr` of whole types as sort and cache keys: `runtime_union_members`
     and `enum_members` sort members by `repr(member)` (`semantic/ty.py`),
     and `_member_tag` keys its cache by `repr(plain)`
@@ -169,8 +225,11 @@ fallback. Profiles taken during the September 2026 paired self-build
 attempts (summarized in `bootstrap/PERFORMANCE.md`) showed every sample
 inside string cloning, called from record copying, called from reading a
 node out of the type arena: a read-only arena lookup paid a full deep copy
-each time, for a cumulative 324 GB allocated against 9 GB live. Copy-on-write made those
-copies free until a write, which is why it unblocked the bootstrap.
+each time, for a cumulative 324 GB allocated against 9 GB live. Copy-on-write
+made snapshots cheap until a write; together with string ownership and
+temporary reclamation, it unblocked the bootstrap. The completed run no
+longer has that memory blocker, but compile latency and allocation overhead
+still make ordinary native development too expensive.
 
 **Strategy.** Make it structurally impossible to re-enter that state
 silently.
@@ -396,11 +455,13 @@ stable surface.
 - Any new user-visible spelling before the Phase 1.4 decisions; surface
   changes need David's approval first.
 
-## Open ordering questions
+## Ordering decisions and open questions
 
-- Whether the proof engine (1.2) should precede the ownership model (1.1).
-  Current lean: ownership first, because it is what blocks the bootstrap's
-  own memory behavior today.
+- Keep ownership (1.1) before the full proof engine (1.2), while landing the
+  targeted proof and effect improvements needed to justify borrows alongside
+  it. The bootstrap memory blocker is resolved; the purpose now is predictable
+  costs and practical native development, without making either project wait
+  for the other to be complete.
 - Whether compile-time reflection deserves to move into Phase 1 so more of
   the standard library can be written in Dewy earlier. Current lean: no; it
   does not help compiler performance and its purity rules want effects
