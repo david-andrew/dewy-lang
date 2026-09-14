@@ -519,11 +519,30 @@ class ModuleCompiler:
     # Prelude declarations the backend may call without a source reference.
     BACKEND_RUNTIME_HELPERS = frozenset({'_arena_alloc', '_arena_release', '_arena_note_copy', '_region_new', '_region_alloc', '_region_reset', '_region_release', '_union_tree'})
 
-    def _needed_prelude_binding_ids(self) -> set[int]:
+    def _needed_runtime_binding_ids(self, entry: ModuleRecord) -> set[int]:
+        """Follow runtime references before renaming and lowering imports.
+
+        The entry's declarations remain available to HIR tools, including
+        compilation of a module with no main. Imported function declarations
+        do not execute at startup; keep only their referenced dependency graph.
+        Non-function user initializers always remain, in module load order.
+        Callback values and lazy defaults contribute ordinary HIR references.
+        """
         needed: set[int] = set()
         for record in self.order:
-            if not record.prelude:
+            if record is entry:
                 self._collect_referenced_binding_ids(record.root, needed)
+            elif not record.prelude:
+                for item in record.root.items:
+                    if not self._imported_function(item):
+                        self._collect_referenced_binding_ids(item, needed)
+
+        # Debugger formatters are invoked externally, not by source calls.
+        if self.debug:
+            for record in self.order:
+                for item in record.root.items:
+                    if isinstance(item, hir.Declare) and item.name.startswith('__dewy_debug_show_') and item.binding_id is not None:
+                        needed.add(item.binding_id)
 
         prelude_items = [
             item
@@ -544,7 +563,12 @@ class ModuleCompiler:
                 needed.add(item.binding_id)
         # Reachability is a graph walk. A dependency already visited need not
         # have its whole function body scanned again when another root grows.
-        declarations = {item.binding_id: item for item in prelude_items}
+        declarations = {
+            item.binding_id: item
+            for record in self.order
+            for item in record.root.items
+            if isinstance(item, hir.Declare) and item.binding_id is not None
+        }
         pending = list(needed)
         visited: set[int] = set()
         while pending:
@@ -559,6 +583,11 @@ class ModuleCompiler:
                 needed.update(references)
                 pending.extend(references - visited)
         return needed
+
+    @staticmethod
+    def _imported_function(item: hir.AST) -> bool:
+        return (isinstance(item, hir.Declare) and item.binding_id is not None
+                and isinstance(item.expr, (hir.FunctionLiteral, hir.OverloadedFunction)))
 
     def _validate_and_select(
         self,
@@ -609,21 +638,23 @@ class ModuleCompiler:
         from . import check
         check.validate_brand_matches()   # every module is loaded: the brands are a closed world
         names = self._emitted_names(entry)
-        needed_prelude = self._needed_prelude_binding_ids()
+        needed = self._needed_runtime_binding_ids(entry)
         items: list[hir.AST] = []
         for record in self.order:
-            renamed = self._rename(record.root, names)
+            # Filter before the recursive rename: discarded functions should
+            # cost neither rebuilt HIR nor downstream lowering/analysis work.
+            kept = [item for item in record.root.items if not (
+                record is not entry
+                and isinstance(item, hir.Declare)
+                and item.binding_id is not None
+                and item.binding_id not in needed
+                and (record.prelude or self._imported_function(item))
+            )]
+            renamed = self._rename(replace(record.root, items=kept), names)
             assert isinstance(renamed, hir.Block)
             self.finished_roots[id(record)] = renamed
             for item in renamed.items:
                 if isinstance(item, hir.Void):
-                    continue
-                if (
-                    record.prelude
-                    and isinstance(item, hir.Declare)
-                    and item.binding_id is not None
-                    and item.binding_id not in needed_prelude
-                ):
                     continue
                 items.append(item)
                 if isinstance(item, hir.Declare) and item.binding_id is not None:

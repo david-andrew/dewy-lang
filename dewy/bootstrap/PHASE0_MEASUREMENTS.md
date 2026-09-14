@@ -534,3 +534,30 @@ native executable compares the former linear lookup with the index: inserting
 showing the expected scaling in this bounded kernel. Full CLI validation
 jobs overlapped; no full-checker speedup is claimed. Artifacts:
 `syntax-index-{gates,bench}.log` and `syntax-index-bench.py`.
+
+The `1fa828cc` native executable subsequently compiles pinned t0 in
+**39.79 s**, with 3,112,352 KiB peak process RSS and 4,310,586 emitted bytes.
+This invocation used a fresh process and build directory, pinned source and
+library inputs, and the verified eighteenth µDewy executable on the direct
+backend. OS page caches were uncontrolled. No compiler jobs overlapped the
+timed invocation. This is a module measurement, not the full-build target.
+Artifacts: `native-active-values-t0`.
+
+## Prune unused hosted imported functions before lowering
+
+Hosted module assembly now follows runtime dependencies through imported
+functions as well as the prelude, as native graph assembly already does.
+Unreferenced imported bodies are removed before recursive renaming, analysis
+and lowering. Entry declarations remain available to HIR tools and no-main
+module compilation. User module initializers retain load order; callbacks,
+lazy defaults, backend helpers and debugger formatters retain their dependencies.
+All source bodies are still checked and validated before this pruning.
+
+For p0, emitted text falls from **7,871,421 to 7,574,584 bytes (3.8%)**.
+In-process old/new/new/old samples take 12.60/11.66/10.98/11.56 s; cache order
+and overlapping regression checks limit latency comparisons. The imports and
+prelude-cache group passes 31 checks, with two test-only mistakes corrected
+in the final three-test group. Expected execution covers callback tables,
+defaults, startup dependencies, unused-body rejection and complete entry HIR.
+Artifacts: `import-reachability-{gates,final-gates,bench}.log` and
+`compare-import-reachability.py`.
