@@ -200,3 +200,41 @@ let mixed = (items:array<int64 length=2>):>int64 => {
     summary = _param_effects(effects, _function(root, 'mixed'))
     assert summary.reads == {ROOT}
     assert summary.read_only
+
+
+def test_place_call_chain_schedules_only_changed_dependents(monkeypatch):
+    from dewy.reporting import Span
+    from dewy.semantic import ty
+    from dewy.semantic.analyze.effects import _EffectAnalyzer
+
+    loc = Span(0, 0)
+    array = ty.ArrayType('int64', 1)
+    signature = ty.FunctionType([], [], None, 'void')
+    declarations = []
+    count = 200
+    for index in range(count):
+        binding = 1000 + index
+        parameter = hir.Param('values', array, binding_id=binding, place=True)
+        value = hir.ExpressedIdentifier(loc, array, 'values', binding_id=binding)
+        if index == count - 1:
+            zero = hir.Integer(loc, 'int64', '0d', 0)
+            body = hir.IndexAssign(loc, 'void', hir.Index(loc, 'int64', value, zero, 0), zero)
+        else:
+            callee = hir.ExpressedIdentifier(loc, signature, f'call{index + 1}', binding_id=index + 1)
+            body = hir.FunctionCall(loc, 'void', callee, [hir.Place(loc, array, value)], {})
+        literal = hir.FunctionLiteral(loc, signature, [parameter], [], None, 'void', body)
+        declarations.append(hir.Declare(loc, 'void', 'let', f'call{index}', signature, literal, binding_id=index))
+    # Callers precede callees, the worst order for repeated whole-program scans.
+    root = hir.Block(loc, 'void', declarations, True)
+    visits = 0
+    summarize = _EffectAnalyzer._summarize
+
+    def counted(self, literal):
+        nonlocal visits
+        visits += 1
+        return summarize(self, literal)
+
+    monkeypatch.setattr(_EffectAnalyzer, '_summarize', counted)
+    result = analyze_effects(root)
+    assert all(result.by_param_binding[1000 + index].mutates == {(INDEX_STEP,)} for index in range(count))
+    assert visits < 3 * count   # the former solver visited over 40,000 bodies

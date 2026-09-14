@@ -94,7 +94,7 @@ shares_storage = (call:hir.FunctionCall target:addr plan:captures.Plan nodes:arr
 }
 ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<types.Type> opaque_only:bool=false value_boundaries:bool=false indirect:dict<addr array<addr>>=[]):>set<addr> => {
     let dirty:set<addr>=set[]
-    let dependencies:dict<addr set<addr>>=[]
+    let callers:dict<addr array<addr>>=[]
     loop [id function] in plan.functions {
         if not opaque_only {loop binding in function.writes {if binding in? plan.globals {dirty.add(id)}}}
         let literal=hir.node_at(nodes id)
@@ -143,16 +143,22 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
             }
             loop next in hir.children(node) {pending.push(next)}
         }
-        dependencies[id]=called
+        loop target in called {
+            let users=callers.get(target [])
+            users.push(id)
+            callers[target]=users
+        }
     }
-    let changed=true
-    loop changed {
-        changed=false
-        loop [id function] in plan.functions {
-            if id in? dirty continue
-            loop dependency in dependencies.get(id set[]) {
-                if dependency in? dirty {dirty.add(id) changed=true break}
-            }
+    # Dirtiness is a monotone bit. Propagate each newly dirty function to
+    # its callers once; long call chains need no whole-program rescans.
+    let pending:array<addr>=[]
+    loop id in dirty {pending.push(id)}
+    loop pending.length >? 0 {
+        let id=pending.pop
+        loop caller in callers.get(id []) {
+            if caller in? dirty continue
+            dirty.add(caller)
+            pending.push(caller)
         }
     }
     return dirty

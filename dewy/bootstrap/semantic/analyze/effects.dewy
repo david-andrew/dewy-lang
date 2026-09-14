@@ -370,29 +370,71 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis
     return changed
 }
 
+summary_callers = (analysis:Analysis nodes:array<hir.AST>):>dict<addr set<addr>> => {
+    let callers:dict<addr set<addr>>=[]
+    loop caller in analysis.literals {
+        let literal=hir.node_at(nodes caller)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let pending:array<addr>=[literal.body]
+        loop parameter in literal_params(literal) {
+            if parameter is? hir.BoundParam {pending.push(parameter.value)}
+        }
+        let seen:set<addr>=set[]
+        loop pending.length >? 0 {
+            let id=pending.pop
+            if id in? seen continue
+            seen.add(id)
+            let node=hir.node_at(nodes id)
+            if node is? hir.FunctionLiteral|hir.GenericFunction continue
+            if node is? hir.FunctionCall {
+                let placed=false
+                loop argument in node.pos_args {if hir.node_at(nodes argument) is? hir.Place {placed=true}}
+                loop argument in node.kw_args.values {if hir.node_at(nodes argument) is? hir.Place {placed=true}}
+                if placed {
+                    let targets=direct_targets(node analysis nodes)
+                    if targets isnt? none {
+                        loop target in targets {
+                            let users=callers.get(target set[])
+                            users.add(caller)
+                            callers[target]=users
+                        }
+                    }
+                }
+            }
+            loop child in hir.children(node) {pending.push(child)}
+        }
+    }
+    return callers
+}
+
 analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> callback_targets:dict<addr array<addr>>=[] value_casts_escape:bool=true):>ProgramEffects => {
     let analysis = collect(root nodes)
     analysis.callback_targets=callback_targets
     analysis.value_casts_escape=value_casts_escape
-    # These are may-effects: each iteration can only add coverage. Accumulate
-    # into the previous summary rather than rebuilding and comparing whole
-    # dictionaries. Prefix normalization plus MAX_ROUTE_DEPTH bounds the
-    # ascending chain, including recursive calls through projected places.
-    let changed:bool = true
-    loop changed {
-        changed = false
-        loop id in analysis.literals {
-            if id not in? analysis.effects continue
-            let summary = analysis.effects[id]
-            let literal = hir.node_at(nodes id)
-            $runtime_assert literal is? hir.FunctionLiteral
-            let updated=visit(literal.body @summary.params analysis nodes type_nodes)
-            loop parameter in literal_params(literal) {
-                if parameter is? hir.BoundParam and visit(parameter.value @summary.params analysis nodes type_nodes) {updated=true}
-            }
-            if updated {
-                analysis.effects[id] = summary
-                changed = true
+    # These are may-effects: updates only add coverage. Revisit callers of
+    # changed summaries, instead of rescanning every function each round.
+    # Prefix normalization plus MAX_ROUTE_DEPTH bounds recursive place routes.
+    let callers=summary_callers(analysis nodes)
+    let pending=analysis.literals
+    let queued:set<addr>=set[]
+    loop id in pending {queued.add(id)}
+    loop pending.length >? 0 {
+        let id=pending.pop
+        queued.pop(id default=id);
+        if id not in? analysis.effects continue
+        let summary = analysis.effects[id]
+        let literal = hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let updated=visit(literal.body @summary.params analysis nodes type_nodes)
+        loop parameter in literal_params(literal) {
+            if parameter is? hir.BoundParam and visit(parameter.value @summary.params analysis nodes type_nodes) {updated=true}
+        }
+        if updated {
+            analysis.effects[id] = summary
+            loop caller in callers.get(id set[]) {
+                if caller in? queued continue
+                queued.add(caller)
+                pending.push(caller)
             }
         }
     }

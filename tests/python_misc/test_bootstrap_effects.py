@@ -80,6 +80,19 @@ def effect_program():
     declarations.append(hir.Declare(LOC, 'void', 'let', 'alias', CALLABLE, read(101, CALLABLE), binding_id=119))
     declarations.append(hir.Assign(LOC, 'void', read(119, CALLABLE), '=', read(110, CALLABLE)))
     function(120, [param(20)], [call(119, [place(read(20))])])
+    # Defaults remain part of the checked HIR's effect boundary, including
+    # after transformations have introduced parameter-rooted references.
+    function(121, [param(21), hir.BoundParam('fallback', 'void',
+        call(101, [place(read(21))]), binding_id=22)], [])
+    function(122, [param(23)], [call(121, [place(read(23))])])
+    default_function = hir.FunctionLiteral(LOC, CALLABLE, [param(24)], [], None,
+        'void', store(read(24)))
+    function(123, [hir.BoundParam('callback', CALLABLE, default_function, binding_id=25)], [])
+    # A long forwarding chain, in the slow order for whole-program rounds.
+    for index in range(32):
+        binding = 1000 + index
+        body = [store(read(binding))] if index == 31 else [call(2001 + index, [place(read(binding))])]
+        function(2000 + index, [param(binding)], body)
     return hir.Block(LOC, 'void', declarations, True)
 
 

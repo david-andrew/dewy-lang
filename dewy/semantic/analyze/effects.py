@@ -22,6 +22,7 @@ instead of copying, replacing the array-specific boundary checks.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections import deque
 from functools import cache
 
 from .. import bindings as sb
@@ -172,6 +173,8 @@ def _iter_values(value: object):
         yield value
     elif isinstance(value, hir.ObjectField):
         yield value.value
+    elif isinstance(value, hir.BoundParam):
+        yield value.value
     elif isinstance(value, (list, tuple)):
         for item in value:
             yield from _iter_values(item)
@@ -205,6 +208,7 @@ class _EffectAnalyzer:
         self.declares: dict[int, hir.Declare] = {}
         self.reassigned: set[int] = set()
         self.param_binding_ids: set[int] = set()
+        self.collected: set[int] = set()
         self._collect(root)
         self.effects: dict[int, FunctionEffects] = {
             id(literal): FunctionEffects(
@@ -217,11 +221,16 @@ class _EffectAnalyzer:
             )
             for literal in self.literals
         }
+        self.dependents: dict[int, set[int]] = {}
 
     # ------------------------------------------------------------------
     # program structure collection
 
     def _collect(self, node: object) -> None:
+        if isinstance(node, hir.AST):
+            if id(node) in self.collected:
+                return
+            self.collected.add(id(node))
         if isinstance(node, hir.FunctionLiteral):
             self.literals.append(node)
             for param in _literal_params(node):
@@ -338,15 +347,24 @@ class _EffectAnalyzer:
     # per-function summarization
 
     def solve(self) -> ProgramEffects:
-        changed = True
-        while changed:
-            changed = False
-            for literal in self.literals:
-                summary = self._summarize(literal)
-                current = self.effects[id(literal)]
-                if summary.params != current.params:
-                    self.effects[id(literal)] = summary
-                    changed = True
+        # Every body runs once to discover its effects and summary reads.
+        # Thereafter only callers of a changed summary need another visit.
+        # Recursive place routes still converge under prefix normalization
+        # and MAX_ROUTE_DEPTH; value calls introduce no such dependency.
+        pending = deque(self.literals)
+        queued = {id(literal) for literal in self.literals}
+        while pending:
+            literal = pending.popleft()
+            key = id(literal)
+            queued.remove(key)
+            self.current_literal = key
+            summary = self._summarize(literal)
+            if summary.params != self.effects[key].params:
+                self.effects[key] = summary
+                for caller in self.dependents.get(key, ()):
+                    if caller not in queued:
+                        queued.add(caller)
+                        pending.append(self.effects[caller].literal)
         by_param: dict[int, ParameterEffects] = {}
         for function_effects in self.effects.values():
             by_param.update(function_effects.params)
@@ -359,6 +377,9 @@ class _EffectAnalyzer:
             if param.binding_id is not None
         }
         self._visit(literal.body, params)
+        for parameter in _literal_params(literal):
+            if isinstance(parameter, hir.BoundParam):
+                self._visit(parameter.value, params)
         return FunctionEffects(literal, params)
 
     def _resolve_route(
@@ -602,6 +623,7 @@ class _EffectAnalyzer:
             if parameter is None or parameter.binding_id is None:
                 effects.add_opaque(route)
                 continue
+            self.dependents.setdefault(id(target), set()).add(self.current_literal)
             callee_effects = self.effects[id(target)].params.get(
                 parameter.binding_id
             )

@@ -157,22 +157,39 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
         function.captures=function.direct
         result.functions[id]=function
     }
-    let changed=true
-    loop changed {
-        changed=false
-        loop id in functions {
-            $runtime_assert id in? result.functions
-            let function=result.functions[id]
-            loop dependency in function.dependencies {
-                let other=result.functions.get(dependency)
-                if other is? none continue
-                loop binding in other.captures {
-                    if binding in? result.globals or binding in? function.locals or binding in? function.captures continue
-                    function.captures.add(binding)
-                    changed=true
-                }
+    let callers:dict<addr array<addr>>=[]
+    loop id in functions {
+        $runtime_assert id in? result.functions
+        loop dependency in result.functions[id].dependencies {
+            let users=callers.get(dependency [])
+            users.push(id)
+            callers[dependency]=users
+        }
+    }
+    # A newly captured binding travels only along reverse dependency edges.
+    # Filtering globals and each caller's locals preserves the lexical scope
+    # boundary; a recursive component converges when its capture sets stop growing.
+    let pending:array<addr>=[]
+    let queued:set<addr>=set[]
+    loop id in functions {pending.push(id) queued.add(id)}
+    loop pending.length >? 0 {
+        let id=pending.pop
+        queued.pop(id default=id);
+        let other=result.functions.get(id)
+        if other is? none continue
+        loop caller in callers.get(id []) {
+            $runtime_assert caller in? result.functions
+            let function=result.functions[caller]
+            let changed=false
+            loop binding in other.captures {
+                if binding in? result.globals or binding in? function.locals or binding in? function.captures continue
+                function.captures.add(binding)
+                changed=true
             }
-            result.functions[id]=function
+            if changed {
+                result.functions[caller]=function
+                if caller not in? queued {queued.add(caller) pending.push(caller)}
+            }
         }
     }
     return result

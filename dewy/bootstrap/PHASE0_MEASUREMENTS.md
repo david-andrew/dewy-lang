@@ -275,3 +275,41 @@ improvement is established by that small sample. The ordinary isolated-cache
 CLI sample took 19.10 seconds; it must not be compared with the warm prelude
 comparison as the same workload. See `bounds-query-gates.log`,
 `bounds-queries-{cached,uncached}.log`, and `host-bounds-queries-t0`.
+
+## Dependency worklists
+
+Hosted parameter effects now discover the summaries they read and revisit
+only affected callers. HIR discovery visits shared nodes once (overload
+alternatives can legitimately reuse a function literal). Default expression
+bodies, including function literals stored in defaults, are included in
+hosted discovery and summaries, as in the native analysis.
+
+Native parameter effects build reverse place-call dependencies, while
+capture propagation and ambient-write propagation use their own reverse
+edges. Value boundaries, callback resolution, lexical-local filtering,
+recursive route normalization, and the existing conservative raw-storage
+rules are preserved. Worklists change scheduling, not the effect vocabulary.
+
+A 200-function hosted forwarding-chain regression establishes the expected
+mutation at every parameter with fewer than 600 summary visits; the former
+whole-program solver required over 40,000. Native differential checks include
+a 32-function chain, recursion, overload sharing, unknown callees, and default
+expression effects. The 128-function native capture/ambient kernel includes
+a cycle and a disconnected function. Built by the same hosted compiler, the
+old source takes 147–150 ms to analyze it; the worklist source takes 31–33 ms
+(three runs each). Its complete emitted harness grows from 20,048,997 to
+20,533,952 bytes, so this optimization trades a little implementation code
+for less repeated execution. Both versions return the expected result.
+
+The three existing native effect/borrowing gates pass, the expanded capture
+kernel passes, and the final 34-test group covers hosted effects, native
+summary parity, array sharing, and local/loop captures. Two isolated hosted
+t0 CLI invocations take 16.80 and 16.95 seconds, with lowering at 2.93 and
+2.85 seconds and roughly 237,260 KiB peak process RSS. These measurements
+precede the final default-expression discovery addition; a full self-build
+with the worklist batch is still pending.
+
+Artifacts: `host-worklists-t0`, `analysis-worklist-comparison-complete.log`,
+`effect-worklist-chain-gate.log`, `capture-worklist-complete-gate.log`, and
+`worklist-final-gates.log`. The old/new kernel sources and emitted programs
+are retained as `analysis-worklist-{old,new}.{dewy,udewy}`.

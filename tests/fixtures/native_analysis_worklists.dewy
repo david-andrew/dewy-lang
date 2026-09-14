@@ -1,0 +1,51 @@
+# Reverse dependency propagation must handle long chains, recursion, and
+# disconnected functions without dropping capture or ambient-write facts.
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/backend/udewy/captures.dewy" as captures
+import p"../../dewy/bootstrap/backend/udewy/borrowing.dewy" as borrowing
+main=():>int64=>{
+    let nodes:array<hir.AST>=[]
+    let ts:array<types.Type>=[]
+    let loc=Span[0 0]
+    let empty=types.primitive('void' @ts)
+    let word=types.primitive('int64' @ts)
+    let signature=types.function_type([] [] none empty [] @ts)
+    let declarations:array<addr>=[]
+    let literals:array<addr>=[]
+    let symbols:set<addr>=set[500]
+    loop i in 0.. and i <? 128 {
+        let body:array<addr>=[]
+        let next:addr=if i =? 127 0 else i+1
+        let callee=hir.append_node(@nodes hir.ExpressedIdentifier[loc signature 'next' 1000+next])
+        body.push(hir.append_node(@nodes hir.FunctionCall[loc empty callee [] []]))
+        if i =? 127 {
+            body.push(hir.append_node(@nodes hir.ExpressedIdentifier[loc word 'captured' 500]))
+            let raw=hir.append_node(@nodes hir.ExpressedIdentifier[loc signature '__store_i64__'])
+            let zero=hir.append_node(@nodes hir.Integer[loc word '0d' 0])
+            body.push(hir.append_node(@nodes hir.FunctionCall[loc empty raw [zero zero] []]))
+        }
+        let block=hir.append_node(@nodes hir.Block[loc empty body true])
+        let literal=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty block])
+        literals.push(literal)
+        declarations.push(hir.append_node(@nodes hir.Declare[loc empty 'let' "f{i}" signature literal 1000+i]))
+        symbols.add(1000+i)
+    }
+    let blank=hir.append_node(@nodes hir.Void[loc empty])
+    let separate=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty blank])
+    declarations.push(hir.append_node(@nodes hir.Declare[loc empty 'let' 'separate' signature separate 2000]))
+    symbols.add(2000)
+    let root=hir.append_node(@nodes hir.Block[loc empty declarations true])
+    let plan=captures.analyze(root nodes symbols)
+    let dirty=borrowing.ambient_writers(plan nodes ts)
+    loop id in literals {
+        if id not in? plan.functions return 1
+        if 500 not in? plan.functions[id].captures return 2
+        if id not in? dirty return 3
+    }
+    if separate not in? plan.functions return 4
+    if plan.functions[separate].captures.length not=? 0 return 5
+    if separate in? dirty return 6
+    return 42
+}
