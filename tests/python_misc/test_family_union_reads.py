@@ -54,6 +54,26 @@ Box:type=[node:Token]
 
 
 @pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_child_view_predicate_uses_converted_tags(tmp_path, target):
+    source = tmp_path / 'nested-predicate.dewy'
+    source.write_text(FIELD_FAMILY + '''
+let read=(node:Token|int64):>int64=>{
+    if node is? Left|Right {
+        if node is? Left return node.value
+        return node.value
+    }
+    return 0
+}
+let main=():>int64=>read(Left[0 20])+read(Right[0 999 22])+read(0)
+''')
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), target=target))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
 def test_child_union_widens_into_parent_union(tmp_path, target):
     source = tmp_path / 'widen.dewy'
     source.write_text(FIELD_FAMILY + '''

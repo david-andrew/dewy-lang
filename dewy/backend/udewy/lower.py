@@ -4581,7 +4581,9 @@ class _Lowerer(
                 and node.value.binding_id is not None
             ):
                 stored = self.union_cells.get(node.value.binding_id)
-                if stored is not None:
+                if stored is not None and (members is None or not self._union_family_conversions(stored, members)):
+                    # A checked child-family view is extracted with new child
+                    # tags. Ordinary subset reads keep the original tags.
                     members = stored
             if isinstance(node.value, hir.MemberAccess) and isinstance(node.value.value.type, ty.ObjectType):
                 # a union field: its storage members are the declared field
