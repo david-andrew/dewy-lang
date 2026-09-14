@@ -1868,6 +1868,27 @@ counted_bytes = (source:addr target:addr start:addr stop:addr node:hir.AST @stat
 }
 array_reserve = (descriptor:addr required:addr stride:addr node:hir.AST @state:State):>addr => {
     if state.allocator is? none return reject(node 'array growth needs the prelude arena allocator' @state)
+    let key="reserve_array:{stride}"
+    let name=state.copy_helpers.get(key)
+    let empty=types.primitive('void' @state.type_nodes)
+    if name is? none {
+        let generated=fresh('reserve_array' @state)
+        name=generated state.copy_helpers[key]=generated
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let source=fresh('descriptor' @state)
+        let count=fresh('required' @state)
+        let pointer=put(hir.ExpressedIdentifier[node.loc word_type source] @state)
+        let needed=put(hir.ExpressedIdentifier[node.loc word_type count] @state)
+        let body=array_reserve_body(pointer needed stride node @state)
+        let signature=types.function_type([types.PosOrKwArg[source word_type] types.PosOrKwArg[count word_type]] [] none empty [] @state.type_nodes)
+        let literal=put(hir.FunctionLiteral[node.loc signature [hir.Param[source word_type] hir.Param[count word_type]] [] none empty body source=state.source_index] @state)
+        state.generated.push(program.Function[generated literal])
+    }
+    $runtime_assert name isnt? none
+    return intrinsic(name [descriptor required] empty node @state)
+}
+array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @state:State):>addr => {
+    if state.allocator is? none return reject(node 'array growth needs the prelude arena allocator' @state)
     let prefix:array<addr>=[]
     let capacity=snapshot(read_word(descriptor layouts.array_descriptor.capacity node @state) @prefix @state)
     let body:array<addr>=[]
@@ -1878,7 +1899,16 @@ array_reserve = (descriptor:addr required:addr stride:addr node:hir.AST @state:S
     let data=snapshot(allocation(word_op('__mul__' next word(stride node @state) node @state) node @state) @body @state)
     let source=snapshot(read_word(descriptor layouts.array_descriptor.data node @state) @body @state)
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @body @state)
-    body.push(counted_bytes(source data word(0 node @state) word_op('__mul__' length word(stride node @state) node @state) node @state))
+    # New storage is disjoint. Move one stored element's bits at a time;
+    # record/cell/array handles have word width and retain their ownership.
+    # Other byte-copy sites may overlap and keep their directional loops.
+    if stride in? [1 2 4 8] {
+        let cursor=snapshot(word(0 node @state) @body @state)
+        let offset=word_op('__mul__' cursor word(stride node @state) node @state)
+        let value=intrinsic("__load_u{stride*8}__" [word_op('__add__' source offset node @state)] types.primitive("uint{stride*8}" @state.type_nodes) node @state)
+        let stored=intrinsic("__store_u{stride*8}__" [value word_op('__add__' data offset node @state)] types.primitive('void' @state.type_nodes) node @state)
+        body.push(while_loop(compare('__lt__' cursor length node @state) [stored set_local(cursor word_op('__add__' cursor word(1 node @state) node @state) node @state)] node @state))
+    } else {body.push(counted_bytes(source data word(0 node @state) word_op('__mul__' length word(stride node @state) node @state) node @state))}
     # Descriptor ownership describes the data buffer independently of the
     # descriptor's own lifetime. Static/frame views must never be released.
     let release=state.runtime_helpers.get('_arena_release')

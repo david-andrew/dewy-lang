@@ -482,6 +482,24 @@ potentially aliasing place routes remain conservative. The focused native
 lowering fixture covers replacement, element writes, append, callbacks,
 global writes, aggregate results, exactly-once index evaluation, and zero
 retained bytes over repeated calls. Its arithmetic-index loop allocates
-zero bytes. Direct and C execution pass. The original full-CLI failure is
-also covered by the nested-length contract source; checking the next full
-integration seed remains separate from these lowering-driver gates.
+zero bytes. Direct and C execution pass. The full native CLI built from
+`1ce9c366` now passes all 12 nested-length contract cases against the frozen
+hosted compiler, including the original array-snapshot failure. This is a
+contract integration gate, not a refreshed full corpus or fixed point.
+
+## Shared array relocation
+
+Both lowerers now share array-growth code by stored element width (1, 2,
+4, or 8 bytes). Growth relocates bits into disjoint storage; aggregate
+elements are handles, so this operation neither clones nor releases their
+payloads. Typed copy-on-write detachment remains separate. Native growth
+also moves a complete stored element per iteration instead of copying
+each byte separately. Pinned buffers retain their existing lifetime rule.
+
+Hosted ownership, record, and dictionary-width gates pass on direct x86_64
+and C. The native lowering driver passes explicit growth across all widths,
+record/array/string-view elements, reserve argument evaluation, raw-exposed
+growth, dictionary widths, and effectful index snapshots on both routes.
+The native dictionary-width fixture shrank from 307,284 to 214,901 bytes
+of emitted µDewy after sharing relocation. These are bounded lowering
+checks; the next full compiler integration remains a separate gate.

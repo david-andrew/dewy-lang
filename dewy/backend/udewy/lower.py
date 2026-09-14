@@ -305,6 +305,8 @@ class _Lowerer(
         self.pending_dict_rebuilds = []
         self.dict_probe_symbols = []
         self.pending_dict_probes = []
+        self.array_grow_symbols: dict[int, str] = {}
+        self.pending_array_grows: list[tuple[int, str]] = []
         self.string_clone_needed = False   # a string array was copied: emit `__dewy_string_clone` once
         self.optional_globals_initialized: set[int] = set()
         self.union_globals_initialized: set[int] = set()

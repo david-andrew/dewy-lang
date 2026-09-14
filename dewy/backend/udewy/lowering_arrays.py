@@ -1589,7 +1589,39 @@ class _ArrayLowering(_ArraySharing):
             or cls._is_string_valued(element)
         )
 
-    def _array_grow_statements(
+    def _array_grow_statements(self, descriptor, needed, element_type, element_bytes, loc):
+        # Growth moves stored bits; it never clones or releases individual
+        # elements. Scalars and aggregate handles therefore share one helper
+        # per storage width. Detachment remains a separate, typed operation.
+        if not self._has_arena():
+            return self._array_grow_body(descriptor, needed, element_type, element_bytes, loc)
+        symbol = self.array_grow_symbols.get(element_bytes)
+        if symbol is None:
+            symbol = self._internal_symbol(f'__dewy_grow_array_{element_bytes}')
+            self.array_grow_symbols[element_bytes] = symbol
+            self.pending_array_grows.append((element_bytes, symbol))
+        signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+        return [hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, signature, symbol),
+                                 [replace(descriptor, type='int64'), needed], {})]
+
+    def _synthesize_array_grows(self) -> list:
+        from .lowering_shared import LoweredFunction
+        result = []
+        while self.pending_array_grows:
+            width, symbol = self.pending_array_grows.pop(0)
+            assert width in (1, 2, 4, 8), width
+            loc = self.root.loc
+            descriptor = hir.ExpressedIdentifier(loc, 'int64', '__dewy_descriptor')
+            needed = hir.ExpressedIdentifier(loc, 'int64', '__dewy_needed')
+            body = self._array_grow_body(descriptor, needed, f'uint{width * 8}', width, loc)
+            signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+            literal = hir.FunctionLiteral(loc, signature,
+                [hir.Param(descriptor.name, 'int64'), hir.Param(needed.name, 'int64')],
+                [], None, ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, body, True))
+            result.append(LoweredFunction(symbol, literal))
+        return result
+
+    def _array_grow_body(
         self,
         descriptor: hir.AST,
         needed: hir.AST,
