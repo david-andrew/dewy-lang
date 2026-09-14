@@ -503,3 +503,38 @@ growth, dictionary widths, and effectful index snapshots on both routes.
 The native dictionary-width fixture shrank from 307,284 to 214,901 bytes
 of emitted µDewy after sharing relocation. These are bounded lowering
 checks; the next full compiler integration remains a separate gate.
+
+## Bounding C optimizer work
+
+Profiling the frozen `1ce9c366` compiler's generated C isolated a 141-second
+LTO partition containing module initialization. Alias queries and partial
+redundancy elimination accounted for almost all of it. Disabling that pass
+for the saved partition reduced it to 3 seconds; relinking produced the
+same `t0` µDewy bytes and similar native compile time (22.3 versus 22.9 s).
+
+Both `-fno-tree-pre` and `-fno-code-hoisting` are needed for ordinary GCC
+invocations: [GCC's pass gate](https://github.com/gcc-mirror/gcc/blob/master/gcc/tree-ssa-pre.cc)
+enables the shared analysis for either optimization. Disabling only PRE
+hit a 130-second cap. With both disabled, the frozen C built in 88.14 s
+versus 196.56 s with the usual `-O2 -flto=8`; its native `t0` invocation
+took 22.06 s and emitted identical µDewy. These were exploratory backend
+runs, with short fixture checks overlapping part of the candidate builds.
+The remaining `-O2` optimizations stay enabled.
+
+`DEWY_BOOTSTRAP_GCC_NO_PRE=1` opts into these two switches for C bootstrap
+builds. The script probes support before generation one, records the option,
+and rejects a resume with different options. It combines with the existing
+`DEWY_BOOTSTRAP_LTO_JOBS` option. Other routes retain their usual defaults.
+
+An isolated integration build of frozen `5d67b83e`, including the nominal
+graph and shared array-growth helpers, used these options with GCC 16.2.1,
+eight LTO jobs, and ccache disabled on the recorded i7-6700 machine. The full
+hosted invocation took **231.74 s**: checking 66.45 s, lowering 56.48 s,
+emission 4.49 s, and downstream compilation/linking 98.59 s. Peak process
+RSS was 2,228,984 KiB; emitted µDewy was 33,799,460 bytes, SHA-256
+`f0202296b580a3595cd2595337541dc115908614fb4aa8184764b35d9a3f8815`.
+An isolated native build of the pinned `t0` module took 22.21 s, peaked at
+2,042,992 KiB, and emitted 3,509,937 bytes. These measurements use fresh
+processes and empty build directories, with OS page caches uncontrolled.
+The under-60-second full-build target and a refreshed fixed point remain
+open; this checkpoint does not certify a new release.

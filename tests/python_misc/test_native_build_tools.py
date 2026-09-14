@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import pytest
 
 
 def test_backend_runs_after_dewy_exits_and_failure_stops_build(tmp_path):
@@ -53,7 +54,8 @@ exit 77
     assert not list((work / 'pair').glob('.backend-handoff.*'))
 
 
-def test_lto_launcher_keeps_original_compiler_search_path(tmp_path):
+@pytest.mark.parametrize('no_pre', [False, True])
+def test_lto_launcher_keeps_original_compiler_search_path(tmp_path, no_pre):
     root = Path(__file__).resolve().parents[2]
     for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library'):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
@@ -89,6 +91,7 @@ exit 99
     env = os.environ | {
         'PATH': f'{launcher.parent}:{backend.parent}:{os.environ["PATH"]}',
         'DEWY_BOOTSTRAP_LTO_JOBS': '2',
+        'DEWY_BOOTSTRAP_GCC_NO_PRE': str(int(no_pre)),
         'TEST_CC_LOG': str(log),
     }
     result = subprocess.run(
@@ -99,6 +102,8 @@ exit 99
     calls = log.read_text().splitlines()
     assert len(calls) == 2  # capability probe and the seed's backend invocation
     assert all(call.split().count('-flto=2') == 1 for call in calls)
+    for flag in ('-fno-tree-pre', '-fno-code-hoisting'):
+        assert all(call.split().count(flag) == int(no_pre) for call in calls)
     assert not (tmp_path / 'pair/SHA256SUMS').exists()
     assert not list((tmp_path / 'pair').glob('.cc-tools.*'))
 
@@ -245,7 +250,7 @@ def test_resume_rechecks_saved_generation_without_rebuilding_it(tmp_path):
 
 def test_resume_rejects_modified_saved_inputs(tmp_path):
     # Each rejection occurs before invoking even the execution-check helper.
-    for name in ('source', 'binary', 'seed', 'options', 'missing'):
+    for name in ('source', 'binary', 'seed', 'options', 'pre-option', 'missing'):
         work = tmp_path / name
         command, env = interrupted_pair(work)
         if name == 'source':
@@ -256,6 +261,8 @@ def test_resume_rejects_modified_saved_inputs(tmp_path):
             (work / 'dewy-seed').write_text('changed\n')
         elif name == 'options':
             env['DEWY_BOOTSTRAP_LTO_JOBS'] = '2'
+        elif name == 'pre-option':
+            env['DEWY_BOOTSTRAP_GCC_NO_PRE'] = '1'
         else:
             (work / 'pair/GENERATION_1_SHA256SUMS').unlink()
         result = subprocess.run(command[:2] + ['--resume'] + command[2:], env=env,

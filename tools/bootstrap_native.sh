@@ -16,6 +16,12 @@ if [[ $bootstrap_target != x86_64 && $bootstrap_target != c ]]; then
     echo "Unsupported native bootstrap target: $bootstrap_target" >&2
     exit 2
 fi
+bootstrap_gcc_no_pre=${DEWY_BOOTSTRAP_GCC_NO_PRE:-0}
+if [[ $bootstrap_gcc_no_pre != 0 && $bootstrap_gcc_no_pre != 1 ]] ||
+   [[ $bootstrap_gcc_no_pre == 1 && $bootstrap_target != c ]]; then
+    echo 'DEWY_BOOTSTRAP_GCC_NO_PRE needs 0 or 1, and enabling it needs --target c' >&2
+    exit 2
+fi
 if [[ $# -lt 2 || $# -gt 3 ]]; then
     echo "Usage: $0 [--resume] [--target x86_64|c] NATIVE_DEWY_SEED NATIVE_UDEWY_SEED [OUTPUT_DIRECTORY]" >&2
     exit 2
@@ -43,9 +49,14 @@ if $bootstrap_resume; then
     (cd -- "$bootstrap_root"; sha256sum --check --status "$bootstrap_output/SOURCE_SHA256SUMS")
     cmp -- "$bootstrap_dewy" "$bootstrap_output/dewy-stage0"
     cmp -- "$bootstrap_udewy" "$bootstrap_output/udewy-stage0"
+    bootstrap_recorded_no_pre=0
+    if [[ -f $bootstrap_output/GCC_NO_PRE ]]; then
+        bootstrap_recorded_no_pre=$(cat "$bootstrap_output/GCC_NO_PRE")
+    fi
     if [[ $(cat "$bootstrap_output/BACKEND") != "$bootstrap_target" ||
-          $(cat "$bootstrap_output/LTO_JOBS") != "${DEWY_BOOTSTRAP_LTO_JOBS:-}" ]]; then
-        echo 'Resume requires the recorded backend and LTO options' >&2
+          $(cat "$bootstrap_output/LTO_JOBS") != "${DEWY_BOOTSTRAP_LTO_JOBS:-}" ||
+          $bootstrap_recorded_no_pre != "$bootstrap_gcc_no_pre" ]]; then
+        echo 'Resume requires the recorded backend and C optimization options' >&2
         exit 2
     fi
 fi
@@ -88,8 +99,11 @@ if [[ $bootstrap_target == c ]]; then
     DEWY_BOOTSTRAP_CC_PATH=$PATH
     bootstrap_cc_tools=$(mktemp -d "$bootstrap_output/.cc-tools.XXXXXX")
     # Check support before starting either expensive compiler generation.
-    if [[ -n $bootstrap_lto_jobs ]]; then
-        "$DEWY_BOOTSTRAP_REAL_CC" -flto="$bootstrap_lto_jobs" -x c -o "$bootstrap_cc_tools/probe" - <<'EOF'
+    bootstrap_cc_probe_flags=()
+    if [[ -n $bootstrap_lto_jobs ]]; then bootstrap_cc_probe_flags+=("-flto=$bootstrap_lto_jobs"); fi
+    if [[ $bootstrap_gcc_no_pre == 1 ]]; then bootstrap_cc_probe_flags+=(-fno-tree-pre -fno-code-hoisting); fi
+    if [[ ${#bootstrap_cc_probe_flags[@]} != 0 ]]; then
+        "$DEWY_BOOTSTRAP_REAL_CC" "${bootstrap_cc_probe_flags[@]}" -x c -o "$bootstrap_cc_tools/probe" - <<'EOF'
 int main(void) { return 0; }
 EOF
     fi
@@ -99,6 +113,11 @@ set -euo pipefail
 cc_flags=()
 if [[ -n ${DEWY_BOOTSTRAP_LTO_JOBS:-} ]]; then
     cc_flags+=("-flto=$DEWY_BOOTSTRAP_LTO_JOBS")
+fi
+# Both switches are needed: GCC's PRE pass also implements code hoisting.
+# Keep the rest of -O2, including inlining and loop optimization, available.
+if [[ ${DEWY_BOOTSTRAP_GCC_NO_PRE:-0} == 1 ]]; then
+    cc_flags+=(-fno-tree-pre -fno-code-hoisting)
 fi
 # Compile-only bootstrap calls may defer this invocation until µDewy exits,
 # releasing its parser arena before the C compiler needs memory.
@@ -144,6 +163,7 @@ if $bootstrap_resume; then
 else
     printf '%s\n' "$bootstrap_target" > "$bootstrap_output/BACKEND"
     printf '%s\n' "${DEWY_BOOTSTRAP_LTO_JOBS:-}" > "$bootstrap_output/LTO_JOBS"
+    printf '%s\n' "$bootstrap_gcc_no_pre" > "$bootstrap_output/GCC_NO_PRE"
     cp -- "$bootstrap_dewy" "$bootstrap_output/dewy-stage0"
     cp -- "$bootstrap_udewy" "$bootstrap_output/udewy-stage0"
     rm -f -- "$bootstrap_output/GENERATION_1_SHA256SUMS" "$bootstrap_output/SHA256SUMS"
