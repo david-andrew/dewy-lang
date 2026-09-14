@@ -58,6 +58,7 @@ from .lowering_shared import (
     CopyNote,
     MoveNote,
     ARRAY_LENGTH_OFFSET,
+    ARRAY_OWNER_OFFSET,
     STRING_GRAPHEME_LENGTH_OFFSET,
     ArrayCallBoundaryAnalysis,
     ArrayParameterAnalysis,
@@ -4045,6 +4046,24 @@ class _Lowerer(
                     hir.Declare(node.loc, ty.VOID_TYPE, 'let', old.name, 'int64', self._intrinsic_call('__load_i64__', [address], 'int64', node.loc)),
                     *self._release_owned_array(old, node.loc, element=node.target.type.element),
                 ]
+            elif self._has_arena() and (self._is_optional_element(node.target.type) or self._is_union_element(node.target.type)):
+                # A container element owns its tag/payload cell, including in
+                # a fixed stack buffer. Replacing the handle must release the
+                # old cell and active payload after detaching the array.
+                old = self._name('old_cell', node.loc)
+                members = self._field_union_members(ty.strip_refinement(node.target.type))
+                assert members is not None
+                old_release = [
+                    self._declare(old, self._intrinsic_call('__load_i64__', [address], 'int64', node.loc), node.loc),
+                    *self._release_cell_payload(old, members, node.loc),
+                    self._arena_release_call(old, self._int64_literal(node.loc, 16), node.loc),
+                ]
+                if not stack_data:
+                    # Raw exposure pins the whole container tree. Its old
+                    # cells may still be reachable through untracked pointers.
+                    old_release = [self._if(self._int64_comparison('__ne__',
+                        self._load_i64_field(target, ARRAY_OWNER_OFFSET, node.loc),
+                        self._int64_literal(node.loc, -1), node.loc), old_release, node.loc)]
             elif self._is_string_valued(node.target.type) and self._has_arena() and self._place_is_owned(node.target.array):
                 # an owned array's element string is replaced: the old one goes back by its owner word
                 old = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'old_element').name)
