@@ -1276,6 +1276,7 @@ class TypeSystem:
         self._named_types: set[str] = {TOP_TYPE, BOTTOM_TYPE, EXCEPTION_TYPE, TYPE_TYPE} # void and inferred don't participate in type expressions
         self._type_parents: dict[str, set[str]] = defaultdict(set, {BOTTOM_TYPE: {TOP_TYPE}, EXCEPTION_TYPE: {TOP_TYPE}, TYPE_TYPE: {TOP_TYPE}})
         self._type_children: dict[str, set[str]] = defaultdict(set, {TOP_TYPE: {BOTTOM_TYPE, EXCEPTION_TYPE, TYPE_TYPE}})
+        self._nominal_ancestors: dict[str, frozenset[str]] = {}
         # order-independent keys via sorted (a, b); separate from the subtype graph
         self._promote_rules: dict[tuple[str, str], str] = {}
         # Runtime representations of `rational`/`fixed`, registered from the
@@ -1308,6 +1309,7 @@ class TypeSystem:
             raise ValueError(f'Type {parent} not defined')
         self._type_parents[child].add(parent)
         self._type_children[parent].add(child)
+        self._nominal_ancestors.clear()
 
     def add_promote_rule(self, a: str, b: str, result: str) -> None:
         """Register promote_type(a, b) == result (order-independent). Extensible for user types."""
@@ -1346,6 +1348,16 @@ class TypeSystem:
 
     def is_subtype(self, s: TypeExpr, t: TypeExpr) -> bool:
         """Top-level type checking function. `s of? t` => `is_empty(s & ~t)`"""
+        if s is t:
+            return True
+        if isinstance(s, str) and isinstance(t, str):
+            # Nominal atoms need only graph reachability; constructing and
+            # normalizing their Boolean difference cannot add information.
+            if s == BOTTOM_TYPE or t == TOP_TYPE:
+                return True
+            if s == TOP_TYPE or t == BOTTOM_TYPE:
+                return s == t
+            return self._is_nom_subtype(s, t)
         return self.is_empty(intersect(s, negate(t)))
 
     def join(self, *types: TypeExpr) -> TypeExpr:
@@ -1404,17 +1416,19 @@ class TypeSystem:
     def _is_nom_subtype(self, a: Primitive, b: Primitive) -> bool:
         if a == b:
             return True
+        known = self._nominal_ancestors.get(a)
+        if known is not None:
+            return b in known
         frontier = [a]
         seen = {a}
         while frontier:
             cur = frontier.pop()
             for parent in self._type_parents[cur]:
-                if parent == b:
-                    return True
                 if parent not in seen:
                     seen.add(parent)
                     frontier.append(parent)
-        return False
+        self._nominal_ancestors[a] = frozenset(seen)
+        return b in seen
 
 
     def _meet_prim(self, a: Primitive, b: Primitive) -> Primitive | None:

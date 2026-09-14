@@ -55,7 +55,13 @@ def test_resident_prelude_gives_identical_output_across_compiles() -> None:
     codegen(SrcFile(None, OTHER))
     assert codegen(SrcFile(None, SOURCE)) == first
     assert registry.next_id > resident.next_id
+    # Restoring the nominal graph must discard reachability learned from a
+    # previous compilation's added edges as well as its added names.
+    system = resident.state['type_system']
+    system.add_type('TemporaryNominal', 'exception')
+    assert system.is_subtype('TemporaryNominal', 'exception')
     resident.rollback()
+    assert not system.is_subtype('TemporaryNominal', 'exception')
     assert registry.next_id == resident.next_id and set(resident.state['records']) == set(resident.records)   # …until the next compile starts
     program = f"from dewy.backend.udewy import codegen\nfrom dewy.reporting import SrcFile\nimport sys\nsys.stdout.write(codegen(SrcFile(None, {SOURCE!r})))"
     for variable in ('DEWY_NO_RESIDENT_PRELUDE', 'DEWY_NO_PRELUDE_CACHE'):

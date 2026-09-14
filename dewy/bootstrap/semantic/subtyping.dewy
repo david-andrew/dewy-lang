@@ -341,6 +341,13 @@ is_subtype = (source:addr target:addr links:array<Link> @nodes:types.Table):>boo
     # Reflexivity needs no normalized difference. Arena ids already name
     # the same description, including any retained refinement metadata.
     if source =? target return true
+    let left=types.node_at(nodes source)
+    let right=types.node_at(nodes target)
+    if left is? types.Primitive and right is? types.Primitive {
+        if left.name =? 'never' or right.name =? 'any' return true
+        if left.name =? 'any' or right.name =? 'never' return left.name =? right.name
+        return nominal_subtype(left.name right.name links)
+    }
     let excluded = types.negate(target @nodes)
     let difference = types.intersect([source excluded] @nodes)
     return is_empty(difference links @nodes)

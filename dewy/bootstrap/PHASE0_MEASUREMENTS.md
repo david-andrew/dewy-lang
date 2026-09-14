@@ -773,3 +773,47 @@ the default toolchain. Short regression checks overlapped part of the C
 compilation, so this probe is not an isolated acceptance run. Logs are in
 `phase0-performance/clang-shared-strings/` and
 `phase0-performance/native-clang-shared-strings-t0/`.
+
+The matching GCC 16.2.1 `-O1 -flto=8` probe built the same old C source in
+80.12 seconds (peak process RSS 3,025,768 KiB), but its compiler needed 73.41
+seconds for t0. Output remained byte-identical. This is a substantial runtime
+regression against the `-O2` compiler, so the cheaper optimization level was
+not adopted. The GCC pass report and timing logs are in
+`phase0-performance/gcc-o1-shared-strings/`; module records are in
+`phase0-performance/native-gcc-o1-shared-strings-t0/`.
+
+## Indexed-arena integration and repeated type queries
+
+The compiler frozen at `7cadb2c3` builds through the hosted C route in
+324.72 seconds: checking 70.19, lowering 67.76, emission 8.08, and backend
+172.91 seconds; peak process RSS is 3,742,296 KiB. The generated µDewy is
+57,628,213 bytes, SHA-256
+`997a7ed518cbc237ae0a0f5c8b9da46a962ee019164ec5fcce96cab6d61368a7`.
+This uses the same machine, fresh build directory, GCC 16.2.1 `-O2` and
+`-flto=8`, without concurrent compilation. Its native t0 invocation takes
+28.47 seconds and peaks at 2,174,236 KiB. These timings do not show a material
+end-to-end improvement over the preceding integration seed. Artifacts are
+`source-indexed-arena`, `host-full-indexed-arena`, and `native-indexed-arena-t0`.
+The complete-build target remains unmet; this is not a new fixed point.
+
+The next query batch bypasses Boolean normalization for nominal subtype
+queries in both implementations. Hosted graph reachability is cached until
+the graph changes, including resident-prelude rollback. Native normal forms
+are cached with their type arena; truncation invalidates results before ids
+can be reused. Alias targets remain outside the normal form of a named atom.
+The hosted mutable type-tree normalizer is deliberately not identity-cached.
+
+A native CLI-compiled kernel repeats normalization of a 32-field record 128
+times. Cached queries allocate 2,048 bytes, compared with 196,608 for the
+uncached outer walk, and return the expected 42. Direct/C hosted-generated
+kernel checks also pass, including arena forks, rollback, reused result ids,
+and alias resolution. Logs are in `query-cache-native` and
+`normalization-query-gates.log`.
+
+The hosted t0 sample before this batch is 15.84 seconds (checking 9.23,
+lowering 2.55); after it is 15.49 seconds (checking 9.05, lowering 2.50).
+Both use the same pinned module/library, direct backend and separate empty
+build directories. This small single-sample difference does not establish a
+build-time speedup. Logs are `host-before-nominal-queries-t0` and
+`host-nominal-queries-t0`. Native whole-module timings for this query batch
+remain an integration gate.

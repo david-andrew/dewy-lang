@@ -107,7 +107,12 @@ Clause:type = [literals:array<SignedAtom>]
 # to another arena and forced a full scan on every newly encountered type.
 # Mutations go through intern, truncate, and resolve_alias (which preserves
 # the key). Description ids remain stable for the retained prefix.
-Table:type = [entries:array<Type>=[] positions:dict<string addr>=[]]
+Table:type = [
+    entries:array<Type>=[] positions:dict<string addr>=[]
+    # Completed descriptions are stable: normalize each tree once per arena.
+    # Alias resolution only changes the target of an atomic NamedType.
+    normal_forms:dict<addr addr>=[]
+]
 
 
 node_at = (nodes:Table id:addr):>Type => {
@@ -171,12 +176,17 @@ intern = (@nodes:Table value:Type):>addr<i => i <? nodes.entries.length> => {
 # entries so subsequent insertion can reuse the positions without stale keys.
 truncate = (@nodes:Table count:addr):>void => {
     $runtime_assert count <=? nodes.entries.length
+    if count =? nodes.entries.length return
     let i=count
     loop i <? nodes.entries.length {
         nodes.positions.pop(nodes.entries[i].key default=0);
         i+=1
     }
     nodes.entries.truncate(count)
+    # A retained description's normalized result can be in the discarded
+    # suffix. Invalidate before those result ids can be reused. This scalar
+    # dictionary releases its buffers without walking type descriptions.
+    nodes.normal_forms=[]
 }
 
 primitive = (name:string @nodes:Table):>addr => intern(@nodes Primitive[key="P{_quoted(name)}" name=name])
@@ -544,6 +554,14 @@ negate = (id:addr @nodes:Table):>addr => {
 }
 
 to_nnf = (id:addr @nodes:Table):>addr => {
+    let known=nodes.normal_forms.get(id)
+    if known isnt? none return known
+    let result=to_nnf_uncached(id @nodes)
+    nodes.normal_forms[id]=result
+    return result
+}
+
+to_nnf_uncached = (id:addr @nodes:Table):>addr => {
     let node = node_at(nodes id)
     if node is? TypeNot return negate(node.item @nodes)
     if node is? TypeAnd | TypeOr | SequenceType {

@@ -108,6 +108,7 @@ class _ResidentPrelude:
         system._type_parents.update({name: set(parents) for name, parents in self.type_parents.items()})
         system._type_children.clear()
         system._type_children.update({name: set(children) for name, children in self.type_children.items()})
+        system._nominal_ancestors.clear()
         system._promote_rules.clear()
         system._promote_rules.update(self.promote_rules)
         for source, instances, declarations, scopes in self.generics:
