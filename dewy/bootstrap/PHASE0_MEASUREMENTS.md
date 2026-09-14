@@ -860,3 +860,29 @@ driver emits 41,062,392 bytes with this batch; its source also contains the
 new probe generator, so that is a combined checkpoint rather than a pure
 output comparison. Logs are `shared-dict-probes-hosted.log`,
 `shared-dict-probes-widths.log`, and `shared-dict-probe-driver.log`.
+
+## Shared-dictionary full integration checkpoint
+
+The frozen `1ce9c366` compiler builds through the hosted C route in 355.45
+seconds: checking 67.88, lowering 59.87, emission 5.28, and backend 216.49;
+peak process RSS is 2,495,812 KiB. It emits 38,589,624 bytes of µDewy,
+SHA-256 `e3293edb53029c516d14d2fe3fb2e15854d13fc39a84fa85e603d6fa9f7a79d7`,
+and 83,987,921 bytes of C. The preceding integration was 324.72 seconds,
+57,628,213 bytes of µDewy, 125,039,048 bytes of C, and 3,742,296 KiB.
+
+This is a full-build **time regression** despite smaller code, lower memory,
+and cheaper lowering/emission. A single GCC LTO partition remained busy for
+more than two minutes after most other partitions finished. That observation
+does not identify the responsible optimization pass; backend profiling and
+further code-shape work are still required. Both runs used GCC 16.2.1 `-O2`
+with `-flto=8`, empty build directories, disabled ccache, and no overlapping
+compilation jobs. Source and logs are retained in `source-shared-dictionaries`
+and `host-full-shared-dictionaries`.
+
+The resulting native compiler builds the same pinned t0 module in 22.91
+seconds, versus 28.47 previously, with peak process RSS 2,062,660 KiB. Its
+output is 3,724,614 bytes, SHA-256
+`c718853f9d13add1aa9483d63ccb6a366d5ef35a4389daa2358b9fc30b8beb90`.
+This isolated run is in `native-shared-dictionaries-t0`. The native execution
+improvement does not establish the full-build target, and the new integration
+seed is not a fresh two-generation fixed point.
