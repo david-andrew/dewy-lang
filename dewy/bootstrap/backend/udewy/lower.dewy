@@ -68,9 +68,10 @@ State:type = [
     cleanup_enabled:bool=false
     cleanup_frames:array<array<OwnedLocal>>=[]
     cleanup_loops:array<addr>=[]
+    # Program-wide capture/place exclusions are computed once. Rebuilding
+    # this set in every function revisited the entire function graph N times.
     cleanup_excluded:set<addr>=set[]
     cleanup_owned:set<addr>=set[]
-    escaping_places:set<addr>=set[]
     generated:array<program.Function>=[]
     getter_reads:dict<addr addr?>=[]
     scalar_projections:dict<string ScalarProjection>=[]
@@ -2549,8 +2550,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     # matters when a read-only parameter was borrowed: a returned aggregate
     # must own its storage even when the caller immediately mutates the result.
     let enabled=state.allocator isnt? none and '_arena_release' in? state.runtime_helpers
-    let excluded=state.escaping_places
-    loop nested in state.capture_plan.functions.values {excluded=excluded|nested.captures}
+    let excluded=state.cleanup_excluded
     let rebound:set<addr>=set[]
     let pending:array<addr>=[node.body]
     loop parameter in parameters(node) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
@@ -2581,7 +2581,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         }
         loop item in hir.children(current) {pending.push(item)}
     }
-    state.cleanup_enabled=enabled state.cleanup_excluded=excluded state.cleanup_owned=set[]
+    state.cleanup_enabled=enabled state.cleanup_owned=set[]
     let frame_start=state.cleanup_frames.length
     state.cleanup_frames.push([])
     loop argument in parameters(node) {
@@ -2666,7 +2666,10 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links)
     state.borrowed_arguments=borrowed.arguments
     state.disposable_arguments=borrowed.disposable_arguments
-    state.escaping_places=borrowed.escaping_places
+    state.cleanup_excluded=borrowed.escaping_places
+    loop unit in state.capture_plan.functions.values {
+        loop binding in unit.captures {state.cleanup_excluded.add(binding)}
+    }
     let units=state.capture_plan.functions
     let named=state.capture_plan.named
     loop [id capture] in units {state.code_symbols[id]="__dewy_function_{id}"}

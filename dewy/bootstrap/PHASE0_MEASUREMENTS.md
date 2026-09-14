@@ -561,3 +561,22 @@ in the final three-test group. Expected execution covers callback tables,
 defaults, startup dependencies, unused-body rejection and complete entry HIR.
 Artifacts: `import-reachability-{gates,final-gates,bench}.log` and
 `compare-import-reachability.py`.
+
+## Hoist native cleanup exclusions out of individual functions
+
+Native lowering formerly rebuilt the same union of all captured bindings
+once per function, repeatedly scanning and copying the complete function
+graph and growing exclusion set. It now collects those bindings once, along
+with escaping places, and shares that immutable result across function
+lowering. Cleanup eligibility and binding order are unchanged.
+
+Compared with the `1fa828cc` lowering driver, the current driver lowers a
+300-function capture kernel in **2.13/2.14 s versus 4.60/4.46 s**. At 900
+functions it takes **7.67/7.68 s versus 63.30/64.62 s**. Both sizes produce
+byte-identical µDewy across the drivers and return the expected 42. The new
+driver also contains the syntax-reference index and hosted import-pruning
+build changes, so these are combined checkpoint measurements, not isolated
+attribution to the hoist. A small brand regression overlaps part of the
+larger comparison. Union retention, capture facts, and the original capture
+corpus fixture pass direct/C checks with this driver. Artifacts:
+`cleanup-exclusions/{build,gates}.log` and `cleanup-exclusions/compare.py`.
