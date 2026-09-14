@@ -488,6 +488,13 @@ place_address = (id:addr @state:State):>addr => {
 expression_owns = (id:addr @state:State):>bool => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.Suppress return expression_owns(node.item @state)
+    if node is? hir.RepresentationCast and array_valued(node.value_type state) {
+        let source=hir.node_at(state.input.nodes node.expr)
+        let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(source.value_type state.type_nodes) state.type_nodes))
+        # These conversions construct an independent array. Value boundaries
+        # adopt it; temporary reads/discarded conversions must reclaim it.
+        if type is? types.BinaryLiteralType or string_type(source.value_type state) return true
+    }
     if node is? hir.ValueCast {
         let source=hir.node_at(state.input.nodes node.expr)
         if cell_members(source.value_type @state) isnt? none and temporary_owner(node.expr @state) return true
@@ -536,6 +543,13 @@ temporary_owner = (id:addr @state:State):>bool => state.cleanup_enabled and rele
 # arms and short-circuit operands never execute either half accidentally.
 ReadOperand:type = [value:addr owner_type:addr?]
 read_operand = (id:addr @prefix:array<addr> @state:State):>ReadOperand => {
+    let original=hir.node_at(state.input.nodes id)
+    if original is? hir.RepresentationCast and binary_array_view(original state) {
+        # Binary literals already use the byte-array descriptor layout. A
+        # read needs only that view, not a mutable copy of the entire table.
+        # Actual value conversions still materialize independent storage.
+        return read_operand(original.expr @prefix @state)
+    }
     let owner:addr?=if temporary_owner(id @state) hir.node_at(state.input.nodes id).value_type else none
     let value=expression(id @state)
     if owner isnt? none {value=snapshot(value @prefix @state)}
@@ -1446,10 +1460,13 @@ string_scalars = (value:addr node:hir.AST @state:State):>addr => {
 # Raw literal bytes and compiler-created borrowed byte views use the same
 # descriptor as arrays. A later value copy makes independently mutable
 # storage; merely describing embedded data must not allocate a second copy.
-byte_descriptor = (data:addr length:addr node:hir.AST @state:State):>addr => {
+byte_descriptor = (data:addr length:addr node:hir.AST @state:State static_storage:bool=false):>addr => {
     let prefix:array<addr>=[]
-    let descriptor=snapshot(allocation(word(layouts.array_descriptor.size node @state) node @state) @prefix @state)
-    let fields:array<addr>=[data length length word(1 node @state) word(layouts.array_flags.borrowed_static node @state) word(0 node @state)]
+    let size=word(layouts.array_descriptor.size node @state)
+    let storage=if static_storage intrinsic('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else allocation(size node @state)
+    let descriptor=snapshot(storage @prefix @state)
+    let flags=layouts.array_flags.borrowed_static + if static_storage 0 else layouts.array_flags.arena_descriptor
+    let fields:array<addr>=[data length length word(1 node @state) word(flags node @state) word(0 node @state)]
     let offset:addr=0
     loop field in fields {prefix.push(store_word(field descriptor offset node @state)) offset+=8}
     prefix.push(descriptor)
@@ -1457,7 +1474,13 @@ byte_descriptor = (data:addr length:addr node:hir.AST @state:State):>addr => {
 }
 binary_literal = (node:hir.BasedString @state:State):>addr => {
     let data=put(hir.BasedString[node.loc types.primitive('int64' @state.type_nodes) node.prefix node.digits node.content node.include_path] @state)
-    return byte_descriptor(data word(node.content.length node @state) node @state)
+    return byte_descriptor(data word(node.content.length node @state) node @state static_storage=true)
+}
+binary_array_view = (node:hir.RepresentationCast state:State):>bool => {
+    let source=hir.node_at(state.input.nodes node.expr)
+    let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(source.value_type state.type_nodes) state.type_nodes))
+    let target=array_type(node.value_type state)
+    return type is? types.BinaryLiteralType and target isnt? none and types.is_primitive(types.node_at(state.type_nodes target.element) 'uint8')
 }
 
 # Materialized strings resegment all bytes, including a cluster crossing a

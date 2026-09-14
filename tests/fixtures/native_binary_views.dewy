@@ -1,0 +1,41 @@
+# Binary tables already have a byte-array layout. Reading through their
+# implicit/explicit array view must not copy the complete table per byte.
+let table=0x"2a0102030405060708090a0b0c0d0e0f"
+let live=():>int64=>_arena_live_bytes
+let copied=():>int64=>_arena_copied_bytes
+let read=(offset:int64<offset >=? 0 and offset <? 16>):>uint8=>table[offset]
+let exercise=():>bool=>{
+    loop i in 0.. and i <? 2000 {
+        if read(0) not=?42 or read(15) not=?15 return false
+        if (table as array<uint8>).length not=?16 return false
+        if (table as array<uint8>)[0] not=?42 return false
+        if (0x"2a00" as array<uint8>)[0] not=?42 return false
+    }
+    return true
+}
+let values=():>bool=>{
+    loop i in 0.. and i <? 1000 {
+        let saved=table as array<uint8>
+        if saved.length not=?16 return false
+        saved[0]=99
+        if table[0] not=?42 return false
+        # A materialized value owns its allocation, including discarded casts.
+        table as array<uint8>;
+        let bytes='*' as array<uint8>
+        bytes[0]=99
+        if ('*' as array<uint8>)[0] not=?42 return false
+        if ('*' as array<uint32>).length not=?1 return false
+        '*' as array<uint32>;
+    }
+    return true
+}
+let main=():>int64=>{
+    if not exercise() or not values() return 2
+    let before=live()
+    let copied_before=copied()
+    if not exercise() return 3
+    if copied() not=?copied_before return 4
+    if not values() return 5
+    if live()-before >?4096 return 1
+    return 42
+}

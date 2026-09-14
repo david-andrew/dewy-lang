@@ -181,3 +181,30 @@ The same fixture also passes after native Dewy compiles it to direct x86_64:
 fixture through the native C seed took 90.6 seconds. This separately checks
 the writer's mutable buffer under native lowering, without a C backend in
 the emitted fixture's execution route.
+
+## Binary table reads and conversion ownership
+
+With linear emission, native-pair attempt thirteen emitted generation one
+normally in about 20.6 minutes, peaking at 24.2 GiB RSS. Its executable built
+and passed the scalar check, but the first full-library check exceeded the
+4 GiB gate. The runner stopped before generation two; there is still no
+fixed-point certificate from that attempt.
+
+A bounded sample found a concrete cause: each byte access in
+`_casefold_word` copied the entire 24,912-byte case-folding table through an
+implicit binary-to-array representation cast. The temporary arrays were also
+missing from ownership classification. Even a minimal program using the
+prelude reached 1.5 GiB RSS in 2.4 seconds through this path.
+
+Read operands now borrow representation-compatible binary byte-array views.
+Actual array values still materialize independent mutable storage, and fresh
+binary/string array conversions are adopted and reclaimed at value and
+lifetime boundaries. Binary literal descriptors are static, matching their
+immutable data. This applies to ordinary binary reads, not just Unicode data.
+
+`native_binary_views.dewy` checks implicit and explicit views, independent
+mutable copies, and discarded byte/scalar array conversions. The previous
+compiler fails its copy-counter check. Both output backends now pass the
+zero-copy and bounded-retention checks; a direct-backend allocation measurement
+reports exactly zero retained arena bytes. Dynamic string/view lifetimes remain unfinished and
+are a separate issue; they were not the whole-table-copy path measured here.

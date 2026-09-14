@@ -18,6 +18,7 @@ import p"native_owned_union_temporaries.dewy" as owned
 import p"native_read_temporaries.dewy" as reads
 import p"native_iterator_temporaries.dewy" as iterators
 import p"native_static_strings.dewy" as strings
+import p"native_binary_views.dewy" as binaries
 
 let main=():>int64=>{
     printl('Checking sibling field facts')
@@ -56,5 +57,7 @@ let main=():>int64=>{
     if iterators.main() not=?42 return 17
     printl('Checking static string descriptors')
     if strings.main() not=?42 return 18
+    printl('Checking binary table views')
+    if binaries.main() not=?42 return 19
     return 42
 }
