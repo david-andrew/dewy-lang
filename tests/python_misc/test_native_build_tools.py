@@ -82,9 +82,9 @@ for directory in "${directories[@]}"; do
 done
 exit 99
 ''')
-    backend = executable(tmp_path / 'backend/cc', 'printf "%s\\n" "$*" >> "$TEST_CC_LOG"\n')
+    backend = executable(tmp_path / 'backend/cc', 'printf "%s\\n" "$*" >> "$TEST_CC_LOG"\nif [[ $* == *fixture.c* ]]; then exit 77; fi\n')
     # Stop after exercising the launcher. No fake compiler pair is certified.
-    seed = executable(tmp_path / 'seed', 'cc -c fixture.c\nexit 77\n')
+    seed = executable(tmp_path / 'seed', 'cc -c fixture.c\n')
     log = tmp_path / 'compiler.log'
     env = os.environ | {
         'PATH': f'{launcher.parent}:{backend.parent}:{os.environ["PATH"]}',
@@ -141,3 +141,42 @@ fi
     assert (pair / 'dewy-stage1').exists()
     assert not (pair / 'udewy-stage2').exists()
     assert not (pair / 'SHA256SUMS').exists()
+
+
+def test_c_backend_runs_after_micro_compiler_exits(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library', 'bin'):
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+    script = tmp_path / 'tools/bootstrap_native.sh'
+    shutil.copy2(root / 'tools/bootstrap_native.sh', script)
+    (tmp_path / 'VERSION').write_text('fixture\n')
+    (tmp_path / 'tools/dewy_test.dewy').touch()
+    seed = tmp_path / 'seed'
+    seed.write_text('''#!/usr/bin/env bash
+set -eu
+echo "$$" > "$TEST_MICRO_PID"
+cc -std=c99 -O2 -o 'output with spaces' 'source with spaces.c'
+''')
+    compiler = tmp_path / 'bin/cc'
+    compiler.write_text('''#!/usr/bin/env bash
+set -eu
+if kill -0 "$(cat "$TEST_MICRO_PID")" 2>/dev/null; then exit 98; fi
+printf '%s\\0' "$@" > "$TEST_CC_ARGUMENTS"
+exit 77
+''')
+    seed.chmod(0o755)
+    compiler.chmod(0o755)
+    arguments = tmp_path / 'arguments'
+    env = os.environ | {
+        'PATH': f'{compiler.parent}:{os.environ["PATH"]}',
+        'TEST_MICRO_PID': str(tmp_path / 'micro.pid'),
+        'TEST_CC_ARGUMENTS': str(arguments),
+    }
+    env.pop('DEWY_BOOTSTRAP_LTO_JOBS', None)
+    result = subprocess.run(['bash', script, '--target', 'c', seed, seed, tmp_path / 'pair'],
+                            env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 77, result.stdout + result.stderr
+    assert arguments.read_bytes().split(b'\0') == [
+        b'-std=c99', b'-O2', b'-o', b'output with spaces', b'source with spaces.c', b'',
+    ]
+    assert not (tmp_path / 'pair/SHA256SUMS').exists()

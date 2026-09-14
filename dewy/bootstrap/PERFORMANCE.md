@@ -102,6 +102,11 @@ handoff records the seed's exact compile-only arguments; the script invokes
 arena before µDewy and any C compiler need memory. Backend failures still
 stop generation construction and prevent certification. The handoff uses no
 hosted compiler and applies to both output backends.
+For C output, the same compile-only handoff separates µDewy from the C
+compiler: its exact argument vector is recorded and replayed after µDewy
+exits. This avoids overlapping the µDewy parser arena with C compilation.
+The original compiler search path is restored for launchers such as ccache,
+and a failure in either process prevents certification.
 
 Generation one must pass `tools/check_native.sh PAIR 1` before the bootstrap
 script starts generation two. This exercises the new compiler's scalar,

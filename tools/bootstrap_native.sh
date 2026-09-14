@@ -69,24 +69,56 @@ if [[ -n $bootstrap_lto_jobs ]]; then
         echo 'DEWY_BOOTSTRAP_LTO_JOBS needs a positive job count and --target c' >&2
         exit 2
     fi
+fi
+if [[ $bootstrap_target == c ]]; then
     export DEWY_BOOTSTRAP_REAL_CC DEWY_BOOTSTRAP_CC_PATH
     DEWY_BOOTSTRAP_REAL_CC=$(command -v cc)
     DEWY_BOOTSTRAP_CC_PATH=$PATH
     bootstrap_cc_tools=$(mktemp -d "$bootstrap_output/.cc-tools.XXXXXX")
     # Check support before starting either expensive compiler generation.
-    "$DEWY_BOOTSTRAP_REAL_CC" -flto="$bootstrap_lto_jobs" -x c -o "$bootstrap_cc_tools/probe" - <<'EOF'
+    if [[ -n $bootstrap_lto_jobs ]]; then
+        "$DEWY_BOOTSTRAP_REAL_CC" -flto="$bootstrap_lto_jobs" -x c -o "$bootstrap_cc_tools/probe" - <<'EOF'
 int main(void) { return 0; }
 EOF
+    fi
     cat > "$bootstrap_cc_tools/cc" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
+cc_flags=()
+if [[ -n ${DEWY_BOOTSTRAP_LTO_JOBS:-} ]]; then
+    cc_flags+=("-flto=$DEWY_BOOTSTRAP_LTO_JOBS")
+fi
+# Compile-only bootstrap calls may defer this invocation until µDewy exits,
+# releasing its parser arena before the C compiler needs memory.
+if [[ -n ${DEWY_BOOTSTRAP_CC_ARGS:-} ]]; then
+    if [[ -e $DEWY_BOOTSTRAP_CC_ARGS ]]; then
+        echo 'Expected one C compiler invocation per bootstrap compiler build' >&2
+        exit 1
+    fi
+    printf '%s\0' "${cc_flags[@]}" "$@" > "$DEWY_BOOTSTRAP_CC_ARGS"
+    exit 0
+fi
 # Launchers such as ccache search PATH for the underlying compiler. Exclude
 # this accelerator wrapper from that search so they cannot invoke it again.
 export PATH="$DEWY_BOOTSTRAP_CC_PATH"
-exec "$DEWY_BOOTSTRAP_REAL_CC" "-flto=$DEWY_BOOTSTRAP_LTO_JOBS" "$@"
+exec "$DEWY_BOOTSTRAP_REAL_CC" "${cc_flags[@]}" "$@"
 EOF
     chmod +x "$bootstrap_cc_tools/cc"
     export PATH="$bootstrap_cc_tools:$PATH"
 fi
+bootstrap_compile_udewy() {
+    if [[ $bootstrap_target != c ]]; then "$@"; return; fi
+    local cc_record="$bootstrap_handoff/cc-arguments"
+    local -a cc_arguments
+    rm -f -- "$cc_record"
+    DEWY_BOOTSTRAP_CC_ARGS="$cc_record" "$@"
+    if [[ ! -s $cc_record ]]; then
+        echo 'The µDewy seed did not hand off a C compiler invocation' >&2
+        return 1
+    fi
+    mapfile -d '' -t cc_arguments < "$cc_record"
+    PATH="$DEWY_BOOTSTRAP_CC_PATH" "$DEWY_BOOTSTRAP_REAL_CC" "${cc_arguments[@]}"
+}
 printf '%s\n' "$bootstrap_target" > "$bootstrap_output/BACKEND"
 cp -- "$bootstrap_dewy" "$bootstrap_output/dewy-stage0"
 cp -- "$bootstrap_udewy" "$bootstrap_output/udewy-stage0"
@@ -106,7 +138,7 @@ for bootstrap_generation in 1 2; do
     bootstrap_previous=$((bootstrap_generation - 1))
     echo "Building native compiler generation $bootstrap_generation ($bootstrap_target)"
     bootstrap_started=$SECONDS
-    "$bootstrap_output/udewy-stage$bootstrap_previous" --target "$bootstrap_target" -c udewy/bootstrap/main.udewy
+    bootstrap_compile_udewy "$bootstrap_output/udewy-stage$bootstrap_previous" --target "$bootstrap_target" -c udewy/bootstrap/main.udewy
     cp -- __dewycache__/udewy/bootstrap/main "$bootstrap_output/udewy-stage$bootstrap_generation"
     rm -f -- "$DEWY_BOOTSTRAP_BACKEND_ARGS"
     DEWY_LIBRARY_ROOT="$bootstrap_root/library" \
@@ -118,7 +150,7 @@ for bootstrap_generation in 1 2; do
     fi
     mapfile -d '' -t bootstrap_backend_args < "$DEWY_BOOTSTRAP_BACKEND_ARGS"
     echo "Emitted Dewy generation $bootstrap_generation; building its executable"
-    "$bootstrap_output/udewy-stage$bootstrap_generation" "${bootstrap_backend_args[@]}"
+    bootstrap_compile_udewy "$bootstrap_output/udewy-stage$bootstrap_generation" "${bootstrap_backend_args[@]}"
     cp -- __dewycache__/dewy/bootstrap/main "$bootstrap_output/dewy-stage$bootstrap_generation"
     "$bootstrap_output/udewy-stage$bootstrap_generation" --help > /dev/null
     "$bootstrap_output/dewy-stage$bootstrap_generation" --version
