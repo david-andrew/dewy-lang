@@ -111,6 +111,13 @@ class _ObjectLowering:
         Register before emitting a body so recursive union members can reuse
         the same helper rather than expand its implementation indefinitely.
         """
+        # Only exact-length array fields use destination storage prepared by
+        # the caller. Otherwise a non-moving result write is the ordinary
+        # arena copy, including nested records and inline union cells. Reuse
+        # that implementation and its concrete-family dispatch. Move/adopt
+        # modes keep their distinct clearing and transfer rules.
+        if prepared and move is False and not borrowed and not self._object_uses_prepared_storage(object_type):
+            prepared = False
         key = (object_type, prepared, move, frozenset(borrowed), exact)
         symbol = next((entry[5] for entry in self.object_copy_symbols if entry[:5] == key), None)
         if symbol is None:
@@ -121,6 +128,15 @@ class _ObjectLowering:
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, symbol),
                                 [replace(dest, type='int64'), replace(src, type='int64')], {})
+
+    @classmethod
+    def _object_uses_prepared_storage(cls, object_type: ty.ObjectType) -> bool:
+        for field in object_type.fields:
+            if isinstance(field.type, ty.ArrayType) and field.type.length is not None:
+                return True
+            if isinstance(field.type, ty.ObjectType) and cls._object_uses_prepared_storage(field.type):
+                return True
+        return False
 
     def _synthesize_object_copies(self) -> list:
         from .lowering_shared import LoweredFunction

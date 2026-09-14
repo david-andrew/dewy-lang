@@ -121,3 +121,23 @@ the native-built baseline, so this does not establish a runtime improvement
 for the helper batch: generation provenance must accompany native timings.
 It has not yet passed a new native fixed-point verification. The sub-minute
 full-build target remains open.
+
+## Hosted record-family helpers
+
+The hosted backend now also selects shared concrete-field helpers for arena
+copies and releases. Non-moving result writes reuse ordinary arena copies
+when their fields need no caller-prepared fixed-array storage; move/adopt and
+prepared-array cases retain their separate rules. The guarded twelve-level
+inheritance fixture shrinks from 2,544,010 to 607,930 bytes (76% smaller), with
+both outputs returning the expected result through direct and C backends.
+The new hosted output budget is 700 KB, including reachable runtime code.
+Another execution case covers fixed arrays nested in both base and descendant
+fields, so sharing cannot silently discard prepared destination storage.
+Sixty-six focused ownership, array-sharing, release and default-argument tests
+pass alongside those two new cases.
+
+The inheritance fixture now also guards its variable-length indexed reads
+and writes, allowing the complete hosted checker to validate it. Its native
+lowering-driver output is 146,253 bytes, still below the existing 160 KB gate,
+and executes correctly on both routes. The earlier 124,977-byte native kernel
+measurement predates those guards; compare like fixture revisions.
