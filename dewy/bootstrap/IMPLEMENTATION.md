@@ -33,6 +33,15 @@ themselves are Dewy code and their bounded tests pass on both backends.
 
 ## Hosted parity gaps
 
+The subsequent [isolated Phase 0 inventory](PARITY_INVENTORY.md) completed
+all 201 accepted-program fixtures against pinned baseline compilers: 138
+matched, 59 stopped at native acceptance gaps, three misexecuted natively,
+and one differed only in diagnostic value notes. The hosted baseline passed
+all expected results. Ten separate language-rejection cases passed on both
+implementations. Follow-up fixes and their bounded regressions are recorded
+in [the campaign measurements](PHASE0_MEASUREMENTS.md); they still need a new
+full native corpus and fixed-point checkpoint.
+
 A broader composed corpus checked 12 bundles on both backends. Two bundles
 passed completely (24 ordinary programs, including arrays, process/file I/O,
 strings, and conversions). Ten stopped at their first unsupported construct,
