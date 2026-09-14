@@ -817,3 +817,30 @@ build directories. This small single-sample difference does not establish a
 build-time speedup. Logs are `host-before-nominal-queries-t0` and
 `host-nominal-queries-t0`. Native whole-module timings for this query batch
 remain an integration gate.
+
+## Shared dictionary rebuild implementations
+
+Both lowerers now outline arena-backed dictionary/set rebuilds by their
+entry storage and field layout. Every lookup still tests whether a rebuild
+is needed, but its cold compaction, hashing, allocation, and table-fill code
+is emitted once per helper. Arena-free lowering retains the existing inline
+path so newly allocated storage cannot outlive a helper frame.
+
+The pinned hosted t0 direct build now emits 2,224,589 bytes of µDewy, versus
+2,965,235 before outlining (25% smaller). Its single fresh-process sample is
+13.94 seconds: checking 8.52, lowering 2.19, emission 0.32, backend 2.05;
+peak process RSS 164,436 KiB. The previous sample is 15.49 seconds and
+196,448 KiB. Checking also varied despite no checker edits in this batch,
+so the time difference should not all be attributed to outlining. Artifacts
+are in `host-shared-dict-rebuild-t0` and `host-nominal-queries-t0`.
+
+The reusable native lowering driver's generated µDewy decreases from
+57,354,225 to 43,677,513 bytes in this combined development checkpoint.
+That comparison includes concurrent snapshot-analysis source changes and
+is not an isolated timing experiment or full compiler build. Hosted and
+native lowering both pass direct/C expected-result checks for scalar widths,
+record payloads with arrays, tombstones, compaction, growth, insertion order,
+Unicode keys, and saved dictionary independence. Repeated lookup sites also
+have an explicit helper-count/code-growth regression. Logs are
+`shared-dict-native-gates.log`, `shared-dict-rebuild-hosted.log`, and
+`shared-dict-execution-gates.log`.

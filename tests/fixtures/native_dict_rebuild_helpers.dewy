@@ -1,0 +1,28 @@
+# Rehashing must preserve insertion order, tombstones, and independent values
+# when its cold implementation is shared by several container operations.
+Item:type=[value:int64 data:array<int64>]
+exercise=():>int64=>{
+    let values:dict<int64 Item>=[0->Item[42 [20 22]] 1->Item[1 [1 2]]]
+    let saved=values
+    loop i in 2..48 {values[i]=Item[i [i i+1]]}
+    loop i in 1..24 {if i in? values {values.pop(i);}}
+    # Force compaction and table growth after the tombstones have accumulated.
+    loop i in 49..96 {values[i]=Item[i [i i+1]]}
+    if values.get(1) isnt? none or values.get(24) isnt? none return 1
+    let first=values.get(0)
+    if first is? none or first.value not=? 42 or first.data.length not=? 2 return 2
+    first.data[0]=99
+    let original=saved.get(0)
+    if original is? none or original.data.length not=? 2 or original.data[0] not=? 20 return 3
+    if saved.length not=? 2 or saved.get(2) isnt? none return 4
+    let order:array<int64>=[]
+    loop key in values.keys {order.push(key)}
+    if order.length =? 0 or order[0] not=? 0 return 5
+    let text:dict<string int64>=['é'->40 'é'->2]
+    let prior=text
+    text['é']=99
+    if prior.get('é') not=? 40 or prior.get('é') not=? 2 return 6
+    if text.get('missing') isnt? none return 7
+    return 42
+}
+main=():>int64=>exercise()

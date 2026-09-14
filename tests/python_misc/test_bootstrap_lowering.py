@@ -538,6 +538,7 @@ ARENA_CASES += [((ROOT / 'tests/fixtures/native_set_pop_defaults.dewy').read_tex
 ARENA_CASES += [((ROOT / 'tests/fixtures/native_record_array_replacement.dewy').read_text(), 42)]
 RECORD_FAMILY = (ROOT / 'tests/fixtures/native_record_family_helpers.dewy').read_text()
 ARENA_CASES += [(RECORD_FAMILY, 42)]
+ARENA_CASES += [((ROOT / 'tests/fixtures/native_dict_rebuild_helpers.dewy').read_text(), 42)]
 
 
 def build_native_lowering_driver(tmp_path):

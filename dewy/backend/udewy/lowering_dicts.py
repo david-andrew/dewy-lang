@@ -177,6 +177,39 @@ class _DictLowering:
 
     # ------------------------------------------------------------------ table
     def _dict_rebuild(self, parts: _DictParts, capacity: hir.AST, loc: Span) -> list[hir.AST]:
+        # A rebuild is large and cold, but every lookup can request one.
+        # Share it by entry storage and field offsets. Only arena-backed
+        # tables can move their allocation into a helper's stack frame.
+        if not self._has_arena():
+            return self._dict_rebuild_body(parts, capacity, loc)
+        key = (parts.key_type, parts.value_type, tuple(sorted(parts.offsets.items())))
+        symbol = next((symbol for old, _parts, symbol in self.dict_rebuild_symbols if old == key), None)
+        if symbol is None:
+            symbol = self._internal_symbol(f'__dewy_rebuild_dict_{len(self.dict_rebuild_symbols)}')
+            entry = (key, parts, symbol)
+            self.dict_rebuild_symbols.append(entry)
+            self.pending_dict_rebuilds.append(entry)
+        signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+        return [hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, signature, symbol),
+                                 [replace(parts.pointer, type='int64'), capacity], {})]
+
+    def _synthesize_dict_rebuilds(self) -> list:
+        from .lowering_shared import LoweredFunction
+        result = []
+        while self.pending_dict_rebuilds:
+            _key, parts, symbol = self.pending_dict_rebuilds.pop(0)
+            loc = self.root.loc
+            pointer = hir.ExpressedIdentifier(loc, 'int64', '__dewy_dictionary')
+            capacity = hir.ExpressedIdentifier(loc, 'int64', '__dewy_capacity')
+            body = self._dict_rebuild_body(replace(parts, pointer=pointer), capacity, loc)
+            signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+            literal = hir.FunctionLiteral(loc, signature,
+                [hir.Param(pointer.name, 'int64'), hir.Param(capacity.name, 'int64')],
+                [], None, ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, body, True))
+            result.append(LoweredFunction(symbol, literal))
+        return result
+
+    def _dict_rebuild_body(self, parts: _DictParts, capacity: hir.AST, loc: Span) -> list[hir.AST]:
         """Compact the entries (dropping tombstones), fill missing hashes, and build a fresh table."""
         keys = self._dict_descriptor(parts, 'keys', loc)
         values = self._dict_descriptor(parts, 'values', loc) if parts.value_type is not None else None

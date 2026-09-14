@@ -3248,6 +3248,29 @@ dict_advance = (cursor:addr perturb:addr mask:addr node:hir.AST @state:State):>a
     return [set_local(perturb shifted node @state) set_local(cursor next node @state)]
 }
 dict_rebuild = (parts:DictParts room:addr node:hir.AST @state:State):>addr => {
+    if state.allocator is? none return dict_rebuild_body(parts room node @state)
+    # Rebuilding compacts/reclaims entries and initializes an entire table.
+    # A lookup needs only a call to that code, not another expanded copy.
+    # Offsets distinguish container views with different physical layouts.
+    let key="dict_rebuild:{parts.key}:{parts.value}:{parts.layout.offsets}:{room}"
+    let name=state.copy_helpers.get(key)
+    let empty=types.primitive('void' @state.type_nodes)
+    if name is? none {
+        let generated=fresh('rebuild_dict' @state)
+        name=generated state.copy_helpers[key]=generated
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let parameter=fresh('dictionary' @state)
+        let pointer=put(hir.ExpressedIdentifier[node.loc word_type parameter] @state)
+        let local=DictParts[pointer parts.layout parts.key parts.value]
+        let body=dict_rebuild_body(local room node @state)
+        let signature=types.function_type([types.PosOrKwArg[parameter word_type]] [] none empty [] @state.type_nodes)
+        let literal=put(hir.FunctionLiteral[node.loc signature [hir.Param[parameter word_type]] [] none empty body source=state.source_index] @state)
+        state.generated.push(program.Function[generated literal])
+    }
+    $runtime_assert name isnt? none
+    return intrinsic(name [parts.pointer] empty node @state)
+}
+dict_rebuild_body = (parts:DictParts room:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let word_type=types.primitive('int64' @state.type_nodes)
     let keys=snapshot(dict_field(parts 'keys' node @state) @prefix @state)
