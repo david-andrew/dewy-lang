@@ -72,6 +72,8 @@ def main() -> int:
     parser.add_argument('--hosted-root', type=Path, default=ROOT,
                         help='pin the hosted packages and library to a source snapshot')
     parser.add_argument('--udewy-executable', type=Path)
+    parser.add_argument('--library-root', type=Path,
+                        help='pin library inputs independently of the benchmark driver')
     parser.add_argument('--target', choices=('x86_64', 'c'), default='x86_64')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--runs', type=int, default=1)
@@ -92,6 +94,8 @@ def main() -> int:
     if not args.native_executable:
         env |= {'PYTHONPATH': str(hosted_root), 'DEWY_LIBRARY_ROOT': str(hosted_root / 'library'),
                 'DEWY_BENCH_HOSTED_ROOT': str(hosted_root)}
+    if args.library_root:
+        env['DEWY_LIBRARY_ROOT'] = str(args.library_root.resolve(strict=True))
     if args.udewy_executable:
         env['DEWY_UDEWY'] = str(args.udewy_executable.resolve(strict=True))
     if args.profile:
@@ -128,6 +132,14 @@ def main() -> int:
     if args.udewy_executable:
         metadata['udewy'] = str(args.udewy_executable.resolve())
         metadata['udewy_sha256'] = hashlib.sha256(args.udewy_executable.read_bytes()).hexdigest()
+    library_root = Path(env['DEWY_LIBRARY_ROOT'])
+    metadata['library_root'] = str(library_root)
+    library_digest = hashlib.sha256()
+    for path in sorted(library_root.rglob('*')):
+        if path.is_file() and path.suffix in ('.dewy', '.udewy'):
+            library_digest.update(str(path.relative_to(library_root)).encode() + b'\0')
+            library_digest.update(path.read_bytes())
+    metadata['library_sha256'] = library_digest.hexdigest()
     metadata['backend_driver'] = 'native executable' if args.native_executable else 'hosted in-process µDewy'
     (output / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     failed = False
