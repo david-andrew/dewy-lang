@@ -138,6 +138,28 @@ class _ObjectLowering:
                 return True
         return False
 
+    def _object_copy_uses_frame_storage(self, object_type: ty.ObjectType) -> bool:
+        """Whether an ordinary non-moving field copy allocates in its frame.
+
+        With the arena available, dynamic array snapshots, strings, and union
+        payloads already have arena lifetime. Fixed-array fields still use
+        the caller's frame, including fields only present on descendants.
+        The containing record's allocation is separate from this query.
+        """
+        cached = self.object_frame_copies.get(id(object_type))
+        if cached is not None:
+            return cached[1]
+        candidates = [object_type, *(ty.USER_BRAND_TYPES[brand]
+                      for brand in ty.brand_alternatives(object_type)
+                      if brand in ty.USER_BRAND_TYPES)]
+        frame = any(
+            isinstance(field.type, ty.ArrayType) and field.type.length is not None
+            or isinstance(field.type, ty.ObjectType) and self._object_copy_uses_frame_storage(field.type)
+            for candidate in candidates for field in candidate.fields
+        )
+        self.object_frame_copies[id(object_type)] = (object_type, frame)
+        return frame
+
     def _synthesize_object_copies(self) -> list:
         from .lowering_shared import LoweredFunction
         synthesized = []
@@ -189,10 +211,11 @@ class _ObjectLowering:
         startup = self.lowering_module_startup
         self.lowering_module_startup = False
         try:
-            while self.pending_named_copies or self.pending_object_copies or self.pending_object_releases or getattr(self, 'pending_pins', []) or getattr(self, 'pending_uniques', []):
+            while self.pending_named_copies or self.pending_object_copies or self.pending_object_releases or self.pending_shared_copies or getattr(self, 'pending_pins', []) or getattr(self, 'pending_uniques', []):
                 result.extend(self._synthesize_named_copies())
                 result.extend(self._synthesize_object_copies())
                 result.extend(self._synthesize_object_releases())
+                result.extend(self._synthesize_shared_copies())
                 result.extend(self._synthesize_pins())
                 result.extend(self._synthesize_uniques())
         finally:
@@ -616,6 +639,12 @@ class _ObjectLowering:
         """Copy every field; with ``arena``, nested mutable storage is arena-backed too.
         A minted object's brand word is copied, and the fields a child carries
         beyond the static type follow, selected by that brand at runtime."""
+        # A frame-rooted record does not imply frame-rooted field copies.
+        # Most bootstrap records already copy every owned field into the
+        # arena. Share those operations too, while the caller still supplies
+        # its original record slot. No allocation changes lifetime here.
+        if not arena and not move and self._has_arena() and not self._object_copy_uses_frame_storage(object_type):
+            arena = True
         if arena and not inline:
             return [self._object_copy_call(dest, src, object_type, loc, prepared=False, move=move, exact=exact)]
         if arena and not exact:

@@ -280,10 +280,13 @@ class _Lowerer(
         self.pending_named_copies: list[ty.NamedType] = []
         self.object_copy_symbols: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], bool, str]] = []
         self.object_layouts: dict[int, tuple[ty.ObjectType, tuple[int, dict[str, int]]]] = {}
+        self.object_frame_copies: dict[int, tuple[ty.ObjectType, bool]] = {}
         self.member_tags_by_identity: dict[int, tuple[ty.TypeExpr, int]] = {}
         self.pending_object_copies: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], bool, str]] = []
         self.object_release_symbols: list[tuple[ty.ObjectType, bool, str]] = []
         self.pending_object_releases: list[tuple[ty.ObjectType, bool, str]] = []
+        self.shared_copy_symbols: list[tuple[ty.ArrayType, str]] = []
+        self.pending_shared_copies: list[tuple[ty.ArrayType, str]] = []
         self.string_clone_needed = False   # a string array was copied: emit `__dewy_string_clone` once
         self.optional_globals_initialized: set[int] = set()
         self.union_globals_initialized: set[int] = set()

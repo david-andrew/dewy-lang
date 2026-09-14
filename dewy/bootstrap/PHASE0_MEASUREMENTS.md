@@ -154,3 +154,38 @@ returns 42 through both updated backends. The hosted version also returns
 42. Cases cover present/absent/discarded integer and string results, eager
 defaults, and zero retained arena growth over 64 repeated scopes. A fresh
 full-native corpus run remains an integration gate.
+
+## Full-build checkpoint and array copy expansion
+
+The complete `e305d2e6` source snapshot (including the imported
+`tools/dewy_test.dewy`) builds through hosted Python and GCC in 667.44 seconds:
+83.59 checking, 107.57 lowering, 18.87 emission, and 451.94 in the backend.
+Maximum process RSS is 6,948,352 KiB. A short nonblocking 5 Hz sample spans
+late lowering, emission and µDewy tokenization; other kernel tests overlap
+the C build. Treat this as an integration measurement, not a controlled
+acceptance run. Its native test seed builds t0 in 69.40 seconds and emits
+4,275,940 bytes, with maximum process RSS 3,554,960 KiB. It is not a newly
+verified native fixed point.
+
+The 118.9 MB full hosted output includes 12.1 MB of source-location comments
+and 12.7 MB of variable comments. The longer snapshot paths explain much of
+the increase from the earlier build; record helpers account for only a small
+part of the remaining 94 MB of code. Most code sits in ordinary functions.
+
+Hosted lowering now shares complete non-moving dynamic-array copies,
+including their wide-union fallback loops. Both paths already return
+arena-owned descriptors. Frame-rooted records can also share their field
+operations when every nested allocation already has arena lifetime; fixed
+arrays and moves retain their distinct rules. The t0 module emits 5,466,153
+bytes in 21.06 seconds (a bounded sample), so this alone is not the large
+full-build improvement still needed. A 24-caller, twelve-alternative union
+array kernel drops from 946,621 to 729,334 bytes, under an 850 KB gate.
+
+That kernel also exposed an older hosted leak when overwriting optional or
+union array elements. The replacement now releases the old cell and its
+active payload after detachment, while respecting pinned containers. The
+native implementation already reclaimed these cells. Both implementations
+now return the expected result with zero growth across repeated kernel
+scopes on direct and C backends; additional cases cover self-replacement and
+pinned old-cell pointers. Sixty-nine existing ownership, sharing, string,
+array and object tests pass with array helper sharing enabled.

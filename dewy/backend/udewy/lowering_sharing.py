@@ -88,7 +88,30 @@ class _ArraySharing:
         signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return [hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, signature, helper.symbol), [size], {})]
 
-    def _clone_dynamic_array_value(self, node, array_type, *, arena=False, move=False):
+    def _shared_array_copy_call(self, source, array_type, loc):
+        symbol = next((name for existing, name in self.shared_copy_symbols if existing == array_type), None)
+        if symbol is None:
+            symbol = self._internal_symbol(f'__dewy_copy_array_{len(self.shared_copy_symbols)}')
+            self.shared_copy_symbols.append((array_type, symbol))
+            self.pending_shared_copies.append((array_type, symbol))
+        signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
+        return hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, signature, symbol), [source], {})
+
+    def _synthesize_shared_copies(self):
+        from .lowering_shared import LoweredFunction
+        result = []
+        while self.pending_shared_copies:
+            array_type, symbol = self.pending_shared_copies.pop(0)
+            loc = self.root.loc
+            source = hir.ExpressedIdentifier(loc, array_type, '__dewy_array_source')
+            prefix, value = self._clone_dynamic_array_value(source, array_type, arena=True, inline=True)
+            signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
+            literal = hir.FunctionLiteral(loc, signature, [hir.Param(source.name, 'int64')], [], None,
+                'int64', hir.Block(loc, 'int64', [*prefix, hir.Return(loc, ty.BOTTOM_TYPE, value)], True))
+            result.append(LoweredFunction(symbol, literal))
+        return result
+
+    def _clone_dynamic_array_value(self, node, array_type, *, arena=False, move=False, inline=False):
         # A widened length fact does not change a fixed backing allocation
         # into a descriptor. Copy from its known physical extent before
         # entering descriptor-only sharing, including at call boundaries.
@@ -101,6 +124,14 @@ class _ArraySharing:
         before, value = self._extract_expression(node)
         source = self._name('shared_source', loc)
         before.append(self._declare(source, value, loc))
+        if not move and not inline:
+            # Both the shared fast path and the fallback already return an
+            # arena-owned descriptor. Outline the whole operation, including
+            # the potentially large union/record element clone loop, once per
+            # array type. Source evaluation remains in the caller, in order.
+            result = self._name('shared_array', loc)
+            before.append(self._declare(result, self._shared_array_copy_call(source, array_type, loc), loc))
+            return before, result
         if move:
             before.extend(self._ensure_unique_array(source, array_type.element, loc))
             cloned, result = self._clone_dynamic_array_storage(replace(source, type=array_type), array_type, arena=arena, move=True)
