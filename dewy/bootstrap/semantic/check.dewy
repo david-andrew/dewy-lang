@@ -222,6 +222,13 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     if actual is? types.IntegerLiteralType and (types.is_primitive(target 'int') or types.is_primitive(target 'uint')) return value
     if target is? types.TypeOr {
         if actual is? types.TypeOr return put(hir.RepresentationCast[node.loc expected value] @session)
+        # A value already represented by one alternative needs only packing.
+        # In particular, an exact-length array also fits a dynamic-length
+        # alternative, but that does not make its existing representation
+        # ambiguous. Keep it, as hosted checking does for subsumption.
+        loop member in target.items {
+            if types.same_type(node.value_type member session.types) return put(hir.RepresentationCast[node.loc expected value] @session)
+        }
         let candidates:array<addr> = []
         loop member in target.items {
             if subtyping.is_subtype(node.value_type member session.links @session.types) { candidates.push(member) }

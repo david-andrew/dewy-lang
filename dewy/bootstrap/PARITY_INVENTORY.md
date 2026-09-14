@@ -33,9 +33,12 @@ These are outside the original corpus counts:
 
 - `tests/fixtures/array_union_widening.dewy` now passes hosted direct/C
   execution after fixing array descriptor extraction. Native lowering passes
-  its narrowed optional-array case, but native checking still rejects the
-  explicit `array<int64 length=2>|array<int64>` return when a fixed array fits
-  both alternatives (`selecting among overlapping union materializations`).
+  its narrowed optional-array case. Native checking now preserves an exact
+  matching union alternative, accepting the explicit
+  `array<int64 length=2>|array<int64>` return without choosing a different
+  representation merely because the fixed array also fits the wider member.
+  Unique-array contextual construction and rejection checks pass; execution
+  of this expanded case awaits the next native integration executable.
 - Comparing two separately constructed arrays of equal records with `=?`
   currently returns false in both compilers. The numbering regression exposed
   this while comparing independent snapshots; checking each field confirms

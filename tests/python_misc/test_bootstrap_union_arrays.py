@@ -2,6 +2,8 @@
 import test_bootstrap_check as source_values
 
 CASES = [
+    'let fixed:array<int64 length=2>=[40 2]\nlet value:array<int64 length=2>|array<int64>=fixed\nvalue',
+    'let choose=(short:bool):>array<int64 length=2>|array<int64>=>{let fixed:array<int64 length=2>=[40 2] let dynamic:array<int64>=[19 23] return if short fixed else dynamic}',
     'let choose=(missing:bool):>array<int64>|none=>{if missing return [] return [42]}',
     "Failure:type=[why:string]\nlet choose=(missing:bool):>array<int64>|Failure=>{if missing return [] return Failure[why='missing']}",
     'let values:array<uint8>|none=[]\nvalues',
