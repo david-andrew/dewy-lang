@@ -1,6 +1,48 @@
 from dataclasses import dataclass, field, replace
 from collections import defaultdict
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
+from collections.abc import Callable, Iterator
 from typing import Literal
+
+
+_runtime_query_cache: ContextVar[dict | None] = ContextVar('dewy_runtime_queries', default=None)
+
+
+@contextmanager
+def runtime_query_scope() -> Iterator[None]:
+    """Memoize representation queries only while checked types are stable.
+
+    The checker can resolve aliases and change type descriptions, so its
+    calls stay uncached. Lowering/emission opt into one scope per compilation.
+    Entries retain their input objects: identity keys cannot be reused while
+    cached, and do not recursively hash mutable unions or recursive aliases.
+    """
+    if _runtime_query_cache.get() is not None:
+        yield
+        return
+    token = _runtime_query_cache.set({})
+    try:
+        yield
+    finally:
+        _runtime_query_cache.reset(token)
+
+
+def _runtime_query[T, R](function: Callable[[T], R]) -> Callable[[T], R]:
+    @wraps(function)
+    def query(type_: T) -> R:
+        cache = _runtime_query_cache.get()
+        if cache is None:
+            return function(type_)
+        key = (function, id(type_))
+        found = cache.get(key)
+        if found is not None:
+            return found[1]
+        result = function(type_)
+        cache[key] = (type_, result)
+        return result
+    return query
 
 """
 Candidate type names:
@@ -902,6 +944,7 @@ def dict_key_value(type_: TypeExpr) -> tuple[TypeExpr, TypeExpr] | None:
     return None
 
 
+@_runtime_query
 def string_valued(type_: TypeExpr) -> bool:
     """Whether every value of ``type_`` is a string (a string type, a string
     literal, or a union of them): such values are one-word string handles,
@@ -930,6 +973,7 @@ def strip_result_refinement(type_: TypeExpr) -> TypeExpr:
     return type_
 
 
+@_runtime_query
 def strip_all_refinements(type_: TypeExpr) -> TypeExpr:
     """A type as the runtime sees it: every refinement gone, also inside a union
     (`addr | none` is stored as `int64 | none`)."""
@@ -992,6 +1036,7 @@ _fixed_integer_widths: dict[str, tuple[int, bool]] = {
 FIXED_INTEGER_TYPES = frozenset(_fixed_integer_widths)
 
 
+@_runtime_query
 def optional_payload(type_: Type) -> TypeExpr | None:
     """Return the sole non-none member of ``T | none``."""
 
@@ -1015,6 +1060,7 @@ def optional(type_: TypeExpr) -> TypeExpr:
     return union(type_, 'none')
 
 
+@_runtime_query
 def enum_members(type_: Type) -> tuple[TypeExpr, ...] | None:
     """The canonical member order of an *enum*: a union of string and/or
     integer singletons (`'A' | 'B' | 'C'`, `1 | 2 | "fast"`).
@@ -1044,6 +1090,7 @@ def enum_member_index(members: tuple[TypeExpr, ...], value: TypeExpr) -> int | N
     return None
 
 
+@_runtime_query
 def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
     """Canonical member order for a general runtime tagged union.
 

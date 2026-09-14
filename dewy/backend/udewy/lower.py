@@ -278,6 +278,8 @@ class _Lowerer(
         self.named_copy_symbols: dict[int, str] = {}  # recursive alias id -> deep-copy function symbol
         self.pending_named_copies: list[ty.NamedType] = []
         self.object_copy_symbols: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], str]] = []
+        self.object_layouts: dict[int, tuple[ty.ObjectType, tuple[int, dict[str, int]]]] = {}
+        self.member_tags_by_identity: dict[int, tuple[ty.TypeExpr, int]] = {}
         self.pending_object_copies: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], str]] = []
         self.object_release_symbols: list[tuple[ty.ObjectType, str]] = []
         self.pending_object_releases: list[tuple[ty.ObjectType, str]] = []
@@ -5567,6 +5569,7 @@ last_move_notes: list[MoveNote] = []
 """The transfers of owned arrays (moved or copied) of the most recent lowering, for `dewy analyze`."""
 
 
+@ty.runtime_query_scope()
 def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main') -> LoweredProgram:
     """Legalize checked HIR function constructs for udewy source emission."""
     if not isinstance(root, hir.Block):

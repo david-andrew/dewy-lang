@@ -234,8 +234,11 @@ changing registries or facts.
     (`backend/udewy/lowering_optionals.py`). A record's repr is its whole
     nested dataclass text, guarded by `reprlib` — 3.6 million repr calls and
     7.5 million set operations for one program, the single largest self-time
-    item. Memoize per type object (the types are frozen and hashable), or
-    key by a cheap structural hash;
+    item. Memoize by retained type-object identity within a stable lowering
+    scope, or key by a cheap structural hash where safe. Some type objects
+    contain mutable unions or unresolved aliases; global memoization is
+    unsafe. The first scoped-cache batch and measurements are recorded in
+    [`bootstrap/PHASE0_MEASUREMENTS.md`](bootstrap/PHASE0_MEASUREMENTS.md);
   - `location_marker` resolves the source path (`Path(...).resolve()`) for
     every marker — 52k `realpath` and 181k `lstat` calls, about 1.9 s.
     Resolve once per source file;

@@ -1,6 +1,7 @@
 """Emit udewy source from HIR prepared by the udewy lowering pass."""
 
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from pathlib import Path
 from textwrap import indent
 
@@ -120,8 +121,21 @@ class EmitContext:
     debug_raw_arrays: dict[int, tuple[int, int]] = field(default_factory=dict)
     raw_array_thunks: dict[tuple[str, int, int], str] = field(default_factory=dict)   # (formatter, length, element bytes) -> thunk name
 
+    source_paths: dict[int, tuple[SrcFile, str]] = field(default_factory=dict)
+
+    @cached_property
+    def source_path(self) -> str | None:
+        if self.source is None or self.source.path is None:
+            return None
+        key = id(self.source)
+        found = self.source_paths.get(key)
+        if found is None:
+            found = self.source, str(Path(self.source.path).resolve())
+            self.source_paths[key] = found
+        return found[1]
+
     def child(self, local_names: set[str]) -> 'EmitContext':
-        return EmitContext(self.direct_function_names, local_names, self.include_directives, self.source, self.last_marker, self.debug_locations, self.debug_aliases, self.debug_raw_arrays, self.raw_array_thunks)
+        return EmitContext(self.direct_function_names, local_names, self.include_directives, self.source, self.last_marker, self.debug_locations, self.debug_aliases, self.debug_raw_arrays, self.raw_array_thunks, self.source_paths)
 
 
 def location_marker(node: hir.AST, ctx: EmitContext) -> str | None:
@@ -132,7 +146,7 @@ def location_marker(node: hir.AST, ctx: EmitContext) -> str | None:
     if node.loc.start == 0 and node.loc.stop == 0:
         return None   # a synthesized node without a position
     row, column = source.offset_to_row_col(node.loc.start)
-    marker = f'# @loc {Path(source.path).resolve()}:{row + 1}:{column + 1}'
+    marker = f'# @loc {ctx.source_path}:{row + 1}:{column + 1}'
     if marker == ctx.last_marker[0]:
         return None
     ctx.last_marker[0] = marker
@@ -197,6 +211,7 @@ def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False, debu
     ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test, debug=debug_locations and debug_values)
     return codegen_inner(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main', debug_locations=debug_locations)
 
+@ty.runtime_query_scope()
 def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: str = 'main', debug_locations: bool = True) -> str:
     """Emit checked HIR after legalizing Dewy callable constructs.
 
@@ -410,7 +425,7 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -
     local_names.update(arg.name for arg in func.kw_only_args)
     if func.rest_args is not None:
         local_names.add(func.rest_args.name)
-    func_ctx = EmitContext(ctx.direct_function_names, local_names, ctx.include_directives, func.source if ctx.debug_locations else None, debug_locations=ctx.debug_locations, debug_aliases=ctx.debug_aliases, debug_raw_arrays=ctx.debug_raw_arrays, raw_array_thunks=ctx.raw_array_thunks)
+    func_ctx = EmitContext(ctx.direct_function_names, local_names, ctx.include_directives, func.source if ctx.debug_locations else None, debug_locations=ctx.debug_locations, debug_aliases=ctx.debug_aliases, debug_raw_arrays=ctx.debug_raw_arrays, raw_array_thunks=ctx.raw_array_thunks, source_paths=ctx.source_paths)
     body = func.body
     if _contains_return(body):
         code.append(emit_ast(body, func_ctx))

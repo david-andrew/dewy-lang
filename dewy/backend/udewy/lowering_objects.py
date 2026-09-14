@@ -393,6 +393,9 @@ class _ObjectLowering:
         typed by the parent holds any child whole, and `is?` on it reads the
         brand word.
         """
+        cached = self.object_layouts.get(id(object_type))
+        if cached is not None:
+            return cached[1]
         brand = object_type.brand if ty.user_branded(object_type) else None
         carriers = ty.structure_carriers(object_type) if brand is None else []
         root_fields = (
@@ -426,7 +429,9 @@ class _ObjectLowering:
             child_type = ty.USER_BRAND_TYPES.get(descendant)
             if child_type is not None:
                 size = max(size, self._object_layout(child_type, node)[0])
-        return size, offsets
+        result = size, offsets
+        self.object_layouts[id(object_type)] = (object_type, result)
+        return result
 
     def _brand_word_store(self, dest: hir.AST, object_type: ty.ObjectType, loc: Span) -> list[hir.AST]:
         """Write a freshly built object's brand word: its brand's id, or 0 for a

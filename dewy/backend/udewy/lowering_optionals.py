@@ -44,6 +44,9 @@ class _OptionalLowering:
 
     def _member_tag(self, member: ty.TypeExpr) -> int:
         """The program-wide tag of a union member type."""
+        cached = self.member_tags_by_identity.get(id(member))
+        if cached is not None:
+            return cached[1]
         plain = ty.strip_refinement(member)
         if plain == 'none':
             return 0
@@ -58,7 +61,9 @@ class _OptionalLowering:
         tags = self.union_tags
         if key not in tags:
             tags[key] = len(tags) + 1
-        return tags[key]
+        tag = tags[key]
+        self.member_tags_by_identity[id(member)] = (member, tag)
+        return tag
 
     def _tag_literal(self, loc: Span, member: ty.TypeExpr) -> hir.Integer:
         return self._int64_literal(loc, self._member_tag(member))
