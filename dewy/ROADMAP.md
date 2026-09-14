@@ -21,9 +21,9 @@ How this relates to the other documents:
   is the user-facing maturity ledger. It should move items from provisional
   to settled as the phases below complete.
 
-Recorded 2026-09-13 from a roadmap discussion. The ordering is a
-recommendation David accepted for phases 1.1 through 1.3; later phases are
-the preliminary proposal and will be revised as earlier phases land.
+Recorded 2026-09-13. The ordering and the phase 1.1 strategy were reviewed
+and accepted by David for phases 1.1 through 1.3; later phases are a
+preliminary proposal and will be revised as earlier phases land.
 
 ## Organizing principle
 
@@ -76,10 +76,11 @@ Copy-on-write is a provisional bootstrap accelerator
 **What went wrong last time.** The model was not the problem. The analysis
 could not justify enough borrows and moves, so lowering fell back to "copy to
 be safe", and the compiler's own code shape hit the worst case for that
-fallback. Self-build profiles showed every sample inside string cloning,
-called from record copying, called from reading a node out of the type
-arena: a read-only arena lookup paid a full deep copy each time, for a
-cumulative 324 GB allocated against 9 GB live. Copy-on-write made those
+fallback. Profiles taken during the September 2026 paired self-build
+attempts (summarized in `bootstrap/PERFORMANCE.md`) showed every sample
+inside string cloning, called from record copying, called from reading a
+node out of the type arena: a read-only arena lookup paid a full deep copy
+each time, for a cumulative 324 GB allocated against 9 GB live. Copy-on-write made those
 copies free until a write, which is why it unblocked the bootstrap.
 
 **Strategy.** Make it structurally impossible to re-enter that state
@@ -149,52 +150,102 @@ union alternatives, effects describe evaluation behavior.
 
 A short pass over small surface questions that get more expensive every
 month and block documentation and library code. None needs a large
-implementation; the value is in closing them. The cases were presented to
-David with examples and options on 2026-09-13; his decisions:
+implementation; the value is in closing them. Each case below states the
+question with a minimal example, then the decision (or that it stays open).
+Decisions were made by David on 2026-09-13.
 
-1. **Juxtaposition with union-typed operands (decided).** The type system
-   allows a union of a callable and a multipliable. If a value of such a
-   type reaches a juxtaposition, that is a compile error as ambiguous. The
+1. **Juxtaposition with union-typed operands (decided).** Writing two
+   expressions next to each other is an operation chosen by the operand
+   types: a callable on the left means call, a number means multiply.
+   The two forms have different precedences on purpose, so that
+   `sin(x)^2` is `(sin(x))^2` while `2x^2` is `2 * (x^2)`. The question
+   is what happens when the left operand's static type is a union of a
+   callable and a number, since the parser cannot pick a precedence:
+
+   ```dewy
+   let f:((int):>int) | int = ...
+   f(x)^2        # call or multiply?
+   ```
+
+   Decision: such union types are allowed by the type system, but a value
+   of one reaching a juxtaposition is a compile error as ambiguous. The
    diagnostic must show the explicit forms: `A |> B` or `B <| A` for a
    call, `A * B` for a multiplication. Parenthesizing is not offered as a
    fix, since the parentheses are gone by the time the operation is chosen.
-   The two precedences themselves (call tighter than `^`, multiply looser)
-   stay. A number on the right of a name (`x 2`) is never a call and is
-   not a multiplication either: it is two separate expressions. The
-   right-side multiply-juxtapose case for numbers is dropped.
-2. **Based byte literals.** The remaining sub-decisions (non-power-of-two
-   bases, separators, digit order) stay open; low priority.
-3. **Keywords (decided).** `extern`, `intrinsic`, `none`, `void`, `end`,
-   and `new` are all reserved. `new` is the NumPy `newaxis` idiom:
-   `myarray[new]` yields an array (or view) with an extra singleton
-   dimension at the front, `myarray[... new]` at the end, following NumPy
-   exactly. `untyped` was an internal inference marker (`ty.INFERRED_TYPE`
-   still uses the string internally); it is not reserved as surface syntax.
-4. **Parametric type brackets (decided).** `T<>` stays.
-5. **Export control (decided).** Python's convention: everything public,
-   a leading underscore marks a private binding by convention, no
-   enforcement. Left alone until people demand more.
-6. **Unicode identifiers.** Repertoire open, low priority. Decided rule
-   for normalization: subscript digits stay distinct from plain digits
-   (`x₁` and `x1` are different names) but `x₁` and `x_1` are the same
-   name. Superscripts and the confusable-letter table (micro sign versus
-   mu) are not yet decided.
-7. **Unit-like nominal types (decided).** `Overflow` is usable as both the
-   type and its sole value; the shared spelling is the language rule.
-   Whether the implementation represents them as one object or two is
-   internal.
-8. **Container method names (decided).** `push` is the uniform name for
-   adding to any container, sets included (their insertion order is
-   guaranteed); `pop` is the uniform name for removing. Uniform names may
-   take container-specific parameters, but the name and the broad
-   signature are the same everywhere. `length` is the uniform accessor for
-   both length and shape: on a multidimensional array `myarr.length`
-   returns an array of dimensions.
+   Both precedences stay. Separately, a number on the right of a name
+   (`x 2`) is never a call and never a multiplication: it is two separate
+   expressions. The parser's tentative right-side multiply-juxtapose case
+   for numbers (noted in the hosted `t2` stage) is dropped.
+2. **Based byte literals (open, low priority).** Strings carry no `\x`
+   escape because a string is a sequence of scalars, not bytes, so byte
+   arrays need their own literal. The compiler already implements the
+   based-string family for power-of-two bases, e.g.
+   `a:array<uint8> = 0x"00 ff ab 12"`, with digits in big-endian order.
+   Still undecided: whether the reserved non-power-of-two bases
+   (`0t 0s 0d 0z 0r`) pack or are rejected, which separators are allowed,
+   and the exact rule relating digit order to a numeric literal reinterpreted
+   with `transmute`. See `../resources/discussion_points.md` ("How to input
+   byte-arrays").
+3. **Keywords (decided).** The hosted `t1` stage carried a note asking
+   whether `extern`, `intrinsic`, `none`, `void`, `untyped`, `end`, and
+   `new` are keywords (cannot be shadowed, may change parsing) or ordinary
+   identifiers the prelude provides (`let none = 5` would be legal).
+   Decision: `extern`, `intrinsic`, `none`, `void`, `end`, and `new` are
+   all reserved. `end` is the last-index name inside an index expression
+   (`xs[end]`). `new` is the NumPy `newaxis` idiom: `myarray[new]` yields
+   an array (or view) with an extra singleton dimension at the front,
+   `myarray[... new]` at the end, following NumPy exactly. `untyped` was
+   only an internal inference marker (`ty.INFERRED_TYPE` still uses the
+   string internally) and is not reserved as surface syntax.
+4. **Brackets for parametric types (decided).** Whether `array<int>`
+   should become `array[int]` or `array(int)`. Dewy's comparison operators
+   are `<?` and `>?`, so the usual less-than ambiguity does not arise; the
+   one wart is a shift inside a type parameter needing parentheses
+   (`something<(a >> b)>`). Both alternatives collide with indexing or
+   calls under juxtaposition. Decision: `T<>` stays.
+5. **Export control (decided).** Every top-level binding in a module is
+   importable today; the question was whether an `export` keyword or a
+   privacy modifier is needed. Decision: Python's convention. Everything
+   is public, a leading underscore marks a binding as private by
+   convention, nothing is enforced. Left alone until people demand more.
+6. **Unicode identifiers (partly decided, low priority).** Which non-ASCII
+   characters may appear in identifiers (the hosted `t0` stage lists
+   candidate additions), and which visually or semantically equivalent
+   spellings name the same binding. Decided: subscript digits are distinct
+   from plain digits, so `x₁` and `x1` are different names, but `x₁` and
+   `x_1` are the same name. Open: the repertoire itself, superscripts, and
+   whether look-alike letters such as the micro sign and Greek mu fold
+   together.
+7. **Unit-like nominal types (decided).** A minted nominal type with no
+   fields, such as an error type declared as `Overflow = type of error`,
+   is spelled the same way whether used as a type or as its single value:
 
-Not decisions: the three precedence adjustments listed as open in
-`design-status.md` landed on 2026-08-31 (see `semantic/precedence.md` and
-the 2026-08-31 entry in `status.md`). Multidimensional shape syntax is a
-real design but belongs to Phase 3.
+   ```dewy
+   let r:int64 | Overflow = ...
+   if r is? Overflow ...     # the type
+   return Overflow           # the value
+   ```
+
+   Decision: the shared spelling is the language rule and the name is
+   usable in both roles. Whether the implementation represents the type
+   and its inhabitant as one object or two is internal.
+8. **Container method names (decided).** Dewy collapses names that mean
+   the same thing across container types (`length`, `pop`); the open item
+   was whether sets should keep `add` or use `push` like arrays. Decision:
+   `push` is the uniform name for adding to any container, sets included
+   (their insertion order is guaranteed, so "push" is meaningful); `pop`
+   is the uniform name for removing. Uniform names may take
+   container-specific parameters, but the name and the broad signature are
+   the same everywhere. `length` is the uniform accessor for both length
+   and shape: on a multidimensional array `myarr.length` returns an array
+   of dimensions. There is no `size` or `shape`.
+
+Not decisions: the precedence adjustments once listed as open in the
+reference's design-status appendix (word `not` below comparisons,
+one-direction comparison chains, postfix `or_throw` below `as`, prefix
+`type of`) landed on 2026-08-31; see `semantic/precedence.md` and the
+2026-08-31 entry in `status.md`. Multidimensional shape syntax is a real
+design but belongs to Phase 3.
 
 ## Phase 2: expressiveness on top of the foundations
 
