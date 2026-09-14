@@ -145,3 +145,32 @@ lowering retains **zero bytes** after a second 5,000-iteration run. Existing
 values still copy independently. Adopting a record requires matching storage
 sizes; a differing destination layout copies and releases the original.
 This is a bounded ownership result, not a completed native bootstrap claim.
+
+## Linear native output emission
+
+The twelfth native-pair attempt stopped at the 35 GiB aggregate RSS limit
+while the seed rendered generation one. Lowering had finished; recursive
+subtree strings and repeated `indent` passes consumed the remaining memory.
+That attempt produced no first-generation Dewy executable or certificate.
+
+The emitter now visits expressions, statements and function bodies with one
+shared output writer. It writes each line's indentation once, reuses cached
+indentation strings, and joins fragments at the output boundary. Startup and
+program emission use the same writer. Errors still prevent publication of
+partial code, and operand parentheses and µDewy boolean semantics are unchanged.
+
+A bounded fixture with shared HIR leaves separates rendering from checking
+and lowering. On the development machine, using hosted-built direct x86_64
+executables for both versions:
+
+| Nested blocks above the leaf body | Statements | Output bytes | Before | After | Peak RSS before / after |
+| --- | --- | --- | --- | --- | --- |
+| 32 | 1,000 | 148,356 | 7.95 s | 0.14 s | 31.8 / 6.7 MiB |
+| 64 | 1,000 | 288,900 | 28.68 s | 0.25 s | 87.9 / 9.1 MiB |
+| 64 | 4,000 | 1,104,900 | exceeded 60 s | 0.87 s | unmeasured / 22.2 MiB |
+
+The completed old/new cases match byte for byte. All three new outputs also
+match an independently constructed expected result, including every space
+and newline. `native_emitter_scaling.dewy` and its emitter regression test
+preserve this workload. These measurements justify another bounded-gated
+self-build; they do not establish that the native bootstrap loop is closed.

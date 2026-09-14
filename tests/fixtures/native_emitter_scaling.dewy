@@ -1,0 +1,30 @@
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/backend/udewy/emit.dewy" as emit
+
+# Shared HIR children make this a rendering workload: increasing nesting must
+# not repeatedly copy and re-indent every statement below each enclosing block.
+# One extra command-line word doubles depth; two also quadruple leaf count.
+main = (args:array<string>):>int64 => {
+    let nodes:array<hir.AST>=[]
+    let type_nodes:array<types.Type>=[]
+    let span=Span[0 0]
+    let word=types.primitive('int64' @type_nodes)
+    let nothing=types.primitive('void' @type_nodes)
+    let number=hir.append_node(@nodes hir.Integer[span word '0d' 42])
+    let target=hir.append_node(@nodes hir.ExpressedIdentifier[span word 'answer'])
+    let assign=hir.append_node(@nodes hir.Assign[span nothing target '=' number])
+    let width:addr=if args.length >? 2 4000 else 1000
+    let depth:addr=if args.length >? 1 64 else 32
+    let leaves:array<addr>=[]
+    loop i in 0.. and i <? width {leaves.push(assign)}
+    let root=hir.append_node(@nodes hir.Block[span nothing leaves true])
+    loop i in 0.. and i <? depth {root=hir.append_node(@nodes hir.Block[span nothing [root] true])}
+    let scope=emit.Scope[]
+    let state=emit.State[]
+    let text=emit.ast(root @scope emit.Input[nodes type_nodes] @state)
+    if state.problem isnt? none {state.problem.fail}
+    printl(text)
+    return 0
+}

@@ -22,31 +22,38 @@ Program:type = const [
 # received only when lowering has supplied the conversion to array<string>.
 # No command-line conversion, allocation, or module initialization is hidden
 # in an expression emitter.
-entrypoint = (program:Program functions:dict<string addr> scope:emit.Scope input:emit.Input @state:emit.State):>string|Error => {
+write_entrypoint = (program:Program functions:dict<string addr> scope:emit.Scope input:emit.Input @state:emit.State @out:emit.Writer):>Error? => {
     let inner=emit.Scope[scope.direct_functions set[] program.source]
-    let arguments:string=''
-    let lines:array<string>=["{program.startup_symbol}()"]
-    if program.argv_prologue isnt? none {
-        arguments='__dewy_argc:int64 __dewy_argv:int64'
-        inner.locals.add('__dewy_argc') inner.locals.add('__dewy_argv')
-        loop line in emit.statements(program.argv_prologue @inner input @state) {lines.push(line)}
-    }
     let result:string='void'
-    if program.user_main_symbol is? none {lines.push('return void')}
-    else {
+    if program.user_main_symbol isnt? none {
         let symbol=program.user_main_symbol
         let function_id=functions.get(symbol)
         if function_id is? none return Error[title="entry function `{symbol}` is absent from the lowered program" srcfile=program.source]
         let function=hir.node_at(input.nodes function_id)
         if function isnt? hir.FunctionLiteral return Error[title='entry function is not a function literal' srcfile=program.source]
         result=emit.annotation(function.rettype input)
-        let actual:string=''
-        if program.argv_value isnt? none {actual=emit.argument(program.argv_value @inner input @state)}
-        let call="{symbol}({actual})"
-        if result =? 'void' {lines.push(call) lines.push('return void')}
-        else {lines.push("return {call}")}
     }
-    return "let main = ({arguments}):>{result} => \{\n{emit.indent(lines.join('\n'))}\n}"
+    emit.write('let main = (' @out)
+    if program.argv_prologue isnt? none {
+        emit.write('__dewy_argc:int64 __dewy_argv:int64' @out)
+        inner.locals.add('__dewy_argc') inner.locals.add('__dewy_argv')
+    }
+    emit.write("):>{result} => \{" @out) emit.newline(@out) emit.nest(@out)
+    emit.write("{program.startup_symbol}()" @out) emit.newline(@out)
+    if program.argv_prologue isnt? none {
+        emit.write_statements(program.argv_prologue @inner input @state @out)
+        if program.argv_prologue.length >? 0 {emit.newline(@out)}
+    }
+    if program.user_main_symbol is? none {emit.write('return void' @out)}
+    else {
+        if result not=? 'void' {emit.write('return ' @out)}
+        emit.write(program.user_main_symbol @out) emit.write('(' @out)
+        if program.argv_value isnt? none {emit.write_argument(program.argv_value @inner input @state @out)}
+        emit.write(')' @out)
+        if result =? 'void' {emit.newline(@out) emit.write('return void' @out)}
+    }
+    emit.unnest(@out) emit.newline(@out) emit.write('}' @out)
+    return none
 }
 
 # Publication is all-or-nothing: expression errors stay in State until this
@@ -65,30 +72,32 @@ render = (program:Program input:emit.Input debug_locations:bool=false):>string|E
     }
     let scope=emit.Scope[direct set[] program.source debug_locations=debug_locations]
     let state=emit.State[]
-    let code:array<string>=[]
+    let out=emit.Writer[]
     loop id in program.globals {
         let declaration=hir.node_at(input.nodes id)
         if declaration isnt? hir.Declare return Error[title='lowered global storage must be a declaration' srcfile=program.source]
         scope.locals.add(declaration.name)
     }
-    loop id in program.globals {code.push(emit.ast(id @scope input @state))}
+    loop id in program.globals {emit.write_ast(id @scope input @state @out) emit.newline(@out)}
     loop function in program.functions {
         let literal=hir.node_at(input.nodes function.literal)
         if literal isnt? hir.FunctionLiteral return Error[title='lowered function unit must contain a function literal' srcfile=program.source]
-        code.push(emit.function_decl(function.symbol literal scope input @state))
+        emit.write_function(function.symbol literal scope input @state @out) emit.newline(@out)
     }
     if program.needs_startup {
         let startup=emit.Scope[direct set[] program.source]
-        let lines=emit.statements(program.startup_items @startup input @state)
-        lines.push('return void')
-        code.push("let {program.startup_symbol} = ():>void => \{\n{emit.indent(lines.join('\n'))}\n}")
-        let main=entrypoint(program functions scope input @state)
-        if main is? Error return main
-        code.push(main)
-    } else if 'main' not in? functions {code.push(r'let main = ():>void => { return void }')}
+        emit.write("let {program.startup_symbol} = ():>void => \{" @out) emit.newline(@out) emit.nest(@out)
+        emit.write_statements(program.startup_items @startup input @state @out)
+        if program.startup_items.length >? 0 {emit.newline(@out)}
+        emit.write('return void' @out) emit.unnest(@out) emit.newline(@out) emit.write('}' @out) emit.newline(@out)
+        let problem=write_entrypoint(program functions scope input @state @out)
+        if problem isnt? none return problem
+        emit.newline(@out)
+    } else if 'main' not in? functions {emit.write(r'let main = ():>void => { return void }' @out) emit.newline(@out)}
     if state.problem isnt? none return state.problem
     let directives:array<string>=[]
     loop [path name] in state.includes {directives.push("$include_bytes(p\"{path}\") as {name}")}
-    loop text in code {directives.push(text)}
-    return directives.join('\n')+'\n'
+    let code=out.parts.join
+    if directives.length =? 0 return code
+    return directives.join('\n')+'\n'+code
 }

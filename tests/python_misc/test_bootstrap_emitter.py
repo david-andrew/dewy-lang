@@ -244,3 +244,21 @@ let main=():>int64=>{{
         executable = cache_artifact(output).resolve()
         assert subprocess.run([executable], timeout=10, check=False).returncode == 42
         assert subprocess.run([executable, 'stop'], timeout=10, check=False).returncode == 87
+
+
+def test_native_emitter_deep_output_is_identical(tmp_path):
+    """Large nested bodies retain exact whitespace without subtree re-rendering."""
+    source = ROOT / 'tests/fixtures/native_emitter_scaling.dewy'
+    seed = tmp_path / 'emitter-scaling.udewy'
+    seed.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
+    executable = cache_artifact(seed).resolve()
+    for args, depth, width in [([], 32, 1000), (['deep'], 64, 1000), (['deep', 'wide'], 64, 4000)]:
+        result = subprocess.run([executable, *args], capture_output=True, text=True,
+                                timeout=30, check=False)
+        assert result.returncode == 0, result.stderr
+        # Construct the independent expected text directly by line depth.
+        expected = ''.join('    ' * n + '{\n' for n in range(depth + 1))
+        expected += ('    ' * (depth + 1) + 'answer = 42\n') * width
+        expected += ''.join('    ' * n + '}\n' for n in reversed(range(depth + 1)))
+        assert result.stdout == expected
