@@ -28,7 +28,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
 import p"{ROOT / 'dewy/bootstrap/semantic/context.dewy'}" as contexts
 import p"{ROOT / 'dewy/bootstrap/semantic/numeric_values.dewy'}" as numeric
 main = ():>int64 => {{
-    let type_nodes:array<types.Type>=[]
+    let type_nodes:types.Table=types.Table[]
 {chr(10).join(lines)}
     let session=contexts.Session[types=type_nodes]
     let values:array<bigint>=[{' '.join(f'({value})' for value in VALUES)}]

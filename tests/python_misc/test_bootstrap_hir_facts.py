@@ -92,7 +92,7 @@ emit_props = (label:string props:array<facts.Proposition>):>void => {{
 main = ():>int64 => {{
     let span = Span[0 0]
     let nodes:array<hir.AST> = []
-    let type_nodes:array<types.Type> = []
+    let type_nodes:types.Table = types.Table[]
 {chr(10).join(type_lines + lines + checks)}
     loop binding in analysis.assigned_binding_ids({root_id} nodes) {{ printl("assigned|{{binding}}") }}
     return 0

@@ -150,7 +150,7 @@ case_{index} = ():>void => {{
     let span = Span[0 0]
     let srcfile = SrcFile['fixture' {json.dumps(body)}]
     let nodes:array<hir.AST> = []
-    let type_nodes:array<types.Type> = []
+    let type_nodes:types.Table = types.Table[]
     let registry = bindings.Registry[]
 {chr(10).join(type_lines + hir_lines + binding_lines)}
     let result = initialization.validate_initialization({root_id} nodes type_nodes registry srcfile source_files=[srcfile])

@@ -28,7 +28,7 @@ known_interval = (interval:ranges.Interval?):>string => {
     let upper = if interval.upper is? none '∞' else _bigint_as_string(interval.upper)
     return "{lower}..{upper}"
 }
-string_length = (id:addr nodes:array<types.Type>):>addr? => {
+string_length = (id:addr nodes:types.Table):>addr? => {
     let node = types.node_at(nodes id)
     if node is? types.StringLiteralType return node.value.length
     if node is? types.StringType return node.length

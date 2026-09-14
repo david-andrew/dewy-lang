@@ -22,7 +22,7 @@ MemberRoute:type = const [binding_id:addr path:array<string>]
 CheckFrame:type = [function_id:addr available:set<addr> required:set<addr>=set[] assumed_calls:set<addr>=set[]]
 CheckedCall:type = const [key:string required:set<addr> assumed_calls:set<addr>]
 Checker:type = [
-    nodes:array<hir.AST> type_nodes:array<types.Type>
+    nodes:array<hir.AST> type_nodes:types.Table
     registry:bindings.Registry srcfile:SrcFile
     source_by_item:dict<addr addr>=[]
     source_files:array<SrcFile>=[]
@@ -147,7 +147,7 @@ function_results = (id:addr checker:Checker):>array<addr> => {
 
 # A binding id and a node id live in different arenas. Keep separate visited
 # sets instead of inheriting Python's accidental shared integer namespace.
-cannot_be_callable = (id:addr nodes:array<types.Type> seen:set<addr>=set[]):>bool => {
+cannot_be_callable = (id:addr nodes:types.Table seen:set<addr>=set[]):>bool => {
     let current = types.unfold(types.strip_refinement(id nodes) nodes)
     if current in? seen return false
     seen.add(current)
@@ -543,7 +543,7 @@ validate_main = (declaration:hir.Declare @checker:Checker):>void => {
     if result is? types.Primitive { valid = result.name in? ['void' 'never' 'int' 'uint' 'uint8' 'uint16' 'uint32' 'uint64' 'int8' 'int16' 'int32' 'int64'] }
     if not valid { main_error(declaration '`main` must return an integer or `void`' "`main` returns `{types.describe(function.rettype checker.type_nodes)}`" @checker) }
 }
-validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry srcfile:SrcFile entry:'named'|addr|none='named' source_by_item:dict<addr addr>=[] source_files:array<SrcFile>=[]):>Error? => {
+validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:types.Table registry:bindings.Registry srcfile:SrcFile entry:'named'|addr|none='named' source_by_item:dict<addr addr>=[] source_files:array<SrcFile>=[]):>Error? => {
     let checker = Checker[nodes type_nodes registry srcfile source_by_item=source_by_item source_files=source_files]
     collect(root @checker)
     let block = hir.node_at(nodes root)

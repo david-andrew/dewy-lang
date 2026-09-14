@@ -451,3 +451,15 @@ less generated code, and predictable ownership remain performance work.
 The full no-C self-bootstrap remains a separate verification goal. Broader
 language parity also remains incomplete; see the observed corpus blockers in
 [IMPLEMENTATION.md](IMPLEMENTATION.md#hosted-parity-gaps).
+
+### Type arena lookup
+
+`semantic/ty.dewy` owns an insertion-ordered description array and its key
+index as a single `Table` value. Read-only APIs take that table; `intern`
+inserts, `truncate` rolls back a suffix, and `resolve_alias` changes a target
+without changing its key. A fork copies the array and index together under
+ordinary value semantics. This removes the process-global interning hint and
+the full-table scan that previously followed each new-key miss. The dependent
+result bound names `nodes.entries.length`, preserving the checked arena-handle
+contract. Benchmarks and integration limits are recorded in
+[PHASE0_MEASUREMENTS.md](PHASE0_MEASUREMENTS.md#type-interning-index-owned-by-the-arena).

@@ -21,7 +21,7 @@ family = (name:string context:contexts.Context session:contexts.Session):>addr? 
     let value=bindings.binding_at(session.registry id).type_value
     return if value is? addr value else none
 }
-object_member = (type:addr nodes:array<types.Type>):>addr => {
+object_member = (type:addr nodes:types.Table):>addr => {
     let node=types.node_at(nodes type)
     if node isnt? types.TypeOr return type
     let found:addr?=none

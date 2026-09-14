@@ -66,7 +66,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/hir.dewy'}" as hir
 import p"{ROOT / 'dewy/bootstrap/semantic/bindings.dewy'}" as bindings
 import p"{ROOT / 'dewy/bootstrap/semantic/propositions.dewy'}" as facts
 main = ():>int64 => {{
-    let type_nodes:array<types.Type> = []
+    let type_nodes:types.Table = types.Table[]
     let span = Span[0 0]
     let source = SrcFile['fixture' '']
 {chr(10).join(lines + checks)}

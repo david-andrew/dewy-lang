@@ -7,7 +7,7 @@ import p"../../semantic/ty.dewy" as types
 # enclosing statement list, retaining the source ordering and branch where
 # each step runs. This is scalar legalization; ownership-aware aggregate
 # extraction will use the same boundary when its storage rules are added.
-State:type = [nodes:array<hir.AST> types:array<types.Type> serial:addr=0 in_function:bool=false]
+State:type = [nodes:array<hir.AST> types:types.Table serial:addr=0 in_function:bool=false]
 Expression:type = [prefix:array<addr> value:addr]
 Result:type = const [program:program.Program input:emit.Input]
 put = (node:hir.AST @state:State):>addr => hir.append_node(@state.nodes node)

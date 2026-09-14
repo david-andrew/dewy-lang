@@ -22,7 +22,7 @@ strip_casts = (id:addr nodes:array<hir.AST>):>addr => {
         else return current
     }
 }
-call_function_type = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>types.FunctionType? => {
+call_function_type = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>types.FunctionType? => {
     let node = hir.node_at(nodes strip_casts(id nodes))
     if node isnt? hir.FunctionCall return none
     let callable = types.node_at(type_nodes hir.node_at(nodes node.func).value_type)
@@ -33,7 +33,7 @@ call_function_type = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>)
     }
     return if callable is? types.FunctionType callable else none
 }
-call_result_refinements = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>array<types.RefinedType> => {
+call_result_refinements = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<types.RefinedType> => {
     let signature = call_function_type(id nodes type_nodes)
     if signature is? none return []
     let result = types.node_at(type_nodes signature.ret)
@@ -51,7 +51,7 @@ argument_value = (id:addr nodes:array<hir.AST>):>addr => {
     let node = hir.node_at(nodes id)
     return if node is? hir.Place node.target else id
 }
-call_argument = (id:addr name:string nodes:array<hir.AST> type_nodes:array<types.Type> unwrap:bool=true):>addr? => {
+call_argument = (id:addr name:string nodes:array<hir.AST> type_nodes:types.Table unwrap:bool=true):>addr? => {
     let signature = call_function_type(id nodes type_nodes)
     let call = hir.node_at(nodes strip_casts(id nodes))
     if signature is? none or call isnt? hir.FunctionCall return none
@@ -64,7 +64,7 @@ call_argument = (id:addr name:string nodes:array<hir.AST> type_nodes:array<types
     }
     return none
 }
-named_call_route = (id:addr name:string nodes:array<hir.AST> type_nodes:array<types.Type> @registry:bindings.Registry):>addr? => {
+named_call_route = (id:addr name:string nodes:array<hir.AST> type_nodes:types.Table @registry:bindings.Registry):>addr? => {
     let route=facts.named_route(name)
     let supplied=call_argument(id route.root nodes type_nodes unwrap=false)
     if supplied is? none return none
@@ -77,7 +77,7 @@ named_call_route = (id:addr name:string nodes:array<hir.AST> type_nodes:array<ty
     let root=bindings.array_route_id(argument nodes @registry)
     return if root is? none none else bindings.extend_route(root route.fields type_nodes @registry)
 }
-object_of = (id:addr nodes:array<types.Type>):>types.ObjectType? => {
+object_of = (id:addr nodes:types.Table):>types.ObjectType? => {
     # Excluding a descendant preserves the positive record's field contracts,
     # just as the source checker preserves its available member structure.
     let node = types.node_at(nodes views.structural_base(id nodes))
@@ -94,7 +94,7 @@ object_of = (id:addr nodes:array<types.Type>):>types.ObjectType? => {
     return object
 }
 
-member_invariant = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>array<facts.Proposition> => {
+member_invariant = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>array<facts.Proposition> => {
     let node = hir.node_at(nodes strip_casts(id nodes))
     let name:string = ''
     let receiver:addr = 0
@@ -165,7 +165,7 @@ sequence_of = (id:addr nodes:array<hir.AST>):>addr? => {
     if node is? hir.StringLength return node.string
     return none
 }
-value_flow_of = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>addr? => {
+value_flow_of = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>addr? => {
     let current = strip_casts(id nodes)
     loop true {
         let node = hir.node_at(nodes current)
@@ -178,14 +178,14 @@ value_flow_of = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>add
     }
 }
 
-word_bound = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+word_bound = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let type_id = hir.node_at(nodes id).value_type
     let value = types.node_at(type_nodes type_id)
     if value is? types.IntegerLiteralType return -(0d9223372036854775808 as bigint) <=? value.value <=? (0d9223372036854775807 as bigint)
     let layout = views.fixed_integer_layout(type_id type_nodes)
     return layout isnt? none and (layout.bits <? 64 or (layout.bits =? 64 and layout.signed))
 }
-below_word_max = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+below_word_max = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     if sequence_of(id nodes) isnt? none return true  # address-space length cap
     let type_id = hir.node_at(nodes id).value_type
     let value = types.node_at(type_nodes type_id)
@@ -197,7 +197,7 @@ is_target = (id:addr binding:addr nodes:array<hir.AST>):>bool => {
     let node = hir.node_at(nodes strip_casts(id nodes))
     return node is? hir.ExpressedIdentifier and node.binding_id =? binding
 }
-predicate_bounds_counter = (id:addr target:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+predicate_bounds_counter = (id:addr target:addr nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let node = hir.node_at(nodes id)
     if node is? hir.ShortCircuit and node.op =? 'and' return predicate_bounds_counter(node.left target nodes type_nodes) or predicate_bounds_counter(node.right target nodes type_nodes)
     if node isnt? hir.FunctionCall return false

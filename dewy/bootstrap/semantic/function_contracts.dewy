@@ -12,7 +12,7 @@ not to similarly named outer bindings. Once parameters have binding ids,
 those identities replace the temporary names used during signature checking.
 """
 
-rename = (id:addr names:dict<string string> @nodes:array<types.Type>):>addr => {
+rename = (id:addr names:dict<string string> @nodes:types.Table):>addr => {
     let node=types.node_at(nodes id)
     if node is? types.TypeOr {
         let members:array<addr>=[]
@@ -30,7 +30,7 @@ rename = (id:addr names:dict<string string> @nodes:array<types.Type>):>addr => {
     }
     return types.refined_type(node.base promises @nodes)
 }
-member = (id:addr contract:array<addr> @nodes:array<types.Type>):>addr => {
+member = (id:addr contract:array<addr> @nodes:types.Table):>addr => {
     let node=types.node_at(nodes id)
     let base=types.strip_refinement(id nodes)
     loop candidate in contract {
@@ -44,7 +44,7 @@ member = (id:addr contract:array<addr> @nodes:array<types.Type>):>addr => {
     }
     return id
 }
-adopt = (result:addr expected:types.FunctionType parameters:array<types.PosOrKwArg> @nodes:array<types.Type>):>addr => {
+adopt = (result:addr expected:types.FunctionType parameters:array<types.PosOrKwArg> @nodes:types.Table):>addr => {
     let promised=types.node_at(nodes expected.ret)
     let has_promises=promised is? types.RefinedType
     if promised is? types.TypeOr {
@@ -67,7 +67,7 @@ adopt = (result:addr expected:types.FunctionType parameters:array<types.PosOrKwA
     loop item in node.items {output.push(member(item members @nodes))}
     return types.union(output @nodes)
 }
-bind_parameters = (id:addr parameters:array<hir.Param> @nodes:array<types.Type> @registry:bindings.Registry):>addr => {
+bind_parameters = (id:addr parameters:array<hir.Param> @nodes:types.Table @registry:bindings.Registry):>addr => {
     let node=types.node_at(nodes id)
     if node is? types.TypeOr {
         let members:array<addr>=[]
@@ -93,7 +93,7 @@ bind_parameters = (id:addr parameters:array<hir.Param> @nodes:array<types.Type> 
     return types.refined_type(node.base promises @nodes)
 }
 
-unknown_parameter = (id:addr parameters:array<hir.Param> nodes:array<types.Type>):>string? => {
+unknown_parameter = (id:addr parameters:array<hir.Param> nodes:types.Table):>string? => {
     let node=types.node_at(nodes id)
     if node is? types.TypeOr {
         loop item in node.items {
@@ -121,7 +121,7 @@ unknown_parameter = (id:addr parameters:array<hir.Param> nodes:array<types.Type>
 
 # A parameter's dependent obligation names the actual supplied value. It
 # cannot inherit the callee's binding id merely because the spelling agrees.
-at_call = (id:addr arguments:dict<string addr> hir_nodes:array<hir.AST> @nodes:array<types.Type> @registry:bindings.Registry):>addr => {
+at_call = (id:addr arguments:dict<string addr> hir_nodes:array<hir.AST> @nodes:types.Table @registry:bindings.Registry):>addr => {
     let node=types.node_at(nodes id)
     if node is? types.TypeOr {
         let members:array<addr>=[]

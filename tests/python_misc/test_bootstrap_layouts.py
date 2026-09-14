@@ -18,7 +18,7 @@ def test_native_aggregate_layouts(tmp_path, monkeypatch):
     monkeypatch.setattr(ty, 'USER_BRAND_PARENTS', {})
     monkeypatch.setattr(ty, 'USER_BRANDS', set())
     node = hir.Void(Span(0, 0), 'void')
-    lowerer = object.__new__(_Lowerer)
+    lowerer = _Lowerer(hir.Block(Span(0, 0), 'void', [], False), SrcFile(None, ''))
     field = ty.ObjectField
     record = lambda *fields: ty.ObjectType(tuple(fields))
     pair = record(field('small', 'uint8'), field('wide', 'uint64'))
@@ -100,7 +100,7 @@ element_text = (value:layouts.Storage|layouts.Pending):>string => {{
     return "{{value.size}}|{{value.signed}}"
 }}
 main = ():>int64 => {{
-    let type_nodes:array<types.Type>=[]
+    let type_nodes:types.Table=types.Table[]
     let context=layouts.Context[]
 {chr(10).join(lines)}
 {chr(10).join(checks)}

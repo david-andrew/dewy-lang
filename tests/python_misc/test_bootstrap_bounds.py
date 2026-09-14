@@ -107,7 +107,7 @@ def test_native_bounds_visitor_matches_hosted(tmp_path):
     let span=Span[0 0]
     let srcfile=SrcFile['fixture' '']
     let nodes:array<hir.AST>=[]
-    let type_nodes:array<types.Type>=[]
+    let type_nodes:types.Table=types.Table[]
     let registry=bindings.Registry[]
 {chr(10).join(type_lines + hir_lines + binding_lines)}
     registry.next_id={registry.next_id}

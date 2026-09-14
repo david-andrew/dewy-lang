@@ -37,7 +37,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/analyze/predicate_effects.dewy'}" as e
 Case:type = const [node:addr reads:set<addr> writes:set<addr>]
 main = ():>int64 => {{
     let span=Span[0 0]
-    let arena:array<types.Type>=[]
+    let arena:types.Table=types.Table[]
     let scalar=types.primitive('any' @arena)
     let callable=types.function_type([] [] none scalar [] @arena)
     let nodes:array<hir.AST>=[]

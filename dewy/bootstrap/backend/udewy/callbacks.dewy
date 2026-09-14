@@ -12,7 +12,7 @@ import p"captures.dewy" as captures
 #
 # A raw pointer conversion or memory access involving callable storage opens
 # that world again. Keep the ordinary unknown-callback rules for such programs.
-storage_type = (type:addr nodes:array<types.Type>):>addr => {
+storage_type = (type:addr nodes:types.Table):>addr => {
     let current=type
     loop true {
         current=types.unfold(types.strip_refinement(current nodes) nodes)
@@ -21,7 +21,7 @@ storage_type = (type:addr nodes:array<types.Type>):>addr => {
         current=node.number
     }
 }
-contains_callable = (root:addr nodes:array<types.Type>):>bool => {
+contains_callable = (root:addr nodes:types.Table):>bool => {
     let pending:array<addr>=[root]
     let seen:set<addr>=set[]
     loop pending.length >? 0 {
@@ -49,7 +49,7 @@ contains_callable = (root:addr nodes:array<types.Type>):>bool => {
     }
     return false
 }
-analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan links:array<subtyping.Link>):>dict<addr array<addr>> => {
+analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:array<subtyping.Link>):>dict<addr array<addr>> => {
     let parameters:set<addr>=set[]
     # Iterators and sibling-field bindings have checked origins too, although
     # they are not Declare nodes. Include every lexical binding before deciding

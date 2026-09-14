@@ -162,7 +162,7 @@ member_fields = (path:AccessPath nodes:array<hir.AST>):>array<string> | none => 
     return names
 }
 
-field_route_type = (id:addr fields:array<string> nodes:array<types.Type>):>addr? => {
+field_route_type = (id:addr fields:array<string> nodes:types.Table):>addr? => {
     let current=id
     loop name in fields {
         let object=types.node_at(nodes types.unfold(types.strip_refinement(current nodes) nodes))
@@ -176,7 +176,7 @@ field_route_type = (id:addr fields:array<string> nodes:array<types.Type>):>addr?
 }
 # Extend a known binding or field identity without constructing HIR reads.
 # Keep the original root so replacing any enclosing record invalidates it.
-extend_route = (id:addr fields:array<string> type_nodes:array<types.Type> @registry:Registry):>addr? => {
+extend_route = (id:addr fields:array<string> type_nodes:types.Table @registry:Registry):>addr? => {
     if fields.length =? 0 return id
     let binding=binding_at(registry id)
     if binding.value_type is? none return none

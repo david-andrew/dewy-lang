@@ -17,7 +17,7 @@ Parsing/resolving an alias declaration and looking it up through imports are
 still tasks for that checker; this layer consumes their compile-time value.
 """
 
-instantiate = (alias:types.GenericTypeAlias arguments:array<addr> links:array<subtyping.Link> @nodes:array<types.Type> srcfile:SrcFile loc:Span):>addr | Error => {
+instantiate = (alias:types.GenericTypeAlias arguments:array<addr> links:array<subtyping.Link> @nodes:types.Table srcfile:SrcFile loc:Span):>addr | Error => {
     if arguments.length not=? alias.params.length {
         return Error[srcfile=srcfile title='wrong number of generic type arguments'
             pointers=[Pointer[span=loc message="expected {alias.params.length}, got {arguments.length}"]]]

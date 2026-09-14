@@ -210,12 +210,12 @@ resolve_route = (id:addr params:dict<addr ParameterEffects> nodes:array<hir.AST>
     }
 }
 
-visit_all = (ids:array<addr> @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+visit_all = (ids:array<addr> @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let changed:bool = false
     loop id in ids { if visit(id @params analysis nodes type_nodes) { changed = true } }
     return changed
 }
-visit_route = (id:addr kind:Effect suffix:array<string> @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+visit_route = (id:addr kind:Effect suffix:array<string> @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let resolved = resolve_route(id params nodes)
     if resolved is? none return visit(id @params analysis nodes type_nodes)
     let steps = resolved.route.steps
@@ -225,7 +225,7 @@ visit_route = (id:addr kind:Effect suffix:array<string> @params:dict<addr Parame
     return changed
 }
 
-visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     if params.length =? 0 return false
     let node = hir.node_at(nodes id)
     if node is? hir.FunctionCall return visit_call(node @params analysis nodes type_nodes)
@@ -314,7 +314,7 @@ visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:arr
     return visit_all(hir.children(node) @params analysis nodes type_nodes)
 }
 
-visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:array<types.Type>):>bool => {
+visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let function = hir.node_at(nodes call.func)
     let arguments = call.pos_args
     loop argument in call.kw_args.values { arguments.push(argument) }
@@ -407,7 +407,7 @@ summary_callers = (analysis:Analysis nodes:array<hir.AST>):>dict<addr set<addr>>
     return callers
 }
 
-analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> callback_targets:dict<addr array<addr>>=[] value_casts_escape:bool=true):>ProgramEffects => {
+analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:types.Table callback_targets:dict<addr array<addr>>=[] value_casts_escape:bool=true):>ProgramEffects => {
     let analysis = collect(root nodes)
     analysis.callback_targets=callback_targets
     analysis.value_casts_escape=value_casts_escape

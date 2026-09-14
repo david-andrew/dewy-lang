@@ -76,7 +76,7 @@ conflicts = (call:hir.FunctionCall position:addr source:Route nodes:array<hir.AS
 # A place parameter can refer to caller storage that also has a global name.
 # Conservatively exclude callees with ambient writes/unknown callbacks. The
 # semantic parameter summaries alone cannot establish that global boundary.
-word_value = (id:addr type_nodes:array<types.Type>):>bool => {
+word_value = (id:addr type_nodes:types.Table):>bool => {
     let type=types.node_at(type_nodes types.unfold(types.strip_refinement(id type_nodes) type_nodes))
     if type is? types.IntegerLiteralType return type.value >=? -9223372036854775808 and type.value <=? 18446744073709551615
     return type is? types.Primitive and type.name in? ['int' 'uint' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64' 'bool' 'true' 'false' 'none']
@@ -92,7 +92,7 @@ shares_storage = (call:hir.FunctionCall target:addr plan:captures.Plan nodes:arr
     loop argument in arguments(call) {if hir.node_at(nodes argument) is? hir.Place return true}
     return false
 }
-ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<types.Type> opaque_only:bool=false value_boundaries:bool=false indirect:dict<addr array<addr>>=[]):>set<addr> => {
+ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table opaque_only:bool=false value_boundaries:bool=false indirect:dict<addr array<addr>>=[]):>set<addr> => {
     let dirty:set<addr>=set[]
     let callers:dict<addr array<addr>>=[]
     loop [id function] in plan.functions {
@@ -164,8 +164,8 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
     return dirty
 }
 Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>>]
-analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
-details = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan links:array<subtyping.Link>=subtyping.default_links):>Plan => {
+analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
+details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:array<subtyping.Link>=subtyping.default_links):>Plan => {
     let indirect=callbacks.analyze(root nodes type_nodes plan links)
     # Checked value casts borrow while evaluating but do not expose raw
     # storage. At a value boundary lowering supplies an independent owner,

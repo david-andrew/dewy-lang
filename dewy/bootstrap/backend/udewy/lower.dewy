@@ -40,7 +40,7 @@ State:type = [
     source:SrcFile
     source_index:addr?=none
     nodes:array<hir.AST>=[]
-    type_nodes:array<types.Type>=[]
+    type_nodes:types.Table=types.Table[]
     symbols:dict<addr string>=[]
     serial:addr=0
     # The driver identifies the prelude allocator by binding, not spelling.
@@ -2098,13 +2098,13 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
 # identity strings, then discard all of that metadata at every value use.
 object_valued = (id:addr state:State):>bool => {
     let plain=views.structural_base(id state.type_nodes)
-    $runtime_assert plain <? state.type_nodes.length
-    return state.type_nodes[plain] is? types.ObjectType
+    $runtime_assert plain <? state.type_nodes.entries.length
+    return state.type_nodes.entries[plain] is? types.ObjectType
 }
 array_valued = (id:addr state:State):>bool => {
     let plain=views.structural_base(id state.type_nodes)
-    $runtime_assert plain <? state.type_nodes.length
-    return state.type_nodes[plain] is? types.ArrayType
+    $runtime_assert plain <? state.type_nodes.entries.length
+    return state.type_nodes.entries[plain] is? types.ArrayType
 }
 object_type = (id:addr state:State):>types.ObjectType? => {
     let type=types.node_at(state.type_nodes views.structural_base(id state.type_nodes))

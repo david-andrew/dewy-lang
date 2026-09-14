@@ -22,7 +22,7 @@ same = (left:Identity right:Identity):>bool => {
     if left is? Binding and right is? Binding return left.id =? right.id
     return left is? Total and right is? Total
 }
-identity = (id:addr nodes:array<hir.AST> @registry:bindings.Registry @type_nodes:array<types.Type>):>Identity? => {
+identity = (id:addr nodes:array<hir.AST> @registry:bindings.Registry @type_nodes:types.Table):>Identity? => {
     let node = hir.node_at(nodes id)
     if node is? hir.Obligation return identity(node.value nodes @registry @type_nodes)
     if node is? hir.ValueCast|hir.RepresentationCast return identity(node.expr nodes @registry @type_nodes)

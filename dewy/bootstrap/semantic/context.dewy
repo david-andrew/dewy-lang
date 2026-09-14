@@ -71,7 +71,7 @@ CheckState:type = [
 HirEdit:type = const [id:addr previous:hir.AST]
 Session:type = CheckState & [
     target:targets.Target=$target sources:array<Source>=[]
-    syntax_refs:array<SyntaxRef>=[] types:array<types.Type>=[] hir:array<hir.AST>=[]
+    syntax_refs:array<SyntaxRef>=[] types:types.Table=types.Table[] hir:array<hir.AST>=[]
     hir_edits:array<HirEdit>=[]
     # Stable arena identities are indexed by source/node/scope. This index
     # belongs to the session, not a speculative CheckState snapshot; rollback
@@ -107,7 +107,7 @@ checkpoint = (session:Session):>Checkpoint => {
         resolving_aliases=session.resolving_aliases
         named_refs=session.named_refs
     ]
-    return Checkpoint[state session.syntax_refs.length session.types.length session.hir.length session.hir_edits.length]
+    return Checkpoint[state session.syntax_refs.length session.types.entries.length session.hir.length session.hir_edits.length]
 }
 # Every checking rewrite goes through here, including writes made by nested
 # speculative readings. Later validation/representation passes run outside
@@ -125,7 +125,7 @@ restore = (checkpoint:Checkpoint @session:Session):>void => {
         session.hir[edit.id]=edit.previous
     }
     session.hir.truncate(checkpoint.hir)
-    session.types.truncate(checkpoint.types)
+    types.truncate(@session.types checkpoint.types)
     let index=checkpoint.syntax_refs
     loop index <? session.syntax_refs.length {
         let reference=session.syntax_refs[index]

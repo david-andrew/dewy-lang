@@ -85,7 +85,7 @@ bind_ordered = (method:types.FunctionType pos:array<addr> kw:dict<string addr> o
 # Overloads can name their slots differently, so bind separately for each
 # candidate. As in ordinary dispatch, try exact applicability for every
 # candidate before considering numeric promotion.
-match_ordered = (methods:array<addr> pos:array<addr> kw:dict<string addr> order:array<string?> expected:addr? system:System @nodes:array<types.Type>):>DispatchResult|DispatchError => {
+match_ordered = (methods:array<addr> pos:array<addr> kw:dict<string addr> order:array<string?> expected:addr? system:System @nodes:types.Table):>DispatchResult|DispatchError => {
     loop i in 0.. and i <? pos.length {pos[i]=types.strip_refinement(pos[i] nodes)}
     let named:dict<string addr>=[]
     loop [name type] in kw {named[name]=types.strip_refinement(type nodes)}
@@ -127,7 +127,7 @@ match_ordered = (methods:array<addr> pos:array<addr> kw:dict<string addr> order:
     return winners[0]
 }
 
-method_at = (nodes:array<types.Type> id:addr):>types.FunctionType => {
+method_at = (nodes:types.Table id:addr):>types.FunctionType => {
     let method = types.node_at(nodes id)
     $runtime_assert method is? types.FunctionType
     return method
@@ -135,7 +135,7 @@ method_at = (nodes:array<types.Type> id:addr):>types.FunctionType => {
 
 # An explicit promotion crosses representation branches. It is not a new
 # subtype edge and is never used by the ordinary type relation.
-promote_type = (a:addr b:addr system:System @nodes:array<types.Type>):>addr? => {
+promote_type = (a:addr b:addr system:System @nodes:types.Table):>addr? => {
     let left = types.node_at(nodes a)
     let right = types.node_at(nodes b)
     if left isnt? types.Primitive or right isnt? types.Primitive return none
@@ -189,7 +189,7 @@ match_shape = (method:types.FunctionType pos:array<addr> kw:dict<string addr>):>
     return ShapeMatch[pairs=pairs]
 }
 
-accepts = (actual:addr formal:addr system:System @nodes:array<types.Type>):>bool => {
+accepts = (actual:addr formal:addr system:System @nodes:types.Table):>bool => {
     if subtyping.is_subtype(actual formal system.links @nodes) return true
     if system.bigint is? none return false
     let target=types.node_at(nodes types.strip_refinement(formal nodes))
@@ -214,14 +214,14 @@ accepts = (actual:addr formal:addr system:System @nodes:array<types.Type>):>bool
     return subtyping.is_subtype(actual types.primitive('int' @nodes) system.links @nodes)
 }
 
-call_accepted_concrete = (method:types.FunctionType pos:array<addr> kw:dict<string addr> system:System @nodes:array<types.Type>):>bool => {
+call_accepted_concrete = (method:types.FunctionType pos:array<addr> kw:dict<string addr> system:System @nodes:types.Table):>bool => {
     let shape = match_shape(method pos kw)
     if shape is? none return false
     loop pair in shape.pairs { if not accepts(pair.actual pair.formal system @nodes) return false }
     return true
 }
 
-bind_type_variable = (name:string actual:addr @inference:Inference system:System @nodes:array<types.Type>):>bool => {
+bind_type_variable = (name:string actual:addr @inference:Inference system:System @nodes:types.Table):>bool => {
     let current = inference.bindings.get(name)
     if current is? none { inference.bindings[name] = actual return true }
     if name in? inference.contextual return subtyping.is_subtype(actual current system.links @nodes)
@@ -260,13 +260,13 @@ bind_type_variable = (name:string actual:addr @inference:Inference system:System
     return true
 }
 
-variable_name = (id:addr variables:set<string> nodes:array<types.Type>):>string? => {
+variable_name = (id:addr variables:set<string> nodes:types.Table):>string? => {
     let node = types.node_at(nodes id)
     if node is? types.Primitive | types.TypeVariable and node.name in? variables return node.name
     return none
 }
 
-match_parameter = (formal:addr actual:addr variables:set<string> @inference:Inference system:System @nodes:array<types.Type>):>bool => {
+match_parameter = (formal:addr actual:addr variables:set<string> @inference:Inference system:System @nodes:types.Table):>bool => {
     let name = variable_name(formal variables nodes)
     if name isnt? none return bind_type_variable(name actual @inference system @nodes)
     let p = types.node_at(nodes formal)
@@ -305,7 +305,7 @@ match_parameter = (formal:addr actual:addr variables:set<string> @inference:Infe
     return subtyping.is_subtype(actual formal system.links @nodes)
 }
 
-infer_type_args = (method:types.FunctionType pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:array<types.Type>):>Inference | none => {
+infer_type_args = (method:types.FunctionType pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:types.Table):>Inference | none => {
     let shape = match_shape(method pos kw)
     if shape is? none return none
     let variables:set<string> = set[]
@@ -328,7 +328,7 @@ infer_type_args = (method:types.FunctionType pos:array<addr> kw:dict<string addr
     return inference
 }
 
-try_instantiate_for_call = (id:addr pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:array<types.Type>):>addr? => {
+try_instantiate_for_call = (id:addr pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:types.Table):>addr? => {
     let method = method_at(nodes id)
     let concrete:addr = id
     if method.type_params.length >? 0 {
@@ -340,7 +340,7 @@ try_instantiate_for_call = (id:addr pos:array<addr> kw:dict<string addr> expecte
     return none
 }
 
-applicable = (methods:array<addr> pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:array<types.Type>):>array<Candidate> => {
+applicable = (methods:array<addr> pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:types.Table):>array<Candidate> => {
     let output:array<Candidate> = []
     loop index in 0.. and index <? methods.length {
         let concrete = try_instantiate_for_call(methods[index] pos kw expected system @nodes)
@@ -349,7 +349,7 @@ applicable = (methods:array<addr> pos:array<addr> kw:dict<string addr> expected:
     return output
 }
 
-more_specific = (m1:types.FunctionType m2:types.FunctionType system:System @nodes:array<types.Type>):>bool => {
+more_specific = (m1:types.FunctionType m2:types.FunctionType system:System @nodes:types.Table):>bool => {
     if m1.pos_or_kw.length not=? m2.pos_or_kw.length return false
     let strict:bool = false
     loop i in 0.. and i <? m1.pos_or_kw.length {
@@ -361,7 +361,7 @@ more_specific = (m1:types.FunctionType m2:types.FunctionType system:System @node
     return strict
 }
 
-match_best_function = (methods:array<addr> pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:array<types.Type>):>DispatchResult | DispatchError => {
+match_best_function = (methods:array<addr> pos:array<addr> kw:dict<string addr> expected:addr? system:System @nodes:types.Table):>DispatchResult | DispatchError => {
     # Applicability and numeric promotion use each argument's representation
     # base. Keep its refinements on the source value for the later parameter
     # obligations, rather than making an `addr` fail int/int64 promotion.

@@ -69,11 +69,11 @@ def test_native_type_queries_match_hosted(tmp_path):
 import p"{ROOT / 'dewy/bootstrap/semantic/type_queries.dewy'}" as views
 import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
 import p"{ROOT / 'dewy/bootstrap/semantic/propositions.dewy'}" as facts
-matches = (actual:addr? expected:addr nodes:array<types.Type>):>bool => actual isnt? none and types.same_type(actual expected nodes)
+matches = (actual:addr? expected:addr nodes:types.Table):>bool => actual isnt? none and types.same_type(actual expected nodes)
 size = (items:array<addr> | none):>int64 => if items is? none (-1) else items.length
 bounds_text = (value:views.IntegerBounds?):>string => if value is? none 'none' else "{{_bigint_as_string(value.minimum)}},{{_bigint_as_string(value.maximum)}}"
 main = ():>int64 => {{
-    let type_nodes:array<types.Type> = []
+    let type_nodes:types.Table = types.Table[]
 {chr(10).join(lines + checks)}
     # Canonical tag order ignores both source order and the allocation ids.
     let a = types.primitive('int64' @type_nodes)

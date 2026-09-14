@@ -62,7 +62,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/type_display.dewy'}" as display
 import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
 import p"{ROOT / 'dewy/bootstrap/semantic/propositions.dewy'}" as facts
 main = ():>int64 => {{
-    let type_nodes:array<types.Type> = []
+    let type_nodes:types.Table = types.Table[]
 {chr(10).join(lines)}
     loop id in [{' '.join(ids)}] {{ printl(display.type_to_dewy(id type_nodes)) }}
     let mint = types.object_type([] 'Example' false [] [] @type_nodes minted=true)

@@ -71,7 +71,7 @@ main = ():>int64 => {{
     let span=Span[0 0]
     let srcfile=SrcFile['input' '']
     let nodes:array<hir.AST>=[]
-    let type_nodes:array<types.Type>=[]
+    let type_nodes:types.Table=types.Table[]
 {chr(10).join(type_lines)}
 {chr(10).join(node_lines)}
     let input=emit.Input[nodes type_nodes]
@@ -138,7 +138,7 @@ import p"{ROOT / 'dewy/bootstrap/backend/udewy/program.dewy'}" as program
 let main=():>int64=>{{
     loop path in [{' '.join(json.dumps(str(path)) for path in paths)}] {{
         let nodes:array<hir.AST>=[]
-        let type_nodes:array<types.Type>=[]
+        let type_nodes:types.Table=types.Table[]
         let span=Span[0 0]
         let word=types.primitive('int64' @type_nodes)
         let byte=types.primitive('uint8' @type_nodes)
@@ -238,7 +238,7 @@ import p"{ROOT / 'dewy/bootstrap/backend/udewy/statements.dewy'}" as statements
 let main=():>int64=>{{
     let span=Span[0 0]
     let nodes:array<hir.AST>=[]
-    let type_nodes:array<types.Type>=[]
+    let type_nodes:types.Table=types.Table[]
 {chr(10).join(type_lines)}
 {chr(10).join(node_lines)}
     let units:array<program.Function>=[{' '.join(f"program.Function['{name}' {names[id(function)]}]" for name, function in functions)}]

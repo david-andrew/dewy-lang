@@ -13,7 +13,7 @@ literal_length = (text:string element:types.Type):>addr? => {
     if element.name in? ['char' 'grapheme' 'string'] return text.length
     return none
 }
-materialization_target = (source:addr target:addr @nodes:array<types.Type>):>addr => {
+materialization_target = (source:addr target:addr @nodes:types.Table):>addr => {
     let literal=types.node_at(nodes source)
     let destination=types.node_at(nodes target)
     if literal is? types.BinaryLiteralType and destination is? types.ArrayType and destination.length is? none and types.is_primitive(types.node_at(nodes destination.element) 'uint8') return types.array_type(destination.element literal.value.length @nodes)
@@ -33,7 +33,7 @@ materialization_target = (source:addr target:addr @nodes:array<types.Type>):>add
 # shape; it cannot reinterpret a string descriptor as an array descriptor.
 # TODO: tighten the other aggregate layout cases alongside representation
 # selection, rather than claiming this provisional word check proves them.
-transmute_compatible = (source:addr target:addr nodes:array<types.Type>):>bool => {
+transmute_compatible = (source:addr target:addr nodes:types.Table):>bool => {
     let a=types.node_at(nodes source)
     let b=types.node_at(nodes target)
     if a is? types.BinaryLiteralType or b is? types.BinaryLiteralType return false
@@ -42,7 +42,7 @@ transmute_compatible = (source:addr target:addr nodes:array<types.Type>):>bool =
     if string_type(source nodes) and b is? types.ArrayType or a is? types.ArrayType and string_type(target nodes) return false
     return true
 }
-string_type = (id:addr nodes:array<types.Type>):>bool => {
+string_type = (id:addr nodes:types.Table):>bool => {
     let type=types.node_at(nodes types.unfold(types.strip_refinement(id nodes) nodes))
     if type is? types.TypeOr {
         loop member in type.items {if not string_type(member nodes) return false}

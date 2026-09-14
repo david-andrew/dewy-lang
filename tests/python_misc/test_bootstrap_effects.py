@@ -175,7 +175,7 @@ emit = (binding_id:addr kind:string routes:array<effects.Route>):>void => {{
 main = ():>int64 => {{
     let span = Span[0 0]
     let nodes:array<hir.AST> = []
-    let type_nodes:array<types.Type> = []
+    let type_nodes:types.Table = types.Table[]
     let scalar = types.primitive('any' @type_nodes)
     let callable = types.function_type([] [] none scalar [] @type_nodes)
 {chr(10).join(lines)}

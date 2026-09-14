@@ -41,7 +41,7 @@ string_to_dewy = (value:string):>string => {
     return parts.join
 }
 
-bound_to_dewy = (p:facts.Proposition nodes:array<types.Type>):>string => {
+bound_to_dewy = (p:facts.Proposition nodes:types.Table):>string => {
     if p.tested_type isnt? none return type_to_dewy(p.tested_type nodes)
     if p.term isnt? none return if p.term_projection =? 'length' "{p.term}.length" else p.term
     return _bigint_as_string(p.value)
@@ -51,13 +51,13 @@ subject_to_dewy = (p:facts.Proposition):>string => {
     if name isnt? none return if p.projection =? 'length' "{name}.length" else name
     return if p.subject =? 'length' 'length' else 'i'
 }
-fact_to_dewy = (p:facts.Proposition nodes:array<types.Type>):>string => {
+fact_to_dewy = (p:facts.Proposition nodes:types.Table):>string => {
     if p.axiom =? 'addr' return 'i => i fits the address space'
     let op = if p.op =? 'not=?' 'not =?' else p.op
     let subject = if p.subject =? 'self' 'i => i' else subject_to_dewy(p)
     return "{subject} {op} {bound_to_dewy(p nodes)}"
 }
-facts_to_dewy = (items:array<facts.Proposition> nodes:array<types.Type>):>string => {
+facts_to_dewy = (items:array<facts.Proposition> nodes:types.Table):>string => {
     let parts:array<string> = []
     loop p in items { parts.push(fact_to_dewy(p nodes)) }
     return parts.join(' ')
@@ -66,7 +66,7 @@ facts_to_dewy = (items:array<facts.Proposition> nodes:array<types.Type>):>string
 # T<facts> describes the value; T & <facts> describes parameters. A boolean
 # can promise different facts on each arm, with unconditional facts in both.
 # Field invariants use the same rule without mutating the interned type table.
-refined_to_dewy = (base:addr props:array<facts.Proposition> nodes:array<types.Type>):>string => {
+refined_to_dewy = (base:addr props:array<facts.Proposition> nodes:types.Table):>string => {
     let node = types.node_at(nodes base)
     let name = type_to_dewy(base nodes)
     let remaining:array<facts.Proposition> = props
@@ -116,22 +116,22 @@ refined_to_dewy = (base:addr props:array<facts.Proposition> nodes:array<types.Ty
     return name
 }
 
-atom = (id:addr nodes:array<types.Type>):>string => {
+atom = (id:addr nodes:types.Table):>string => {
     let text = type_to_dewy(id nodes)
     return if types.node_at(nodes id) is? types.TypeAnd | types.TypeOr | types.OverloadType "({text})" else text
 }
-generic_params = (params:array<types.GenericParam> nodes:array<types.Type>):>string => {
+generic_params = (params:array<types.GenericParam> nodes:types.Table):>string => {
     let generics:array<string> = []
     loop param in params {
         generics.push(if types.is_primitive(types.node_at(nodes param.bound) 'any') param.name else "{param.name} of {type_to_dewy(param.bound nodes)}")
     }
     return generics.join(' ')
 }
-type_alias_value_to_dewy = (value:types.TypeAliasValue nodes:array<types.Type>):>string => {
+type_alias_value_to_dewy = (value:types.TypeAliasValue nodes:types.Table):>string => {
     if value is? addr return type_to_dewy(value nodes)
     return "<{generic_params(value.params nodes)}>({type_to_dewy(value.body nodes)})"
 }
-function_to_dewy = (node:types.FunctionType nodes:array<types.Type>):>string => {
+function_to_dewy = (node:types.FunctionType nodes:types.Table):>string => {
     let args:array<string> = []
     loop arg in node.pos_or_kw {
         let text = type_to_dewy(arg.value_type nodes)
@@ -154,7 +154,7 @@ function_to_dewy = (node:types.FunctionType nodes:array<types.Type>):>string => 
     return "<{prefix}{signature}:>{type_to_dewy(node.ret nodes)}>"
 }
 
-type_to_dewy = (id:addr nodes:array<types.Type>):>string => {
+type_to_dewy = (id:addr nodes:types.Table):>string => {
     let node = types.node_at(nodes id)
     if node is? types.Primitive | types.TypeVariable | types.NamedType return node.name
     if node is? types.IntegerLiteralType return _bigint_as_string(node.value)

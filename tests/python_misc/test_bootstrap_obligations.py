@@ -23,7 +23,7 @@ def test_native_obligation_discharge(tmp_path):
 {imports}
 main=():>int64=>{{
     let span=Span[0 0]
-    let type_nodes:array<types.Type>=[]
+    let type_nodes:types.Table=types.Table[]
     let word=types.primitive('int64' @type_nodes)
     let boolean=types.primitive('bool' @type_nodes)
     let string=types.primitive('string' @type_nodes)

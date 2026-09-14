@@ -20,7 +20,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/propositions.dewy'}" as facts
 
 BODY = '''
 main=():>int64=>{
-    let nodes:array<types.Type>=[]
+    let nodes:types.Table=types.Table[]
     let word=types.primitive('int64' @nodes)
     let first=types.object_type([types.ObjectField['value' word default=1]] none false [] [] @nodes)
     let second=types.object_type([types.ObjectField['value' word default=2]] none false [] [] @nodes)

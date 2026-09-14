@@ -16,7 +16,7 @@ Debug locations and variable formatters belong to the program emitter;
 this module handles expressions, statements, and concrete function units.
 """
 
-Input:type = const [nodes:array<hir.AST> types:array<types.Type> source_files:array<SrcFile>=[]]
+Input:type = const [nodes:array<hir.AST> types:types.Table source_files:array<SrcFile>=[]]
 Scope:type = [
     direct_functions:set<string>=set[]
     locals:set<string>=set[]
@@ -54,7 +54,7 @@ const wrapping:set<string>=set[
 const derived:dict<string string>=['__nand__'->'and' '__nor__'->'or' '__xnor__'->'xor']
 const alphabet='0123456789abcdef'
 intrinsic_names = ():>set<string> => {
-    let nodes:array<types.Type>=[]
+    let nodes:types.Table=types.Table[]
     let functions=builtins.intrinsic_types(@nodes)
     return functions.keys
 }

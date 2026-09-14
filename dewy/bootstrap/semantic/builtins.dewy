@@ -32,20 +32,20 @@ const prefix_operators:dict<string string> = ['~' -> '__not__' 'not' -> '__not__
 const postfix_operators:dict<string string> = []
 # TODO: ordinary indexing may eventually resolve `x[y]` through __index__.
 
-binary_generic = (bound:addr @nodes:array<types.Type> ret:addr?=none):>addr => {
+binary_generic = (bound:addr @nodes:types.Table ret:addr?=none):>addr => {
     let variable = types.primitive('T' @nodes)
     let result:addr = variable
     if ret isnt? none { result = ret }
     return types.function_type([types.PosOrKwArg['left' variable] types.PosOrKwArg['right' variable]] [] none result [types.GenericParam['T' bound]] @nodes)
 }
-binary_concrete = (arg:addr ret:addr @nodes:array<types.Type>):>addr => types.function_type([
+binary_concrete = (arg:addr ret:addr @nodes:types.Table):>addr => types.function_type([
     types.PosOrKwArg['left' arg] types.PosOrKwArg['right' arg]
 ] [] none ret [] @nodes)
-unary_generic = (bound:addr @nodes:array<types.Type>):>addr => {
+unary_generic = (bound:addr @nodes:types.Table):>addr => {
     let variable = types.primitive('T' @nodes)
     return types.function_type([types.PosOrKwArg['item' variable]] [] none variable [types.GenericParam['T' bound]] @nodes)
 }
-bitwise_overload = (@nodes:array<types.Type> callable_overload:bool=false):>addr => {
+bitwise_overload = (@nodes:types.Table callable_overload:bool=false):>addr => {
     let integer = types.primitive('int' @nodes)
     let boolean = types.primitive('bool' @nodes)
     let methods:array<addr> = [binary_generic(integer @nodes) binary_concrete(boolean boolean @nodes)]
@@ -56,7 +56,7 @@ bitwise_overload = (@nodes:array<types.Type> callable_overload:bool=false):>addr
     }
     return types.overload_type(methods @nodes)
 }
-intrinsic = (params:array<addr> ret:addr @nodes:array<types.Type>):>addr => {
+intrinsic = (params:array<addr> ret:addr @nodes:types.Table):>addr => {
     let positional:array<types.PosOrKwArg> = []
     loop param in params { positional.push(types.PosOrKwArg[none param]) }
     return types.function_type(positional [] none ret [] @nodes)
@@ -129,13 +129,13 @@ const word_intrinsic_arities:dict<string addr> = [
     "__audio_queue_size__" -> 0
 ]
 
-word_intrinsic = (arity:addr word:addr @nodes:array<types.Type>):>addr => {
+word_intrinsic = (arity:addr word:addr @nodes:types.Table):>addr => {
     let args:array<addr> = []
     loop i in 0.. and i <? arity { args.push(word) }
     return intrinsic(args word @nodes)
 }
 
-intrinsic_types = (@nodes:array<types.Type>):>dict<string addr> => {
+intrinsic_types = (@nodes:types.Table):>dict<string addr> => {
     let result:dict<string addr> = []
     let any = types.primitive('any' @nodes)
     let word = types.primitive('int64' @nodes)
@@ -176,7 +176,7 @@ intrinsic_types = (@nodes:array<types.Type>):>dict<string addr> => {
     return result
 }
 
-definitions = (@nodes:array<types.Type>):>dict<string addr> => {
+definitions = (@nodes:types.Table):>dict<string addr> => {
     let result = intrinsic_types(@nodes)
     let number = types.primitive('number' @nodes)
     let integer = types.primitive('int' @nodes)
@@ -200,7 +200,7 @@ definitions = (@nodes:array<types.Type>):>dict<string addr> => {
     return result
 }
 
-type_aliases = (@nodes:array<types.Type>):>dict<string addr> => {
+type_aliases = (@nodes:types.Table):>dict<string addr> => {
     let result:dict<string addr> = []
     # Physical dimensions have no runtime value. The prelude combines these
     # compile-time factors with a chosen numeric representation.

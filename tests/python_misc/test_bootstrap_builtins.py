@@ -45,7 +45,7 @@ import p"{ROOT / 'dewy/bootstrap/semantic/builtins.dewy'}" as builtin
 import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
 import p"{ROOT / 'dewy/bootstrap/semantic/propositions.dewy'}" as facts
 main = ():>int64 => {{
-    let type_nodes:array<types.Type> = []
+    let type_nodes:types.Table = types.Table[]
     let actual = builtin.definitions(@type_nodes)
     if actual.length not=? {len(expected)} return 2
 {chr(10).join(type_lines + checks)}

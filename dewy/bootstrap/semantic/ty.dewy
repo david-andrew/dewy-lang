@@ -102,17 +102,25 @@ ModuleType = type of Type & [fields:array<ModuleField>]
 SignedAtom:type = [positive:bool item:addr]
 Clause:type = [literals:array<SignedAtom>]
 
-node_at = (nodes:array<Type> id:addr):>Type => {
-    $runtime_assert id <? nodes.length
-    return nodes[id]
+# The descriptions and their lookup index are one value. Forking or clearing
+# an arena therefore forks or clears both; a process-global hint could refer
+# to another arena and forced a full scan on every newly encountered type.
+# Mutations go through intern, truncate, and resolve_alias (which preserves
+# the key). Description ids remain stable for the retained prefix.
+Table:type = [entries:array<Type>=[] positions:dict<string addr>=[]]
+
+
+node_at = (nodes:Table id:addr):>Type => {
+    $runtime_assert id <? nodes.entries.length
+    return nodes.entries[id]
 }
 
-shape_of = (id:addr nodes:array<Type>):>string => {
+shape_of = (id:addr nodes:Table):>string => {
     # Read only the identity fields. Returning a complete Type from node_at
     # would copy its potentially large argument/field tables for this query.
-    $runtime_assert id <? nodes.length
-    let shape=nodes[id].shape
-    return if shape is? none nodes[id].key else shape
+    $runtime_assert id <? nodes.entries.length
+    let shape=nodes.entries[id].shape
+    return if shape is? none nodes.entries[id].key else shape
 }
 # Equality consumes the identity while its owners remain alive. Returning
 # both identity strings from shape_of would first copy and resegment them;
@@ -125,57 +133,61 @@ same_shape = (left:Type right:Type):>bool => {
     if right.shape isnt? none return left.key =? right.shape
     return left.key =? right.key
 }
-same_type = (a:addr b:addr nodes:array<Type>):>bool => {
+same_type = (a:addr b:addr nodes:Table):>bool => {
     if a =? b return true
-    $runtime_assert a <? nodes.length and b <? nodes.length
-    return same_shape(nodes[a] nodes[b])
+    $runtime_assert a <? nodes.entries.length and b <? nodes.entries.length
+    return same_shape(nodes.entries[a] nodes.entries[b])
 }
 # Shape components are length-prefixed, not recursively quoted. Quoting an
 # already encoded child doubles its escapes at every enclosing type layer;
 # nested compiler types then spend most of checking copying those escapes.
 # Prefixing the component length preserves exact, collision-free identity.
 component = (value:string):>string => "{value.length}:{value}"
-shapes_key = (items:array<addr> nodes:array<Type>):>string => {
+shapes_key = (items:array<addr> nodes:Table):>string => {
     let parts:array<string> = []
     loop id in items { parts.push(component(shape_of(id nodes))) }
     return parts.join(',')
 }
-contains_type = (items:array<addr> id:addr nodes:array<Type>):>bool => {
+contains_type = (items:array<addr> id:addr nodes:Table):>bool => {
     loop other in items { if same_type(other id nodes) return true }
     return false
 }
 
-# Tables contain one description per key. Read states may copy a table and
-# then append different descriptions, so a remembered position is only a
-# hint: check both its bounds and the key in this particular table before
-# using it. No pointer identity or lifetime of a previous table is assumed.
-let intern_positions:dict<string addr>=[]
 
 # Return evidence about the current table on both paths, including reuse.
-intern = (@nodes:array<Type> value:Type):>addr<i => i <? nodes.length> => {
-    let known=intern_positions.get(value.key)
-    if known isnt? none and known <? nodes.length and nodes[known].key =? value.key return known
-    loop i in 0.. and i <? nodes.length {
-        if nodes[i].key =? value.key {
-            intern_positions[value.key]=i
-            return i
-        }
+intern = (@nodes:Table value:Type):>addr<i => i <? nodes.entries.length> => {
+    let known=nodes.positions.get(value.key)
+    if known isnt? none {
+        $runtime_assert known <? nodes.entries.length
+        return known
     }
-    let id=nodes.length
-    nodes.push(value)
-    intern_positions[value.key]=id
+    let id=nodes.entries.length
+    nodes.entries.push(value)
+    nodes.positions[value.key]=id
     return id
 }
 
-primitive = (name:string @nodes:array<Type>):>addr => intern(@nodes Primitive[key="P{_quoted(name)}" name=name])
-integer_literal = (value:bigint @nodes:array<Type>):>addr => intern(@nodes IntegerLiteralType[key="I{_bigint_as_string(value)}" value=value])
-string_literal = (value:string @nodes:array<Type>):>addr => intern(@nodes StringLiteralType[key="S{_quoted(value)}" value=value])
-binary_literal = (value:array<uint8> @nodes:array<Type>):>addr => {
+# Speculative checking discards a suffix. Remove only that suffix's index
+# entries so subsequent insertion can reuse the positions without stale keys.
+truncate = (@nodes:Table count:addr):>void => {
+    $runtime_assert count <=? nodes.entries.length
+    let i=count
+    loop i <? nodes.entries.length {
+        nodes.positions.pop(nodes.entries[i].key default=0);
+        i+=1
+    }
+    nodes.entries.truncate(count)
+}
+
+primitive = (name:string @nodes:Table):>addr => intern(@nodes Primitive[key="P{_quoted(name)}" name=name])
+integer_literal = (value:bigint @nodes:Table):>addr => intern(@nodes IntegerLiteralType[key="I{_bigint_as_string(value)}" value=value])
+string_literal = (value:string @nodes:Table):>addr => intern(@nodes StringLiteralType[key="S{_quoted(value)}" value=value])
+binary_literal = (value:array<uint8> @nodes:Table):>addr => {
     let parts:array<string> = []
     loop byte in value { parts.push("{byte}") }
     return intern(@nodes BinaryLiteralType[key="B{parts.join(',')}" value=value])
 }
-rational_literal = (numerator:bigint denominator:bigint & ~0 @nodes:array<Type>):>addr => {
+rational_literal = (numerator:bigint denominator:bigint & ~0 @nodes:Table):>addr => {
     let value = _bigrational_make(numerator denominator)
     if value =? 0 return intern(@nodes RationalLiteralType[key='L0/1' numerator=0 denominator=1])
     let key = "L{_bigint_as_string(value.numerator)}/{_bigint_as_string(value.denominator)}"
@@ -194,7 +206,7 @@ name_before = (left:string right:string):>bool => {
     return a.length <? b.length
 }
 
-dimension = (powers:array<DimensionPower> @nodes:array<Type>):>addr => {
+dimension = (powers:array<DimensionPower> @nodes:Table):>addr => {
     let combined:dict<string bigint> = []
     let names:array<string> = []
     loop power in powers {
@@ -220,30 +232,30 @@ dimension = (powers:array<DimensionPower> @nodes:array<Type>):>addr => {
     return intern(@nodes DimensionType[key="D{parts.join(';')}" powers=normalized])
 }
 
-dimension_at = (id:addr nodes:array<Type>):>DimensionType => {
+dimension_at = (id:addr nodes:Table):>DimensionType => {
     let node = node_at(nodes id)
     $runtime_assert node is? DimensionType
     return node
 }
-multiply_dimensions = (left:addr right:addr @nodes:array<Type>):>addr => {
+multiply_dimensions = (left:addr right:addr @nodes:Table):>addr => {
     let powers = dimension_at(left nodes).powers
     let other = dimension_at(right nodes)
     loop power in other.powers { powers.push(power) }
     return dimension(powers @nodes)
 }
-divide_dimensions = (left:addr right:addr @nodes:array<Type>):>addr => {
+divide_dimensions = (left:addr right:addr @nodes:Table):>addr => {
     let powers = dimension_at(left nodes).powers
     let other = dimension_at(right nodes)
     loop power in other.powers { powers.push(DimensionPower[power.name (-power.exponent)]) }
     return dimension(powers @nodes)
 }
-power_dimension = (base:addr exponent:bigint @nodes:array<Type>):>addr => {
+power_dimension = (base:addr exponent:bigint @nodes:Table):>addr => {
     let powers:array<DimensionPower> = []
     let original = dimension_at(base nodes)
     loop power in original.powers { powers.push(DimensionPower[power.name (power.exponent * exponent)]) }
     return dimension(powers @nodes)
 }
-quantity_type = (number:addr dim:addr @nodes:array<Type>):>addr => intern(@nodes QuantityType[key="U{number}:{dim}" shape="U{shapes_key([number dim] nodes)}" number=number dimension=dim])
+quantity_type = (number:addr dim:addr @nodes:Table):>addr => intern(@nodes QuantityType[key="U{number}:{dim}" shape="U{shapes_key([number dim] nodes)}" number=number dimension=dim])
 
 items_key = (items:array<addr>):>string => {
     let pieces:array<string> = []
@@ -256,7 +268,7 @@ is_primitive = (node:Type name:string):>bool => node is? Primitive and node.name
 # Smart constructors flatten their own connective, discard duplicates, and
 # apply identity/annihilator laws. They deliberately do not consult subtyping:
 # int64 | int remains a syntactic union until a semantic join asks to simplify.
-combine = (items:array<addr> conjunction:bool @nodes:array<Type>):>addr => {
+combine = (items:array<addr> conjunction:bool @nodes:Table):>addr => {
     let identity = if conjunction 'any' else 'never'
     let annihilator = if conjunction 'never' else 'any'
     let flat:array<addr> = []
@@ -274,12 +286,12 @@ combine = (items:array<addr> conjunction:bool @nodes:array<Type>):>addr => {
     if conjunction return intern(@nodes TypeAnd[key="A{items_key(flat)}" shape="A{shapes_key(flat nodes)}" items=flat])
     return intern(@nodes TypeOr[key="O{items_key(flat)}" shape="O{shapes_key(flat nodes)}" items=flat])
 }
-intersect = (items:array<addr> @nodes:array<Type>):>addr => combine(items true @nodes)
-union = (items:array<addr> @nodes:array<Type>):>addr => combine(items false @nodes)
+intersect = (items:array<addr> @nodes:Table):>addr => combine(items true @nodes)
+union = (items:array<addr> @nodes:Table):>addr => combine(items false @nodes)
 
 # Parentheses are nonsemantic for expressed values: (1 (2 3)) expresses three
 # values. A generator value is one value, so only SequenceType is flattened.
-sequence = (items:array<addr> @nodes:array<Type>):>addr => {
+sequence = (items:array<addr> @nodes:Table):>addr => {
     let flat:array<addr> = []
     loop id in items {
         let node = node_at(nodes id)
@@ -291,13 +303,13 @@ sequence = (items:array<addr> @nodes:array<Type>):>addr => {
     return intern(@nodes SequenceType[key="Q{items_key(flat)}" shape="Q{shapes_key(flat nodes)}" items=flat])
 }
 
-array_type = (element:addr length:addr? @nodes:array<Type>):>addr => intern(@nodes ArrayType[key="R{element}:{length}" shape="R{shapes_key([element] nodes)}:{length}" element=element length=length])
-string_type = (length:addr? @nodes:array<Type>):>addr => intern(@nodes StringType[key="T{length}" length=length])
-parameterize = (head:addr args:array<addr> @nodes:array<Type>):>addr => intern(@nodes TypeParameterize[key="G{head}:{items_key(args)}" shape="G{shapes_key([head] nodes)}:{shapes_key(args nodes)}" head=head args=args])
+array_type = (element:addr length:addr? @nodes:Table):>addr => intern(@nodes ArrayType[key="R{element}:{length}" shape="R{shapes_key([element] nodes)}:{length}" element=element length=length])
+string_type = (length:addr? @nodes:Table):>addr => intern(@nodes StringType[key="T{length}" length=length])
+parameterize = (head:addr args:array<addr> @nodes:Table):>addr => intern(@nodes TypeParameterize[key="G{head}:{items_key(args)}" shape="G{shapes_key([head] nodes)}:{shapes_key(args nodes)}" head=head args=args])
 
-type_variable = (name:string bound:addr @nodes:array<Type>):>addr => intern(@nodes TypeVariable[key="V{_quoted(name)}:{bound}" shape="V{_quoted(name)}:{shapes_key([bound] nodes)}" name=name bound=bound])
+type_variable = (name:string bound:addr @nodes:Table):>addr => intern(@nodes TypeVariable[key="V{_quoted(name)}:{bound}" shape="V{_quoted(name)}:{shapes_key([bound] nodes)}" name=name bound=bound])
 
-function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr params:array<GenericParam> @nodes:array<Type>):>addr => {
+function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr params:array<GenericParam> @nodes:Table):>addr => {
     let slots:array<string> = []
     let shapes:array<string> = []
     loop p in pos {
@@ -318,12 +330,12 @@ function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr
     let shape = "F{shapes.join(';')}:R{rest_key}:T{shapes_key([ret] nodes)}"
     return intern(@nodes FunctionType[key=key shape=shape pos_or_kw=pos kw_only=kw rest=rest ret=ret type_params=params])
 }
-overload_type = (methods:array<addr> @nodes:array<Type>):>addr => intern(@nodes OverloadType[key="M{items_key(methods)}" shape="M{shapes_key(methods nodes)}" methods=methods])
+overload_type = (methods:array<addr> @nodes:Table):>addr => intern(@nodes OverloadType[key="M{items_key(methods)}" shape="M{shapes_key(methods nodes)}" methods=methods])
 
 # Compare a single contract without allocating its serialized key. Resolved
 # binding ids describe proof provenance, not contract identity; tested types
 # use structural identity just as propositions_key(structural=true) does.
-same_proposition = (a:facts.Proposition b:facts.Proposition nodes:array<Type>):>bool => {
+same_proposition = (a:facts.Proposition b:facts.Proposition nodes:Table):>bool => {
     if a.subject not=? b.subject or a.op not=? b.op or a.value not=? b.value return false
     if a.projection not=? b.projection or a.term_projection not=? b.term_projection return false
     if a.term is? none {
@@ -352,7 +364,7 @@ same_proposition = (a:facts.Proposition b:facts.Proposition nodes:array<Type>):>
     return same_type(a.tested_type b.tested_type nodes)
 }
 
-propositions_key = (props:array<facts.Proposition> structural:bool nodes:array<Type>):>string => {
+propositions_key = (props:array<facts.Proposition> structural:bool nodes:Table):>string => {
     let parts:array<string> = []
     loop p in props {
         let key = if structural facts.identity_key(p) else facts.storage_key(p)
@@ -366,12 +378,12 @@ propositions_key = (props:array<facts.Proposition> structural:bool nodes:array<T
     }
     return parts.join(';')
 }
-refined_type = (base:addr propositions:array<facts.Proposition> @nodes:array<Type>):>addr => {
+refined_type = (base:addr propositions:array<facts.Proposition> @nodes:Table):>addr => {
     let key = "E{base}:{propositions_key(propositions false nodes)}"
     let shape = "E{shapes_key([base] nodes)}:{propositions_key(propositions true nodes)}"
     return intern(@nodes RefinedType[key=key shape=shape base=base propositions=propositions])
 }
-strip_refinement = (id:addr nodes:array<Type>):>addr => {
+strip_refinement = (id:addr nodes:Table):>addr => {
     let node = node_at(nodes id)
     return if node is? RefinedType node.base else id
 }
@@ -379,7 +391,7 @@ strip_refinement = (id:addr nodes:array<Type>):>addr => {
 # Object field order and mutability are structural. Constructor defaults,
 # field proof bindings, methods, and constructor overload ids are retained
 # in the stored description but do not make two layouts different types.
-object_type = (fields:array<ObjectField> brand:string? immutable:bool methods:array<MethodSpec> constructors:array<addr> @nodes:array<Type> minted:bool=false parent:addr?=none abstract:bool=false):>addr => {
+object_type = (fields:array<ObjectField> brand:string? immutable:bool methods:array<MethodSpec> constructors:array<addr> @nodes:Table minted:bool=false parent:addr?=none abstract:bool=false):>addr => {
     let parts:array<string> = []
     let shapes:array<string> = []
     loop f in fields {
@@ -415,7 +427,7 @@ object_invariants = (node:ObjectType):>array<facts.Proposition> => {
     return props
 }
 
-path_type = (value:string? methods:array<MethodSpec> @nodes:array<Type>):>addr => {
+path_type = (value:string? methods:array<MethodSpec> @nodes:Table):>addr => {
     let element = if value is? none string_type(none @nodes) else string_literal(value @nodes)
     let base = object_type([ObjectField['path' element]] none false methods [] @nodes)
     let description = node_at(nodes base)
@@ -426,22 +438,22 @@ path_type = (value:string? methods:array<MethodSpec> @nodes:array<Type>):>addr =
     return intern(@nodes PathLiteralType[key=key shape=shape fields=description.fields methods=methods value=value])
 }
 
-named_type = (name:string alias_id:addr @nodes:array<Type>):>addr => intern(@nodes NamedType[key="Y{alias_id}" name=name alias_id=alias_id])
-resolve_alias = (id:addr target:addr @nodes:array<Type>):>void => {
-    $runtime_assert id <? nodes.length
-    let node = nodes[id]
+named_type = (name:string alias_id:addr @nodes:Table):>addr => intern(@nodes NamedType[key="Y{alias_id}" name=name alias_id=alias_id])
+resolve_alias = (id:addr target:addr @nodes:Table):>void => {
+    $runtime_assert id <? nodes.entries.length
+    let node = nodes.entries[id]
     $runtime_assert node is? NamedType
     # Resolution changes the target, not the recursive reference's identity.
-    nodes[id] = NamedType[key=node.key name=node.name alias_id=node.alias_id target=target]
+    nodes.entries[id] = NamedType[key=node.key name=node.name alias_id=node.alias_id target=target]
 }
-unfold = (id:addr nodes:array<Type>):>addr => {
+unfold = (id:addr nodes:Table):>addr => {
     let node = node_at(nodes id)
     if node isnt? NamedType return id
     $runtime_assert node.target isnt? none
     return node.target
 }
-meta_type = (family:addr @nodes:array<Type>):>addr => intern(@nodes MetaType[key="H{family}" shape="H{shapes_key([family] nodes)}" family=family])
-alias_key = (value:TypeAliasValue nodes:array<Type> structural:bool):>string => {
+meta_type = (family:addr @nodes:Table):>addr => intern(@nodes MetaType[key="H{family}" shape="H{shapes_key([family] nodes)}" family=family])
+alias_key = (value:TypeAliasValue nodes:Table structural:bool):>string => {
     if value is? addr return if structural shape_of(value nodes) else "{value}"
     let params:array<string> = []
     loop param in value.params {
@@ -451,7 +463,7 @@ alias_key = (value:TypeAliasValue nodes:array<Type> structural:bool):>string => 
     let body = if structural shape_of(value.body nodes) else "{value.body}"
     return "alias[{params.join(';')}]:{component(body)}"
 }
-module_type = (fields:array<ModuleField> @nodes:array<Type>):>addr => {
+module_type = (fields:array<ModuleField> @nodes:Table):>addr => {
     let parts:array<string> = []
     let shapes:array<string> = []
     loop f in fields {
@@ -470,7 +482,7 @@ module_field = (node:ModuleType name:string):>ModuleField? => {
 # Substitute free names, respecting generic binders inside a nested callable.
 # Instantiating the outer method is a separate operation: it removes that
 # method's binder before substitution rather than accidentally shadowing it.
-substitute = (id:addr bindings:dict<string addr> @nodes:array<Type>):>addr => {
+substitute = (id:addr bindings:dict<string addr> @nodes:Table):>addr => {
     let node = node_at(nodes id)
     if node is? Primitive | TypeVariable return bindings.get(node.name default=id)
     if node is? TypeNot return negate(substitute(node.item bindings @nodes) @nodes)
@@ -502,7 +514,7 @@ substitute = (id:addr bindings:dict<string addr> @nodes:array<Type>):>addr => {
     return id
 }
 
-substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:bool @nodes:array<Type>):>addr => {
+substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:bool @nodes:Table):>addr => {
     let inner = bindings
     let params = node.type_params
     if instantiate { params = [] }
@@ -518,7 +530,7 @@ substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:
 # De Morgan's laws put not only on atoms. A type constructor is itself an atom
 # here; its arguments are normalized independently, never complemented merely
 # because the outer constructor was complemented.
-negate = (id:addr @nodes:array<Type>):>addr => {
+negate = (id:addr @nodes:Table):>addr => {
     let node = node_at(nodes id)
     if is_primitive(node 'any') return primitive('never' @nodes)
     if is_primitive(node 'never') return primitive('any' @nodes)
@@ -531,7 +543,7 @@ negate = (id:addr @nodes:array<Type>):>addr => {
     return intern(@nodes TypeNot[key="N{id}" shape="N{shapes_key([id] nodes)}" item=id])
 }
 
-to_nnf = (id:addr @nodes:array<Type>):>addr => {
+to_nnf = (id:addr @nodes:Table):>addr => {
     let node = node_at(nodes id)
     if node is? TypeNot return negate(node.item @nodes)
     if node is? TypeAnd | TypeOr | SequenceType {
@@ -594,7 +606,7 @@ distribute = (left:array<Clause> right:array<Clause>):>array<Clause> => {
     return output
 }
 
-dnf = (id:addr nodes:array<Type>):>array<Clause> => {
+dnf = (id:addr nodes:Table):>array<Clause> => {
     let node = node_at(nodes id)
     if is_primitive(node 'never') return []
     if is_primitive(node 'any') return [Clause[literals=[]]]
@@ -612,12 +624,12 @@ dnf = (id:addr nodes:array<Type>):>array<Clause> => {
     return [Clause[literals=[SignedAtom[true id]]]]
 }
 
-normalize = (id:addr @nodes:array<Type>):>array<Clause> => {
+normalize = (id:addr @nodes:Table):>array<Clause> => {
     let normalized = to_nnf(id @nodes)
     return dnf(normalized nodes)
 }
 
-describe = (id:addr nodes:array<Type>):>string => {
+describe = (id:addr nodes:Table):>string => {
     let node = node_at(nodes id)
     if node is? Primitive return node.name
     if node is? NamedType return node.name

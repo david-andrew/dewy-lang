@@ -198,7 +198,7 @@ def algebra_program(tmp_path_factory):
              f'import p"{ROOT / "dewy/bootstrap/semantic/subtyping.dewy"}" as subtyping',
              f'import p"{ROOT / "dewy/bootstrap/semantic/propositions.dewy"}" as facts',
              f'import p"{ROOT / "dewy/bootstrap/semantic/dispatch.dewy"}" as dispatch', '''
-render = (clauses:array<types.Clause> nodes:array<types.Type>):>string => {
+render = (clauses:array<types.Clause> nodes:types.Table):>string => {
     let parts:array<string> = []
     loop clause in clauses {
         let literals:array<string> = []
@@ -209,7 +209,7 @@ render = (clauses:array<types.Clause> nodes:array<types.Type>):>string => {
     }
     return parts.join('|')
 }
-render_dispatch = (result:dispatch.DispatchResult | dispatch.DispatchError nodes:array<types.Type>):>string => {
+render_dispatch = (result:dispatch.DispatchResult | dispatch.DispatchError nodes:types.Table):>string => {
     if result is? dispatch.DispatchError {
         if result.message.startswith('ambiguous') return 'ambiguous'
         return 'no overload'
@@ -222,7 +222,7 @@ render_dispatch = (result:dispatch.DispatchResult | dispatch.DispatchError nodes
     return "{result.method_index}|{types.describe(method.ret nodes)}|{params.join(',')}|{promotions.join(',')}"
 }
 main = ():>int64 => {
-    let nodes:array<types.Type> = []
+    let nodes:types.Table = types.Table[]
 ''']
     counter = 0
 
@@ -428,7 +428,7 @@ def test_deep_type_shapes_do_not_requote_child_encodings(tmp_path):
     source.write_text(f'''
 import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
 let main=():>int64=>{{
-    let nodes:array<types.Type>=[]
+    let nodes:types.Table=types.Table[]
     let integer=types.primitive('int64' @nodes)
     let left=types.object_type([types.ObjectField['field' integer]] none false [] [] @nodes)
     let right=types.object_type([types.ObjectField['field' integer default=17]] none false [] [] @nodes)

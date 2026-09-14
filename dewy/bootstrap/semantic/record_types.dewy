@@ -58,7 +58,7 @@ merge_methods = (@methods:array<types.MethodSpec> additions:array<types.MethodSp
         replaced.add(method.name)
     }
 }
-flatten = (id:addr nodes:array<types.Type>):>array<addr> => {
+flatten = (id:addr nodes:types.Table):>array<addr> => {
     let node = types.node_at(nodes types.unfold(id nodes))
     if node isnt? types.TypeAnd return [id]
     let result:array<addr> = []

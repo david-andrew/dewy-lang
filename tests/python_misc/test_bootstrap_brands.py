@@ -18,7 +18,7 @@ def test_native_brand_registry_numbering_and_order(tmp_path, monkeypatch):
 import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
 import p"{ROOT / 'dewy/bootstrap/semantic/brands.dewy'}" as brands
 main = ():>int64 => {{
-    let nodes:array<types.Type> = []
+    let nodes:types.Table = types.Table[]
     let registry = brands.Registry[]
     let structure = types.object_type([] none false [] [] @nodes)
     let root = types.object_type([] 'Root' false [] [] @nodes minted=true parent=structure abstract=true)

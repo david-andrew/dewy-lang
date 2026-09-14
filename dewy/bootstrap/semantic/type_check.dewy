@@ -51,7 +51,7 @@ word_element = (id:addr @session:contexts.Session):>addr => {
 # At a source type boundary, excluding integer singletons supplies value
 # facts. Preserve this distinction from the general type-algebra API: a
 # nonzero word is still a word when generic arithmetic infers its operand.
-excluded_integers = (id:addr nodes:array<types.Type>):>array<bigint> | none => {
+excluded_integers = (id:addr nodes:types.Table):>array<bigint> | none => {
     let negation=types.node_at(nodes id)
     if negation isnt? types.TypeNot return none
     let inner=types.node_at(nodes negation.item)
@@ -352,7 +352,7 @@ bind_subjects = (base:addr propositions:array<facts.Proposition> id:addr context
 # field-only refinement of that alias selects its unique record alternative:
 # BigInt<sign =? 1> cannot contain the zero alternative, which has no sign.
 # Multiple record alternatives still require an explicit type selection.
-field_refinement_base = (base:addr promises:array<facts.Proposition> nodes:array<types.Type>):>addr => {
+field_refinement_base = (base:addr promises:array<facts.Proposition> nodes:types.Table):>addr => {
     let union=types.node_at(nodes types.strip_refinement(base nodes))
     if union isnt? types.TypeOr or promises.length =? 0 return base
     loop promise in promises {if facts.field(promise) is? none return base}
@@ -874,7 +874,7 @@ generic_alias = (parameters:parser.Block body:addr context:contexts.Context @ses
     return types.GenericTypeAlias[declared.params resolved]
 }
 
-contains_named = (id:addr nodes:array<types.Type>):>bool => {
+contains_named = (id:addr nodes:types.Table):>bool => {
     let node = types.node_at(nodes id)
     if node is? types.NamedType return true
     if node is? types.RefinedType return contains_named(node.base nodes)

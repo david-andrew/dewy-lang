@@ -8,7 +8,7 @@ import p"../../dewy/bootstrap/backend/udewy/emit.dewy" as emit
 # One extra command-line word doubles depth; two also quadruple leaf count.
 main = (args:array<string>):>int64 => {
     let nodes:array<hir.AST>=[]
-    let type_nodes:array<types.Type>=[]
+    let type_nodes:types.Table=types.Table[]
     let span=Span[0 0]
     let word=types.primitive('int64' @type_nodes)
     let nothing=types.primitive('void' @type_nodes)

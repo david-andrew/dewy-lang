@@ -80,7 +80,7 @@ field_prefix = (child:types.ObjectType parent:types.ObjectType):>bool => {
     }
     return true
 }
-brand_descends = (child:types.ObjectType parent:types.ObjectType nodes:array<types.Type>):>bool => {
+brand_descends = (child:types.ObjectType parent:types.ObjectType nodes:types.Table):>bool => {
     if not child.minted or not parent.minted or not field_prefix(child parent) return false
     if child.brand =? parent.brand return true
     let next = child.parent
@@ -92,7 +92,7 @@ brand_descends = (child:types.ObjectType parent:types.ObjectType nodes:array<typ
     }
     return false
 }
-same_fields = (a:types.ObjectType b:types.ObjectType nodes:array<types.Type>):>bool => {
+same_fields = (a:types.ObjectType b:types.ObjectType nodes:types.Table):>bool => {
     if a.fields.length not=? b.fields.length return false
     loop i in 0.. and i <? a.fields.length {
         $runtime_assert i <? b.fields.length
@@ -102,7 +102,7 @@ same_fields = (a:types.ObjectType b:types.ObjectType nodes:array<types.Type>):>b
     }
     return true
 }
-brand_carries = (child:types.ObjectType structure:types.ObjectType nodes:array<types.Type>):>bool => {
+brand_carries = (child:types.ObjectType structure:types.ObjectType nodes:types.Table):>bool => {
     if not child.minted or structure.brand isnt? none return false
     let root = child
     loop root.parent isnt? none {
@@ -121,12 +121,12 @@ brand_carries = (child:types.ObjectType structure:types.ObjectType nodes:array<t
     }
     return true
 }
-object_subtype = (a:types.ObjectType b:types.ObjectType nodes:array<types.Type>):>bool => {
+object_subtype = (a:types.ObjectType b:types.ObjectType nodes:types.Table):>bool => {
     if a.immutable and not b.immutable return false
     if b isnt? types.PathType and a.brand =? b.brand and same_fields(a b nodes) return true
     return brand_descends(a b nodes) or brand_carries(a b nodes)
 }
-path_implies = (a:types.PathType b:types.ObjectType links:array<Link> @nodes:array<types.Type>):>bool => {
+path_implies = (a:types.PathType b:types.ObjectType links:array<Link> @nodes:types.Table):>bool => {
     if a is? types.PathLiteralType and b is? types.PathLiteralType return a.value =? b.value
     if a.fields.length not=? b.fields.length return false
     loop i in 0.. and i <? a.fields.length {
@@ -138,7 +138,7 @@ path_implies = (a:types.PathType b:types.ObjectType links:array<Link> @nodes:arr
     return true
 }
 
-string_literal_implies = (value:string target:types.Type nodes:array<types.Type> links:array<Link>):>bool => {
+string_literal_implies = (value:string target:types.Type nodes:types.Table links:array<Link>):>bool => {
     if target is? types.StringLiteralType return value =? target.value
     if target is? types.StringType return target.length is? none or target.length =? value.length
     if target is? types.Primitive {
@@ -154,7 +154,7 @@ string_literal_implies = (value:string target:types.Type nodes:array<types.Type>
     return false
 }
 
-atom_implies = (a_id:addr b_id:addr links:array<Link> @nodes:array<types.Type>):>bool => {
+atom_implies = (a_id:addr b_id:addr links:array<Link> @nodes:types.Table):>bool => {
     if types.same_type(a_id b_id nodes) return true
     let a = types.node_at(nodes a_id)
     let b = types.node_at(nodes b_id)
@@ -238,7 +238,7 @@ atom_implies = (a_id:addr b_id:addr links:array<Link> @nodes:array<types.Type>):
     return true
 }
 
-meet_atoms = (a_id:addr b_id:addr links:array<Link> @nodes:array<types.Type>):>addr? => {
+meet_atoms = (a_id:addr b_id:addr links:array<Link> @nodes:types.Table):>addr? => {
     if types.same_type(a_id b_id nodes) return a_id
     let a = types.node_at(nodes a_id)
     let b = types.node_at(nodes b_id)
@@ -313,7 +313,7 @@ meet_atoms = (a_id:addr b_id:addr links:array<Link> @nodes:array<types.Type>):>a
     return none
 }
 
-clause_is_empty = (clause:types.Clause links:array<Link> @nodes:array<types.Type>):>bool => {
+clause_is_empty = (clause:types.Clause links:array<Link> @nodes:types.Table):>bool => {
     let met:addr = types.primitive('any' @nodes)
     loop literal in clause.literals {
         if not literal.positive continue
@@ -331,13 +331,13 @@ clause_is_empty = (clause:types.Clause links:array<Link> @nodes:array<types.Type
     return false
 }
 
-is_empty = (id:addr links:array<Link> @nodes:array<types.Type>):>bool => {
+is_empty = (id:addr links:array<Link> @nodes:types.Table):>bool => {
     let clauses = types.normalize(id @nodes)
     loop clause in clauses { if not clause_is_empty(clause links @nodes) return false }
     return true
 }
 
-is_subtype = (source:addr target:addr links:array<Link> @nodes:array<types.Type>):>bool => {
+is_subtype = (source:addr target:addr links:array<Link> @nodes:types.Table):>bool => {
     # Reflexivity needs no normalized difference. Arena ids already name
     # the same description, including any retained refinement metadata.
     if source =? target return true
@@ -349,7 +349,7 @@ is_subtype = (source:addr target:addr links:array<Link> @nodes:array<types.Type>
 # Joining checked values has no subsequent obligation boundary. A refined
 # target's base may be applicable to a call, but a join must never obtain
 # the target's predicates merely by asking that applicability question.
-covered = (member:addr other:addr seen:set<string> links:array<Link> @nodes:array<types.Type>):>bool => {
+covered = (member:addr other:addr seen:set<string> links:array<Link> @nodes:types.Table):>bool => {
     let pair = "{member}:{other}"
     if pair in? seen return true
     seen.add(pair)
@@ -394,7 +394,7 @@ covered = (member:addr other:addr seen:set<string> links:array<Link> @nodes:arra
     return is_subtype(m_id o_id links @nodes)
 }
 
-join = (items:array<addr> links:array<Link> @nodes:array<types.Type>):>addr => {
+join = (items:array<addr> links:array<Link> @nodes:types.Table):>addr => {
     # Hosted limitation: syntactic union deduplicates equal record shapes
     # before `covered` sees their possibly different field predicates. A
     # future correction must reconcile those contracts, not preserve one
@@ -419,7 +419,7 @@ join = (items:array<addr> links:array<Link> @nodes:array<types.Type>):>addr => {
 # F can stand in for G when it accepts G's calls and returns a subtype of
 # G's result. Defaults and keyword names affect the call shape; source
 # parameter bodies and default expressions do not participate here.
-function_subtype = (f:types.FunctionType g:types.FunctionType links:array<Link> @nodes:array<types.Type>):>bool => {
+function_subtype = (f:types.FunctionType g:types.FunctionType links:array<Link> @nodes:types.Table):>bool => {
     if f.pos_or_kw.length not=? g.pos_or_kw.length return false
     loop i in 0.. and i <? f.pos_or_kw.length {
         let fp = f.pos_or_kw[i]
@@ -459,7 +459,7 @@ function_subtype = (f:types.FunctionType g:types.FunctionType links:array<Link> 
     return is_subtype(f.ret g.ret links @nodes)
 }
 
-callable_subtype = (f:types.CallableType g:types.CallableType links:array<Link> @nodes:array<types.Type>):>bool => {
+callable_subtype = (f:types.CallableType g:types.CallableType links:array<Link> @nodes:types.Table):>bool => {
     let fs:array<types.FunctionType> = []
     let gs:array<types.FunctionType> = []
     if f is? types.FunctionType { fs.push(f) }

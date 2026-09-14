@@ -17,7 +17,7 @@ Constant evaluation is deliberately limited to the hosted pass's pure subset.
 An unsupported expression contributes no evidence, never an assumed value.
 """
 
-Environment:type = const [nodes:array<hir.AST> types:array<types.Type> registry:bindings.Registry cap:bigint]
+Environment:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry cap:bigint]
 length_default = (cap:bigint):>ranges.Interval => ranges.Interval[0 cap true]
 bounds_of = (props:array<propositions.Proposition> cap:bigint):>ranges.Interval? => {
     let interval = ranges.propositions_interval(props)
@@ -29,7 +29,7 @@ bounds_of = (props:array<propositions.Proposition> cap:bigint):>ranges.Interval?
     }
     return interval
 }
-fixed_bounds = (id:addr type_nodes:array<types.Type>):>ranges.Interval? => {
+fixed_bounds = (id:addr type_nodes:types.Table):>ranges.Interval? => {
     let bounds = views.fixed_integer_bounds(id type_nodes)
     if bounds is? none return none
     return ranges.Interval[bounds.minimum bounds.maximum]
@@ -37,11 +37,11 @@ fixed_bounds = (id:addr type_nodes:array<types.Type>):>ranges.Interval? => {
 # Like the hosted _fit_type, this checks a concrete result representation.
 # A refined or abstract result is still mathematical evidence at this stage;
 # its obligations and representation selection happen at their own boundary.
-result_width = (id:addr type_nodes:array<types.Type>):>ranges.Interval? => {
+result_width = (id:addr type_nodes:types.Table):>ranges.Interval? => {
     if types.node_at(type_nodes id) isnt? types.Primitive return none
     return fixed_bounds(id type_nodes)
 }
-binary = (name:string left:ranges.Interval? right:ranges.Interval? result_type:addr type_nodes:array<types.Type> bound:ranges.Interval?=none floor:bool=false):>ranges.Interval? => {
+binary = (name:string left:ranges.Interval? right:ranges.Interval? result_type:addr type_nodes:types.Table bound:ranges.Interval?=none floor:bool=false):>ranges.Interval? => {
     if name isnt? ranges.Operation return none
     let width = result_width(result_type type_nodes)
     if bound isnt? none and (left is? none or right is? none) return ranges.fits(bound width)
@@ -123,7 +123,7 @@ binding_interval = (term:facts.Term state:facts.State env:Environment):>ranges.I
     return if declared is? none ranges.UNKNOWN else declared
 }
 
-constant_binding = (id:addr? nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry @seen:set<addr>):>ranges.Interval? => {
+constant_binding = (id:addr? nodes:array<hir.AST> type_nodes:types.Table registry:bindings.Registry @seen:set<addr>):>ranges.Interval? => {
     if id is? none return none
     if id in? seen return none
     let binding = registry.by_id.get(id)
@@ -136,7 +136,7 @@ constant_binding = (id:addr? nodes:array<hir.AST> type_nodes:array<types.Type> r
     seen.add(id)
     return constant_expr(declaration.expr nodes type_nodes registry @seen)
 }
-constant_expr = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry @seen:set<addr>):>ranges.Interval? => {
+constant_expr = (id:addr nodes:array<hir.AST> type_nodes:types.Table registry:bindings.Registry @seen:set<addr>):>ranges.Interval? => {
     let node = hir.node_at(nodes id)
     let value_type = types.node_at(type_nodes node.value_type)
     if value_type is? types.IntegerLiteralType return ranges.exact(value_type.value)
@@ -178,7 +178,7 @@ constant_expr = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type> regis
 # Source checking already owns these arenas. Pass their read-only arguments
 # directly rather than constructing a value record that copies the registry
 # on every query. The complete Environment remains the analysis-pass API.
-constant_in = (id:addr nodes:array<hir.AST> type_nodes:array<types.Type> registry:bindings.Registry):>ranges.Interval? => {
+constant_in = (id:addr nodes:array<hir.AST> type_nodes:types.Table registry:bindings.Registry):>ranges.Interval? => {
     let seen:set<addr> = set[]
     return constant_expr(id nodes type_nodes registry @seen)
 }

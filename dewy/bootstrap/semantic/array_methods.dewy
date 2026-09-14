@@ -8,7 +8,7 @@ and `join` an optional separator. No allocator policy is implied here.
 """
 
 const names:set<string> = set['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'join']
-signature = (name:string element:addr @nodes:array<types.Type>):>addr => {
+signature = (name:string element:addr @nodes:types.Table):>addr => {
     $runtime_assert name in? names
     let word = types.primitive('int64' @nodes)
     let void_type = types.primitive('void' @nodes)

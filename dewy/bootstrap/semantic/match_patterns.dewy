@@ -105,7 +105,7 @@ Member:type = [
     covered_brands:set<string>=set[]
 ]
 Coordinate:type = [members:array<Member>]
-family = (id:addr nodes:array<types.Type>):>addr? => {
+family = (id:addr nodes:types.Table):>addr? => {
     let base=types.unfold(types.strip_refinement(id nodes) nodes)
     let node=types.node_at(nodes base)
     if node is? types.MetaType return node.family
@@ -259,7 +259,7 @@ cover = (pattern:Pattern @coverage:array<Member> @session:contexts.Session):>boo
 # Object patterns must select a unique record alternative before any field
 # reads are formed; having the same field names in two alternatives is not
 # an implicit merge of their contracts.
-object_member = (id:addr fields:array<Field> nodes:array<types.Type>):>addr? => {
+object_member = (id:addr fields:array<Field> nodes:types.Table):>addr? => {
     let type=types.node_at(nodes types.strip_refinement(id nodes))
     let members:array<addr>=if type is? types.TypeOr type.items else [id]
     let selected:addr?=none

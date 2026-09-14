@@ -90,7 +90,7 @@ main=():>int64=>{{
     let span=Span[0 0]
     let srcfile=SrcFile["representation fixture" ""]
     let nodes:array<hir.AST>=[]
-    let type_nodes:array<types.Type>=[]
+    let type_nodes:types.Table=types.Table[]
     let registry=bindings.Registry[]
 {chr(10).join(type_lines + lines + registry_lines)}
     let session=contexts.Session[hir=nodes types=type_nodes registry=registry]

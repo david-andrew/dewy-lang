@@ -20,7 +20,7 @@ lookup = (name:string registry:Registry):>Brand? => {
     loop entry in registry.entries { if entry.name =? name return entry }
     return none
 }
-register = (id:addr @registry:Registry nodes:array<types.Type>):>void => {
+register = (id:addr @registry:Registry nodes:types.Table):>void => {
     let node = types.node_at(nodes id)
     $runtime_assert node is? types.ObjectType and node.minted and node.brand isnt? none
     $runtime_assert lookup(node.brand registry) is? none

@@ -1,4 +1,4 @@
-"""Interning hints must remain valid across independent and forked arenas."""
+"""Type lookup indexes belong to their arena and follow forks and rollback."""
 import subprocess
 from pathlib import Path
 
@@ -10,23 +10,24 @@ from udewy.frontend import EntryPointOptions, entry_point
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_interning_checks_hints_against_the_current_arena(tmp_path):
+def test_interning_keeps_the_index_with_its_arena(tmp_path):
     source = tmp_path / 'interning.dewy'
     source.write_text(
         f'import p"{ROOT / "dewy/bootstrap/semantic/ty.dewy"}" as types\n'
         + BODY)
     output = source.with_suffix('.udewy')
     output.write_text(codegen(SrcFile.from_path(source)))
-    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
-    result = subprocess.run([cache_artifact(output).resolve()], check=False,
-                            capture_output=True, text=True, timeout=10)
-    assert result.returncode == 42, result.stdout + result.stderr
-    assert result.stdout == 'Independent, forked, and cleared type arenas passed\n'
+    for target in ('x86_64', 'c'):
+        assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+        result = subprocess.run([cache_artifact(output).resolve()], check=False,
+                                capture_output=True, text=True, timeout=10)
+        assert result.returncode == 42, result.stdout + result.stderr
+        assert result.stdout == 'Independent, forked, and cleared type arenas passed\n'
 
 
 BODY = '''let main=():>int64=>{
-    let left:array<types.Type>=[]
-    let right:array<types.Type>=[]
+    let left:types.Table=types.Table[]
+    let right:types.Table=types.Table[]
     if types.primitive('int64' @left) not=? 0 return 1
     if types.primitive('bool' @left) not=? 1 return 2
     if types.primitive('bool' @right) not=? 0 return 3
@@ -37,9 +38,27 @@ BODY = '''let main=():>int64=>{
     if types.primitive('uint64' @fork) not=? 2 return 7
     if types.primitive('string' @fork) not=? 3 return 8
     if types.primitive('string' @left) not=? 2 return 9
-    right=[]
+    right=types.Table[]
     if types.primitive('string' @right) not=? 0 return 10
-    if left.length not=? 3 or fork.length not=? 4 or right.length not=? 1 return 11
+    if left.entries.length not=? 3 or fork.entries.length not=? 4 or right.entries.length not=? 1 return 11
+    # Truncation must erase the discarded keys before ids are reused. A fork
+    # retains both its old descriptions and its own index independently.
+    let saved=fork
+    types.truncate(@fork 2)
+    if fork.positions.length not=? 2 return 12
+    if types.primitive('float64' @fork) not=? 2 return 13
+    if types.primitive('string' @fork) not=? 3 return 14
+    if types.primitive('uint64' @saved) not=? 2 return 15
+    if types.primitive('string' @saved) not=? 3 return 16
+    if types.node_at(fork 2).key =? types.node_at(saved 2).key return 17
+    types.truncate(@fork 0)
+    if fork.positions.length not=? 0 or fork.entries.length not=? 0 return 18
+    if types.primitive('bool' @fork) not=? 0 return 19
+    let alias=types.named_type('Later' 7 @fork)
+    types.resolve_alias(alias 0 @fork)
+    if types.named_type('Later' 7 @fork) not=? alias return 20
+    if types.unfold(alias fork) not=? 0 return 21
+    if fork.positions.length not=? fork.entries.length return 22
     printl('Independent, forked, and cleared type arenas passed')
     return 42
 }

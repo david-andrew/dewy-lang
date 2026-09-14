@@ -19,9 +19,9 @@ import p"{ROOT / 'dewy/bootstrap/semantic/hir.dewy'}" as hir
 import p"{ROOT / 'dewy/bootstrap/backend/udewy/lower.dewy'}" as lower
 import p"{ROOT / 'dewy/bootstrap/backend/udewy/emit.dewy'}" as emit
 main=():>int64=>{{
-    let word_types:array<types.Type>=[]
+    let word_types:types.Table=types.Table[]
     let word=types.primitive('uint32' @word_types)
-    let string_types:array<types.Type>=[]
+    let string_types:types.Table=types.Table[]
     let text=types.primitive('string' @string_types)
     $runtime_assert word =? text
     let first=lower.State[emit.Input[[] word_types] SrcFile['first' ''] type_nodes=word_types]
