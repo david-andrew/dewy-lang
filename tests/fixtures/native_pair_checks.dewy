@@ -15,6 +15,7 @@ import p"native_optional_flow_join.dewy" as flows
 import p"native_range_normalization.dewy" as ranges
 import p"native_bigint_membership.dewy" as membership
 import p"native_owned_union_temporaries.dewy" as owned
+import p"native_read_temporaries.dewy" as reads
 
 let main=():>int64=>{
     printl('Checking sibling field facts')
@@ -47,5 +48,7 @@ let main=():>int64=>{
     if membership.main() not=? 42 return 14
     printl('Checking owned union temporaries')
     if owned.main() not=? 42 return 15
+    printl('Checking temporary aggregate reads')
+    if reads.main() not=? 42 return 16
     return 42
 }

@@ -65,6 +65,15 @@ they must not trigger the source-level exposure rule.
 
 ## Native gates after sharing and temporary reclamation
 
+Fresh aggregate reads now use the same ownership classification as value
+boundaries. Field/index reads preserve their result before releasing a fresh
+receiver; type tests and length queries release it after computing the scalar
+result. Skipped branches keep evaluation and cleanup together. Removed array
+elements transfer ownership, and joins and set operations release private
+input snapshots. The combined `native_read_temporaries.dewy` kernel retained
+8,920,032 bytes per 5,000 iterations before this batch and zero afterward.
+Both output backends pass; this is a bounded result, not a self-build claim.
+
 The same checker-construction kernel compiled through native lowering now
 allocates 616,000 bytes for 500 constructions, at both graph sizes, retains
 zero bytes and copies zero dynamic-array payload bytes. The allocation count

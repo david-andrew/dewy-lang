@@ -203,6 +203,7 @@ expression = (id:addr @state:State):>addr => {
     if state.problem isnt? none return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
     if node is? hir.ValueCast {
         let actual=hir.node_at(state.input.nodes node.expr).value_type
+        if object_valued(actual state) and object_valued(node.value_type state) and expression_owns(node.expr @state) return owned_record(expression(node.expr @state) actual node.value_type node @state)
         if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) actual node.value_type node @state)
         if enum_members(actual state) isnt? none return enum_read(expression(node.expr @state) actual node.value_type node @state)
         # A logical upcast can leave a narrowed union representation behind:
@@ -240,7 +241,11 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.NoneValue|hir.ErrorValue return word(0 node @state)
     if node is? hir.MemberAccess {
         let stored=stored_type(id state)
-        return read_value(field_read(field_pointer(node @state) stored node @state) stored node.value_type node @state)
+        let prefix:array<addr>=[]
+        let receiver=read_operand(node.value @prefix @state)
+        let pointer=field_address(receiver.value node @state)
+        let value=read_value(field_read(pointer stored node @state) stored node.value_type node @state)
+        return finish_read(value receiver node @prefix @state)
     }
     if node is? hir.MemberAssign {
         let target=hir.node_at(state.input.nodes node.target)
@@ -259,11 +264,20 @@ expression = (id:addr @state:State):>addr => {
         return sequence(prefix node @state)
     }
     if node is? hir.ArrayLiteral return array_literal(node @state)
-    if node is? hir.ArrayLength return intrinsic('__load_i64__' [address(expression(node.array @state) layouts.array_descriptor.length node @state)] types.primitive('int64' @state.type_nodes) node @state)
+    if node is? hir.ArrayLength {
+        let prefix:array<addr>=[]
+        let receiver=read_operand(node.array @prefix @state)
+        let value=read_word(receiver.value layouts.array_descriptor.length node @state)
+        return finish_read(value receiver node @prefix @state)
+    }
     if node is? hir.Index {
-        let pointer=array_index(node @state)
+        let prefix:array<addr>=[]
+        let receiver=read_operand(node.array @prefix @state)
+        let descriptor=snapshot(receiver.value @prefix @state)
+        let pointer=array_element_address(descriptor expression(node.index @state) node @state)
         let stored=stored_type(id state)
-        return read_value(array_load(pointer stored node @state) stored node.value_type node @state)
+        let value=read_value(array_load(pointer stored node @state) stored node.value_type node @state)
+        return finish_read(value receiver node @prefix @state)
     }
     if node is? hir.IndexAssign {
         let target=hir.node_at(state.input.nodes node.target)
@@ -464,6 +478,81 @@ place_address = (id:addr @state:State):>addr => {
     }
     return reject(node 'an addressable place route' @state)
 }
+# This describes the storage produced by expression, not the source type's
+# mutability. Keep adoption and temporary reclamation on the same rule: a
+# borrowed binding/field cannot be released merely because it is aggregate.
+expression_owns = (id:addr @state:State):>bool => {
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Suppress return expression_owns(node.item @state)
+    if node is? hir.ValueCast {
+        let source=hir.node_at(state.input.nodes node.expr)
+        if object_valued(source.value_type state) and object_valued(node.value_type state) return expression_owns(node.expr @state)
+        if array_valued(source.value_type state) and array_valued(node.value_type state) return expression_owns(node.expr @state)
+    }
+    if node is? hir.ObjectLiteral|hir.ArrayLiteral|hir.DictView|hir.SetAlgebra return true
+    if node is? hir.MemberAccess and temporary_owner(node.value @state) return true
+    if node is? hir.Index and temporary_owner(node.array @state) return true
+    if node is? hir.Block|hir.Flow and state.cleanup_enabled return true
+    # Packing a non-cell value already creates an independent payload and
+    # cell. Copying that result again abandons the first owned allocation.
+    if node is? hir.ValueCast|hir.RepresentationCast and cell_members(node.value_type @state) isnt? none {
+        let source=hir.node_at(state.input.nodes node.expr)
+        if cell_members(source.value_type @state) is? none return true
+    }
+    if node is? hir.DictLookup and not node.proven and node.default is? none {
+        let values=array_type(stored_type(node.values state) state)
+        # The stored element decides ownership. A dictionary of optional
+        # values may return an existing cell with the same optional type.
+        if values isnt? none and cell_members(values.element @state) is? none return true
+    }
+    if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index and cell_members(node.value_type @state) isnt? none {
+        if cell_members(stored_type(id state) @state) is? none return true
+    }
+    if node is? hir.DictRemove return true
+    # Ordinary Dewy calls already return independent aggregate storage: both
+    # explicit returns and implicit function results pass through this value
+    # boundary. Adopt that result instead of cloning it and abandoning its
+    # original allocation. Intrinsics and array methods have separate ABIs.
+    if node is? hir.FunctionCall {
+        let callee=hir.node_at(state.input.nodes node.func)
+        # Pop transfers the removed element; it no longer belongs to the
+        # shortened array. This applies to discarded pops as well as locals.
+        if callee is? hir.ArrayMethod and callee.name =? 'pop' return true
+        if callee is? hir.FunctionLiteral return true
+        if callee is? hir.ExpressedIdentifier and callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix return true
+    }
+    return false
+}
+temporary_owner = (id:addr @state:State):>bool => state.cleanup_enabled and releasable(hir.node_at(state.input.nodes id).value_type @state) and expression_owns(id @state)
+
+# A read borrows its receiver until the result is evaluated. When that
+# receiver was fresh, copy any aggregate result before releasing the owner.
+# The returned expression contains its own setup/cleanup, so skipped flow
+# arms and short-circuit operands never execute either half accidentally.
+ReadOperand:type = [value:addr owner_type:addr?]
+read_operand = (id:addr @prefix:array<addr> @state:State):>ReadOperand => {
+    let owner:addr?=if temporary_owner(id @state) hir.node_at(state.input.nodes id).value_type else none
+    let value=expression(id @state)
+    if owner isnt? none {value=snapshot(value @prefix @state)}
+    return ReadOperand[value owner]
+}
+finish_read = (value:addr receiver:ReadOperand node:hir.AST @prefix:array<addr> @state:State):>addr => {
+    if receiver.owner_type isnt? none {
+        if releasable(node.value_type @state) {value=copy_value(value node.value_type node @state)}
+        value=snapshot(value @prefix @state)
+        prefix.push(release_value(receiver.value receiver.owner_type node @state))
+    }
+    if prefix.length =? 0 return value
+    prefix.push(value)
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+}
+copy_value = (value:addr type:addr node:hir.AST @state:State):>addr => {
+    if cell_members(type @state) isnt? none return cell_copy(value type node @state)
+    let array=array_type(type state)
+    if array isnt? none return array_copy(value array node @state)
+    if object_valued(type state) return object_copy(value type node @state)
+    return value
+}
 owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.Suppress return owned_value(node.item @state)
@@ -476,33 +565,7 @@ owned_value = (id:addr @state:State):>addr => {
         if cell_members(source.value_type @state) is? none and cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state) source.value_type node.value_type node @state owned=true)
     }
     let value=expression(id @state)
-    if node is? hir.Place return value
-    if node is? hir.Block|hir.Flow and state.cleanup_enabled return value
-    # Packing a non-cell value already creates an independent payload and
-    # cell. Copying that result again abandons the first owned allocation.
-    if node is? hir.ValueCast|hir.RepresentationCast and cell_members(node.value_type @state) isnt? none {
-        let source=hir.node_at(state.input.nodes node.expr)
-        if cell_members(source.value_type @state) is? none return value
-    }
-    if node is? hir.DictLookup and not node.proven and node.default is? none {
-        let values=array_type(stored_type(node.values state) state)
-        # The stored element decides ownership. A dictionary of optional
-        # values may return an existing cell with the same optional type.
-        if values isnt? none and cell_members(values.element @state) is? none return value
-    }
-    if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index and cell_members(node.value_type @state) isnt? none {
-        if cell_members(stored_type(id state) @state) is? none return value
-    }
-    if node is? hir.DictRemove return value
-    # Ordinary Dewy calls already return independent aggregate storage: both
-    # explicit returns and implicit function results pass through this value
-    # boundary. Adopt that result instead of cloning it and abandoning its
-    # original allocation. Intrinsics and array methods have separate ABIs.
-    if node is? hir.FunctionCall {
-        let callee=hir.node_at(state.input.nodes node.func)
-        if callee is? hir.FunctionLiteral return value
-        if callee is? hir.ExpressedIdentifier and callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix return value
-    }
+    if node is? hir.Place or expression_owns(id @state) return value
     if cell_members(node.value_type @state) isnt? none return cell_copy(value node.value_type node @state)
     let array=array_type(node.value_type state)
     if array isnt? none and node isnt? hir.ArrayLiteral return array_copy(value array node @state)
@@ -581,15 +644,22 @@ array_index = (node:hir.Index @state:State writable:bool=false):>addr => {
     let prefix:array<addr>=[]
     let descriptor=snapshot((if writable write_route(node.array @state) else expression(node.array @state)) @prefix @state)
     let index=snapshot(expression(node.index @state) @prefix @state)
+    if writable {
+        let type=array_type(hir.node_at(state.input.nodes node.array).value_type state)
+        $runtime_assert type isnt? none
+        prefix.push(array_unique(descriptor type.element node @state))
+    }
+    prefix.push(array_element_address(descriptor index node @state))
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+array_element_address = (descriptor:addr index:addr node:hir.Index @state:State):>addr => {
     let type=array_type(hir.node_at(state.input.nodes node.array).value_type state)
     $runtime_assert type isnt? none
     let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
-    if writable {prefix.push(array_unique(descriptor type.element node @state))}
-    let data=intrinsic('__load_i64__' [descriptor] types.primitive('int64' @state.type_nodes) node @state)
+    let data=read_word(descriptor 0 node @state)
     let offset=word_op('__mul__' index word(layout.size node @state) node @state)
-    prefix.push(word_op('__add__' data offset node @state))
-    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    return word_op('__add__' data offset node @state)
 }
 # Copy helpers are monomorphic in storage type and shared by every use.
 # Reserve the symbol before generating its body: a recursive record through
@@ -1080,6 +1150,12 @@ test_refinements_implied = (actual:addr tested:addr @state:State):>bool => {
     return true
 }
 runtime_test = (node:hir.TypeTest @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let receiver=read_operand(node.value @prefix @state)
+    let value=runtime_test_value(receiver.value node @state)
+    return finish_read(value receiver node @prefix @state)
+}
+runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
     let actual=hir.node_at(state.input.nodes node.value).value_type
     if test_has_refinement(node.test_type state) {
         if not test_refinements_implied(actual node.test_type @state) return reject(node 'runtime refinement predicates' @state)
@@ -1095,7 +1171,7 @@ runtime_test = (node:hir.TypeTest @state:State):>addr => {
             # optional lowering. Preserve evaluation of the source once.
             let absent=subtyping.is_subtype(types.primitive('none' @state.type_nodes) node.test_type state.links @state.type_nodes)
             let prefix:array<addr>=[]
-            let source=snapshot(expression(node.value @state) @prefix @state)
+            let source=snapshot(operand @prefix @state)
             let boolean=types.primitive('bool' @state.type_nodes)
             let result=if present =? absent put(hir.Bool[node.loc boolean present] @state) else intrinsic(if present '__ne__' else '__eq__' [read_word(source 0 node @state) word(0 node @state)] boolean node @state)
             if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
@@ -1106,7 +1182,7 @@ runtime_test = (node:hir.TypeTest @state:State):>addr => {
     let enum=enum_members(actual state)
     if enum isnt? none {
         let prefix:array<addr>=[]
-        let tag=snapshot(expression(node.value @state) @prefix @state)
+        let tag=snapshot(operand @prefix @state)
         let boolean=types.primitive('bool' @state.type_nodes)
         let result=put(hir.Bool[node.loc boolean false] @state)
         loop member in enum {
@@ -1121,13 +1197,13 @@ runtime_test = (node:hir.TypeTest @state:State):>addr => {
     let members=cell_members(actual @state)
     if members is? none {
         if string_type(actual state) {
-            let result=string_type_test(expression(node.value @state) node.test_type node @state)
+            let result=string_type_test(operand node.test_type node @state)
             return if node.negated intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state) else result
         }
-        return object_test(node @state)
+        return object_test(operand node @state)
     }
     let prefix:array<addr>=[]
-    let source=snapshot(expression(node.value @state) @prefix @state)
+    let source=snapshot(operand @prefix @state)
     let tag=snapshot(read_word(source 0 node @state) @prefix @state)
     let boolean=types.primitive('bool' @state.type_nodes)
     let result=put(hir.Bool[node.loc boolean false] @state)
@@ -1521,6 +1597,7 @@ string_join = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr 
     let advance=put(hir.Assign[call.loc empty offset '=' word_op('__add__' offset length call @state)] @state)
     let fill=put(hir.LoopArm[call.loc empty running sequence([conditional(separated sequence([separator_copy advance_gap] call @state) call @state) copy advance increment] call @state)] @state)
     prefix.push(put(hir.Flow[call.loc empty [fill] none] @state))
+    prefix.push(release_value(array hir.node_at(state.input.nodes method.array).value_type call @state))
     prefix.push(segmented_string(buffer total call false @state))
     return put(hir.Block[call.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
@@ -1859,11 +1936,15 @@ brand_number = (name:string state:State):>brands.NumberedBrand? => {
     return none
 }
 field_pointer = (node:hir.MemberAccess @state:State writable:bool=false):>addr => {
+    let value=if writable write_route(node.value @state) else expression(node.value @state)
+    return field_address(value node @state)
+}
+field_address = (value:addr node:hir.MemberAccess @state:State):>addr => {
     let type=hir.node_at(state.input.nodes node.value).value_type
     let layout=object_layout(type node @state)
     let offset=layout.offsets.get(node.name)
     if offset is? none return reject(node 'a checked field is absent from its record layout' @state)
-    return address((if writable write_route(node.value @state) else expression(node.value @state)) offset node @state)
+    return address(value offset node @state)
 }
 field_read = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     if cell_members(type @state) isnt? none or object_valued(type state) return pointer
@@ -2023,9 +2104,9 @@ object_matches = (value:addr actual:addr tested:addr node:hir.AST @state:State):
     prefix.push(object_predicate(tag actual tested node @state))
     return put(hir.Block[node.loc boolean prefix false] @state)
 }
-object_test = (node:hir.TypeTest @state:State):>addr => {
+object_test = (operand:addr node:hir.TypeTest @state:State):>addr => {
     let actual=hir.node_at(state.input.nodes node.value).value_type
-    let result=object_matches(expression(node.value @state) actual node.test_type node @state)
+    let result=object_matches(operand actual node.test_type node @state)
     return if node.negated intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state) else result
 }
 
@@ -3034,6 +3115,8 @@ set_algebra = (node:hir.SetAlgebra @state:State):>addr => {
         prefix.push(algebra_entries(left right output 'absent' node @state))
         prefix.push(algebra_entries(right left output 'absent' node @state))
     } else return reject(node 'an unknown container algebra operation' @state)
+    prefix.push(release_value(left.pointer hir.node_at(state.input.nodes node.left).value_type node @state))
+    prefix.push(release_value(right.pointer hir.node_at(state.input.nodes node.right).value_type node @state))
     prefix.push(output.pointer)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
@@ -3174,6 +3257,15 @@ cleanup_since = (first:addr node:hir.AST @state:State):>array<addr> => {
     }
     return prefix
 }
+# Suppression changes the expression's visible type to void, but does not
+# remove ownership of its underlying result. Reclaim that result too.
+discarded_value = (id:addr @state:State):>addr => {
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Suppress return discarded_value(node.item @state)
+    let value=expression(id @state)
+    if temporary_owner(id @state) return release_value(value node.value_type node @state)
+    return value
+}
 cleanup_block = (node:hir.Block @state:State):>addr => {
     let start=state.cleanup_frames.length
     state.cleanup_frames.push([])
@@ -3186,7 +3278,9 @@ cleanup_block = (node:hir.Block @state:State):>addr => {
             let actual=hir.node_at(state.nodes value)
             if types.is_primitive(types.node_at(state.type_nodes actual.value_type) 'never') {prefix.push(value)}
             else {result=snapshot(value @prefix @state)}
-        } else {prefix.push(expression(item @state))}
+        } else {
+            prefix.push(discarded_value(item @state))
+        }
     }
     loop released in cleanup_since(start node @state) {prefix.push(released)}
     $runtime_assert state.cleanup_frames.length >? 0
