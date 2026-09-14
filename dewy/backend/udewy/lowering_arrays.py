@@ -1275,13 +1275,19 @@ class _ArrayLowering(_ArraySharing):
                 hir.Block(loc, ty.VOID_TYPE, [hir.Flow(loc, ty.VOID_TYPE, arms, None)], True))], None),
         ]
 
-    def _release_object_members(self, base: hir.AST, object_type: ty.ObjectType, loc, *, inline: bool = False) -> list[hir.AST]:
+    def _release_object_members(self, base: hir.AST, object_type: ty.ObjectType, loc,
+                                *, inline: bool = False, exact: bool = False) -> list[hir.AST]:
         """Give back the runtime-sized storage an object's fields own, by their
         owner words: string fields, runtime-length array fields (with their
         elements), the owned payloads of inline union cells, and nested
         objects' fields. The object's own block is the caller's business."""
         if not inline:
-            return [self._object_release_call(base, object_type, loc)]
+            return [self._object_release_call(base, object_type, loc, exact=exact)]
+        if not exact:
+            dispatched = self._record_dispatch(base, object_type, loc,
+                lambda concrete: self._object_release_call(base, concrete, loc, exact=True))
+            if dispatched is not None:
+                return dispatched
         _size, offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
         statements: list[hir.AST] = []
 
@@ -1329,7 +1335,8 @@ class _ArrayLowering(_ArraySharing):
             del statements[mark:]
             return released
 
-        statements.extend(self._by_brand(base, object_type, loc, child_fields))
+        if not exact:
+            statements.extend(self._by_brand(base, object_type, loc, child_fields))
         return statements
 
     def _release_object_elements(self, word: hir.ExpressedIdentifier, object_type: ty.ObjectType, loc, *, start: hir.AST | None = None, stop: hir.AST | None = None) -> list[hir.AST]:

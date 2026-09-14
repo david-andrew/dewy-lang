@@ -102,7 +102,8 @@ class _ObjectLowering:
         return statements, result
 
     def _object_copy_call(self, dest: hir.AST, src: hir.AST, object_type: ty.ObjectType, loc: Span,
-                          *, prepared: bool, move: bool | str, borrowed: set[str] = frozenset()) -> hir.FunctionCall:
+                          *, prepared: bool, move: bool | str, borrowed: set[str] = frozenset(),
+                          exact: bool = False) -> hir.FunctionCall:
         """Share copy code by structural type and ownership mode.
 
         Only prepared-result copies and arena-backed copies may be outlined:
@@ -110,8 +111,8 @@ class _ObjectLowering:
         Register before emitting a body so recursive union members can reuse
         the same helper rather than expand its implementation indefinitely.
         """
-        key = (object_type, prepared, move, frozenset(borrowed))
-        symbol = next((entry[4] for entry in self.object_copy_symbols if entry[:4] == key), None)
+        key = (object_type, prepared, move, frozenset(borrowed), exact)
+        symbol = next((entry[5] for entry in self.object_copy_symbols if entry[:5] == key), None)
         if symbol is None:
             symbol = self._internal_symbol(f'__dewy_copy_object_{len(self.object_copy_symbols)}')
             entry = (*key, symbol)
@@ -125,7 +126,7 @@ class _ObjectLowering:
         from .lowering_shared import LoweredFunction
         synthesized = []
         while self.pending_object_copies:
-            object_type, prepared, move, borrowed, symbol = self.pending_object_copies.pop(0)
+            object_type, prepared, move, borrowed, exact, symbol = self.pending_object_copies.pop(0)
             loc = self.root.loc
             dest = hir.ExpressedIdentifier(loc, 'int64', '__dewy_dest')
             src = hir.ExpressedIdentifier(loc, 'int64', '__dewy_src')
@@ -133,19 +134,21 @@ class _ObjectLowering:
                 statements = self._copy_object_into_result_storage(dest, src, object_type, loc, move=move, borrowed=borrowed, inline=True)
             else:
                 assert isinstance(move, bool)
-                statements = self._object_copy(dest, src, object_type, loc, arena=True, move=move, inline=True)
+                statements = self._object_copy(dest, src, object_type, loc, arena=True, move=move, inline=True, exact=exact)
             function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
             literal = hir.FunctionLiteral(loc, function_type, [hir.Param('__dewy_dest', 'int64'), hir.Param('__dewy_src', 'int64')],
                                           [], None, ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, statements, True))
             synthesized.append(LoweredFunction(symbol, literal))
         return synthesized
 
-    def _object_release_call(self, base: hir.AST, object_type: ty.ObjectType, loc: Span) -> hir.FunctionCall:
-        symbol = next((symbol for existing, symbol in self.object_release_symbols if existing == object_type), None)
+    def _object_release_call(self, base: hir.AST, object_type: ty.ObjectType, loc: Span,
+                             *, exact: bool = False) -> hir.FunctionCall:
+        symbol = next((symbol for existing, mode, symbol in self.object_release_symbols
+                       if mode == exact and existing == object_type), None)
         if symbol is None:
             symbol = self._internal_symbol(f'__dewy_release_object_{len(self.object_release_symbols)}')
-            self.object_release_symbols.append((object_type, symbol))
-            self.pending_object_releases.append((object_type, symbol))
+            self.object_release_symbols.append((object_type, exact, symbol))
+            self.pending_object_releases.append((object_type, exact, symbol))
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, symbol), [replace(base, type='int64')], {})
 
@@ -153,10 +156,10 @@ class _ObjectLowering:
         from .lowering_shared import LoweredFunction
         synthesized = []
         while self.pending_object_releases:
-            object_type, symbol = self.pending_object_releases.pop(0)
+            object_type, exact, symbol = self.pending_object_releases.pop(0)
             loc = self.root.loc
             base = hir.ExpressedIdentifier(loc, 'int64', '__dewy_value')
-            statements = self._release_object_members(base, object_type, loc, inline=True)
+            statements = self._release_object_members(base, object_type, loc, inline=True, exact=exact)
             function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
             literal = hir.FunctionLiteral(loc, function_type, [hir.Param('__dewy_value', 'int64')], [], None, ty.VOID_TYPE,
                                           hir.Block(loc, ty.VOID_TYPE, statements, True))
@@ -488,6 +491,27 @@ class _ObjectLowering:
             return []
         return [hir.Flow(loc, ty.VOID_TYPE, arms, None)]
 
+    def _record_dispatch(self, source: hir.AST, object_type: ty.ObjectType, loc: Span,
+                         operation: Callable[[ty.ObjectType], hir.AST]) -> list[hir.AST] | None:
+        """Select one complete concrete-field helper through a parent view.
+
+        Copying/releasing only each parent's extra fields expands the same
+        field operations at every level of a hierarchy. A dynamic brand
+        instead selects a shared helper for all of that concrete type's
+        fields. Nested records still dispatch on their own independent brand.
+        """
+        children = self._descendant_extra_fields(object_type)
+        if not children:
+            return None
+        ids = ty.brand_ids()
+        brand_word = self._brand_word_load(source, object_type, loc)
+        arms = [hir.IfArm(loc, ty.VOID_TYPE,
+                    self._typed_equality(brand_word, self._int64_literal(loc, ids[brand][0]), 'int64', loc),
+                    hir.Block(loc, ty.VOID_TYPE, [operation(child)], True))
+                for brand, child, _extras in children if brand in ids]
+        return [hir.Flow(loc, ty.VOID_TYPE, arms,
+                        hir.Block(loc, ty.VOID_TYPE, [operation(object_type)], True))]
+
     def _field_size_align(self, type_: ty.Type, node: hir.AST) -> tuple[int, int]:
         if type_ == 'bool':
             return 1, 1
@@ -571,12 +595,18 @@ class _ObjectLowering:
         arena: bool = False,
         move: bool = False,
         inline: bool = False,
+        exact: bool = False,
     ) -> list[hir.AST]:
         """Copy every field; with ``arena``, nested mutable storage is arena-backed too.
         A minted object's brand word is copied, and the fields a child carries
         beyond the static type follow, selected by that brand at runtime."""
         if arena and not inline:
-            return [self._object_copy_call(dest, src, object_type, loc, prepared=False, move=move)]
+            return [self._object_copy_call(dest, src, object_type, loc, prepared=False, move=move, exact=exact)]
+        if arena and not exact:
+            dispatched = self._record_dispatch(src, object_type, loc,
+                lambda concrete: self._object_copy_call(dest, src, concrete, loc, prepared=False, move=move, exact=True))
+            if dispatched is not None:
+                return dispatched
         _size, offsets = self._object_layout(object_type, dest)
 
         def copy_field(field: ty.ObjectField, dest_addr: hir.AST, src_addr: hir.AST) -> list[hir.AST]:
@@ -657,7 +687,8 @@ class _ObjectLowering:
                 copied.extend(copy_field(field, self._field_address(dest, child_offsets[field.name], loc), self._field_address(src, child_offsets[field.name], loc)))
             return copied
 
-        statements.extend(self._by_brand(src, object_type, loc, child_fields))
+        if not exact:
+            statements.extend(self._by_brand(src, object_type, loc, child_fields))
         return statements
 
     def _extract_object_literal(
