@@ -1,0 +1,20 @@
+# A full-library check of the binary-view rule. Case folding searches an
+# included Unicode table repeatedly; reading one word must not copy it.
+# Dynamic strings still have arena lifetime, so bound their small allocations
+# separately from the forbidden whole-table copies.
+let live=():>int64=>_arena_live_bytes
+let copied=():>int64=>_arena_copied_bytes
+let exercise=():>bool=>{
+    loop i in 0.. and i <? 1000 {
+        if 'AbC'.casefold not=?'abc' return false
+    }
+    return true
+}
+let main=():>int64=>{
+    let before=live()
+    let copied_before=copied()
+    if not exercise() return 2
+    if copied()-copied_before >?131072 return 3
+    if live()-before >?8388608 return 1
+    return 42
+}

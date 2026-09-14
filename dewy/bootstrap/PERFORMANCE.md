@@ -208,3 +208,9 @@ compiler fails its copy-counter check. Both output backends now pass the
 zero-copy and bounded-retention checks; a direct-backend allocation measurement
 reports exactly zero retained arena bytes. Dynamic string/view lifetimes remain unfinished and
 are a separate issue; they were not the whole-table-copy path measured here.
+
+A full-library workload also checks 1,000 `'AbC'.casefold` operations against
+the actual included table. Native lowering copies zero payload bytes and
+retains 408,000 arena bytes in the current string representation. The pair's
+execution checks include this workload, with separate copy and retention
+limits, before allowing generation two to start.

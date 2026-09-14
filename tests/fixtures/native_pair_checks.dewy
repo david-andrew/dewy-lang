@@ -19,6 +19,7 @@ import p"native_read_temporaries.dewy" as reads
 import p"native_iterator_temporaries.dewy" as iterators
 import p"native_static_strings.dewy" as strings
 import p"native_binary_views.dewy" as binaries
+import p"native_casefold_scaling.dewy" as casefold
 
 let main=():>int64=>{
     printl('Checking sibling field facts')
@@ -59,5 +60,7 @@ let main=():>int64=>{
     if strings.main() not=?42 return 18
     printl('Checking binary table views')
     if binaries.main() not=?42 return 19
+    printl('Checking Unicode table read scaling')
+    if casefold.main() not=?42 return 20
     return 42
 }
