@@ -44,12 +44,24 @@ let main=():>int64=>{
 '''
 
 
+BRANDED = (NESTED
+    .replace('Record:type=[items:array<int64>]',
+             'Record=$abstract type of [items:array<int64>]\n'
+             'Small=type of Record & []\nLarge=type of Record & [padding:int64]')
+    .replace('Record[[42]] Record[[7]]', 'Small[[42]] Large[[7] 99]')
+    .replace('Record[[]]', 'Small[[]]')
+    .replace('values.pop;', 'let removed=values.pop\n'
+             '        if removed isnt?Large or removed.padding not=?99 return false')
+)
+
+
 @pytest.mark.parametrize('target', ['x86_64', 'c'])
 @pytest.mark.parametrize('body', [
     (ROOT / 'tests/fixtures/native_read_temporaries.dewy').read_text(),
     NESTED,
     NESTED.replace('values.pop;', 'values.pop(1);'),
-], ids=['scalar-records', 'nested-records', 'indexed-records'])
+    BRANDED,
+], ids=['scalar-records', 'nested-records', 'indexed-records', 'branded-records'])
 def test_popped_records_release_roots_and_preserve_retained_fields(tmp_path, target, body):
     source = tmp_path / 'popped-records.dewy'
     source.write_text(body)
