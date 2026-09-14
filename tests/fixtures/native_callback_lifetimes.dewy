@@ -1,0 +1,39 @@
+# Callback dispatch must not retain every fact-state snapshot. Both possible
+# leaves read the state and update only their explicit data place. Wrapping a
+# returned state in an optional still gives the caller an independent value.
+State:type=[items:array<int64>]
+Data:type=[calls:int64]
+Leaf:type=<(state:State @data:Data):>State?>
+let copied=():>int64=>_arena_copied_bytes
+let live=():>int64=>_arena_live_bytes
+let first=(state:State @data:Data):>State?=>{data.calls+=1 return state}
+let second=(state:State @data:Data):>State?=>{data.calls+=2 return state}
+let apply=(state:State @data:Data leaf:Leaf):>State?=>leaf(state @data)
+let count=(state:State @data:Data leaf:Leaf):>int64=>{
+    let found=apply(state @data @leaf)
+    if found is? none return -1
+    return found.items.length
+}
+let grow=():>bool=>{
+    let state=State[[]]
+    let data=Data[0]
+    loop i in 0.. and i <? 512 {
+        let n=if i % 2 =? 0 count(state @data @first) else count(state @data @second)
+        if n not=? i return false
+        state.items.push(i)
+    }
+    return data.calls =? 768
+}
+let main=():>int64=>{
+    let before=copied()
+    if not grow() return 1
+    if copied() not=? before return 2
+    let baseline=live()
+    if not grow() return 3
+    if live()-baseline >?4096 return 4
+    let state=State[[42]]
+    let data=Data[0]
+    let saved=apply(state @data @first)
+    state.items[0]=99
+    return if saved isnt? none and saved.items.length >? 0 and saved.items[0] =?42 42 else 5
+}

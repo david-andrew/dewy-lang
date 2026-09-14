@@ -1,0 +1,19 @@
+# An indirect call can select either a reader or a writer. Merge their effects
+# without replacing the runtime callback or borrowing writable value storage.
+State:type=[items:array<int64>]
+Leaf:type=<(state:State):>State?>
+let read=(state:State):>State?=>state
+let write=(state:State):>State?=>{
+    if state.items.length >?0 {state.items[0]=99}
+    return state
+}
+let apply=(state:State leaf:Leaf):>State?=>leaf(state)
+let main=():>int64=>{
+    let original=State[[42]]
+    let changed=apply(original @write)
+    let unchanged=apply(original @read)
+    if original.items[0] not=?42 return 1
+    if changed is? none or unchanged is? none return 2
+    if changed.items.length =?0 or unchanged.items.length =?0 return 3
+    return if changed.items[0] =?99 and unchanged.items[0] =?42 42 else 4
+}

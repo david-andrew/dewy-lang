@@ -3,6 +3,8 @@ import p"../../semantic/ty.dewy" as types
 import p"../../semantic/analyze/effects.dewy" as effects
 import p"captures.dewy" as captures
 import p"emit.dewy" as emit
+import p"callbacks.dewy" as callbacks
+import p"../../semantic/subtyping.dewy" as subtyping
 
 # Value copies remain the default. A direct callee may borrow a read-only
 # aggregate argument when no later argument or place can change its storage.
@@ -90,7 +92,7 @@ shares_storage = (call:hir.FunctionCall target:addr plan:captures.Plan nodes:arr
     loop argument in arguments(call) {if hir.node_at(nodes argument) is? hir.Place return true}
     return false
 }
-ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<types.Type> opaque_only:bool=false value_boundaries:bool=false):>set<addr> => {
+ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<types.Type> opaque_only:bool=false value_boundaries:bool=false indirect:dict<addr array<addr>>=[]):>set<addr> => {
     let dirty:set<addr>=set[]
     let dependencies:dict<addr set<addr>>=[]
     loop [id function] in plan.functions {
@@ -99,6 +101,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
         $runtime_assert literal is? hir.FunctionLiteral
         let called:set<addr>=set[]
         let pending:array<addr>=[literal.body]
+        loop parameter in effects.literal_params(literal) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
         let seen:set<addr>=set[]
         loop pending.length >? 0 {
             let child=pending.pop
@@ -120,12 +123,14 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
             if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) {dirty.add(id)}
             if node is? hir.FunctionCall {
                 let callee=hir.node_at(nodes node.func)
-                if callee is? hir.ExpressedIdentifier {
-                    let target=captures.resolve(node.func node.selected_method_index plan nodes)
-                    if target isnt? none {
+                let direct=captures.resolve(node.func node.selected_method_index plan nodes)
+                let targets:array<addr> | none = if direct is? none indirect.get(node.func) else [direct]
+                if targets isnt? none {
+                    loop target in targets {
                         if not value_boundaries or shares_storage(node target plan nodes) {called.add(target)}
                     }
-                    else if (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix) or callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') {dirty.add(id)}
+                } else if callee is? hir.ExpressedIdentifier {
+                    if (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix) or callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') {dirty.add(id)}
                 } else if callee is? hir.ArrayMethod {
                     # A sort invokes its key inside the method. In particular
                     # a function-valued parameter can hide ambient writes;
@@ -154,17 +159,21 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
 }
 Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>>]
 analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
-details = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan):>Plan => {
-    let summaries=effects.analyze_effects(root nodes type_nodes)
-    let dirty=ambient_writers(plan nodes type_nodes)
+details = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan links:array<subtyping.Link>=subtyping.default_links):>Plan => {
+    let indirect=callbacks.analyze(root nodes type_nodes plan links)
+    # Checked value casts borrow while evaluating but do not expose raw
+    # storage. At a value boundary lowering supplies an independent owner,
+    # including an aggregate wrapped into an optional result.
+    let summaries=effects.analyze_effects(root nodes type_nodes indirect value_casts_escape=false)
+    let dirty=ambient_writers(plan nodes type_nodes indirect=indirect)
     # Raw address operations and unknown callbacks can expose storage even
     # without a declared place. They always require the ordinary value copy;
     # writes to unrelated globals only matter for an aliasing place source.
-    let opaque=ambient_writers(plan nodes type_nodes opaque_only=true)
+    let opaque=ambient_writers(plan nodes type_nodes opaque_only=true indirect=indirect)
     # Borrowing must also exclude indirect raw writes that could alias caller
     # storage. Releasing an already independent snapshot only requires proving
     # that this snapshot was not itself exposed beyond the call.
-    let retaining=ambient_writers(plan nodes type_nodes opaque_only=true value_boundaries=true)
+    let retaining=ambient_writers(plan nodes type_nodes opaque_only=true value_boundaries=true indirect=indirect)
     let places:set<addr>=set[]
     loop id in plan.functions.keys {
         let literal=hir.node_at(nodes id)
@@ -188,41 +197,50 @@ details = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:capt
         if node isnt? hir.FunctionCall continue
         let callee=hir.node_at(nodes node.func)
         let direct=captures.resolve(node.func node.selected_method_index plan nodes)
-        if direct is? none {
+        let targets:array<addr> | none = if direct is? none indirect.get(node.func) else [direct]
+        if targets is? none {
             loop argument in arguments(node) {if hir.node_at(nodes argument) is? hir.Place {unsafe_places.add(argument)}}
             continue
         }
-        let literal=hir.node_at(nodes direct)
-        $runtime_assert literal is? hir.FunctionLiteral
-        let pairs=effects.pair_arguments(node literal)
-        if pairs is? none {
-            loop argument in arguments(node) {if hir.node_at(nodes argument) is? hir.Place {unsafe_places.add(argument)}}
-            continue
+        let allowed_all:set<addr>=set[]
+        loop argument in arguments(node) {allowed_all.add(argument)}
+        let temporary_all=allowed_all
+        loop direct in targets {
+            let literal=hir.node_at(nodes direct)
+            $runtime_assert literal is? hir.FunctionLiteral
+            let pairs=effects.pair_arguments(node literal)
+            if pairs is? none {
+                loop argument in arguments(node) {if hir.node_at(nodes argument) is? hir.Place {unsafe_places.add(argument)}}
+                allowed_all.clear temporary_all.clear
+                break
+            }
+            loop pair in pairs {
+                if hir.node_at(nodes pair.argument) isnt? hir.Place continue
+                let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
+                if summary isnt? none and summary.escapes.length =? 0 {safe_places.add(pair.argument)}
+                else {unsafe_places.add(pair.argument)}
+            }
+            let allowed:set<addr>=set[]
+            let rejected:set<addr>=set[]
+            let temporary:set<addr>=set[]
+            let retained:set<addr>=set[]
+            let position:addr=0
+            loop pair in pairs {
+                let source=route(pair.argument nodes)
+                let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
+                if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.add(pair.argument)}
+                else {retained.add(pair.argument)}
+                if direct not in? opaque and source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
+                else {rejected.add(pair.argument)}
+                position+=1
+            }
+            # A shared expression must be safe at every argument position,
+            # and an indirect call must be safe for every possible callee.
+            allowed_all=allowed_all & (allowed-rejected)
+            temporary_all=temporary_all & (temporary-retained)
         }
-        loop pair in pairs {
-            if hir.node_at(nodes pair.argument) isnt? hir.Place continue
-            let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
-            if summary isnt? none and summary.escapes.length =? 0 {safe_places.add(pair.argument)}
-            else {unsafe_places.add(pair.argument)}
-        }
-        let allowed:set<addr>=set[]
-        let rejected:set<addr>=set[]
-        let temporary:set<addr>=set[]
-        let retained:set<addr>=set[]
-        let position:addr=0
-        loop pair in pairs {
-            let source=route(pair.argument nodes)
-            let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
-            if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.add(pair.argument)}
-            else {retained.add(pair.argument)}
-            if direct not in? opaque and source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
-            else {rejected.add(pair.argument)}
-            position+=1
-        }
-        # A shared HIR expression used at two positions is borrowed only if
-        # both positions are safe; one earlier snapshot must not be lost.
-        result[id]=allowed-rejected
-        disposable[id]=temporary-retained
+        result[id]=allowed_all
+        disposable[id]=temporary_all
     }
     let escaping:set<addr>=set[]
     loop id in seen {

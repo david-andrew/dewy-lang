@@ -253,3 +253,44 @@ initial 4 GiB guard stopped that integration run after compilation; separate
 60-second, 6 GiB probes established these bounded peaks. This is a substantial
 improvement over the preceding unbounded reader copies, but the full-prelude
 cost remains high and the native fixed-point comparison is still pending.
+
+## Callback argument lifetimes
+
+The next larger native-reader check exposed retained snapshots in the bounds
+pass's higher-order predicate traversal. Its leaf callback returns an optional
+fact state and receives separate analysis data by place. Treating every such
+call as an unknown storage escape prevents reclaiming the state and context
+arguments, even when every possible leaf only reads those values.
+
+Native storage analysis now merges all checked function literals compatible
+with a callback parameter's signature. Borrowing and temporary reclamation
+must be safe for every candidate; dispatch still calls the supplied pointer.
+A compatible writer therefore prevents borrowing even if a particular caller
+usually supplies a reader. This is an internal effect analysis, with no new
+source-language feature or change to evaluation order.
+
+The closed-program assumption applies only while all callable values originate
+from checked literals. Raw access to callable storage disables this inference.
+Records count conservatively because a branded descendant can contain extra
+function-valued fields. Removing a quantity dimension while preserving the
+underlying representation does not expose raw storage. Supporting separately
+linked Dewy code or escaping closures will require revisiting this boundary.
+
+Ordinary value conversions, including optional wrappers, preserve independent
+ownership at argument, return, and assignment boundaries. Native storage
+analysis can therefore distinguish those conversions from raw exposure; the
+general semantic effect analysis retains its conservative default behavior.
+
+The callback fixtures test merged reader/writer effects, optional return value
+independence, raw-ingress fallback, and repeated read/append reclamation.
+`native_predicate_path_scaling.dewy` additionally exercises the actual generic
+`predicate_paths.refine` and conjunction traversal over a growing HIR arena.
+Run positive callback performance gates separately from fixtures deliberately
+exposing raw records: combining them legitimately disables the closed-program
+inference for the resulting executable.
+
+The bounded callback kernel passes through native lowering on both backends.
+For 512 read/append iterations its direct executable measures zero copied
+array payload bytes and zero retained arena bytes after a second run. The
+larger predicate-path fixture copies 1,058,816 bytes with the preceding seed;
+its updated full-prelude validation and the native fixed point remain gates.

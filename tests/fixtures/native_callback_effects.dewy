@@ -1,0 +1,69 @@
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/semantic/subtyping.dewy" as subtyping
+import p"../../dewy/bootstrap/backend/udewy/captures.dewy" as captures
+import p"../../dewy/bootstrap/backend/udewy/callbacks.dewy" as callbacks
+import p"../../dewy/bootstrap/backend/udewy/borrowing.dewy" as borrowing
+let main=():>int64=>{
+    let nodes:array<hir.AST>=[]
+    let ts:array<types.Type>=[]
+    let loc=Span[0 0]
+    let empty=types.primitive('void' @ts)
+    let word=types.primitive('int64' @ts)
+    let array=types.array_type(word none @ts)
+    let signature=types.function_type([types.PosOrKwArg['values' array]] [] none word [] @ts)
+    let caller_type=types.function_type([types.PosOrKwArg['callback' signature] types.PosOrKwArg['values' array]] [] none word [] @ts)
+    let zero=hir.append_node(@nodes hir.Integer[loc word '0d' 0])
+    let value=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' 10])
+    let length=hir.append_node(@nodes hir.ArrayLength[loc word value])
+    let reader=hir.append_node(@nodes hir.FunctionLiteral[loc signature [hir.Param['values' array 10]] [] none word length])
+    let mutated=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' 11])
+    let replacement=hir.append_node(@nodes hir.ArrayLiteral[loc array []])
+    let assign=hir.append_node(@nodes hir.Assign[loc empty mutated '=' replacement])
+    let body=hir.append_node(@nodes hir.Block[loc word [assign zero] true])
+    let writer=hir.append_node(@nodes hir.FunctionLiteral[loc signature [hir.Param['values' array 11]] [] none word body])
+    let callback=hir.append_node(@nodes hir.ExpressedIdentifier[loc signature 'callback' 20])
+    let argument=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' 21])
+    let call=hir.append_node(@nodes hir.FunctionCall[loc word callback [argument] []])
+    let caller=hir.append_node(@nodes hir.FunctionLiteral[loc caller_type [hir.Param['callback' signature 20] hir.Param['values' array 21]] [] none word call])
+    let items:array<addr>=[
+        hir.append_node(@nodes hir.Declare[loc empty 'let' 'reader' signature reader 100])
+        hir.append_node(@nodes hir.Declare[loc empty 'let' 'writer' signature writer 101])
+        hir.append_node(@nodes hir.Declare[loc empty 'let' 'caller' caller_type caller 102])
+    ]
+    let root=hir.append_node(@nodes hir.Block[loc empty items true])
+    let plan=captures.analyze(root nodes set[10 11 20 21 100 101 102])
+    let known=callbacks.analyze(root nodes ts plan subtyping.default_links)
+    let targets=known.get(callback [])
+    if targets.length not=?2 or reader not in? targets or writer not in? targets return 1
+    let ownership=borrowing.details(root nodes ts plan)
+    if argument in? ownership.arguments.get(call set[]) return 2
+    if argument not in? ownership.disposable_arguments.get(call set[]) return 3
+    # Ordinary byte-buffer exposure cannot manufacture a code pointer.
+    let bytes=types.array_type(types.primitive('uint8' @ts) none @ts)
+    items.push(hir.append_node(@nodes hir.Transmute[loc bytes zero]))
+    let byte_root=hir.append_node(@nodes hir.Block[loc empty items true])
+    if callbacks.analyze(byte_root nodes ts plan subtyping.default_links).length not=?1 return 4
+    # Removing a quantity's dimension preserves its record representation.
+    let record=types.object_type([types.ObjectField['value' word]] none false [] [] @ts)
+    let quantity=types.quantity_type(record types.dimension([types.DimensionPower['Time' 1]] @ts) @ts)
+    let object=hir.append_node(@nodes hir.ObjectLiteral[loc quantity [hir.ObjectField[loc 'value' zero]]])
+    let unchanged=hir.append_node(@nodes hir.Transmute[loc record object])
+    let quantity_items=items
+    quantity_items.push(unchanged)
+    let quantity_root=hir.append_node(@nodes hir.Block[loc empty quantity_items true])
+    if callbacks.analyze(quantity_root nodes ts plan subtyping.default_links).length not=?1 return 7
+    # Exposing that same record as an address must stay conservative: a
+    # branded descendant may have additional function-valued fields.
+    quantity_items.push(hir.append_node(@nodes hir.Transmute[loc word unchanged]))
+    let record_root=hir.append_node(@nodes hir.Block[loc empty quantity_items true])
+    if callbacks.analyze(record_root nodes ts plan subtyping.default_links).length not=?0 return 8
+    # Raw function-pointer ingress must restore conservative unknown calls.
+    items.push(hir.append_node(@nodes hir.Transmute[loc signature zero]))
+    let raw_root=hir.append_node(@nodes hir.Block[loc empty items true])
+    if callbacks.analyze(raw_root nodes ts plan subtyping.default_links).length not=?0 return 5
+    let raw=borrowing.details(raw_root nodes ts plan)
+    if argument in? raw.arguments.get(call set[]) or argument in? raw.disposable_arguments.get(call set[]) return 6
+    return 42
+}

@@ -29,6 +29,8 @@ Analysis:type = [
     literals:array<addr>=[] declares:dict<addr addr>=[]
     reassigned:set<addr>=set[] param_ids:set<addr>=set[]
     effects:dict<addr FunctionEffects>=[]
+    callback_targets:dict<addr array<addr>>=[]
+    value_casts_escape:bool=true
 ]
 ResolvedRoute:type = [binding_id:addr route:Route inner:array<addr>]
 ArgumentPair:type = const [argument:addr parameter:addr?]
@@ -155,6 +157,8 @@ flatten_callable = (id:addr seen:set<addr> analysis:Analysis nodes:array<hir.AST
     return flatten_callable(declared.expr seen analysis nodes)
 }
 direct_targets = (call:hir.FunctionCall analysis:Analysis nodes:array<hir.AST>):>array<addr> | none => {
+    let callback=analysis.callback_targets.get(call.func)
+    if callback isnt? none return callback
     let targets = flatten_callable(call.func set[] analysis nodes)
     if targets is? none return none
     if call.selected_method_index isnt? none {
@@ -294,9 +298,11 @@ visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:arr
         let changed:bool = false
         if node is? hir.Place { changed = opaque(resolved.binding_id resolved.route @params) }
         else {
-            # Until cast aliasing is modeled, a view may retain its source.
+            # General semantic consumers remain conservative about views.
+            # Storage lowering can instead use its independent value-boundary
+            # ownership rules; wrapping an optional does not expose a pointer.
             changed = record(resolved.binding_id 'read' resolved.route @params)
-            if record(resolved.binding_id 'escape' resolved.route @params) { changed = true }
+            if analysis.value_casts_escape and record(resolved.binding_id 'escape' resolved.route @params) { changed = true }
         }
         if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
         return changed
@@ -364,8 +370,10 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis
     return changed
 }
 
-analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type>):>ProgramEffects => {
+analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> callback_targets:dict<addr array<addr>>=[] value_casts_escape:bool=true):>ProgramEffects => {
     let analysis = collect(root nodes)
+    analysis.callback_targets=callback_targets
+    analysis.value_casts_escape=value_casts_escape
     # These are may-effects: each iteration can only add coverage. Accumulate
     # into the previous summary rather than rebuilding and comparing whole
     # dictionaries. Prefix normalization plus MAX_ROUTE_DEPTH bounds the
@@ -378,7 +386,11 @@ analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type>):
             let summary = analysis.effects[id]
             let literal = hir.node_at(nodes id)
             $runtime_assert literal is? hir.FunctionLiteral
-            if visit(literal.body @summary.params analysis nodes type_nodes) {
+            let updated=visit(literal.body @summary.params analysis nodes type_nodes)
+            loop parameter in literal_params(literal) {
+                if parameter is? hir.BoundParam and visit(parameter.value @summary.params analysis nodes type_nodes) {updated=true}
+            }
+            if updated {
                 analysis.effects[id] = summary
                 changed = true
             }

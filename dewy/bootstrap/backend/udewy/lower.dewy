@@ -2385,7 +2385,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
     discover(root @state)
     state.capture_plan=captures.analyze(root input.nodes state.symbols.keys)
-    let borrowed=borrowing.details(root input.nodes input.types state.capture_plan)
+    let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links)
     state.borrowed_arguments=borrowed.arguments
     state.disposable_arguments=borrowed.disposable_arguments
     state.escaping_places=borrowed.escaping_places

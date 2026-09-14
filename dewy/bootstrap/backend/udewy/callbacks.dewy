@@ -1,0 +1,117 @@
+import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/ty.dewy" as types
+import p"../../semantic/subtyping.dewy" as subtyping
+import p"../../semantic/analyze/effects.dewy" as effects
+import p"captures.dewy" as captures
+
+# This executable has no separately linked Dewy functions or escaping closure
+# ABI. Without raw function-pointer ingress/exposure, every callable value
+# comes from a checked function literal. For an indirect parameter call we can
+# merge the effects of ALL type-compatible literals. This is an overestimate,
+# not devirtualization: the runtime call still uses the supplied pointer.
+#
+# A raw pointer conversion or memory access involving callable storage opens
+# that world again. Keep the ordinary unknown-callback rules for such programs.
+storage_type = (type:addr nodes:array<types.Type>):>addr => {
+    let current=type
+    loop true {
+        current=types.unfold(types.strip_refinement(current nodes) nodes)
+        let node=types.node_at(nodes current)
+        if node isnt? types.QuantityType return current
+        current=node.number
+    }
+}
+contains_callable = (root:addr nodes:array<types.Type>):>bool => {
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=types.node_at(nodes id)
+        if node is? types.CallableType return true
+        if node is? types.Primitive and node.name in? ['any' 'function'] return true
+        if node is? types.RefinedType {pending.push(node.base)}
+        else if node is? types.NamedType {
+            if node.target is? none return true
+            pending.push(node.target)
+        }
+        else if node is? types.TypeVariable {pending.push(node.bound)}
+        else if node is? types.TypeParameterize {pending.push(node.head) loop item in node.args {pending.push(item)}}
+        else if node is? types.QuantityType {pending.push(node.number)}
+        else if node is? types.ArrayType {pending.push(node.element)}
+        else if node is? types.TypeAnd|types.TypeOr|types.SequenceType {loop item in node.items {pending.push(item)}}
+        else if node is? types.TypeNot return true
+        # A value seen through a base record can carry additional branded
+        # fields, including a function pointer. Raw record access therefore
+        # opens the world even when this particular view lists no callbacks.
+        else if node is? types.ObjectType return true
+    }
+    return false
+}
+analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan links:array<subtyping.Link>):>dict<addr array<addr>> => {
+    let parameters:set<addr>=set[]
+    loop id in plan.functions.keys {
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        loop parameter in effects.literal_params(literal) {
+            if parameter.binding_id isnt? none {parameters.add(parameter.binding_id)}
+        }
+    }
+    let calls:array<hir.FunctionCall>=[]
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    let callable_storage:dict<addr bool>=[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(nodes id)
+        let exposed:array<addr>=[]
+        if node is? hir.Transmute {
+            let source=hir.node_at(nodes node.expr).value_type
+            # Removing a dimension or refinement keeps the same value. In
+            # particular, rational time -> rational does not expose an address
+            # merely because the numeric representation happens to be a record.
+            if not types.same_type(storage_type(source type_nodes) storage_type(node.value_type type_nodes) type_nodes) {exposed=[node.value_type source]}
+        }
+        if node is? hir.FunctionCall {
+            let callee=hir.node_at(nodes node.func)
+            if callee is? hir.ExpressedIdentifier and (callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall')) {
+                exposed.push(node.value_type)
+                loop argument in node.pos_args {exposed.push(hir.node_at(nodes argument).value_type)}
+            }
+            if callee is? hir.ExpressedIdentifier and callee.binding_id isnt? none and callee.binding_id in? parameters {calls.push(node)}
+        }
+        loop type in exposed {
+            if type not in? callable_storage {callable_storage[type]=contains_callable(type type_nodes)}
+            if callable_storage[type] return []
+        }
+        loop child in hir.children(node) {
+            let value=hir.node_at(nodes child)
+            # An intrinsic/external symbol used as a value has no checked
+            # literal to summarize. Direct intrinsic calls are ordinary HIR.
+            if (node isnt? hir.FunctionCall or child not=? node.func) and value is? hir.ExpressedIdentifier {
+                if (value.binding_id is? none or (value.binding_id not in? parameters and value.binding_id not in? plan.definitions)) and contains_callable(value.value_type type_nodes) return []
+            }
+            pending.push(child)
+        }
+    }
+    let signatures:dict<addr array<addr>>=[]
+    let result:dict<addr array<addr>>=[]
+    loop call in calls {
+        let signature=types.strip_refinement(hir.node_at(nodes call.func).value_type type_nodes)
+        if types.node_at(type_nodes types.unfold(signature type_nodes)) isnt? types.FunctionType continue
+        if signature not in? signatures {
+            let targets:array<addr>=[]
+            loop id in plan.functions.keys {
+                let literal=hir.node_at(nodes id)
+                if subtyping.is_subtype(literal.value_type signature links @type_nodes) {targets.push(id)}
+            }
+            signatures[signature]=targets
+        }
+        let targets=signatures[signature]
+        if targets.length >? 0 {result[call.func]=targets}
+    }
+    return result
+}
