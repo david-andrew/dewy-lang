@@ -67,18 +67,33 @@ concrete = (name:string registry:Registry):>bool => {
     return entry is? none or not entry.abstract
 }
 
-number_family = (name:string registry:Registry @next:addr @output:array<NumberedBrand>):>void => {
+# Number a completed forest with one adjacency index. Looking up each
+# family's children by scanning the whole registry made numbering quadratic.
+# Child insertion order and postorder output preserve the existing tags.
+child_index = (registry:Registry):>dict<string array<string>> => {
+    let result:dict<string array<string>>=[]
+    loop entry in registry.entries {
+        if entry.parent is? none continue
+        let children=result.get(entry.parent [])
+        children.push(entry.name)
+        result[entry.parent]=children
+    }
+    return result
+}
+number_indexed_family = (name:string children:dict<string array<string>> @next:addr @output:array<NumberedBrand>):>void => {
     let first = next
     next += 1
-    let immediate = children(name registry)
-    loop child in immediate { number_family(child registry @next @output) }
+    loop child in children.get(name []) { number_indexed_family(child children @next @output) }
     output.push(NumberedBrand[name first next])
 }
+number_family = (name:string registry:Registry @next:addr @output:array<NumberedBrand>):>void =>
+    number_indexed_family(name child_index(registry) @next @output)
 numbered = (registry:Registry):>array<NumberedBrand> => {
     let output:array<NumberedBrand> = []
     let next:addr = 1
+    let children=child_index(registry)
     loop entry in registry.entries {
-        if entry.parent is? none { number_family(entry.name registry @next @output) }
+        if entry.parent is? none { number_indexed_family(entry.name children @next @output) }
     }
     return output
 }

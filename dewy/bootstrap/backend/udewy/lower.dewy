@@ -49,7 +49,12 @@ State:type = [
     layout_context:layouts.Context=layouts.Context[]
     record_layouts:dict<addr layouts.Record>=[]
     links:array<subtyping.Link>=subtyping.default_links
-    brand_numbers:array<brands.NumberedBrand>=[]
+    brand_numbers:dict<string brands.NumberedBrand>=[]
+    # Checked descriptions stay stable while lowering only appends runtime
+    # types. Each successful representation is validated once in this state.
+    runtime_types:dict<addr addr>=[]
+    # A real cell has alternatives; an empty cached list means no cell.
+    cell_types:dict<addr array<addr>>=[]
     storage_types:dict<addr addr>=[]
     capture_plan:captures.Plan=captures.Plan[]
     borrowed_arguments:dict<addr set<addr>>=[]
@@ -101,6 +106,15 @@ unit_type = (id:addr state:State):>bool => {
     return plain in? state.layout_context.nominals or types.is_primitive(types.node_at(state.type_nodes plain) 'none')
 }
 runtime_type = (id:addr node:hir.AST @state:State):>addr => {
+    let cached=state.runtime_types.get(id)
+    if cached isnt? none return cached
+    let result=runtime_type_uncached(id node @state)
+    # Failure locations belong to their source use. Do not memoize a fallback
+    # representation from a failed validation as if it were a supported type.
+    if state.problem is? none {state.runtime_types[id]=result}
+    return result
+}
+runtime_type_uncached = (id:addr node:hir.AST @state:State):>addr => {
     # A negative type test restricts values without changing the positive
     # family's storage. Keep those exclusions out of representation queries.
     let plain=views.structural_base(id state.type_nodes)
@@ -1013,10 +1027,15 @@ array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State)
 # Views retain tags when their alternatives remain the same. Splitting or
 # combining record families converts the tags at the read/cast boundary.
 cell_members = (id:addr @state:State):>array<addr>|none => {
+    # Most calls ask about a non-cell type. Cache negative answers too, while
+    # distinguishing them from a type that has not been queried yet.
+    let cached=state.cell_types.get(id)
+    if cached isnt? none return if cached.length =? 0 none else cached
     let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
     let payload=views.optional_payload(plain @state.type_nodes)
-    if payload isnt? none return [types.primitive('none' @state.type_nodes) payload]
-    return views.runtime_union_members(plain @state.type_nodes)
+    let result:array<addr>|none=if payload isnt? none [types.primitive('none' @state.type_nodes) payload] else views.runtime_union_members(plain @state.type_nodes)
+    state.cell_types[id]=if result is? none [] else result
+    return result
 }
 member_tag = (type:addr @state:State):>addr => {
     let plain=types.unfold(types.strip_refinement(type state.type_nodes) state.type_nodes)
@@ -2104,10 +2123,7 @@ object_layout = (id:addr node:hir.AST @state:State):>layouts.Record => {
     state.record_layouts[plain]=layout
     return layout
 }
-brand_number = (name:string state:State):>brands.NumberedBrand? => {
-    loop brand in state.brand_numbers {if brand.name =? name return brand}
-    return none
-}
+brand_number = (name:string state:State):>brands.NumberedBrand? => state.brand_numbers.get(name)
 field_pointer = (node:hir.MemberAccess @state:State writable:bool=false):>addr => {
     let value=if writable write_route(node.value @state) else expression(node.value @state)
     return field_address(value node @state)
@@ -2658,7 +2674,8 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
 }
 
 lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:array<subtyping.Link>=subtyping.default_links):>Result|Error => {
-    let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links brand_numbers=brands.numbered(layout_context.brands)]
+    let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links]
+    loop brand in brands.numbered(layout_context.brands) {state.brand_numbers[brand.name]=brand}
     let block=hir.node_at(input.nodes root)
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
     discover(root @state)

@@ -580,3 +580,32 @@ attribution to the hoist. A small brand regression overlaps part of the
 larger comparison. Union retention, capture facts, and the original capture
 corpus fixture pass direct/C checks with this driver. Artifacts:
 `cleanup-exclusions/{build,gates}.log` and `cleanup-exclusions/compare.py`.
+
+## Cache native runtime representations and index brand numbering
+
+Lowering now memoizes successful runtime-type validation and cell alternatives
+within its own stable type arena, including negative cell answers. Failed
+validation is not cached: a later use still reports its own source span.
+Brand numbering builds one child adjacency index, and lowering looks up
+numbered brands by name. Registry insertion order and the existing tags stay
+unchanged; neither cache survives a compilation.
+
+A 150-function kernel with nested record and array fields lowers in
+**5.61/5.68 s versus 8.04/7.89 s**, emitting the same **59,047 bytes** in all
+four samples. The direct/C executions return 42, as do the union-retention,
+capture-facts and local-capture cases. Scoped-cache tests cover distinct
+arenas, appended types, modified returned lists and failure locations;
+brand tests cover numbering order and independently modified registries.
+The sharing/lifetime follow-up passes 13 tests. These remain bounded kernel
+results, not full-build acceptance measurements.
+
+The cache work exposed a hosted array-union widening bug: consumers received
+the tag-cell address instead of its active array descriptor. The correction
+covers branches, fresh call results, declarations, assignment, returns and
+arguments on direct/C backends. Native lowering already handles the narrowed
+optional-array case. The expanded explicit overlapping-array-union case is
+still rejected by native checking and is recorded separately in the parity
+inventory. Artifacts: `native-type-cache-final/{gates,widening}.log`,
+`native-runtime-type-final-gates.log`, `native-brand-index-final-gates.log`,
+and `array-union-{consumer-corrected,sharing}-gates.log`. The earlier
+`native-type-cache` driver contains the hosted bug and is not a valid seed.

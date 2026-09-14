@@ -37,6 +37,22 @@ main = ():>int64 => {{
     printl(brands.most_specific_first(['Other' 'Root' 'Right' 'Left' 'Grand'] registry).join(','))
     printl(brands.concrete('Root' registry))
     printl(brands.concrete('Left' registry))
+    # A second numbering observes newly registered children, while numbering
+    # a saved registry still describes that earlier independent forest.
+    let saved=registry
+    let late=types.object_type([] 'Late' false [] [] @nodes minted=true parent=right)
+    brands.register(late @registry nodes)
+    let updated=brands.numbered(registry)
+    let before=brands.numbered(saved)
+    $runtime_assert updated.length =? 6 and before.length =? numbered.length
+    loop i in 0.. and i <? before.length and i <? numbered.length {{
+        $runtime_assert before[i].name =? numbered[i].name
+        $runtime_assert before[i].first =? numbered[i].first and before[i].end =? numbered[i].end
+    }}
+    loop entry in updated {{
+        if entry.name =? 'Root' {{$runtime_assert entry.first =? 1 and entry.end =? 6}}
+        if entry.name =? 'Other' {{$runtime_assert entry.first =? 6 and entry.end =? 7}}
+    }}
     return 0
 }}
 ''')
@@ -51,6 +67,7 @@ main = ():>int64 => {{
     monkeypatch.setattr(ty, 'USER_BRAND_PARENTS', {'Left': 'Root', 'Right': 'Root', 'Grand': 'Left'})
     monkeypatch.setattr(ty, 'USER_ABSTRACT_BRANDS', {'Root'})
     assert actual == ty.brand_ids()
+    assert list(actual) == list(ty.brand_ids())  # stable postorder, not just intervals
     assert order.splitlines() == [','.join(ty.brand_children('Root')), ','.join(ty.brand_descendants('Root')),
                                   ','.join(ty.brand_ancestry('Grand')), ty.brand_root('Grand'),
                                   'Grand,Right,Left,Other,Root', 'false', 'true']

@@ -27,6 +27,30 @@ those cases. All other stderr remains byte-exact. Applying that policy to the
 saved assertion-failure result removes its semantic parity failure; the raw
 baseline counts and missing native value notes above remain recorded.
 
+## Additional observations from optimization regressions
+
+These are outside the original corpus counts:
+
+- `tests/fixtures/array_union_widening.dewy` now passes hosted direct/C
+  execution after fixing array descriptor extraction. Native lowering passes
+  its narrowed optional-array case, but native checking still rejects the
+  explicit `array<int64 length=2>|array<int64>` return when a fixed array fits
+  both alternatives (`selecting among overlapping union materializations`).
+- Comparing two separately constructed arrays of equal records with `=?`
+  currently returns false in both compilers. The numbering regression exposed
+  this while comparing independent snapshots; checking each field confirms
+  that their contents match. Agreement here is not evidence of correct value
+  comparison. Clarify the array comparison contract, including its relation
+  to planned vectorized comparisons, before expanding this behavior. The
+  isolated reproducer and both executions are retained in
+  `phase0-performance/array-equality-probe.{dewy,log}`.
+- The hosted compiler rejects an optional array as a container element,
+  including the value of `dict<addr (array<addr>|none)>`, despite supporting
+  arrays and optionals separately. The native lowering query cache uses an
+  empty member list for a non-cell type; an actual cell always has members.
+  This internal encoding does not close the general optional-array container
+  gap.
+
 ## Execution and output differences
 
 | Fixture | Baseline result | Follow-up |
