@@ -94,6 +94,65 @@ let _arena_release = (block:int64 size:int64):>void => {
     return void
 }
 
+# Native immutable strings use a private descriptor and shared byte/boundary
+# backing. This is an implementation ownership boundary, not a source alias.
+# The 40-byte control stores refs, data, data size, boundaries, boundary size.
+# A descriptor's owner word (offset 40) is zero for immortal literals. Views
+# retain the original control even when their boundary/data pointers shift.
+let _native_string_owner = (data:int64 size:int64 boundaries:int64 boundary_size:int64):>int64 => {
+    let owner=_arena_alloc(40)
+    __store_i64__(1 owner)
+    __store_i64__(data owner+8)
+    __store_i64__(size owner+16)
+    __store_i64__(boundaries owner+24)
+    __store_i64__(boundary_size owner+32)
+    return owner
+}
+let _native_string_view_owner = (value:int64):>int64 => {
+    let owner=__load_i64__(value+40)
+    # Static views own their descriptor, but never the literal's buffers.
+    if owner =? 0 return _native_string_owner(0 0 0 0)
+    let refs=__load_i64__(owner)
+    if refs >? 0 {__store_i64__(refs+1 owner)}
+    return owner
+}
+let _native_string_copy = (value:int64):>int64 => {
+    let owner=__load_i64__(value+40)
+    if owner =? 0 return value
+    let refs=__load_i64__(owner)
+    if refs <? 0 return value
+    let copy=_arena_alloc(48)
+    let offset:int64=0
+    loop offset <? 48 {
+        __store_i64__(__load_i64__(value+offset) copy+offset)
+        offset+=8
+    }
+    __store_i64__(refs+1 owner)
+    return copy
+}
+let _native_string_release = (value:int64):>void => {
+    if value =? 0 return void
+    let owner=__load_i64__(value+40)
+    if owner =? 0 return void
+    let refs=__load_i64__(owner)
+    # Raw exposure has no tracked lifetime. Pin the backing and descriptor.
+    if refs <? 0 return void
+    refs-=1
+    __store_i64__(refs owner)
+    if refs =? 0 {
+        _arena_release(__load_i64__(owner+8) __load_i64__(owner+16))
+        _arena_release(__load_i64__(owner+24) __load_i64__(owner+32))
+        _arena_release(owner 40)
+    }
+    _arena_release(value 48)
+    return void
+}
+let _native_string_pin = (value:int64):>int64 => {
+    let owner=__load_i64__(value+40)
+    if owner not=? 0 {__store_i64__((-1) owner)}
+    return value
+}
+
 # Regions — the scoped-arena tier. A region is a bump allocator over 64 KB
 # chunks (an oversized allocation gets a chunk of its own) that is released
 # as a whole: its chunks go back to a free list for the next region. The
