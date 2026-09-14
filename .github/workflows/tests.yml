@@ -10,6 +10,13 @@ name: Run test suite
 permissions:
   contents: read
 
+# One run in progress and at most one pending per branch: a newer push
+# replaces the pending run instead of queueing behind every intermediate
+# commit, and the run already in progress is left to finish.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   pytest:
     runs-on: ubuntu-latest
