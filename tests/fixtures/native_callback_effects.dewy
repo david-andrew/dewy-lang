@@ -54,6 +54,13 @@ let main=():>int64=>{
     quantity_items.push(unchanged)
     let quantity_root=hir.append_node(@nodes hir.Block[loc empty quantity_items true])
     if callbacks.analyze(quantity_root nodes ts plan subtyping.default_links).length not=?1 return 7
+    # A top-level iterator is another checked lexical binding, even though
+    # it has no Declare node and is not local to any function in the plan.
+    let iterator=hir.append_node(@nodes hir.ExpressedIdentifier[loc record 'item' 300])
+    let iterable=hir.append_node(@nodes hir.ArrayLiteral[loc types.array_type(record none @ts) [unchanged]])
+    quantity_items.push(hir.append_node(@nodes hir.IteratorExpression[loc types.primitive('bool' @ts) iterator iterable 0 1 none none]))
+    let iterator_root=hir.append_node(@nodes hir.Block[loc empty quantity_items true])
+    if callbacks.analyze(iterator_root nodes ts plan subtyping.default_links).length not=?1 return 9
     # Exposing that same record as an address must stay conservative: a
     # branded descendant may have additional function-valued fields.
     quantity_items.push(hir.append_node(@nodes hir.Transmute[loc word unchanged]))

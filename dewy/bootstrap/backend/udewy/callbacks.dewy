@@ -51,7 +51,14 @@ contains_callable = (root:addr nodes:array<types.Type>):>bool => {
 }
 analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:captures.Plan links:array<subtyping.Link>):>dict<addr array<addr>> => {
     let parameters:set<addr>=set[]
-    loop id in plan.functions.keys {
+    # Iterators and sibling-field bindings have checked origins too, although
+    # they are not Declare nodes. Include every lexical binding before deciding
+    # that an identifier denotes an external callable/storage source.
+    let bindings=plan.globals
+    let discovered:set<addr>=set[]
+    captures.locals(root nodes @bindings @discovered)
+    loop [id function] in plan.functions {
+        loop binding in function.locals {bindings.add(binding)}
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         loop parameter in effects.literal_params(literal) {
@@ -92,7 +99,7 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:capt
             # An intrinsic/external symbol used as a value has no checked
             # literal to summarize. Direct intrinsic calls are ordinary HIR.
             if (node isnt? hir.FunctionCall or child not=? node.func) and value is? hir.ExpressedIdentifier {
-                if (value.binding_id is? none or (value.binding_id not in? parameters and value.binding_id not in? plan.definitions)) and contains_callable(value.value_type type_nodes) return []
+                if (value.binding_id is? none or (value.binding_id not in? bindings and value.binding_id not in? plan.definitions)) and contains_callable(value.value_type type_nodes) return []
             }
             pending.push(child)
         }

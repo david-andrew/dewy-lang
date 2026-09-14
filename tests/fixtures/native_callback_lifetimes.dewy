@@ -6,7 +6,12 @@ Data:type=[calls:int64]
 Leaf:type=<(state:State @data:Data):>State?>
 let copied=():>int64=>_arena_copied_bytes
 let live=():>int64=>_arena_live_bytes
-let first=(state:State @data:Data):>State?=>{data.calls+=1 return state}
+let first=(state:State @data:Data):>State?=>{
+    # The iterator binding is a checked local, not an external record source.
+    # Reporting in the full prelude uses this same pattern.
+    loop item in [state] {data.calls+=1 if item.items.length not=? state.items.length return none}
+    return state
+}
 let second=(state:State @data:Data):>State?=>{data.calls+=2 return state}
 let apply=(state:State @data:Data leaf:Leaf):>State?=>leaf(state @data)
 let count=(state:State @data:Data leaf:Leaf):>int64=>{
