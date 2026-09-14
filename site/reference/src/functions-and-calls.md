@@ -93,7 +93,7 @@ let TokenError:type = type of error
 let TokenProtocol:type = [eat:<(src:string):>uint64? | TokenError>]
 Whitespace = type of TokenProtocol & [eat = (src:string):>uint64? => if src.startswith(" ") 1 else none]
 
-count = ():>int64 => {
+count = ():>uint64 => {
     let table:array<TokenProtocol> = [Whitespace]
     return match table[0].eat(" x") { n:uint64 => n  <none> => 0  <TokenError> => 0 }   # `Whitespace.eat` returns `uint64?`; the slot reads it
 }
