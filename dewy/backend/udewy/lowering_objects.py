@@ -1285,7 +1285,10 @@ class _ObjectLowering:
     ) -> list[hir.AST]:
         """Write an object into a complete storage tree owned by the caller."""
 
-        if isinstance(item, hir.FunctionCall):
+        # A child-returning callee expects its child's whole prepared tree.
+        # A parent destination has room for that child, but only its parent
+        # fields were prepared. Materialize and copy differing layouts below.
+        if isinstance(item, hir.FunctionCall) and ty.unfold(item.type) == object_type:
             destination_prelude, destination = self._result_destination_identifier(
                 dest,
                 object_type,
@@ -1334,6 +1337,7 @@ class _ObjectLowering:
     ) -> list[hir.AST]:
         """Initialize an object literal without replacing prepared child storage."""
 
+        prepared_type = object_type
         literal_type = ty.unfold(node.type)
         if isinstance(literal_type, ty.ObjectType) and ty.user_branded(literal_type) and literal_type != object_type and (
             ty.user_brand_descends(literal_type, object_type) or ty.user_brand_carries(literal_type, object_type)
@@ -1362,6 +1366,12 @@ class _ObjectLowering:
                     prelude, handle = self._arena_array_field_value(field.value, field_type)
                     statements.extend(prelude)
                     statements.extend(self._value_store(handle, address, field_type, field.loc))
+                elif isinstance(field_type, ty.ArrayType) and prepared_type.field(field.name) is None:
+                    # The caller prepared only the parent fields. A selected
+                    # child's extra storage must outlive this writing frame.
+                    prelude, value = self._stored_array_value(field.value, field_type)
+                    statements.extend(prelude)
+                    statements.extend(self._value_store(value, address, field_type, field.loc))
                 elif isinstance(field_type, ty.ArrayType):
                     nested_dest = self._value_load(
                         address,
@@ -1375,6 +1385,10 @@ class _ObjectLowering:
                             field_type,
                         )
                     )
+                elif isinstance(field_type, ty.ObjectType) and prepared_type.field(field.name) is None:
+                    prelude, source = self._extract_object_pointer(field.value)
+                    statements.extend(prelude)
+                    statements.extend(self._object_copy(address, source, field_type, field.loc, arena=True))
                 elif isinstance(field_type, ty.ObjectType):
                     statements.extend(
                         self._write_object_result_value(
@@ -1450,7 +1464,7 @@ class _ObjectLowering:
             hir.Void(loc, ty.VOID_TYPE),
         )
 
-        def copy_field(field: ty.ObjectField, dest_address: hir.AST, source_address: hir.AST) -> list[hir.AST]:
+        def copy_field(field: ty.ObjectField, dest_address: hir.AST, source_address: hir.AST, *, prepared: bool = True) -> list[hir.AST]:
             statements: list[hir.AST] = []
             members = self._field_union_members(field.type)
             if members is not None:
@@ -1478,6 +1492,11 @@ class _ObjectLowering:
                 )
                 statements.extend(prelude)
                 statements.extend(self._value_store(copied, dest_address, field.type, loc))
+            elif isinstance(field.type, ty.ArrayType) and not prepared:
+                source_array = self._value_load(source_address, field.type, loc)
+                prelude, copied = self._clone_array_value(replace(source_array, type='int64'), field.type, arena=True, move=bool(move))
+                statements.extend(prelude)
+                statements.extend(self._value_store(copied, dest_address, field.type, loc))
             elif isinstance(field.type, ty.ArrayType):
                 target_array = self._value_load(dest_address, field.type, loc)
                 source_array = self._value_load(source_address, field.type, loc)
@@ -1490,6 +1509,8 @@ class _ObjectLowering:
                         source_is_pointer=True,
                     )
                 )
+            elif isinstance(field.type, ty.ObjectType) and not prepared:
+                statements.extend(self._object_copy(dest_address, source_address, field.type, loc, arena=True, move=bool(move)))
             elif isinstance(field.type, ty.ObjectType):
                 statements.extend(
                     self._copy_object_into_result_storage(
@@ -1528,7 +1549,7 @@ class _ObjectLowering:
             _child_size, child_offsets = self._object_layout(child_type, hir.Void(loc, ty.VOID_TYPE))
             copied: list[hir.AST] = []
             for field in extras:
-                copied.extend(copy_field(field, self._field_address(dest, child_offsets[field.name], loc), self._field_address(src, child_offsets[field.name], loc)))
+                copied.extend(copy_field(field, self._field_address(dest, child_offsets[field.name], loc), self._field_address(src, child_offsets[field.name], loc), prepared=False))
             return copied
 
         statements.extend(self._by_brand(src, object_type, loc, child_fields))

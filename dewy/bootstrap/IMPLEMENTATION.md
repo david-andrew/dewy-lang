@@ -83,12 +83,13 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   presence tests ignore read-length annotations, while a narrowed general
   union continues to use its original storage alternatives.
 
-- Hosted prepared parent-record storage still has a fixed-array gap:
-  constructing `Child[0 [20 22]]` in `Parent | int64`, where Child adds an
-  `array<int64 length=2>` field, reserves the child's bytes but does not
-  initialize its nested array descriptor. Growable array fields work. The
-  fixed-array path needs preparation of the selected descendant's nested
-  storage; initializing every descendant at once would overlap their fields.
+- Hosted prepared parent-record storage now allocates the selected child's
+  extra fixed arrays and nested records with escaping lifetimes. Reserving
+  the child's bytes alone did not prepare those descriptors. Calls with a
+  different result layout materialize before copying into the parent slot;
+  same-layout calls retain destination forwarding. Regressions cover literal
+  and call results, parent copies, nested fields, independent mutation, and
+  replacement with a differently shaped descendant on both backends.
 
 - Checked function defaults are children of native HIR function literals.
   Proof discharge, helper reachability, representation selection, and nested

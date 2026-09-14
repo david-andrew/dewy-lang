@@ -54,6 +54,62 @@ Box:type=[node:Token]
 
 
 @pytest.mark.parametrize('target', ['x86_64', 'c'])
+@pytest.mark.parametrize('expression', ['ArrayChild[0 [20 22]]', 'make_child()', 'make_parent()', 'copy_parent(make_parent())'])
+def test_parent_result_prepares_selected_child_array(tmp_path, target, expression):
+    source = tmp_path / 'fixed-child.dewy'
+    source.write_text('''
+ArrayParent=$abstract type of [loc:int64]
+ArrayChild=type of ArrayParent & [items:array<int64 length=2>]
+ArrayOther=type of ArrayParent & [padding:int64 items:array<int64 length=3>]
+let make_child=():>ArrayChild=>ArrayChild[0 [20 22]]
+let make_parent=():>ArrayParent=>ArrayChild[0 [20 22]]
+let copy_parent=(value:ArrayParent):>ArrayParent=>value
+let read=(value:ArrayParent|int64):>int64=>{
+    if value is? ArrayChild return value.items[0]+value.items[1]
+    return 1
+}
+let main=():>int64=>{
+    let value:ArrayParent|int64=''' + expression + '''
+    let saved=value
+    if saved is? ArrayChild {saved.items[0]=99}
+    if read(value) not=?42 return 2
+    value=ArrayOther[0 999 [1 2 3]]
+    if value is? ArrayOther {if value.items[2] not=?3 return 3}
+    value=make_parent()
+    return read(value)
+}
+''')
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), target=target))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_parent_result_copies_nested_child_storage(tmp_path, target):
+    source = tmp_path / 'nested-child.dewy'
+    source.write_text('''
+NestedParent=$abstract type of [loc:int64]
+NestedChild=type of NestedParent & [data:[items:array<int64 length=2>]]
+let make_nested=():>NestedParent=>NestedChild[0 [items=[20 22]]]
+let copy_nested=(value:NestedParent):>NestedParent=>value
+let main=():>int64=>{
+    let original:NestedParent|int64=copy_nested(make_nested())
+    let saved=original
+    if saved is? NestedChild {saved.data.items[0]=99}
+    if original is? NestedChild return original.data.items[0]+original.data.items[1]
+    return 1
+}
+''')
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), target=target))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
 def test_child_view_predicate_uses_converted_tags(tmp_path, target):
     source = tmp_path / 'nested-predicate.dewy'
     source.write_text(FIELD_FAMILY + '''
