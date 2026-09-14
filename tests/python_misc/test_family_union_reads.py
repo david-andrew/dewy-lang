@@ -54,6 +54,32 @@ Box:type=[node:Token]
 
 
 @pytest.mark.parametrize('target', ['x86_64', 'c'])
+@pytest.mark.parametrize('array_type', ['array<int64>', 'array<int64 length=2>'])
+def test_return_local_parent_keeps_nested_child_storage(tmp_path, target, array_type):
+    source = tmp_path / 'returned-local.dewy'
+    source.write_text('''
+NestedParent=$abstract type of [loc:int64]
+NestedChild=type of NestedParent & [data:[items:''' + array_type + ''']]
+let make=():>NestedParent=>NestedChild[0 [items=[20 22]]]
+let returned=():>NestedParent=>{let local=make() return local}
+let main=():>int64=>{
+    let value=returned()
+    let other=returned()
+    if other is? NestedChild and other.data.items.length >?0 {other.data.items[0]=99}
+    if value is? NestedChild {
+        if value.data.items.length >=?2 return value.data.items[0]+value.data.items[1]
+    }
+    return 1
+}
+''')
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), target=target))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
 @pytest.mark.parametrize('expression', ['ArrayChild[0 [20 22]]', 'make_child()', 'make_parent()', 'copy_parent(make_parent())'])
 def test_parent_result_prepares_selected_child_array(tmp_path, target, expression):
     source = tmp_path / 'fixed-child.dewy'

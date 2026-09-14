@@ -1494,7 +1494,7 @@ class _ObjectLowering:
                 statements.extend(self._value_store(copied, dest_address, field.type, loc))
             elif isinstance(field.type, ty.ArrayType) and not prepared:
                 source_array = self._value_load(source_address, field.type, loc)
-                prelude, copied = self._clone_array_value(replace(source_array, type='int64'), field.type, arena=True, move=bool(move))
+                prelude, copied = self._clone_array_value(replace(source_array, type='int64'), field.type, arena=True, move=move is True)
                 statements.extend(prelude)
                 statements.extend(self._value_store(copied, dest_address, field.type, loc))
             elif isinstance(field.type, ty.ArrayType):
@@ -1510,7 +1510,11 @@ class _ObjectLowering:
                     )
                 )
             elif isinstance(field.type, ty.ObjectType) and not prepared:
-                statements.extend(self._object_copy(dest_address, source_address, field.type, loc, arena=True, move=bool(move)))
+                # `adopt` still releases the source local after returning.
+                # The unprepared copy helper cannot clear its moved fields,
+                # so retain an independent copy for that case. Only a dead
+                # temporary (move=True) permits transferring the whole tree.
+                statements.extend(self._object_copy(dest_address, source_address, field.type, loc, arena=True, move=move is True))
             elif isinstance(field.type, ty.ObjectType):
                 statements.extend(
                     self._copy_object_into_result_storage(
