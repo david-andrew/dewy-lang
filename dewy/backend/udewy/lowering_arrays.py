@@ -3136,6 +3136,7 @@ class _ArrayLowering(_ArraySharing):
                 'array call results require an exact compile-time length',
             )
         result = self.array_result_destinations.pop(id(node), None)
+        fresh = result is None
         if result is None:
             allocation, result = self._allocate_array_result_value(
                 node.type,
@@ -3151,6 +3152,12 @@ class _ArrayLowering(_ArraySharing):
                 kw_args=kw_args,
             )
         )
+        if fresh and self._has_arena():
+            # The result buffer is frame storage, but its elements may own
+            # records, cells, and nested arrays. A length/index read must
+            # release those after the statement just like a dynamic result.
+            # A forwarded destination already belongs to its caller.
+            return self._array_result_temporary(node, result, prelude)
         return prelude, result
 
     def _array_result_write(self, item: hir.AST) -> list[hir.AST]:
