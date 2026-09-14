@@ -25,6 +25,11 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Dictionary insertion detaches shared entry storage before reserving
+  capacity. Detaching can reduce capacity to the live length, so reversing
+  that order could append beyond the replacement buffer. A regression copies
+  a scope record and extends its dictionary through several growth boundaries.
+
 - Native lowering makes a diverging function tail explicit for µDewy's
   syntactic return check. Calls to `never` functions keep their behavior;
   lowering appends an unreachable return, as the hosted backend does. This

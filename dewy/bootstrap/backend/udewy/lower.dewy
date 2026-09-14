@@ -2592,6 +2592,10 @@ dict_push = (descriptor:addr value:addr element:addr node:hir.AST @state:State):
     let layout=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let prefix:array<addr>=[]
+    # Detaching shared storage can reduce capacity to the live length.
+    # Reserve against that new capacity before appending, just as ordinary
+    # array push does; detaching at the final store would invalidate reserve.
+    prefix.push(array_unique(descriptor element node @state))
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @prefix @state)
     let next=word_op('__add__' length word(1 node @state) node @state)
     prefix.push(array_reserve(descriptor next layout.size node @state))
