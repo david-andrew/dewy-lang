@@ -19,6 +19,14 @@ Keep this inventory separate from performance acceptance and fixed-point
 verification. The follow-up work remains bidirectional, even though these
 particular fixtures all pass on the hosted baseline.
 
+The current runner gives expected runtime reports explicit assertions in
+`tests/fixtures/compiler_parity_expectations.json`: the exit, ordinary stdout,
+failure kind/location and evaluated user message must agree with expectations.
+It records byte differences in stderr, but extra diagnostic notes do not fail
+those cases. All other stderr remains byte-exact. Applying that policy to the
+saved assertion-failure result removes its semantic parity failure; the raw
+baseline counts and missing native value notes above remain recorded.
+
 ## Execution and output differences
 
 | Fixture | Baseline result | Follow-up |

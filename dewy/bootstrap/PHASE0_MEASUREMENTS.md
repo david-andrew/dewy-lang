@@ -27,6 +27,10 @@ language rejection. Exact diagnostic wording is not part of parity.
 The default inventory includes ten isolated rejection fixtures for names,
 initialization, types, bounds, const mutation and stored contracts. Both
 baseline compilers reject all ten at the language-checking boundary.
+Expected runtime reports use explicit `diagnostic_stderr` fragments from the
+fixture expectations, checked independently along with exit/stdout. Those
+reports may differ in formatting or additional notes; raw stderr differences
+remain in the record. Ordinary program stderr still requires exact bytes.
 
 ## Initial bounded baseline — 2026-09-14
 

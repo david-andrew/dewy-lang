@@ -1,9 +1,12 @@
 """Compare hosted and native acceptance and execution, one fixture at a time.
 
 Use the existing end-to-end fixture expectations by default, or supply a JSON
-list of {source, accepts, exit, args, stdout} cases. Rejections need only source
-and accepts=false. Compiler errors, timeouts and runtime failures are recorded
-separately. A failed fixture never prevents later fixtures from being checked.
+list of {source, accepts, exit, args, stdout} cases. An expected runtime report
+can specify diagnostic_stderr as a nonempty list of required report fragments;
+only those cases permit diagnostic formatting/notes to differ. Rejections need
+only source and accepts=false. Compiler errors, timeouts and runtime failures
+are recorded separately. A failed fixture never prevents later fixtures from
+being checked.
 """
 from __future__ import annotations
 
@@ -30,6 +33,11 @@ def fixture_cases() -> list[dict]:
                       and any(isinstance(target, ast.Name) and target.id == 'LOWERED_CASES' for target in node.targets))
     accepted = [{'source': f'dewy/tests/{name}', 'accepts': True, 'exit': status}
                 for name, status in ast.literal_eval(assignment.value)]
+    expectations = json.loads((ROOT / 'tests/fixtures/compiler_parity_expectations.json').read_text())
+    for case in accepted:
+        case.update(expectations.pop(case['source'], {}))
+    if expectations:
+        raise ValueError(f'parity expectations reference absent fixtures: {list(expectations)}')
     rejected = json.loads((ROOT / 'tests/fixtures/compiler_parity_rejections.json').read_text())
     return [*accepted, *rejected]
 
@@ -55,12 +63,23 @@ def expected_outcome(case: dict, result: dict, work: Path) -> bool:
     if case['accepts']:
         run = result.get('run', {})
         return (compiled['status'] == 0 and run.get('status') == case['exit']
-                and ('stdout' not in case or run.get('stdout') == case['stdout']))
+                and ('stdout' not in case or run.get('stdout') == case['stdout'])
+                and ('diagnostic_stderr' not in case or
+                     bool(case['diagnostic_stderr']) and all(
+                         fragment in run.get('stderr', '') for fragment in case['diagnostic_stderr'])))
     # A timeout, signal, traceback, or backend failure is not a successful
     # language-level rejection. Keep this distinct from a program exiting 1.
     return (compiled['status'] == 1 and 'Error:' in compiled['stderr']
             and 'Traceback' not in compiled['stderr']
             and not list(work.rglob('*.udewy')))
+
+
+def same_output(case: dict, left: dict, right: dict) -> bool:
+    # Ordinary stderr is program output and remains byte-exact. For an
+    # explicitly specified failure report, each implementation has already
+    # passed its expected fragments, exit and stdout checks independently.
+    streams = ('stdout_hex',) if case.get('diagnostic_stderr') else ('stdout_hex', 'stderr_hex')
+    return all(left[key] == right[key] for key in streams)
 
 
 def main() -> int:
@@ -121,7 +140,8 @@ def main() -> int:
             (work / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         if all(outcomes) and case['accepts']:
             left, right = record['hosted']['run'], record['native']['run']
-            record['same_output'] = all(left[key] == right[key] for key in ('stdout_hex', 'stderr_hex'))
+            record['same_output'] = same_output(case, left, right)
+            record['same_stderr_bytes'] = left['stderr_hex'] == right['stderr_hex']
         record['passed'] = all(outcomes) and record.get('same_output', True)
         passed += record['passed']
         with (output / 'results.jsonl').open('a') as results:
