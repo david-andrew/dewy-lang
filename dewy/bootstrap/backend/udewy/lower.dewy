@@ -524,11 +524,13 @@ expression_owns = (id:addr @state:State):>bool => {
         # adopt it; temporary reads/discarded conversions must reclaim it.
         if type is? types.BinaryLiteralType or string_type(source.value_type state) return true
     }
-    if node is? hir.ValueCast {
+    if node is? hir.ValueCast|hir.RepresentationCast {
         let source=hir.node_at(state.input.nodes node.expr)
         if cell_members(source.value_type @state) isnt? none and temporary_owner(node.expr @state) return true
-        if object_valued(source.value_type state) and object_valued(node.value_type state) return expression_owns(node.expr @state)
-        if array_valued(source.value_type state) and array_valued(node.value_type state) return expression_owns(node.expr @state)
+        if node is? hir.ValueCast {
+            if object_valued(source.value_type state) and object_valued(node.value_type state) return expression_owns(node.expr @state)
+            if array_valued(source.value_type state) and array_valued(node.value_type state) return expression_owns(node.expr @state)
+        }
     }
     if node is? hir.StringConcat|hir.InterpolatedString|hir.StringIndex|hir.StringSlice return true
     if node is? hir.ValueCast|hir.RepresentationCast and owned_string(node.value_type state) {
@@ -612,7 +614,7 @@ copy_value = (value:addr type:addr node:hir.AST @state:State):>addr => {
 # the enclosing result is one ordinary array type. Extracting the payload
 # must not abandon that cell. Retagging may itself create a new cell on only
 # some paths; release that intermediate only when it differs from the source.
-owned_cell_cast = (node:hir.ValueCast actual:addr @state:State):>addr => {
+owned_cell_cast = (node:hir.ValueCast|hir.RepresentationCast actual:addr @state:State):>addr => {
     let prefix:array<addr>=[]
     let source=snapshot(expression(node.expr @state) @prefix @state)
     let value=if enum_members(node.value_type state) isnt? none enum_pack(source actual node.value_type node @state) else read_value(source actual node.value_type node @state)
@@ -1773,6 +1775,10 @@ representation = (node:hir.RepresentationCast @state:State):>addr => {
         prefix.push(result)
         return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
     }
+    # Both logical and representation conversions can consume a fresh union
+    # result. Preserve its payload before retiring the source cell instead
+    # of treating that result as a borrowed binding and abandoning it.
+    if cell_members(source.value_type @state) isnt? none and temporary_owner(node.expr @state) return owned_cell_cast(node source.value_type @state)
     if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) source.value_type node.value_type node @state)
     if enum_members(source.value_type state) isnt? none return enum_read(expression(node.expr @state) source.value_type node.value_type node @state)
     if cell_members(node.value_type @state) isnt? none {

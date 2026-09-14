@@ -447,10 +447,16 @@ All 62 selected union, sharing, record and popped-element checks pass.
 The preliminary representation-only t0 comparison shrinks emitted text from
 3,697,407 to 3,606,809 bytes (2.5%). Its 4.7–5.4 second in-process compilation
 samples show no reliable latency improvement and precede the lifetime fixes.
-The native kernel passes the value checks but fails this new retention
-budget; that remains a native ownership follow-up, not a parity success.
+The native kernel initially passed the value checks but retained 40,800
+bytes per 300 iterations. Representation casts now use the owned-cell
+conversion path already used for logical casts, retiring fresh source cells
+and any intermediate retagged cell after preserving the result. The same
+kernel now passes the 4 KiB budget on both direct and C routes. Capture and
+wide-range regressions pass with that native lowering driver too; full native
+driver validation remains part of the next integration checkpoint.
 Artifacts: `active-union-{t0,final-gates,lifetimes}.log` and
-`active-union/{probes,native-gates}.log`.
+`active-union/{probes,native-gates,native-retention-probe}.log`, plus
+`owned-cell-casts/{gates,boundary-gates}.log`.
 
 ## Shared array release operations
 
