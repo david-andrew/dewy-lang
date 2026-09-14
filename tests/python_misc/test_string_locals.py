@@ -1,6 +1,9 @@
 """String locals own their values: released at scope exit, moved by `return s`, and every returned string is the caller's."""
 import re
 
+import pytest
+from tests.python_misc.test_scalar_projection import execute
+
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 
@@ -21,15 +24,6 @@ HEAD = (
 )
 
 
-def test_an_owning_local_is_released_by_owner_word_at_scope_exit_and_before_reassignment() -> None:
-    emitted = _compile(HEAD + 'let round = ():>int64 => {\n    let s:string = join2("a" "b")\n    s = join2(s "x")\n    return s.length\n}\nlet main = ():>int64 => round()\n')
-    body = _function(emitted, 'round')
-    assigned = re.search(r'let __dewy_string_assigned_\d+:int64 = join2\([^\n]+\)', body)
-    assert assigned is not None
-    assert assigned.start() < body.index('if __load_i64__(s + 40) =? 1 {')   # the new value first …
-    assert body.count('if __load_i64__(s + 40) =? 1 {') == 2                      # … then the old one, and again at exit
-
-
 def test_a_returned_parameter_comes_back_as_a_view_and_a_fresh_result_as_it_is() -> None:
     emitted = _compile(HEAD + 'let main = ():>int64 => pick("ab" true).length\n')
     pick = _function(emitted, 'pick')
@@ -37,26 +31,6 @@ def test_a_returned_parameter_comes_back_as_a_view_and_a_fresh_result_as_it_is()
     assert re.search(r'__store_i64__\(2 __dewy_string_returned_view_\d+ \+ 40\)', pick)
     # … while `text.trim` (a call) is returned as it is
     assert re.search(r'let __dewy_string_returned_\d+:int64 = \S+string_trim\(text\)\n\s*return __dewy_string_returned_\d+', pick)
-
-
-def test_return_s_moves_and_a_return_reaching_s_copies() -> None:
-    emitted = _compile(HEAD + 'let moved = ():>string => {\n    let s:string = join2("a" "b")\n    return s\n}\nlet copied = ():>string => {\n    let s:string = join2("a" "b")\n    return pick(s true)\n}\nlet main = ():>int64 => moved().length + copied().length\n')
-    moved = _function(emitted, 'moved')
-    assert 'if __load_i64__(s + 40) =? 1 {' not in moved                 # nothing released: the caller takes it
-    copied = _function(emitted, 'copied')
-    assert re.search(r'if __load_i64__\(__dewy_string_returned_\d+ \+ 40\) =\? 2 \{', copied)   # a view of `s` is copied
-    assert 'if __load_i64__(s + 40) =? 1 {' in copied                     # and `s` released
-
-
-def test_a_call_result_nothing_keeps_is_a_temporary_released_after_its_statement() -> None:
-    emitted = _compile(HEAD + 'let main = ():>int64 => {\n    printl(join2("a" "b"))\n    return 0\n}\n')
-    main = _function(emitted, '__dewy_user_main')
-    # declared empty at the statement's top, assigned where it arises, released by owner word after
-    assigned = re.search(r'(__dewy_string_temp_\d+) = join2\(', main)
-    assert assigned, main
-    temp = assigned.group(1)
-    assert f'let {temp}:int64 = 0' in main
-    assert f'if __load_i64__({temp} + 40) =? 1 {{' in main
 
 
 def test_stack_descriptors_clear_their_owner_word() -> None:
@@ -67,30 +41,28 @@ def test_stack_descriptors_clear_their_owner_word() -> None:
         assert f'__store_i64__(0 {name} + 40)' in emitted
 
 
-def test_an_array_result_nothing_keeps_is_released_after_its_statement() -> None:
-    emitted = _compile('let count = (text:string):>int64 => text.split" ".length\nlet main = ():>int64 => count("a b")\n')
-    count = _function(emitted, 'count')
-    temp = re.search(r'(__dewy_string_array_temp_\d+) = \S+string_split\(', count)
-    assert temp, count
-    assert f'let {temp.group(1)}:int64 = 0' in count
-    assert re.search(rf'if {temp.group(1)} =\? 0 \{{', count) and re.search(rf'__load_i64__\({temp.group(1)} \+ 40\) =\? 1', count)
-
-
-def test_optional_locals_and_returns_own_independent_string_payloads() -> None:
-    source = (
-        HEAD
-        + 'let choose = (flag:bool):>string|none => if flag join2("a" "b") else none\n'
-        + 'let moved = ():>string|none => {\n    let maybe:string|none = choose(true)\n    return maybe\n}\n'
-        + 'let aliased = ():>string|none => {\n    let maybe:string|none = choose(true)\n    let other:string|none = maybe\n    return other\n}\n'
-        + 'let main = ():>int64 => {\n    let m:string|none = moved()\n    match aliased() { s:string => return s.length  <none> => return 0 }\n}\n'
-    )
-    emitted = _compile(source)
-    moved = _function(emitted, 'moved')
-    # the payload is released by member tag and owner word …
-    assert re.search(r'let __dewy_string_cell_tag_\d+:int64 = __load_i64__\(maybe\)', moved)
-    # Return storage already receives an independent clone. Releasing the
-    # original must not be suppressed by an obsolete ownership-transfer marker.
-    assert '__dewy_string_clone(' in moved and '_arena_release(' in moved
-    assert '__store_i64__(0 maybe + 8)' not in moved
-    aliased = _function(emitted, 'aliased')
-    assert '__dewy_string_clone(' in aliased and '_arena_release(' in aliased
+@pytest.mark.parametrize('definitions, exercise', [
+    ('', 'let s:string=join2("a" "b") s=join2(s "x") if s not=? "a-b-x" return 1'),
+    ('let moved=():>string=>{let s:string=join2("a" "b") return s}\n'
+     'let copied=():>string=>{let s:string=join2("a" "b") return pick(s true)}',
+     'let a=moved() let b=copied() if a not=? "a-b" or b not=? "a-b" return 1'),
+    ('', 'join2("a" "b");'),
+    ('let count=(text:string):>int64=>text.split" ".length', 'if count("a b") not=? 2 return 1'),
+    ('let choose=(flag:bool):>string|none=>if flag join2("a" "b") else none\n'
+     'let moved=():>string|none=>{let maybe:string|none=choose(true) return maybe}\n'
+     'let aliased=():>string|none=>{let maybe:string|none=choose(true) let other:string|none=maybe return other}',
+     'let a=moved() let b=aliased() if a is? none or b is? none return 1 if a not=? "a-b" or b not=? "a-b" return 2'),
+])
+def test_local_result_and_temporary_lifetimes(tmp_path, definitions, exercise):
+    # Values survive their producers' exits; repeated visits release their
+    # storage regardless of whether cleanup is inline or shared in helpers.
+    source = HEAD + definitions + '\nexercise=():>int64=>{' + exercise + '\nreturn 42}\n' + '''
+main=():>int64=>{
+    if exercise() not=? 42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {if exercise() not=? 42 return 2}
+    if _arena_live_bytes not=? before return 3
+    return 42
+}
+'''
+    execute(tmp_path, 'local-lifetimes', _compile(source))

@@ -1,5 +1,5 @@
 """Arrays own their element strings: stores copy, releases free elements, and copies of string arrays get their own strings."""
-import re
+from tests.python_misc.test_scalar_projection import execute
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
@@ -25,14 +25,17 @@ BUILD = (
 )
 
 
-def test_stored_strings_carry_the_owner_word_and_are_released_with_the_array() -> None:
-    emitted = _compile(BUILD)
-    build = _function(emitted, 'build')
-    # the escape copy marks its descriptor as owned (offset 40 = 1) …
-    assert re.search(r'__store_i64__\(1 __dewy_string_value_\d+ \+ 40\)', build)
-    # … and the exit releases each element by its owner word, then the buffer
-    assert re.search(r'__load_i64__\(__dewy_string_release_element_\d+ \+ 40\)', build)
-    assert build.count('_arena_release(') >= 4
+def test_growing_string_array_releases_every_owned_element(tmp_path):
+    source = BUILD.split('let main =')[0].replace('[0..4)', '[0..64)') + '''
+main=():>int64=>{
+    if build(3) not=? 64 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {if build(3) not=? 64 return 2}
+    if _arena_live_bytes not=? before return 3
+    return 42
+}
+'''
+    execute(tmp_path, 'owned-string-growth', _compile(source))
 
 
 def test_element_reads_copy_when_stored_or_returned() -> None:
@@ -66,10 +69,6 @@ def test_a_copy_of_a_string_array_owns_its_own_elements() -> None:
     assert 'let __dewy_string_clone = ' in emitted   # … through the one synthesized helper
 
 
-def test_growth_moves_elements_without_cloning_in_the_build_loop() -> None:
-    emitted = _compile(BUILD)
-    build = _function(emitted, 'build')
-    assert '__dewy_string_clone' not in build         # growth relocates, never re-copies
     # The shared-array detachment helper may need a clone fallback, even
     # when this particular loop never shares its buffer.
 

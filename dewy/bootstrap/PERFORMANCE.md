@@ -408,9 +408,17 @@ construction scratch, argument lifetimes, and temporary container lifetimes on
 both x86-64 and C. Full seed and self-bootstrap verification remain separate
 gates; these bounded results do not constitute a fixed-point certificate.
 
-The hosted backend retains its existing string-region representation. Its
-checks cover the same value semantics; the stricter retention budget above is
-checked on the native implementation. Reference counts remain provisional,
+The hosted backend retains string regions for frame-lifetime values. The
+Phase 0 campaign also adds shared immutable backing for its owned arena
+strings: the first snapshot promotes unique ownership to a shared count,
+and later copies allocate only a descriptor. Borrowed, frame and pinned
+strings retain the copying fallback. Raw exposure detaches shared backing
+before pinning it. This is the hosted representation's own ownership
+protocol; its control layout is not the native runtime's control layout.
+Both release their buffers when the last tracked owner dies.
+
+The checks cover the same value semantics; the stricter retention budget above
+is checked on the native implementation. Reference counts remain provisional,
 and the longer-term question of predictable, ideally zero-cost ownership at
 the start of this document remains open.
 

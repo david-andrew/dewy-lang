@@ -2950,17 +2950,13 @@ class _StringLowering:
         back — when it is a view (owner 2) of bytes that may belong to a string
         released before the taker is done."""
         out = self._new_string_temp(loc, 'int64', 'taken')
-        length = self._new_string_temp(loc, 'int64', 'taken_length')
-        copy, copied = self._string_from_bytes(self._string_data_start(descriptor, loc), length, loc, segmented_source=descriptor)
         return [
             hir.Declare(loc, ty.VOID_TYPE, 'let', out.name, 'int64', descriptor),
             hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
                 loc, ty.VOID_TYPE,
                 self._typed_equality(self._load_i64_field(descriptor, STRING_OWNER_OFFSET, loc), self._int64_literal(loc, 2), 'int64', loc),
                 hir.Block(loc, ty.VOID_TYPE, [
-                    hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._load_i64_field(descriptor, STRING_BYTE_LENGTH_OFFSET, loc)),
-                    *copy,
-                    hir.Assign(loc, ty.VOID_TYPE, out, '=', replace(copied, type='int64')),
+                    hir.Assign(loc, ty.VOID_TYPE, out, '=', self._string_clone_call(descriptor, loc)),
                     self._arena_release_call(descriptor, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
                 ], True),
             )], None),
@@ -3212,19 +3208,47 @@ class _StringLowering:
         else:
             descriptor = self._new_string_temp(loc, 'int64', 'escaping')
             statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', descriptor.name, 'int64', value))
-        length = self._new_string_temp(loc, 'int64', 'escaping_length')
-        statements.append(
-            hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._load_i64_field(descriptor, STRING_BYTE_LENGTH_OFFSET, loc))
-        )
-        copy, result = self._string_from_bytes(self._string_data_start(descriptor, loc), length, loc, segmented_source=descriptor)
-        return [*statements, *copy], result
+        return statements, self._string_clone_call(descriptor, loc)
 
     STRING_CLONE_SYMBOL = '__dewy_string_clone'
 
+    def _string_clone_call(self, source: hir.AST, loc: Span) -> hir.FunctionCall:
+        self.string_clone_needed = True
+        signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
+        return hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, signature, self.STRING_CLONE_SYMBOL), [source], {})
+
+    def _shared_string_clone_prefix(self, source: hir.AST, loc: Span) -> list[hir.AST]:
+        owner = hir.ExpressedIdentifier(loc, 'int64', '__dewy_string_owner')
+        shared = hir.ExpressedIdentifier(loc, 'int64', '__dewy_string_shared')
+        one = self._int64_literal(loc, 1)
+        share = [
+            self._if(self._typed_equality(owner, one, 'int64', loc), [
+                self._assign(owner, self._arena_allocation(self._int64_literal(loc, 8), loc), loc),
+                self._store_i64_field(owner, 0, one, loc),
+                self._store_i64_field(source, STRING_OWNER_OFFSET, owner, loc),
+            ], loc),
+            self._store_i64_field(owner, 0, self._int64_binary('__add__', self._load_i64_field(owner, 0, loc), one, loc), loc),
+            self._declare(shared, self._arena_allocation(self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc), loc),
+            *[self._store_i64_field(shared, offset, self._load_i64_field(source, offset, loc), loc)
+              for offset in (STRING_DATA_OFFSET, STRING_BYTE_LENGTH_OFFSET, STRING_BOUNDARIES_OFFSET,
+                             STRING_GRAPHEME_LENGTH_OFFSET, STRING_START_OFFSET, STRING_OWNER_OFFSET)],
+            hir.Return(loc, ty.BOTTOM_TYPE, shared),
+        ]
+        return [
+            self._declare(owner, self._load_i64_field(source, STRING_OWNER_OFFSET, loc), loc),
+            self._if(hir.ShortCircuit(loc, 'bool', 'or',
+                self._typed_equality(owner, one, 'int64', loc),
+                self._int64_comparison('__gt__', owner, self._int64_literal(loc, 2), loc)), share, loc),
+        ]
+
     def _synthesize_string_clone(self) -> list:
-        """`__dewy_string_clone(src)`: an independent arena copy of a string's
-        bytes (owner 1), emitted once when a lasting copy of a string array is
-        made — each array owns its own elements."""
+        """Keep immutable owned buffers; copy frame, borrowed or pinned bytes.
+
+        Every kept value still has its own descriptor. Owner 1 is promoted
+        to a reference-count word on the first copy; owners above 2 are those
+        shared counts. Existing frame (0) and borrowed-view (2) lifetimes
+        cannot justify sharing and retain the copying fallback.
+        """
         from .lowering_shared import LoweredFunction
         if not self.string_clone_needed:
             return []
@@ -3238,6 +3262,7 @@ class _StringLowering:
         finally:
             self.current_literal, self.frame_region, self.lowering_module_startup = saved_literal, saved_region, saved_startup
         body = hir.Block(loc, ty.VOID_TYPE, [
+            *self._shared_string_clone_prefix(source, loc),
             hir.Declare(loc, ty.VOID_TYPE, 'let', length.name, 'int64', self._load_i64_field(source, STRING_BYTE_LENGTH_OFFSET, loc)),
             *copy,
             hir.Return(loc, ty.BOTTOM_TYPE, replace(result, type='int64')),

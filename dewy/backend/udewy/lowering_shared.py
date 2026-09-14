@@ -75,8 +75,10 @@ STRING_GRAPHEME_LENGTH_OFFSET = 24
 
 STRING_START_OFFSET = 32
 # ownership metadata: 0 = static, frame, or borrowed; 1 = an arena copy that owns its data and
-# boundaries; 2 = an arena view (owns only this descriptor). Set where descriptors are made,
-# read when a container releases its elements.
+# boundaries; 2 = an arena view (owns only this descriptor); >2 = a shared
+# buffer reference-count address; -1 = raw-exposed, pinned arena storage.
+# Each shared string still has its own descriptor. Frame/borrowed strings
+# copy their bytes before acquiring an independent lifetime.
 STRING_OWNER_OFFSET = 40
 
 STRING_DESCRIPTOR_SIZE = 48

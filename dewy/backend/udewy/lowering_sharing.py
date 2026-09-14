@@ -21,6 +21,9 @@ from .lowering_shared import (
     ARRAY_OWNER_OFFSET,
     ARRAY_SHARED,
     ARRAY_STRIDE_OFFSET,
+    STRING_DESCRIPTOR_SIZE,
+    STRING_OWNER_OFFSET,
+    STRING_BYTE_LENGTH_OFFSET,
 )
 
 
@@ -55,7 +58,7 @@ class _ArraySharing:
     @staticmethod
     def _pin_type(type_):
         unfolded = ty.unfold(ty.strip_refinement(type_))
-        return isinstance(unfolded, (ty.ArrayType, ty.ObjectType)) or ty.runtime_union_members(type_) is not None or ty.optional_payload(type_) is not None
+        return ty.string_valued(unfolded) or isinstance(unfolded, (ty.ArrayType, ty.ObjectType)) or ty.runtime_union_members(type_) is not None or ty.optional_payload(type_) is not None
 
     def _extract_write_route(self, node):
         """Evaluate a nested place once, detaching enclosing array buffers."""
@@ -247,7 +250,7 @@ class _ArraySharing:
         pinned storage is conservatively retained for the process.
         """
         unfolded = ty.unfold(ty.strip_refinement(type_))
-        if not isinstance(unfolded, (ty.ArrayType, ty.ObjectType)) and ty.runtime_union_members(type_) is None and ty.optional_payload(type_) is None:
+        if not self._is_string_valued(unfolded) and not isinstance(unfolded, (ty.ArrayType, ty.ObjectType)) and ty.runtime_union_members(type_) is None and ty.optional_payload(type_) is None:
             return []
         if not hasattr(self, 'pin_symbols'):
             self.pin_symbols = []
@@ -275,6 +278,27 @@ class _ArraySharing:
 
     def _pin_aggregate_body(self, source, type_, loc):
         unfolded = ty.unfold(ty.strip_refinement(type_))
+        if self._is_string_valued(unfolded):
+            # A raw write cannot affect an earlier string snapshot. Give a
+            # shared or borrowed descriptor private buffers before exposure;
+            # pinned buffers then use deep copies and have process lifetime.
+            owner = self._name('pinned_string_owner', loc)
+            length = self._name('pinned_string_length', loc)
+            copied, fresh = self._string_from_bytes(self._string_data_start(source, loc), length, loc,
+                                                    frame=False, segmented_source=source)
+            detach = [
+                self._declare(length, self._load_i64_field(source, STRING_BYTE_LENGTH_OFFSET, loc), loc),
+                *copied,
+                self._if(self._int64_comparison('__gt__', owner, self._int64_literal(loc, 2), loc),
+                         self._release_shared_string_buffers(source, loc), loc),
+                *[self._store_i64_field(source, offset, self._load_i64_field(fresh, offset, loc), loc)
+                  for offset in range(0, STRING_OWNER_OFFSET, 8)],
+                self._arena_release_call(fresh, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
+            ]
+            return [self._declare(owner, self._load_i64_field(source, STRING_OWNER_OFFSET, loc), loc),
+                    self._if(self._int64_comparison('__ge__', owner, self._int64_literal(loc, 2), loc), detach, loc),
+                    self._if(self._int64_comparison('__gt__', owner, self._int64_literal(loc, 0), loc),
+                             [self._store_i64_field(source, STRING_OWNER_OFFSET, self._int64_literal(loc, -1), loc)], loc)]
         if isinstance(unfolded, ty.ArrayType):
             body = self._ensure_unique_array(source, unfolded.element, loc)
             # A borrowed byte/grapheme view may keep a string descriptor in
@@ -301,7 +325,7 @@ class _ArraySharing:
                 for field in selected:
                     pointer = self._field_address(source, offsets[field.name], loc)
                     field_type = ty.unfold(ty.strip_refinement(field.type))
-                    if isinstance(field_type, ty.ArrayType):
+                    if isinstance(field_type, ty.ArrayType) or self._is_string_valued(field_type):
                         pointer = self._load_i64_field(pointer, 0, loc)
                     body.extend(self._pin_aggregate_call(pointer, field.type, loc))
                 return body

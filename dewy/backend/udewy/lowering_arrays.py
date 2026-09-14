@@ -1273,7 +1273,8 @@ class _ArrayLowering(_ArraySharing):
 
     def _release_string_by_owner(self, string: hir.ExpressedIdentifier, loc, *, inline: bool = False) -> hir.AST:
         """Give a string's storage back by its owner word: data, boundaries, and
-        descriptor for an arena copy (1); the descriptor alone for an arena view (2)."""
+        descriptor for an arena copy (1); the descriptor for a view (2); a
+        shared reference and descriptor for a reference-count pointer (>2)."""
         if not inline:
             if self.string_release_symbol is None:
                 self.string_release_symbol = self._internal_symbol('__dewy_release_string')
@@ -1291,10 +1292,30 @@ class _ArrayLowering(_ArraySharing):
         by_owner = hir.Flow(loc, ty.VOID_TYPE, [
             hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, one, 'int64', loc), release_all),
             hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, self._int64_literal(loc, 2), 'int64', loc), release_descriptor),
+            hir.IfArm(loc, ty.VOID_TYPE, self._int64_comparison('__gt__', owner, self._int64_literal(loc, 2), loc),
+                hir.Block(loc, ty.VOID_TYPE, [*self._release_shared_string_buffers(string, loc), *release_descriptor.items], True)),
         ], None)
         # an emptied slot (the string moved out with a returned object) holds 0
         empty = self._typed_equality(string, self._int64_literal(loc, 0), 'int64', loc)
         return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, empty, hir.Block(loc, ty.VOID_TYPE, [], True))], by_owner)
+
+    def _release_shared_string_buffers(self, string: hir.AST, loc) -> list[hir.AST]:
+        """Release one backing reference, leaving the descriptor to its caller."""
+        owner = self._name('string_owner', loc)
+        refs = self._name('string_refs', loc)
+        one = self._int64_literal(loc, 1)
+        size = self._int64_binary('__add__', self._load_i64_field(string, STRING_BYTE_LENGTH_OFFSET, loc), one, loc)
+        return [
+            self._declare(owner, self._load_i64_field(string, STRING_OWNER_OFFSET, loc), loc),
+            self._declare(refs, self._int64_binary('__sub__', self._load_i64_field(owner, 0, loc), one, loc), loc),
+            self._store_i64_field(owner, 0, refs, loc),
+            self._if(self._typed_equality(refs, self._int64_literal(loc, 0), 'int64', loc), [
+                self._arena_release_call(self._load_i64_field(string, STRING_DATA_OFFSET, loc), size, loc),
+                self._arena_release_call(self._load_i64_field(string, STRING_BOUNDARIES_OFFSET, loc),
+                    self._int64_binary('__mul__', size, self._int64_literal(loc, 4), loc), loc),
+                self._arena_release_call(owner, self._int64_literal(loc, 8), loc),
+            ], loc),
+        ]
 
     def _release_cell_payload(self, cell: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span, *, prepared: bool = False, strings: bool = True, inline: bool = False) -> list[hir.AST]:
         """Release the active value according to the cell's storage contract.
@@ -1483,28 +1504,9 @@ class _ArrayLowering(_ArraySharing):
         data_declare, data = local('release_data', self._load_i64_field(word, ARRAY_DATA_OFFSET, loc))
         address = self._int64_binary('__add__', data, self._int64_binary('__mul__', index, self._int64_literal(loc, 8), loc), loc)
         element_declare, element = local('release_element', self._intrinsic_call('__load_i64__', [address], 'int64', loc))
-        owner_declare, owner = local('release_owner', self._load_i64_field(element, STRING_OWNER_OFFSET, loc))
-        bytes_plus_one = self._int64_binary('__add__', self._load_i64_field(element, STRING_BYTE_LENGTH_OFFSET, loc), one, loc)
-        release_all = hir.Block(loc, ty.VOID_TYPE, [
-            self._arena_release_call(self._load_i64_field(element, STRING_DATA_OFFSET, loc), bytes_plus_one, loc),
-            self._arena_release_call(
-                self._load_i64_field(element, STRING_BOUNDARIES_OFFSET, loc),
-                self._int64_binary('__mul__', bytes_plus_one, self._int64_literal(loc, 4), loc),
-                loc,
-            ),
-            self._arena_release_call(element, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
-        ], True)
-        release_descriptor = hir.Block(loc, ty.VOID_TYPE, [
-            self._arena_release_call(element, self._int64_literal(loc, STRING_DESCRIPTOR_SIZE), loc),
-        ], True)
-        by_owner = hir.Flow(loc, ty.VOID_TYPE, [
-            hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, one, 'int64', loc), release_all),
-            hir.IfArm(loc, ty.VOID_TYPE, self._typed_equality(owner, self._int64_literal(loc, 2), 'int64', loc), release_descriptor),
-        ], None)
         body = hir.Block(loc, ty.VOID_TYPE, [
             element_declare,
-            owner_declare,
-            by_owner,
+            self._release_string_by_owner(element, loc),
             hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, one, loc)),
         ], True)
         loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), body)], None)
@@ -2827,9 +2829,7 @@ class _ArrayLowering(_ArraySharing):
     def _copy_string_element(self, source_value: hir.AST, target_address: hir.AST, element_type: ty.Type, loc: Span, *, may_be_frame: bool = False) -> list[hir.AST]:
         name = self._new_string_temp(loc, 'int64', 'element_copy').name
         element = hir.ExpressedIdentifier(loc, 'int64', name)
-        self.string_clone_needed = True   # `__dewy_string_clone` is synthesized once per program
-        clone_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
-        cloned = hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, clone_type, self.STRING_CLONE_SYMBOL), [element], {})
+        cloned = self._string_clone_call(element, loc)
         if may_be_frame:
             # Owner zero includes frame-backed strings, not just static ones.
             # A union can hold a fresh decode before any escaping store has

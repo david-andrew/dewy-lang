@@ -1,0 +1,21 @@
+# Raw exposure detaches existing snapshots; later copies of pinned bytes are
+# independent too. This deliberately keeps exposed storage alive.
+Box:type=[text:string]
+make=(suffix:string):>Box=>Box["a{suffix}"]
+main=():>int64=>{
+    let box=make('bc')
+    let before=box
+    let raw:int64=box transmute int64
+    let bytes=__load_i64__(__load_i64__(raw))
+    __store_u8__(90 bytes)
+    if before.text not=? 'abc' or box.text not=? 'Zbc' return 1
+    let after=box
+    __store_u8__(89 bytes)
+    if after.text not=? 'Zbc' or box.text not=? 'Ybc' return 2
+    let direct=make('xy')
+    let saved=direct
+    let address=__load_i64__(direct.text)
+    __store_u8__(90 address)
+    if saved.text not=? 'axy' or direct.text not=? 'Zxy' return 3
+    return 42
+}
