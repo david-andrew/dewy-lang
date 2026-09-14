@@ -362,3 +362,54 @@ array-layout mismatch: a copy into a runtime-length parameter treated an
 optimized flat buffer as a descriptor. Dynamic copy dispatch now consults the
 known physical extent first, preserving that buffer's layout even when its
 source-level length fact has been widened.
+
+## Native immutable string ownership
+
+The seventeenth pair attempt passed all first-generation integration, analysis,
+and invocation checks on both targets. Its second-generation compilation still
+crossed the 35 GiB guard during lowering. Allocation counters showed live
+storage accounting for most of that memory, even after validation scratch was
+reclaimed. The bootstrap loop was not closed by that attempt.
+
+Native dynamic strings now retain shared immutable backing through private
+48-byte descriptors. The owner word names a control containing a reference
+count and the original byte/boundary allocations and sizes. Copies retain the
+control; slices and grapheme views retain it even when their pointers shift.
+The last release returns the backing to the arena. Literal descriptors have
+owner zero and need no allocation or release. Raw exposure pins storage
+conservatively. These runtime helpers are Dewy code using the existing arena,
+so this storage path also works through the direct µDewy backend.
+
+Ownership follows ordinary value boundaries, including records, arrays,
+optional cells, calls, returns, default arguments, and replacements. String
+operators hold their operands across later evaluations and release them after
+materialization. Dictionary probes release temporary keys; a replacement
+releases the unused incoming key. Iteration releases each grapheme view before
+advancing and releases the final view when leaving the arm. UTF-8 decoding
+owns an independent byte allocation instead of retaining an anonymous array
+snapshot; command-line decoding also copies the process-owned argv bytes.
+
+Default arguments exposed another lifetime gap: the callee created the default
+but did not reclaim it. Cleanup now uses the existing ABI presence flag to
+release a missing default without releasing a supplied borrowed argument.
+Boxed or reassigned aggregate parameters own a private local snapshot, so a
+place into that local cannot release the caller's argument descriptor. Their
+cleanup runs on explicit returns and implicit results, after preserving the
+returned value.
+
+`native_string_lifetimes.dewy` exercises aliases, returned parameters, slices,
+record and array replacements, optional values, decoding, grapheme iteration,
+joins, dictionary keys, defaults, and parameter rebinding. Before this work,
+512 visits to its original workload retained 2,125,824 bytes. String ownership
+alone reduced that to 86,016 bytes: one 168-byte default per visit. With default
+and parameter cleanup, the expanded workload retains **zero bytes in each of
+two batches of 512 visits**. The lowering driver passes this workload, string
+construction scratch, argument lifetimes, and temporary container lifetimes on
+both x86-64 and C. Full seed and self-bootstrap verification remain separate
+gates; these bounded results do not constitute a fixed-point certificate.
+
+The hosted backend retains its existing string-region representation. Its
+checks cover the same value semantics; the stricter retention budget above is
+checked on the native implementation. Reference counts remain provisional,
+and the longer-term question of predictable, ideally zero-cost ownership at
+the start of this document remains open.

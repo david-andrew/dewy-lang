@@ -9,6 +9,8 @@ import p"../../semantic/subtyping.dewy" as subtyping
 ArrayDescriptor:type = const [data:addr length:addr capacity:addr stride:addr flags:addr owner:addr size:addr]
 const array_descriptor:ArrayDescriptor=[0 8 16 24 32 40 48]
 const array_flags=[mutable=1 borrowed_static=2 arena_descriptor=4 shared=8]
+# Native strings use owner 0 for literals and a shared backing control for
+# dynamic descriptors. The hosted backend retains its separate region policy.
 StringDescriptor:type = const [data:addr byte_length:addr boundaries:addr grapheme_length:addr start:addr owner:addr size:addr]
 const string_descriptor:StringDescriptor=[0 8 16 24 32 40 48]
 const brand_field='__brand__'

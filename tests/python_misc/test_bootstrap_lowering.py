@@ -563,8 +563,10 @@ main = (argv:array<string>):>int64 => {{
     let helpers:dict<string addr>=[]
     let release=bindings.lookup(session.scopes env.lexical.scope '_arena_release')
     if release isnt? none {{helpers['_arena_release']=release}}
-    let copied=bindings.lookup(session.scopes env.lexical.scope '_arena_note_copy')
-    if copied isnt? none {{helpers['_arena_note_copy']=copied}}
+    loop name in ['_utf8_boundaries' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin'] {{
+        let helper=bindings.lookup(session.scopes env.lexical.scope name)
+        if helper isnt? none {{helpers[name]=helper}}
+    }}
     let lowered=lower.lower(root emit.Input[session.hir session.types [source]] source allocator=allocator layout_context=layouts.Context[session.brands session.error_types] runtime_helpers=helpers links=session.links)
     if lowered is? Error {{lowered.fail}}
     let code=program.render(lowered.program lowered.input)

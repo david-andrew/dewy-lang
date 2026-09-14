@@ -1,0 +1,88 @@
+# Value boundaries retain immutable string backing, while temporary
+# descriptors (including views and dictionary probe keys) are reclaimed.
+Box:type=[text:string items:array<string>]
+let live=():>int64=>_arena_live_bytes
+let make=(suffix:int64):>string=>"abc{suffix}xyz"
+let identity=(text:string):>string=>text
+let rebound=(text:string @other:string):>string=>{other=make(9) return text}
+let fallback=(text:string=make(7)):>string=>text
+let view=(text:string):>string=>{if text.length >=? 3 return text[0..2] return ''}
+# A reassigned parameter owns its local slot; returning it still creates an
+# independent value. A place into that local must not release caller storage.
+let replace=(text:string):>string=>{text=make(8) return text}
+let through=(text:string):>string=>{let before=rebound(text @text) return before+text}
+let default_rebound=(text:string=make(3)):>string=>{text=make(4) return text}
+let paired=(left:string=make(1) right:string=make(1)):>string=>left+right
+let default_array=(items:array<string>=[make(3)]):>string=>{if items.length >? 0 return items[0] return ''}
+let boxed=():>Box=>Box[make(4) [make(5)]]
+let transient=():>bool=>{
+    let text=make(1)
+    let saved=identity(text)
+    let selected=view(text)
+    let original=rebound(text @text)
+    text=make(2)
+    if saved not=? 'abc1xyz' or original not=? saved or selected not=? 'abc' return false
+    if fallback() not=? 'abc7xyz' or fallback(saved) not=? saved return false
+    if replace(saved) not=? 'abc8xyz' or saved not=? 'abc1xyz' return false
+    if through(saved) not=? 'abc1xyzabc9xyz' or saved not=? 'abc1xyz' return false
+    if default_rebound() not=? 'abc4xyz' or default_rebound(saved) not=? 'abc4xyz' return false
+    if paired() not=? 'abc1xyzabc1xyz' or paired(right=saved) not=? 'abc1xyzabc1xyz' return false
+    if default_array() not=? 'abc3xyz' return false
+    let box=boxed()
+    let copy=box
+    box.text=make(8)
+    if box.items.length =? 0 or copy.items.length =? 0 return false
+    box.items[0]=make(9)
+    if copy.text not=? 'abc4xyz' or copy.items[0] not=? 'abc5xyz' return false
+    if boxed().text not=? 'abc4xyz' return false
+    let option:string|none=make(3)
+    let saved_option=option
+    option=none
+    if saved_option is? none or saved_option not=? 'abc3xyz' return false
+    let bytes=make(4) as array<uint8>
+    let decoded=bytes as string|none
+    if bytes.length =? 0 return false
+    bytes[0]=122
+    if decoded is? none or decoded not=? 'abc4xyz' return false
+    let graphemes=make(6) as array<grapheme>
+    if graphemes.length =? 0 or graphemes[0] not=? 'a' return false
+    let total:int64=0
+    loop character in make(7) {
+        total+=character.length
+        if character =? 'b' continue
+        if character =? 'x' break
+    }
+    if total not=? 5 return false
+    let table:dict<string string>=[]
+    table[make(0)]=make(1)
+    table[make(0)]=make(2)
+    if make(0) not in? table return false
+    let found=table.get(make(0) make(3))
+    let missing=table.get(make(8) make(4))
+    if found not=? 'abc2xyz' or missing not=? 'abc4xyz' return false
+    let key=make(0)
+    if key not in? table return false
+    let removed=table.pop(key)
+    if removed not=? 'abc2xyz' return false
+    table.clear
+    let strings:array<string>=[make(1) make(2)]
+    let joined=strings.join(sep=make(0))
+    if joined not=? 'abc1xyzabc0xyzabc2xyz' return false
+    return make(9).length =? 7
+}
+let repeated=():>bool=>{
+    loop i in 0.. and i <? 512 {if not transient() return false}
+    return true
+}
+let main=():>int64=>{
+    if not transient() return 1
+    let before=live()
+    if not repeated() return 2
+    # This bounds retained storage, not total allocation traffic. No result
+    # escapes repeated(), so another 512 visits must remain bounded too.
+    if live() <? before or live()-before >? 4096 return 3
+    let after=live()
+    if not repeated() return 4
+    if live() <? after or live()-after >? 4096 return 5
+    return 42
+}

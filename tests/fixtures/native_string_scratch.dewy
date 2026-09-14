@@ -1,6 +1,6 @@
 # Completed strings must survive reuse of the UTF-8 validator's temporary
 # offset array. Account for the intentionally retained results separately
-# from scratch; dynamic string backing still has process-arena lifetime.
+# from scratch; the array owns the completed results until its release.
 let live=():>int64=>_arena_live_bytes
 let double=(text:string):>string=>text+text
 let build=():>array<string>=>{

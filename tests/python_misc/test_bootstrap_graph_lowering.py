@@ -249,6 +249,7 @@ let main=():>int64=>{{
         'let combine=(words:array<string> sep:string):>string=>words.join(sep)\nlet main=():>int64=>{let text=combine(["a" "b" "c"] "/") let empty=combine([] "/") return if text=?"a/b/c" and empty=?"" 42 else 0}',
         'let main=():>int64=>{let parts:array<string>=["e" "\\u0301x"] let text=parts.join return if text.length=?2 and text[0]=?"é" 42 else 0}',
         (ROOT / 'tests/fixtures/native_string_scratch.dewy').read_text(),
+        (ROOT / 'tests/fixtures/native_string_lifetimes.dewy').read_text(),
     ]):
         source = tmp_path / f'unicode-runtime-{index}.dewy'
         source.write_text(body)

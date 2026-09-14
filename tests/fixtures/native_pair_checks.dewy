@@ -24,10 +24,13 @@ import p"native_argument_lifetimes.dewy" as arguments
 import p"native_dict_scalar_widths.dewy" as scalar_dictionaries
 import p"native_container_receiver_lifetimes.dewy" as receivers
 
+import p"native_string_lifetimes.dewy" as string_lifetimes
 import p"native_string_scratch.dewy" as string_scratch
 import p"native_string_materialization.dewy" as string_materialization
 
 let main=():>int64=>{
+    printl('Checking string value lifetimes')
+    if string_lifetimes.main() not=?42 return 26
     printl('Checking temporary container receivers')
     if receivers.main() not=?42 return 23
     printl('Checking dictionary scalar widths')
