@@ -245,6 +245,7 @@ class _Lowerer(
         self.next_binding_order = 0
         self.next_function_order = 0
         self.functions: list[_FunctionDef] = []
+        self.runtime_helpers: dict[str, tuple[int, _FunctionDef | None]] = {}
         self.function_by_literal: dict[int, _FunctionDef] = {}
         self.declare_bindings: dict[int, _Binding] = {}
         self.binding_by_semantic_id: dict[int, _Binding] = {}
@@ -415,6 +416,20 @@ class _Lowerer(
         # the source function the entry wrapper calls: `main`, or the generated test runner
         self.entry_name = entry_name
         self.program_effects: ProgramEffects = analyze_effects(root)
+
+    def _runtime_helper(self, name: str) -> _FunctionDef | None:
+        """Find a runtime helper once in the append-only discovery list.
+
+        Preserve the existing first-suffix-match rule. A miss expires when
+        discovery appends a function; a hit cannot be displaced by an append.
+        The cache belongs to this lowerer, including bare/prelude-free builds.
+        """
+        cached = self.runtime_helpers.get(name)
+        if cached is not None and (cached[1] is not None or cached[0] == len(self.functions)):
+            return cached[1]
+        result = next((function for function in self.functions if function.logical_name.endswith(name)), None)
+        self.runtime_helpers[name] = (len(self.functions), result)
+        return result
 
     def lower(self) -> LoweredProgram:
         """Run discovery, validation, symbol allocation, and HIR rewriting."""
@@ -1047,11 +1062,14 @@ class _Lowerer(
         analysis_literal = replace(literal, body=transformed_body)
         self.current_literal = analysis_literal
         self.moved_uses = self._compute_moves(analysis_literal)
-        self.returned_string_nodes = self._returned_string_node_ids(analysis_literal)
-        self.loop_string_escapes = self._loop_string_escapes(analysis_literal)
+        # These analyses inspect the same transformed body. Build its binding
+        # initializer index once and pass it explicitly; no cached tree query
+        # needs to survive a later rewrite.
         self.local_initializers = self._local_initializers(analysis_literal)
+        self.returned_string_nodes = self._returned_string_node_ids(analysis_literal, self.local_initializers)
+        self.loop_string_escapes = self._loop_string_escapes(analysis_literal, self.local_initializers)
         self.array_element_targets = self._array_element_string_targets(analysis_literal)
-        self.owning_string_bindings = self._owning_string_locals(analysis_literal)
+        self.owning_string_bindings = self._owning_string_locals(analysis_literal, self.local_initializers)
         self.owned_strings = set()
         self.owned_raw_arrays = {}
         self.owned_cells = {}
@@ -3187,7 +3205,7 @@ class _Lowerer(
         if self.lowering_module_startup or self.current_literal is None:
             return body
         helpers = ('_region_new', '_region_alloc', '_region_release')
-        if not all(any(function.logical_name.endswith(name) for function in self.functions) for name in helpers):
+        if not all(self._runtime_helper(name) is not None for name in helpers):
             return body
 
         def walk(node: hir.AST) -> hir.AST:

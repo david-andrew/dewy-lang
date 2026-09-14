@@ -1012,3 +1012,31 @@ tree has the same SHA-256 before and after. All 166 parser differential,
 literal-boundary, and partial-operator checks pass. Artifacts are
 `t2-before.json`, `t2-after.json`, their logs, and `t2-dispatch-gates.log`.
 This is a parser workload result, not a new full compiler build measurement.
+
+### Combined type-description integration
+
+Frozen `99d6162a` (`source-type-descriptions`, with archive and manifest)
+builds the complete compiler through the hosted C route in **216.01 seconds**.
+Checking is 67.80 s, lowering **35.97 s** (previously 57.41), emission 4.60 s,
+and backend 101.51 s. Peak process RSS is 2,229,000 KiB. This uses the same
+GCC/LTO/no-PRE flags, disabled ccache, empty build directory, and no overlapping
+compilation jobs. Emitted µDewy is 33,823,436 bytes, SHA-256
+`068092b0b483cdb5bec567899bb9b703b673134aa0a85edf8895514e8af1ab85`.
+
+Its native seed builds pinned t0 in **13.24 seconds**, versus 19.85 before
+deferred type construction, with identical 3,509,937-byte µDewy and SHA-256
+`0b9937ceda2d3f07d24ac688c3210c69094556813adbf6916ef7d56aab5238c2`.
+Frontend takes 3.59 s, validation 4.93 s, initialization/reachability 0.04 s,
+lowering 2.20 s, emission 0.88 s, and backend 1.26 s. Peak process RSS is
+2,148,724 KiB. This was an isolated invocation; the full native build and
+fixed-point refresh remain separate gates. Artifacts: `host-full-type-descriptions`
+and `native-type-descriptions-t0`.
+
+The following hosted lowering batch shares a function's initializer index
+between ownership analyses, reducing four walks of the same transformed
+body to one without retaining results across rewrites. Runtime helper lookup
+also reuses discovery results: hits preserve the first matching declaration,
+and misses expire when discovery appends a function. Eleven targeted tests
+pass, including direct/C ownership and growth execution, helper discovery
+lifetime, and the single-walk cost gate (`lowering-index-gates.log`). No full
+build speedup is claimed for this follow-up batch yet.

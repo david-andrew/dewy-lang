@@ -672,7 +672,7 @@ class _OptionalLowering:
         return (
             isinstance(cell, hir.ExpressedIdentifier)
             and any(result is not None and cell.name == result.name for result in results)
-            and any(candidate.logical_name.endswith('_union_tree') for candidate in self.functions)
+            and self._runtime_helper('_union_tree') is not None
         )
 
     def _synthesize_cell_copies(self) -> list:

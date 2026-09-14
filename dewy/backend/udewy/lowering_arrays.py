@@ -1184,7 +1184,7 @@ class _ArrayLowering(_ArraySharing):
 
     def _arena_release_call(self, block: hir.AST, size: hir.AST, loc) -> hir.FunctionCall:
         """Give ``size`` bytes at ``block`` back to the prelude's arena (`_arena_release`)."""
-        function = next((candidate for candidate in self.functions if candidate.logical_name.endswith('_arena_release')), None)
+        function = self._runtime_helper('_arena_release')
         if function is None:
             self._target_error(hir.Void(loc, ty.VOID_TYPE), 'arena release without the prelude arena')
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
@@ -1514,14 +1514,7 @@ class _ArrayLowering(_ArraySharing):
 
     def _arena_allocation(self, size: hir.AST, loc) -> hir.FunctionCall:
         """Allocate ``size`` bytes from the prelude's process arena."""
-        function = next(
-            (
-                candidate
-                for candidate in self.functions
-                if candidate.logical_name.endswith('_arena_alloc')
-            ),
-            None,
-        )
+        function = self._runtime_helper('_arena_alloc')
         if function is None:
             self._target_error(
                 hir.Void(loc, ty.VOID_TYPE),

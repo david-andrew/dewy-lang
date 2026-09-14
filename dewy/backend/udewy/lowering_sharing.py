@@ -85,7 +85,7 @@ class _ArraySharing:
         return hir.ShortCircuit(loc, 'bool', 'and', tagged, self._int64_comparison('__gt__', owner, self._int64_literal(loc, 1), loc))
 
     def _note_array_copy(self, size, loc):
-        helper = next((candidate for candidate in self.functions if candidate.logical_name.endswith('_arena_note_copy')), None)
+        helper = self._runtime_helper('_arena_note_copy')
         if helper is None:
             return []
         signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)

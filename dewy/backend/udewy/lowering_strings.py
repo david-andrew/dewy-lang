@@ -2502,7 +2502,7 @@ class _StringLowering:
         return statements, cell
 
     def _has_arena(self) -> bool:
-        return any(candidate.logical_name.endswith('_arena_alloc') for candidate in self.functions)
+        return self._runtime_helper('_arena_alloc') is not None
 
     # ---- frame regions ----
     # String storage that provably never leaves the frame — a view, decoded
@@ -2513,7 +2513,8 @@ class _StringLowering:
     def _string_allocation(self, size: hir.AST, loc: Span, *, frame: bool, node: hir.AST | None = None) -> hir.AST:
         if frame and not self.lowering_module_startup and self.current_literal is not None and self._has_arena():
             region = self._region_for_node(node, loc)
-            function = next(candidate for candidate in self.functions if candidate.logical_name.endswith('_region_alloc'))
+            function = self._runtime_helper('_region_alloc')
+            assert function is not None
             function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
             return hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, function_type, function.symbol), [region, size], {})
         if not self._has_arena():
@@ -2614,7 +2615,8 @@ class _StringLowering:
         return hir.Block(arm.body.loc, ty.VOID_TYPE, [lowered, reset], True)
 
     def _region_call(self, name: str, arguments: list[hir.AST], loc: Span, result: ty.Type) -> hir.FunctionCall:
-        function = next(candidate for candidate in self.functions if candidate.logical_name.endswith(name))
+        function = self._runtime_helper(name)
+        assert function is not None
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64') for _ in arguments], [], None, result)
         return hir.FunctionCall(loc, result, hir.ExpressedIdentifier(loc, function_type, function.symbol), arguments, {})
 
@@ -2622,11 +2624,10 @@ class _StringLowering:
         """Whether a string built by ``node`` may live in the frame region (no `return` reaches it)."""
         return id(node) not in self.returned_string_nodes
 
-    def _returned_string_node_ids(self, literal: hir.FunctionLiteral) -> set[int]:
+    def _returned_string_node_ids(self, literal: hir.FunctionLiteral, candidates: dict[int, list[hir.AST]]) -> set[int]:
         """Every string expression a `return` may hand to the caller: the returned expressions, the
         initializers of returned locals, the sources of returned views, the string arguments of
         returned calls (a callee may return an argument's descriptor)."""
-        candidates = self._local_initializers(literal)
         params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
         return self._reached_string_nodes(self._returned_string_expressions(literal), candidates, params)
 
@@ -2683,14 +2684,13 @@ class _StringLowering:
             mark(expr)
         return reached
 
-    def _loop_string_escapes(self, literal: hir.FunctionLiteral) -> dict[int, set[int]]:
+    def _loop_string_escapes(self, literal: hir.FunctionLiteral, candidates: dict[int, list[hir.AST]]) -> dict[int, set[int]]:
         """For each loop body (by id): the string expressions built in it that
         reach a binding declared outside the loop — assigned to an outer local
         (or a module variable), directly or through the body's own locals —
         and so must outlive the iteration. Stores into containers, fields, and
         returns copy or go to the arena already; a loop's iterator targets and
         its body's declarations are inside."""
-        candidates = self._local_initializers(literal)
         params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
         escapes: dict[int, set[int]] = {}
 
@@ -2744,7 +2744,7 @@ class _StringLowering:
         visit(literal.body)
         return escapes
 
-    def _owning_string_locals(self, literal: hir.FunctionLiteral) -> set[int]:
+    def _owning_string_locals(self, literal: hir.FunctionLiteral, candidates: dict[int, list[hir.AST]]) -> set[int]:
         """String locals that own their value: every value they receive is a named
         function's result (static, or arena storage the caller owns — a returned
         parameter comes back as a view, an element as a copy), a literal, or an
@@ -2753,7 +2753,6 @@ class _StringLowering:
         outlive them); no nested function literal captures them. They are released
         by their owner word at scope exit, moved out by `return s`, copied when a
         return only reaches them."""
-        candidates = self._local_initializers(literal)
         params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
         declared: dict[int, list[hir.AST]] = {}
         captured: set[int] = set()
