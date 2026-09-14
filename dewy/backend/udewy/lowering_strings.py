@@ -3647,185 +3647,60 @@ class _StringLowering:
         def integer_piece(part: hir.AST) -> None:
             prelude, raw = self._extract_expression(part)
             statements.extend(prelude)
-            digits = declare(
-                'digits',
-                'int64',
-                self._intrinsic_call(
-                    allocator,
-                    [self._int64_literal(loc, 20)],
-                    'int64',
-                    loc,
-                ),
-            )
-            position = declare('digit_position', 'int64', self._int64_literal(loc, 20))
-            value = declare(
-                'digit_value',
-                'int64',
-                raw if raw.type == 'int64' else replace(raw, type='int64'),
-            )
+            # Render an unsigned magnitude for every width. This handles both
+            # uint64.max and abs(int64.min) without a signed overflow or a
+            # separate minimum-value string path.
+            layout = ty.fixed_integer_layout(raw.type)
+            signed = layout is None or layout[1]
+            raw = declare('integer_value', raw.type, raw)
+            widened = hir.ValueCast(loc, 'int64' if signed else 'uint64', raw)
             negative = declare(
-                'digit_negative',
-                'bool',
-                self._int64_comparison('__lt__', value, self._int64_literal(loc, 0), loc),
+                'digit_negative', 'bool',
+                self._int64_comparison('__lt__', widened, self._int64_literal(loc, 0), loc)
+                if signed else hir.Bool(loc, 'bool', False),
             )
-            source = declare('piece_source', 'int64', self._int64_literal(loc, 0))
-            length = declare('piece_length', 'int64', self._int64_literal(loc, 0))
-            minimum_text = static_text('-9223372036854775808')
+            value = declare('digit_value', 'uint64', hir.Transmute(loc, 'uint64', widened))
+            digits = declare('digits', 'int64', self._intrinsic_call(
+                allocator, [self._int64_literal(loc, 20)], 'int64', loc))
+            position = declare('digit_position', 'int64', self._int64_literal(loc, 20))
+
+            def word(number: int) -> hir.Integer:
+                return hir.Integer(loc, 'uint64', '0d', number)
+
+            def magnitude_op(name: str, left: hir.AST, right: hir.AST) -> hir.AST:
+                return self._intrinsic_call(name, [left, right], 'uint64', loc)
 
             def emit_digit() -> list[hir.AST]:
+                digit = magnitude_op('__add__', word(48), magnitude_op('__mod__', value, word(10)))
                 return [
-                    assign(
-                        position,
-                        self._int64_binary(
-                            '__sub__', position, self._int64_literal(loc, 1), loc
-                        ),
-                    ),
-                    store_digit(
-                        self._int64_binary(
-                            '__add__',
-                            self._int64_literal(loc, 48),
-                            self._int64_binary(
-                                '__mod__', value, self._int64_literal(loc, 10), loc
-                            ),
-                            loc,
-                        ),
-                        self._int64_binary('__add__', digits, position, loc),
-                    ),
-                    assign(
-                        value,
-                        self._int64_binary(
-                            '__floordiv__', value, self._int64_literal(loc, 10), loc
-                        ),
-                    ),
+                    assign(position, self._int64_binary('__sub__', position, self._int64_literal(loc, 1), loc)),
+                    store_digit(hir.Transmute(loc, 'uint8', digit), self._int64_binary('__add__', digits, position, loc)),
+                    assign(value, magnitude_op('__floordiv__', value, word(10))),
                 ]
 
-            render = hir.Block(
-                loc,
-                ty.VOID_TYPE,
-                [
-                    hir.Flow(
-                        loc,
-                        ty.VOID_TYPE,
-                        [
-                            hir.IfArm(
-                                loc,
-                                ty.VOID_TYPE,
-                                negative,
-                                assign(
-                                    value,
-                                    self._int64_binary(
-                                        '__sub__',
-                                        self._int64_literal(loc, 0),
-                                        value,
-                                        loc,
-                                    ),
-                                ),
-                            )
-                        ],
-                        None,
-                    ),
-                    *emit_digit(),
-                    hir.Flow(
-                        loc,
-                        ty.VOID_TYPE,
-                        [
-                            hir.LoopArm(
-                                loc,
-                                ty.VOID_TYPE,
-                                self._int64_comparison(
-                                    '__lt__',
-                                    self._int64_literal(loc, 0),
-                                    value,
-                                    loc,
-                                ),
-                                hir.Block(loc, ty.VOID_TYPE, emit_digit(), True),
-                            )
-                        ],
-                        None,
-                    ),
-                    hir.Flow(
-                        loc,
-                        ty.VOID_TYPE,
-                        [
-                            hir.IfArm(
-                                loc,
-                                ty.VOID_TYPE,
-                                negative,
-                                hir.Block(
-                                    loc,
-                                    ty.VOID_TYPE,
-                                    [
-                                        assign(
-                                            position,
-                                            self._int64_binary(
-                                                '__sub__',
-                                                position,
-                                                self._int64_literal(loc, 1),
-                                                loc,
-                                            ),
-                                        ),
-                                        store_digit(
-                                            self._int64_literal(loc, 45),
-                                            self._int64_binary(
-                                                '__add__', digits, position, loc
-                                            ),
-                                        ),
-                                    ],
-                                    True,
-                                ),
-                            )
-                        ],
-                        None,
-                    ),
-                    assign(
-                        source,
-                        self._int64_binary('__add__', digits, position, loc),
-                    ),
-                    assign(
-                        length,
-                        self._int64_binary(
-                            '__sub__',
-                            self._int64_literal(loc, 20),
-                            position,
-                            loc,
-                        ),
-                    ),
-                ],
-                True,
+            statements.extend([
+                hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                    loc, ty.VOID_TYPE, negative,
+                    assign(value, magnitude_op('__sub__', word(0), value)),
+                )], None),
+                *emit_digit(),
+                hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(
+                    loc, ty.VOID_TYPE,
+                    self._intrinsic_call('__ne__', [value, word(0)], 'bool', loc),
+                    hir.Block(loc, ty.VOID_TYPE, emit_digit(), True),
+                )], None),
+                hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+                    loc, ty.VOID_TYPE, negative,
+                    hir.Block(loc, ty.VOID_TYPE, [
+                        assign(position, self._int64_binary('__sub__', position, self._int64_literal(loc, 1), loc)),
+                        store_digit(self._int64_literal(loc, 45), self._int64_binary('__add__', digits, position, loc)),
+                    ], True),
+                )], None),
+            ])
+            add_piece(
+                self._int64_binary('__sub__', self._int64_literal(loc, 20), position, loc),
+                self._int64_binary('__add__', digits, position, loc),
             )
-            # Negating the minimum value would overflow; use its literal text.
-            statements.append(
-                hir.Flow(
-                    loc,
-                    ty.VOID_TYPE,
-                    [
-                        hir.IfArm(
-                            loc,
-                            ty.VOID_TYPE,
-                            self._int64_comparison(
-                                '__eq__',
-                                value,
-                                self._int64_literal(loc, -9223372036854775808),
-                                loc,
-                            ),
-                            hir.Block(
-                                loc,
-                                ty.VOID_TYPE,
-                                [
-                                    assign(
-                                        source,
-                                        self._string_data_start(minimum_text, loc),
-                                    ),
-                                    assign(length, self._int64_literal(loc, 20)),
-                                ],
-                                True,
-                            ),
-                        )
-                    ],
-                    render,
-                )
-            )
-            pieces.append((length, source))
 
         for part in node.parts:
             part_type = part.type
