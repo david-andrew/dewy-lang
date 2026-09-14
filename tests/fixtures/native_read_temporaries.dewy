@@ -1,0 +1,51 @@
+# Reading a fresh aggregate must release its owner after the read. Values
+# retained from its fields/elements must remain independent of that owner.
+Entry:type=[value:int64]
+Container:type=[entry:Entry items:array<Entry>]
+Node=$abstract type of [loc:int64]
+Leaf=type of Node & [value:int64]
+let calls:int64=0
+let entry=():>Entry=>{calls+=1 return Entry[42]}
+let container=():>Container=>Container[Entry[42] [Entry[42]]]
+let entries=():>array<Entry length=1>=>[Entry[42]]
+let optional=(present:bool):>Entry|none=>if present Entry[42] else none
+let leaf=():>Node=>Leaf[0 42]
+let exercise=():>bool=>{
+    let values:dict<int64 Entry>=[1->Entry[42]]
+    let borrowed=Container[Entry[42] [Entry[42]]]
+    loop i in 0.. and i <? 5000 {
+        if entry().value not=?42 return false
+        container();
+        let stack:array<Entry>=[Entry[42] Entry[42]]
+        let popped=stack.pop
+        if popped.value not=?42 return false
+        stack.pop;
+        let keys=values.keys
+        let union=keys | set[2]
+        if union.length not=?2 return false
+        if entries().length not=?1 return false
+        if optional(true) is? none or optional(false) isnt? none return false
+        if leaf() isnt? Leaf return false
+        if values.get(1) is? none or values.get(2) isnt? none return false
+        let selected=container().entry
+        let array=container().items
+        let element=(entries())[0]
+        selected.value=99
+        element.value=100
+        if array.length not=?1 return false
+        if array[0].value not=?42 return false
+        if borrowed.entry.value not=?42 return false
+        # A skipped condition must neither evaluate nor release its operand.
+        if false and entry().value =?0 return false
+    }
+    return true
+}
+let live=():>int64=>_arena_live_bytes
+let main=():>int64=>{
+    if not exercise() return 2
+    let before=live()
+    if not exercise() return 3
+    if calls not=?10000 return 4
+    if live()-before >?4096 return 1
+    return 42
+}

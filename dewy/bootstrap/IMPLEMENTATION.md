@@ -25,6 +25,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Hosted array pops now convert removed record elements from arena roots to
+  the usual caller/frame result storage, then release the original tree.
+  Locals, direct returns, retained fields and discarded pops consequently
+  use the same cleanup rules as ordinary record results. Bounded cases cover
+  nested arrays, independent snapshots and both indexed and final-element pops.
+
 - Native ownership boundaries adopt fresh flow, packing, lookup and call
   results instead of copying them again and abandoning their allocations.
   Packing takes ownership of constructors and returned records, but still

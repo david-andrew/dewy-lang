@@ -4235,11 +4235,12 @@ class _Lowerer(
         active payload are owned allocations. Methods have separate result
         conventions; strings and dynamic arrays already track temporaries.
         """
-        if (not self._has_arena() or not isinstance(source, hir.FunctionCall)
-                or not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
+        if not self._has_arena() or not isinstance(source, hir.FunctionCall):
             return None
-        if isinstance(source.type, ty.ObjectType):
+        if isinstance(source.type, ty.ObjectType) and self._frame_record_call(source):
             return self._release_object_members(value, source.type, source.loc)
+        if not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral)):
+            return None
         members = self._field_union_members(source.type)
         if members is not None:
             return self._release_cell_payload(value, members, source.loc,

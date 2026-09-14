@@ -180,6 +180,14 @@ class _ObjectLowering:
             self.lowering_module_startup = startup
         return result
 
+    def _frame_record_call(self, node: hir.AST) -> bool:
+        """Calls whose record result follows the caller-frame storage ABI."""
+        node = self._copy_source_expression(node)
+        return isinstance(node, hir.FunctionCall) and (
+            isinstance(node.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))
+            or isinstance(node.func, hir.ArrayMethod) and node.func.name == 'pop'
+        )
+
     def _object_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
         node = self._copy_source_expression(node)
         return isinstance(node, (hir.ObjectLiteral, hir.FunctionCall, hir.SetAlgebra, hir.DictView))
@@ -209,8 +217,7 @@ class _ObjectLowering:
         prelude, value = self._extract_object_pointer(arg)
         if isinstance(arg.type, ty.ObjectType) and (
             isinstance(arg, hir.ObjectLiteral)
-            or isinstance(arg, hir.FunctionCall)
-            and isinstance(arg.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))
+            or self._frame_record_call(arg)
         ):
             return self._object_statement_temporary(prelude, value, arg.type, arg.loc)
         return prelude, value
@@ -777,8 +784,7 @@ class _ObjectLowering:
         if not isinstance(node.value.type, ty.ObjectType):
             self._target_error(node, 'member access requires an object')
         if (self._has_arena() and not self.lowering_module_startup
-                and isinstance(node.value, hir.FunctionCall)
-                and isinstance(node.value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
+                and self._frame_record_call(node.value)):
             # A field view keeps its returned receiver alive for the whole
             # statement. Retained fields are copied by their ordinary value
             # boundary before this receiver's owned members are released.

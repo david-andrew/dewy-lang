@@ -1650,6 +1650,31 @@ class _ArrayLowering(_ArraySharing):
             index += 2 if flagged else 1
         return supplied
 
+    def _popped_array_result(self, node: hir.FunctionCall, element_type: ty.Type,
+                             prelude: list[hir.AST], value: hir.ExpressedIdentifier
+                             ) -> tuple[list[hir.AST], hir.AST]:
+        """Convert a removed arena record to the ordinary frame-result ABI.
+
+        Array elements own arena roots, whereas record locals/call results
+        release their members and keep frame roots. A pop crosses that
+        boundary: preserve the value, then release the removed element's
+        entire allocation. Shared nested arrays need only another descriptor.
+        """
+        record = ty.unfold(element_type)
+        if not isinstance(record, ty.ObjectType) or not self._has_arena():
+            return prelude, replace(value, type=element_type)
+        size, _offsets = self._object_layout(record, node)
+        result = self.object_result_destinations.pop(id(node), None)
+        if result is None:
+            allocation, result = self._allocate_object_result_value(record, node.loc)
+            prelude.extend(allocation)
+        return [
+            *prelude,
+            *self._copy_object_into_result_storage(result, value, record, node.loc),
+            *self._release_object_members(value, record, node.loc),
+            self._arena_release_call(value, self._int64_literal(node.loc, size), node.loc),
+        ], replace(result, type=element_type)
+
     def _extract_array_method_call(
         self,
         node: hir.FunctionCall,
@@ -1718,7 +1743,7 @@ class _ArrayLowering(_ArraySharing):
             result = hir.ExpressedIdentifier(loc, popped_type, self._new_array_name('popped'))
             index_arg = self._optional_method_argument(node, 'idx')
             if index_arg is None:
-                return [
+                return self._popped_array_result(node, element_type, [
                     *prelude,
                     length_declare,
                     hir.Declare(
@@ -1730,12 +1755,12 @@ class _ArrayLowering(_ArraySharing):
                         ),
                     ),
                     self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, last, loc),
-                ], replace(result, type=element_type)
+                ], result)
             # `xs.pop(idx)`: take the element, shift the tail down, shrink
             index_prelude, index = self._extract_expression(index_arg)
             index_name = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('pop_index'))
             last_name = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('last'))
-            return [
+            return self._popped_array_result(node, element_type, [
                 *prelude,
                 *index_prelude,
                 length_declare,
@@ -1751,7 +1776,7 @@ class _ArrayLowering(_ArraySharing):
                 ),
                 *shift_loop(index_name, '__lt__', last_name, +1, +1),
                 self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, last_name, loc),
-            ], replace(result, type=element_type)
+            ], result)
         if method.name == 'insert':
             # grow, shift the tail up from the end, store, extend
             value_prelude, value = self._growable_element_value(node.pos_args[0], element_type)
