@@ -238,3 +238,40 @@ Artifacts: `phase0-performance/host-static-literals-t0`,
 `fixed-result-lifetime-gates.log`. The reusable native lowering driver is
 recorded in `pinned-replacement/driver-path.txt`; it includes the pinned
 replacement fix, but is not a new full native compiler or fixed point.
+
+## Full build checkpoint: shared value helpers
+
+A pinned `3e15bcfd` snapshot (including the compiler packages, library, tools,
+and VERSION) builds the complete C-backed compiler executable in **479.40 s**:
+84.26 s checking, 99.98 s lowering, 11.14 s emission, and 278.02 s in the
+backend. Maximum process RSS is 4,653,972 KiB. Its 69,050,267-byte µDewy source
+has SHA-256 `6f9fd8fa964712f849aca7c850e1aebccfebe14f6fbf4892d48ee7089024085f`.
+The preceding `e305d2e6` checkpoint took 667.44 s and emitted 118,865,274 bytes.
+This is about 28% less wall time and 42% less generated text; normal debug
+metadata is part of the older text. Both checkpoints bypass ccache and use
+GCC with eight LTO jobs. Other validation overlapped these builds, so these
+are integration observations rather than controlled acceptance samples.
+A late, nonblocking profiler attempt collected no samples while the Python
+parent waited on C compilation.
+
+The resulting hosted-built compiler completes the native t0 invocation in
+66.22 s, producing 4,276,283 bytes, with 3,182,688 KiB peak process RSS. This
+remains well outside the desired native performance; no new native fixed
+point is claimed. Artifacts are `host-full-value-helpers` and
+`native-value-helpers-t0` under the campaign artifact directory.
+
+## Bounds query scope
+
+Syntactic predicate read/write queries and declared-type numeric intervals
+are now cached per bounds validator. Checked HIR structure and declared types
+remain stable within this pass; recording a constant index does not change
+its binding reads/writes. The constructing checker keeps uncached queries,
+and state-dependent interval evaluation remains uncached. Fifty-one focused
+bounds, predicate invalidation, width and refinement tests pass. A cache-on /
+cache-off t0 comparison emits identical text (3,697,407 bytes, SHA-256
+`defff774b4bc4991432bbdb8235f9f70fdd22f76617ea7609201b3d4e34a875e`).
+Its warm checking samples were 2.29 and 2.27 seconds respectively: no wall-time
+improvement is established by that small sample. The ordinary isolated-cache
+CLI sample took 19.10 seconds; it must not be compared with the warm prelude
+comparison as the same workload. See `bounds-query-gates.log`,
+`bounds-queries-{cached,uncached}.log`, and `host-bounds-queries-t0`.

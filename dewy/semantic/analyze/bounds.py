@@ -733,6 +733,8 @@ class _BoundsValidator:
         self.srcfile = srcfile
         self.unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None
         self.checked_functions: set[int] = set()
+        self.predicate_bindings = predicate_effects.BindingQueries()
+        self.declared_intervals: dict[int, tuple[ty.Type, Interval | None]] = {}
         assigned = _assigned_binding_ids(root)
         self.assigned = assigned
         # Element intervals of arrays and dictionaries initialized from a
@@ -1898,6 +1900,15 @@ class _BoundsValidator:
         return self._declared_type_interval(declared) if declared is not None else None
 
     def _declared_type_interval(self, declared: ty.Type) -> Interval | None:
+        # The checked types stay fixed during this validator's pass. Interval
+        # evaluation against a changing flow state deliberately is not cached.
+        entry = self.declared_intervals.get(id(declared))
+        if entry is None:
+            entry = (declared, self._compute_declared_type_interval(declared))
+            self.declared_intervals[id(declared)] = entry
+        return entry[1]
+
+    def _compute_declared_type_interval(self, declared: ty.Type) -> Interval | None:
         """Bounds of a numeric payload, independent of optional presence.
 
         Combine all alternatives; a refined alternative must not constrain
@@ -2997,7 +3008,7 @@ class _BoundsValidator:
 
     def _refine_after(self, state: State, left: hir.AST, right: hir.AST, *, right_truth: bool, invalidated: frozenset[int] = frozenset()) -> State | None:
         """Refine by `right` on the path where `left` decided nothing (its truth is the opposite of `right_truth`)."""
-        first = self._refine(state, left, truth=not right_truth, invalidated=invalidated | predicate_effects.mutated_bindings(right))
+        first = self._refine(state, left, truth=not right_truth, invalidated=invalidated | self.predicate_bindings.mutated_bindings(right))
         if first is None:
             return None
         return self._refine(first, right, truth=right_truth, invalidated=invalidated)
@@ -3954,7 +3965,7 @@ class _BoundsValidator:
         invalidated: frozenset[int] = frozenset(),
     ) -> State | None:
         refined = dict(state)
-        if invalidated and not isinstance(condition, hir.ShortCircuit) and invalidated.intersection(predicate_effects.read_bindings(condition)):
+        if invalidated and not isinstance(condition, hir.ShortCircuit) and invalidated.intersection(self.predicate_bindings.read_bindings(condition)):
             return refined
         if isinstance(condition, hir.Bool):
             return refined if condition.value == truth else None
@@ -3974,7 +3985,7 @@ class _BoundsValidator:
                     writes = invalidated
                     for conjunct in reversed(conjuncts):
                         later_writes.append(writes)
-                        writes = writes | predicate_effects.mutated_bindings(conjunct)
+                        writes = writes | self.predicate_bindings.mutated_bindings(conjunct)
                     later_writes.reverse()
                     current: State | None = refined
                     for _pass in range(2):
@@ -3991,7 +4002,7 @@ class _BoundsValidator:
             if condition.op in {'or', 'nor'}:
                 effective_truth = truth if condition.op == 'or' else not truth
                 if not effective_truth:
-                    left = self._refine(refined, condition.left, truth=False, invalidated=invalidated | predicate_effects.mutated_bindings(condition.right))
+                    left = self._refine(refined, condition.left, truth=False, invalidated=invalidated | self.predicate_bindings.mutated_bindings(condition.right))
                     if left is None:
                         return None
                     return self._refine(left, condition.right, truth=False, invalidated=invalidated)
