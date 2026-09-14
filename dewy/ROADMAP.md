@@ -40,10 +40,45 @@ visibility. The pieces users notice most (floats, matrices, closures, GUI
 examples) come after the pieces that make them cheap to build once.
 
 One structural cost shapes everything: while the hosted Python compiler and
-the bootstrap compiler must stay in parity, every feature costs twice. The
-highest-leverage decision after the fixed point is to retire Python as the
-reference as soon as the native pair passes the regression corpus. Until
-then, foundation changes are scoped to land once, in the native compiler.
+the bootstrap compiler stay in parity, every feature costs twice. That cost
+is accepted on purpose for now; see "The hosted compiler's role" below for
+what it buys and when it stops being worth paying.
+
+## The hosted compiler's role
+
+The Python compiler is not only the bootstrap seed. It is the one
+implementation of the language that shares nothing with the native compiler
+(different language, different code generator), which makes it:
+
+- an independent oracle for miscompilation. A self-hosting compiler can
+  miscompile itself consistently and still reach a byte-identical fixed
+  point; the differential `test_bootstrap_*` comparisons catch what a
+  fixed-point check cannot, and matter most while lowering and ownership
+  are being rewritten (Phase 1);
+- a from-source bootstrap path with no trusted binary seed;
+- the faster development loop while native compile time lags (about six
+  minutes to emit the compiler's own source versus roughly twenty-five
+  natively, as of September 2026); analysis changes are prototyped in
+  Python and then ported;
+- the way around staged seeds when the language changes: the compiler's
+  own source will use each new feature, and a hosted compiler that already
+  supports it avoids a two-generation staging dance for every change.
+
+Its role changes in three steps, decided 2026-09-14:
+
+1. **Full parity (now, and through the period of frequent language
+   change).** Features and fixes land in both compilers. Parity is
+   semantic: a program both accept behaves identically. It is not parity in
+   cost; the native lowering already reclaims storage the hosted lowering
+   does not, and the hosted side is not required to match that.
+2. **Pinned reference.** When the language changes slowly enough that
+   staging is cheap, the hosted compiler is pinned at a language version N
+   and stops taking features. Native N+1 is built by native N, which was
+   built by hosted N. The execution-parity oracle keeps working across
+   versions for programs both accept.
+3. **Retirement.** When native compile time is competitive, a
+   reproducibly built native seed is published, and the language has
+   stabilized. Expected around the end of Phase 2, not Phase 0.
 
 ## Phase 0: workable native compiler (in progress, mandated)
 
@@ -54,8 +89,9 @@ Exit criteria that the later phases depend on:
 - the native pair passes the full end-to-end corpus, the differential
   `test_bootstrap_*` groups, and the `$test` runner;
 - installer and release wired to the verified package; CI green;
-- the Python compiler frozen except for seed rebuilds, then retired as the
-  behavioral reference;
+- the Python compiler remains the behavioral reference and stays in
+  parity (see "The hosted compiler's role"); its retirement is not a Phase
+  0 exit criterion;
 - compile-time performance adequate for dogfooding. Full-source checking
   measured in hundreds of seconds and multi-gigabyte peaks makes the language
   unusable regardless of features. A serialized checked-prelude cache on the
@@ -354,7 +390,9 @@ stable surface.
 - Additional µDewy backends, the browser playground, and the hypothetical
   ndewy rung (a TBD section in `../udewy/trusted_computing_concept.md`; no
   code exists). Finished enough, or not started, and correctly so for now.
-- Growing the Python compiler beyond seed duty.
+- Matching the native compiler's storage cost in the hosted lowering.
+  Parity is semantic; the hosted compiler is the reference and the seed,
+  not the performance target.
 - Any new user-visible spelling before the Phase 1.4 decisions; surface
   changes need David's approval first.
 
