@@ -204,6 +204,10 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.ValueCast {
         let actual=hir.node_at(state.input.nodes node.expr).value_type
         if object_valued(actual state) and object_valued(node.value_type state) and expression_owns(node.expr @state) return owned_record(expression(node.expr @state) actual node.value_type node @state)
+        if temporary_owner(node.expr @state) {
+            if cell_members(actual @state) isnt? none return owned_cell_cast(node actual @state)
+            if cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state) actual node.value_type node @state owned=true)
+        }
         if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) actual node.value_type node @state)
         if enum_members(actual state) isnt? none return enum_read(expression(node.expr @state) actual node.value_type node @state)
         # A logical upcast can leave a narrowed union representation behind:
@@ -486,6 +490,7 @@ expression_owns = (id:addr @state:State):>bool => {
     if node is? hir.Suppress return expression_owns(node.item @state)
     if node is? hir.ValueCast {
         let source=hir.node_at(state.input.nodes node.expr)
+        if cell_members(source.value_type @state) isnt? none and temporary_owner(node.expr @state) return true
         if object_valued(source.value_type state) and object_valued(node.value_type state) return expression_owns(node.expr @state)
         if array_valued(source.value_type state) and array_valued(node.value_type state) return expression_owns(node.expr @state)
     }
@@ -552,6 +557,23 @@ copy_value = (value:addr type:addr node:hir.AST @state:State):>addr => {
     if array isnt? none return array_copy(value array node @state)
     if object_valued(type state) return object_copy(value type node @state)
     return value
+}
+# A fresh flow can carry a union of differently refined arrays even when
+# the enclosing result is one ordinary array type. Extracting the payload
+# must not abandon that cell. Retagging may itself create a new cell on only
+# some paths; release that intermediate only when it differs from the source.
+owned_cell_cast = (node:hir.ValueCast actual:addr @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let source=snapshot(expression(node.expr @state) @prefix @state)
+    let value=if enum_members(node.value_type state) isnt? none enum_pack(source actual node.value_type node @state) else read_value(source actual node.value_type node @state)
+    value=snapshot(value @prefix @state)
+    let result=snapshot(copy_value(value node.value_type node @state) @prefix @state)
+    if cell_members(node.value_type @state) isnt? none {
+        prefix.push(conditional(compare('__ne__' value source node @state) release_value(value node.value_type node @state) node @state))
+    }
+    prefix.push(release_value(source actual node @state))
+    prefix.push(result)
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
 }
 owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
@@ -1246,9 +1268,11 @@ string_type = (id:addr state:State):>bool => {
     let plain=types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes)
     return views.string_valued(plain state.type_nodes)
 }
-string_memory = (data:addr byte_length:addr boundaries:addr length:addr start:addr node:hir.AST @state:State):>addr => {
+string_memory = (data:addr byte_length:addr boundaries:addr length:addr start:addr node:hir.AST @state:State static_storage:bool=false):>addr => {
     let prefix:array<addr>=[]
-    let descriptor=snapshot(allocation(word(layouts.string_descriptor.size node @state) node @state) @prefix @state)
+    let size=word(layouts.string_descriptor.size node @state)
+    let storage=if static_storage intrinsic('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else allocation(size node @state)
+    let descriptor=snapshot(storage @prefix @state)
     let fields:array<addr>=[data byte_length boundaries length start word(0 node @state)]
     let offset:addr=0
     loop value in fields {prefix.push(store_word(value descriptor offset node @state)) offset+=8}
@@ -1275,7 +1299,10 @@ string_literal = (node:hir.String @state:State):>addr => {
         prefix.push(intrinsic('__store_u32__' [value word_op('__add__' boundaries word(i*4 node @state) node @state)] types.primitive('void' @state.type_nodes) node @state))
     }
     let data=put(hir.String[node.loc types.primitive('int64' @state.type_nodes) node.content] @state)
-    prefix.push(string_memory(data word(bytes.length node @state) boundaries word(node.content.length node @state) word(0 node @state) node @state))
+    # Every descriptor field is constant for this literal site. Like its
+    # bytes and boundary table, the descriptor can be reused across calls;
+    # allocating it on each evaluation retains space for immutable data.
+    prefix.push(string_memory(data word(bytes.length node @state) boundaries word(node.content.length node @state) word(0 node @state) node @state static_storage=true))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 string_data = (value:addr node:hir.AST @state:State):>addr => word_op('__add__' read_word(value layouts.string_descriptor.data node @state) read_word(value layouts.string_descriptor.start node @state) node @state)
@@ -2466,6 +2493,15 @@ iterator_step = (node:hir.IteratorExpression @state:State):>IteratorStep => {
         value=word_op('__add__' word(node.first node @state) word_op('__mul__' cursor word(node.step node @state) node @state) node @state)
     } else {
         let sequence=snapshot(expression(node.iterable @state) @prefix @state)
+        if temporary_owner(node.iterable @state) {
+            # lower_flow gives iterator setup its own cleanup frame. Body
+            # continues keep this owner; leaving the arm or returning from
+            # the function releases it after the last borrowed element use.
+            $runtime_assert state.cleanup_frames.length >? 0
+            let frame=state.cleanup_frames.pop
+            frame.push(OwnedLocal[sequence source.value_type])
+            state.cleanup_frames.push(frame)
+        }
         let array=array_type(source.value_type state)
         if array isnt? none {
             let layout=layouts.element(array.element @state.type_nodes nominals=state.layout_context.nominals)
@@ -2510,12 +2546,14 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     if position >=? node.arms.length return if node.default is? none put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state) else flow_value(node.default node.value_type @state)
     let arm=hir.node_at(state.input.nodes node.arms[position])
     $runtime_assert arm is? hir.IfArm|hir.LoopArm
-    let fallback:addr?=none
-    if position+1 <? node.arms.length or node.default isnt? none {fallback=lower_flow(node position+1 @state)}
     let test=hir.node_at(state.input.nodes arm.condition)
+    let iterator=arm is? hir.LoopArm and test is? hir.IteratorExpression|hir.MultiIteratorExpression
+    let cleanup_start=state.cleanup_frames.length
+    let scoped=state.cleanup_enabled and iterator
+    if scoped {state.cleanup_frames.push([])}
     let prefix:array<addr>=[]
     let condition:addr=0
-    if arm is? hir.LoopArm and test is? hir.IteratorExpression|hir.MultiIteratorExpression {
+    if iterator {
         let step=iterator_condition(test @state)
         prefix=step.prefix condition=step.condition
     } else {condition=expression(arm.condition @state)}
@@ -2525,11 +2563,25 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
         $runtime_assert state.cleanup_loops.length >? 0
         state.cleanup_loops.pop;
     }
+    # The fallback runs after setup when this arm never enters. Lower it
+    # with the iterator frame still active so a return there cleans it too.
+    let fallback:addr?=none
+    if position+1 <? node.arms.length or node.default isnt? none {fallback=lower_flow(node position+1 @state)}
     let arm_type=runtime_type(arm.value_type arm @state)
     let lowered=put(if arm is? hir.IfArm hir.IfArm[arm.loc arm_type condition body] else hir.LoopArm[arm.loc arm_type condition body] @state)
     let flow=put(hir.Flow[node.loc type [lowered] fallback] @state)
-    if prefix.length =? 0 return flow
-    prefix.push(flow)
+    if scoped {
+        let result:addr?=none
+        if types.is_primitive(types.node_at(state.type_nodes type) 'void') or types.is_primitive(types.node_at(state.type_nodes type) 'never') {prefix.push(flow)}
+        else {result=snapshot(flow @prefix @state)}
+        loop released in cleanup_since(cleanup_start node @state) {prefix.push(released)}
+        $runtime_assert state.cleanup_frames.length >? 0
+        state.cleanup_frames.pop;
+        if result isnt? none {prefix.push(result)}
+    } else {
+        if prefix.length =? 0 return flow
+        prefix.push(flow)
+    }
     return put(hir.Block[node.loc type prefix false] @state)
 }
 

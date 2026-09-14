@@ -26,6 +26,8 @@ REFINED_TAG_CASES = [
     (ROOT / 'tests/fixtures/native_optional_flow_join.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_owned_union_temporaries.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_read_temporaries.dewy').read_text(),
+    (ROOT / 'tests/fixtures/native_iterator_temporaries.dewy').read_text(),
+    (ROOT / 'tests/fixtures/native_static_strings.dewy').read_text(),
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(Record[0]) 42 else 1",
     "let test=(value:addr?):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(none) 42 else 1",
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value isnt? addr\nlet main=():>int64=>if not test(42) and test(Record[0]) 42 else 1",

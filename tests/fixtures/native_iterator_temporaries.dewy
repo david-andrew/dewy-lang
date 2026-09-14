@@ -1,0 +1,39 @@
+# A returned iterable owns its elements until its loop arm finishes. Every
+# exit route must release that owner, including returns and nested loops.
+Entry:type=[value:int64]
+let children=(present:bool):>array<Entry>=>if present [Entry[42] Entry[7]] else []
+let early=(present:bool):>int64=>{
+    loop child in children(present) {return child.value}
+    else {return 7}
+    return 0
+}
+let exercise=():>bool=>{
+    loop i in 0.. and i <?1000 {
+        let total:int64=0
+        loop child in children(true) {
+            if child.value =?7 continue
+            total+=child.value
+        }
+        if total not=?42 return false
+        loop child in children(false) {return false}
+        else {total+=1}
+        if total not=?43 return false
+        loop a in children(true) and b in children(true) {
+            if a.value not=?b.value return false
+        }
+        loop a in children(true) {
+            loop b in children(true) {break}
+            if a.value =?42 continue
+            break
+        }
+        if early(true) not=?42 or early(false) not=?7 return false
+    }
+    return true
+}
+let live=():>int64=>_arena_live_bytes
+let main=():>int64=>{
+    if not exercise() return 2
+    let before=live()
+    if not exercise() return 3
+    return if live()-before <=?4096 42 else 1
+}

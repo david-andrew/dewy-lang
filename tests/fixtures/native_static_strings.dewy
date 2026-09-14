@@ -1,0 +1,18 @@
+# Literal bytes, boundary tables and descriptors are all immutable and can
+# have static storage. Calling a literal-returning function must not allocate
+# another descriptor every time, including multibyte graphemes.
+let literal=():>string=>'é🇺🇸'
+let exercise=():>bool=>{
+    loop i in 0.. and i <?5000 {
+        if literal().length not=?2 return false
+        if literal() not=?'é🇺🇸' return false
+    }
+    return true
+}
+let live=():>int64=>_arena_live_bytes
+let main=():>int64=>{
+    if not exercise() return 2
+    let before=live()
+    if not exercise() return 3
+    return if live()-before <=?4096 42 else 1
+}

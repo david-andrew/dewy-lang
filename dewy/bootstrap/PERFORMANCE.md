@@ -74,6 +74,18 @@ input snapshots. The combined `native_read_temporaries.dewy` kernel retained
 8,920,032 bytes per 5,000 iterations before this batch and zero afterward.
 Both output backends pass; this is a bounded result, not a self-build claim.
 
+Iterator arms now retain fresh sequence owners in a cleanup scope spanning
+setup, body and fallback. Normal exit, break and return release the sequence;
+continue keeps it for the next element. Fresh casts also reclaim union cells
+after preserving their converted result, including flows joining arrays of
+different lengths. The combined iterator/cast fixture retained 1,032,000 bytes
+per 1,000 iterations before the cast fix and zero afterward.
+
+String literals now use static descriptors as well as static bytes and
+grapheme tables. Three literal evaluations per iteration previously retained
+960,000 bytes over 5,000 iterations; the multibyte-string fixture now retains
+zero. Dynamic strings and their views still need a fuller reclamation model.
+
 The same checker-construction kernel compiled through native lowering now
 allocates 616,000 bytes for 500 constructions, at both graph sizes, retains
 zero bytes and copies zero dynamic-array payload bytes. The allocation count
