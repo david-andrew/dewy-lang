@@ -1323,6 +1323,12 @@ class _ObjectLowering:
         if moved:
             self.move_notes.append(MoveNote(self.srcfile, returned.loc, f'`{returned.name}` is moved when returned: this is its last use, so its arrays are adopted rather than copied', True))
         prelude, source = self._extract_object_pointer(item)
+        if self._frame_record_call(item) and isinstance(item.type, ty.ObjectType):
+            # A child-returning call cannot write directly into the parent's
+            # prepared result tree. The copy below keeps the complete dynamic
+            # value; release the temporary child's fields after that copy, just
+            # as for any other returned-record receiver.
+            prelude, source = self._object_statement_temporary(prelude, source, item.type, item.loc)
         return [
             *prelude,
             *self._copy_object_into_result_storage(
