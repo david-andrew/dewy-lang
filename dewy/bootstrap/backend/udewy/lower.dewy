@@ -34,6 +34,7 @@ Escaping closures remain a subsequent step. An unsupported representation report
 pending-implementation diagnostic before program emission.
 """
 OwnedLocal:type = const [value:addr value_type:addr box:addr?=none condition:addr?=none]
+ScalarProjection:type = const [function:addr read:addr field:string result:addr symbol:string]
 State:type = [
     input:emit.Input
     source:SrcFile
@@ -71,6 +72,10 @@ State:type = [
     cleanup_owned:set<addr>=set[]
     escaping_places:set<addr>=set[]
     generated:array<program.Function>=[]
+    getter_reads:dict<addr addr?>=[]
+    scalar_projections:dict<string ScalarProjection>=[]
+    pending_projections:array<ScalarProjection>=[]
+    result_projection:ScalarProjection?=none
     problem:Error?=none
 ]
 Result:type = const [program:program.Program input:emit.Input]
@@ -250,6 +255,18 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.SetAlgebra return set_algebra(node @state)
     if node is? hir.NoneValue|hir.ErrorValue return word(0 node @state)
     if node is? hir.MemberAccess {
+        # Most fields read a local, not a call result. Inspect its brand in
+        # place before asking for a variant, avoiding a record/cell snapshot
+        # on every ordinary field access just to rule this optimization out.
+        $runtime_assert node.value <? state.input.nodes.length
+        if state.input.nodes[node.value] is? hir.FunctionCall {
+            let projection=scalar_getter_projection(node @state)
+            if projection isnt? none {
+                let call=hir.node_at(state.input.nodes node.value)
+                $runtime_assert call is? hir.FunctionCall
+                return ordinary_call(node.value call runtime_type(node.value_type node @state) @state projection=projection)
+            }
+        }
         let stored=stored_type(id state)
         let prefix:array<addr>=[]
         let receiver=read_operand(node.value @prefix @state)
@@ -610,6 +627,16 @@ owned_cell_cast = (node:hir.ValueCast actual:addr @state:State):>addr => {
 }
 owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
+    if state.result_projection isnt? none and state.result_projection.read =? id {
+        let projection=state.result_projection
+        # Read the word while the route and all its enclosing locals are
+        # still alive. The ordinary return cleanup runs after this read.
+        let member=hir.MemberAccess[node.loc projection.result id projection.field]
+        let prefix:array<addr>=[]
+        let receiver=read_operand(id @prefix @state)
+        let value=field_read(field_address(receiver.value member @state) projection.result member @state)
+        return finish_read(value receiver member @prefix @state)
+    }
     if node is? hir.Suppress return owned_value(node.item @state)
     if node is? hir.ValueCast {
         let source=hir.node_at(state.input.nodes node.expr)
@@ -2105,6 +2132,74 @@ field_write = (pointer:addr value:addr type:addr node:hir.AST @state:State):>add
     }
     return array_store(value pointer type node @state)
 }
+
+# Return-by-value remains the fallback. The initial projection rule accepts
+# one terminal route read, preserving every preceding guard and side effect.
+# It does not select a field out of a constructor or change an indirect call.
+getter_read = (body:addr nodes:array<hir.AST>):>addr? => {
+    let terminal=body
+    let node=hir.node_at(nodes terminal)
+    let prefix_nodes:set<addr>=set[]
+    if node is? hir.Block {
+        if node.items.length =? 0 return none
+        terminal=node.items[node.items.length-1]
+        let pending:array<addr>=[]
+        loop i in 0.. and i <? node.items.length-1 {pending.push(node.items[i])}
+        loop pending.length >? 0 {
+            let child=pending.pop
+            if child in? prefix_nodes continue
+            prefix_nodes.add(child)
+            let current=hir.node_at(nodes child)
+            if current is? hir.FunctionLiteral continue
+            if current is? hir.Return return none
+            loop child in hir.children(current) {pending.push(child)}
+        }
+        node=hir.node_at(nodes terminal)
+        # A block's implicit aggregate result needs its own type rewrite;
+        # keep that shape on the ordinary path in this first native slice.
+        if node isnt? hir.Return return none
+    }
+    if node is? hir.Return {
+        if node.item is? none return none
+        terminal=node.item
+        node=hir.node_at(nodes terminal)
+    }
+    if node isnt? hir.Index|hir.MemberAccess|hir.ExpressedIdentifier return none
+    # HIR is an arena and may share nodes. The result override must not also
+    # change a use of this record read in the unchanged prefix.
+    if terminal in? prefix_nodes return none
+    let pending=hir.children(node)
+    loop pending.length >? 0 {
+        let current=hir.node_at(nodes pending.pop)
+        if current is? hir.FunctionLiteral continue
+        if current is? hir.Return return none
+        loop child in hir.children(current) {pending.push(child)}
+    }
+    return terminal
+}
+scalar_getter_projection = (node:hir.MemberAccess @state:State):>ScalarProjection? => {
+    let call=hir.node_at(state.input.nodes node.value)
+    if call isnt? hir.FunctionCall return none
+    let direct=captures.resolve(call.func call.selected_method_index state.capture_plan state.input.nodes)
+    if direct is? none return none
+    let literal=hir.node_at(state.input.nodes direct)
+    if literal isnt? hir.FunctionLiteral or literal.object_receiver return none
+    let record=object_type(literal.rettype state)
+    if record is? none or literal.rettype not=? call.value_type return none
+    let field=types.object_field(record node.name)
+    if field is? none or field.value_type not=? node.value_type return none
+    if not types.is_primitive(types.node_at(state.type_nodes node.value_type) 'bool') and views.fixed_integer_layout(node.value_type state.type_nodes) is? none return none
+    if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
+    let read=state.getter_reads.get(direct default=none)
+    if read is? none return none
+    let key="{direct}:{node.name}"
+    let existing=state.scalar_projections.get(key)
+    if existing isnt? none return existing
+    let projection=ScalarProjection[direct read node.name node.value_type fresh('project' @state)]
+    state.scalar_projections[key]=projection
+    state.pending_projections.push(projection)
+    return projection
+}
 # Exact field operations and dynamic-family dispatch have different sharing
 # boundaries. A family's copy/release calls one field helper for its selected
 # brand; embedding every child's fields at every parent view expands the same
@@ -2329,7 +2424,9 @@ call_slot = (value:addr? type:addr required:bool node:hir.AST @args:array<addr> 
     }
     if not required {args.push(put(hir.Bool[node.loc types.primitive('bool' @state.type_nodes) value isnt? none] @state))}
 }
-ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State):>addr => {
+# A variant changes only the output ABI. Argument evaluation, default flags,
+# ownership decisions, and lifted captures follow the original checked call.
+ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State projection:ScalarProjection?=none):>addr => {
     let callee=hir.node_at(state.input.nodes node.func)
     let direct=captures.resolve(node.func node.selected_method_index state.capture_plan state.input.nodes)
     let signature_type=if direct is? none callee.value_type else hir.node_at(state.input.nodes direct).value_type
@@ -2338,6 +2435,7 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State):>a
     if signature.rest isnt? none return reject(node 'rest argument legalization' @state)
     let prefix:array<addr>=[]
     let function=if direct is? none snapshot(expression(node.func @state) @prefix @state) else code_reference(direct callee @state)
+    if projection isnt? none {function=put(hir.ExpressedIdentifier[node.loc code_type(projection.function node @state result=projection.result) projection.symbol] @state)}
     let borrowed=state.borrowed_arguments.get(id set[])
     let disposable=state.disposable_arguments.get(id set[])-borrowed
     let temporary:array<OwnedLocal>=[]
@@ -2401,7 +2499,7 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State):>a
 # Only the lifted code signature contains captures. Ordinary function values
 # retain the source callable ABI, so a capturing unit cannot masquerade as
 # a plain function pointer merely because its visible parameters match.
-code_type = (id:addr node:hir.AST @state:State):>addr => {
+code_type = (id:addr node:hir.AST @state:State result:addr?=none):>addr => {
     let literal=hir.node_at(state.input.nodes id)
     let capture=state.capture_plan.functions.get(id)
     $runtime_assert literal is? hir.FunctionLiteral and capture isnt? none
@@ -2415,7 +2513,7 @@ code_type = (id:addr node:hir.AST @state:State):>addr => {
         let type=if binding in? state.boxed types.primitive('int64' @state.type_nodes) else runtime_type(stored node @state)
         arguments.push(types.PosOrKwArg[none type])
     }
-    return types.function_type(arguments [] none signature.ret [] @state.type_nodes)
+    return types.function_type(arguments [] none if result is? none signature.ret else runtime_type(result node @state) [] @state.type_nodes)
 }
 code_reference = (id:addr node:hir.AST @state:State):>addr => {
     let name=state.code_symbols.get(id)
@@ -2428,7 +2526,7 @@ function_value = (id:addr node:hir.AST @state:State):>addr => {
     if capture.captures.length >? 0 return reject(node 'a capturing function used as a value needs closure storage' @state)
     return code_reference(id node @state)
 }
-function = (id:addr node:hir.FunctionLiteral @state:State):>addr => {
+function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProjection?=none):>addr => {
     if node.rest_args isnt? none return reject(node 'rest parameter legalization' @state)
     if aggregate(node.rettype state) and state.allocator is? none return reject(node 'aggregate results need the prelude arena allocator' @state)
     let arguments:array<hir.Param>=[]
@@ -2533,8 +2631,10 @@ function = (id:addr node:hir.FunctionLiteral @state:State):>addr => {
         let type=if binding in? state.boxed types.primitive('int64' @state.type_nodes) else runtime_type(stored node @state)
         arguments.push(hir.Param[symbol('capture' binding @state) type binding])
     }
+    state.result_projection=projection
     let body=owned_value(node.body @state)
-    let result_type=runtime_type(node.rettype node @state)
+    state.result_projection=none
+    let result_type=runtime_type(if projection is? none node.rettype else projection.result node @state)
     let cleanup=cleanup_since(frame_start node @state)
     $runtime_assert state.cleanup_frames.length >? frame_start and state.cleanup_frames.length >? 0
     state.cleanup_frames.pop;
@@ -2548,7 +2648,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State):>addr => {
         if result isnt? none {prologue.push(result)}
         body=put(hir.Block[node.loc result_type prologue false] @state)
     }
-    return put(hir.FunctionLiteral[node.loc code_type(id node @state) arguments [] none result_type body source=node.source] @state)
+    return put(hir.FunctionLiteral[node.loc code_type(id node @state result=if projection is? none none else projection.result) arguments [] none result_type body source=node.source] @state)
 }
 
 lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:array<subtyping.Link>=subtyping.default_links):>Result|Error => {
@@ -2609,6 +2709,18 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         state.source_index=node.source
         state.source=if node.source is? none source else hir.source_at(node.source input.source_files)
         functions.push(program.Function[name function(id node @state)])
+    }
+    # Never lower a variant inside the active caller's cleanup state. New
+    # variants are registered before their bodies, so recursion stays finite.
+    let projection_index:addr=0
+    loop projection_index <? state.pending_projections.length {
+        let projection=state.pending_projections[projection_index]
+        projection_index+=1
+        let node=hir.node_at(input.nodes projection.function)
+        $runtime_assert node is? hir.FunctionLiteral
+        state.source_index=node.source
+        state.source=if node.source is? none source else hir.source_at(node.source input.source_files)
+        functions.push(program.Function[projection.symbol function(projection.function node @state projection=projection)])
     }
     if state.problem isnt? none return state.problem
     if entry_binding isnt? none and main is? none return Error[srcfile=source title='the entry binding is not a concrete function']

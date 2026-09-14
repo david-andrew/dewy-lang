@@ -1,0 +1,33 @@
+# A node arena lookup should read a scalar without copying the returned node.
+# Its descendants carry owned fields, so checking only the base layout would
+# conceal the expensive part of a return-by-value fallback.
+Node=type of [value:int64 active:bool]
+Branch=type of Node & [children:array<int64> label:string]
+Leaf=type of Node & [words:array<string>]
+node_at=(nodes:array<Node> id:addr):>Node=>{
+    $runtime_assert id <? nodes.length
+    return nodes[id]
+}
+sum=(nodes:array<Node> count:int64):>int64=>{
+    let total:int64=0
+    loop i in 0.. and i <? count {
+        if node_at(nodes 0).active {total+=node_at(nodes 0).value}
+        total+=node_at(nodes 1).value
+    }
+    return total
+}
+main=():>int64=>{
+    let nodes:array<Node>=[Branch[20 true [1 2 3] 'branch'] Leaf[22 false ['a' 'b']]]
+    if sum(nodes 2) not=? 84 return 1
+    let live:int64=_arena_live_bytes
+    let allocated:int64=_arena_allocated_bytes
+    let copied:int64=_arena_copied_bytes
+    let total=sum(nodes 1000)
+    let allocations:int64=_arena_allocated_bytes-allocated
+    let copies:int64=_arena_copied_bytes-copied
+    let retained:int64=_arena_live_bytes-live
+    printl("{allocations} {copies} {retained}")
+    if total not=? 42000 return 2
+    if retained not=? 0 return 3
+    return 42
+}

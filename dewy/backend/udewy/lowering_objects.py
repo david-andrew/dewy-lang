@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import Callable
+from ...utils import dataclass_fields
 
 from ...reporting import Span
 from ...semantic import builtins, hir, ty
@@ -30,6 +31,76 @@ def _flow_values(flow: hir.Flow) -> list[hir.AST]:
     return values
 
 class _ObjectLowering:
+    @classmethod
+    def _projection_has_return(cls, value: object) -> bool:
+        """Look through expression wrappers too, but not a nested function."""
+        if isinstance(value, hir.Return):
+            return True
+        if isinstance(value, hir.FunctionLiteral):
+            return False
+        if isinstance(value, hir.AST):
+            return any(cls._projection_has_return(getattr(value, field.name))
+                       for field in dataclass_fields(value))
+        if isinstance(value, (tuple, list)):
+            return any(cls._projection_has_return(item) for item in value)
+        if isinstance(value, dict):
+            return any(cls._projection_has_return(item) for item in value.values())
+        return False
+
+    @classmethod
+    def _scalar_getter_body(cls, body: hir.AST) -> bool:
+        # Start with a single terminal route read. We preserve the complete
+        # prefix (guards, mutations, locals, calls), and never project out of
+        # a record constructor, whose other fields may have effects. More
+        # general control-flow results can be added with their own proof.
+        if isinstance(body, hir.Block):
+            if not body.items or any(cls._projection_has_return(item) for item in body.items[:-1]):
+                return False
+            body = body.items[-1]
+        if isinstance(body, hir.Return):
+            body = body.item
+        return isinstance(body, (hir.Index, hir.MemberAccess, hir.ExpressedIdentifier)) and not cls._projection_has_return(body)
+
+    def _scalar_getter_projection(self, node: hir.MemberAccess) -> tuple[str, ty.Type, str] | None:
+        if not isinstance(node.value, hir.FunctionCall):
+            return None
+        function = self._direct_call_function(node.value)
+        if function is None or function.literal.object_receiver:
+            return None
+        record = function.literal.rettype
+        if not isinstance(record, ty.ObjectType) or node.value.type != record:
+            return None
+        field = record.field(node.name)
+        if field is None or node.type != field.type:
+            return None
+        # Only plain words can leave the callee without a storage lifetime.
+        if field.type != 'bool' and ty.fixed_integer_layout(field.type) is None:
+            return None
+        eligible = self.scalar_projection_bodies.get(id(function))
+        if eligible is None:
+            eligible = self._scalar_getter_body(function.literal.body)
+            self.scalar_projection_bodies[id(function)] = eligible
+        if not eligible:
+            return None
+        key = (id(function), node.name)
+        variant = self.scalar_projections.get(key)
+        if variant is None:
+            symbol = self._internal_symbol(f'__dewy_project_{len(self.scalar_projections)}_{node.name}')
+            variant = (function, node.name, field.type, symbol)
+            self.scalar_projections[key] = variant
+            self.pending_scalar_projections.append(variant)
+        return variant[1:]
+
+    @classmethod
+    def _project_getter_result(cls, body: hir.AST, field: str, type_: ty.Type) -> hir.AST:
+        if isinstance(body, hir.Block):
+            return replace(body, type=ty.BOTTOM_TYPE if body.type == ty.BOTTOM_TYPE else type_,
+                           items=[*body.items[:-1], cls._project_getter_result(body.items[-1], field, type_)])
+        if isinstance(body, hir.Return):
+            assert body.item is not None
+            return replace(body, item=hir.MemberAccess(body.item.loc, type_, body.item, field))
+        return hir.MemberAccess(body.loc, type_, body, field)
+
     def _family_union_view(
         self, pointer: hir.AST, stored: ty.ObjectType,
         members: tuple[ty.TypeExpr, ...], node: hir.AST,

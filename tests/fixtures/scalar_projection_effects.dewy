@@ -1,0 +1,42 @@
+Node=type of [value:int64 items:array<int64>]
+let trace:int64=0
+mark=(value:int64):>addr=>{trace=trace*10+value return 0}
+node_at=(nodes:array<Node> id:addr=mark(2)):>Node=>{
+    trace=trace*10+3
+    $runtime_assert id <? nodes.length
+    return nodes[id]
+}
+make=():>array<Node>=>{mark(1); return [Node[42 [7 8]]]}
+indirect=(getter:<(nodes:array<Node> id:addr):>Node> nodes:array<Node>):>int64=>getter(nodes 0).value
+plain=(nodes:array<Node> id:addr):>Node=>{
+    $runtime_assert id <? nodes.length
+    return nodes[id]
+}
+construct=():>Node=>Node[42 [mark(4)]]
+main=():>int64=>{
+    if node_at(make()).value not=? 42 return 1
+    if trace not=? 123 return 2
+    trace=0
+    if node_at(make() mark(5)).value not=? 42 return 3
+    if trace not=? 153 return 4
+    let nodes:array<Node>=[Node[42 [7 8]]]
+    let id:addr=0
+    local=():>Node=>{
+        $runtime_assert id <? nodes.length
+        return nodes[id]
+    }
+    if local().value not=? 42 return 5
+    if indirect(@plain nodes) not=? 42 return 6
+    change=(nodes:array<Node>):>Node=>{
+        $runtime_assert nodes.length >? 0
+        nodes[0].value=17
+        return nodes[0]
+    }
+    if change(nodes).value not=? 17 return 9
+    if nodes.length not=? 1 return 10
+    if nodes[0].value not=? 42 return 11
+    trace=0
+    if construct().value not=? 42 return 7
+    if trace not=? 4 return 8
+    return 42
+}

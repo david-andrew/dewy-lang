@@ -325,6 +325,12 @@ class _Lowerer(
         ] = {}
         self.array_result_destinations: dict[int, hir.ExpressedIdentifier] = {}
         self.object_result_destinations: dict[int, hir.ExpressedIdentifier] = {}
+        # A direct getter followed by a scalar field read can return that word
+        # before copying its record. Variants retain the original input ABI and
+        # discovery identities; only their output and terminal read differ.
+        self.scalar_projection_bodies: dict[int, bool] = {}
+        self.scalar_projections: dict[tuple[int, str], tuple[_FunctionDef, str, ty.Type, str]] = {}
+        self.pending_scalar_projections: list[tuple[_FunctionDef, str, ty.Type, str]] = []
         # union-returning calls whose result cell is a fresh destination (a
         # declared binding, the enclosing function's result cell): the call
         # writes there directly instead of into a temporary that is then
@@ -520,7 +526,12 @@ class _Lowerer(
             if main is not None and main.function is not None
             else None
         )
-        # module startup may have requested more copy functions
+        # Lower variants outside any caller's active lowering state. Their
+        # bodies can request more variants, including mutually recursive ones.
+        while self.pending_scalar_projections:
+            function, field, field_type, symbol = self.pending_scalar_projections.pop(0)
+            lowered_functions.append(self._lower_function(function, projection=(field, field_type, symbol)))
+        # module startup and scalar variants may have requested more helpers
         lowered_functions.extend(self._synthesize_aggregate_helpers())
         lowered_functions.extend(self._synthesize_string_clone())
         for name, data in self.unicode_table_globals.items():
@@ -563,8 +574,12 @@ class _Lowerer(
             raw[binding_id] = (array_type.length, element_bytes)
         return raw
 
-    def _lower_function(self, function: _FunctionDef) -> LoweredFunction:
+    def _lower_function(self, function: _FunctionDef, *, projection: tuple[str, ty.Type, str] | None = None) -> LoweredFunction:
         literal = function.literal
+        if projection is not None:
+            _field, field_type, _symbol = projection
+            assert isinstance(literal.type, ty.FunctionType)
+            literal = replace(literal, rettype=field_type, type=replace(literal.type, ret=field_type))
         if isinstance(literal.rettype, ty.RefinedType):
             # a refined result is proven at every return during checking; the target sees the base type
             literal = replace(literal, rettype=literal.rettype.base)
@@ -1012,6 +1027,9 @@ class _Lowerer(
         }
         previous_literal = self.current_literal
         transformed_body = self._require_node(self._transform_node(literal.body))
+        if projection is not None:
+            field, field_type, _symbol = projection
+            transformed_body = self._project_getter_result(transformed_body, field, field_type)
         # the analyses look at the nodes the lowering will see: the transformed body
         analysis_literal = replace(literal, body=transformed_body)
         self.current_literal = analysis_literal
@@ -1070,7 +1088,7 @@ class _Lowerer(
                 pos_or_kw=[ty.PosOrKwArg(None, 'int64'), *function_type.pos_or_kw],
             )
         return LoweredFunction(
-            function.symbol,
+            projection[2] if projection is not None else function.symbol,
             replace(
                 literal,
                 type=function_type,
@@ -2556,7 +2574,7 @@ class _Lowerer(
             )
         return normalized, source_positions, optional_payloads
 
-    def _transform_node(self, node: hir.AST) -> hir.AST | None:
+    def _transform_node(self, node: hir.AST, *, scalar_projection: tuple[str, ty.Type, str] | None = None) -> hir.AST | None:
         """Rewrite callable references and elide compile-time declarations.
 
         Returning ``None`` is reserved for function and overload declarations:
@@ -2635,6 +2653,9 @@ class _Lowerer(
                 ],
             )
         if isinstance(node, hir.MemberAccess):
+            projection = self._scalar_getter_projection(node)
+            if projection is not None:
+                return self._transform_node(node.value, scalar_projection=projection)
             return replace(
                 node,
                 value=self._require_node(self._transform_node(node.value)),
@@ -2858,8 +2879,14 @@ class _Lowerer(
                 normalized = transformed_pos
                 source_positions = list(range(len(transformed_pos)))
                 optional_payloads = [None] * len(transformed_pos)
+            result_type = node.type
+            if scalar_projection is not None:
+                _field, result_type, symbol = scalar_projection
+                assert source_function_type is not None
+                func = replace(func, name=symbol, type=self._lower_callable_type(replace(source_function_type, ret=result_type)))
             transformed = replace(
                 node,
+                type=result_type,
                 func=func,
                 # a lambda-lifted callee also receives the enclosing values it reads
                 pos_args=[*normalized, *self._lifted_arguments(node)],

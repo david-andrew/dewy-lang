@@ -313,3 +313,42 @@ Artifacts: `host-worklists-t0`, `analysis-worklist-comparison-complete.log`,
 `effect-worklist-chain-gate.log`, `capture-worklist-complete-gate.log`, and
 `worklist-final-gates.log`. The old/new kernel sources and emitted programs
 are retained as `analysis-worklist-{old,new}.{dewy,udewy}`.
+
+## Scalar getter projections
+
+Both lowerers can specialize a direct record-returning getter when its caller
+immediately reads a fixed-width integer or boolean field. The variant keeps
+the original argument/default/capture ABI, effects, guards, and cleanup, but
+reads the scalar before the whole record would be copied. No pointer or view
+escapes the callee. The first rule accepts one terminal route read; constructors,
+indirect calls, aggregate fields and multiple return paths retain their usual
+lowering. Native implicit block results also keep the fallback for now. Native
+HIR may share arena nodes, so a read reused in the unchanged prefix is excluded.
+
+`native_scalar_projection.dewy` performs 3,000 reads from a record family whose
+descendants contain owned arrays and strings. Hosted projection uses **zero
+arena allocations, copied bytes and retained bytes**; disabling the rule in
+the same compiler allocates more than 100 KB, while still reclaiming it. The
+native lowering kernel reaches the same zero budgets. Expected-result checks
+cover lazy defaults, argument order, captures, indirect dispatch, constructor
+effects, failed guards and mutation of private arguments on direct and C routes.
+The native kernel driver enters below fact validation and runtime-report
+installation; its adapted plain-index guard checks are not a substitute for
+full-compiler validation. Ordinary raw-effect borrowing restrictions remain
+intact. In particular, a raw failure syscall conservatively causes argument
+snapshots, so the valid-input allocation gate uses a divergent guard instead.
+
+The broader latency evidence is modest. A 150-function checking/lowering
+driver workload takes 4.97/4.88/4.84 seconds with the preceding driver and
+4.71/4.68/4.75 with the worklist/projection driver. Both emitted executables
+return 42, and emitted size is unchanged at 172,202 bytes. This comparison
+includes the worklist batch and precedes the final cheap rejection path for
+ordinary field reads; it does not isolate projection's wall-time effect.
+Two hosted t0 builds take 18.46 and 17.70 seconds and emit 3,697,956 bytes.
+This module does not substantially exercise projected getters, and no hosted
+compile-time improvement is claimed. One small native gate overlapped the
+first sample. A new full compiler checkpoint is pending.
+
+Artifacts: `scalar-projection/{native-complete-gates,hosted-regressions,
+final-gates,driver-comparison}.log`, its comparison script and emitted kernels,
+and `host-projected-getters-t0`, under the campaign artifact directory.
