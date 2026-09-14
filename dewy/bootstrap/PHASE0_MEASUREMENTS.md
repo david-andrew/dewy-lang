@@ -687,3 +687,29 @@ executions pass. The full native CLI builds and runs the same gate, allocating
 allocation kernel measurements, not full-checker timings. Artifacts:
 `proposition-identity-cost-gates.log` and
 `proposition-identity-native-corrected-gates.log`.
+
+## Shared-string integration checkpoint
+
+A frozen `54007516` hosted build completed in **327.28 s**, compared with
+343.10 s at `32a1570e`: checking 72.53 s, lowering 68.29 s, emission 8.58 s,
+and backend 171.86 s. Peak RSS was **3,732,484 KiB**. Generated µDewy was
+**57,453,649 bytes**, SHA-256
+`f855390e1e46d4ed5a07fca1634845212bfd3c170b51fcc83baea38ec911abf7`.
+This used GCC `-O2`, `-flto=8`, and disabled ccache, with no other compilation
+jobs running. The fresh process and build directory do not control OS page
+caches. The earlier 343.10 s checkpoint had small overlapping tests, so the
+full-build comparison is observational.
+
+Using that executable on the same pinned `source-active-values` t0 input and
+library takes **27.82 s**, versus the previous **39.79 s**, with peak RSS
+**2,172,672 KiB** versus **3,112,352 KiB**. The emitted **4,310,586 bytes** are
+byte-identical (SHA-256
+`ec7aa66b51f6e26182eae15cad4cd78d47c1f543eddd2d5cb038a229ff30257f`).
+Both measurements use the same native µDewy executable, a fresh process and
+empty build directory, and no overlapping compilation jobs. They measure a
+combined checkpoint, not individual attribution to string sharing.
+
+Artifacts: `source-shared-strings`, `host-full-shared-strings`, and
+`native-shared-strings-t0`. This checkpoint is a working integration seed,
+not a new two-generation fixed point. The sub-minute complete-build target
+still requires substantial checking, lowering, and backend improvements.
