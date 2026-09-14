@@ -25,6 +25,12 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Late representation selection applies a helper's declared parameter types
+  when creating its call. A narrowed nonzero bigint record must be packed
+  before a helper accepting the full zero/record union receives it. The
+  representation-pass regression checks these argument types; a real-library
+  membership fixture covers the generic equality path that exposed the gap.
+
 - Every returning flow arm now materializes the inferred join's storage.
   A narrowed optional payload or nonzero bigint record cannot occupy the
   same result slot as an optional/union cell without conversion. Regression

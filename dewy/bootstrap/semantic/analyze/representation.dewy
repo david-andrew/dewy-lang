@@ -53,6 +53,17 @@ prelude_call = (name:string args:array<addr> loc:Span @state:State @session:cont
     $runtime_assert binding.value_type isnt? none
     let signature=types.node_at(session.types binding.value_type)
     $runtime_assert signature is? types.FunctionType
+    $runtime_assert args.length =? signature.pos_or_kw.length
+    # Late helper selection still crosses an ordinary argument boundary.
+    # In particular, a known nonzero bigint is a record, while most helpers
+    # accept its zero/record union cell. Mathematical compatibility alone
+    # does not give those two values the same calling representation.
+    loop i in 0.. and i <? args.length {
+        let argument=args[i]
+        let required=signature.pos_or_kw[i].value_type
+        let value=node_at(argument session)
+        if value.value_type not=? required {args[i]=put(hir.ValueCast[value.loc required argument] @session)}
+    }
     let func=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding.id] @session)
     let operation:string?=none
     loop [op helper] in binary {if helper =? name {operation=op break}}

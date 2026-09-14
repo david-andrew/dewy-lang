@@ -1,0 +1,14 @@
+# Array membership is checked in the generic library's defining scope. Its
+# payload equality can acquire bigint helpers during late representation
+# selection, after union narrowing has exposed a nonzero record.
+let main=():>int64=>{
+    let values:array<bigint>=[-1 0 1 18446744073709551616]
+    let one:bigint=1
+    let missing:bigint=2
+    let huge:bigint=18446744073709551616
+    if one not in? values or huge not in? values return 1
+    if missing in? values return 2
+    let zero:bigint=0
+    if zero not in? values return 3
+    return 42
+}

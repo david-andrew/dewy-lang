@@ -109,6 +109,12 @@ main=():>int64=>{{
     $runtime_assert call is? hir.FunctionCall
     let callee=hir.node_at(session.hir call.func)
     $runtime_assert callee is? hir.ExpressedIdentifier and callee.name =? '_bigint_mul'
+    # Late calls use the selected helper's union ABI even when their input
+    # was already a mathematically compatible nonzero bigint record.
+    $runtime_assert call.pos_args.length =? 2
+    loop argument in call.pos_args {{
+        $runtime_assert hir.node_at(session.hir argument).value_type =? state.big_type
+    }}
     let huge=hir.node_at(session.hir {names[id(huge.declaration)]})
     $runtime_assert huge is? hir.Declare
     let literal=hir.node_at(session.hir huge.expr)
