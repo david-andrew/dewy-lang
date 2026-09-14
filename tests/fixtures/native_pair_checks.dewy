@@ -24,6 +24,9 @@ import p"native_argument_lifetimes.dewy" as arguments
 import p"native_dict_scalar_widths.dewy" as scalar_dictionaries
 import p"native_container_receiver_lifetimes.dewy" as receivers
 
+import p"native_string_scratch.dewy" as string_scratch
+import p"native_string_materialization.dewy" as string_materialization
+
 let main=():>int64=>{
     printl('Checking temporary container receivers')
     if receivers.main() not=?42 return 23
@@ -71,5 +74,9 @@ let main=():>int64=>{
     if binaries.main() not=?42 return 19
     printl('Checking Unicode table read scaling')
     if casefold.main() not=?42 return 20
+    printl('Checking string construction scratch')
+    if string_scratch.main() not=?42 return 24
+    printl('Checking Unicode string materialization')
+    if string_materialization.main() not=?42 return 25
     return 42
 }

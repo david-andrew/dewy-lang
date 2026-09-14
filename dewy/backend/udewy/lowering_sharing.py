@@ -89,6 +89,12 @@ class _ArraySharing:
         return [hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, signature, helper.symbol), [size], {})]
 
     def _clone_dynamic_array_value(self, node, array_type, *, arena=False, move=False):
+        # A widened length fact does not change a fixed backing allocation
+        # into a descriptor. Copy from its known physical extent before
+        # entering descriptor-only sharing, including at call boundaries.
+        if self._array_use_representation(node) is not None:
+            fixed = replace(array_type, length=self._raw_array_length(node))
+            return self._clone_array_value(node, fixed, arena=arena or self._has_arena(), move=move)
         if not self._has_arena():
             return self._clone_dynamic_array_storage(node, array_type, arena=arena, move=move)
         loc = node.loc

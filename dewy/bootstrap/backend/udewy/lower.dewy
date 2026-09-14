@@ -1494,8 +1494,11 @@ segmented_string = (data:addr length:addr node:hir.AST optional:bool @state:Stat
     if name is? none return reject(node 'the segmentation helper is absent from the lowered graph' @state)
     let prefix:array<addr>=[]
     data=snapshot(data @prefix @state) length=snapshot(length @prefix @state)
-    let bytes=byte_descriptor(data length node @state)
+    let bytes=snapshot(byte_descriptor(data length node @state) @prefix @state)
     let checked=snapshot(intrinsic(name [bytes] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    # The helper borrows the byte view for this call. Its optional offsets
+    # are owned scratch storage, independent of the final uint32 table.
+    prefix.push(release_block(bytes word(layouts.array_descriptor.size node @state) node @state))
     let valid=intrinsic('__ne__' [read_word(checked 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
     let fits=intrinsic('__le__' [length word(uint32.max node @state)] types.primitive('bool' @state.type_nodes) node @state)
     valid=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'and' fits valid] @state)
@@ -1532,6 +1535,15 @@ segmented_string = (data:addr length:addr node:hir.AST optional:bool @state:Stat
         let selected=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) valid body] @state)
         prefix.push(put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [selected] impossible] @state))
     }
+    # Preserve the selected result before destroying the helper's optional
+    # cell and growable offsets array, on success and on invalid UTF-8.
+    $runtime_assert prefix.length >? 0
+    let selected=prefix.pop
+    let output=snapshot(selected @prefix @state)
+    let offsets_type=types.array_type(types.primitive('int64' @state.type_nodes) none @state.type_nodes)
+    let checked_type=types.union([offsets_type types.primitive('none' @state.type_nodes)] @state.type_nodes)
+    prefix.push(release_value(checked checked_type node @state))
+    prefix.push(output)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 string_concat = (node:hir.StringConcat @state:State):>addr => {
@@ -1563,7 +1575,9 @@ integer_text = (value:addr type:addr node:hir.AST @prefix:array<addr> @state:Sta
     # does not fit a signed word. No signed negation or division overflows.
     let negate=intrinsic('__sub__' [zero magnitude] uint node @state)
     prefix.push(conditional(negative put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) magnitude '=' negate] @state) node @state))
-    let buffer=snapshot(allocation(word(21 node @state) node @state) @prefix @state)
+    # Formatting consumes these bytes inside this expression; they never
+    # escape into the materialized string. Reserve fixed frame scratch.
+    let buffer=snapshot(intrinsic('__alloca__' [word(21 node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let cursor=snapshot(word(21 node @state) @prefix @state)
     let body:array<addr>=[]
     body.push(put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__sub__' cursor word(1 node @state) node @state)] @state))
@@ -1662,7 +1676,13 @@ representation = (node:hir.RepresentationCast @state:State):>addr => {
     if source_array isnt? none and types.is_primitive(types.node_at(state.type_nodes source_array.element) 'uint8') and string_type(target state) {
         let prefix:array<addr>=[]
         let bytes=snapshot(owned_value(node.expr @state) @prefix @state)
-        prefix.push(segmented_string(read_word(bytes 0 node @state) read_word(bytes layouts.array_descriptor.length node @state) node optional isnt? none @state))
+        let result=snapshot(segmented_string(read_word(bytes 0 node @state) read_word(bytes layouts.array_descriptor.length node @state) node optional isnt? none @state) @prefix @state)
+        # Successful strings keep this byte snapshot as their immutable
+        # backing. A failed conversion has no view and releases it now.
+        if optional isnt? none {
+            prefix.push(conditional(compare('__eq__' read_word(result 0 node @state) word(0 node @state) node @state) release_value(bytes source.value_type node @state) node @state))
+        }
+        prefix.push(result)
         return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
     }
     if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) source.value_type node.value_type node @state)

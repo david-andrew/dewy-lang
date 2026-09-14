@@ -1,0 +1,37 @@
+# Completed strings must survive reuse of the UTF-8 validator's temporary
+# offset array. Account for the intentionally retained results separately
+# from scratch; dynamic string backing still has process-arena lifetime.
+let live=():>int64=>_arena_live_bytes
+let double=(text:string):>string=>text+text
+let build=():>array<string>=>{
+    let result:array<string>=[]
+    loop i in 0.. and i <? 256 {result.push(double('abcdefghijklmnop'))}
+    return result
+}
+let invalid=():>bool=>{
+    let bytes:array<uint8>=[255]
+    let decoded=bytes as string|none
+    return decoded is? none
+}
+let rejected=():>bool=>{
+    loop i in 0.. and i <? 512 {if not invalid() return false}
+    return true
+}
+let format=(low:int64 high:uint64):>string=>"{low}:{high}:{low}"
+let main=():>int64=>{
+    let before=live()
+    let saved=build()
+    # The 256 retained 32-byte strings and their boundary tables fit here;
+    # retaining the validator's growable word arrays does not.
+    if live()-before >? 196608 return 1
+    if not rejected() return 2
+    let baseline=live()
+    if not rejected() return 3
+    if live()-baseline >? 4096 return 4
+    loop text in saved {
+        if text.length not=? 32 or text not=? 'abcdefghijklmnopabcdefghijklmnop' return 5
+        if text[0] not=? 'a' or text[31] not=? 'p' return 7
+    }
+    if format(-9223372036854775808 18446744073709551615) not=? '-9223372036854775808:18446744073709551615:-9223372036854775808' return 6
+    return 42
+}

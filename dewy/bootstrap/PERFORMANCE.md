@@ -328,3 +328,37 @@ copied bytes with 352 retained bytes for 512 predicate visits. The 80 bounded
 kernel executions and 23-case integration bundle also pass on both backends.
 These checks justify a new compiler generation run; they do not certify a
 completed native fixed point.
+
+## Dynamic string construction scratch
+
+The sixteenth pair attempt built generation one and passed the 23-case direct
+integration bundle. The larger analysis compilation exceeded its 6 GiB guard;
+a separate bounded diagnostic also exceeded 8 GiB. Allocation counters showed
+live storage growing through checking and lowering, so generation two was not
+started and that attempt produced no fixed-point certificate.
+
+Every native dynamic string construction retained the UTF-8 validator's
+optional growable offset array after copying its entries into the final
+uint32 boundary table. The borrowed input descriptor also remained allocated.
+Lowering now releases those scratch values after preserving the result, on
+both valid and invalid input. Failed decodes release the unused byte snapshot;
+integer interpolation uses fixed frame scratch for its decimal digits.
+
+`native_string_scratch.dewy` keeps 256 completed 32-byte strings alive while
+checking their construction cost and contents after allocator reuse. Native
+lowering retains 92,232 bytes instead of 262,216 bytes for those results. A
+second batch of 512 invalid decodes retains zero bytes. Both output backends
+pass. This measures scratch reclamation: successful dynamic string backing
+still has process-arena lifetime and needs a fuller ownership model.
+
+The fixture also exposed a hosted formatting bug: unsigned 64-bit values
+above the signed range were rendered as negative. Hosted interpolation now
+uses an unsigned magnitude for every fixed width, covering `uint64.max` and
+`int64.min` with the same digit loop. This changes no µDewy evaluation rules.
+
+The accompanying Unicode fixture keeps concatenated clusters, joined strings,
+and decoded byte arrays across later constructions. It also caught a hosted
+array-layout mismatch: a copy into a runtime-length parameter treated an
+optimized flat buffer as a descriptor. Dynamic copy dispatch now consults the
+known physical extent first, preserving that buffer's layout even when its
+source-level length fact has been widened.

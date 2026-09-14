@@ -1,0 +1,23 @@
+# Validation scratch may be released only after the final uint32 grapheme
+# boundaries have been copied. Joined clusters and surviving decoded values
+# must remain correct after subsequent constructions reuse that scratch.
+let combine=(left:string right:string):>string=>left+right
+let decode=(bytes:array<uint8>):>string|none=>bytes as string|none
+let main=():>int64=>{
+    let joined=combine('e' "\u0301x")
+    let parts:array<string>=['e' "\u0301x"]
+    let joined_parts=parts.join
+    let bytes:array<uint8>=[0x68 0xc3 0xa9]
+    let decoded=decode(bytes)
+    bytes[0]=0x7a
+    loop i in 0.. and i <? 64 {
+        if decode([0xed 0xa0 0x80]) isnt? none return 1
+        let empty=decode([])
+        if empty is? none or empty.length not=? 0 return 2
+        if combine('a' 'b') not=? 'ab' return 3
+    }
+    if joined.length not=? 2 or joined_parts.length not=? 2 return 4
+    if joined[0] not=? 'é' or joined_parts[0] not=? 'é' return 5
+    if decoded is? none or decoded not=? 'hé' or decoded.length not=? 2 return 6
+    return 42
+}
