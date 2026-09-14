@@ -38,37 +38,52 @@ arguments = (call:hir.FunctionCall):>array<addr> => {
     loop value in call.kw_args.values {result.push(value)}
     return result
 }
+# A receiver's value is evaluated before its index or later call arguments.
+# Borrow it only while those expressions cannot replace or mutate its storage.
+# An unknown source route (including an aliasing place parameter) overlaps all
+# writes. Merely calculating an integer index does not require a snapshot.
+expression_conflicts = (root:addr source:Route? nodes:array<hir.AST> plan:captures.Plan ambient:set<addr> deep:bool=true):>bool => {
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(nodes id)
+        if node is? hir.FunctionLiteral|hir.GenericFunction continue
+        if deep and node is? hir.FunctionCall {
+            let direct=captures.resolve(node.func node.selected_method_index plan nodes)
+            if direct isnt? none {
+                if direct in? ambient return true
+                let function=plan.functions.get(direct)
+                if function isnt? none and source isnt? none and source.binding in? function.writes return true
+            } else {
+                let callee=hir.node_at(nodes node.func)
+                # Only operators without runtime bindings are intrinsics. A source
+                # function or callback with the same spelling still has effects.
+                let pure=callee is? hir.ExpressedIdentifier and (callee.binding_id is? none or callee.binding_id not in? plan.source_bindings) and (callee.name in? emit.binary or callee.name in? emit.prefix)
+                if callee is? hir.ArrayMethod {
+                    if callee.name =? 'sort' and 'key' in? node.kw_args return true
+                } else if not pure return true
+            }
+        }
+        let targets:array<addr>=[]
+        if node is? hir.Place {targets=[node.target]}
+        else if deep {targets=captures.write_targets(node nodes)}
+        loop target in targets {
+            let exposed=route(target nodes)
+            if source is? none or exposed is? none or overlap(source exposed) return true
+        }
+        if deep {loop child in hir.children(node) {pending.push(child)}}
+    }
+    return false
+}
 conflicts = (call:hir.FunctionCall position:addr source:Route nodes:array<hir.AST> plan:captures.Plan ambient:set<addr>):>bool => {
     let args=arguments(call)
     loop i in 0.. and i <? args.length {
-        let pending:array<addr>=[args[i]]
-        let seen:set<addr>=set[]
-        loop pending.length >? 0 {
-            let id=pending.pop
-            if id in? seen continue
-            seen.add(id)
-            let node=hir.node_at(nodes id)
-            if node is? hir.FunctionLiteral|hir.GenericFunction continue
-            # A later call may write through ambient or raw storage without
-            # spelling a place here. Known callees without those effects can
-            # preserve the earlier borrow; explicit place routes are checked
-            # below even for those callees. Unknown callbacks still conflict.
-            if i >? position and node is? hir.FunctionCall {
-                let direct=captures.resolve(node.func node.selected_method_index plan nodes)
-                if direct is? none or direct in? ambient return true
-            }
-            let targets:array<addr>=[]
-            if node is? hir.Place {targets=[node.target]}
-            else if i >? position {targets=captures.write_targets(node nodes)}
-            loop target in targets {
-                let exposed=route(target nodes)
-                if exposed is? none or overlap(source exposed) return true
-            }
-            # Earlier argument evaluation has finished; only its directly
-            # passed place remains live. Later arguments can mutate during
-            # evaluation, even if their final value is an ordinary integer.
-            if i >? position {loop child in hir.children(node) {pending.push(child)}}
-        }
+        # Earlier evaluation has finished; only a directly passed place remains
+        # live. Later arguments can mutate even when their result is an integer.
+        if expression_conflicts(args[i] source nodes plan ambient deep=(i >? position)) return true
     }
     return false
 }
@@ -163,7 +178,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
     }
     return dirty
 }
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>>]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr>]
 analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
 details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:array<subtyping.Link>=subtyping.default_links):>Plan => {
     let indirect=callbacks.analyze(root nodes type_nodes plan links)
@@ -188,6 +203,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             if parameter.place and parameter.binding_id isnt? none {places.add(parameter.binding_id)}
         }
     }
+    let array_snapshots:set<addr>=set[]
     let result:dict<addr set<addr>>=[]
     let disposable:dict<addr set<addr>>=[]
     let safe_places:set<addr>=set[]
@@ -200,6 +216,13 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         seen.add(id)
         let node=hir.node_at(nodes id)
         loop child in hir.children(node) {pending.push(child)}
+        if node is? hir.Index {
+            let source=route(node.array nodes)
+            # A place may alias a different parameter's route. Its spelling
+            # cannot establish disjoint storage from another written route.
+            if source isnt? none and source.binding in? places {source=none}
+            if expression_conflicts(node.index source nodes plan dirty) {array_snapshots.add(id)}
+        }
         if node isnt? hir.FunctionCall continue
         let callee=hir.node_at(nodes node.func)
         let direct=captures.resolve(node.func node.selected_method_index plan nodes)
@@ -256,5 +279,5 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             if source isnt? none {escaping.add(source.binding)}
         }
     }
-    return Plan[result escaping disposable]
+    return Plan[result escaping disposable array_snapshots]
 }

@@ -58,6 +58,7 @@ State:type = [
     storage_types:dict<addr addr>=[]
     capture_plan:captures.Plan=captures.Plan[]
     borrowed_arguments:dict<addr set<addr>>=[]
+    array_snapshots:set<addr>=set[]
     disposable_arguments:dict<addr set<addr>>=[]
     code_symbols:dict<addr string>=[]
     # A place is an address of the binding's storage, including the handle
@@ -315,6 +316,13 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Index {
         let prefix:array<addr>=[]
         let receiver=read_operand(node.array @prefix @state)
+        if id in? state.array_snapshots and receiver.owner_type is? none {
+            # Saving the descriptor address alone does not keep its buffer
+            # alive across index evaluation. Acquire a private descriptor;
+            # shared data detaches if the index writes the original array.
+            let type=hir.node_at(state.input.nodes node.array).value_type
+            receiver=ReadOperand[snapshot(copy_value(receiver.value type node @state) @prefix @state) type]
+        }
         let descriptor=snapshot(receiver.value @prefix @state)
         let pointer=array_element_address(descriptor expression(node.index @state) node @state)
         let stored=stored_type(id state)
@@ -556,7 +564,7 @@ expression_owns = (id:addr @state:State):>bool => {
     if node is? hir.ObjectLiteral|hir.ArrayLiteral|hir.DictView|hir.SetAlgebra return true
     if node is? hir.DictEntries and temporary_owner(node.dictionary @state) return true
     if node is? hir.MemberAccess and temporary_owner(node.value @state) return true
-    if node is? hir.Index and temporary_owner(node.array @state) return true
+    if node is? hir.Index and (id in? state.array_snapshots or temporary_owner(node.array @state)) return true
     if node is? hir.Block|hir.Flow and state.cleanup_enabled return true
     # Packing a non-cell value already creates an independent payload and
     # cell. Copying that result again abandons the first owned allocation.
@@ -2687,6 +2695,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.capture_plan=captures.analyze(root input.nodes state.symbols.keys)
     let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links)
     state.borrowed_arguments=borrowed.arguments
+    state.array_snapshots=borrowed.array_snapshots
     state.disposable_arguments=borrowed.disposable_arguments
     state.cleanup_excluded=borrowed.escaping_places
     loop unit in state.capture_plan.functions.values {

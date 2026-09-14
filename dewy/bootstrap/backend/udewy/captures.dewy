@@ -6,7 +6,7 @@ import p"../../semantic/hir.dewy" as hir
 # Capturing functions used as values and writes through captures still need
 # closure storage; keep those cases explicit rather than silently copying.
 Function:type = [id:addr locals:set<addr>=set[] direct:set<addr>=set[] dependencies:set<addr>=set[] captures:set<addr>=set[] writes:set<addr>=set[]]
-Plan:type = [functions:dict<addr Function>=[] named:dict<addr addr>=[] definitions:dict<addr addr>=[] globals:set<addr>=set[]]
+Plan:type = [functions:dict<addr Function>=[] named:dict<addr addr>=[] definitions:dict<addr addr>=[] globals:set<addr>=set[] source_bindings:set<addr>=set[]]
 
 discover = (root:addr nodes:array<hir.AST> @plan:Plan @seen:set<addr>):>void => {
     if root in? seen return void
@@ -125,7 +125,7 @@ root_binding = (id:addr nodes:array<hir.AST>):>addr? => {
     return none
 }
 analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
-    let result=Plan[]
+    let result=Plan[source_bindings=symbols]
     let seen:set<addr>=set[]
     discover(root nodes @result @seen)
     let block=hir.node_at(nodes root)

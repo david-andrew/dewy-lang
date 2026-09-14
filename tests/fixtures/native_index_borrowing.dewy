@@ -1,0 +1,29 @@
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/backend/udewy/captures.dewy" as captures
+import p"../../dewy/bootstrap/backend/udewy/borrowing.dewy" as borrowing
+main=():>int64=>{
+    let nodes:array<hir.AST>=[]
+    let loc=Span[0 0]
+    let plan=captures.Plan[source_bindings=set[7]]
+    let source=borrowing.Route[1 ['entries']]
+    let zero=hir.append_node(@nodes hir.Integer[loc 0 '0d' 0])
+    let pure=hir.append_node(@nodes hir.ExpressedIdentifier[loc 0 '__add__' 8])
+    let sum=hir.append_node(@nodes hir.FunctionCall[loc 0 pure [zero zero] []])
+    if borrowing.expression_conflicts(sum source nodes plan set[]) return 1
+    # Spelling does not make a parameter/callback an intrinsic.
+    let shadow=hir.append_node(@nodes hir.ExpressedIdentifier[loc 0 '__add__' 7])
+    let called=hir.append_node(@nodes hir.FunctionCall[loc 0 shadow [zero zero] []])
+    if not borrowing.expression_conflicts(called source nodes plan set[]) return 2
+    let root=hir.append_node(@nodes hir.ExpressedIdentifier[loc 0 'table' 1])
+    let entries=hir.append_node(@nodes hir.MemberAccess[loc 0 root 'entries'])
+    let other=hir.append_node(@nodes hir.MemberAccess[loc 0 root 'other'])
+    let written=hir.append_node(@nodes hir.Place[loc 0 entries])
+    let unrelated=hir.append_node(@nodes hir.Place[loc 0 other])
+    if not borrowing.expression_conflicts(written source nodes plan set[]) return 3
+    if borrowing.expression_conflicts(unrelated source nodes plan set[]) return 4
+    if not borrowing.expression_conflicts(unrelated none nodes plan set[]) return 5
+    let length=hir.append_node(@nodes hir.ArrayLength[loc 0 entries])
+    if borrowing.expression_conflicts(length source nodes plan set[]) return 6
+    return 42
+}

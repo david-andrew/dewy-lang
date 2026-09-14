@@ -463,3 +463,25 @@ the full-table scan that previously followed each new-key miss. The dependent
 result bound names `nodes.entries.length`, preserving the checked arena-handle
 contract. Benchmarks and integration limits are recorded in
 [PHASE0_MEASUREMENTS.md](PHASE0_MEASUREMENTS.md#type-interning-index-owned-by-the-arena).
+
+## Array reads across index effects
+
+An array read evaluates its receiver before its index. Saving a descriptor
+address is insufficient when the index replaces or mutates the source:
+that descriptor or its backing storage can change before the element load.
+Borrowing analysis now identifies these reads and acquires an independent
+array descriptor before index evaluation. The existing COW rules preserve
+its data, and the read releases the snapshot after keeping its result.
+Aggregate elements already retained by this read are adopted by the next
+value boundary; copying them again would abandon the first owned result.
+
+The analysis shares route/effect checks with call arguments. Pure compiler
+operators keep the cheap borrow, while source functions or callbacks with
+the same spelling retain their ordinary effects. Unknown callbacks and
+potentially aliasing place routes remain conservative. The focused native
+lowering fixture covers replacement, element writes, append, callbacks,
+global writes, aggregate results, exactly-once index evaluation, and zero
+retained bytes over repeated calls. Its arithmetic-index loop allocates
+zero bytes. Direct and C execution pass. The original full-CLI failure is
+also covered by the nested-length contract source; checking the next full
+integration seed remains separate from these lowering-driver gates.
