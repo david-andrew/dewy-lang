@@ -16,6 +16,7 @@ def test_native_nested_checkpoints(tmp_path):
 from reporting import Span
 import p"{ROOT / 'dewy/bootstrap/semantic/context.dewy'}" as contexts
 import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
+import p"{ROOT / 'dewy/bootstrap/semantic/subtyping.dewy'}" as subtyping
 import p"{ROOT / 'dewy/bootstrap/semantic/hir.dewy'}" as hir
 main = ():>int64 => {{
     let session=contexts.Session[]
@@ -23,10 +24,13 @@ main = ():>int64 => {{
     let original=hir.append_node(@session.hir hir.Integer[Span[0 1] word '0d' 1])
     session.read_states.push(contexts.ReadState[types=[1 -> word]])
     session.retained_read_states.add(0)
+    subtyping.add_link(@session.links subtyping.Link['Before' 'int'])
     let before=contexts.checkpoint(session)
+    subtyping.add_link(@session.links subtyping.Link['Outer' 'Before'])
     contexts.replace_hir(original hir.Integer[Span[0 1] word '0d' 2] @session)
     let added=hir.append_node(@session.hir hir.Integer[Span[0 1] word '0d' 3])
     let inner=contexts.checkpoint(session)
+    subtyping.add_link(@session.links subtyping.Link['Before' 'bool'])
     contexts.replace_hir(original hir.Integer[Span[0 1] word '0d' 4] @session)
     contexts.replace_hir(added hir.Integer[Span[0 1] word '0d' 5] @session)
     let discarded=types.primitive('string' @session.types)
@@ -35,6 +39,8 @@ main = ():>int64 => {{
     session.read_states.push(contexts.ReadState[types=[2 -> word]])
     session.retained_read_states.add(1)
     contexts.restore(inner @session)
+    $runtime_assert subtyping.nominal_subtype('Outer' 'int' session.links)
+    $runtime_assert not subtyping.nominal_subtype('Before' 'bool' session.links)
     $runtime_assert session.read_states.length =? 1
     $runtime_assert 0 in? session.retained_read_states and 1 not in? session.retained_read_states
     let restored=hir.node_at(session.hir original)
@@ -43,6 +49,8 @@ main = ():>int64 => {{
     $runtime_assert suffix is? hir.Integer and suffix.value =? 3
     $runtime_assert session.syntax_refs.length =? 0 and 12 not in? session.named_refs
     contexts.restore(before @session)
+    $runtime_assert not subtyping.nominal_subtype('Outer' 'int' session.links)
+    $runtime_assert subtyping.nominal_subtype('Before' 'int' session.links)
     let first=hir.node_at(session.hir original)
     $runtime_assert first is? hir.Integer and first.value =? 1
     $runtime_assert session.hir.length =? 1 and session.hir_edits.length =? 0

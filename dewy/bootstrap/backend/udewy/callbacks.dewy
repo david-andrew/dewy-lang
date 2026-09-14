@@ -49,7 +49,7 @@ contains_callable = (root:addr nodes:types.Table):>bool => {
     }
     return false
 }
-analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:array<subtyping.Link>):>dict<addr array<addr>> => {
+analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph):>dict<addr array<addr>> => {
     let parameters:set<addr>=set[]
     # Iterators and sibling-field bindings have checked origins too, although
     # they are not Declare nodes. Include every lexical binding before deciding

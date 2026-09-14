@@ -48,7 +48,7 @@ State:type = [
     runtime_helpers:dict<string addr>=[]
     layout_context:layouts.Context=layouts.Context[]
     record_layouts:dict<addr layouts.Record>=[]
-    links:array<subtyping.Link>=subtyping.default_links
+    links:subtyping.Graph=subtyping.default_links
     brand_numbers:dict<string brands.NumberedBrand>=[]
     # Checked descriptions stay stable while lowering only appends runtime
     # types. Each successful representation is validated once in this state.
@@ -2686,7 +2686,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     return put(hir.FunctionLiteral[node.loc code_type(id node @state result=if projection is? none none else projection.result) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:array<subtyping.Link>=subtyping.default_links):>Result|Error => {
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links):>Result|Error => {
     let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links]
     loop brand in brands.numbered(layout_context.brands) {state.brand_numbers[brand.name]=brand}
     let block=hir.node_at(input.nodes root)

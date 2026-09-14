@@ -886,3 +886,23 @@ output is 3,724,614 bytes, SHA-256
 This isolated run is in `native-shared-dictionaries-t0`. The native execution
 improvement does not establish the full-build target, and the new integration
 seed is not a fresh two-generation fixed point.
+
+## Native nominal graph queries
+
+Nominal edges and their transitive closure now live in one `subtyping.Graph`
+value. Adding an edge updates the affected descendants once; checking subtype
+membership does not walk the edge list. Checker forks/rollback restore both
+parts together, and type-name lookup uses the same indexed names. Promotion
+rules remain separate from inheritance.
+
+The query checks the child's presence and then uses the proven dictionary
+lookup directly. This avoids constructing an optional copy of its ancestor
+set. A full native CLI-compiled kernel performs 128 positive and 128 negative
+queries with **zero allocated bytes**, versus 241,664 bytes for the previous
+edge-scanning algorithm run as an independent control. Both paths return the
+expected answers. This is an allocation result, not a full compiler timing.
+The graph kernel also compares a complete small relation after each late edge,
+including cycles, and checks independent values and restored snapshots.
+Hosted-generated direct/C execution, the type-algebra differential group,
+and actual nested Session rollback pass. Artifacts are `nominal-graph-native`
+and `nominal-graph-snapshot-gates.log`.

@@ -180,7 +180,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
 }
 Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr>]
 analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
-details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:array<subtyping.Link>=subtyping.default_links):>Plan => {
+details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links):>Plan => {
     let indirect=callbacks.analyze(root nodes type_nodes plan links)
     # Checked value casts borrow while evaluating but do not expose raw
     # storage. At a value boundary lowering supplies an independent owner,

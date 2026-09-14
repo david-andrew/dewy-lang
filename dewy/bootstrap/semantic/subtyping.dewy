@@ -12,25 +12,38 @@ boundary, not permission to assume a predicate from a type annotation.
 """
 
 Link:type = const [child:string parent:string]
+# The edge list remains available for declaration order and diagnostics.
+# Queries use its transitive closure instead of rescanning every edge at each
+# visited ancestor. Keep both in one value so checker forks and rollbacks
+# restore the same graph. Add edges through add_link, never by editing fields.
+Graph:type = [edges:array<Link>=[] ancestors:dict<string set<string>>=[]]
+add_link = (@graph:Graph link:Link):>void => {
+    graph.edges.push(link)
+    if link.parent not in? graph.ancestors {graph.ancestors[link.parent]=set[]}
+    let inherited=graph.ancestors.get(link.parent default=set[])
+    inherited.add(link.parent)
+    let previous=graph.ancestors.get(link.child default=set[])
+    if link.parent in? previous return
+    # A new edge adds exactly ancestors(parent) to descendants(child).
+    # Iterate the old map snapshot: even a cycle needs just this one update.
+    let before=graph.ancestors
+    loop [name ancestors] in before {
+        if link.child in? ancestors {graph.ancestors[name]=ancestors | inherited}
+    }
+    graph.ancestors[link.child]=previous | inherited
+}
+from_links = (edges:array<Link>):>Graph => {
+    let result=Graph[]
+    loop link in edges {add_link(@result link)}
+    return result
+}
 
 # Nominal inheritance is separate from numeric promotion. A cross-branch
 # arithmetic conversion must not silently introduce a subtype edge.
-nominal_subtype = (child:string parent:string links:array<Link>):>bool => {
+nominal_subtype = (child:string parent:string links:Graph):>bool => {
     if child =? parent return true
-    let frontier:array<string> = [child]
-    let seen:set<string> = set[child]
-    loop frontier.length >? 0 {
-        let current = frontier.pop
-        loop link in links {
-            if link.child not=? current continue
-            if link.parent =? parent return true
-            if link.parent not in? seen {
-                seen.add(link.parent)
-                frontier.push(link.parent)
-            }
-        }
-    }
-    return false
+    if child not in? links.ancestors return false
+    return parent in? links.ancestors[child]
 }
 
 # Every integer representation has at least one bit. Keep that evidence in
@@ -126,7 +139,7 @@ object_subtype = (a:types.ObjectType b:types.ObjectType nodes:types.Table):>bool
     if b isnt? types.PathType and a.brand =? b.brand and same_fields(a b nodes) return true
     return brand_descends(a b nodes) or brand_carries(a b nodes)
 }
-path_implies = (a:types.PathType b:types.ObjectType links:array<Link> @nodes:types.Table):>bool => {
+path_implies = (a:types.PathType b:types.ObjectType links:Graph @nodes:types.Table):>bool => {
     if a is? types.PathLiteralType and b is? types.PathLiteralType return a.value =? b.value
     if a.fields.length not=? b.fields.length return false
     loop i in 0.. and i <? a.fields.length {
@@ -138,7 +151,7 @@ path_implies = (a:types.PathType b:types.ObjectType links:array<Link> @nodes:typ
     return true
 }
 
-string_literal_implies = (value:string target:types.Type nodes:types.Table links:array<Link>):>bool => {
+string_literal_implies = (value:string target:types.Type nodes:types.Table links:Graph):>bool => {
     if target is? types.StringLiteralType return value =? target.value
     if target is? types.StringType return target.length is? none or target.length =? value.length
     if target is? types.Primitive {
@@ -154,7 +167,7 @@ string_literal_implies = (value:string target:types.Type nodes:types.Table links
     return false
 }
 
-atom_implies = (a_id:addr b_id:addr links:array<Link> @nodes:types.Table):>bool => {
+atom_implies = (a_id:addr b_id:addr links:Graph @nodes:types.Table):>bool => {
     if types.same_type(a_id b_id nodes) return true
     let a = types.node_at(nodes a_id)
     let b = types.node_at(nodes b_id)
@@ -238,7 +251,7 @@ atom_implies = (a_id:addr b_id:addr links:array<Link> @nodes:types.Table):>bool 
     return true
 }
 
-meet_atoms = (a_id:addr b_id:addr links:array<Link> @nodes:types.Table):>addr? => {
+meet_atoms = (a_id:addr b_id:addr links:Graph @nodes:types.Table):>addr? => {
     if types.same_type(a_id b_id nodes) return a_id
     let a = types.node_at(nodes a_id)
     let b = types.node_at(nodes b_id)
@@ -313,7 +326,7 @@ meet_atoms = (a_id:addr b_id:addr links:array<Link> @nodes:types.Table):>addr? =
     return none
 }
 
-clause_is_empty = (clause:types.Clause links:array<Link> @nodes:types.Table):>bool => {
+clause_is_empty = (clause:types.Clause links:Graph @nodes:types.Table):>bool => {
     let met:addr = types.primitive('any' @nodes)
     loop literal in clause.literals {
         if not literal.positive continue
@@ -331,13 +344,13 @@ clause_is_empty = (clause:types.Clause links:array<Link> @nodes:types.Table):>bo
     return false
 }
 
-is_empty = (id:addr links:array<Link> @nodes:types.Table):>bool => {
+is_empty = (id:addr links:Graph @nodes:types.Table):>bool => {
     let clauses = types.normalize(id @nodes)
     loop clause in clauses { if not clause_is_empty(clause links @nodes) return false }
     return true
 }
 
-is_subtype = (source:addr target:addr links:array<Link> @nodes:types.Table):>bool => {
+is_subtype = (source:addr target:addr links:Graph @nodes:types.Table):>bool => {
     # Reflexivity needs no normalized difference. Arena ids already name
     # the same description, including any retained refinement metadata.
     if source =? target return true
@@ -356,7 +369,7 @@ is_subtype = (source:addr target:addr links:array<Link> @nodes:types.Table):>boo
 # Joining checked values has no subsequent obligation boundary. A refined
 # target's base may be applicable to a call, but a join must never obtain
 # the target's predicates merely by asking that applicability question.
-covered = (member:addr other:addr seen:set<string> links:array<Link> @nodes:types.Table):>bool => {
+covered = (member:addr other:addr seen:set<string> links:Graph @nodes:types.Table):>bool => {
     let pair = "{member}:{other}"
     if pair in? seen return true
     seen.add(pair)
@@ -401,7 +414,7 @@ covered = (member:addr other:addr seen:set<string> links:array<Link> @nodes:type
     return is_subtype(m_id o_id links @nodes)
 }
 
-join = (items:array<addr> links:array<Link> @nodes:types.Table):>addr => {
+join = (items:array<addr> links:Graph @nodes:types.Table):>addr => {
     # Hosted limitation: syntactic union deduplicates equal record shapes
     # before `covered` sees their possibly different field predicates. A
     # future correction must reconcile those contracts, not preserve one
@@ -426,7 +439,7 @@ join = (items:array<addr> links:array<Link> @nodes:types.Table):>addr => {
 # F can stand in for G when it accepts G's calls and returns a subtype of
 # G's result. Defaults and keyword names affect the call shape; source
 # parameter bodies and default expressions do not participate here.
-function_subtype = (f:types.FunctionType g:types.FunctionType links:array<Link> @nodes:types.Table):>bool => {
+function_subtype = (f:types.FunctionType g:types.FunctionType links:Graph @nodes:types.Table):>bool => {
     if f.pos_or_kw.length not=? g.pos_or_kw.length return false
     loop i in 0.. and i <? f.pos_or_kw.length {
         let fp = f.pos_or_kw[i]
@@ -466,7 +479,7 @@ function_subtype = (f:types.FunctionType g:types.FunctionType links:array<Link> 
     return is_subtype(f.ret g.ret links @nodes)
 }
 
-callable_subtype = (f:types.CallableType g:types.CallableType links:array<Link> @nodes:types.Table):>bool => {
+callable_subtype = (f:types.CallableType g:types.CallableType links:Graph @nodes:types.Table):>bool => {
     let fs:array<types.FunctionType> = []
     let gs:array<types.FunctionType> = []
     if f is? types.FunctionType { fs.push(f) }
@@ -496,7 +509,7 @@ callable_subtype = (f:types.CallableType g:types.CallableType links:array<Link> 
 
 # The hosted primitive graph, in declaration order. Promotion rules are
 # installed separately by the semantic checker.
-const default_links:array<Link> = [
+const default_links:Graph = from_links([
     ["never" "any"]
     ["exception" "any"]
     ["type" "any"]
@@ -539,4 +552,4 @@ const default_links:array<Link> = [
     ["grapheme" "string"]
     ["char" "grapheme"]
     ["ID" "any"]
-]
+])

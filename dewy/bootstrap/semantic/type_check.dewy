@@ -158,9 +158,7 @@ resolve_name = (name:string id:addr context:contexts.Context @session:contexts.S
         return refine(types.primitive('int64' @session.types) [facts.Proposition['self' '>=?' 0] facts.Proposition['self' '<?' 0 axiom='addr']] @session)
     }
     if name in? ['any' 'void' 'untyped' 'noreturn'] return types.primitive(name @session.types)
-    loop link in session.links {
-        if name =? link.child or name =? link.parent return types.primitive(name @session.types)
-    }
+    if name in? session.links.ancestors return types.primitive(name @session.types)
     return contexts.problem(id "undefined type `{name}`" 'no type of this name is in scope' context session)
 }
 
@@ -1005,7 +1003,7 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
     if parent is? none return contexts.problem(id '`$abstract` marks a `type of` mint' 'an alias of an existing type cannot be abstract' context session)
     let name = binding.name
     let taken = brands.lookup(name session.brands) isnt? none
-    loop link in session.links { if link.child =? name { taken = true } }
+    loop link in session.links.edges { if link.child =? name { taken = true } }
     if taken { name = "{name}#{binding_id}" }
     let parent_node = types.node_at(session.types types.unfold(parent session.types))
     let error_type = types.primitive('error' @session.types)
@@ -1013,7 +1011,7 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
     if parent_node is? types.Primitive and nominal_error {
         if abstract return contexts.problem(id '`$abstract` marks an object mint' 'error types are not abstract' context session)
         if additions.length =? 0 {
-            session.links.push(subtyping.Link[name parent_node.name])
+            subtyping.add_link(@session.links subtyping.Link[name parent_node.name])
             let minted=types.primitive(name @session.types)
             session.error_types.add(minted)
             return minted
@@ -1076,7 +1074,7 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
     if nominal_error {
         let nominal_parent = if parent_node is? types.Primitive parent_node.name else if parent_node is? types.ObjectType parent_node.brand else none
         $runtime_assert nominal_parent isnt? none
-        session.links.push(subtyping.Link[name nominal_parent])
+        subtyping.add_link(@session.links subtyping.Link[name nominal_parent])
     }
     return minted
 }
