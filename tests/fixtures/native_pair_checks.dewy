@@ -21,8 +21,11 @@ import p"native_static_strings.dewy" as strings
 import p"native_binary_views.dewy" as binaries
 import p"native_casefold_scaling.dewy" as casefold
 import p"native_argument_lifetimes.dewy" as arguments
+import p"native_dict_scalar_widths.dewy" as scalar_dictionaries
 
 let main=():>int64=>{
+    printl('Checking dictionary scalar widths')
+    if scalar_dictionaries.main() not=?42 return 22
     printl('Checking argument snapshot lifetimes')
     if arguments.main() not=?42 return 21
     printl('Checking sibling field facts')

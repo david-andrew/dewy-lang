@@ -1,0 +1,35 @@
+# Insertions and replacements must agree on the value array's element width.
+# Mixed booleans expose an incorrect word stride even before the first grow;
+# later insertions exercise rehashing and detachment from a saved dictionary.
+let main=():>int64=>{
+    let flags:dict<int64 bool>=[]
+    let bytes:dict<int64 uint8>=[]
+    let shorts:dict<int64 int16>=[]
+    let words:dict<int64 int32>=[]
+    flags[0]=false flags[1]=true
+    bytes[0]=201 bytes[1]=202
+    shorts[0]=-1234 shorts[1]=2345
+    words[0]=-70000 words[1]=80000
+    let saved_flags=flags
+    let saved_bytes=bytes
+    loop i in 2..40 {
+        flags[i]=i % 2 =? 1
+        bytes[i]=203 shorts[i]=-3000 words[i]=90000
+    }
+    if flags.get(0) not=? false or flags.get(1) not=? true return 1
+    if bytes.get(0) not=? 201 or bytes.get(1) not=? 202 return 2
+    if shorts.get(0) not=? -1234 or shorts.get(1) not=? 2345 return 3
+    if words.get(0) not=? -70000 or words.get(1) not=? 80000 return 4
+    loop i in 2..40 {
+        if flags.get(i) not=? (i % 2 =? 1) return 5
+        if bytes.get(i) not=? 203 or shorts.get(i) not=? -3000 or words.get(i) not=? 90000 return 6
+    }
+    flags[0]=true bytes[0]=204
+    if saved_flags.get(0) not=? false or saved_bytes.get(0) not=? 201 return 7
+    if 1 in? flags {flags.pop(1);}
+    if 1 in? bytes {bytes.pop(1);}
+    flags[41]=true bytes[41]=205
+    if flags.get(1) isnt? none or bytes.get(1) isnt? none return 8
+    if flags.get(41) not=? true or bytes.get(41) not=? 205 return 9
+    return 42
+}

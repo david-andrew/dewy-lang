@@ -519,8 +519,10 @@ class _DictLowering:
         append = [
             self._declare(new_position, self._dict_length_of(keys, loc), loc),
             *self._dict_push(parts, 'keys', parts.key_type, key, loc),
-            # the value went through `_array_storage_value` above: push the word raw
-            *(self._dict_push(parts, 'values', 'int64', value, loc) if value is not None and parts.value_type is not None else []),
+            # Storage conversion above already owns aggregate payloads. Push
+            # that lowered representation without copying it again, retaining
+            # scalar widths: bool/uint8 slots occupy one byte, not a word.
+            *(self._dict_push(parts, 'values', runtime_type, value, loc) if value is not None and parts.value_type is not None else []),
             *hash_prelude,
             *self._dict_push(parts, 'hashes', 'int64', key_hash, loc),
             self._dict_store_element(indices, slot, new_position, 'int64', loc),
