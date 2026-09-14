@@ -496,3 +496,41 @@ too slow to select `-O1` as the default. Small validation/measurement jobs
 overlapped these experiments; none establishes a full-build acceptance time.
 Artifacts: `c-toolchain/{memory-snapshot.json,gcc-memory-o1*,gcc-o1*,
 memory-helper-*}`, `native-gcc-o1-t0`, and `native-gcc-memory-o1-t0`.
+
+## Active-value integration checkpoint
+
+The hosted C-backed executable build at `1fa828cc` finishes in **333.72 s**:
+checking 72.28 s, lowering 68.81 s, emission 8.50 s, and backend 178.21 s.
+It emits **60,668,904 bytes** of µDewy and peaks at 4,064,844 KiB process RSS.
+The previous checkpoint took 450.51 s and emitted 69,976,136 bytes. Both use
+the normal GCC `-O2` route with the recorded `-flto=8` wrapper. Small
+regression jobs overlapped; these are integration observations, not isolated
+acceptance samples or a new native fixed point. The executable remains far
+above the full-build target.
+
+That executable passes full native CLI compilation and execution of the
+union-retention, capture-facts, scalar-projection and projection-effects
+fixtures. It also passes the original `sets`, `integer_widths`, and
+`local_captures` corpus programs, closing the three previously isolated
+execution failures. Set output and exit status match the corpus's expected
+92; the other six return 42. Individual compiles take 17.0–18.2 s, including
+the prelude. This is a seven-program integration check, not a new full-corpus
+result. Artifacts: `source-active-values/snapshot.json`,
+`host-full-active-values`, and `active-values-integration/gates.log`.
+
+## Index native syntax-reference identities
+
+Each session now indexes syntax references by source, syntax node, and scope,
+instead of scanning all prior references for every lookup or insertion.
+The index is outside speculative state snapshots. Rollback removes discarded
+suffix entries; lazily indexed preloaded references retain first-match
+identity, including duplicates.
+
+The nested-transaction regression passes with scope/source distinctions,
+rollback followed by reused positions, and preloaded duplicates. A single
+native executable compares the former linear lookup with the index: inserting
+4,000 references and looking them up again takes **0.272/0.272 s linear versus
+0.054/0.054 s indexed**. At 1,000 references the indexed path takes 0.014 s,
+showing the expected scaling in this bounded kernel. Full CLI validation
+jobs overlapped; no full-checker speedup is claimed. Artifacts:
+`syntax-index-{gates,bench}.log` and `syntax-index-bench.py`.

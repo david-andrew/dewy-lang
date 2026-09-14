@@ -65,6 +65,24 @@ main = ():>int64 => {{
     $runtime_assert session.read_states[1].types.length =? 0
     $runtime_assert 3 in? session.read_states[2].types
     $runtime_assert 1 in? session.read_states[0].types
+    # Interned syntax identities distinguish both source and lexical scope.
+    # Discarded suffix entries must not survive rollback or overwrite the
+    # next reference that reuses their arena position.
+    let origin=contexts.Context[0 0]
+    let first_ref=contexts.syntax_ref(12 origin @session)
+    let scoped=contexts.syntax_ref(12 contexts.Context[0 1] @session)
+    $runtime_assert first_ref =? 0 and scoped =? 1
+    let saved=contexts.checkpoint(session)
+    let rejected=contexts.syntax_ref(12 contexts.Context[1 0] @session)
+    $runtime_assert rejected =? 2
+    contexts.restore(saved @session)
+    $runtime_assert contexts.syntax_ref(12 origin @session) =? first_ref
+    $runtime_assert contexts.syntax_ref(13 origin @session) =? rejected
+    $runtime_assert contexts.syntax_ref(12 contexts.Context[1 0] @session) =? 3
+    # A preloaded arena is indexed lazily and retains first-match behavior.
+    let loaded=contexts.Session[syntax_refs=[contexts.SyntaxRef[4 5 6] contexts.SyntaxRef[4 5 6]]]
+    $runtime_assert contexts.syntax_ref(5 contexts.Context[4 6] @loaded) =? 0
+    $runtime_assert contexts.syntax_ref(6 contexts.Context[4 6] @loaded) =? 2
     return 0
 }}
 ''')

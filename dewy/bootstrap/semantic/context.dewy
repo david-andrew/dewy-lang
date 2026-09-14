@@ -73,6 +73,12 @@ Session:type = CheckState & [
     target:targets.Target=$target sources:array<Source>=[]
     syntax_refs:array<SyntaxRef>=[] types:array<types.Type>=[] hir:array<hir.AST>=[]
     hir_edits:array<HirEdit>=[]
+    # Stable arena identities are indexed by source/node/scope. This index
+    # belongs to the session, not a speculative CheckState snapshot; rollback
+    # removes just the discarded suffix. Imported/preloaded references can
+    # be indexed lazily without rebuilding a complete table on each lookup.
+    syntax_ref_positions:dict<string addr>=[]
+    syntax_refs_indexed:addr=0
 ]
 Checkpoint:type = const [state:CheckState syntax_refs:addr types:addr hir:addr edits:addr]
 checkpoint = (session:Session):>Checkpoint => {
@@ -120,7 +126,15 @@ restore = (checkpoint:Checkpoint @session:Session):>void => {
     }
     session.hir.truncate(checkpoint.hir)
     session.types.truncate(checkpoint.types)
+    let index=checkpoint.syntax_refs
+    loop index <? session.syntax_refs.length {
+        let reference=session.syntax_refs[index]
+        let key=syntax_ref_key(reference.source reference.node reference.scope)
+        if session.syntax_ref_positions.get(key) =? index {session.syntax_ref_positions.pop(key default=0);}
+        index+=1
+    }
     session.syntax_refs.truncate(checkpoint.syntax_refs)
+    if session.syntax_refs_indexed >? session.syntax_refs.length {session.syntax_refs_indexed=session.syntax_refs.length}
     session.warnings=checkpoint.state.warnings
     session.pending_brand_matches=checkpoint.state.pending_brand_matches
     session.read_states=checkpoint.state.read_states
@@ -172,13 +186,24 @@ node_at = (id:addr context:Context session:Session):>tokens.Token => {
     $runtime_assert context.source <? session.sources.length
     return tokens.node_at(session.sources[context.source].nodes id)
 }
+syntax_ref_key = (source:addr node:addr scope:addr):>string => "{source}:{node}:{scope}"
 syntax_ref = (id:addr context:Context @session:Session):>addr => {
-    loop i in 0.. and i <? session.syntax_refs.length {
-        let reference = session.syntax_refs[i]
-        if reference.source =? context.source and reference.node =? id and reference.scope =? context.scope return i
+    loop session.syntax_refs_indexed <? session.syntax_refs.length {
+        let index=session.syntax_refs_indexed
+        let reference=session.syntax_refs[index]
+        let key=syntax_ref_key(reference.source reference.node reference.scope)
+        # Preserve the first identity even if a supplied arena contains the
+        # same triple twice, matching the former linear search.
+        if key not in? session.syntax_ref_positions {session.syntax_ref_positions[key]=index}
+        session.syntax_refs_indexed+=1
     }
+    let key=syntax_ref_key(context.source id context.scope)
+    let known=session.syntax_ref_positions.get(key)
+    if known isnt? none return known
     let reference = session.syntax_refs.length
     session.syntax_refs.push(SyntaxRef[context.source id context.scope])
+    session.syntax_ref_positions[key]=reference
+    session.syntax_refs_indexed=session.syntax_refs.length
     return reference
 }
 problem = (id:addr title:string message:string context:Context session:Session hint:string=''):>Error => {
