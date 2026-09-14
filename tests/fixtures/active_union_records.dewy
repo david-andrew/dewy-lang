@@ -1,0 +1,38 @@
+# Only the active record alternative needs storage. Copies remain independent
+# across result cells, replacement, container storage and narrower unions.
+Record:type=[items:array<int64> text:string]
+Other:type=[padding:int64 items:array<int64>]
+Choice:type=Record|Other|int64
+make=(n:int64):>Record|int64=>if n <? 0 n else Record[[n 2] "value"]
+copy=(value:Choice):>Choice=>value
+exercise=():>bool=>{
+    loop i in 0.. and i <? 300 {
+        let value:Choice=make(40)
+        let saved=copy(value)
+        value=copy(value)
+        if value isnt? Record or saved isnt? Record return false
+        if value.items.length <? 1 or saved.items.length <? 1 return false
+        value.items[0]=99
+        if saved.items[0] not=?40 or value.items[0] not=?99 return false
+        let values:array<Choice>=[value saved Other[7 [8]]]
+        value=7
+        let removed=values.pop
+        if removed isnt?Other or removed.items.length <? 1 return false
+        if removed.items[0] not=?8 return false
+        value=copy(saved)
+        if value isnt?Record or value.text not=?"value" return false
+        value=value
+        if value isnt?Record or value.items.length <? 1 return false
+        if value.items[0] not=?40 return false
+        value=make(-1)
+        if value isnt?int64 or value not=?-1 return false
+    }
+    return true
+}
+live=():>int64=>_arena_live_bytes
+main=():>int64=>{
+    if not exercise() return 1
+    let before=live()
+    if not exercise() return 2
+    return if live()-before <=?4096 42 else 3
+}

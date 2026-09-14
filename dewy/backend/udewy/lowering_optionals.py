@@ -346,7 +346,7 @@ class _OptionalLowering:
             or member in {'string', 'grapheme', 'char'}
         )
 
-    # Aggregate members (fixed-layout objects and exact arrays) get a
+    # Aggregate members requiring caller-prepared storage get a
     # prepared storage tree each, allocated with the cell and listed after the
     # payload word with the member's tag: [tag @0][payload @8][count @16]
     # [(tag, tree) @24, @40, …]. Tagging to an aggregate member copies the
@@ -355,33 +355,37 @@ class _OptionalLowering:
     # function whose result cell the caller declared with more members — finds
     # the tree by scanning (`_union_tree` in the prelude) rather than by offset.
 
-    # A cell is *prepared* when it owns storage trees for its fixed-layout
-    # aggregate members (locals, parameters, results). A cell stored inline in
+    # A cell is *prepared* when it can own storage trees for aggregate members
+    # needing them (locals, parameters, results). Other record members use an
+    # arena handle allocated only when active, like records in inline cells.
+    # This avoids constructing every possible record root at every union
+    # declaration/call. Fixed-array storage and the no-arena path keep trees.
+    # A cell stored inline in
     # an object field is unprepared: every aggregate member is a *handle* to
     # arena storage allocated when the member is tagged. Recursive references
     # (`ty.NamedType`) are handle members in every cell — that is what makes
     # `[value:int64 next:Node|none]` finite. Reads never care: the payload
     # word is the object pointer in both cases.
 
-    @staticmethod
-    def _union_member_kind(member: ty.TypeExpr, *, prepared: bool = True) -> str:
+    def _union_member_kind(self, member: ty.TypeExpr, *, prepared: bool = True) -> str:
         if isinstance(member, ty.NamedType):
             return 'handle'
         if isinstance(member, ty.ArrayType) and member.length is None:
             # a runtime-length array has no compile-time layout to prepare:
             # the member is an arena-backed handle (`array<uint8> | FileError`)
             return 'handle'
+        if isinstance(member, ty.ObjectType) and prepared and self._has_arena() and not self._object_copy_uses_frame_storage(member):
+            return 'handle'
         if isinstance(member, (ty.ObjectType, ty.ArrayType)):
             return 'tree' if prepared else 'handle'
         return 'word'
 
-    @classmethod
-    def _union_tree_slots(cls, members: tuple[ty.TypeExpr, ...], *, prepared: bool = True) -> dict[int, int]:
+    def _union_tree_slots(self, members: tuple[ty.TypeExpr, ...], *, prepared: bool = True) -> dict[int, int]:
         """Member index -> offset of its tree-pointer word (the member's tag sits 8 bytes before it)."""
         slots: dict[int, int] = {}
         offset = 32
         for index, member in enumerate(members):
-            if cls._union_member_kind(member, prepared=prepared) == 'tree':
+            if self._union_member_kind(member, prepared=prepared) == 'tree':
                 slots[index] = offset
                 offset += 16
         return slots
@@ -887,6 +891,9 @@ class _OptionalLowering:
             fresh
             and prepared
             and isinstance(value, hir.FunctionCall)
+            # Container methods return their removed/selected element cell;
+            # they do not implement the ordinary caller-result-cell ABI.
+            and not isinstance(value.func, hir.ArrayMethod)
             and isinstance(cell, hir.ExpressedIdentifier)
             and ty.runtime_union_members(value.type) == members
         ):
@@ -942,19 +949,20 @@ class _OptionalLowering:
                 if isinstance(source, hir.ExpressedIdentifier)
                 else source
             )
-            if (not prepared and ty.optional_payload(value.type) is not None
+            if (not self._union_tree_slots(members, prepared=prepared)
+                    and (ty.optional_payload(value.type) is not None or not self._union_tree_slots(members))
                     and isinstance(value, hir.FunctionCall)
                     and isinstance(value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
-                # An ordinary optional call returns an owned handle cell, as
-                # does this destination. Transfer its payload instead of
-                # cloning it and abandoning the original. Prepared general
-                # unions may point into caller-frame trees and still copy.
+                # With no caller-frame trees on either side, an ordinary
+                # call's dead result can transfer its active payload. This
+                # includes general unions whose record alternatives are
+                # arena handles. The source cell itself remains frame-owned.
                 return [*prelude,
                         self._intrinsic_call('__store_i64__', [self._optional_tag(source_word, value.loc), cell], ty.VOID_TYPE, value.loc),
                         self._store_i64_field(cell, 8, self._load_i64_field(source_word, 8, value.loc), value.loc),
                         self._store_i64_field(source_word, 8, self._int64_literal(value.loc, 0), value.loc)]
-            dead_temporary = isinstance(value, hir.FunctionCall) and prepared
-            return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc, prepared=prepared, move=dead_temporary)]
+            cleanup = self._discarded_call_result(value, source_word) or []
+            return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc, prepared=prepared), *cleanup]
         source_members = self._field_union_members(value.type)
         if source_members is not None:
             if not all(self._union_target_member(member, members) is not None for member in source_members):
@@ -971,6 +979,7 @@ class _OptionalLowering:
             return [
                 *prelude,
                 *self._union_retag(cell, source_word, source_members, members, value.loc, prepared=prepared),
+                *(self._discarded_call_result(value, source_word) or []),
             ]
         if isinstance(value.type, ty.TypeOr) and not self._is_string_valued(value.type):
             self._target_error(

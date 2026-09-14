@@ -426,3 +426,28 @@ API-name error corrected in that final run. Artifacts:
 `normalization-{comparison,final-gates,gates}.log` and
 `compare-normalization.py`. These are bounded results, not a full-build
 speedup claim.
+
+## Active union records and result lifetimes
+
+Hosted prepared union cells now allocate record roots only for the active
+alternative when its family needs no caller-prepared fixed arrays. Fixed
+arrays, records containing them (including descendants), and the no-arena
+route retain prepared trees. Copies still own independent values. A dead
+call result with no frame trees transfers its payload and clears the old
+cell; conversions requiring copies release the temporary after the copy.
+
+The lifetime audit also fixed result-cell forwarding being attempted for
+container methods, and added the missing arena-element to frame-result
+conversion for popped union cells. A repeated replacement/retag/pop kernel
+formerly retained 74,400 bytes per 300 iterations with prepared records;
+the first handle experiment retained 84,000. The final hosted version passes
+the 4 KiB repeated-run budget, alongside mixed fixed/dynamic union storage.
+All 62 selected union, sharing, record and popped-element checks pass.
+
+The preliminary representation-only t0 comparison shrinks emitted text from
+3,697,407 to 3,606,809 bytes (2.5%). Its 4.7–5.4 second in-process compilation
+samples show no reliable latency improvement and precede the lifetime fixes.
+The native kernel passes the value checks but fails this new retention
+budget; that remains a native ownership follow-up, not a parity success.
+Artifacts: `active-union-{t0,final-gates,lifetimes}.log` and
+`active-union/{probes,native-gates}.log`.

@@ -1712,6 +1712,20 @@ class _ArrayLowering(_ArraySharing):
         entire allocation. Shared nested arrays need only another descriptor.
         """
         record = ty.unfold(element_type)
+        members = self._field_union_members(element_type)
+        if members is not None and self._has_arena():
+            # The removed element owns an arena cell. Return a caller-frame
+            # cell with the usual member storage contract, then retire both
+            # the element's payload and its cell root. This mirrors the
+            # record boundary below, including optional scalar/string cells.
+            cell = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('popped_cell'))
+            statements = [*prelude,
+                hir.Declare(node.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._union_cell_allocation(members, node.loc)),
+                *self._union_prepare_trees(cell, members, node.loc),
+                *self._union_copy_cell(cell, value, members, node.loc),
+                *self._release_cell_payload(value, members, node.loc),
+                self._arena_release_call(value, self._int64_literal(node.loc, 16), node.loc)]
+            return self._cell_statement_temporary(statements, cell, members, prepared=True)
         if not isinstance(record, ty.ObjectType) or not self._has_arena():
             return prelude, replace(value, type=element_type)
         size, _offsets = self._object_layout(record, node)

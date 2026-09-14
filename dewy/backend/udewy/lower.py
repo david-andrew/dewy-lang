@@ -3300,7 +3300,7 @@ class _Lowerer(
             *self._union_write(temporary, value, members, prepared=False),
             *self._release_cell_payload(cell, members, loc, prepared=prepared),
         ]
-        if prepared:
+        if prepared and self._union_tree_slots(members):
             statements.extend(self._union_copy_cell(cell, temporary, members, loc, prepared=True))
             statements.extend(self._release_cell_payload(temporary, members, loc))
         else:
