@@ -20,8 +20,11 @@ import p"native_iterator_temporaries.dewy" as iterators
 import p"native_static_strings.dewy" as strings
 import p"native_binary_views.dewy" as binaries
 import p"native_casefold_scaling.dewy" as casefold
+import p"native_argument_lifetimes.dewy" as arguments
 
 let main=():>int64=>{
+    printl('Checking argument snapshot lifetimes')
+    if arguments.main() not=?42 return 21
     printl('Checking sibling field facts')
     if sibling.main() not=? 42 return 1
     printl('Checking refined union tags')

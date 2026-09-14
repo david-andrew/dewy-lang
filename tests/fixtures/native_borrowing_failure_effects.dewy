@@ -43,12 +43,53 @@ let main=():>int64=>{
         let caller=hir.append_node(@nodes hir.FunctionLiteral[loc read_type [hir.Param['actual' array actual_binding]] [] none word call])
         items.push(hir.append_node(@nodes hir.Declare[loc empty 'let' "caller{index}" read_type caller 400+index]))
     }
+    # Raw access to a parameter can retain its storage. An ordinary forwarding
+    # call copies there; a place or lifted capture shares the caller's storage.
+    let exposed=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' 500])
+    let load=hir.append_node(@nodes hir.ExpressedIdentifier[loc read_type '__load_i64__'])
+    let raw_read=hir.append_node(@nodes hir.FunctionCall[loc word load [exposed] []])
+    let raw_reader=hir.append_node(@nodes hir.FunctionLiteral[loc read_type [hir.Param['values' array 500]] [] none word raw_read])
+    items.push(hir.append_node(@nodes hir.Declare[loc empty 'let' 'raw_reader' read_type raw_reader 501]))
+    let raw_name=hir.append_node(@nodes hir.ExpressedIdentifier[loc read_type 'raw_reader' 501])
+    let place_type=types.function_type([types.PosOrKwArg['values' array place=true]] [] none word [] @ts)
+    let place_input=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' 503])
+    let place_read=hir.append_node(@nodes hir.FunctionCall[loc word load [place_input] []])
+    let raw_place=hir.append_node(@nodes hir.FunctionLiteral[loc place_type [hir.Param['values' array 503 place=true]] [] none word place_read])
+    items.push(hir.append_node(@nodes hir.Declare[loc empty 'let' 'raw_place' place_type raw_place 502]))
+    let place_name=hir.append_node(@nodes hir.ExpressedIdentifier[loc place_type 'raw_place' 502])
+    let noargs=types.function_type([] [] none word [] @ts)
+    let wrappers:array<addr>=[]
+    loop index in 0..2 {
+        let parameter:addr=510+index
+        let value=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' parameter])
+        let argument=if index =? 1 hir.append_node(@nodes hir.Place[loc array value]) else value
+        let body=hir.append_node(@nodes hir.FunctionCall[loc word (if index =? 1 place_name else raw_name) [argument] []])
+        if index =? 2 {
+            let nested_body=hir.append_node(@nodes hir.FunctionCall[loc word load [value] []])
+            let nested=hir.append_node(@nodes hir.FunctionLiteral[loc noargs [] [] none word nested_body])
+            body=hir.append_node(@nodes hir.FunctionCall[loc word nested [] []])
+        }
+        let wrapper=hir.append_node(@nodes hir.FunctionLiteral[loc read_type [hir.Param['values' array parameter]] [] none word body])
+        wrappers.push(wrapper)
+        items.push(hir.append_node(@nodes hir.Declare[loc empty 'let' "wrapper{index}" read_type wrapper 520+index]))
+    }
     let root=hir.append_node(@nodes hir.Block[loc empty items true])
-    let plan=captures.analyze(root nodes set[100 200 201 202 400 401 402])
-    let allowed=borrowing.analyze(root nodes ts plan)
+    let plan=captures.analyze(root nodes set[10 11 12 100 200 201 202 300 301 302 400 401 402 500 501 502 503 510 511 512 520 521 522])
+    let lifetime=borrowing.details(root nodes ts plan)
+    let allowed=lifetime.arguments
     if checks.length not=? 3 or arguments.length not=? 3 return 1
     if arguments[0] not in? allowed.get(checks[0] set[]) return 2
     if arguments[1] in? allowed.get(checks[1] set[]) return 3
     if arguments[2] in? allowed.get(checks[2] set[]) return 4
+    # Explicit reporting still prevents borrowing across ambient raw effects,
+    # but it receives its own values and cannot retain the reader's snapshot.
+    loop index in 0..2 {
+        if arguments[index] not in? lifetime.disposable_arguments.get(checks[index] set[]) return 5
+    }
+    let retaining=borrowing.ambient_writers(plan nodes ts opaque_only=true value_boundaries=true)
+    if raw_reader not in? retaining return 6
+    if wrappers.length not=? 3 return 7
+    if wrappers[0] in? retaining return 8
+    if wrappers[1] not in? retaining or wrappers[2] not in? retaining return 9
     return 42
 }

@@ -1,0 +1,49 @@
+# A reader can call a raw helper without handing that helper its graph. The
+# reader's private argument snapshot must die before the next graph append.
+# Otherwise each append detaches and copies all preceding nodes (quadratic).
+Node:type=[id:int64 children:array<int64>]
+let copied=():>int64=>_arena_copied_bytes
+let live=():>int64=>_arena_live_bytes
+let raw_tick=():>int64=>{
+    let slot=__alloca__(8)
+    __store_i64__(0 slot)
+    return __load_i64__(slot)
+}
+let count=(nodes:array<Node>):>int64=>nodes.length+raw_tick()
+let first=(nodes:array<Node>):>Node=>{
+    raw_tick();
+    if nodes.length =? 0 return Node[-1 []]
+    return nodes[0]
+}
+let grow=():>bool=>{
+    let nodes:array<Node>=[]
+    loop i in 0.. and i <? 512 {
+        if count(nodes) not=? i return false
+        nodes.push(Node[i [i]])
+    }
+    let saved=first(nodes)
+    if nodes.length =? 0 return false
+    let changed=nodes[0]
+    if changed.children.length =? 0 return false
+    changed.children[0]=99
+    nodes[0]=changed
+    return saved.id =? 0 and saved.children.length >? 0 and saved.children[0] =? 0 and nodes.length =? 512
+}
+# Conversely, a helper that actually exposes an argument's record storage
+# keeps that copy alive. Releasing the wrapper's separate value is still safe.
+Box:type=[value:int64]
+let retained:int64=0
+let retain=(box:Box):>void=>{retained=box transmute int64}
+let forward=(box:Box):>void=>retain(box)
+let retained_value=():>int64=>__load_i64__(retained)
+let main=():>int64=>{
+    let before=copied()
+    if not grow() return 1
+    if copied()-before >? 524288 return 2
+    let baseline=live()
+    if not grow() return 3
+    if live()-baseline >? 4096 return 4
+    forward(Box[42])
+    loop i in 0.. and i <? 100 {let scratch=Box[i] if scratch.value not=? i return 5}
+    return retained_value()
+}

@@ -214,3 +214,25 @@ the actual included table. Native lowering copies zero payload bytes and
 retains 408,000 arena bytes in the current string representation. The pair's
 execution checks include this workload, with separate copy and retention
 limits, before allowing generation two to start.
+
+## Argument snapshots across raw-effect calls
+
+Borrowing and reclamation need different call-graph rules. A transitive raw
+effect can mutate storage visible to a caller, so it still prevents borrowing.
+But an ordinary value call gives its raw callee an independent copy. Retaining
+that inner copy does not require retaining the outer caller's argument snapshot.
+Place arguments and lifted captures share storage and continue to propagate
+retention. Direct raw access and unknown callbacks remain conservative.
+
+This distinction matters for HIR readers: the explicit error-reporting fallback
+in `hir.children` previously prevented reclamation throughout its caller graph.
+Each unreleased arena snapshot then forced the next append to copy the graph.
+`native_argument_lifetimes.dewy` checks repeated read/append operations, an
+independent returned record, and deliberately retained raw record storage.
+Through native lowering on both output backends, it passes the copy/retention
+limits. For 512 appends, the direct backend measures 8 copied payload bytes
+(down from 1,050,632) and zero retained bytes after a second run. The 8 bytes
+come from the intentional mutation of a saved record's array field.
+
+These bounded checks do not establish a completed bootstrap loop. Larger
+compiler-reader checks and the native generation comparison remain required.

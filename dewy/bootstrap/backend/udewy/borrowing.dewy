@@ -79,7 +79,18 @@ word_value = (id:addr type_nodes:array<types.Type>):>bool => {
     if type is? types.IntegerLiteralType return type.value >=? -9223372036854775808 and type.value <=? 18446744073709551615
     return type is? types.Primitive and type.name in? ['int' 'uint' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64' 'bool' 'true' 'false' 'none']
 }
-ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<types.Type> opaque_only:bool=false):>set<addr> => {
+# An ordinary value call is an ownership boundary. If its callee needs raw
+# storage, lowering supplies a private copy there. That callee can retain its
+# copy without retaining its caller's argument snapshot. Places and lifted
+# captures cross the boundary without copying, so they still propagate storage
+# exposure. Ambient mutation propagates across every call regardless.
+shares_storage = (call:hir.FunctionCall target:addr plan:captures.Plan nodes:array<hir.AST>):>bool => {
+    let function=plan.functions.get(target)
+    if function is? none or function.captures.length >? 0 return true
+    loop argument in arguments(call) {if hir.node_at(nodes argument) is? hir.Place return true}
+    return false
+}
+ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<types.Type> opaque_only:bool=false value_boundaries:bool=false):>set<addr> => {
     let dirty:set<addr>=set[]
     let dependencies:dict<addr set<addr>>=[]
     loop [id function] in plan.functions {
@@ -111,14 +122,18 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:array<type
                 let callee=hir.node_at(nodes node.func)
                 if callee is? hir.ExpressedIdentifier {
                     let target=captures.resolve(node.func node.selected_method_index plan nodes)
-                    if target isnt? none {called.add(target)}
+                    if target isnt? none {
+                        if not value_boundaries or shares_storage(node target plan nodes) {called.add(target)}
+                    }
                     else if (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix) or callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') {dirty.add(id)}
                 } else if callee is? hir.ArrayMethod {
                     # A sort invokes its key inside the method. In particular
                     # a function-valued parameter can hide ambient writes;
                     # it is not an ordinary HIR call with a known dependency.
                     if callee.name =? 'sort' and 'key' in? node.kw_args {dirty.add(id)}
-                } else if callee is? hir.FunctionLiteral {called.add(node.func)}
+                } else if callee is? hir.FunctionLiteral {
+                    if not value_boundaries or shares_storage(node node.func plan nodes) {called.add(node.func)}
+                }
                 else {dirty.add(id)}
             }
             loop next in hir.children(node) {pending.push(next)}
@@ -146,6 +161,10 @@ details = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:capt
     # without a declared place. They always require the ordinary value copy;
     # writes to unrelated globals only matter for an aliasing place source.
     let opaque=ambient_writers(plan nodes type_nodes opaque_only=true)
+    # Borrowing must also exclude indirect raw writes that could alias caller
+    # storage. Releasing an already independent snapshot only requires proving
+    # that this snapshot was not itself exposed beyond the call.
+    let retaining=ambient_writers(plan nodes type_nodes opaque_only=true value_boundaries=true)
     let places:set<addr>=set[]
     loop id in plan.functions.keys {
         let literal=hir.node_at(nodes id)
@@ -186,7 +205,6 @@ details = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:capt
             if summary isnt? none and summary.escapes.length =? 0 {safe_places.add(pair.argument)}
             else {unsafe_places.add(pair.argument)}
         }
-        if direct in? opaque continue
         let allowed:set<addr>=set[]
         let rejected:set<addr>=set[]
         let temporary:set<addr>=set[]
@@ -195,9 +213,9 @@ details = (root:addr nodes:array<hir.AST> type_nodes:array<types.Type> plan:capt
         loop pair in pairs {
             let source=route(pair.argument nodes)
             let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
-            if summary isnt? none and summary.escapes.length =? 0 {temporary.add(pair.argument)}
+            if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.add(pair.argument)}
             else {retained.add(pair.argument)}
-            if source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
+            if direct not in? opaque and source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
             else {rejected.add(pair.argument)}
             position+=1
         }
