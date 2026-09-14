@@ -274,6 +274,12 @@ class _Lowerer(
         # global per table, declared once and stored at module startup
         self.unicode_table_globals: dict[str, hir.BasedString] = {}
         self.string_literal_globals: list[hir.Declare] = []
+        self.string_release_symbol: str | None = None
+        self.pending_string_release = False
+        self.cell_release_symbols: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
+        self.pending_cell_releases: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
+        self.cell_copy_symbols: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
+        self.pending_cell_copies: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
         # bindings whose value is an enum (a union of singletons): a word
         # holding the member index (`ty.enum_members`), no cell
         self.enum_words: dict[int, tuple[ty.TypeExpr, ...]] = {}

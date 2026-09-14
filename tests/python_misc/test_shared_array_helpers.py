@@ -43,9 +43,9 @@ main=():>int64=>{{
 def test_array_helpers_preserve_independence_and_reclamation(tmp_path):
     code = codegen(SrcFile(None, source()), debug_locations=False)
     # Include every caller and all reachable runtime helpers in the budget.
-    # Inlining the array-copy fallbacks emitted 946,621 bytes after the same
-    # replacement cleanup fix; shared helpers emit 729,334 bytes.
-    assert len(code.encode()) < 850_000
+    # Array-copy fallbacks first fell from 946,621 to 729,334 bytes. Sharing
+    # release and union-copy dispatch, plus static literals, reaches 309,077.
+    assert len(code.encode()) < 400_000
     output = tmp_path / 'shared-array-helpers.udewy'
     output.write_text(code)
     for target in ['x86_64', 'c']:

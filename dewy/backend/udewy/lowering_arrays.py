@@ -1215,9 +1215,41 @@ class _ArrayLowering(_ArraySharing):
         # the descriptor is released inside `buffer`: read nothing from it after
         return [*elements, buffer]
 
-    def _release_string_by_owner(self, string: hir.ExpressedIdentifier, loc) -> hir.AST:
+    def _synthesize_value_releases(self) -> list:
+        """Share ownership dispatch; no allocation here escapes a helper frame."""
+        from .lowering_shared import LoweredFunction
+        result = []
+        loc = self.root.loc
+        value = hir.ExpressedIdentifier(loc, 'int64', '__dewy_value')
+
+        def function(symbol, body):
+            signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+            literal = hir.FunctionLiteral(loc, signature, [hir.Param(value.name, 'int64')],
+                [], None, ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, body, True))
+            result.append(LoweredFunction(symbol, literal))
+
+        while self.pending_cell_releases:
+            members, prepared, strings, symbol = self.pending_cell_releases.pop(0)
+            function(symbol, self._release_cell_payload(value, members, loc,
+                prepared=prepared, strings=strings, inline=True))
+        if self.pending_string_release:
+            self.pending_string_release = False
+            function(self.string_release_symbol, [self._release_string_by_owner(value, loc, inline=True)])
+        return result
+
+    def _release_value_call(self, symbol, value, loc):
+        signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+        return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, signature, symbol),
+            [replace(value, type='int64')], {})
+
+    def _release_string_by_owner(self, string: hir.ExpressedIdentifier, loc, *, inline: bool = False) -> hir.AST:
         """Give a string's storage back by its owner word: data, boundaries, and
         descriptor for an arena copy (1); the descriptor alone for an arena view (2)."""
+        if not inline:
+            if self.string_release_symbol is None:
+                self.string_release_symbol = self._internal_symbol('__dewy_release_string')
+                self.pending_string_release = True
+            return self._release_value_call(self.string_release_symbol, string, loc)
         one = self._int64_literal(loc, 1)
         owner = self._load_i64_field(string, STRING_OWNER_OFFSET, loc)
         bytes_plus_one = self._int64_binary('__add__', self._load_i64_field(string, STRING_BYTE_LENGTH_OFFSET, loc), one, loc)
@@ -1235,7 +1267,7 @@ class _ArrayLowering(_ArraySharing):
         empty = self._typed_equality(string, self._int64_literal(loc, 0), 'int64', loc)
         return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, empty, hir.Block(loc, ty.VOID_TYPE, [], True))], by_owner)
 
-    def _release_cell_payload(self, cell: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span, *, prepared: bool = False, strings: bool = True) -> list[hir.AST]:
+    def _release_cell_payload(self, cell: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span, *, prepared: bool = False, strings: bool = True, inline: bool = False) -> list[hir.AST]:
         """Release the active value according to the cell's storage contract.
 
         Inline/container cells own aggregate handles. Prepared local/result
@@ -1243,6 +1275,18 @@ class _ArrayLowering(_ArraySharing):
         cached object release helper, keeping both layouts and code finite.
         A zero payload is an emptied slot after an ownership transfer.
         """
+        if not inline and self._has_arena():
+            if not any((strings and self._is_string_valued(member)) or
+                       isinstance(ty.unfold(ty.strip_refinement(member)), (ty.ArrayType, ty.ObjectType))
+                       for member in members):
+                return []
+            key = (members, prepared, strings)
+            symbol = next((entry[3] for entry in self.cell_release_symbols if entry[:3] == key), None)
+            if symbol is None:
+                symbol = self._internal_symbol(f'__dewy_release_cell_{len(self.cell_release_symbols)}')
+                self.cell_release_symbols.append((*key, symbol))
+                self.pending_cell_releases.append((*key, symbol))
+            return [self._release_value_call(symbol, cell, loc)]
         tag = self._new_string_temp(loc, 'int64', 'cell_tag')
         payload = self._new_string_temp(loc, 'int64', 'cell_payload')
         arms: list[hir.IfArm | hir.LoopArm] = []

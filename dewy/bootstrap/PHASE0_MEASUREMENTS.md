@@ -189,3 +189,52 @@ now return the expected result with zero growth across repeated kernel
 scopes on direct and C backends; additional cases cover self-replacement and
 pinned old-cell pointers. Sixty-nine existing ownership, sharing, string,
 array and object tests pass with array helper sharing enabled.
+
+## Static literals and shared value dispatch
+
+The hosted ordinary CLI now omits source/variable debug metadata. `dewy debug`
+retains both, in its existing separate cache artifact; the codegen API keeps
+its explicit/default debug controls. Literal bytes, packed grapheme offsets,
+and descriptors are emitted as relocatable static data. Descriptors remain
+separate per lowering site. This removes repeated initialization stores;
+it does not add a source-level interning rule. Repeated large ASCII, combined
+Unicode graphemes, and empty literals pass direct and C execution checks.
+
+The same t0 module drops from 5,466,153 bytes to 4,299,559 bytes and 19.65 s
+with static literals and ordinary debug metadata omitted. Sharing string
+release, cell-payload release, and union-copy dispatch reduces it further to
+3,697,941 bytes, with 230,500 KiB peak process RSS. The latter sample took
+20.21 s (11.57 checking, 3.42 lowering, 0.55 emission, 3.71 backend) while
+other validation was running; use its output size, not the small wall-time
+difference, to compare these batches. This is still a module benchmark,
+not achievement of the full-build target.
+
+Copy helpers retain distinct prepared/unprepared and move modes. Copies
+that might construct fixed-size storage in the caller's frame remain
+inline. Release helpers only dispatch ownership and reclaim existing
+storage. The 24-caller union-array kernel is now 309,077 bytes, with a
+400 KB regression budget (formerly 729,334 bytes after array-helper sharing).
+Thirty focused release/ownership tests and twenty-five copy-helper tests
+pass. The broader union/recursive/ownership group passed 109 cases and
+exposed two fixed-array temporary lifetime failures; after the lifetime fix,
+all thirteen record/result regressions pass, including those two failures.
+
+Array element ownership is now consistent on the hosted side: literals,
+copies, and prepared array results own their record roots as well as fields,
+even when the pointer buffer is frame-backed. Replacing an element releases
+the old value after materializing its replacement; raw exposure preserves
+pinned old elements. Scope exit releases copied record roots, and temporary
+fixed-array results release their elements after reads. The combined test
+covers inheritance, fixed results, self-replacement, preserved snapshots,
+repeated-scope reclamation, and raw pointers without assuming brand layout.
+It also found a native omission: index replacement released pinned elements.
+The corrected native lowering passes the same kernel on direct and C routes.
+
+Artifacts: `phase0-performance/host-static-literals-t0`,
+`host-cell-helpers-t0`, `shared-release-union-kernel.udewy`,
+`static-literal-*-gates.log`, `record-replace-complete-gates.log`,
+`pinned-replacement-native-gates.log`, `shared-release-gates.log`,
+`shared-cell-copy-gates.log`, `shared-cell-ownership-gates.log`, and
+`fixed-result-lifetime-gates.log`. The reusable native lowering driver is
+recorded in `pinned-replacement/driver-path.txt`; it includes the pinned
+replacement fix, but is not a new full native compiler or fixed point.

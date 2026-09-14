@@ -671,6 +671,22 @@ class _OptionalLowering:
             and any(candidate.logical_name.endswith('_union_tree') for candidate in self.functions)
         )
 
+    def _synthesize_cell_copies(self) -> list:
+        from .lowering_shared import LoweredFunction
+        result = []
+        loc = self.root.loc
+        dest = hir.ExpressedIdentifier(loc, 'int64', '__dewy_dest')
+        source = hir.ExpressedIdentifier(loc, 'int64', '__dewy_source')
+        while self.pending_cell_copies:
+            members, prepared, move, symbol = self.pending_cell_copies.pop(0)
+            body = self._union_copy_cell(dest, source, members, loc,
+                prepared=prepared, move=move, inline=True)
+            signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+            literal = hir.FunctionLiteral(loc, signature, [hir.Param(dest.name, 'int64'), hir.Param(source.name, 'int64')],
+                [], None, ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, body, True))
+            result.append(LoweredFunction(symbol, literal))
+        return result
+
     def _union_copy_cell(
         self,
         dest: hir.AST,
@@ -680,6 +696,7 @@ class _OptionalLowering:
         *,
         prepared: bool = True,
         move: bool = False,
+        inline: bool = False,
     ) -> list[hir.AST]:
         """Copy a whole union cell, deep-copying an active aggregate member.
 
@@ -693,6 +710,25 @@ class _OptionalLowering:
             if self._union_member_kind(member, prepared=prepared) != 'word'
             or (not move and self._has_arena() and self._is_string_valued(member))
         ]
+        if not inline and aggregate_indexes and self._has_arena():
+            # The helper may allocate only arena-owned payloads. Prepared
+            # fixed arrays and records containing them still construct some
+            # storage in the caller's frame; leave those paths at the site.
+            frame_storage = any(
+                isinstance(plain := ty.unfold(ty.strip_refinement(member)), ty.ArrayType) and plain.length is not None
+                or isinstance(plain, ty.ObjectType) and self._object_copy_uses_frame_storage(plain)
+                for member in members
+            )
+            if not frame_storage:
+                key = (members, prepared, move)
+                symbol = next((entry[3] for entry in self.cell_copy_symbols if entry[:3] == key), None)
+                if symbol is None:
+                    symbol = self._internal_symbol(f'__dewy_copy_cell_{len(self.cell_copy_symbols)}')
+                    self.cell_copy_symbols.append((*key, symbol))
+                    self.pending_cell_copies.append((*key, symbol))
+                signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+                return [hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, signature, symbol),
+                    [replace(dest, type='int64'), replace(source, type='int64')], {})]
         tag = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('tag'))
         statements: list[hir.AST] = [
             hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._optional_tag(source, loc)),

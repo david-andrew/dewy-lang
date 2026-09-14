@@ -211,13 +211,15 @@ class _ObjectLowering:
         startup = self.lowering_module_startup
         self.lowering_module_startup = False
         try:
-            while self.pending_named_copies or self.pending_object_copies or self.pending_object_releases or self.pending_shared_copies or getattr(self, 'pending_pins', []) or getattr(self, 'pending_uniques', []):
+            while self.pending_named_copies or self.pending_object_copies or self.pending_object_releases or self.pending_shared_copies or self.pending_cell_copies or self.pending_cell_releases or self.pending_string_release or getattr(self, 'pending_pins', []) or getattr(self, 'pending_uniques', []):
                 result.extend(self._synthesize_named_copies())
                 result.extend(self._synthesize_object_copies())
                 result.extend(self._synthesize_object_releases())
                 result.extend(self._synthesize_shared_copies())
                 result.extend(self._synthesize_pins())
                 result.extend(self._synthesize_uniques())
+                result.extend(self._synthesize_value_releases())
+                result.extend(self._synthesize_cell_copies())
         finally:
             self.lowering_module_startup = startup
         return result
