@@ -292,8 +292,9 @@ inference for the resulting executable.
 The bounded callback kernel passes through native lowering on both backends.
 For 512 read/append iterations its direct executable measures zero copied
 array payload bytes and zero retained arena bytes after a second run. The
-larger predicate-path fixture copies 1,058,816 bytes with the preceding seed;
-its updated full-prelude validation and the native fixed point remain gates.
+larger predicate-path fixture copies 1,058,816 bytes with the preceding seed.
+The full-prelude validation below additionally checks the real traversal;
+native generation comparison remains a separate gate.
 
 ## Temporary container receivers
 
@@ -319,3 +320,11 @@ remains separate from deliberate raw-exposure tests. Before the receiver fix,
 the grouped predicate test already copied zero array payload bytes but retained
 983,392 arena bytes per 512 visits. This larger gate still precedes any full
 native generation comparison.
+
+The updated grouped check passes on both output backends, taking 80.5 seconds
+for direct output and 102.7 seconds for C output through the C seed. Its direct
+executable measures zero copied/retained bytes for the HIR reader and zero
+copied bytes with 352 retained bytes for 512 predicate visits. The 80 bounded
+kernel executions and 23-case integration bundle also pass on both backends.
+These checks justify a new compiler generation run; they do not certify a
+completed native fixed point.
