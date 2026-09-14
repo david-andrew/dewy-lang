@@ -50,6 +50,9 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   overlapping proof-join arms can share values without making a known
   member's tag ambiguous. Source-level ambiguous materializations keep their
   existing diagnostic.
+  Retagging applies only to record alternatives that need that conversion;
+  array length facts retain the original payload and optional presence tag.
+  Unchanged alternatives in mixed unions keep their original cell.
 
 - Hosted optional family tests now use the same guarded tag/brand checks as
   general unions, including negated tests. Narrowed parent payloads reuse the
@@ -65,6 +68,9 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   Child unions can also widen into a parent union, retaining dynamic brands
   and replacing member tags. General parent unions use borrowed child views
   on narrowed reads; escaping copies use those views' actual tags.
+  Subsequent predicates also use the converted child tags. Optional array
+  presence tests ignore read-length annotations, while a narrowed general
+  union continues to use its original storage alternatives.
 
 - Hosted prepared parent-record storage still has a fixed-array gap:
   constructing `Child[0 [20 22]]` in `Parent | int64`, where Child adds an

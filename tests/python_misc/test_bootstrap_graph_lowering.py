@@ -21,6 +21,7 @@ REFINED_TAG_CASES = [
     STORED_HANDLE,
     (ROOT / 'tests/fixtures/native_parameter_defaults.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_diverging_tails.dewy').read_text(),
+    (ROOT / 'tests/fixtures/native_optional_views.dewy').read_text(),
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(Record[0]) 42 else 1",
     "let test=(value:addr?):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(none) 42 else 1",
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value isnt? addr\nlet main=():>int64=>if not test(42) and test(Record[0]) 42 else 1",

@@ -876,29 +876,32 @@ read_value = (value:addr stored:addr read:addr node:hir.AST @state:State):>addr 
         # A parent may itself occupy a union cell (e.g. Token|none). Keeping
         # several child alternatives then needs new tags, not just the old
         # parent tag with a narrower logical annotation.
-        let retag=false
+        let retag:set<addr>=set[]
         let tags:set<addr>=set[]
         loop target in narrowed {tags.add(member_tag(target @state))}
         loop member in original {
             if member_tag(member @state) in? tags continue
-            if not type_tests.disjoint(member read state.links @state.type_nodes) {retag=true}
+            # Array length facts refine a read without changing its physical
+            # payload or presence tag. Only record family conversions need
+            # to split a parent tag into children (or widen children back).
+            if object_valued(member state) and not type_tests.disjoint(member read state.links @state.type_nodes) {retag.add(member)}
         }
-        if retag {
+        if retag.length >? 0 {
             let prefix:array<addr>=[]
             let source=snapshot(value @prefix @state)
             let tag=snapshot(read_word(source 0 node @state) @prefix @state)
             let arms:array<addr>=[]
             let output=types.primitive('int64' @state.type_nodes)
             loop member in original {
-                if type_tests.disjoint(member read state.links @state.type_nodes) continue
+                if member not in? retag continue
                 let converted=cell_pack(cell_payload(source member node @state) member read node @state)
                 let condition=compare('__eq__' tag word(member_tag(member @state) node @state) node @state)
                 arms.push(put(hir.IfArm[node.loc output condition converted] @state))
             }
             $runtime_assert arms.length >? 0
-            let last=hir.node_at(state.nodes arms.pop)
-            $runtime_assert last is? hir.IfArm
-            prefix.push(put(hir.Flow[node.loc output arms last.body] @state))
+            # Other alternatives retain their original cell, including a
+            # refined array alongside a record family in the same union.
+            prefix.push(put(hir.Flow[node.loc output arms source] @state))
             return put(hir.Block[node.loc output prefix false] @state)
         }
     }
