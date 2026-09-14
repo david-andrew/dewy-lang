@@ -968,3 +968,31 @@ speedups. Both variants check their returned identities and arena size;
 existing algebra, display, deep-shape, fork, and rollback tests pass.
 Artifacts: `type-factory-before`, `type-factory-after`,
 `type-factory-native-before`, `type-factory-native-after`, and their logs.
+
+### Hosted full-source profile and runtime union ordering
+
+A bounded profile of frozen `c4658546` on the full compiler source completed
+checking and was interrupted during lowering at 400 seconds to retain call
+data. It did **not** produce a compiler. Its 238.47 profiled checking seconds
+and 162.02 partial lowering seconds are diagnostic data, not an unprofiled
+build comparison (`host-full-profile/run-00/hosted.prof`). A short native t0
+sampling run overlapped part of this profile; do not use either as an isolated
+time measurement. Sampling captured 132 stacks, with `shapes_key` in 35,
+supporting the earlier factory batch (`native-fact-index-samples`).
+
+The hosted profile attributes about 67 seconds to `runtime_union_members`
+sorting by `repr`: record defaults and method bodies were rendered recursively
+merely to choose tag order. Hosted ordering now walks structural comparison
+fields, terminates recursion at alias identity, and shares nested keys for
+one pure traversal (or the enclosing stable lowering scope). This follows the
+native implementation's existing structural-order policy. Numeric tag order
+is internal; None remains tag zero, and each spelling of the same member set
+must agree. Declaration metadata cannot influence the order, and same-name
+recursive aliases remain distinct by binding identity. Tests cover opaque
+metadata that must never be rendered, a shared type DAG, cache lifetime,
+recursive aliases, and existing union/enum execution fixtures.
+
+An exploratory adjacent-temporary fold reduced the frozen generated C from
+74,384,681 to 68,709,917 bytes, eliminating 134,757 declarations. The Python
+prototype took 10.74 seconds and has no established backend-time benefit;
+it was **not** adopted. Its script and output remain in the artifact tree.

@@ -5,6 +5,7 @@ from contextvars import ContextVar
 from functools import wraps
 from collections.abc import Callable, Iterator
 from typing import Literal
+from ..utils import dataclass_fields
 
 
 _runtime_query_cache: ContextVar[dict | None] = ContextVar('dewy_runtime_queries', default=None)
@@ -1096,6 +1097,38 @@ def enum_member_index(members: tuple[TypeExpr, ...], value: TypeExpr) -> int | N
 
 
 @_runtime_query
+def _runtime_order_key(value: object) -> tuple:
+    """Order type identities without rendering their declaration metadata.
+
+    Dataclass comparison fields describe structural identity. Defaults,
+    method bodies and resolved proof bindings explicitly do not participate;
+    their repr can contain whole syntax trees and lexical environments.
+    Named references terminate recursive structures at their alias identity.
+    Keys share nested tuples within a stable lowering scope, rather than
+    recursively serializing an already-serialized child at each level.
+    """
+    if _runtime_query_cache.get() is None:
+        # A checker query has no persistent cache, but this one pure walk
+        # can still memoize a shared type DAG until it returns.
+        with runtime_query_scope():
+            return _runtime_order_key(value)
+    if isinstance(value, NamedType):
+        return ('NamedType', value.alias_id)
+    if value is None:
+        return ('none',)
+    if isinstance(value, (str, int, bytes)):
+        return (type(value).__name__, value)
+    if isinstance(value, (tuple, list)):
+        return (type(value).__name__, tuple(_runtime_order_key(item) for item in value))
+    if type(value).__module__ == __name__:
+        return (type(value).__name__, tuple(
+            _runtime_order_key(getattr(value, field.name))
+            for field in dataclass_fields(value) if field.compare
+        ))
+    raise TypeError(f'unsupported runtime type identity component: {type(value).__name__}')
+
+
+@_runtime_query
 def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
     """Canonical member order for a general runtime tagged union.
 
@@ -1121,7 +1154,7 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
     # its tags identically.
     members = sorted(
         type_.items,
-        key=lambda member: (0 if member == 'none' else 1, repr(member)),
+        key=lambda member: (0 if member == 'none' else 1, _runtime_order_key(member)),
     )
     return tuple(members)
 
