@@ -3744,6 +3744,31 @@ class _Lowerer(
                 body = self._release_string_elements(value, value.loc)
             present = self._typed_equality(value, self._int64_literal(value.loc, 0), 'int64', value.loc)
             releases.append(hir.Flow(value.loc, ty.VOID_TYPE, [hir.IfArm(value.loc, ty.VOID_TYPE, present, hir.Block(value.loc, ty.VOID_TYPE, [], True))], hir.Block(value.loc, ty.VOID_TYPE, body, True)))
+
+        def release_return(node: hir.Return) -> list[hir.AST]:
+            # A return inside a loop/conditional also leaves this statement's
+            # receiver lifetime. Evaluate its result before releasing views.
+            if node.item is not None and not isinstance(node.item, (hir.ExpressedIdentifier, hir.Integer, hir.Bool, hir.Void)):
+                value = hir.ExpressedIdentifier(node.loc, node.item.type if isinstance(node.item.type, str) else 'int64', self._new_result_name())
+                return [hir.Declare(node.loc, ty.VOID_TYPE, 'let', value.name, value.type, node.item), *releases, replace(node, item=value)]
+            return [*releases, node]
+
+        def nested_body(node: hir.AST) -> hir.AST:
+            if isinstance(node, hir.Return):
+                return hir.Block(node.loc, node.type, release_return(node), True)
+            if isinstance(node, hir.Block):
+                items: list[hir.AST] = []
+                for item in node.items:
+                    items.extend(release_return(item) if isinstance(item, hir.Return) else [nested_body(item)])
+                return replace(node, items=items)
+            if isinstance(node, hir.Flow):
+                return replace(node, arms=[replace(arm, body=nested_body(arm.body)) for arm in node.arms],
+                               default=nested_body(node.default) if node.default is not None else None)
+            return node
+
+        # Break/continue within these flows still use the statement's ordinary
+        # postlude (or retain the iterator on continue). Only returns leave it.
+        lowered = [nested_body(item) if not isinstance(item, hir.Return) else item for item in lowered]
         if lowered and isinstance(lowered[-1], (hir.Return, hir.Break, hir.Continue)):
             last = lowered[-1]
             if isinstance(last, hir.Return) and last.item is not None and not isinstance(last.item, (hir.ExpressedIdentifier, hir.Integer, hir.Bool, hir.Void)):

@@ -146,6 +146,9 @@ class _IteratorLowering:
         declarations: list[hir.AST] = []
         updates: list[hir.AST] = []
         active_values: list[hir.ExpressedIdentifier] = []
+        # A dictionary unpack supplies two leaves over one evaluated value.
+        # Keep this cache local to setup of this particular iterator flow.
+        dictionary_sources = []
         for iterator in condition.iterators:
             range_iterator = isinstance(iterator.iterable, hir.Range)
             array_iterator = isinstance(iterator.iterable.type, ty.ArrayType)
@@ -162,9 +165,10 @@ class _IteratorLowering:
                 array_representation = self._array_use_representation(
                     iterator.iterable
                 )
-                array_prelude, array_value = self._extract_expression(
-                    iterator.iterable
-                )
+                if isinstance(iterator.iterable, hir.DictEntries):
+                    array_prelude, array_value = self._extract_dict_entries(iterator.iterable, dictionary_sources)
+                else:
+                    array_prelude, array_value = self._extract_expression(iterator.iterable)
                 declarations.extend(array_prelude)
                 if iterator.count is None and array_representation is not None:
                     self._target_error(
@@ -570,4 +574,3 @@ class _IteratorLowering:
             scaled_offset,
             iterator.loc,
         )
-

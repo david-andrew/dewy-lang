@@ -1,0 +1,56 @@
+# Entry arrays borrow a container during iteration. A returned container must
+# live through all iterator leaves and be released at the end of the arm.
+# Fresh views and lookup results must also outlive their temporary receiver.
+Item:type=[values:array<int64>]
+let calls:int64=0
+let live=():>int64=>_arena_live_bytes
+let numbers=():>set<int64>=>set[1 2]
+let records=():>dict<int64 Item>=>{
+    calls+=1
+    return [1->Item[[20]] 2->Item[[22]]]
+}
+let first_number=():>int64=>{
+    loop value in numbers() {return value}
+    return 0
+}
+let first_record=():>int64=>{
+    loop [key value] in records() {if value.values.length >?0 return value.values[0]}
+    return 0
+}
+let exercise=():>bool=>{
+    let sum:int64=0
+    loop value in numbers() {sum+=value}
+    if sum not=?3 return false
+    let before=calls
+    sum=0
+    loop [key value] in records() {
+        if value.values.length =?0 return false
+        sum+=value.values[0]
+    }
+    if calls-before not=?1 or sum not=?42 return false
+    loop value in numbers() {if value =?1 continue break}
+    sum=0
+    loop key in records().keys {sum+=key}
+    if sum not=?3 return false
+    sum=0
+    loop value in (numbers() | numbers()) {sum+=value}
+    if sum not=?3 return false
+    let values=records().values
+    let keys=records().keys
+    let selected=records().get(1)
+    let missing=records().get(3 default=Item[[42]])
+    let present=records().get(1 default=Item[[99]])
+    if selected is? none or selected.values.length =?0 or selected.values[0] not=?20 return false
+    if values.length not=?2 or keys.length not=?2 return false
+    if first_number() not=?1 or first_record() not=?20 return false
+    if missing.values.length =?0 or missing.values[0] not=?42 return false
+    if present.values.length =?0 or present.values[0] not=?20 return false
+    return true
+}
+let main=():>int64=>{
+    if not exercise() return 1
+    let before=live()
+    loop i in 0.. and i <?512 {if not exercise() return 2}
+    if live()-before >?4096 return 3
+    return 42
+}

@@ -58,6 +58,10 @@ class _DictLowering:
             raise TypeError('INTERNAL ERROR: dictionary node on a non-container')
         key_type, value_type = entry_types
         prelude, pointer = self._extract_write_route(dictionary)
+        if self._object_expression_owns_fresh_storage(dictionary):
+            # A returned container's frame holds owned member arrays. Its
+            # entry view borrows them until this statement (or loop) ends.
+            prelude, pointer = self._object_statement_temporary(prelude, pointer, object_type, dictionary.loc)
         name = hir.ExpressedIdentifier(keys.loc, 'int64', self._new_array_name('dict'))
         _size, offsets = self._object_layout(object_type, dictionary)
         return [*prelude, hir.Declare(keys.loc, ty.VOID_TYPE, 'let', name.name, 'int64', pointer)], _DictParts(name, offsets, object_type, key_type, value_type)
@@ -399,6 +403,10 @@ class _DictLowering:
                 default_prelude, default = self._array_storage_value(node.default, parts.value_type)
             else:
                 default_prelude, default = self._extract_expression(node.default)
+                if isinstance(node.default.type, ty.ObjectType) and self._object_expression_owns_fresh_storage(node.default):
+                    default_prelude, default = self._object_statement_temporary(
+                        default_prelude, default, node.default.type, node.default.loc,
+                    )
             result = self._name('dict_value', loc, parts.value_type)
             return [
                 *prelude, *key_prelude, *default_prelude, *search,
@@ -602,11 +610,17 @@ class _DictLowering:
             self._if(found, [self._assign(removed, self._dict_element(values, position, parts.value_type, loc), loc), *tombstone], loc),
         ], removed
 
-    def _extract_dict_entries(self, node: hir.DictEntries) -> tuple[list[hir.AST], hir.AST]:
+    def _extract_dict_entries(self, node: hir.DictEntries, shared: list[tuple[hir.AST, _DictParts]] | None = None) -> tuple[list[hir.AST], hir.AST]:
         """The entry array for iteration, compacted first if removals left tombstones."""
         loc = node.loc
+        if shared is not None:
+            for dictionary, parts in shared:
+                if dictionary == node.dictionary:
+                    return [], self._dict_descriptor(parts, node.name, loc)
         member = hir.MemberAccess(loc, node.type, node.dictionary, 'keys')
         prelude, parts = self._dict_parts(member)
+        if shared is not None:
+            shared.append((node.dictionary, parts))
         keys = self._dict_descriptor(parts, 'keys', loc)
         has_dead = self._int64_comparison('__gt__', self._dict_length_of(keys, loc), self._dict_live(parts, loc), loc)
         capacity_prelude, capacity = self._table_capacity_for(self._dict_live(parts, loc), loc)
