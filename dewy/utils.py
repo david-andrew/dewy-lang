@@ -1,5 +1,17 @@
 from typing import Generator, Callable, Iterable
 from itertools import groupby
+from dataclasses import fields as _fields, Field
+from functools import cache
+
+
+@cache
+def _class_fields(cls: type) -> tuple[Field, ...]:
+    return _fields(cls)
+
+
+def dataclass_fields(value: object) -> tuple[Field, ...]:
+    """Reuse static class metadata without caching mutable instance contents."""
+    return _class_fields(value if isinstance(value, type) else type(value))
 
 def first_line(s:str) -> str:
     return s.split('\n')[0]

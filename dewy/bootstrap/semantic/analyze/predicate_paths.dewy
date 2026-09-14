@@ -91,8 +91,10 @@ let refine = <Data>(state:facts.State condition:addr truth:bool invalidated:set<
         # evaluation is defined; deriving stronger proof paths is later work.
         return state
     }
-    loop binding in effects.read_bindings(condition context.nodes) {
-        if binding in? invalidated return state
+    if invalidated.length >? 0 {
+        loop binding in effects.read_bindings(condition context.nodes) {
+            if binding in? invalidated return state
+        }
     }
     if node is? hir.Bool return if node.value =? truth state else none
     return leaf(state condition truth context @data)

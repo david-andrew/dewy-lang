@@ -1695,7 +1695,7 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
     let result = fork(env @session)
     let node = node_at(condition session)
     if node is? hir.ValueCast return refined(node.expr truth result @session invalidated=invalidated moved=moved)
-    if node isnt? hir.ShortCircuit {
+    if invalidated.length >? 0 and node isnt? hir.ShortCircuit {
         loop binding in predicate_effects.read_bindings(condition session.hir) {
             if binding in? invalidated return result
         }

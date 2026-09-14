@@ -3954,7 +3954,7 @@ class _BoundsValidator:
         invalidated: frozenset[int] = frozenset(),
     ) -> State | None:
         refined = dict(state)
-        if not isinstance(condition, hir.ShortCircuit) and invalidated.intersection(predicate_effects.read_bindings(condition)):
+        if invalidated and not isinstance(condition, hir.ShortCircuit) and invalidated.intersection(predicate_effects.read_bindings(condition)):
             return refined
         if isinstance(condition, hir.Bool):
             return refined if condition.value == truth else None

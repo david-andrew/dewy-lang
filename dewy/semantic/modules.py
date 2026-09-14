@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import dataclass, is_dataclass, replace
 from os import PathLike
 from pathlib import Path
 from typing import Any
 
 from ..reporting import Pointer, Span, SrcFile
+from ..utils import dataclass_fields as fields
 from . import bindings as sb
 from . import builtins, hir, ty
 from ..reporting import Warning as RepWarning
@@ -120,7 +121,6 @@ class _ResidentPrelude:
 
 def _generic_sources(value: object, seen: set[int]) -> list[hir.GenericSource]:
     """Every `GenericFunction`'s source under a checked tree."""
-    from dataclasses import fields, is_dataclass
     found: list[hir.GenericSource] = []
     if id(value) in seen:
         return found
@@ -455,22 +455,29 @@ class ModuleCompiler:
     def _rename(self, value: Any, names: dict[int, str]) -> Any:
         if isinstance(value, hir.Declare):
             renamed = names.get(value.binding_id, value.name)
+            expr = self._rename(value.expr, names)
+            if renamed == value.name and expr is value.expr:
+                return value
             return replace(
                 value,
                 name=renamed,
-                expr=self._rename(value.expr, names),
+                expr=expr,
             )
         if isinstance(value, hir.ExpressedIdentifier):
-            return replace(value, name=names.get(value.binding_id, value.name))
+            name = names.get(value.binding_id, value.name)
+            return value if name == value.name else replace(value, name=name)
         if isinstance(value, list):
-            return [self._rename(item, names) for item in value]
+            items = [self._rename(item, names) for item in value]
+            return items if any(new is not old for new, old in zip(items, value)) else value
         if isinstance(value, tuple):
-            return tuple(self._rename(item, names) for item in value)
+            items = tuple(self._rename(item, names) for item in value)
+            return items if any(new is not old for new, old in zip(items, value)) else value
         if isinstance(value, dict):
-            return {
+            items = {
                 key: self._rename(item, names)
                 for key, item in value.items()
             }
+            return items if any(items[key] is not value[key] for key in value) else value
         if is_dataclass(value) and (
             isinstance(value, hir.AST)
             or isinstance(value, (hir.ObjectField, hir.Param))
@@ -480,7 +487,7 @@ class ModuleCompiler:
                 for field in fields(value)
                 if field.name not in {'loc', 'type', 'binding_id', 'name'}
             }
-            return replace(value, **updates)
+            return replace(value, **updates) if any(new is not getattr(value, name) for name, new in updates.items()) else value
         return value
 
     def _collect_referenced_binding_ids(self, value: Any, found: set[int]) -> None:
@@ -525,18 +532,6 @@ class ModuleCompiler:
             for item in record.root.items
             if isinstance(item, hir.Declare) and item.binding_id is not None
         ]
-        def close_over_references() -> None:
-            changed = True
-            while changed:
-                changed = False
-                for item in prelude_items:
-                    if item.binding_id not in needed:
-                        continue
-                    before = len(needed)
-                    self._collect_referenced_binding_ids(item.expr, needed)
-                    changed = changed or len(needed) > before
-
-        close_over_references()
         # The arena is always kept: string views, strings that escape into
         # arrays and objects, growth, decoded bytes and `main(args)` all
         # allocate from it, and the lowering falls back to *frame* storage
@@ -547,7 +542,22 @@ class ModuleCompiler:
         for item in prelude_items:
             if item.name in self.BACKEND_RUNTIME_HELPERS and item.binding_id is not None:
                 needed.add(item.binding_id)
-        close_over_references()
+        # Reachability is a graph walk. A dependency already visited need not
+        # have its whole function body scanned again when another root grows.
+        declarations = {item.binding_id: item for item in prelude_items}
+        pending = list(needed)
+        visited: set[int] = set()
+        while pending:
+            binding_id = pending.pop()
+            if binding_id in visited:
+                continue
+            visited.add(binding_id)
+            item = declarations.get(binding_id)
+            if item is not None:
+                references: set[int] = set()
+                self._collect_referenced_binding_ids(item.expr, references)
+                needed.update(references)
+                pending.extend(references - visited)
         return needed
 
     def _validate_and_select(

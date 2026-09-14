@@ -6,7 +6,8 @@ semantic analysis pass 0:
 import copy
 import os
 from pathlib import Path
-from dataclasses import dataclass, replace, field, fields, is_dataclass
+from dataclasses import dataclass, replace, field, is_dataclass
+from ..utils import dataclass_fields as fields
 from fractions import Fraction
 from collections import ChainMap
 from itertools import count
@@ -3711,7 +3712,7 @@ def _refine_condition_context(
     invalidated: frozenset[int] = frozenset(),
 ) -> Context:
     condition = _unwrap_parens(_strip_obligations(condition))
-    if not isinstance(condition, hir.ShortCircuit) and invalidated.intersection(predicate_effects.read_bindings(condition)):
+    if invalidated and not isinstance(condition, hir.ShortCircuit) and invalidated.intersection(predicate_effects.read_bindings(condition)):
         return replace(ctx, refinements=dict(ctx.refinements), length_bounds=dict(ctx.length_bounds), key_facts=dict(ctx.key_facts))
     if (
         isinstance(condition, hir.FunctionCall)

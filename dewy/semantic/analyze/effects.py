@@ -21,11 +21,12 @@ instead of copying, replacing the array-specific boundary checks.
 
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import dataclass, field
+from functools import cache
 
 from .. import bindings as sb
 from .. import hir, ty
+from ...utils import dataclass_fields
 
 INDEX_STEP = '[]'
 """Route step standing for any element of an array; field steps use the name."""
@@ -179,9 +180,15 @@ def _iter_values(value: object):
             yield from _iter_values(item)
 
 
+@cache
+def _child_fields(cls: type[hir.AST]) -> tuple[str, ...]:
+    # Source positions and type descriptions cannot contain executable HIR.
+    return tuple(f.name for f in dataclass_fields(cls) if f.name not in ('loc', 'type'))
+
+
 def _iter_children(node: hir.AST):
-    for f in dataclasses.fields(node):
-        yield from _iter_values(getattr(node, f.name))
+    for name in _child_fields(type(node)):
+        yield from _iter_values(getattr(node, name))
 
 
 def _literal_params(literal: hir.FunctionLiteral) -> list[hir.Param]:

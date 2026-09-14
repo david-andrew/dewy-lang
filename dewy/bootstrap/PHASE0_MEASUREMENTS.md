@@ -42,6 +42,7 @@ location markers, native ordinary compilation does not.
 | Hosted baseline | 34.74 s | 15.51 s | 11.01 s | 2.59 s | 4.71 s | 274,828 KiB | 5,675,282 |
 | Native baseline | 61.70 s | — | — | — | — | 941,620 KiB | 5,984,229 |
 | Hosted representation query cache | 25.21 s | 15.11 s | 3.67 s | 0.87 s | 4.60 s | 275,424 KiB | 5,675,291 |
+| Hosted traversal batch | 23.56 s | 13.40 s | 3.47 s | 0.86 s | 5.01 s | 273,076 KiB | 5,675,288 |
 
 These are single samples, with other work on separate CPUs; use repeated
 samples for close comparisons. The nine-byte output difference is entirely
@@ -55,6 +56,13 @@ until the scope ends. No query cache spans checker mutations, alias resolution,
 brand registration, or compilations. Regression checks cover failed-scope
 cleanup, mutable unions, identical uncached output, expected execution, and
 array-sharing budgets on direct and C output routes.
+
+The traversal batch caches class field metadata, preserves unchanged subtrees
+during module renaming, and walks the prelude dependency graph once per
+reachable declaration. Both compilers skip predicate-read traversal when the
+invalidated-binding set is empty. Output again matches the original after
+directory normalization. Prelude cache restoration, effect summaries, and
+native short-circuit proof-path checks pass (22 focused tests).
 
 The next hosted profile shifts attention to cold prelude checking, repeated
 analysis traversals, and the µDewy tokenizer. Native phase profiling and

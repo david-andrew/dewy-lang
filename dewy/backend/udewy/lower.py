@@ -33,8 +33,8 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-import dataclasses
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import is_dataclass, replace
+from ...utils import dataclass_fields as fields
 from typing import Literal, NoReturn
 
 from ...parser import t0
@@ -3402,7 +3402,7 @@ class _Lowerer(
                     walk(node.default, depth, nested, {})
                 return
             if isinstance(node, hir.AST):
-                for field_ in dataclasses.fields(node):
+                for field_ in fields(node):
                     value = getattr(node, field_.name)
                     for child in (value if isinstance(value, (list, tuple)) else [value]):
                         if isinstance(child, hir.AST):
@@ -3441,7 +3441,7 @@ class _Lowerer(
             if isinstance(node, hir.Return) and node.item is not None and id(self._copy_source_expression(node.item)) == transfer_id:
                 found = True
                 return
-            for field_ in dataclasses.fields(node):
+            for field_ in fields(node):
                 value = getattr(node, field_.name)
                 for child in (value if isinstance(value, (list, tuple)) else [value]):
                     if isinstance(child, hir.AST):
