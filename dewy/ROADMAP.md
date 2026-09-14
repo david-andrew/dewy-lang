@@ -61,6 +61,32 @@ Exit criteria that the later phases depend on:
   unusable regardless of features. A serialized checked-prelude cache on the
   native side (the counterpart of the hosted resident prelude) is likely the
   single largest available win and is independent of any language work.
+- the size of the generated µDewy, and the time spent generating it
+  (measured 2026-09-14 on `bootstrap/parser/t0.dewy`, 873 lines: 5.7 MB /
+  79k lines of µDewy; 17.9 s to check, lower, and emit against 4.6 s for the
+  µDewy stage to parse, assemble, and link). The text is large, but the time
+  is mostly in *building* it — lowering is about three quarters, checking a
+  seventh, emission a ninth (a third of that the source-position markers).
+  In order of payoff per risk:
+  1. cache the pure type functions the lowering recomputes per site
+     (`_object_layout` ran 24k times, the union-member computation 18k, for
+     that one program; ninety union result writes cost 9 s between them) —
+     output-neutral, plausibly a third to a half of the lowering time;
+  2. outline what a person writing µDewy would call a helper for: the
+     scope-exit release sequence (3,274 inline blocks of ~6 lines, about a
+     fifth of the file) as one prelude call; a per-type copy function for
+     object copies and union writes instead of inline field-by-field stores;
+  3. hoist string literals (595 sites, each rebuilding its descriptor and
+     boundary table with a dozen stores every time the site runs) into
+     module init or static data, and build the module-level constant tables
+     (the 15k-line top-level function: symbol lists, character sets) as data
+     rather than store by store;
+  4. emit source-position markers (12.7k lines) only for debug builds, or
+     thin them to statement starts.
+  Expected together: about half the text and a further slice off lowering;
+  measure after each, since the profile shifts. The checker's share is
+  analysis proportional to the program, not the output, and is a separate
+  problem (the proof engine's bounded traversals, 1.2).
 
 ## Phase 1: foundations to their intended designs
 
