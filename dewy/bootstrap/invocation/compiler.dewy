@@ -3,6 +3,7 @@ import p"options.dewy" as options
 import p"platform.dewy" as platform
 import p"cache.dewy" as cache
 import p"../paths.dewy" as paths
+import p"../timing.dewy" as timing
 import p"../semantic/modules.dewy" as modules
 import p"../semantic/prelude.dewy" as prelude
 import p"../semantic/test_syntax.dewy" as tests
@@ -19,10 +20,12 @@ build = (request:options.Request cwd:string library:string):>graph.Compilation|E
     engine.session.target=request.target
     engine.test_mode=request.command =? 'test'
     if engine.test_mode {engine.entry_name=tests.entry_name}
+    let started=timing.start(request.timings)
     let entry=modules.load(paths.absolute(request.source cwd) @engine)
+    timing.finish('frontend' started)
     if entry is? Error return entry
     loop warning in engine.session.warnings {warning.warn}
-    let result=graph.compile(entry @engine)
+    let result=graph.compile(entry @engine timings=request.timings)
     if result is? Error return result
     loop warning in result.analysis.warnings {warning.warn}
     return result
@@ -42,7 +45,9 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
         printl("{compiled.analysis.notes.length} big integer representation decisions")
         return 0
     }
+    let emission_started=timing.start(request.timings)
     let emitted=program.render(compiled.lowered.program compiled.lowered.input debug_locations=request.command =? 'debug')
+    timing.finish('emission' emission_started)
     if emitted is? Error return emitted
     $runtime_assert request.source isnt? none
     let suffix=if request.command =? 'debug' '.debug.udewy' else if request.command =? 'test' '.test.udewy' else '.udewy'
@@ -57,7 +62,9 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
     if request.compile_only or request.command is? 'debug'|'test' {arguments.push('-c')}
     arguments.push(source)
     if request.command =? 'run' {loop argument in request.arguments {arguments.push(argument)}}
+    let backend_started=timing.start(request.timings)
     let status=run(backend arguments)
+    timing.finish((if request.compile_only or request.command is? 'debug'|'test' 'backend' else 'backend_and_run') backend_started)
     if status isnt? int64 return Error[title='could not start the native µDewy compiler' message=backend]
     if request.command =? 'test' and status not=? 0 return 102
     let binary=paths.absolute(cache.artifact(source cwd) cwd)

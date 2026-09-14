@@ -41,6 +41,24 @@ def test_version_flag_belongs_to_the_top_level_command() -> None:
     assert result.returncode == 0 and result.stdout.startswith('dewy ')
 
 
+def test_phase_timings_preserve_generated_code_and_program_arguments(tmp_path):
+    source = tmp_path / 'timed.dewy'
+    source.write_text("main=(args:array<string>):>int64=>if args.length >? 1 and args[1]=?'--timings' 42 else 1\n")
+    plain = _dewy('-c', str(source))
+    assert plain.returncode == 0, plain.stderr
+    assert 'dewy timing ' not in plain.stderr
+    code = cache_artifact(source, '.udewy').read_bytes()
+    cache_artifact(source).unlink()  # force the same input through every phase
+    timed = _dewy('--timings', '-c', str(source))
+    assert timed.returncode == 0, timed.stderr
+    records = [line.split() for line in timed.stderr.splitlines() if line.startswith('dewy timing ')]
+    assert [row[2] for row in records] == ['checking', 'lowering', 'emission', 'backend']
+    assert all(len(row) == 5 and row[3].isdigit() and row[4] == 'ns' for row in records)
+    assert cache_artifact(source, '.udewy').read_bytes() == code
+    run = _dewy(str(source), '--timings')
+    assert run.returncode == 42 and 'dewy timing ' not in run.stderr
+
+
 def test_ordinary_and_debug_builds_keep_separate_metadata_and_caches(tmp_path) -> None:
     source = tmp_path / 'answer.dewy'
     source.write_text('main=():>int64=>{let answer:int64=42 return answer}\n')

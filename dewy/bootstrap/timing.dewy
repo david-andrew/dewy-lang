@@ -1,0 +1,18 @@
+# Observations of this Linux compiler process, independent of its output
+# target. CLOCK_MONOTONIC avoids wall-clock adjustments. Failed clock reads
+# disable an observation rather than failing an otherwise valid build.
+from p"../../library/linux/io.dewy" import _write_stderr
+
+start = (enabled:bool):>int64 => {
+    if not enabled return -1
+    let buffer:int64=__alloca__(16)
+    if __syscall2__(228 1 buffer) not=? 0 return -1
+    return __load_i64__(buffer)*1000000000+__load_i64__(buffer+8)
+}
+finish = (stage:string started:int64):>void => {
+    if started <? 0 return
+    let ended=start(true)
+    if ended <? started return
+    let line="dewy timing {stage} {ended-started} ns\n"
+    _write_stderr(line as array<uint8>);
+}

@@ -79,6 +79,7 @@ def main() -> int:
     parser.add_argument('--runs', type=int, default=1)
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--profile', action='store_true', help='hosted cProfile; timings include profiling overhead')
+    parser.add_argument('--phase-timings', action='store_true', help='request --timings from a compiler that supports it')
     args = parser.parse_args()
     if args.runs < 1 or args.timeout <= 0:
         parser.error('runs and timeout must be positive')
@@ -112,7 +113,7 @@ def main() -> int:
         'python': sys.version, 'compiler': compiler, 'target': args.target,
         'source': str(source), 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
         'cache_state': 'fresh process and empty build directory; OS page caches uncontrolled',
-        'profiled': args.profile,
+        'profiled': args.profile, 'phase_timings': args.phase_timings,
         'toolchain': {name: subprocess.check_output([name, '--version'], text=True).splitlines()[0]
                       for name in ('cc', 'as', 'ld') if shutil.which(name)},
         'backend_environment': {key: value for key, value in env.items()
@@ -146,7 +147,8 @@ def main() -> int:
     for run in range(args.runs):
         work = output / f'run-{run:02}'
         work.mkdir()
-        command = ['/usr/bin/time', '-f', '%M', '-o', 'rss-kib.txt', *compiler, '--target', args.target, '-c', str(source)]
+        command = ['/usr/bin/time', '-f', '%M', '-o', 'rss-kib.txt', *compiler,
+                   *(['--timings'] if args.phase_timings else []), '--target', args.target, '-c', str(source)]
         started = time.perf_counter()
         with (work / 'stdout.log').open('w') as stdout, (work / 'stderr.log').open('w') as stderr:
             process = subprocess.Popen(command, cwd=work, env=env, stdout=stdout, stderr=stderr, start_new_session=True)
@@ -165,6 +167,13 @@ def main() -> int:
         phases = work / 'phases.json'
         if phases.exists():
             record.update(json.loads(phases.read_text()))
+        if args.phase_timings:
+            reported = {}
+            for line in (work / 'stderr.log').read_text().splitlines():
+                fields = line.split()
+                if len(fields) == 5 and fields[:2] == ['dewy', 'timing'] and fields[4] == 'ns' and fields[3].isdigit():
+                    reported[fields[2]] = reported.get(fields[2], 0) + int(fields[3])
+            record['reported_phase_nanoseconds'] = reported
         record['udewy_artifacts'] = [
             {'path': str(path.relative_to(work)), 'bytes': path.stat().st_size,
              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}

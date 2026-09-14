@@ -906,3 +906,32 @@ including cycles, and checks independent values and restored snapshots.
 Hosted-generated direct/C execution, the type-algebra differential group,
 and actual nested Session rollback pass. Artifacts are `nominal-graph-native`
 and `nominal-graph-snapshot-gates.log`.
+
+## Array growth and C optimization integration
+
+Frozen `5d67b83e` builds through the hosted C route in **231.74 seconds**,
+versus 355.45 at the preceding checkpoint. This combines nominal indexing,
+shared array relocation, and the measured GCC accelerator options
+`-O2 -flto=8 -fno-tree-pre -fno-code-hoisting`. Checking takes 66.45 s,
+lowering 56.48 s, emission 4.49 s, and backend compilation/linking 98.59 s.
+Peak process RSS is 2,228,984 KiB; emitted µDewy is 33,799,460 bytes,
+SHA-256 `f0202296b580a3595cd2595337541dc115908614fb4aa8184764b35d9a3f8815`.
+The source snapshot and isolated invocation are `source-array-growth` and
+`host-full-array-growth`; caches are empty and ccache is disabled.
+
+That seed compiles the pinned `t0` source in 22.21 s with peak process RSS
+2,042,992 KiB, emitting 3,509,937 bytes, SHA-256
+`0b9937ceda2d3f07d24ac688c3210c69094556813adbf6916ef7d56aab5238c2`.
+The isolated run is `native-array-growth-t0`. This improves the complete
+hosted build but does not meet the full-build target or refresh the fixed
+point. [PERFORMANCE.md](PERFORMANCE.md#bounding-c-optimizer-work) records
+the separate C profiling experiments that motivated the options.
+
+The following fact-index batch replaces formatted lookup keys with integer
+buckets and structural comparisons. Five thousand lookups allocate
+1,120,000 bytes instead of 5,424,000 in hosted-generated code, and 1,920,000
+instead of 10,712,000 through the full native CLI. Collision, removal,
+snapshot, and proof-oracle checks pass. Artifacts are `fact-lookup-before`,
+`fact-index-native`, `fact-index-native-before`, and the `fact-index-*gates`
+logs. This is an allocation result; whole-compiler timing with that batch
+remains a separate integration measurement.

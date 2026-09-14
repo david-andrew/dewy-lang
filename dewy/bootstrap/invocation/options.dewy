@@ -14,6 +14,7 @@ Request:type = [
     # backend does not make users' ordinary compilations require cc.
     target:targets.Target=if $target =? 'c' 'x86_64' else $target
     compile_only:bool=false
+    timings:bool=false
     help:bool=false
     version:bool=false
     json:bool=false
@@ -41,6 +42,7 @@ parse = (argv:array<string>):>Request|Error => {
         if options and arg is? '-h'|'--help' {result.help=true return result}
         if options and result.command =? 'run' and arg is? '-v'|'--version' {result.version=true return result}
         if options and result.command =? 'run' and arg is? '-c'|'--compile' {result.compile_only=true continue}
+        if options and result.command =? 'run' and arg =? '--timings' {result.timings=true continue}
         if options and result.command =? 'test' and arg =? '--json' {result.json=true continue}
         if options and result.command =? 'test' and arg =? '--brief' {result.brief=true continue}
         if options and result.command =? 'debug' and arg =? '--build' {result.build=true continue}

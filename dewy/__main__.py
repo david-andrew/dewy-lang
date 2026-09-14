@@ -23,7 +23,7 @@ from udewy.backend import BackendName
 from udewy.cache import cache_artifact, cache_layout
 from udewy.frontend import EntryPointOptions, entry_point
 
-from . import failure_log
+from . import failure_log, timing
 from .backend.udewy import codegen
 from .reporting import Info, Pointer, ReportException, SrcFile, color_enabled
 from .targets import TARGETS, identify_host_target
@@ -74,6 +74,7 @@ def run(argv: list[str]) -> int:
     _add_target_option(parser)
     parser.add_argument('-v', '--version', action='version', version=f'dewy {get_version()}', help='Print version information and exit')
     parser.add_argument('-c', '--compile', action='store_true', help="compile only, don't run")
+    parser.add_argument('--timings', action='store_true', help='report compiler phase times to stderr')
     parser.add_argument('remainder', nargs=REMAINDER, default=[], help='arguments to pass to the program')
     args = parser.parse_args(argv)
 
@@ -96,7 +97,8 @@ def run(argv: list[str]) -> int:
             report.use_color = use_color
             print(report, file=sys.stderr)
             print(file=sys.stderr)
-    return _build_and_run(path, target, args.remainder, argv, compile_only=args.compile, debug_values=getattr(args, 'debug_values', False), print_prototype_warnings=print_prototype_warnings)
+    with timing.capture(args.timings):
+        return _build_and_run(path, target, args.remainder, argv, compile_only=args.compile, debug_values=getattr(args, 'debug_values', False), print_prototype_warnings=print_prototype_warnings)
 
 
 def _build_and_run(
@@ -144,7 +146,8 @@ def _build_and_run(
 
         # run the udewy compiler/executor
         try:
-            return entry_point(udewy_path, program_args, options)
+            with timing.phase('backend' if compile_only else 'backend_and_run'):
+                return entry_point(udewy_path, program_args, options)
         except Exception as e:
             print(f'Error: {e}')
             recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{udewy_path}`)'])

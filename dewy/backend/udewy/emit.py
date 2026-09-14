@@ -6,6 +6,7 @@ from pathlib import Path
 from textwrap import indent
 
 from ...reporting import SrcFile
+from ... import timing
 from ...semantic import builtins, check, hir, ty
 from ...semantic.hir_display import type_to_dewy
 from . import lower
@@ -208,7 +209,8 @@ def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False, debu
     build) adds the per-type formatters that let a debugger show Dewy
     values; they cost compile time and size, so an ordinary build has none.
     """
-    ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test, debug=debug_locations and debug_values)
+    with timing.phase('checking'):
+        ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test, debug=debug_locations and debug_values)
     return codegen_inner(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main', debug_locations=debug_locations)
 
 @ty.runtime_query_scope()
@@ -223,7 +225,13 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: s
 
     if srcfile is None:
         srcfile = SrcFile(None, ' ' * ast.loc.stop)
-    program = lower.lower_for_udewy(ast, srcfile, entry_name=entry_name)
+    with timing.phase('lowering'):
+        program = lower.lower_for_udewy(ast, srcfile, entry_name=entry_name)
+    return _emit_program(program, ast, debug_locations=debug_locations)
+
+
+@timing.phase('emission')
+def _emit_program(program: lower.LoweredProgram, ast: hir.Block, *, debug_locations: bool) -> str:
     functions: dict[str, hir.FunctionLiteral] = {}
     for function in program.functions:
         functions[function.symbol] = function.literal

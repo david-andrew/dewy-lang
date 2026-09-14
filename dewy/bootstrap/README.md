@@ -169,11 +169,14 @@ With GCC, prefix the build command with `DEWY_BOOTSTRAP_LTO_JOBS=8` to
 parallelize link-time optimization of the generated C. The script checks
 support before rebuilding and applies the same option to both generations.
 Choose the job count for the build machine; leaving it unset uses ordinary
-C compilation.
+C compilation. `DEWY_BOOTSTRAP_GCC_NO_PRE=1` additionally disables GCC's
+partial redundancy elimination and code hoisting, which dominate some large
+generated initialization functions. This remains opt-in; see the measured
+runtime and build-time comparisons in [PERFORMANCE.md](PERFORMANCE.md).
 
 After generation one has completed, an interrupted build can use the same
 command with `--resume`. Keep the seed executables, output directory, target,
-and LTO options unchanged. The script verifies its saved generation and source
+and C optimization options unchanged. The script verifies its saved generation and source
 checksums, repeats the first-generation execution checks, then builds generation
 two. A missing or changed checkpoint requires a fresh build.
 
@@ -184,3 +187,16 @@ Dewy calls and loops, aggregate value independence, and borrowed string
 views. Run it after a successful fixed-point build: matching generations
 alone do not establish correct program behavior. Packaging verifies the
 generation and source checksums before bundling the pair and its library.
+
+For phase measurements, use `dewy --timings -c file.dewy`. Both compilers
+report `dewy timing <phase> <nanoseconds> ns` to stderr; generated source and
+ordinary stdout are unchanged. The hosted checker includes parsing and
+validation in `checking`. Native measurements separate `frontend`,
+`validation`, and `initialization_and_reachability`, followed by `lowering`,
+`emission`, and `backend`. Without `-c`, the last phase is `backend_and_run`
+because the backend also runs the program. Only phases actually executed are
+reported; a cached executable cannot establish a full-build time.
+
+`tools/measure_compiler.py --phase-timings` requests these records and stores
+them alongside total time, memory, and output sizes. Leave the option off
+when measuring an older seed that does not implement `--timings`.

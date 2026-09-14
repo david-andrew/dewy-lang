@@ -26,6 +26,7 @@ let main=(argv:array<string>):>int64=>{{
     printl(request.target)
     printl("{{request.compile_only}}:{{request.help}}:{{request.version}}:{{request.json}}:{{request.brief}}:{{request.build}}")
     printl(if request.debugger is? none '' else request.debugger)
+    if request.timings {{printl('timings')}}
     loop argument in request.arguments {{printl(argument)}}
     return 0
 }}
@@ -43,6 +44,7 @@ let main=(argv:array<string>):>int64=>{{
         (['analyze', '--target=c', 'file.dewy'], ['analyze', 'file.dewy', 'c', 'false:false:false:false:false:false', '']),
         (['debug', '--debugger', 'lldb', '--build', 'file.dewy', '--flag'], ['debug', 'file.dewy', 'x86_64', 'false:false:false:false:false:true', 'lldb', '--flag']),
         (['update'], ['update', '', 'x86_64', 'false:false:false:false:false:false', '']),
+        (['--timings', '-c', 'file.dewy', '--timings'], ['run', 'file.dewy', 'x86_64', 'true:false:false:false:false:false', '', 'timings', '--timings']),
     ]:
         result = subprocess.run([binary, *args], capture_output=True, text=True, timeout=20, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
