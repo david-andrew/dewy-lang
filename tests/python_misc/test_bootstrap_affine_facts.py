@@ -74,7 +74,7 @@ def test_native_affine_facts_match_hosted(tmp_path):
     $runtime_assert assign{index} is? hir.Assign
     printl("shift{index}|{{endpoint(terms.assignment_shift(assign{index} env @registry))}}")''')
     for state_index, state in enumerate(states):
-        checks.append('    state.clear')
+        checks.append('    state=flow.State[]')
         for key, value in state.items():
             lo = 'none' if value.lower is None else f'({value.lower})'
             hi = 'none' if value.upper is None else f'({value.upper})'
@@ -111,7 +111,7 @@ emit_interval = (label:string interval:ranges.Interval?):>void => {{
     }}
 }}
 emit = (label:string state:flow.State):>void => {{
-    loop entry in state.values {{ emit_interval("{{label}}|{{entry.fact.key}}" entry.interval) }}
+    loop entry in state.values {{ emit_interval("{{label}}|{{flow.describe(entry.fact)}}" entry.interval) }}
 }}
 main = ():>int64 => {{
     let span = Span[0 0]
@@ -124,7 +124,7 @@ main = ():>int64 => {{
         {i.binding_id} -> ranges.Interval[(-9223372036854775808) 9223372036854775807]
         {j.binding_id} -> ranges.Interval[(-9223372036854775808) 9223372036854775807]
     ]]]
-    let state:flow.State = []
+    let state:flow.State = flow.State[]
 {chr(10).join(checks)}
     return 0
 }}

@@ -47,7 +47,7 @@ main=():>int64=>{{
     let size=bindings.allocate(@registry none 'size' 'value' span)
     let object=bindings.allocate(@registry none 'object' 'value' span)
     let result=bindings.allocate(@registry none 'result' 'value' span)
-    let state:facts.State=[]
+    let state:facts.State=facts.State[]
     facts.set_value(@state facts.Term[1] ranges.Interval[1 4])
     facts.set_value(@state facts.Term[2 'length'] ranges.Interval[5 9])
     facts.put(@state facts.index(1 2) ranges.exact(1))
@@ -61,7 +61,7 @@ main=():>int64=>{{
     stores.install(@state size length none word span @declared @data context)
     stores.install(@state object literal record word span @declared @data context)
     stores.install(@state result called none word span @declared @data context)
-    $runtime_assert facts.index(1 copy).key in? state
+    $runtime_assert facts.contains(state facts.index(1 copy))
     $runtime_assert relations.ordered(facts.Term[size] facts.Term[2 'length'] 0 state data.relations)
     $runtime_assert relations.ordered(facts.Term[2 'length'] facts.Term[size] 0 state data.relations)
     $runtime_assert relations.ordered(facts.Term[result] facts.Term[2 'length'] 0 state data.relations)
@@ -73,15 +73,15 @@ main=():>int64=>{{
     $runtime_assert bound isnt? none and bound.lower =? 5 and bound.upper =? 9
     # Mutating just one field loses that field's evidence, not its sibling.
     stores.forget(@state object @data prefix=['count'])
-    $runtime_assert facts.value(facts.Term[count]).key not in? state
-    $runtime_assert facts.value(facts.Term[field_text 'length']).key in? state
+    $runtime_assert not facts.contains(state facts.value(facts.Term[count]))
+    $runtime_assert facts.contains(state facts.value(facts.Term[field_text 'length']))
     # Replacing the source preserves the independent copy's index proof.
     stores.forget(@state 2 @data)
-    $runtime_assert facts.index(1 2).key not in? state and facts.index(1 copy).key in? state
+    $runtime_assert not facts.contains(state facts.index(1 2)) and facts.contains(state facts.index(1 copy))
     bound=facts.lookup(state facts.value(facts.Term[copy 'length']))
     $runtime_assert bound isnt? none and bound.lower =? 5 and bound.upper =? 9
     stores.forget(@state object @data)
-    $runtime_assert facts.value(facts.Term[field_text 'length']).key not in? state
+    $runtime_assert not facts.contains(state facts.value(facts.Term[field_text 'length']))
     return 0
 }}
 ''')

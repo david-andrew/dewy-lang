@@ -40,7 +40,7 @@ def test_native_relations_match_hosted(tmp_path):
     gaps = [-1, 0, 1, 3]
     lines, expected = [], []
     for i, state in enumerate(states):
-        lines.append(f'    let s{i}:facts.State = []')
+        lines.append(f'    let s{i}:facts.State = facts.State[]')
         for key, value in state.items():
             lo = 'none' if value.lower is None else f'({value.lower})'
             hi = 'none' if value.upper is None else f'({value.upper})'
@@ -66,7 +66,7 @@ emit = (label:string state:facts.State):>void => {{
         let value = entry.interval
         let lo = if value.lower is? none '-' else _bigint_as_string(value.lower)
         let hi = if value.upper is? none '+' else _bigint_as_string(value.upper)
-        printl("{{label}}|{{entry.fact.key}}|{{lo}},{{hi}},{{value.capped}}")
+        printl("{{label}}|{{facts.describe(entry.fact)}}|{{lo}},{{hi}},{{value.capped}}")
     }}
 }}
 main = ():>int64 => {{
@@ -93,7 +93,7 @@ main = ():>int64 => {{
         emit("offset{{i}}" offset)
         emit("subject{{i}}" relations.facts_of(state facts.Term[1]))
     }}
-    let lengths:facts.State = []
+    let lengths:facts.State = facts.State[]
     facts.put(@lengths facts.index(1 2) ranges.UNKNOWN)
     relations.copy_relational(@lengths facts.Term[2 'length'] facts.Term[5])
     $runtime_assert relations.ordered(facts.Term[1] facts.Term[5] 1 lengths context)

@@ -57,7 +57,7 @@ def test_native_length_transfer_matches_hosted(tmp_path):
                     state[3] = count_value
                 args = [zero] if method == 'push' else [zero, zero] if method == 'insert' else [unknown if count_value is None else count] if method == 'truncate' else []
                 call = hir.FunctionCall(loc, 'void', hir.ArrayMethod(loc, signature, array, method), args, {})
-                lines.append(f'    let s{case}:facts.State = []')
+                lines.append(f'    let s{case}:facts.State = facts.State[]')
                 for key, value in state.items():
                     lines.append(f'    facts.put(@s{case} {fact(key)[0]} {source_interval(value)})')
                 lines.append(f'    lengths.apply(@s{case} 1 "{method}" {source_interval(count_value)} 1024);')
@@ -74,7 +74,7 @@ emit = (label:string state:facts.State):>void => {{
     loop entry in state.values {{
         let lo = if entry.interval.lower is? none '-' else _bigint_as_string(entry.interval.lower)
         let hi = if entry.interval.upper is? none '+' else _bigint_as_string(entry.interval.upper)
-        printl("{{label}}|{{entry.fact.key}}|{{lo}},{{hi}},{{entry.interval.capped}}")
+        printl("{{label}}|{{facts.describe(entry.fact)}}|{{lo}},{{hi}},{{entry.interval.capped}}")
     }}
 }}
 main = ():>int64 => {{

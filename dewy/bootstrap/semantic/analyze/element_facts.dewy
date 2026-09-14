@@ -116,13 +116,14 @@ store = (@state:facts.State array:addr value:addr word_type:addr loc:Span env:va
     }
     loop item in routes(array registry) {
         let existing = relations.facts_of(state facts.Term[item.id])
-        let incoming:facts.State = if item.id in? stored stored[item.id] else []
+        let incoming:facts.State = if item.id in? stored stored[item.id] else facts.State[]
         loop entry in existing.values {
             let key = relations.rekey(entry.fact facts.Term[item.id])
-            if entry.fact.key in? incoming {
-                facts.put(@state key ranges.union(entry.interval incoming[entry.fact.key].interval))
+            let other=facts.lookup(incoming entry.fact)
+            if other isnt? none {
+                facts.put(@state key ranges.union(entry.interval other))
             } else if not empty {
-                if key.key in? state { state.pop(key.key); }
+                facts.remove(@state key)
             }
         }
     }

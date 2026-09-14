@@ -46,7 +46,7 @@ ordered = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State con
     }
     if left.upper isnt? none and right.lower isnt? none and right.lower - left.upper >=? gap return true
     if larger.projection =? 'length' {
-        if smaller.projection =? 'value' and gap <=? 1 and facts.index(smaller.binding_id larger.binding_id).key in? state return true
+        if smaller.projection =? 'value' and gap <=? 1 and facts.contains(state facts.index(smaller.binding_id larger.binding_id)) return true
         loop entry in state.values {
             let fact = entry.fact
             let lower = entry.interval.lower
@@ -109,7 +109,7 @@ rekey = (fact:facts.Fact subject:facts.Term):>facts.Fact => {
 # Normalize just the subject so an element's facts can be compared with the
 # facts stored for an array's element route. Other bindings retain identity.
 facts_of = (state:facts.State subject:facts.Term):>facts.State => {
-    let output:facts.State = []
+    let output:facts.State = facts.State[]
     loop entry in state.values {
         let term = subject_of(entry.fact)
         if term isnt? none and facts.same_term(term subject) {

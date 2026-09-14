@@ -43,7 +43,7 @@ main=():>int64=>{{
     registry.by_id[2]=bindings.Binding[2 'text' 'value' span value_type=string]
     registry.by_id[3]=bindings.Binding[3 'object' 'value' span value_type=record]
     let env=values.Environment[nodes type_nodes registry 1024]
-    let state:facts.State=[]
+    let state:facts.State=facts.State[]
     facts.set_value(@state facts.Term[1] ranges.Interval[3 7])
     facts.set_value(@state facts.Term[2 'length'] ranges.Interval[8 10])
     let snapshot=intervals.Snapshot[]

@@ -139,7 +139,7 @@ emit_state = (label:string state:flow.State):>void => {{
         if entry.fact is? flow.Order | flow.Remainder {{
             let lo = if entry.interval.lower is? none '-' else _bigint_as_string(entry.interval.lower)
             let hi = if entry.interval.upper is? none '+' else _bigint_as_string(entry.interval.upper)
-            printl("{{label}}|{{entry.fact.key}}|{{lo}},{{hi}},{{entry.interval.capped}}")
+            printl("{{label}}|{{flow.describe(entry.fact)}}|{{lo}},{{hi}},{{entry.interval.capped}}")
         }}
     }}
 }}
@@ -157,7 +157,7 @@ main = ():>int64 => {{
         let promises = terms.call_facts(test.node test.subject env @registry)
         emit("call{{index}}" promises)
         loop pass in 0..1 {{
-            let state:flow.State = []
+            let state:flow.State = flow.State[]
             let lower:bigint = if pass =? 0 (-1) else 0
             flow.put(@state flow.value(flow.Term[{i.binding_id}]) ranges.Interval[lower 7])
             let projection:facts.Projection = if test.subject =? 'self' 'value' else 'length'

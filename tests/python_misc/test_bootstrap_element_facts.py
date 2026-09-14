@@ -114,7 +114,7 @@ emit = (label:string state:flow.State):>void => {{
     loop entry in state.values {{
         let lo = if entry.interval.lower is? none '-' else _bigint_as_string(entry.interval.lower)
         let hi = if entry.interval.upper is? none '+' else _bigint_as_string(entry.interval.upper)
-        printl("{{label}}|{{entry.fact.key}}|{{lo}},{{hi}},{{entry.interval.capped}}")
+        printl("{{label}}|{{flow.describe(entry.fact)}}|{{lo}},{{hi}},{{entry.interval.capped}}")
     }}
 }}
 emit_sources = (label:string sources:array<elements.Source>):>void => {{
@@ -131,7 +131,7 @@ main = ():>int64 => {{
     let registry = bindings.Registry[]
 {chr(10).join(type_lines + lines + registry_lines)}
     let env = values.Environment[nodes type_nodes registry {validator.max_length}]
-    let state:flow.State = []
+    let state:flow.State = flow.State[]
 {chr(10).join(checks)}
     let contract = elements.declared_refinement({refined.binding_id} type_nodes registry)
     $runtime_assert contract isnt? none and contract.propositions.length =? 1

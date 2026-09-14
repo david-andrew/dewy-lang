@@ -61,7 +61,7 @@ main=():>int64=>{{
     registry.by_id[3]=bindings.Binding[3 'text' 'value' span value_type=string]
     registry.by_id[4]=bindings.Binding[4 'result' 'value' span value_type=result_type]
     let env=values.Environment[nodes type_nodes registry 1024]
-    let state:facts.State=[]
+    let state:facts.State=facts.State[]
     facts.set_value(@state facts.Term[1] ranges.Interval[0 100])
     facts.set_value(@state facts.Term[2] ranges.Interval[0 100])
     facts.set_value(@state facts.Term[3 'length'] ranges.Interval[5 10])
@@ -70,7 +70,7 @@ main=():>int64=>{{
     let data=predicates.Data[env relations.Context[facts.Context[1024]] snapshot registry member_calls=[4 -> measured]]
     let refined=predicates.refine(state condition true @data)
     $runtime_assert refined isnt? none
-    $runtime_assert facts.index(1 3).key in? refined and facts.index(2 3).key in? refined
+    $runtime_assert facts.contains(refined facts.index(1 3)) and facts.contains(refined facts.index(2 3))
     let bound=facts.lookup(refined facts.value(facts.Term[1]))
     $runtime_assert bound isnt? none and bound.lower =? 0 and bound.upper =? 9
     # Invalidate the named evidence while retaining the already read value.
@@ -78,10 +78,10 @@ main=():>int64=>{{
     facts.set_value(@state facts.Term[1] ranges.exact(99))
     refined=predicates.refine(state condition true @data)
     $runtime_assert refined isnt? none
-    $runtime_assert facts.index(1 3).key not in? refined
+    $runtime_assert not facts.contains(refined facts.index(1 3))
     bound=facts.lookup(refined facts.value(facts.Term[1]))
     $runtime_assert bound isnt? none and bound.lower =? 99
-    state.clear
+    state=facts.State[]
     snapshot=intervals.Snapshot[]
     loop id in 0.. and id <? nodes.length {{intervals.record(@snapshot id state env @registry)}}
     data.snapshot=snapshot
@@ -91,7 +91,7 @@ main=():>int64=>{{
     $runtime_assert bound isnt? none and bound.lower =? 3
     refined=predicates.refine(state called false @data)
     $runtime_assert refined isnt? none
-    $runtime_assert facts.value(facts.Term[3 'length']).key not in? refined
+    $runtime_assert not facts.contains(refined facts.value(facts.Term[3 'length']))
     refined=predicates.refine(state selected true @data)
     $runtime_assert refined isnt? none
     bound=facts.lookup(refined facts.value(facts.Term[3 'length']))
@@ -104,8 +104,8 @@ main=():>int64=>{{
     loop truth in [true false] {{
         refined=predicates.refine(state selected truth @data)
         $runtime_assert refined isnt? none
-        $runtime_assert facts.value(facts.Term[3 'length']).key not in? refined
-        $runtime_assert facts.value(facts.Term[4]).key not in? refined
+        $runtime_assert not facts.contains(refined facts.value(facts.Term[3 'length']))
+        $runtime_assert not facts.contains(refined facts.value(facts.Term[4]))
     }}
     # Numeric tag selection supplies a width without any call provenance.
     data.member_calls.clear
@@ -115,7 +115,7 @@ main=():>int64=>{{
     $runtime_assert bound isnt? none and bound.lower =? 0 and bound.upper =? 18446744073709551615
     refined=predicates.refine(state unsigned_selected false @data)
     $runtime_assert refined isnt? none
-    $runtime_assert facts.value(facts.Term[4]).key not in? refined
+    $runtime_assert not facts.contains(refined facts.value(facts.Term[4]))
     return 0
 }}
 ''')

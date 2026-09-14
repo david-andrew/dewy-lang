@@ -72,7 +72,7 @@ identifier = (node:hir.ExpressedIdentifier state:facts.State env:values.Environm
     if node.binding_id isnt? none {interval=facts.lookup(state facts.value(facts.Term[node.binding_id]))}
     interval=meet(interval own_bounds(node.value_type env))
     if interval isnt? none {
-        if node.binding_id isnt? none and facts.nonzero(node.binding_id).key in? state {
+        if node.binding_id isnt? none and facts.contains(state facts.nonzero(node.binding_id)) {
             let excluded=ranges.exclude(interval 0)
             return if excluded is? none ranges.EMPTY else excluded
         }

@@ -76,7 +76,7 @@ main=():>int64=>{{
     snapshot.terms[{names[id(flag)]}]=terms.Offset[flow.Term[{flag.binding_id}] 0]
     snapshot.sequences[{names[id(text)]}]={text.binding_id}
     let relation=relations.Context[flow.Context[1024]]
-    let initial:flow.State=[]
+    let initial:flow.State=flow.State[]
     flow.set_value(@initial flow.Term[{i.binding_id}] ranges.Interval[0 8])
     let result=calls.apply(initial {names[id(calls[0])]} none env relation snapshot @registry)
     $runtime_assert result.state isnt? none
@@ -84,10 +84,10 @@ main=():>int64=>{{
     $runtime_assert value isnt? none and value.lower =? 3 and value.upper =? 8
     result=calls.apply(initial {names[id(calls[1])]} false env relation snapshot @registry)
     $runtime_assert result.state isnt? none
-    $runtime_assert flow.index({i.binding_id} {text.binding_id}).key not in? result.state
+    $runtime_assert not flow.contains(result.state flow.index({i.binding_id} {text.binding_id}))
     result=calls.apply(initial {names[id(calls[1])]} true env relation snapshot @registry)
     $runtime_assert result.state isnt? none
-    $runtime_assert flow.index({i.binding_id} {text.binding_id}).key in? result.state
+    $runtime_assert flow.contains(result.state flow.index({i.binding_id} {text.binding_id}))
     result=calls.apply(initial {names[id(calls[2])]} true env relation snapshot @registry)
     $runtime_assert result.state isnt? none
     let gap=flow.lookup(result.state flow.order(flow.Term[{i.binding_id}] flow.Term[{text.binding_id} 'length']))
@@ -103,10 +103,10 @@ main=():>int64=>{{
     intervals.forget(@snapshot {flag.binding_id})
     result=calls.apply(initial {names[id(calls[1])]} true env relation snapshot @registry)
     $runtime_assert result.state isnt? none
-    $runtime_assert flow.index({i.binding_id} {text.binding_id}).key not in? result.state
+    $runtime_assert not flow.contains(result.state flow.index({i.binding_id} {text.binding_id}))
     result=calls.apply(initial {names[id(calls[2])]} true env relation snapshot @registry)
     $runtime_assert result.state isnt? none
-    $runtime_assert flow.order(flow.Term[{i.binding_id}] flow.Term[{text.binding_id} 'length']).key not in? result.state
+    $runtime_assert not flow.contains(result.state flow.order(flow.Term[{i.binding_id}] flow.Term[{text.binding_id} 'length']))
     result=calls.apply(initial {names[id(calls[3])]} true env relation snapshot @registry)
     $runtime_assert result.conditions.length =? 0
     flow.set_value(@initial flow.Term[{i.binding_id}] ranges.exact(1))

@@ -211,7 +211,7 @@ analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer =
         let subject=target.binding_id
         let interval=checker.data.snapshot.numbers.get(node.value)
         let shift=terms.assignment_shift(node checker.data.env @checker.data.registry)
-        let shifted:facts.State=[]
+        let shifted:facts.State=facts.State[]
         if shift isnt? none {shifted=facts.shifted(current facts.Term[subject] shift)}
         if node.op in? ['+=' '-='] {interval=values.binary(if node.op =? '+=' '__add__' else '__sub__' facts.lookup(current facts.value(facts.Term[subject])) interval target.value_type checker.data.env.types)}
         else if node.op not=? '=' {interval=none}
@@ -584,10 +584,10 @@ flow = (id:addr node:hir.Flow state:facts.State @checker:Checker validate:bool):
 }
 
 same_state = (left:facts.State right:facts.State):>bool => {
-    if left.length not=? right.length return false
-    loop [key entry] in left {
-        let other=right.get(key)
-        if other is? none or not ranges.same_bounds(entry.interval other.interval) return false
+    if left.values.length not=? right.values.length return false
+    loop entry in left.values {
+        let other=facts.lookup(right entry.fact)
+        if other is? none or not ranges.same_bounds(entry.interval other) return false
     }
     return true
 }
@@ -736,7 +736,7 @@ validate = (root:addr @checker:Checker):>void => {
     collect(root @checker)
     let node=node_at(root checker)
     $runtime_assert node is? hir.Block
-    let state:facts.State=[]
+    let state:facts.State=facts.State[]
     loop item in node.items {
         let result=analyze(item state @checker true)
         if checker.problem isnt? none return

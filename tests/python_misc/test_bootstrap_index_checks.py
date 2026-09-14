@@ -100,7 +100,7 @@ def test_native_index_checks_match_hosted(tmp_path):
                         result = diagnostic(error)
                     expected.append(f'{state_index}|{index}|{method}|{result}')
         snapshot = ' '.join(f'{node} -> {native_interval(value)}' for node, value in evaluated.items() if value is not None)
-        checks.append(f'''    state.clear
+        checks.append(f'''    state=flow.State[]
 {chr(10).join(entries)}
     let context{state_index} = proofs.Context[env relation_context]
     let observed{state_index}:dict<addr ranges.Interval>=[{snapshot}]
@@ -156,12 +156,12 @@ main = ():>int64 => {{
     let relation_context = relations.Context[flow.Context[cap=1024 widths=[
         {i.binding_id} -> ranges.Interval[(-9223372036854775808) 9223372036854775807]
     ]]]
-    let state:flow.State = []
+    let state:flow.State = flow.State[]
 {chr(10).join(checks)}
     # A saved index is not the binding's current value after another
     # argument has assigned it. Current symbolic facts cannot prove that
     # earlier observation, even though its nonnegative interval survives.
-    state.clear
+    state=flow.State[]
     flow.put(@state flow.index({i.binding_id} {array.binding_id}) ranges.UNKNOWN)
     let observed=ranges.Interval[0 none]
     let current=proofs.Context[env relation_context]

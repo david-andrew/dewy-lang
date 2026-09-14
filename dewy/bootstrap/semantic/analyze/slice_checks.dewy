@@ -35,7 +35,7 @@ endpoint = (id:addr? interval:ranges.Interval? delta:bigint first:bool sequence:
     if interval isnt? none and interval.upper isnt? none and interval.upper+delta <? limit return true
     let saved=data.snapshot.terms.get(id)
     if saved isnt? none {
-        if saved.shift =? 0 and saved.term.projection =? 'value' and facts.index(saved.term.binding_id sequence).key in? state return true
+        if saved.shift =? 0 and saved.term.projection =? 'value' and facts.contains(state facts.index(saved.term.binding_id sequence)) return true
         if relations.ordered(saved.term facts.Term[sequence 'length'] gap+saved.shift state data.relations) return true
     }
     if not stable return false

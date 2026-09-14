@@ -99,7 +99,7 @@ def test_native_refinement_facts_match_hosted(tmp_path):
         expected.append(f'field{index}|none' if interval is None else f'field{index}|{spelling(interval)}')
     state = {}
     validator._seed_parameter_refinements(function, state)
-    checks.append(f'''    state.clear
+    checks.append(f'''    state=flow.State[]
     let function = hir.node_at(nodes {names[id(function)]})
     $runtime_assert function is? hir.FunctionLiteral
     refinements.seed_parameters(@state @declared function context @registry)''')
@@ -127,7 +127,7 @@ emit = (label:string state:flow.State):>void => {{
     loop entry in state.values {{
         let lo = if entry.interval.lower is? none '-' else _bigint_as_string(entry.interval.lower)
         let hi = if entry.interval.upper is? none '+' else _bigint_as_string(entry.interval.upper)
-        printl("{{label}}|{{entry.fact.key}}|{{lo}},{{hi}},{{entry.interval.capped}}")
+        printl("{{label}}|{{flow.describe(entry.fact)}}|{{lo}},{{hi}},{{entry.interval.capped}}")
     }}
 }}
 main = ():>int64 => {{
@@ -139,7 +139,7 @@ main = ():>int64 => {{
     let env = values.Environment[nodes type_nodes registry 1024]
     let context = refinements.Context[env {word}]
     let declared:refinements.Declared = []
-    let state:flow.State = []
+    let state:flow.State = flow.State[]
 {chr(10).join(checks)}
     return 0
 }}

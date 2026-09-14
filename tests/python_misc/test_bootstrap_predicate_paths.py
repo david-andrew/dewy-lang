@@ -46,13 +46,13 @@ main=():>int64=>{{
     let chain=hir.append_node(@nodes hir.ShortCircuit[span 0 'and' a later])
     let impossible=hir.append_node(@nodes hir.ShortCircuit[span 0 'and' a no])
     let context=paths.Context[nodes facts.Context[cap=100]]
-    let state:facts.State=[]
+    let state:facts.State=facts.State[]
     let visited=false
     let invalidated:set<addr>=set[]
     let result=paths.refine(state chain true invalidated context @visited @leaf)
     $runtime_assert visited
     $runtime_assert result isnt? none
-    $runtime_assert facts.value(facts.Term[1]).key not in? result
+    $runtime_assert not facts.contains(result facts.value(facts.Term[1]))
     let second=facts.lookup(result facts.value(facts.Term[2]))
     $runtime_assert second isnt? none and second.lower =? 1 and second.upper =? 1
     $runtime_assert paths.refine(state impossible true invalidated context @visited @leaf) is? none

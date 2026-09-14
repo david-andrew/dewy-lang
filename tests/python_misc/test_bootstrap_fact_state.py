@@ -70,7 +70,7 @@ def test_native_fact_state_matches_hosted(tmp_path):
     changes = [interval.exact(1), interval.exact(-1), interval(0, 2), interval(None, 0), interval(-7, 0), interval(None, None)]
     lines = []
     for i, state in enumerate(states):
-        lines.append(f'    let s{i}:facts.State = []')
+        lines.append(f'    let s{i}:facts.State = facts.State[]')
         for key, value in state.items():
             lo = 'none' if value.lower is None else f'({value.lower})'
             hi = 'none' if value.upper is None else f'({value.upper})'
@@ -109,7 +109,7 @@ emit = (prefix:string state:facts.State):>void => {{
         let interval = entry.interval
         let lo = if interval.lower is? none '-' else _bigint_as_string(interval.lower)
         let hi = if interval.upper is? none '+' else _bigint_as_string(interval.upper)
-        printl("{{prefix}}|{{entry.fact.key}}|{{lo}},{{hi}},{{interval.capped}}")
+        printl("{{prefix}}|{{facts.describe(entry.fact)}}|{{lo}},{{hi}},{{interval.capped}}")
     }}
 }}
 main = ():>int64 => {{
@@ -137,8 +137,8 @@ main = ():>int64 => {{
         emit("{{i}}:forget" left)
     }}
     # Ids beyond the hosted packing width remain distinct across all kinds.
-    if facts.order(facts.Term[2097152] facts.Term[1]).key =? facts.order(facts.Term[1] facts.Term[2097152]).key return 1
-    if facts.index(1048576 1).key =? facts.nonzero(1048576).key return 2
+    if facts.same(facts.order(facts.Term[2097152] facts.Term[1]) facts.order(facts.Term[1] facts.Term[2097152])) return 1
+    if facts.same(facts.index(1048576 1) facts.nonzero(1048576)) return 2
     return 0
 }}
 ''')

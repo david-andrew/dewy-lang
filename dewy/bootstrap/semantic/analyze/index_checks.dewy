@@ -61,7 +61,7 @@ check_index = (node:hir.Index|hir.StringIndex interval:ranges.Interval? length_i
         if interval.upper isnt? none and interval.upper <? minimum return constant(interval)
         if symbolic {
             let named = terms.binding_term(index context.env @registry)
-            if named isnt? none and named.projection =? 'value' and facts.index(named.binding_id array_id).key in? state return Proven[]
+            if named isnt? none and named.projection =? 'value' and facts.contains(state facts.index(named.binding_id array_id)) return Proven[]
             let offset = terms.length_offset(index array_id context.env @registry)
             if offset isnt? none and minimum >=? offset return Proven[]
             if proofs.upper(index array_id 1 state context observed @registry) return Proven[]
@@ -88,7 +88,7 @@ check_method_index = (method:string index:addr interval:ranges.Interval? state:f
         if interval.upper isnt? none and interval.upper <? limit return none
         if symbolic {
             let named = terms.binding_term(index context.env @registry)
-            if named isnt? none and named.projection =? 'value' and facts.index(named.binding_id array_id).key in? state return none
+            if named isnt? none and named.projection =? 'value' and facts.contains(state facts.index(named.binding_id array_id)) return none
             if proofs.upper(index array_id (if allow_end 0 else 1) state context observed @registry) return none
         }
     }

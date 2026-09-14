@@ -116,7 +116,7 @@ def test_native_length_proofs_match_hosted(tmp_path):
                 snapshot.append(f'{names[node_id]} -> {native_interval(value)}')
         entries = [f'    flow.put(@state {fact(key)[0].replace("facts.", "flow.")} {native_interval(value)})'
                    for key, value in state.items()]
-        checks.append(f'''    state.clear
+        checks.append(f'''    state=flow.State[]
 {chr(10).join(entries)}
     let context{state_index} = proofs.Context[env relation_context]
     let observed{state_index}:dict<addr ranges.Interval>=[{' '.join(snapshot)}]
@@ -165,7 +165,7 @@ main = ():>int64 => {{
     let queries:array<addr> = [{' '.join(names[id(query)] for query in queries)}]
     let sequences:array<addr> = [{' '.join(map(str, sequences))}]
     let gaps:array<bigint> = [(-1) 0 1 2 4]
-    let state:flow.State = []
+    let state:flow.State = flow.State[]
 {chr(10).join(checks)}
     return 0
 }}

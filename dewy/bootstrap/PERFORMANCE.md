@@ -538,3 +538,27 @@ An isolated native build of the pinned `t0` module took 22.21 s, peaked at
 processes and empty build directories, with OS page caches uncontrolled.
 The under-60-second full-build target and a refreshed fixed point remain
 open; this checkpoint does not certify a new release.
+
+## Structured native fact indexing
+
+The native proof store now keeps dense entries and integer hash buckets.
+Fact kinds, complete binding ids, projections, and offsets decide equality
+inside a bucket; a hash collision cannot grant or discard evidence. Removal
+moves the last entry and repairs its bucket position. Value copies retain
+both parts of the state. Diagnostic formatting remains available through
+`facts.describe`, with the same text used by the hosted differential tests.
+This is an internal representation change, using existing language features.
+
+For 1,000 repetitions of five constructed fact lookups, allocated bytes fell
+from **5,424,000 to 1,120,000** in hosted-generated code, and from
+**10,712,000 to 1,920,000** through the full native CLI. Both native kernels
+were compiled by the same frozen `5d67b83e` seed. These counters measure
+allocation, not peak RSS or a full compiler speedup.
+
+The explicit collision/removal/snapshot fixture passes through hosted direct
+x86_64 and C, and through the full native CLI/direct backend. Nineteen
+focused tests pass across the index, state operations, relational and affine
+facts, transfers, predicates, obligations, bounds, and slicing. Existing
+expected-result and Python differential comparisons remain the oracle;
+changing the index did not change the proof rules. Full self-build timing
+with this representation is still a separate integration checkpoint.

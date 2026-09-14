@@ -67,7 +67,7 @@ def test_native_slice_checks_match_hosted(tmp_path):
                 expected.append('true')
             except UserError:
                 expected.append('false')
-        checks.append('    state.clear\n' + '\n'.join(entries) + '\n    run(cases state @data)')
+        checks.append('    state=flow.State[]\n' + '\n'.join(entries) + '\n    run(cases state @data)')
     imports = '\n'.join(f'import p"{ROOT / "dewy/bootstrap/semantic" / path}" as {alias}' for alias, path in [
         ('hir', 'hir.dewy'), ('types', 'ty.dewy'), ('bindings', 'bindings.dewy'), ('facts', 'propositions.dewy'),
         ('values', 'analyze/value_bounds.dewy'), ('predicates', 'analyze/predicate_facts.dewy'),
@@ -95,7 +95,7 @@ main=():>int64=>{{
 {chr(10).join(type_lines + hir_lines + binding_lines)}
     let env=values.Environment[nodes type_nodes registry 1024]
     let data=predicates.Data[env relations.Context[flow.Context[1024]] intervals.Snapshot[] registry]
-    let state:flow.State=[]
+    let state:flow.State=flow.State[]
     let cases:array<addr>=[{' '.join(names[id(q)] for q in queries)}]
 {chr(10).join(checks)}
     return 0

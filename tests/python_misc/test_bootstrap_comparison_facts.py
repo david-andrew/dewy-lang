@@ -30,7 +30,7 @@ import p"{module / 'fact_state.dewy'}" as facts
 import p"{module / 'relations.dewy'}" as relations
 import p"{module.parent / 'propositions.dewy'}" as propositions
 let probe=(op:propositions.Operator truth:bool al:int64 ah:int64 bl:int64 bh:int64):>void=>{{
-    let state:facts.State=[]
+    let state:facts.State=facts.State[]
     facts.put(@state facts.value(facts.Term[1]) ranges.Interval[al ah])
     facts.put(@state facts.value(facts.Term[2]) ranges.Interval[bl bh])
     let context=relations.Context[facts.Context[cap=100]]
@@ -43,15 +43,15 @@ let probe=(op:propositions.Operator truth:bool al:int64 ah:int64 bl:int64 bh:int
 }}
 let main=():>int64=>{{
     {chr(10).join(calls)}
-    let state:facts.State=[]
+    let state:facts.State=facts.State[]
     facts.put(@state facts.index(2 7) ranges.exact(1))
     comparisons.ordered(@state comparisons.Operand[term=facts.Term[1]] comparisons.Operand[term=facts.Term[2]] false)
-    $runtime_assert facts.index(1 7).key in? state
+    $runtime_assert facts.contains(state facts.index(1 7))
     comparisons.ordered(@state comparisons.Operand[term=facts.Term[3] shift=2] comparisons.Operand[term=facts.Term[4] shift=4] true)
     let offset=facts.lookup(state facts.order(facts.Term[3] facts.Term[4]))
     $runtime_assert offset isnt? none and offset.lower =? -1
     comparisons.ordered(@state comparisons.Operand[term=facts.Term[5]] comparisons.Operand[term=facts.Term[6 'length']] true)
-    $runtime_assert facts.index(5 6).key in? state
+    $runtime_assert facts.contains(state facts.index(5 6))
     let strict=comparisons.refine(state 'not=?' comparisons.Operand[term=facts.Term[1]] comparisons.Operand[term=facts.Term[2]] true relations.Context[facts.Context[cap=100]])
     $runtime_assert strict isnt? none
     let gap=facts.lookup(strict facts.order(facts.Term[1] facts.Term[2]))

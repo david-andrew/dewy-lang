@@ -124,7 +124,7 @@ def test_native_expression_interval_transfers(tmp_path):
 
     checks, expected = [], []
     for index, state in enumerate(states):
-        checks.append('    state.clear\n    snapshot=transfer.Snapshot[]')
+        checks.append('    state=flow.State[]\n    snapshot=transfer.Snapshot[]')
         checks.extend(f'    flow.put(@state {fact(key)[0].replace("facts.", "flow.")} {native_interval(value)})'
                       for key, value in state.items())
         checks.extend(f'    transfer.record(@snapshot {names[id(node)]} state env @registry)' for node in ordered)
@@ -164,7 +164,7 @@ main=():>int64=>{{
     let registry=bindings.Registry[]
 {chr(10).join(type_lines + lines + registry_lines)}
     let env=values.Environment[nodes type_nodes registry 1024]
-    let state:flow.State=[]
+    let state:flow.State=flow.State[]
     let snapshot=transfer.Snapshot[]
 {chr(10).join(checks)}
     return 0
