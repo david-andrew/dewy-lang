@@ -201,9 +201,27 @@ def test_native_function_tails_preserve_early_and_implicit_returns(tmp_path):
     argc = hir.ExpressedIdentifier(LOC, 'int64', 'argc')
     normal = call('__eq__', [argc, integer(1)], 'bool')
     answer = call('__add__', [answer, call('__sub__', [call('diverging', [normal]), integer(42)])])
+    # Block values do not need mutable result slots, but lifting their earlier
+    # statements must still snapshot earlier operands and the called function.
+    # The later argument changes x from 10 to 20: the sum must remain 30.
+    x = hir.ExpressedIdentifier(LOC, 'int64', 'x')
+    x_decl = hir.Declare(LOC, 'void', 'let', 'x', 'int64', integer(10))
+    later = hir.Block(LOC, 'int64', [
+        hir.Assign(LOC, 'void', x, '=', integer(20)),
+        hir.Block(LOC, 'int64', [x], True)], True)
+    ordered = call('__add__', [hir.Block(LOC, 'int64', [x], True), later])
+    answer = call('__add__', [answer, call('__sub__', [ordered, integer(30)])])
+    callback = hir.ExpressedIdentifier(LOC, value_signature, 'callback')
+    callback_decl = hir.Declare(LOC, 'void', 'let', 'callback', value_signature,
+        hir.ExpressedIdentifier(LOC, value_signature, 'choose'))
+    swap = hir.Block(LOC, 'bool', [hir.Assign(LOC, 'void', callback, '=',
+        hir.ExpressedIdentifier(LOC, value_signature, 'diverging')), yes], True)
+    saved_callee = hir.FunctionCall(LOC, 'int64', callback, [swap], {})
+    answer = call('__add__', [answer, call('__sub__', [saved_callee, integer(40)])])
     main_signature = ty.FunctionType([ty.PosOrKwArg('argc', 'int64'), ty.PosOrKwArg('argv', 'int64')], [], None, 'int64')
     main = hir.FunctionLiteral(LOC, main_signature, [hir.Param('argc', 'int64'), hir.Param('argv', 'int64')], [],
         None, 'int64', hir.Block(LOC, 'int64', [
+            x_decl, callback_decl,
             call('early_void', [yes], 'void'), call('early_void', [no], 'void'), answer], True))
     functions = [('early_void', empty), ('choose', choose), ('stop', stop), ('diverging', diverging), ('main', main)]
     root = hir.Block(LOC, 'void', [function for _, function in functions], True)

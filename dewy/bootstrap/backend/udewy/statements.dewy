@@ -77,6 +77,25 @@ write = (id:addr target:addr @state:State):>array<addr> => {
 }
 expression = (id:addr @state:State):>Expression => {
     let node=node_at(id state)
+    if node is? hir.Block and node.items.length >? 0 {
+        let tail=node_at(node.items[end] state)
+        let tail_type=types.node_at(state.types tail.value_type)
+        if tail isnt? hir.Return and not types.is_primitive(tail_type 'void') and not types.is_primitive(tail_type 'never') {
+            # A straight-line block already has a value: its final expression.
+            # Preserve the preceding evaluation steps and return that value
+            # directly. Only alternatives need a mutable result slot. Names
+            # are unique and ownership cleanup is explicit before this pass.
+            let prefix:array<addr>=[]
+            loop i in 0.. and i <? node.items.length {
+                if i + 1 =? node.items.length {
+                    let result=expression(node.items[i] @state)
+                    append(@prefix result.prefix)
+                    return Expression[prefix result.value]
+                }
+                append(@prefix statement(node.items[i] @state))
+            }
+        }
+    }
     if node is? hir.Block or node is? hir.Flow {
         let name=fresh(@state)
         let target=reference(name node.value_type node @state)
