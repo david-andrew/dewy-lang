@@ -1,0 +1,28 @@
+# Exercise the actual graph readers, including the diagnostic fallback in
+# hir.children. This catches transitive argument retention in the compiler,
+# beyond the smaller ownership-boundary kernel.
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/analyze/predicate_effects.dewy" as predicates
+let copied=():>int64=>_arena_copied_bytes
+let live=():>int64=>_arena_live_bytes
+let exercise=():>bool=>{
+    let nodes:array<hir.AST>=[]
+    let loc=Span[0 0]
+    let root=hir.append_node(@nodes hir.ExpressedIdentifier[loc 0 'value' 42])
+    loop i in 0.. and i <? 512 {
+        let found=predicates.read_bindings(root nodes)
+        if 42 not in? found or found.length not=? 1 return false
+        hir.append_node(@nodes hir.Integer[loc 0 '0d' i]);
+    }
+    return nodes.length =? 513
+}
+let main=():>int64=>{
+    let before=copied()
+    if not exercise() return 1
+    if copied()-before >? 1048576 return 2
+    let baseline=live()
+    if not exercise() return 3
+    if live()-baseline >? 65536 return 4
+    return 42
+}

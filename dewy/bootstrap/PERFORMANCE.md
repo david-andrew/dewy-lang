@@ -236,3 +236,12 @@ come from the intentional mutation of a saved record's array field.
 
 These bounded checks do not establish a completed bootstrap loop. Larger
 compiler-reader checks and the native generation comparison remain required.
+
+The actual `hir.children` and predicate readers also pass on both output
+backends in `native_hir_reader_scaling.dewy`. The direct executable measures
+zero copied array payload bytes for 512 read/append iterations and zero
+retained arena bytes after repeating the workload. Native-pair verification
+runs this check before allowing a second compiler generation. Compiling the
+fixture with the C seed took 69 seconds for direct output and 85 seconds for
+C output, peaking at 3.37 GiB. The seed built without C exceeded a 180-second
+compilation limit on this larger fixture; that route still needs work.
