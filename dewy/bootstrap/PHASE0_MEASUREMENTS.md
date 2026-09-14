@@ -1040,3 +1040,27 @@ and misses expire when discovery appends a function. Eleven targeted tests
 pass, including direct/C ownership and growth execution, helper discovery
 lifetime, and the single-walk cost gate (`lowering-index-gates.log`). No full
 build speedup is claimed for this follow-up batch yet.
+
+### Shared fixed-width integer limits
+
+All twelve contract/aliasing/invalidation cases also pass through the
+`99d6162a` full native CLI and its pinned hosted reference
+(`type-descriptions-contracts`).
+
+Native fixed-width range queries previously rebuilt `2^bits` with BigInt
+multiplication on every call. The bounds now derive once from the existing
+width/signedness table, and both range queries and integer-literal fit checks
+use them. They are keyed by primitive name, independent of arena ids and
+per-program facts; abstract `int`/`uint` behavior is unchanged.
+
+For 2,000 range queries, hosted-generated direct/C code allocates
+**19,760,000 → 1,296,000 bytes**; code compiled by the same `99d6162a` native
+seed allocates **29,724,000 → 1,312,000 bytes**. Tests independently check all
+eight signed/unsigned endpoints against Python integer arithmetic, acceptance
+at either endpoint and rejection immediately outside, unknown types, and
+independent arenas reusing the same ids. Four focused range/type-query tests
+pass, alongside the native CLI-compiled kernel. Artifacts are
+`fixed-width-before`, `fixed-width-gates.log`, `fixed-width-native-before`,
+`fixed-width-native-after`, and `fixed-width-native.log`.
+These are query allocation measurements; the table's one-time initialization
+is outside the repeated-query counter, and a complete build includes it.

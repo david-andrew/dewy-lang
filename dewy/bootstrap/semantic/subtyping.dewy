@@ -54,19 +54,29 @@ const integer_layouts:array<IntegerLayout> = [
     ['uint8' 8 false] ['uint16' 16 false] ['uint32' 32 false] ['uint64' 64 false]
 ]
 
+IntegerBounds:type = const [minimum:bigint maximum:bigint]
+# Width and signedness determine these bounds independently of a compilation's
+# arena, aliases, target, or flow facts. Derive them once from the layout table;
+# repeated proof queries must not rebuild powers of two with BigInt arithmetic.
+_make_integer_bounds = ():>dict<string IntegerBounds> => {
+    let result:dict<string IntegerBounds>=[]
+    loop layout in integer_layouts {
+        let bits:addr=layout.bits
+        if layout.signed {bits-=1}
+        let limit:bigint=1
+        loop i in 0.. and i <? bits {limit*=2}
+        result[layout.name]=IntegerBounds[(if layout.signed (-limit) else 0) limit-1]
+    }
+    return result
+}
+const _integer_bounds:dict<string IntegerBounds>=_make_integer_bounds()
+integer_bounds = (name:string):>IntegerBounds? => _integer_bounds.get(name)
+
 integer_fits = (value:bigint target:string):>bool => {
     if target =? 'int' return true
     if target =? 'uint' return value >=? 0
-    loop layout in integer_layouts {
-        if layout.name not=? target continue
-        let bits:addr = layout.bits
-        if layout.signed { bits -= 1 }
-        let limit:bigint = 1
-        loop i in 0.. and i <? bits { limit *= 2 }
-        if layout.signed return -limit <=? value <? limit
-        return 0 <=? value <? limit
-    }
-    return false
+    let bounds=integer_bounds(target)
+    return bounds isnt? none and bounds.minimum <=? value <=? bounds.maximum
 }
 
 # Structural atoms also have nominal umbrellas. A sequence is consumable as

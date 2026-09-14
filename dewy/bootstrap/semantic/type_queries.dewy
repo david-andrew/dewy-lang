@@ -217,15 +217,11 @@ fixed_integer_layout = (id:addr nodes:types.Table):>subtyping.IntegerLayout? => 
     loop layout in subtyping.integer_layouts { if layout.name =? node.name return layout }
     return none
 }
-IntegerBounds:type = const [minimum:bigint maximum:bigint]
+IntegerBounds:type = subtyping.IntegerBounds
 fixed_integer_bounds = (id:addr nodes:types.Table):>IntegerBounds? => {
-    let layout = fixed_integer_layout(id nodes)
-    if layout is? none return none
-    let bits:addr = layout.bits
-    if layout.signed { bits -= 1 }
-    let limit:bigint = 1
-    loop i in 0.. and i <? bits { limit *= 2 }
-    return IntegerBounds[(if layout.signed (-limit) else 0) limit-1]
+    let node=types.node_at(nodes types.strip_refinement(id nodes))
+    if node isnt? types.Primitive return none
+    return subtyping.integer_bounds(node.name)
 }
 is_zero_arg_function = (id:addr nodes:types.Table):>bool => {
     let node = types.node_at(nodes id)
