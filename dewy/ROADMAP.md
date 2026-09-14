@@ -109,8 +109,11 @@ Exit criteria that the later phases depend on:
   parity (see "The hosted compiler's role"); its retirement is not a Phase
   0 exit criterion;
 - compile-time performance adequate for dogfooding, measured against explicit
-  time and memory budgets. Record cold and warm compilation separately for a
-  small program, a representative compiler module, and the full compiler.
+  time and memory budgets. The dedicated campaign below targets a complete
+  compiler build in under one minute through each compiler implementation,
+  with builds on the order of seconds as the stretch goal. Record cold and
+  warm compilation separately for a small program, a representative compiler
+  module, and the full compiler.
   Record checking, lowering, emission, and backend timings; peak memory;
   generated µDewy size; and copied bytes, shared snapshots, and detachments.
   Establish the baselines and workload budgets before accepting optimization
@@ -122,21 +125,65 @@ Exit criteria that the later phases depend on:
    regressions for acceptance, rejection, and execution. A first unsupported
    construct must not conceal the rest of a corpus bundle. Use
    `bootstrap/IMPLEMENTATION.md` as the starting inventory, not an exhaustive
-   list of gaps.
-2. Close those gaps while batching straightforward, measured performance
-   fixes, especially repeated pure type queries and expensive cache keys.
-   Keep the hosted and native measurements separate. Validate each coherent
-   batch on bounded workloads; full self-builds remain integration gates,
-   not the inner edit/test loop.
-3. Implement native checked-prelude caching. This should particularly improve
-   ordinary edit/run cycles; measure its effect on full self-builds separately.
-   Restore binding and type identities correctly, and invalidate cached state
-   when compiler/cache format, library inputs, target, or relevant options
-   change. Cached and uncached compilation must agree semantically.
-4. Reduce remaining generated-code expansion, then proceed into the
-   ownership, proof, and effects work. Small proof or effect improvements
-   needed to justify a particular borrow can accompany ownership work;
-   ownership does not wait for the complete solver.
+   list of gaps. Establish reproducible performance baselines alongside it.
+2. Run the dedicated performance campaign once the compiler's own source and
+   the optimization regression cases work reliably on both implementations.
+   Unrelated parity gaps can remain while this campaign runs.
+3. Finish the remaining Phase 0 parity, corpus, and release/CI gates with the
+   faster development loop.
+4. Proceed into the broader ownership, proof, and effects work. Targeted
+   ownership improvements, and the proofs or effects needed to justify them,
+   can be pulled into the performance campaign where measurements warrant it.
+   Ownership does not wait for the complete solver.
+
+### Dedicated performance campaign
+
+Plan a sustained optimization effort early in Phase 0, potentially about a
+week when started. The duration is an investment in reaching the target,
+not a guarantee that the target will be achieved within a week. This
+milestone consolidates the performance work below and selected parts of
+Phase 1.1, rather than spreading it across ordinary feature development.
+
+**Acceptance target:** both the Python-hosted compiler and the native
+compiler build the Dewy compiler from source into an executable in **under
+60 seconds** on a recorded benchmark machine. Builds on the order of seconds
+are the stretch goal. Time the complete invocation, including checking,
+lowering, emission, µDewy compilation, and linking; include C compilation
+when that route uses it. Measure one compiler generation separately from
+the two-generation bootstrap verification and its execution checks.
+
+Record cold full builds, warm full builds, and incremental builds separately,
+with the machine, toolchain, backend, options, and cache state. A cached
+executable or an incremental result cannot establish the full-build target.
+Retain semantic and expected-result tests, deterministic bootstrap checks,
+and bounded memory budgets throughout the campaign.
+
+The campaign covers the whole compilation path:
+
+- Eliminate repeated type queries, expensive cache keys, redundant tree
+  transformations, and unnecessary intermediate representation construction.
+  Keep hosted and native profiles separate and prioritize measured costs.
+- Implement native checked-prelude caching. This should particularly improve
+  ordinary edit/run cycles; measure its effect on full self-builds separately.
+  Restore binding and type identities correctly, and invalidate cached state
+  when compiler/cache format, library inputs, target, or relevant options
+  change. Cached and uncached compilation must agree semantically.
+- Reduce generated-code expansion through helper reuse, static data, and
+  cheaper emission, and reduce text-processing overhead between stages.
+  The verified self-build emitted roughly 97 MB of µDewy. Its downstream
+  compilation takes minutes, so faster analysis alone cannot meet the target.
+- Improve the µDewy and C compilation paths as measured bottlenecks warrant.
+  Keep the direct backend as a measured route throughout, preserving the
+  goal of a reasonably performant full bootstrap without C acceleration.
+- Pull forward targeted ownership and allocation improvements from Phase 1.1
+  where copying or reclamation dominates, together with the specific proof
+  and effect improvements needed to make them sound.
+
+Work in coherent optimization batches against bounded representative
+benchmarks. Run full compiler builds and bootstrap comparisons at meaningful
+integration checkpoints, rather than after every small edit. Reaching the
+target is likely to require eliminating whole categories of repeated work;
+small local speedups alone are unlikely to be sufficient.
 
 ### Performance measurements and candidates
 
