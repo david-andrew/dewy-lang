@@ -155,8 +155,15 @@ def main() -> int:
             try:
                 status = process.wait(timeout=args.timeout)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+                # Give a profiled Python worker's finally block a bounded
+                # chance to save its call data. The sample is still a timeout,
+                # regardless of whether interruption unwinds successfully.
+                os.killpg(process.pid, signal.SIGINT if args.profile else signal.SIGKILL)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
                 status = 'timeout'
         record = {'run': run, 'status': status, 'wall_seconds': time.perf_counter() - started}
         rss = work / 'rss-kib.txt'
