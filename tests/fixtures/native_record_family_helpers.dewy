@@ -1,0 +1,72 @@
+# Many parent views of one dynamic descendant share exact field operations.
+# This stresses generated-code growth as well as value independence.
+Root=type of [values:array<int64>]
+Layer1=type of Root & [field1:array<int64>]
+Layer2=type of Layer1 & [field2:array<int64>]
+Layer3=type of Layer2 & [field3:array<int64>]
+Layer4=type of Layer3 & [field4:array<int64>]
+Layer5=type of Layer4 & [field5:array<int64>]
+Layer6=type of Layer5 & [field6:array<int64>]
+Layer7=type of Layer6 & [field7:array<int64>]
+Layer8=type of Layer7 & [field8:array<int64>]
+Layer9=type of Layer8 & [field9:array<int64>]
+Layer10=type of Layer9 & [field10:array<int64>]
+Layer11=type of Layer10 & [field11:array<int64>]
+Layer12=type of Layer11 & [field12:array<int64>]
+clone0=(value:Root):>Root=>value
+clone1=(value:Layer1):>Layer1=>value
+clone2=(value:Layer2):>Layer2=>value
+clone3=(value:Layer3):>Layer3=>value
+clone4=(value:Layer4):>Layer4=>value
+clone5=(value:Layer5):>Layer5=>value
+clone6=(value:Layer6):>Layer6=>value
+clone7=(value:Layer7):>Layer7=>value
+clone8=(value:Layer8):>Layer8=>value
+clone9=(value:Layer9):>Layer9=>value
+clone10=(value:Layer10):>Layer10=>value
+clone11=(value:Layer11):>Layer11=>value
+clone12=(value:Layer12):>Layer12=>value
+main=():>int64=>{
+    let original=Layer12[[42] [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12]]
+    let copy0=clone0(original)
+    copy0.values[0]=0
+    let copy1=clone1(original)
+    copy1.values[0]=1
+    let copy2=clone2(original)
+    copy2.values[0]=2
+    let copy3=clone3(original)
+    copy3.values[0]=3
+    let copy4=clone4(original)
+    copy4.values[0]=4
+    let copy5=clone5(original)
+    copy5.values[0]=5
+    let copy6=clone6(original)
+    copy6.values[0]=6
+    let copy7=clone7(original)
+    copy7.values[0]=7
+    let copy8=clone8(original)
+    copy8.values[0]=8
+    let copy9=clone9(original)
+    copy9.values[0]=9
+    let copy10=clone10(original)
+    copy10.values[0]=10
+    let copy11=clone11(original)
+    copy11.values[0]=11
+    let copy12=clone12(original)
+    copy12.values[0]=12
+    if original.values[0] not=? 42 return 1
+    if copy0.values[0] not=? 0 return 2
+    if copy1.values[0] not=? 1 return 2
+    if copy2.values[0] not=? 2 return 2
+    if copy3.values[0] not=? 3 return 2
+    if copy4.values[0] not=? 4 return 2
+    if copy5.values[0] not=? 5 return 2
+    if copy6.values[0] not=? 6 return 2
+    if copy7.values[0] not=? 7 return 2
+    if copy8.values[0] not=? 8 return 2
+    if copy9.values[0] not=? 9 return 2
+    if copy10.values[0] not=? 10 return 2
+    if copy11.values[0] not=? 11 return 2
+    if copy12.values[0] not=? 12 return 2
+    return 42
+}

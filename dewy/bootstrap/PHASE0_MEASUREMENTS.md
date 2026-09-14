@@ -69,3 +69,21 @@ analysis traversals, and the µDewy tokenizer. Native phase profiling and
 checked-prelude caching remain separate work. The initial full native
 self-build baseline remains the approximately 25-minute generation recorded
 in [PERFORMANCE.md](PERFORMANCE.md#completed-native-fixed-point-2026-09-14).
+
+## Shared native record operations
+
+The verified native compiler emitted 96.7 MB for its own source: 19.7 MB was
+record copy helpers and 7.3 MB release helpers. Parent views repeatedly
+expanded every descendant's concrete fields, including inline nested records
+and union cells. Native lowering now shares family dispatch separately from
+exact field operations. Arena-free copies stay in their caller's frame.
+
+The twelve-level `native_record_family_helpers.dewy` kernel drops from
+281,377 to 124,977 bytes of µDewy (56% smaller), with checking/lowering/emission
+through the dedicated direct lowering driver falling from 6.27 to 4.38 seconds.
+Both versions execute correctly through direct and C backends. Its committed
+160 KB output budget catches reintroducing the expansion. Another new kernel
+checks descendant copies through nested records, arrays and optional cells;
+128 repeated scopes retain zero arena bytes. Thirty-nine existing record,
+brand and reclamation cases also pass on both output routes. These are kernel
+results, not yet a measurement of the full compiler's new generated size.

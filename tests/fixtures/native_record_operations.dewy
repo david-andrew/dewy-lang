@@ -1,0 +1,37 @@
+# Copy a dynamic descendant through parent, nested-record and union storage.
+# Every copy must keep its fields, own its arrays, and release them exactly
+# once. Repeating the scope catches helpers that free their enclosing record.
+Root = type of [code:int64]
+Branch = type of Root & [values:array<int64>]
+Leaf = type of Branch & [extra:array<int64>]
+Sibling = type of Root & [other:array<int64>]
+Box:type = [item:Root choice:Root|none]
+
+exercise = ():>bool => {
+    let root:Root=Leaf[40 [1 2] [3 4]]
+    let copy=root
+    if copy isnt? Leaf return false
+    copy.values[0]=99
+    copy.extra.push(5)
+    let box=Box[root copy]
+    let another=box
+    if another.item isnt? Leaf return false
+    another.item.extra[0]=77
+    another.choice=Sibling[42 [6 7]]
+    if root isnt? Leaf or box.item isnt? Leaf or box.choice isnt? Leaf return false
+    if root.values[0] not=? 1 or root.extra[0] not=? 3 return false
+    if box.item.extra[0] not=? 3 or box.choice.extra.length not=? 3 return false
+    let selected=another.choice
+    if selected is? none return false
+    let sequence:array<Root>=[root copy selected]
+    let value=sequence[2]
+    if value isnt? Sibling return false
+    return value.code =? 42 and value.other[1] =? 7
+}
+main = ():>int64 => {
+    if not exercise() return 1
+    let before=_arena_live_bytes
+    loop i in 0.. and i <? 128 {if not exercise() return 2}
+    if _arena_live_bytes not=? before return 3
+    return 42
+}

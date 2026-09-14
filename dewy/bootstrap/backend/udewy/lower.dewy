@@ -2099,7 +2099,54 @@ field_write = (pointer:addr value:addr type:addr node:hir.AST @state:State):>add
     }
     return array_store(value pointer type node @state)
 }
-object_fields = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => {
+# Exact field operations and dynamic-family dispatch have different sharing
+# boundaries. A family's copy/release calls one field helper for its selected
+# brand; embedding every child's fields at every parent view expands the same
+# work many times. Helpers operate on existing storage and never free its
+# enclosing record. Arena-free code keeps its frame allocations in the caller.
+RecordOperation:type = 'copy_fields' | 'write_record' | 'release_fields' | 'release_record' | 'release_cell'
+record_operation_body = (operation:RecordOperation arguments:array<addr> type:addr node:hir.AST @state:State):>addr => {
+    $runtime_assert arguments.length >? 0
+    if operation is? 'copy_fields'|'write_record' {
+        $runtime_assert arguments.length =? 2
+        if operation =? 'copy_fields' return object_fields_body(arguments[0] arguments[1] type node @state)
+        return object_write_body(arguments[0] arguments[1] type node @state)
+    }
+    if operation =? 'release_fields' return release_record_fields_body(arguments[0] type node @state)
+    if operation =? 'release_record' return release_record_body(arguments[0] type node @state)
+    return release_cell_body(arguments[0] type node @state)
+}
+record_operation = (operation:RecordOperation arguments:array<addr> type:addr node:hir.AST @state:State):>addr => {
+    let storage=views.structural_base(type state.type_nodes)
+    if state.allocator is? none return record_operation_body(operation arguments storage node @state)
+    let key="{operation}:{storage}"
+    let name=state.copy_helpers.get(key)
+    let empty=types.primitive('void' @state.type_nodes)
+    if name is? none {
+        let generated=fresh(operation @state)
+        name=generated state.copy_helpers[key]=generated
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let parameters:array<hir.Param>=[]
+        let slots:array<types.PosOrKwArg>=[]
+        let inputs:array<addr>=[]
+        loop argument in arguments {
+            let parameter=fresh('record_storage' @state)
+            parameters.push(hir.Param[parameter word_type])
+            slots.push(types.PosOrKwArg[parameter word_type])
+            inputs.push(put(hir.ExpressedIdentifier[node.loc word_type parameter] @state))
+        }
+        # Reserve first: recursive records through array/union handles can
+        # refer back to this operation while its body is being constructed.
+        let body=record_operation_body(operation inputs storage node @state)
+        let signature=types.function_type(slots [] none empty [] @state.type_nodes)
+        let literal=put(hir.FunctionLiteral[node.loc signature parameters [] none empty body source=state.source_index] @state)
+        state.generated.push(program.Function[generated literal])
+    }
+    $runtime_assert name isnt? none
+    return intrinsic(name arguments empty node @state)
+}
+object_fields = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => record_operation('copy_fields' [destination source] type node @state)
+object_fields_body = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => {
     let record=object_type(type state)
     $runtime_assert record isnt? none
     runtime_type(type node @state);
@@ -2120,7 +2167,8 @@ object_fields = (destination:addr source:addr type:addr node:hir.AST @state:Stat
     if brand isnt? none {prefix.push(store_word(read_word(source brand node @state) destination brand node @state))}
     return sequence(prefix node @state)
 }
-object_write = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => {
+object_write = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => record_operation('write_record' [destination source] type node @state)
+object_write_body = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => {
     let storage=views.structural_base(type state.type_nodes)
     let record=object_type(type state)
     $runtime_assert record isnt? none
@@ -3410,7 +3458,8 @@ release_value = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     $runtime_assert name isnt? none
     return intrinsic(name [pointer] types.primitive('void' @state.type_nodes) node @state)
 }
-release_record_fields = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+release_record_fields = (pointer:addr type:addr node:hir.AST @state:State):>addr => record_operation('release_fields' [pointer] type node @state)
+release_record_fields_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     let record=object_type(type state)
     $runtime_assert record isnt? none
     let layout=object_layout(type node @state)
@@ -3425,7 +3474,8 @@ release_record_fields = (pointer:addr type:addr node:hir.AST @state:State):>addr
     }
     return sequence(prefix node @state)
 }
-release_record = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+release_record = (pointer:addr type:addr node:hir.AST @state:State):>addr => record_operation('release_record' [pointer] type node @state)
+release_record_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     let storage=views.structural_base(type state.type_nodes)
     let layout=object_layout(type node @state)
     let brand=layout.offsets.get(layouts.brand_field)
@@ -3443,7 +3493,8 @@ release_record = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms release_record_fields(pointer type node @state)] @state))
     return sequence(prefix node @state)
 }
-release_cell = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+release_cell = (pointer:addr type:addr node:hir.AST @state:State):>addr => record_operation('release_cell' [pointer] type node @state)
+release_cell_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     let members=cell_members(type @state)
     $runtime_assert members isnt? none
     let prefix:array<addr>=[]

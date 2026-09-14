@@ -533,6 +533,9 @@ CLEANUP_CASES += [(
     "let measure=(size:int64):>bool=>{let nodes:array<int64>=[] loop i in 0.. and i <? size {nodes.push(i)} let env=Env[nodes] exercise(env 2) let before=_arena_live_bytes let copied=_arena_copied_bytes exercise(env 500) return _arena_live_bytes=?before and _arena_copied_bytes=?copied}\n"
     "let main=():>int64=>if measure(1000) and measure(100000) 42 else 0", 42)]
 ARENA_CASES += CLEANUP_CASES
+ARENA_CASES += [((ROOT / 'tests/fixtures/native_record_operations.dewy').read_text(), 42)]
+RECORD_FAMILY = (ROOT / 'tests/fixtures/native_record_family_helpers.dewy').read_text()
+ARENA_CASES += [(RECORD_FAMILY, 42)]
 
 
 def build_native_lowering_driver(tmp_path):
@@ -601,6 +604,10 @@ def test_native_scalar_lowering(tmp_path):
         case.write_text(text)
         native = subprocess.run([binary, case], capture_output=True, text=True, timeout=60, check=False)
         assert native.returncode == 0, native.stdout + native.stderr
+        if text == ARENA + RECORD_FAMILY:
+            # Twelve ancestor views must share exact field operations. Before
+            # outlining these, the same fixture emitted over 281 KB.
+            assert len(native.stdout.encode()) < 160_000
         output = case.with_suffix('.udewy')
         output.write_text(native.stdout)
         targets = ['x86_64', 'c'] if text.removeprefix(ARENA) in BRAND_READ_CASES else ['x86_64']
