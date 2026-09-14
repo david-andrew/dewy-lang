@@ -5,20 +5,19 @@
 set -euo pipefail
 
 bootstrap_target=x86_64
-if [[ ${1:-} == --target ]]; then
-    if [[ $# -lt 2 ]]; then
-        echo '--target needs x86_64 or c' >&2
-        exit 2
-    fi
+bootstrap_resume=false
+while [[ ${1:-} == --target || ${1:-} == --resume ]]; do
+    if [[ $1 == --resume ]]; then bootstrap_resume=true; shift; continue; fi
+    if [[ $# -lt 2 ]]; then echo '--target needs x86_64 or c' >&2; exit 2; fi
     bootstrap_target=$2
     shift 2
-fi
+done
 if [[ $bootstrap_target != x86_64 && $bootstrap_target != c ]]; then
     echo "Unsupported native bootstrap target: $bootstrap_target" >&2
     exit 2
 fi
 if [[ $# -lt 2 || $# -gt 3 ]]; then
-    echo "Usage: $0 [--target x86_64|c] NATIVE_DEWY_SEED NATIVE_UDEWY_SEED [OUTPUT_DIRECTORY]" >&2
+    echo "Usage: $0 [--resume] [--target x86_64|c] NATIVE_DEWY_SEED NATIVE_UDEWY_SEED [OUTPUT_DIRECTORY]" >&2
     exit 2
 fi
 
@@ -37,6 +36,19 @@ if [[ $bootstrap_target == c ]] && ! command -v cc >/dev/null; then
     exit 2
 fi
 mkdir -p -- "$bootstrap_output"
+# Resume only a recorded, unchanged first generation. Always repeat its
+# execution checks before generation two; an interrupted check is not a pass.
+if $bootstrap_resume; then
+    (cd -- "$bootstrap_output"; sha256sum --check --status GENERATION_1_SHA256SUMS)
+    (cd -- "$bootstrap_root"; sha256sum --check --status "$bootstrap_output/SOURCE_SHA256SUMS")
+    cmp -- "$bootstrap_dewy" "$bootstrap_output/dewy-stage0"
+    cmp -- "$bootstrap_udewy" "$bootstrap_output/udewy-stage0"
+    if [[ $(cat "$bootstrap_output/BACKEND") != "$bootstrap_target" ||
+          $(cat "$bootstrap_output/LTO_JOBS") != "${DEWY_BOOTSTRAP_LTO_JOBS:-}" ]]; then
+        echo 'Resume requires the recorded backend and LTO options' >&2
+        exit 2
+    fi
+fi
 # Let the Dewy process exit before µDewy (and possibly a C compiler) starts.
 # The first seed can retain a large compilation arena through emission.
 # Record its exact backend arguments, then execute them after that arena is
@@ -119,22 +131,32 @@ bootstrap_compile_udewy() {
     mapfile -d '' -t cc_arguments < "$cc_record"
     PATH="$DEWY_BOOTSTRAP_CC_PATH" "$DEWY_BOOTSTRAP_REAL_CC" "${cc_arguments[@]}"
 }
-printf '%s\n' "$bootstrap_target" > "$bootstrap_output/BACKEND"
-cp -- "$bootstrap_dewy" "$bootstrap_output/dewy-stage0"
-cp -- "$bootstrap_udewy" "$bootstrap_output/udewy-stage0"
 cd -- "$bootstrap_root"
 
 # Refuse to certify generations compiled while their inputs were changing.
 # This also binds release packaging to the source/library tree actually used.
-find dewy/bootstrap udewy/bootstrap udewy/stdlib library \
-    -type f \( -name '*.dewy' -o -name '*.udewy' -o -name '*.bin' \) -print0 |
-    sort -z | xargs -0 sha256sum > "$bootstrap_output/SOURCE_SHA256SUMS"
-sha256sum VERSION tools/dewy_test.dewy >> "$bootstrap_output/SOURCE_SHA256SUMS"
+bootstrap_first=1
+if $bootstrap_resume; then
+    rm -f -- "$bootstrap_output/SHA256SUMS"
+    echo 'Checking saved native compiler generation 1 before resuming'
+    bash tools/check_native.sh "$bootstrap_output" 1
+    bootstrap_first=2
+else
+    printf '%s\n' "$bootstrap_target" > "$bootstrap_output/BACKEND"
+    printf '%s\n' "${DEWY_BOOTSTRAP_LTO_JOBS:-}" > "$bootstrap_output/LTO_JOBS"
+    cp -- "$bootstrap_dewy" "$bootstrap_output/dewy-stage0"
+    cp -- "$bootstrap_udewy" "$bootstrap_output/udewy-stage0"
+    rm -f -- "$bootstrap_output/GENERATION_1_SHA256SUMS" "$bootstrap_output/SHA256SUMS"
+    find dewy/bootstrap udewy/bootstrap udewy/stdlib library \
+        -type f \( -name '*.dewy' -o -name '*.udewy' -o -name '*.bin' \) -print0 |
+        sort -z | xargs -0 sha256sum > "$bootstrap_output/SOURCE_SHA256SUMS"
+    sha256sum VERSION tools/dewy_test.dewy >> "$bootstrap_output/SOURCE_SHA256SUMS"
+fi
 
 # Preserve a generation before rebuilding the shared cache artifact. Each
 # Dewy compiler runs with the new µDewy generation and the source library
 # belonging to this checkout, independent of the user's installed compilers.
-for bootstrap_generation in 1 2; do
+for ((bootstrap_generation=bootstrap_first; bootstrap_generation<=2; bootstrap_generation++)); do
     bootstrap_previous=$((bootstrap_generation - 1))
     echo "Building native compiler generation $bootstrap_generation ($bootstrap_target)"
     bootstrap_started=$SECONDS
@@ -157,6 +179,11 @@ for bootstrap_generation in 1 2; do
     echo "Generation $bootstrap_generation completed in $((SECONDS - bootstrap_started)) seconds"
     sha256sum --check --status "$bootstrap_output/SOURCE_SHA256SUMS"
     if [[ $bootstrap_generation == 1 ]]; then
+        (
+            cd -- "$bootstrap_output"
+            sha256sum BACKEND LTO_JOBS SOURCE_SHA256SUMS dewy-stage0 udewy-stage0 \
+                dewy-stage1 udewy-stage1 > GENERATION_1_SHA256SUMS
+        )
         # A matching fixed point alone can hide consistent miscompilation.
         # Check the new compiler before spending another self-build on it.
         bash tools/check_native.sh "$bootstrap_output" 1

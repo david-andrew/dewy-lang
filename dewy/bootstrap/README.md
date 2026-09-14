@@ -168,6 +168,12 @@ support before rebuilding and applies the same option to both generations.
 Choose the job count for the build machine; leaving it unset uses ordinary
 C compilation.
 
+After generation one has completed, an interrupted build can use the same
+command with `--resume`. Keep the seed executables, output directory, target,
+and LTO options unchanged. The script verifies its saved generation and source
+checksums, repeats the first-generation execution checks, then builds generation
+two. A missing or changed checkpoint requires a fresh build.
+
 The build script compares compiler binaries and checks that the compiler and
 library sources stayed unchanged. The execution check separately exercises
 both output backends, including µDewy's conditional-only short-circuit rules,

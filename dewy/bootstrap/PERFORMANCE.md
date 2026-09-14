@@ -245,3 +245,11 @@ runs this check before allowing a second compiler generation. Compiling the
 fixture with the C seed took 69 seconds for direct output and 85 seconds for
 C output, peaking at 3.37 GiB. The seed built without C exceeded a 180-second
 compilation limit on this larger fixture; that route still needs work.
+
+The first compiler generated with this lifetime fix completed a minimal
+full-prelude program in 26.2 seconds at 4.27 GiB RSS, and the 21-case integration
+bundle in 31.4 seconds at 5.01 GiB. Both returned the expected result. The
+initial 4 GiB guard stopped that integration run after compilation; separate
+60-second, 6 GiB probes established these bounded peaks. This is a substantial
+improvement over the preceding unbounded reader copies, but the full-prelude
+cost remains high and the native fixed-point comparison is still pending.
