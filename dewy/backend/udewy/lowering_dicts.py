@@ -445,7 +445,10 @@ class _DictLowering:
             element = self._name('dict_element', loc)
             found_body = [
                 self._declare(element, replace(value_at(position), type='int64'), loc),
-                *self._optional_write(cell_word, replace(element, type=payload), payload),
+                # An already-optional element is a cell, not the object's
+                # address. Preserve its stored type so copying decodes the
+                # presence tag and independently copies the active payload.
+                *self._optional_write(cell_word, replace(element, type=parts.value_type), payload),
             ]
         else:
             found_body = self._optional_write(cell_word, value_at(position), payload)
