@@ -410,3 +410,19 @@ A small native validation compile overlapped the first 32 seconds. The
 timing wrapper's peak RSS does not include the terminated compiler child,
 so it is not a usable memory measurement. Artifacts:
 `c-toolchain/clang-o1{.log,-time.txt}`.
+
+## Preserve normalized type subtrees
+
+Hosted negation normalization now retains record fields, arrays and other
+type structures whose normalized children are unchanged. It revisits children
+on every query, including mutable union lists; this is not a cache over
+changing checker state. Metadata on rebuilt fields and records is preserved.
+
+A 1,000-query nested-record kernel takes **3.76/3.61 s before and
+0.87/0.88 s after**, producing equal types. The unchanged path needs no
+dataclass replacements. The final normalization/query group passes ten
+checks; the preceding broader group passed 24 checks, with one test-only
+API-name error corrected in that final run. Artifacts:
+`normalization-{comparison,final-gates,gates}.log` and
+`compare-normalization.py`. These are bounded results, not a full-build
+speedup claim.

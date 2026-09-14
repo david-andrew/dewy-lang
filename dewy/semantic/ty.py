@@ -2451,22 +2451,32 @@ def negate(t: TypeExpr) -> TypeExpr:
 
 
 def to_nnf(t: TypeExpr) -> TypeExpr:
+    # Revisit children on every query: unions and unresolved type structures
+    # can still change during checking. Preserve unchanged subtrees instead
+    # of rebuilding whole record families just to normalize their leaves.
     if isinstance(t, TypeNot):
         return negate(t.type)
     if isinstance(t, TypeOr):
-        return union(*(to_nnf(x) for x in t.items))
+        result = union(*(to_nnf(x) for x in t.items))
+        return t if isinstance(result, TypeOr) and len(result.items) == len(t.items) and all(a is b for a, b in zip(result.items, t.items)) else result
     if isinstance(t, TypeAnd):
-        return intersect(*(to_nnf(x) for x in t.items))
+        result = intersect(*(to_nnf(x) for x in t.items))
+        return t if isinstance(result, TypeAnd) and len(result.items) == len(t.items) and all(a is b for a, b in zip(result.items, t.items)) else result
     if isinstance(t, TypeParameterize):
-        return TypeParameterize(to_nnf(t.t), [to_nnf(a) for a in t.args])
+        base = to_nnf(t.t)
+        args = [to_nnf(a) for a in t.args]
+        return t if base is t.t and all(a is b for a, b in zip(args, t.args)) else TypeParameterize(base, args)
     if isinstance(t, TypeVariable):
         return t
     if isinstance(t, SequenceType):
-        return SequenceType([to_nnf(x) for x in t.items])
+        items = [to_nnf(x) for x in t.items]
+        return t if all(a is b for a, b in zip(items, t.items)) else SequenceType(items)
     if isinstance(t, ArrayType):
-        return ArrayType(to_nnf(t.element), t.length)
+        element = to_nnf(t.element)
+        return t if element is t.element else ArrayType(element, t.length)
     if isinstance(t, QuantityType):
-        return QuantityType(to_nnf(t.number), t.dimension)
+        number = to_nnf(t.number)
+        return t if number is t.number else QuantityType(number, t.dimension)
     if isinstance(t, DimensionType):
         return t
     if isinstance(t, StringType):
@@ -2475,7 +2485,16 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
         return t
     if isinstance(t, ObjectType):
         # the fields normalized; the rest of the record (brand, methods, `const [...]`) as it was
-        return replace(t, fields=tuple(replace(field, type=to_nnf(field.type)) for field in t.fields))
+        fields = []
+        changed = False
+        for field in t.fields:
+            normalized = to_nnf(field.type)
+            if normalized is field.type:
+                fields.append(field)
+            else:
+                fields.append(replace(field, type=normalized))
+                changed = True
+        return replace(t, fields=tuple(fields)) if changed else t
     if isinstance(t, (ModuleType, MetaType)):
         return t
     return t  # Primitive | TypeFunc | TypeOverload | top | bottom
