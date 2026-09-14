@@ -2621,6 +2621,9 @@ class _ArrayLowering(_ArraySharing):
                 nested_statements, nested = self._allocate_object_result_value(
                     array_type.element,
                     loc,
+                    # Result array elements follow the same ownership rule as
+                    # literals and copies: the container owns their roots.
+                    arena=self._has_arena(),
                 )
                 statements.extend(nested_statements)
                 statements.append(

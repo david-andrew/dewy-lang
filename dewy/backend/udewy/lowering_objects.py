@@ -321,6 +321,8 @@ class _ObjectLowering:
         self,
         object_type: ty.ObjectType,
         loc: Span,
+        *,
+        arena: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         """Allocate an object and its exact mutable result fields in the caller."""
 
@@ -336,7 +338,7 @@ class _ObjectLowering:
                 'let',
                 target.name,
                 'int64',
-                self._object_allocation(loc, size),
+                self._object_allocation(loc, size, arena=arena),
             )
         ]
         statements.extend(

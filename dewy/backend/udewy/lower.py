@@ -367,7 +367,7 @@ class _Lowerer(
         self.loop_string_escapes: dict[int, set[int]] = {}   # loop body id -> string expressions that reach a binding outside the loop (`_loop_string_escapes`)
         self.owning_string_bindings: set[int] = set()   # string locals that own their value (`_owning_string_locals`)
         self.owned_strings: set[str] = set()   # their lowered names: released by owner word at scope exit
-        self.owned_raw_arrays: dict[str, tuple[int, ty.TypeExpr, bool]] = {}   # exact-length stack arrays of strings or objects: their members (and, for a literal's arena element objects, the blocks) are released at scope exit
+        self.owned_raw_arrays: dict[str, tuple[int, ty.TypeExpr]] = {}   # stack buffers own their element handles independently of the buffer's lifetime
         self.statement_temporaries: list[tuple[str, hir.ExpressedIdentifier]] = []   # string values of the statement being lowered that nothing keeps: released after it (`_lower_statement`)
         self.consumed_string_values: set[int] = set()   # call nodes whose string result a binding, a return, or a store takes over (not temporaries)
         self.temporary_array_elements: dict[str, ty.TypeExpr] = {}   # array temporaries' element types, by temp name
@@ -3240,9 +3240,7 @@ class _Lowerer(
             and (self._is_string_valued(exact.element) or isinstance(ty.unfold(exact.element), (ty.ObjectType, ty.ArrayType))
                  or self._is_optional_element(exact.element) or self._is_union_element(exact.element))
         ):
-            # a literal's element objects are arena blocks (`_array_storage_value`); a copy's or a call's may be inline or frame storage
-            blocks = isinstance(self._unwrap_transparent(node.expr), hir.ArrayLiteral)
-            self.owned_raw_arrays[node.name] = (exact.length, exact.element, blocks)
+            self.owned_raw_arrays[node.name] = (exact.length, exact.element)
 
     def _replace_cell_value(self, cell: hir.AST, value: hir.AST, members: tuple[ty.TypeExpr, ...], loc: Span, *, prepared: bool) -> list[hir.AST]:
         """Compute the replacement before releasing the previous payload.
@@ -3272,10 +3270,9 @@ class _Lowerer(
         """Release only string alternatives of a possibly borrowed match cell."""
         return self._release_cell_payload(cell, tuple(member for member in members if self._is_string_valued(member)), loc)
 
-    def _release_raw_array_members(self, word: hir.ExpressedIdentifier, length: int, element: ty.TypeExpr, blocks: bool, loc) -> list[hir.AST]:
+    def _release_raw_array_members(self, word: hir.ExpressedIdentifier, length: int, element: ty.TypeExpr, loc) -> list[hir.AST]:
         """Give back what an exact-length stack array's elements own: each string by
-        its owner word, each element object's members (and its arena block, when
-        the array is a literal's)."""
+        its owner word, each element object's members and its arena block."""
         statements: list[hir.AST] = []
         element_bytes, _signed = self._array_element_layout(element, word)
         for index in range(length):
@@ -3296,9 +3293,8 @@ class _Lowerer(
             else:
                 object_type = ty.unfold(element)
                 statements.extend(self._release_object_members(handle, object_type, loc))
-                if blocks:
-                    size, _offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
-                    statements.append(self._arena_release_call(handle, self._int64_literal(loc, size), loc))
+                size, _offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
+                statements.append(self._arena_release_call(handle, self._int64_literal(loc, size), loc))
         return statements
 
     def _note_owned_array(self, node: hir.Declare, declared_type: ty.Type) -> None:
@@ -3487,8 +3483,8 @@ class _Lowerer(
                     elif local.name in self.owned_cells:
                         released.extend(self._release_cell_string_payload(local, self.owned_cells[local.name], local.loc))
                     elif local.name in self.owned_raw_arrays:
-                        length, element, blocks = self.owned_raw_arrays[local.name]
-                        released.extend(self._release_raw_array_members(local, length, element, blocks, local.loc))
+                        length, element = self.owned_raw_arrays[local.name]
+                        released.extend(self._release_raw_array_members(local, length, element, local.loc))
                     elif local_binding_key(local) in self.owned_objects:
                         released.extend(self._release_object_members(local, self.owned_objects[local_binding_key(local)], local.loc))
                     else:
@@ -4043,7 +4039,22 @@ class _Lowerer(
                     node.loc,
                 )
             old_release: list[hir.AST] = []
-            if isinstance(node.target.type, ty.ArrayType) and self._has_arena():
+            if isinstance(node.target.type, ty.ObjectType) and self._has_arena():
+                # Array storage owns a record's arena root as well as its
+                # fields, even when the pointer buffer itself is on the stack.
+                # Materialize the RHS first so self-replacement remains valid.
+                old = self._name('old_object', node.loc)
+                size, _ = self._object_layout(node.target.type, node)
+                old_release = [
+                    self._declare(old, self._intrinsic_call('__load_i64__', [address], 'int64', node.loc), node.loc),
+                    *self._release_object_members(old, node.target.type, node.loc),
+                    self._arena_release_call(old, self._int64_literal(node.loc, size), node.loc),
+                ]
+                if not stack_data:
+                    old_release = [self._if(self._int64_comparison('__ne__',
+                        self._load_i64_field(target, ARRAY_OWNER_OFFSET, node.loc),
+                        self._int64_literal(node.loc, -1), node.loc), old_release, node.loc)]
+            elif isinstance(node.target.type, ty.ArrayType) and self._has_arena():
                 # The replacement has already been copied. Give back the
                 # previous row recursively before publishing the new handle.
                 old = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('old_row'))
