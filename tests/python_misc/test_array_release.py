@@ -33,10 +33,11 @@ def test_scope_exits_release_owned_locals() -> None:
         'let main = ():>int64 => f(5)\n'
     )
     body = emitted[emitted.index('let f ='):emitted.index('let main =')]
-    # `break`, `continue`, the early `return`, the final `return` (acc and inner), and the loop body's end
-    assert body.count('_arena_release(') >= 6
+    # inner: break, continue, normal iteration; acc: early and final return.
+    assert body.count('__dewy_release_array_0(inner)') == 3
+    assert body.count('__dewy_release_array_0(acc)') == 2
     # the return value is computed before the releases
-    assert body.index('acc + 8') < body.rindex('_arena_release(')
+    assert body.index('acc + 8') < body.rindex('__dewy_release_array_0(')
 
 
 def test_parameters_and_module_arrays_are_not_released() -> None:

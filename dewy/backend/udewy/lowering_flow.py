@@ -936,6 +936,9 @@ class _FlowLowering:
         members = ty.enum_members(target.type)
         if members is not None:
             return self._enum_word_of(item, members)
+        target_type = ty.strip_refinement(target.type)
+        if isinstance(target_type, ty.ArrayType):
+            return self._extract_array_operand(item, target_type)
         item_type = ty.strip_refinement(item.type)
         if isinstance(item_type, ty.ObjectType) and local_binding_key(target) in self.object_flow_targets:
             # an object-valued flow: the temporary is a pointer word — to the arm's

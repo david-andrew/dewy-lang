@@ -1,0 +1,36 @@
+# A fixed-length branch and a dynamic optional branch initially occupy
+# different union alternatives. Narrowing away none and widening the length
+# must read the active array descriptor, not the enclosing tag cell.
+maybe=(present:bool):>array<int64>|none=>if present [19 23] else none
+choose=(short:bool present:bool):>array<int64>=>{
+    let selected=if short [40 2] else maybe(present)
+    return if selected is? none [] else selected
+}
+wide=(short:bool):>array<int64 length=2>|array<int64>=>{
+    let fixed:array<int64 length=2>=[40 2]
+    let dynamic:array<int64>=[19 23]
+    return if short fixed else dynamic
+}
+forward=(short:bool):>array<int64>=>wide(short)
+sum=(items:array<int64>):>int64=>{
+    if items.length not=? 2 return 0
+    return items[0]+items[1]
+}
+main=():>int64=>{
+    let first=choose(true false)
+    let next=choose(false true)
+    let empty=choose(false false)
+    if first.length not=? 2 or next.length not=? 2 or empty.length not=? 0 return 1
+    let saved=first
+    first[0]=0
+    if saved[0] not=? 40 or saved[1] not=? 2 return 2
+    # A fresh union result owns its payload until this copy has completed.
+    let called:array<int64>=wide(true)
+    let other:array<int64>=wide(false)
+    if called.length not=? 2 or other.length not=? 2 return 3
+    if called[0] not=? 40 or other[0] not=? 19 return 4
+    if sum(wide(true)) not=? 42 or sum(forward(false)) not=? 42 return 5
+    called=wide(false)
+    if sum(called) not=? 42 return 6
+    return next[0]+next[1]
+}

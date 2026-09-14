@@ -44,6 +44,32 @@ from .lowering_sharing import _ArraySharing
 
 
 class _ArrayLowering(_ArraySharing):
+    def _extract_array_operand(self, node: hir.AST, target: ty.ArrayType) -> tuple[list[hir.AST], hir.AST]:
+        """Read a descriptor when several length alternatives share an element type.
+
+        A join can retain `array<T length=2> | array<T>` after removing none.
+        Its binding still stores a tag cell, even when the consumer accepts
+        the common `array<T>` type. Widening the length loads that cell's
+        active descriptor; it cannot use the cell address as array storage.
+        """
+        members = self._field_union_members(node.type)
+        if members is None:
+            return self._extract_expression(node)
+        if not all(isinstance(member, ty.ArrayType)
+                   and member.element == target.element
+                   and (target.length is None or member.length == target.length)
+                   for member in members):
+            self._target_error(node, 'an array union requiring element representation conversion')
+        prelude, cell = self._extract_expression(node)
+        cell = replace(cell, type='int64', binding_id=None) if isinstance(cell, hir.ExpressedIdentifier) else cell
+        if self._fresh_cell_expression(node):
+            assert isinstance(cell, hir.ExpressedIdentifier)
+            prelude, cell = self._cell_statement_temporary(prelude, cell, members,
+                                                          prepared=ty.optional_payload(node.type) is None)
+        pointer = self._name('union_array', node.loc)
+        prelude.append(self._declare(pointer, self._load_i64_field(cell, 8, node.loc), node.loc))
+        return prelude, replace(pointer, type=target)
+
     def _array_representation(
         self,
         declaration: hir.Declare,
@@ -1040,7 +1066,7 @@ class _ArrayLowering(_ArraySharing):
         if array_type.length is None:
             self._target_error(node, 'value-copying a dynamic-length raw array')
         source_is_raw = self._array_use_representation(node) is not None
-        source_prelude, source = self._extract_expression(node)
+        source_prelude, source = self._extract_array_operand(node, array_type)
         element_bytes, _signed = self._array_element_layout(
             array_type.element,
             node,
@@ -1116,7 +1142,7 @@ class _ArrayLowering(_ArraySharing):
                 arena = True
             return self._clone_dynamic_array_value(node, array_type, arena=arena, move=move)
         source_is_raw = self._array_use_representation(node) is not None
-        source_prelude, source = self._extract_expression(node)
+        source_prelude, source = self._extract_array_operand(node, array_type)
         allocation, target = self._allocate_array_value(array_type, node.loc, arena=arena)
         element_bytes, _signed = self._array_element_layout(
             array_type.element,
@@ -2267,7 +2293,7 @@ class _ArrayLowering(_ArraySharing):
             self.move_notes.append(MoveNote(self.srcfile, source.loc, f'`{source.name}` is copied when {site}: {reason}', False))
         # a literal or call result is a dying temporary: its element strings,
         # cells, and objects change owner rather than being cloned and lost
-        fresh = isinstance(source, (hir.ArrayLiteral, hir.FunctionCall))
+        fresh = self._array_expression_owns_fresh_storage(source)
         if frame_copy:
             return self._independent_array_value(node, array_type, move=fresh)
         return self._clone_dynamic_array_value(node, array_type, arena=True, move=fresh)
@@ -2297,7 +2323,7 @@ class _ArrayLowering(_ArraySharing):
                     node,
                     'an arena-backed array whose elements are not word scalars, string handles, or objects',
                 )
-        source_prelude, source = self._extract_expression(node)
+        source_prelude, source = self._extract_array_operand(node, array_type)
         element_bytes, _signed = self._array_element_layout(
             array_type.element,
             node,

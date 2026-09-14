@@ -5043,6 +5043,8 @@ class _Lowerer(
                         arg,
                         copy_type,
                     )
+                elif isinstance(expected_type, ty.ArrayType):
+                    arg_prelude, lowered_arg = self._extract_array_operand(arg, expected_type)
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload, temporary=True)
                 elif (
@@ -5293,6 +5295,12 @@ class _Lowerer(
 
     def _array_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
         node = self._copy_source_expression(node)
+        # A call returning several array-length alternatives owns a union
+        # cell, not a directly transferable array descriptor. Its active
+        # payload must be extracted and kept independently before releasing
+        # the cell.
+        if not isinstance(ty.strip_refinement(node.type), ty.ArrayType):
+            return False
         return isinstance(node, (hir.ArrayLiteral, hir.FunctionCall)) or (
             isinstance(node, hir.DictView) and isinstance(node.type, ty.ArrayType)
         ) or (

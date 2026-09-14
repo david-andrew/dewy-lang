@@ -121,7 +121,7 @@ class _ArraySharing:
         if not self._has_arena():
             return self._clone_dynamic_array_storage(node, array_type, arena=arena, move=move)
         loc = node.loc
-        before, value = self._extract_expression(node)
+        before, value = self._extract_array_operand(node, array_type)
         source = self._name('shared_source', loc)
         before.append(self._declare(source, value, loc))
         if not move and not inline:
