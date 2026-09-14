@@ -1693,10 +1693,13 @@ class _Lowerer(
             *([literal.rest_args] if literal.rest_args is not None else []),
         ]:
             if isinstance(param, hir.BoundParam):
+                # Defaults resolve in the defining scope, but execute in
+                # this callee. Reads and calls here therefore contribute to
+                # its captures, including captures reached transitively.
                 self._discover_node(
                     param.value,
                     definition_scope,
-                    definition_scope.owner_function,
+                    function,
                 )
 
         function_scope = _Scope(
@@ -2303,6 +2306,10 @@ class _Lowerer(
                     continue
                 walk(getattr(value, field_info.name))
 
+        for parameter in [*function.literal.pos_or_kw_args, *function.literal.kw_only_args,
+                          *([function.literal.rest_args] if function.literal.rest_args is not None else [])]:
+            if isinstance(parameter, hir.BoundParam):
+                walk(parameter.value)
         walk(function.literal.body)
 
     def _target_error_at(self, node: hir.AST, message: str, hint: str) -> NoReturn:

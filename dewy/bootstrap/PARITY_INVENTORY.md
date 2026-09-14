@@ -33,7 +33,7 @@ baseline counts and missing native value notes above remain recorded.
 | --- | --- | --- |
 | [sets.dewy](../tests/sets.dewy) | Native process crashed after successful compilation. | The optional `set.pop` result-cell fix now passes isolated direct/C regressions; rerun with the next full native seed. |
 | [integer_widths.dewy](../tests/integer_widths.dewy) | Native exit 39 differs from the expected result. | Isolated to a finite range's 2^64 cardinality wrapping into an empty signed-word length. Native lowering now uses the last cursor index and sticky exhaustion for wide counts. Guarded prefixes, continue and break pass direct/C checks in both compilers; rerun the corpus fixture with the next full native seed. |
-| [local_captures.dewy](../tests/local_captures.dewy) | Native exit 26 differs from the expected result. | Isolate capture/value-boundary behavior. |
+| [local_captures.dewy](../tests/local_captures.dewy) | Native exit 26 differs from the expected result. | Fixed caller flow narrowing leaking into deferred function bodies. The complete fixture and lazy-default capture regression pass both lowerers on direct/C backends. Defaults also now contribute captures to the hosted callee; rerun full native validation with the next seed. |
 | [assertions_runtime_fail.dewy](../tests/assertions_runtime_fail.dewy) | Both exit 101 and print the same ordinary output; hosted diagnostics include extra value notes. | Diagnostic richness difference; exact wording is not a semantic parity requirement. |
 
 ## Native acceptance gaps

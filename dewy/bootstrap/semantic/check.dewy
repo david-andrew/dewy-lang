@@ -1569,8 +1569,14 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     let collector=session.return_collectors.length
     session.return_collectors.push(contexts.ReturnCollector[])
     let annotation:addr?=if infer none else contract
-    let inner = Environment[contexts.child(env.lexical @session) fork(env @session).state annotation return_collector=collector]
-    container_state.set_facts(inner.state container_state.inherited(env.state session) @session)
+    # The function runs at a later call, not at its declaration (or the end
+    # of this block, when deferred bodies are checked). Captured bindings
+    # retain their declared types, but caller flow narrowing does not cross
+    # this boundary. Only the existing immutable-container facts survive.
+    let function_state=session.read_states.length
+    session.read_states.push(contexts.ReadState[keys=container_state.inherited(env.state session)])
+    let defining=Environment[env.lexical function_state]
+    let inner = Environment[contexts.child(env.lexical @session) function_state annotation return_collector=collector]
     let parameters:array<hir.Param> = []
     let signature = contexts.node_at(literal.left env.lexical session)
     let parameter_id=if signature is? parser.BinOp and source_views.is_operator(signature.op ':>' env.lexical session) signature.left else literal.left
@@ -1590,7 +1596,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         let row = contexts.node_at(rows[position] env.lexical session)
         let default:addr? = none
         if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) {
-            let value = expression(row.right env @session expected=param.value_type)
+            let value = expression(row.right defining @session expected=param.value_type)
             if value is? Error return value
             default = value
         }

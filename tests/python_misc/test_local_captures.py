@@ -50,3 +50,23 @@ let main = ():>int64 => {
 def test_non_capturing_local_functions_are_unchanged() -> None:
     emitted = codegen(SrcFile(None, "let main = ():>int64 => {\n    let double = (v:int64):>int64 => v * 2\n    return double(21)\n}\n"))
     assert 'let double = (v:int64):>int64' in emitted
+
+
+def test_default_only_captures_cannot_escape_or_write() -> None:
+    with pytest.raises(NotImplementedYet, match='a capturing function used as a value'):
+        codegen(SrcFile(None, '''
+let main=():>int64=>{
+    let value:int64=42
+    let read=(n:int64=value):>int64=>n
+    let escaped=@read
+    return escaped()
+}
+'''))
+    with pytest.raises(NotImplementedYet, match='writing to `value`'):
+        codegen(SrcFile(None, '''
+let main=():>int64=>{
+    let value:int64=42
+    let read=(n:int64={value+=1 value}):>int64=>n
+    return read()
+}
+'''))

@@ -1,0 +1,25 @@
+# A local function sees current captured values at each call. Neither the
+# facts at its declaration nor the final facts of the enclosing block may
+# replace that runtime read, including reads in a lazy parameter default.
+main=():>int64=>{
+    let value:int64|none=5
+    let read=():>int64=>if value is? int64 value else 0
+    let defaulted=(n:int64=if value is? int64 value else 0):>int64=>n
+    let transitive=(n:int64=read()):>int64=>n
+    let first=read()
+    let first_default=defaulted()
+    let first_transitive=transitive()
+    value=none
+    let empty=read()
+    let empty_default=defaulted()
+    value=9
+    let last=read()
+    let last_default=defaulted()
+    let last_transitive=transitive()
+    value=none
+    if first not=?5 or first_default not=?5 return 1
+    if empty not=?0 or empty_default not=?0 return 2
+    if last not=?9 or last_default not=?9 return 3
+    if first_transitive not=?5 or last_transitive not=?9 return 4
+    return 42
+}
