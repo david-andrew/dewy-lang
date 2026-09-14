@@ -116,7 +116,7 @@ let main = ():>int => {
         b"\xab",
         b"\x40",
     ]
-    assert "UINT64_C(0x0000000000000002)" in code
+    assert "UINT64_C(0x2)" in code
     assert "{ 18, 52 }" in code
 
 

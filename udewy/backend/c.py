@@ -115,7 +115,9 @@ def _u64(value: int) -> int:
 
 
 def _u64_literal(value: int) -> str:
-    return f"UINT64_C(0x{_u64(value):016X})"
+    # Keep the unsigned width explicit, without padding the small offsets
+    # that occur hundreds of thousands of times in generated compiler code.
+    return f"UINT64_C(0x{_u64(value):X})"
 
 
 def _c_capability_for_source(path: Path) -> str | None:

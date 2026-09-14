@@ -743,3 +743,33 @@ queries, display, and aggregate layouts agree with hosted results. The
 updated native source-validation driver also accepts the indexed arena with
 the full prelude. Native execution of the new complete compiler and a fresh
 fixed-point comparison remain separate integration gates.
+
+## Smaller µDewy token records and C integer literals
+
+Hosted µDewy tokens now use fixed object slots. For the preprocessed 4,399,645
+byte t0 artifact (368,822 tokens), separate processes using the previous
+scanner with slots peak at 61,872–61,924 KiB, versus 73,532–73,632 KiB without
+slots. Tokenization timings overlap (roughly 0.7–0.8 seconds); this establishes
+a memory reduction, not a throughput improvement. An experimental combined
+regex scanner also preserved the token streams but did not improve these
+samples, so the existing run scanners were retained.
+
+Both µDewy C emitters now spell small word constants without leading zeroes,
+while retaining `UINT64_C` and the complete 64-bit bit pattern. The previous
+full compiler C artifact contains 766,466 padded word literals. Omitting
+padding removes 10,755,004 bytes from that 135,317,721-byte file (projected
+124,562,717 bytes). This is a text-size calculation, not a new complete build
+or a measured C compiler speedup. Token, annotation, literal, C execution,
+and hosted/native µDewy output checks pass. Artifacts are in
+`phase0-performance/udewy-text/`.
+
+A separate toolchain probe compiled the unchanged shared-string integration
+C source with Clang 22.1.8, `-std=c99 -O2`: 288.31 seconds and peak process RSS
+3,207,156 KiB. The resulting compiler builds the pinned t0 module in 22.81
+seconds, producing the same 4,310,586-byte µDewy artifact and SHA-256 as the
+GCC-built compiler (27.82 seconds in the earlier sample). Clang improves this
+execution sample but costs substantially more to build; it has not replaced
+the default toolchain. Short regression checks overlapped part of the C
+compilation, so this probe is not an isolated acceptance run. Logs are in
+`phase0-performance/clang-shared-strings/` and
+`phase0-performance/native-clang-shared-strings-t0/`.

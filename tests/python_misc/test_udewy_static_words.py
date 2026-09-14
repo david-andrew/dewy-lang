@@ -115,7 +115,7 @@ let main = ():>int => { return runtime_global }
 
     table = search(
         r"static udewy_slot udewy_static_\d+\[4\] = "
-        r"\{ \{ \.w = UINT64_C\(0x0000000000000007\) \}, "
+        r"\{ \{ \.w = UINT64_C\(0x7\) \}, "
         r"\{ \.fn = \(udewy_fn\)udewy_fn_table_only_handler_\d+ \}, "
         r"\{ \.obj = .*? \}, \{ \.obj = .*? \} \};",
         code,
@@ -158,8 +158,8 @@ let main = ():>int => {
 """
     backend = get_backend("c")
     code = parse_udewy(source, backend)
-    assert search(r"udewy_global_\d+\.w = UINT64_C\(0x0000000000000007\);", code)
-    assert search(r"udewy_global_\d+\.w = UINT64_C\(0x0000000000000009\);", code)
+    assert search(r"udewy_global_\d+\.w = UINT64_C\(0x7\);", code)
+    assert search(r"udewy_global_\d+\.w = UINT64_C\(0x9\);", code)
 
     with TemporaryDirectory() as tmp_dir:
         output_path = backend.compile_and_link(code, "static_globals", Path(tmp_dir))

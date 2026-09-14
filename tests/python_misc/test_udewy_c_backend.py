@@ -252,7 +252,7 @@ let main = ():>int => {
     )
 
     assert "extern udewy_word raw_extern(udewy_word arg0);" in code
-    assert "raw_extern(UINT64_C(0x0000000000000003))" in code
+    assert "raw_extern(UINT64_C(0x3))" in code
     assert "(&raw_extern)" not in code
 
 

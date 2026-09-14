@@ -160,7 +160,7 @@ SYMBOL_PREFIXES: dict[str, list[tuple[str, Kind]]] = {}
 for _text, _kind in SYMBOL_TOKENS:
     SYMBOL_PREFIXES.setdefault(_text[0], []).append((_text, _kind))
 
-@dataclass
+@dataclass(slots=True)
 class Token:
     value: Value | Kind | None
     location: Location
