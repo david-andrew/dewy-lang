@@ -4343,6 +4343,10 @@ class _BoundsValidator:
     def _join_states(self, states: list[State]) -> State:
         if not states:
             return {}
+        if len(states) == 1:
+            # The sole reachable path already has the joined evidence.
+            # Intervals are immutable; only the mutable mapping needs a copy.
+            return dict(states[0])
         common = set(states[0])
         for state in states[1:]:
             common &= state.keys()

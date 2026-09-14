@@ -1064,3 +1064,23 @@ pass, alongside the native CLI-compiled kernel. Artifacts are
 `fixed-width-native-after`, and `fixed-width-native.log`.
 These are query allocation measurements; the table's one-time initialization
 is outside the repeated-query counter, and a complete build includes it.
+
+### Identity proof-state operations
+
+A one-path join now returns an independent value of that path's state;
+Python copies its mutable mapping and native Dewy retains its value snapshot.
+Native `put` also skips an identical replacement, including comparison of
+`capped` provenance. Actual endpoint/provenance changes still detach through
+the ordinary store path. This avoids forcing copy-on-write for facts that an
+expression recorder or loop pass merely reinstalls.
+
+One hundred singleton joins and identical updates over a 64-entry state
+allocate **14,899,240 → 96,040 bytes** in hosted-generated direct/C code and
+**17,219,240 → 151,240 bytes** when both variants are compiled by the same
+`99d6162a` native seed. This kernel excludes initial state construction.
+Tests check later value/provenance changes against retained snapshots, empty
+joins, all existing fact kinds in the differential singleton-join matrix,
+collision handling, and the complete native bounds test. Artifacts are
+`fact-identity-before`, `fact-identity-after`, `fact-identity-native-before`,
+`fact-identity-native-after`, and the `fact-identity-*gates.log` files.
+Whole-compiler timing for the latest proof-query batches remains pending.

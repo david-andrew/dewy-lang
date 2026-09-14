@@ -85,6 +85,11 @@ put = (@state:State fact:Fact interval:ranges.Interval):>void => {
     let position=find(state fact)
     if position isnt? none {
         $runtime_assert position <? state.values.length
+        # Reinstalling evidence is common during expression recording and
+        # loop analysis. Preserve shared snapshots until an actual change;
+        # a redundant array store would detach every entry in the state.
+        # Provenance must still update even when numeric endpoints agree.
+        if ranges.same_bounds(state.values[position].interval interval) and state.values[position].interval.capped =? interval.capped return
         state.values[position]=Entry[fact interval]
         return
     }
@@ -212,6 +217,10 @@ evidence = (state:State fact:Fact context:Context):>Evidence => {
 }
 
 join = (states:array<State> context:Context):>State => {
+    # A single reachable path already carries exactly the joined evidence.
+    # Returning its value preserves snapshot independence on later mutation.
+    if states.length =? 0 return State[]
+    if states.length =? 1 return states[0]
     let candidates=State[]
     loop state in states { loop entry in state.values { put(@candidates entry.fact entry.interval) } }
     let result=State[]

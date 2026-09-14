@@ -78,6 +78,8 @@ def test_native_fact_state_matches_hosted(tmp_path):
     lines.append('    let states:array<facts.State> = [' + ' '.join(f's{i}' for i in range(len(states))) + ']')
     expected = []
     for i, left in enumerate(states):
+        single = validator._join_states([left])
+        expected.extend(f'{i}:single|{fact(key)[1]}|{spelling(value)}' for key, value in single.items())
         for j, right in enumerate(states):
             for operation, result in [
                 ('join', validator._join_states([left, right])),
@@ -118,6 +120,7 @@ main = ():>int64 => {{
     let changes:array<ranges.Interval> = [{changes_text}]
     loop i in 0.. and i <? states.length {{
         let left = states[i]
+        emit("{{i}}:single" facts.join([left] context))
         loop j in 0.. and j <? states.length {{
             let right = states[j]
             emit("{{i}}:{{j}}:join" facts.join([left right] context))
