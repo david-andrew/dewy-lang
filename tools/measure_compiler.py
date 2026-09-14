@@ -2,7 +2,7 @@
 
 Each sample starts a fresh compiler process and rebuilds the executable. OS
 page caches are not flushed. Hosted phase timings are observational wrappers;
-the timed path is the ordinary CLI, including its ordinary debug metadata.
+the timed path is the ordinary CLI, with that revision's default build options.
 This tool uses Python for measurement, not as part of the native build path.
 """
 from __future__ import annotations

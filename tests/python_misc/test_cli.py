@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import dewy.__main__ as cli
+from udewy.cache import cache_artifact
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -38,6 +39,23 @@ def test_analyze_is_a_subcommand_not_a_flag() -> None:
 def test_version_flag_belongs_to_the_top_level_command() -> None:
     result = _dewy('--version')
     assert result.returncode == 0 and result.stdout.startswith('dewy ')
+
+
+def test_ordinary_and_debug_builds_keep_separate_metadata_and_caches(tmp_path) -> None:
+    source = tmp_path / 'answer.dewy'
+    source.write_text('main=():>int64=>{let answer:int64=42 return answer}\n')
+    ordinary = _dewy('--compile', str(source))
+    assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
+    code = cache_artifact(source, '.udewy').read_text()
+    assert '# @loc ' not in code and '# @var ' not in code
+    debug = _dewy('debug', '--build', str(source))
+    assert debug.returncode == 0, debug.stdout + debug.stderr
+    debug_code = cache_artifact(source, '.debug.udewy').read_text()
+    assert '# @loc ' in debug_code and '# @var ' in debug_code
+    assert cache_artifact(source, '.udewy').read_text() == code
+    for suffix in ['', '.debug']:
+        assert subprocess.run([cache_artifact(source, suffix)], check=False).returncode == 42
+    assert 'up to date' in _dewy('--compile', str(source)).stdout
 
 
 def test_update_downloads_and_runs_the_published_installer(tmp_path: Path, monkeypatch, capsys) -> None:

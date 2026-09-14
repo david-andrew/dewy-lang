@@ -130,7 +130,7 @@ def _build_and_run(
     with failure_log.recording(['dewy', *argv]) as recorder:
         # compile the program and output udewy source code
         srcfile = SrcFile.from_path(path)
-        udewy_src = codegen(srcfile, target=target, debug_values=debug_values)
+        udewy_src = codegen(srcfile, target=target, debug_locations=debug_values, debug_values=debug_values)
         print_prototype_warnings()
 
         # set up udewy options, and save the udewy source code to a cache file
