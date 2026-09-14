@@ -36,7 +36,9 @@ const CH_LINUX_SYSCALL:int    = 33554432
 # requested, we emit the endian-detection prelude before the helpers.
 # Mask = CH_LOAD_U16 | CH_LOAD_I16 | CH_LOAD_U32 | CH_LOAD_I32 | CH_LOAD_U64
 #      | CH_LOAD_I64 | CH_STORE_U16 | CH_STORE_U32 | CH_STORE_U64
-const CH_ENDIAN_MASK:int = 15712256
+# Fixed-size memcpy helpers preserve native byte order and unaligned access
+# without C aliasing assumptions or a target byte-order detection prelude.
+const CH_MEMORY_COPY_MASK:int = 15712256
 
 # Capability flags.
 const CAP_STDIO:int  = 1
@@ -1318,29 +1320,29 @@ let c_render_helper = (out:int flag:int):>void => {
     } else if flag =? CH_F64_FROM_BITS {
         bb_push_str(out "static double udewy_f64_from_bits(udewy_word value) \{\n    union \{ uint64_t u; double f; \} b;\n    b.u = (uint64_t)value;\n    return b.f;\n\}\n\n")
     } else if flag =? CH_LOAD_U8 {
-        bb_push_str(out "static udewy_word udewy_load_u8(udewy_word addr) \{ return (udewy_word)(*(const unsigned char *)(uintptr_t)addr); \}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_load_u8(udewy_word addr) \{\n    return (udewy_word)(*(const unsigned char *)(uintptr_t)addr);\n\}\n\n")
     } else if flag =? CH_LOAD_I8 {
-        bb_push_str(out "static udewy_word udewy_load_i8(udewy_word addr) \{ return (udewy_word)(int64_t)(int8_t)(*(const unsigned char *)(uintptr_t)addr); \}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_load_i8(udewy_word addr) \{\n    return (udewy_word)(int64_t)(int8_t)(*(const unsigned char *)(uintptr_t)addr);\n\}\n\n")
     } else if flag =? CH_LOAD_U16 {
-        bb_push_str(out "static udewy_word udewy_load_u16(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8);\n#else\n    return ((udewy_word)p[0] << 8) | ((udewy_word)p[1]);\n#endif\n\}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_load_u16(udewy_word addr) \{\n    uint16_t value;\n    memcpy(&value, (const void *)(uintptr_t)addr, sizeof(value));\n    return (udewy_word)value;\n\}\n\n")
     } else if flag =? CH_LOAD_I16 {
-        bb_push_str(out "static udewy_word udewy_load_i16(udewy_word addr) \{ return (udewy_word)(int64_t)(int16_t)udewy_load_u16(addr); \}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_load_i16(udewy_word addr) \{\n    return (udewy_word)(int64_t)(int16_t)udewy_load_u16(addr);\n\}\n\n")
     } else if flag =? CH_LOAD_U32 {
-        bb_push_str(out "static udewy_word udewy_load_u32(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24);\n#else\n    return ((udewy_word)p[0] << 24) | ((udewy_word)p[1] << 16) | ((udewy_word)p[2] << 8) | ((udewy_word)p[3]);\n#endif\n\}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_load_u32(udewy_word addr) \{\n    uint32_t value;\n    memcpy(&value, (const void *)(uintptr_t)addr, sizeof(value));\n    return (udewy_word)value;\n\}\n\n")
     } else if flag =? CH_LOAD_I32 {
-        bb_push_str(out "static udewy_word udewy_load_i32(udewy_word addr) \{ return (udewy_word)(int64_t)(int32_t)udewy_load_u32(addr); \}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_load_i32(udewy_word addr) \{\n    return (udewy_word)(int64_t)(int32_t)udewy_load_u32(addr);\n\}\n\n")
     } else if flag =? CH_LOAD_U64 {
-        bb_push_str(out "static udewy_word udewy_load_u64(udewy_word addr) \{\n    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24) | ((udewy_word)p[4] << 32) | ((udewy_word)p[5] << 40) | ((udewy_word)p[6] << 48) | ((udewy_word)p[7] << 56);\n#else\n    return ((udewy_word)p[0] << 56) | ((udewy_word)p[1] << 48) | ((udewy_word)p[2] << 40) | ((udewy_word)p[3] << 32) | ((udewy_word)p[4] << 24) | ((udewy_word)p[5] << 16) | ((udewy_word)p[6] << 8) | ((udewy_word)p[7]);\n#endif\n\}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_load_u64(udewy_word addr) \{\n    uint64_t value;\n    memcpy(&value, (const void *)(uintptr_t)addr, sizeof(value));\n    return (udewy_word)value;\n\}\n\n")
     } else if flag =? CH_LOAD_I64 {
-        bb_push_str(out "static udewy_word udewy_load_i64(udewy_word addr) \{ return udewy_load_u64(addr); \}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_load_i64(udewy_word addr) \{\n    return udewy_load_u64(addr);\n\}\n\n")
     } else if flag =? CH_STORE_U8 {
-        bb_push_str(out "static udewy_word udewy_store_u8(udewy_word value, udewy_word addr) \{ *(unsigned char *)(uintptr_t)addr = (unsigned char)value; return UINT64_C(0); \}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_store_u8(udewy_word value, udewy_word addr) \{\n    *(unsigned char *)(uintptr_t)addr = (unsigned char)value;\n    return UINT64_C(0);\n\}\n\n")
     } else if flag =? CH_STORE_U16 {
-        bb_push_str(out "static udewy_word udewy_store_u16(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8);\n#else\n    p[0] = (unsigned char)(value >> 8); p[1] = (unsigned char)(value >> 0);\n#endif\n    return UINT64_C(0);\n\}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_store_u16(udewy_word value, udewy_word addr) \{\n    uint16_t narrowed = (uint16_t)value;\n    memcpy((void *)(uintptr_t)addr, &narrowed, sizeof(narrowed));\n    return UINT64_C(0);\n\}\n\n")
     } else if flag =? CH_STORE_U32 {
-        bb_push_str(out "static udewy_word udewy_store_u32(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8); p[2] = (unsigned char)(value >> 16); p[3] = (unsigned char)(value >> 24);\n#else\n    p[0] = (unsigned char)(value >> 24); p[1] = (unsigned char)(value >> 16); p[2] = (unsigned char)(value >> 8); p[3] = (unsigned char)(value >> 0);\n#endif\n    return UINT64_C(0);\n\}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_store_u32(udewy_word value, udewy_word addr) \{\n    uint32_t narrowed = (uint32_t)value;\n    memcpy((void *)(uintptr_t)addr, &narrowed, sizeof(narrowed));\n    return UINT64_C(0);\n\}\n\n")
     } else if flag =? CH_STORE_U64 {
-        bb_push_str(out "static udewy_word udewy_store_u64(udewy_word value, udewy_word addr) \{\n    unsigned char *p = (unsigned char *)(uintptr_t)addr;\n#if defined(UDEWY_LITTLE_ENDIAN)\n    p[0] = (unsigned char)(value >> 0); p[1] = (unsigned char)(value >> 8); p[2] = (unsigned char)(value >> 16); p[3] = (unsigned char)(value >> 24);\n    p[4] = (unsigned char)(value >> 32); p[5] = (unsigned char)(value >> 40); p[6] = (unsigned char)(value >> 48); p[7] = (unsigned char)(value >> 56);\n#else\n    p[0] = (unsigned char)(value >> 56); p[1] = (unsigned char)(value >> 48); p[2] = (unsigned char)(value >> 40); p[3] = (unsigned char)(value >> 32);\n    p[4] = (unsigned char)(value >> 24); p[5] = (unsigned char)(value >> 16); p[6] = (unsigned char)(value >> 8); p[7] = (unsigned char)(value >> 0);\n#endif\n    return UINT64_C(0);\n\}\n\n")
+        bb_push_str(out "static inline udewy_word udewy_store_u64(udewy_word value, udewy_word addr) \{\n    uint64_t narrowed = (uint64_t)value;\n    memcpy((void *)(uintptr_t)addr, &narrowed, sizeof(narrowed));\n    return UINT64_C(0);\n\}\n\n")
     }
     return void
 }
@@ -1435,8 +1437,8 @@ let c_finish_module = ():>int => {
     if (c_helpers and CH_ALLOCA) not=? 0 {
         bb_push_str(out "#if defined(__GNUC__) || defined(__clang__)\n#define UDEWY_ALLOCA(size) __builtin_alloca(size)\n#elif defined(_MSC_VER)\n#include <malloc.h>\n#define UDEWY_ALLOCA(size) _alloca(size)\n#elif defined(__has_include)\n#if __has_include(<alloca.h>)\n#include <alloca.h>\n#define UDEWY_ALLOCA(size) alloca(size)\n#endif\n#endif\n#ifndef UDEWY_ALLOCA\n#error \"udewy C backend requires alloca support from the selected C compiler\"\n#endif\n\n")
     }
-    if (c_helpers and CH_ENDIAN_MASK) not=? 0 {
-        bb_push_str(out "#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && defined(__ORDER_BIG_ENDIAN__)\n#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__\n#define UDEWY_LITTLE_ENDIAN 1\n#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__\n#define UDEWY_BIG_ENDIAN 1\n#else\n#error \"unsupported target byte order for udewy C backend\"\n#endif\n#elif defined(_MSC_VER)\n#define UDEWY_LITTLE_ENDIAN 1\n#elif defined(__LITTLE_ENDIAN__) && !defined(__BIG_ENDIAN__)\n#define UDEWY_LITTLE_ENDIAN 1\n#elif defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__)\n#define UDEWY_BIG_ENDIAN 1\n#else\n#error \"cannot determine target byte order for udewy C backend\"\n#endif\n\n")
+    if (c_helpers and CH_MEMORY_COPY_MASK) not=? 0 {
+        bb_push_str(out "#include <string.h>\n\n")
     }
     c_render_helper(out CH_BOOL)
     c_render_helper(out CH_SIGNED_DIV)

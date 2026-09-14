@@ -80,7 +80,11 @@ _PLATFORM_INTRINSIC_ARITIES = {
     "__f64_bits_to_i64__": 1,
 }
 
-_ENDIAN_HELPERS = {
+# memcpy expresses native-endian, possibly unaligned word access without
+# violating C aliasing rules. The constant sizes become ordinary machine
+# loads/stores even at modest optimization levels; byte-pack expressions
+# otherwise need expensive optimization to recover the same operations.
+_MEMORY_COPY_HELPERS = {
     "load_u16",
     "load_u32",
     "load_u64",
@@ -360,27 +364,6 @@ class CBackend(Backend):
                         changed = True
         return helpers
 
-    def _render_endian_detection(self) -> list[str]:
-        return [
-            "#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && defined(__ORDER_BIG_ENDIAN__)",
-            "#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__",
-            "#define UDEWY_LITTLE_ENDIAN 1",
-            "#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__",
-            "#define UDEWY_BIG_ENDIAN 1",
-            "#else",
-            '#error "unsupported target byte order for udewy C backend"',
-            "#endif",
-            "#elif defined(_MSC_VER)",
-            "#define UDEWY_LITTLE_ENDIAN 1",
-            "#elif defined(__LITTLE_ENDIAN__) && !defined(__BIG_ENDIAN__)",
-            "#define UDEWY_LITTLE_ENDIAN 1",
-            "#elif defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__)",
-            "#define UDEWY_BIG_ENDIAN 1",
-            "#else",
-            '#error "cannot determine target byte order for udewy C backend"',
-            "#endif",
-        ]
-
     def _render_alloca_prelude(self) -> list[str]:
         return [
             "#if defined(__GNUC__) || defined(__clang__)",
@@ -500,118 +483,75 @@ class CBackend(Backend):
                 "}",
             ],
             "load_u8": [
-                "static udewy_word udewy_load_u8(udewy_word addr) {",
+                "static inline udewy_word udewy_load_u8(udewy_word addr) {",
                 "    return (udewy_word)(*(const unsigned char *)(uintptr_t)addr);",
                 "}",
             ],
             "load_i8": [
-                "static udewy_word udewy_load_i8(udewy_word addr) {",
+                "static inline udewy_word udewy_load_i8(udewy_word addr) {",
                 "    return (udewy_word)(int64_t)(int8_t)(*(const unsigned char *)(uintptr_t)addr);",
                 "}",
             ],
             "load_u16": [
-                "static udewy_word udewy_load_u16(udewy_word addr) {",
-                "    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;",
-                "#if defined(UDEWY_LITTLE_ENDIAN)",
-                "    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8);",
-                "#else",
-                "    return ((udewy_word)p[0] << 8) | ((udewy_word)p[1]);",
-                "#endif",
+                "static inline udewy_word udewy_load_u16(udewy_word addr) {",
+                "    uint16_t value;",
+                "    memcpy(&value, (const void *)(uintptr_t)addr, sizeof(value));",
+                "    return (udewy_word)value;",
                 "}",
             ],
             "load_i16": [
-                "static udewy_word udewy_load_i16(udewy_word addr) {",
+                "static inline udewy_word udewy_load_i16(udewy_word addr) {",
                 "    return (udewy_word)(int64_t)(int16_t)udewy_load_u16(addr);",
                 "}",
             ],
             "load_u32": [
-                "static udewy_word udewy_load_u32(udewy_word addr) {",
-                "    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;",
-                "#if defined(UDEWY_LITTLE_ENDIAN)",
-                "    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24);",
-                "#else",
-                "    return ((udewy_word)p[0] << 24) | ((udewy_word)p[1] << 16) | ((udewy_word)p[2] << 8) | ((udewy_word)p[3]);",
-                "#endif",
+                "static inline udewy_word udewy_load_u32(udewy_word addr) {",
+                "    uint32_t value;",
+                "    memcpy(&value, (const void *)(uintptr_t)addr, sizeof(value));",
+                "    return (udewy_word)value;",
                 "}",
             ],
             "load_i32": [
-                "static udewy_word udewy_load_i32(udewy_word addr) {",
+                "static inline udewy_word udewy_load_i32(udewy_word addr) {",
                 "    return (udewy_word)(int64_t)(int32_t)udewy_load_u32(addr);",
                 "}",
             ],
             "load_u64": [
-                "static udewy_word udewy_load_u64(udewy_word addr) {",
-                "    const unsigned char *p = (const unsigned char *)(uintptr_t)addr;",
-                "#if defined(UDEWY_LITTLE_ENDIAN)",
-                "    return ((udewy_word)p[0]) | ((udewy_word)p[1] << 8) | ((udewy_word)p[2] << 16) | ((udewy_word)p[3] << 24) | ((udewy_word)p[4] << 32) | ((udewy_word)p[5] << 40) | ((udewy_word)p[6] << 48) | ((udewy_word)p[7] << 56);",
-                "#else",
-                "    return ((udewy_word)p[0] << 56) | ((udewy_word)p[1] << 48) | ((udewy_word)p[2] << 40) | ((udewy_word)p[3] << 32) | ((udewy_word)p[4] << 24) | ((udewy_word)p[5] << 16) | ((udewy_word)p[6] << 8) | ((udewy_word)p[7]);",
-                "#endif",
+                "static inline udewy_word udewy_load_u64(udewy_word addr) {",
+                "    uint64_t value;",
+                "    memcpy(&value, (const void *)(uintptr_t)addr, sizeof(value));",
+                "    return (udewy_word)value;",
                 "}",
             ],
             "load_i64": [
-                "static udewy_word udewy_load_i64(udewy_word addr) {",
+                "static inline udewy_word udewy_load_i64(udewy_word addr) {",
                 "    return udewy_load_u64(addr);",
                 "}",
             ],
             "store_u8": [
-                "static udewy_word udewy_store_u8(udewy_word value, udewy_word addr) {",
+                "static inline udewy_word udewy_store_u8(udewy_word value, udewy_word addr) {",
                 "    *(unsigned char *)(uintptr_t)addr = (unsigned char)value;",
                 "    return UINT64_C(0);",
                 "}",
             ],
             "store_u16": [
-                "static udewy_word udewy_store_u16(udewy_word value, udewy_word addr) {",
-                "    unsigned char *p = (unsigned char *)(uintptr_t)addr;",
-                "#if defined(UDEWY_LITTLE_ENDIAN)",
-                "    p[0] = (unsigned char)(value >> 0);",
-                "    p[1] = (unsigned char)(value >> 8);",
-                "#else",
-                "    p[0] = (unsigned char)(value >> 8);",
-                "    p[1] = (unsigned char)(value >> 0);",
-                "#endif",
+                "static inline udewy_word udewy_store_u16(udewy_word value, udewy_word addr) {",
+                "    uint16_t narrowed = (uint16_t)value;",
+                "    memcpy((void *)(uintptr_t)addr, &narrowed, sizeof(narrowed));",
                 "    return UINT64_C(0);",
                 "}",
             ],
             "store_u32": [
-                "static udewy_word udewy_store_u32(udewy_word value, udewy_word addr) {",
-                "    unsigned char *p = (unsigned char *)(uintptr_t)addr;",
-                "#if defined(UDEWY_LITTLE_ENDIAN)",
-                "    p[0] = (unsigned char)(value >> 0);",
-                "    p[1] = (unsigned char)(value >> 8);",
-                "    p[2] = (unsigned char)(value >> 16);",
-                "    p[3] = (unsigned char)(value >> 24);",
-                "#else",
-                "    p[0] = (unsigned char)(value >> 24);",
-                "    p[1] = (unsigned char)(value >> 16);",
-                "    p[2] = (unsigned char)(value >> 8);",
-                "    p[3] = (unsigned char)(value >> 0);",
-                "#endif",
+                "static inline udewy_word udewy_store_u32(udewy_word value, udewy_word addr) {",
+                "    uint32_t narrowed = (uint32_t)value;",
+                "    memcpy((void *)(uintptr_t)addr, &narrowed, sizeof(narrowed));",
                 "    return UINT64_C(0);",
                 "}",
             ],
             "store_u64": [
-                "static udewy_word udewy_store_u64(udewy_word value, udewy_word addr) {",
-                "    unsigned char *p = (unsigned char *)(uintptr_t)addr;",
-                "#if defined(UDEWY_LITTLE_ENDIAN)",
-                "    p[0] = (unsigned char)(value >> 0);",
-                "    p[1] = (unsigned char)(value >> 8);",
-                "    p[2] = (unsigned char)(value >> 16);",
-                "    p[3] = (unsigned char)(value >> 24);",
-                "    p[4] = (unsigned char)(value >> 32);",
-                "    p[5] = (unsigned char)(value >> 40);",
-                "    p[6] = (unsigned char)(value >> 48);",
-                "    p[7] = (unsigned char)(value >> 56);",
-                "#else",
-                "    p[0] = (unsigned char)(value >> 56);",
-                "    p[1] = (unsigned char)(value >> 48);",
-                "    p[2] = (unsigned char)(value >> 40);",
-                "    p[3] = (unsigned char)(value >> 32);",
-                "    p[4] = (unsigned char)(value >> 24);",
-                "    p[5] = (unsigned char)(value >> 16);",
-                "    p[6] = (unsigned char)(value >> 8);",
-                "    p[7] = (unsigned char)(value >> 0);",
-                "#endif",
+                "static inline udewy_word udewy_store_u64(udewy_word value, udewy_word addr) {",
+                "    uint64_t narrowed = (uint64_t)value;",
+                "    memcpy((void *)(uintptr_t)addr, &narrowed, sizeof(narrowed));",
                 "    return UINT64_C(0);",
                 "}",
             ],
@@ -650,8 +590,8 @@ class CBackend(Backend):
         if "alloca" in helpers:
             lines.extend(self._render_alloca_prelude())
             lines.append("")
-        if helpers & _ENDIAN_HELPERS:
-            lines.extend(self._render_endian_detection())
+        if helpers & _MEMORY_COPY_HELPERS:
+            lines.append("#include <string.h>")
             lines.append("")
         for helper in ordered_helpers:
             if helper in helpers:

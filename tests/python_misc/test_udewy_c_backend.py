@@ -66,6 +66,20 @@ def cc_available() -> bool:
     return which("cc") is not None
 
 
+@pytest.mark.parametrize('optimization', ['-O0', '-O1', '-O2'])
+@pytest.mark.skipif(not cc_available(), reason='C compiler unavailable')
+def test_unaligned_word_helpers_at_each_optimization_level(tmp_path, optimization):
+    from tests.python_misc.test_udewy_bootstrap_parity import SMOKE_SRC
+    code = parse_udewy(SMOKE_SRC, get_backend('c'))
+    source = tmp_path / 'unaligned.c'
+    source.write_text(code)
+    binary = tmp_path / 'unaligned'
+    subprocess.run(['cc', '-std=c99', optimization, str(source), '-o', str(binary)],
+                   check=True, capture_output=True, text=True, timeout=30)
+    result = subprocess.run([binary], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def compile_and_run(src: str, name: str) -> tuple[str, int | None]:
     backend = get_backend("c")
     code = parse_udewy(src, backend)
@@ -123,12 +137,13 @@ def test_c_backend_emits_helpers_on_demand() -> None:
     assert "#define UDEWY_ALLOCA(size)" in code
     assert "UDEWY_ALLOCA((size_t)" in code
     assert "static udewy_word udewy_alloca_bytes" not in code
-    assert "static udewy_word udewy_load_u64(udewy_word addr)" in code
-    assert "static udewy_word udewy_store_u64(udewy_word value, udewy_word addr)" in code
+    assert "static inline udewy_word udewy_load_u64(udewy_word addr)" in code
+    assert "static inline udewy_word udewy_store_u64(udewy_word value, udewy_word addr)" in code
     assert "_ud_v" not in code
     assert "_ud_saved" not in code
     assert "_ud_tmp" not in code
-    assert "memcpy" not in code
+    assert "#include <string.h>" in code
+    assert "memcpy" in code
 
 
 def test_c_import_metadata_is_preserved() -> None:

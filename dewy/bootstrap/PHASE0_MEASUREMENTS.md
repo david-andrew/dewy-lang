@@ -466,3 +466,27 @@ With all other current changes held fixed, outlining reduces t0 output from
 5.16/5.45 s inline and 4.94/5.42 s outlined; the separate C toolchain
 experiment overlapped, so no close latency improvement is claimed.
 Artifacts: `array-release-{gates,t0}.log` and retained emitted programs.
+
+## C word helpers and optimization-level tradeoff
+
+Compiling the pinned 164 MB C file with GCC `-O1 -flto=8` takes **95.96 s**
+and 2,550,748 KiB peak process RSS, but the resulting compiler times out at
+180 seconds compiling t0. Disassembly shows eight separate byte loads and
+shifts for a word read, plus helper calls. The normal backend remains `-O2`.
+
+Both µDewy C emitters now use `static inline` fixed-size `memcpy` helpers for
+wide memory operations. They preserve native byte order, unaligned access,
+signed extension, and C aliasing rules. No µDewy semantics or default C
+optimization level changed. Expected-result checks cover `-O0`, `-O1`, and
+`-O2`, unaligned accesses with neighboring sentinel bytes, signed loads,
+static function/object words, and the hosted/bootstrap C implementations.
+The selected group passes 32 checks; the remaining helper-spelling assertion
+passes after updating it to the new generated C representation.
+
+Replacing only those helpers in the same pinned C file produces a compiler
+in **95.78 s** at `-O1`, with 2,969,484 KiB peak RSS. It compiles pinned t0 in
+108.84 s (3,184,544 KiB peak process RSS), improving on the timeout but still
+too slow to select `-O1` as the default. Small validation/measurement jobs
+overlapped these experiments; none establishes a full-build acceptance time.
+Artifacts: `c-toolchain/{memory-snapshot.json,gcc-memory-o1*,gcc-o1*,
+memory-helper-*}`, `native-gcc-o1-t0`, and `native-gcc-memory-o1-t0`.

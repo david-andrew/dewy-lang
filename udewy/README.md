@@ -1916,7 +1916,7 @@ This backend is intended as a portable code-generation target, not as a promise 
 - udewy booleans still use `true = 0xFFFF_FFFF_FFFF_FFFF` and `false = 0`
 - Ordinary strings and based strings keep the normal udewy layout: one 8-byte byte-length word immediately before the data pointer
 
-The generated C helper layer uses direct `unsigned char *` access for `u8` loads/stores and bytewise helpers for wider loads/stores. Wider operations use the target's native byte order, detected by the generated C at compile time. This matches the native-backend model: raw memory is target memory, not a fixed little-endian serialization format.
+The generated C helper layer uses direct `unsigned char *` access for `u8` loads/stores and fixed-size `memcpy` helpers for wider loads/stores. The latter permit unaligned access without C aliasing assumptions and use the target's native byte order automatically. This matches the native-backend model: raw memory is target memory, not a fixed little-endian serialization format. Constant-size copies let C compilers recover ordinary word loads/stores without first optimizing byte-packing expressions.
 
 ## F.2.1 Function Body Lowering
 

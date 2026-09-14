@@ -47,6 +47,16 @@ let main = ():>int => {
     if __signed_shr__(0xFFFF_FFFF_FFFF_FFF0 2) not=? 0xFFFF_FFFF_FFFF_FFFC {
         return 5
     }
+    # Word operations use native byte order and accept unaligned addresses.
+    __store_u8__(77 tmp)
+    __store_u8__(88 tmp + 9)
+    __store_u64__(0xFEDCBA9876543210 tmp + 1)
+    if __load_u64__(tmp + 1) not=? 0xFEDCBA9876543210 { return 6 }
+    if __load_u8__(tmp) not=? 77 or __load_u8__(tmp + 9) not=? 88 { return 7 }
+    __store_u16__(0xFF80 tmp + 1)
+    if __load_i16__(tmp + 1) not=? -128 { return 8 }
+    __store_u32__(0x80000001 tmp + 1)
+    if __load_i32__(tmp + 1) not=? -2147483647 { return 9 }
     return 0
 }
 """
