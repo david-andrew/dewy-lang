@@ -2675,10 +2675,14 @@ class _ArrayLowering(_ArraySharing):
         elif isinstance(element_type, ty.ObjectType) and move:
             prelude, copied = [], source_value   # the handle moves with its members
         elif isinstance(element_type, ty.ObjectType):
+            # The buffer may be frame-backed, but its independently owned
+            # element handles use the array-element release protocol. That
+            # protocol returns record roots to the arena; storing alloca
+            # roots here would put expired frame addresses on its free list.
             prelude, copied = self._clone_object_value(
                 replace(source_value, type='int64'),
                 element_type,
-                arena=arena,
+                arena=arena or self._has_arena(),
             )
         elif self._is_optional_element(element_type) and self._has_arena() and not move:
             return self._copy_optional_element(source_value, target_address, element_type, loc)

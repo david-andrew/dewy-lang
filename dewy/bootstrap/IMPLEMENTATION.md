@@ -118,6 +118,14 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   cell, not a record address. Regressions cover present, absent, and missing
   entries and mutation independence on both output backends.
 
+- Hosted copies of record elements use arena storage even when their fixed
+  array buffer is on the stack. Array cleanup owns and releases those record
+  handles independently of the buffer; putting frame addresses into that
+  protocol corrupted later allocations. A composed borrowed-array/place
+  regression catches the failure that standalone fixture exits concealed.
+  Frame-backed element roots need a distinct proven cleanup plan before they
+  can safely use the stack again.
+
 - Checked function defaults are children of native HIR function literals.
   Proof discharge, helper reachability, representation selection, and nested
   function discovery now traverse them. Native execution accepts refined
