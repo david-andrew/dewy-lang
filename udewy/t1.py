@@ -153,6 +153,12 @@ SYMBOL_TOKENS: list[tuple[str, Kind]] = [
 
 ]
 
+# Preserve longest-match order within each initial character. Punctuation
+# need not probe every unrelated operator at every occurrence in generated
+# source; contextual cases below still run before this ordinary symbol scan.
+SYMBOL_PREFIXES: dict[str, list[tuple[str, Kind]]] = {}
+for _text, _kind in SYMBOL_TOKENS:
+    SYMBOL_PREFIXES.setdefault(_text[0], []).append((_text, _kind))
 
 @dataclass
 class Token:
@@ -357,7 +363,7 @@ def tokenize(src:str)->list[Token]:
 
         # general case of matching a symbol token
         matched_symbol = False
-        for text, kind in SYMBOL_TOKENS:
+        for text, kind in SYMBOL_PREFIXES.get(src[i], ()):
             if src.startswith(text, i):
                 toks.append(Token(None, i, kind))
                 i += len(text)

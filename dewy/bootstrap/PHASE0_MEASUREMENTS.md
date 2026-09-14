@@ -46,6 +46,7 @@ location markers, native ordinary compilation does not.
 | Native baseline | 61.70 s | — | — | — | — | 941,620 KiB | 5,984,229 |
 | Hosted representation query cache | 25.21 s | 15.11 s | 3.67 s | 0.87 s | 4.60 s | 275,424 KiB | 5,675,291 |
 | Hosted traversal batch | 23.56 s | 13.40 s | 3.47 s | 0.86 s | 5.01 s | 273,076 KiB | 5,675,288 |
+| Hosted lexer batch | 21.20 s | 10.53 s | 4.16 s | 0.92 s | 4.67 s | 273,148 KiB | 5,675,273 |
 
 These are single samples, with other work on separate CPUs; use repeated
 samples for close comparisons. The nine-byte output difference is entirely
@@ -90,3 +91,33 @@ checks descendant copies through nested records, arrays and optional cells;
 128 repeated scopes retain zero arena bytes. Thirty-nine existing record,
 brand and reclamation cases also pass on both output routes. These are kernel
 results, not yet a measurement of the full compiler's new generated size.
+
+## Lexer copying and next integration seed
+
+Sampling the full hosted build exposed a source suffix copy for every token
+class probe. Sharing that suffix across probes, selecting longest matches in
+one pass, and using offsets for inner delimiter tests reduces tokenization of
+`bootstrap/backend/udewy/lower.dewy` from 44.83 to 3.83 seconds. Both versions
+produce exactly the same 70,656 token kinds, texts, spans and indices (combined
+SHA-256 `ce923f4d2e8bd993c82d280c10a68695ebe21c8ef8a728cc5dc2834e28fdaedf`).
+The µDewy tokenizer also groups ordinary symbol probes by initial character,
+retaining longest-match order and contextual token handling. Forty-nine lexer,
+literal-boundary and µDewy precedence/type tests pass. These changes preserve
+µDewy's conditional-only short-circuit rule.
+
+A full hosted C build of revision `8116d279` successfully produced the next
+native test compiler: 113.7 MB of µDewy and 215.3 MB of C. Its initial sampling
+profiler substantially perturbed checking and interrupted the measurement
+parent; the compiler child completed successfully. This is an integration
+artifact, **not a clean full-build timing**. Recorded phase times include
+198.5 seconds checking, 103.2 lowering, 17.4 emission, and 428.6 backend; maximum
+process RSS was 6,735,356 KiB. The build bypassed ccache and used GCC with
+eight LTO jobs.
+
+That hosted-built seed compiles the t0 module in 71.71 seconds, producing
+4,583,067 bytes of µDewy (23% less than the verified native baseline), with
+maximum process RSS of 3,571,432 KiB. The seed's storage behavior differs from
+the native-built baseline, so this does not establish a runtime improvement
+for the helper batch: generation provenance must accompany native timings.
+It has not yet passed a new native fixed-point verification. The sub-minute
+full-build target remains open.

@@ -327,7 +327,7 @@ class Whitespace(Token[WhitespaceOrCommentContexts]):
         """white space is any sequence of whitespace characters"""
         i = 0
         while i < len(src) and src[i] in whitespace:
-            if src[i] == '\r' and not src[i+1:].startswith('\n'):
+            if src[i] == '\r' and not src.startswith('\n', i+1):
                 Whitespace.warning_lone_carriage_return(src, i, ctx)
             i += 1
         return i or None
@@ -374,10 +374,10 @@ class BlockComment(Token[WhitespaceOrCommentContexts]):
         i = 0
 
         while i < len(src):
-            if src[i:].startswith(block_comment_start):
+            if src.startswith(block_comment_start, i):
                 openers.append(Span(i, i + len(block_comment_start)))
                 i += len(block_comment_start)
-            elif src[i:].startswith(block_comment_end):
+            elif src.startswith(block_comment_end, i):
                 openers.pop()
                 i += len(block_comment_end)
 
@@ -679,7 +679,7 @@ class StringQuoteOpener(Token[GeneralBodyContexts]):
         # match opening quotes
         i = 1
         quote = src[0]
-        while src[i:].startswith(quote):
+        while src.startswith(quote, i):
             i += 1
         
         # if total is an even, this indicates empty string, so only eat the first half
@@ -738,8 +738,8 @@ class StringChars(Token[StringBody|TemplateStringBody]):
         i = 0
         while (
             i < len(src)
-            and (closing_quote is None or not src[i:].startswith(closing_quote))    # closing delim of the string 
-            and not src[i:].startswith(interpolation_block_opener)                  # start an interpolation block
+            and (closing_quote is None or not src.startswith(closing_quote, i))    # closing delim of the string
+            and not src.startswith(interpolation_block_opener, i)                  # start an interpolation block
             and src[i] != '\\'                                                      # start an escape sequence
         ):
             i += 1
@@ -892,8 +892,8 @@ class RawStringChars(Token[RawStringBody]):
         i = 0
         while (
             i < len(src)
-            and not (isinstance(ctx.opening_quote, RawStringQuoteOpener) and src[i:].startswith(ctx.opening_quote.src[1:]))  # matches just the quote part of the opener without the `r` prefix
-            and not (isinstance(ctx.opening_quote, RawHeredocStringOpener) and src[i:].startswith(ctx.opening_quote.get_delim()))
+            and not (isinstance(ctx.opening_quote, RawStringQuoteOpener) and src.startswith(ctx.opening_quote.src[1:], i))  # matches just the quote part of the opener without the `r` prefix
+            and not (isinstance(ctx.opening_quote, RawHeredocStringOpener) and src.startswith(ctx.opening_quote.get_delim(), i))
         ):
             i += 1
         
@@ -972,7 +972,7 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
 
         # must have ended the delimiter with a matching quote
         quote = src[1]
-        if not src[i:].startswith(quote):
+        if not src.startswith(quote, i):
             HeredocStringOpener.error_incomplete_heredoc_delimiter(src, ctx, i)
 
         # ensure delimiter doesn't start or end with space
@@ -992,7 +992,7 @@ class HeredocStringOpener(Token[GeneralBodyContexts]):
         offset = ctx.current_tokenization_position()
         quote = src[1]
         wrong_quote = '"' if quote == "'" else "'"
-        wrong_quoted = src[i:].startswith(wrong_quote)
+        wrong_quoted = src.startswith(wrong_quote, i)
         delim = src[2:i]
         example = f"#{quote}{delim}{quote}"
         error = Error(
@@ -1391,15 +1391,19 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
         # try to eat all allowed tokens at the current position
         ctx = ctx_stack[-1]
         allowed_tokens = get_allowed_tokens(type(ctx))
-        matches = [(token_cls.eat(src[i:], ctx), token_cls) for token_cls in allowed_tokens]                
-
-        # filter out matches that didn't eat anything
-        matches = [(length, token_cls) for length, token_cls in matches if length is not None]
-
-        # filter matches shorter than the longest match
-        matches = sorted(matches, key=lambda x: x[0], reverse=True)
-        longest_match_length = matches[0][0] if len(matches) > 0 else 0
-        matches = [match for match in matches if match[0] == longest_match_length]
+        # All probes see the same suffix. Copying it once per token class
+        # dominated large-module parsing, especially for Unicode source.
+        remaining = src[i:]
+        matches: list[tuple[int, type[Token]]] = []
+        longest_match_length = 0
+        for token_cls in allowed_tokens:
+            length = token_cls.eat(remaining, ctx)
+            if length is None or length < longest_match_length:
+                continue
+            if length > longest_match_length:
+                matches.clear()
+                longest_match_length = length
+            matches.append((length, token_cls))
 
         # filter matches by precedence if any precedence rules apply
         match_types = [match[1] for match in matches]
