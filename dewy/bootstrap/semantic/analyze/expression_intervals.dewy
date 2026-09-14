@@ -38,12 +38,16 @@ forget = (@snapshot:Snapshot binding:addr):>void => {
     loop [id sequence] in snapshot.sequences {if sequence =? binding {removed.push(id)}}
     loop id in removed {if id in? snapshot.sequences {snapshot.sequences.pop(id);}}
 }
-stable = (id:addr snapshot:Snapshot nodes:array<hir.AST>):>bool => {
+stable = (id:addr snapshot:Snapshot nodes:array<hir.AST> places:bool=false):>bool => {
     let pending:array<addr>=[id]
     loop pending.length >? 0 {
         let current=pending.pop
         let node=hir.node_at(nodes current)
         if node is? hir.FunctionLiteral continue
+        # A stored call result may describe a place's value after the call.
+        # Ordinary expression proofs still require its original snapshot:
+        # xs[append(@xs value)] indexes the array evaluated before append.
+        if places and node is? hir.Place continue
         if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and current not in? snapshot.terms return false
         loop child in hir.children(node) {pending.push(child)}
     }

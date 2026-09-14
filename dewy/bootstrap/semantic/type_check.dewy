@@ -119,11 +119,13 @@ resolve_scope_terms = (annotation:addr id:addr context:contexts.Context @session
     loop p in node.propositions {
         let term_id=p.term_id
         if p.term isnt? none and term_id is? none {
-            let found=lookup(p.term context session)
+            let route=facts.named_route(p.term)
+            let found=lookup(route.root context session)
             if found is? none return contexts.problem(id 'fact names an unknown binding' "no value binding `{p.term}` is in scope" context session)
             let binding=bindings.binding_at(session.registry found)
             if binding.kind not in? ['value' 'param'] return contexts.problem(id 'fact names an unknown binding' "`{p.term}` does not name a value or parameter" context session)
-            term_id=found
+            term_id=bindings.extend_route(found route.fields session.types @session.registry)
+            if term_id is? none return contexts.problem(id 'fact names an unknown field route' p.term context session)
         }
         if facts.parameter(p) isnt? none and p.subject_id is? none return contexts.unsupported(id 'a declaration fact about another binding' context session)
         propositions.push(facts.Proposition[p.subject p.op p.value p.projection p.term term_id p.term_projection p.tested_type p.when p.subject_id p.axiom])
@@ -203,6 +205,15 @@ subject_of = (id:addr name:string subject:string fields:bool nodes:array<tokens.
     }
     return none
 }
+named_field_route = (id:addr context:contexts.Context session:contexts.Session):>string? => {
+    let direct=source_views.identifier(id context session)
+    if direct isnt? none return direct
+    let node=contexts.node_at(id context session)
+    if node isnt? parser.BinOp or not source_views.is_operator(node.op '.' context session) return none
+    let parent=named_field_route(node.left context session)
+    let field=source_views.identifier(node.right context session)
+    return if parent is? none or field is? none none else "{parent}.{field}"
+}
 comparison = (left:addr right:addr op:facts.Operator name:string subject:string fields:bool context:contexts.Context @session:contexts.Session):>facts.Proposition|none|Error => {
     let target = source_subject(left name subject fields context session)
     let bound = right
@@ -222,7 +233,7 @@ comparison = (left:addr right:addr op:facts.Operator name:string subject:string 
     let bound_projection:facts.Projection = 'value'
     let node = contexts.node_at(bound context session)
     if node is? parser.BinOp and source_views.is_operator(node.op '.' context session) and source_views.identifier(node.right context session) =? 'length' {
-        term = source_views.identifier(node.left context session)
+        term = named_field_route(node.left context session)
         bound_projection = 'length'
     }
     if term isnt? none and term not=? name and term not=? 'length' {

@@ -319,6 +319,16 @@ the native fixed point is not grounds for retiring them yet.
   hosted suite passes 1,773 tests with 10 skips. General refined dictionary
   value arithmetic still has proof gaps shared with the hosted compiler.
 
+- Dependent length terms can name statically known record fields, including
+  nested routes such as `table.inner.entries.length`. Parameters, results,
+  and local annotations retain the root and complete field path; a write to
+  that path or an enclosing record invalidates its evidence. Exact-length
+  reads keep their sequence identity alongside the known length. A returned
+  index may refer to an updated place parameter, while a by-value argument
+  remains a snapshot; later argument writes cannot rebind that promise to
+  replacement storage. This uses the existing refinement syntax and record
+  routes, without adding a general dependent-expression evaluator.
+
 - Local refinement annotations resolve their named terms to lexical binding
   ids, matching hosted declaration checking. This lets an index bound name
   its array while keeping a shadowed array distinct. All 30 source comparison

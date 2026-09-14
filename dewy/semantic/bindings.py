@@ -187,6 +187,24 @@ def _unwrap_fact_route(node: hir.AST) -> hir.AST:
     return node
 
 
+def field_route(node: hir.AST, fields: tuple[str, ...]) -> hir.AST | None:
+    """Resolve a pure, statically known field route without evaluating it.
+
+    Refinement terms use this when rebinding a parameter's nested length to
+    its actual argument. An optional or otherwise ambiguous receiver cannot
+    establish that route without a narrowing at the source expression.
+    """
+    for name in fields:
+        record = ty.unfold(ty.strip_refinement(node.type))
+        if not isinstance(record, ty.ObjectType) or (record.brand is not None and not ty.user_branded(record)):
+            return None
+        member = record.field(name)
+        if member is None:
+            return None
+        node = hir.MemberAccess(node.loc, member.type, node, name, member.mutable)
+    return node
+
+
 def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = True) -> int | None:
     """The fact id of a named sequence or its pure member-access route.
 

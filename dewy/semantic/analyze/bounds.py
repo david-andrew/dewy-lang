@@ -168,20 +168,30 @@ def _call_result_refinements(node: hir.AST) -> list[ty.RefinedType]:
     return []
 
 
-def _call_argument(node: hir.AST, name: str) -> hir.AST | None:
-    """The argument a call passes for the parameter `name`, positionally or by keyword."""
+def _call_argument(node: hir.AST, name: str, queries: predicate_effects.BindingQueries) -> hir.AST | None:
+    """Rebind a contract's parameter/field route to the call's argument."""
+    root, *fields = name.split('.')
     function_type = _call_function_type(node)
     call = _strip_casts(node)
     if function_type is None or not isinstance(call, hir.FunctionCall):
         return None
-    if name in call.kw_args:
-        argument = call.kw_args[name]
-        return argument.target if isinstance(argument, hir.Place) else argument
-    for index, param in enumerate(function_type.pos_or_kw):
-        if param.name == name:
-            argument = call.pos_args[index] if index < len(call.pos_args) else None
-            return argument.target if isinstance(argument, hir.Place) else argument
-    return None
+    argument = call.kw_args.get(root)
+    if argument is None:
+        for index, param in enumerate(function_type.pos_or_kw):
+            if param.name == root:
+                argument = call.pos_args[index] if index < len(call.pos_args) else None
+                break
+    if argument is None:
+        return None
+    if isinstance(argument, hir.Place):
+        # A place contract describes the caller's value after the call.
+        argument = argument.target
+    elif queries.read_bindings(argument) & queries.mutated_bindings(call):
+        # A value argument is a snapshot. Once this invocation writes its
+        # source, the result's promise cannot describe that source's current
+        # value. This also covers mutation during later argument evaluation.
+        return None
+    return sb.field_route(argument, tuple(fields))
 
 
 def _object_of(type_: ty.Type) -> ty.ObjectType | None:
@@ -535,10 +545,15 @@ def _sequence_of(node: hir.AST) -> hir.AST | None:
 
 
 def _runtime_array_id(node: hir.AST, registry: sb.BindingRegistry | None = None) -> int | None:
-    """The fact id of a runtime-length array or string expression (binding or member route)."""
+    """The sequence's fact identity, even when this read has a known length.
+
+    An exact read type may describe a field whose store type is dynamic;
+    its identity must still agree with contracts naming that field.
+    """
     node = _strip_casts(node)
     plain = ty.unfold(ty.strip_refinement(node.type))
-    if not ((isinstance(plain, ty.ArrayType) and plain.length is None) or _is_runtime_string(plain)):
+    if not (isinstance(plain, (ty.ArrayType, ty.StringType, ty.StringLiteralType))
+            or plain in ('string', 'grapheme', 'char')):
         return None
     if isinstance(node, hir.ExpressedIdentifier):
         return node.binding_id
@@ -2392,9 +2407,10 @@ class _BoundsValidator:
             return interval if interval is not None else self._length_default()
         if isinstance(node, hir.Index):
             self._eval(node.array, state, validate=validate)
+            length = self._length_interval(node.array, state)
             interval = self._eval(node.index, state, validate=validate)
             if validate:
-                self._validate_index(node, interval, state)
+                self._validate_index(node, interval, state, length_interval=length)
             if isinstance(node.type, ty.RefinedType):
                 return self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
             return None
@@ -2405,9 +2421,10 @@ class _BoundsValidator:
             return None
         if isinstance(node, hir.StringIndex):
             self._eval(node.string, state, validate=validate)
+            length = self._length_interval(node.string, state)
             interval = self._eval(node.index, state, validate=validate)
             if validate:
-                self._validate_index(node, interval, state)
+                self._validate_index(node, interval, state, length_interval=length)
             return None
         if isinstance(node, hir.StringSlice):
             self._eval(node.string, state, validate=validate)
@@ -3207,7 +3224,7 @@ class _BoundsValidator:
             for proposition in refined.propositions:
                 if proposition.term is None or proposition.subject != subject or proposition.field is not None:
                     continue
-                argument = _call_argument(node, proposition.term)
+                argument = _call_argument(node, proposition.term, self.predicate_bindings)
                 if argument is None:
                     continue
                 argument = _strip_casts(argument)
@@ -3282,7 +3299,7 @@ class _BoundsValidator:
                 if (proposition.term is None or proposition.subject != 'self'
                         or proposition.term_of != 'length'):
                     continue
-                argument = _call_argument(value, proposition.term)
+                argument = _call_argument(value, proposition.term, self.predicate_bindings)
                 known = self._length_interval(argument, state) if argument is not None else None
                 comparison = {'<?': '__lt__', '<=?': '__le__', '>?': '__gt__', '>=?': '__ge__', '=?': '__eq__'}.get(proposition.op)
                 if known is not None and comparison is not None:
@@ -3370,7 +3387,7 @@ class _BoundsValidator:
             for proposition in refined.propositions:
                 if proposition.param is None or proposition.type_ is not None or proposition.when not in (truth, None):
                     continue
-                subject_argument = _call_argument(call, proposition.param)
+                subject_argument = _call_argument(call, proposition.param, self.predicate_bindings)
                 if subject_argument is None:
                     continue
                 if isinstance(subject_argument, hir.Place):
@@ -3401,7 +3418,7 @@ class _BoundsValidator:
                         current = _known_interval(state, subject_term, self.max_length) if subject_term < 0 else self._binding_interval(state, subject_term)
                         state[subject_term] = current.intersect(constraint)
                     continue
-                bound_argument = _call_argument(call, proposition.term)
+                bound_argument = _call_argument(call, proposition.term, self.predicate_bindings)
                 if bound_argument is None:
                     continue
                 bound_argument = _strip_casts(bound_argument)
@@ -3783,6 +3800,8 @@ class _BoundsValidator:
         node: hir.Index | hir.StringIndex,
         interval: Interval | None,
         state: State,
+        *,
+        length_interval: Interval | None,
     ) -> None:
         if isinstance(node, hir.Index):
             length = (
@@ -3807,30 +3826,35 @@ class _BoundsValidator:
             if interval.lower == interval.upper:
                 node.constant_index = interval.lower
             return
-        if length is None:
+        sequence = node.array if isinstance(node, hir.Index) else node.string
+        symbolic = not (self.predicate_bindings.read_bindings(sequence)
+                        & self.predicate_bindings.mutated_bindings(index))
+        if length is None or symbolic:
             # Runtime-length array or string: prove `0 <= index` from the
             # interval and `index < length` from either a proven minimum
             # length or an `index <? xs.length` fact about this index binding.
-            sequence = node.array if isinstance(node, hir.Index) else node.string
             array_id = _runtime_array_id(sequence, self.registry)
             nonnegative = interval is not None and interval.lower is not None and interval.lower >= 0
             if array_id is not None and nonnegative:
                 # the proven minimum: the length fact, tightened by a field's declared length bound
-                minimum_length = (self._length_interval(sequence, state) or self._length_default()).lower or 0
+                # The sequence was evaluated first. Index evaluation may
+                # replace it, so retain that observed length and use current
+                # route relationships only when its root survived.
+                minimum_length = (length_interval or self._length_default()).lower or 0
                 if interval.upper is not None and interval.upper < minimum_length:
                     if interval.lower == interval.upper:
                         node.constant_index = interval.lower
                     return
                 index_id = self._binding_id(index)
-                if index_id is not None and _index_fact_key(index_id, array_id) in state:
+                if symbolic and index_id is not None and _index_fact_key(index_id, array_id) in state:
                     return
                 # `xs[xs.length - k]` is in bounds when the length is at least k
                 offset = self._length_offset_index(index, array_id)
-                if offset is not None and minimum_length >= offset:
+                if symbolic and offset is not None and minimum_length >= offset:
                     return
                 # `xs[k - 1]` under `k <? xs.length`, `xs[i + 1]` under `i + 1 <? xs.length`,
                 # a call's refined result: what the order facts establish
-                if self._bounded_by_length(index, array_id, 1, state):
+                if symbolic and self._bounded_by_length(index, array_id, 1, state):
                     return
         known = (
             'unknown'

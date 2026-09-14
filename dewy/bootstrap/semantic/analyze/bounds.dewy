@@ -69,7 +69,12 @@ fail = (id:addr title:string message:string @checker:Checker hint:string=''):>vo
     if checker.problem isnt? none return
     checker.problem=Error[srcfile=checker.srcfile title=title pointers=[Pointer[span=node_at(id checker).loc message=message]] hint=hint]
 }
-record = (id:addr state:facts.State @checker:Checker):>void => {
+record = (id:addr @state:facts.State @checker:Checker):>void => {
+    let exact=intervals.exact_length(node_at(id checker).value_type checker.data.env)
+    if exact isnt? none {
+        let sequence=terms.sequence_id(id checker.data.env @checker.data.registry)
+        if sequence isnt? none {facts.set_value(@state facts.Term[sequence 'length'] ranges.exact(exact))}
+    }
     intervals.record(@checker.data.snapshot id state checker.data.env @checker.data.registry)
 }
 refine = (state:facts.State id:addr truth:bool @checker:Checker):>facts.State? => predicates.refine_with_context(state id truth checker.path_context @checker.data)
@@ -348,7 +353,7 @@ evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => 
             loop required in previous.get(id []) {attach_result_obligation(node.value required @checker)}
         }
         evaluate(node.value @state @checker validate)
-        record(id state @checker)
+        record(id @state @checker)
         checker.result_obligations=previous
     } else {evaluate_inner(id @state @checker validate)}
     if not validate or checker.problem isnt? none or node is? hir.Block|hir.Flow|hir.Obligation return
@@ -390,7 +395,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         }
         let merged=joined(paths checker)
         if merged isnt? none {state=merged}
-        record(id state @checker)
+        record(id @state @checker)
         return
     }
     if node is? hir.Place {
@@ -413,7 +418,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
                 return
             }
         }
-        if function is? hir.ArrayMethod {array_call(id node function @state @checker validate) record(id state @checker) return}
+        if function is? hir.ArrayMethod {array_call(id node function @state @checker validate) record(id @state @checker) return}
         evaluate(node.func @state @checker validate)
         loop argument in node.pos_args {evaluate(argument @state @checker validate)}
         loop argument in node.kw_args.values {evaluate(argument @state @checker validate)}
@@ -423,7 +428,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         }
         let applied=predicates.apply_call(state id none @checker.data)
         if applied isnt? none {state=applied}
-        record(id state @checker)
+        record(id @state @checker)
         let name=if node.integer_operation isnt? none node.integer_operation else if function is? hir.ExpressedIdentifier function.name else ''
         if validate and name in? ['__floordiv__' '__mod__'] and node.integer_operation is? none and node.pos_args.length =? 2 {
             let divisor=node.pos_args[1]
@@ -456,7 +461,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
                 }
             }
         }
-        record(id state @checker)
+        record(id @state @checker)
         return
     }
     if node is? hir.Assign|hir.Declare|hir.Assert|hir.Return|hir.Break|hir.Continue {
@@ -499,7 +504,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
             }
         }
     }
-    record(id state @checker)
+    record(id @state @checker)
     if not validate return
     if node is? hir.Index|hir.StringIndex {
         let sequence=if node is? hir.Index node.array else node.string

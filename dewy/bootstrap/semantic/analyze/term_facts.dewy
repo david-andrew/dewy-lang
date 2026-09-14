@@ -27,8 +27,11 @@ sequence_id = (id:addr env:values.Environment @registry:bindings.Registry):>addr
     # Refinements constrain the sequence without changing its storage route.
     # Keep the route so parameter length contracts survive a constructor/call.
     let type = types.node_at(env.types types.unfold(types.strip_refinement(node.value_type env.types) env.types))
-    let runtime = (type is? types.ArrayType | types.StringType and type.length is? none) or types.is_primitive(type 'string')
-    if not runtime return none
+    # Knowing a length does not erase a value's identity. A field read may
+    # have an exact length here while a dependent contract names the same
+    # field through its dynamic store type.
+    let sequence = type is? types.ArrayType | types.StringType | types.StringLiteralType or types.is_primitive(type 'string') or types.is_primitive(type 'grapheme') or types.is_primitive(type 'char')
+    if not sequence return none
     return bindings.array_route_id(current env.nodes @registry)
 }
 binding_term = (id:addr env:values.Environment @registry:bindings.Registry):>facts.Term? => {
@@ -150,6 +153,14 @@ call_facts = (id:addr subject:string env:values.Environment @registry:bindings.R
     loop refined in expressions.call_result_refinements(id env.nodes env.types) {
         loop p in refined.propositions {
             if p.term is? none or p.subject not=? subject or propositions.field(p) isnt? none continue
+            let named=propositions.named_route(p.term)
+            if named.fields.length >? 0 {
+                let route=expressions.named_call_route(id p.term env.nodes env.types @registry)
+                if route isnt? none {
+                    loop bound in directions(p.op) {output.push(CallFact[facts.Term[route p.term_projection] none bound.gap bound.direction])}
+                }
+                continue
+            }
             let supplied = expressions.call_argument(id p.term env.nodes env.types)
             if supplied is? none continue
             let argument = expressions.strip_casts(supplied env.nodes)

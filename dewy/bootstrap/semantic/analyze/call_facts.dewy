@@ -68,11 +68,20 @@ apply = (state:facts.State call:addr truth:bool? env:values.Environment relation
             let bound=comparisons.Operand[interval=ranges.exact(p.value)]
             let window:terms.Window?=none
             if p.term isnt? none {
-                let supplied=expressions.call_argument(call p.term env.nodes env.types unwrap=false)
-                if supplied is? none continue
-                let bound_id=expressions.strip_casts(supplied env.nodes)
-                bound=operand(supplied p.term_projection result.state env relation snapshot @registry)
-                if p.term_projection =? 'length' and bound.term is? none and intervals.stable(bound_id snapshot env.nodes) {window=terms.slice_bounds(bound_id env @registry)}
+                let named=propositions.named_route(p.term)
+                if named.fields.length >? 0 {
+                    let route=expressions.named_call_route(call p.term env.nodes env.types @registry)
+                    if route is? none continue
+                    let term=facts.Term[route p.term_projection]
+                    bound=comparisons.Operand[interval=relations.interval_of(term result.state relation) term=term]
+                }
+                else {
+                    let supplied=expressions.call_argument(call p.term env.nodes env.types unwrap=false)
+                    if supplied is? none continue
+                    let bound_id=expressions.strip_casts(supplied env.nodes)
+                    bound=operand(supplied p.term_projection result.state env relation snapshot @registry)
+                    if p.term_projection =? 'length' and bound.term is? none and intervals.stable(bound_id snapshot env.nodes) {window=terms.slice_bounds(bound_id env @registry)}
+                }
             }
             if result.state is? none return result
             result.state=comparisons.refine(result.state p.op subject bound true relation)

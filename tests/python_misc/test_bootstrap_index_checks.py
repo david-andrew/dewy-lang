@@ -82,7 +82,7 @@ def test_native_index_checks_match_hosted(tmp_path):
             evaluated[names[id(query.index)]] = index_interval
             query.constant_index = None
             try:
-                validator._validate_index(query, index_interval, dict(state))
+                validator._validate_index(query, index_interval, dict(state), length_interval=length_interval)
                 result = f'ok|{query.constant_index}'
             except UserError as error:
                 result = diagnostic(error)

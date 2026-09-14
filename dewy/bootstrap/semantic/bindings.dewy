@@ -162,6 +162,36 @@ member_fields = (path:AccessPath nodes:array<hir.AST>):>array<string> | none => 
     return names
 }
 
+field_route_type = (id:addr fields:array<string> nodes:array<types.Type>):>addr? => {
+    let current=id
+    loop name in fields {
+        let object=types.node_at(nodes types.unfold(types.strip_refinement(current nodes) nodes))
+        if object isnt? types.ObjectType return none
+        if object.brand isnt? none and not object.minted return none
+        let field=types.object_field(object name)
+        if field is? none return none
+        current=field.value_type
+    }
+    return current
+}
+# Extend a known binding or field identity without constructing HIR reads.
+# Keep the original root so replacing any enclosing record invalidates it.
+extend_route = (id:addr fields:array<string> type_nodes:array<types.Type> @registry:Registry):>addr? => {
+    if fields.length =? 0 return id
+    let binding=binding_at(registry id)
+    if binding.value_type is? none return none
+    let type=field_route_type(binding.value_type fields type_nodes)
+    if type is? none return none
+    let root=id
+    let path:array<string>=[]
+    if binding.route_root isnt? none {
+        root=binding.route_root
+        loop prior in registry.routes {if prior.id =? id {path=prior.path break}}
+    }
+    loop name in fields {path.push(name)}
+    return route_id(@registry root path type binding.loc)
+}
+
 array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
     let path = access_path(id nodes facts=true)
     let root = hir.node_at(nodes path.root)

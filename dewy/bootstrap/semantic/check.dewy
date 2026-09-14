@@ -699,10 +699,15 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     }
     let args:array<addr> = []
     let places:array<addr> = []
+    let named=keyword
+    loop i in 0.. and i <? positional.length and i <? method.pos_or_kw.length {
+        let name=method.pos_or_kw[i].name
+        if name isnt? none {named[name]=positional[i]}
+    }
     loop i in 0.. and i <? positional.length {
         if i >=? method.pos_or_kw.length return pending(id 'variadic argument materialization' env session)
         let slot = method.pos_or_kw[i]
-        let checked = call_argument(positional[i] slot.value_type slot.place id env @session)
+        let checked = call_argument(positional[i] slot.value_type slot.place id env @session arguments=named)
         if checked is? Error return checked
         let error = remember_place(checked @places id env session)
         if error isnt? none return error
@@ -715,7 +720,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         loop slot in method.pos_or_kw { if slot.name =? name { required = slot.value_type is_place = slot.place break } }
         loop slot in method.kw_only { if slot.name =? name { required = slot.value_type is_place = slot.place break } }
         $runtime_assert required isnt? none
-        let checked = call_argument(argument required is_place id env @session)
+        let checked = call_argument(argument required is_place id env @session arguments=named)
         if checked is? Error return checked
         let error = remember_place(checked @places id env session)
         if error isnt? none return error
@@ -1619,6 +1624,18 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     # Parameter defaults above retain the defining scope. The body sees
     # member proxies in a parent of its parameter scope, so local bindings
     # and nested function parameters shadow members by ordinary lookup.
+    loop i in 0.. and i <? parameters.length {
+        let param=parameters[i]
+        let resolved=contracts.bind_parameters(param.value_type parameters @session.types @session.registry)
+        param.value_type=resolved
+        parameters[i]=param
+        if param.binding_id isnt? none {
+            let binding=bindings.binding_at(session.registry param.binding_id)
+            binding.value_type=resolved
+            binding.store_type=resolved
+            session.registry.by_id[param.binding_id]=binding
+        }
+    }
     if method isnt? none and owner isnt? none {
         let member_scope=contexts.child(env.lexical @session)
         let receiver:addr?=none
@@ -1640,7 +1657,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     if not infer {
         let unknown=contracts.unknown_parameter(contract parameters session.types)
         if unknown isnt? none return problem(id 'result fact names something that is not a parameter' unknown env session)
-        contract=contracts.bind_parameters(contract parameters @session.types)
+        contract=contracts.bind_parameters(contract parameters @session.types @session.registry)
         annotation=contract
         inner=Environment[inner.lexical inner.state contract inner.loop_depth inner.return_collector]
     }
@@ -2490,7 +2507,7 @@ place = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Err
     let loc = contexts.node_at(id env.lexical session).loc
     return put(hir.Place[loc store_type value] @session)
 }
-call_argument = (argument:addr required:addr place_parameter:bool id:addr env:Environment @session:contexts.Session):>addr|Error => {
+call_argument = (argument:addr required:addr place_parameter:bool id:addr env:Environment @session:contexts.Session arguments:dict<string addr>=[]):>addr|Error => {
     let node = node_at(argument session)
     if place_parameter and node isnt? hir.Place return problem(id 'place argument requires `@`' 'the parameter can write its caller binding' env session)
     if not place_parameter and node is? hir.Place return problem(id 'value parameter does not accept a place' 'remove `@` to pass an independent value' env session)
@@ -2498,7 +2515,13 @@ call_argument = (argument:addr required:addr place_parameter:bool id:addr env:En
         if not place_fits(node.value_type required @session) return problem(id 'place parameter types are invariant' 'the storage and parameter types must agree' env session)
         return argument
     }
-    return against(argument required id env @session)
+    let rebound=contracts.at_call(required arguments session.hir @session.types @session.registry)
+    # Syntax checking may already have wrapped the same unresolved contract.
+    # Retarget that boundary; retaining it underneath would still demand the
+    # old parameter identity during validation.
+    let value=argument
+    if node is? hir.Obligation and types.same_type(node.refined required session.types) {value=node.value}
+    return against(value rebound id env @session)
 }
 remember_place = (argument:addr @places:array<addr> id:addr env:Environment session:contexts.Session):>Error? => {
     let node = node_at(argument session)

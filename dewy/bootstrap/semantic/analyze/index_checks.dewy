@@ -54,19 +54,17 @@ check_index = (node:hir.Index|hir.StringIndex interval:ranges.Interval? length_i
     let index_node = hir.node_at(context.env.nodes index)
     let nonnegative = interval isnt? none and interval.lower isnt? none and interval.lower >=? 0
     if length isnt? none and interval isnt? none and nonnegative and interval.upper isnt? none and interval.upper <? length return constant(interval)
-    if length is? none {
-        let array_id = terms.sequence_id(sequence context.env @registry)
-        if array_id isnt? none and interval isnt? none and nonnegative {
-            let measured = if length_interval is? none values.length_default(context.env.cap) else length_interval
-            let minimum:bigint = if measured.lower is? none 0 else measured.lower
-            if interval.upper isnt? none and interval.upper <? minimum return constant(interval)
-            if symbolic {
-                let named = terms.binding_term(index context.env @registry)
-                if named isnt? none and named.projection =? 'value' and facts.index(named.binding_id array_id).key in? state return Proven[]
-                let offset = terms.length_offset(index array_id context.env @registry)
-                if offset isnt? none and minimum >=? offset return Proven[]
-                if proofs.upper(index array_id 1 state context observed @registry) return Proven[]
-            }
+    let array_id = terms.sequence_id(sequence context.env @registry)
+    if array_id isnt? none and interval isnt? none and nonnegative {
+        let measured = if length_interval is? none values.length_default(context.env.cap) else length_interval
+        let minimum:bigint = if measured.lower is? none 0 else measured.lower
+        if interval.upper isnt? none and interval.upper <? minimum return constant(interval)
+        if symbolic {
+            let named = terms.binding_term(index context.env @registry)
+            if named isnt? none and named.projection =? 'value' and facts.index(named.binding_id array_id).key in? state return Proven[]
+            let offset = terms.length_offset(index array_id context.env @registry)
+            if offset isnt? none and minimum >=? offset return Proven[]
+            if proofs.upper(index array_id 1 state context observed @registry) return Proven[]
         }
     }
     let notes:array<string> = []

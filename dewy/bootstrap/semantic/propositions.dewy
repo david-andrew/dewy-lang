@@ -39,6 +39,19 @@ parameter = (p:Proposition):>string? => {
     if p.subject.startswith('@') return p.subject[1..]
     return none
 }
+NamedRoute:type = const [root:string fields:array<string>]
+named_route = (name:string):>NamedRoute => {
+    let parts=name.split('.')
+    $runtime_assert parts.length >? 0
+    let fields:array<string>=[]
+    loop i in 1.. and i <? parts.length {fields.push(parts[i])}
+    return NamedRoute[parts[0] fields]
+}
+rename_term = (name:string names:dict<string string>):>string => {
+    let route=named_route(name)
+    let root=names.get(route.root route.root)
+    return if route.fields.length =? 0 root else "{root}.{route.fields.join('.')}"
+}
 field = (p:Proposition):>string? => {
     if p.subject.startswith('.') return p.subject[1..]
     return none

@@ -58,7 +58,7 @@ call_result = (@state:facts.State subject:addr value:addr @data:predicates.Data)
             }
         }
     }
-    if not intervals.stable(value data.snapshot data.env.nodes) return
+    if not intervals.stable(value data.snapshot data.env.nodes places=true) return
     terms.seed(@state facts.Term[subject] terms.call_facts(value 'self' data.env @data.registry) data.relations)
     terms.seed(@state facts.Term[subject 'length'] terms.call_facts(value 'length' data.env @data.registry) data.relations)
 }

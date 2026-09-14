@@ -3,6 +3,7 @@ import p"../ty.dewy" as types
 import p"../type_queries.dewy" as views
 import p"../propositions.dewy" as facts
 import p"../bindings.dewy" as bindings
+import p"predicate_effects.dewy" as predicate_effects
 
 doc"""
 The HIR views shared by bounds transfer and proof obligations.
@@ -62,6 +63,19 @@ call_argument = (id:addr name:string nodes:array<hir.AST> type_nodes:array<types
         }
     }
     return none
+}
+named_call_route = (id:addr name:string nodes:array<hir.AST> type_nodes:array<types.Type> @registry:bindings.Registry):>addr? => {
+    let route=facts.named_route(name)
+    let supplied=call_argument(id route.root nodes type_nodes unwrap=false)
+    if supplied is? none return none
+    let argument=argument_value(supplied nodes)
+    if hir.node_at(nodes supplied) isnt? hir.Place {
+        let reads=predicate_effects.read_bindings(argument nodes)
+        let writes=predicate_effects.mutated_bindings(id nodes)
+        loop root in reads {if root in? writes return none}
+    }
+    let root=bindings.array_route_id(argument nodes @registry)
+    return if root is? none none else bindings.extend_route(root route.fields type_nodes @registry)
 }
 object_of = (id:addr nodes:array<types.Type>):>types.ObjectType? => {
     # Excluding a descendant preserves the positive record's field contracts,
