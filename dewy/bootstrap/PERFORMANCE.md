@@ -294,3 +294,28 @@ For 512 read/append iterations its direct executable measures zero copied
 array payload bytes and zero retained arena bytes after a second run. The
 larger predicate-path fixture copies 1,058,816 bytes with the preceding seed;
 its updated full-prelude validation and the native fixed point remain gates.
+
+## Temporary container receivers
+
+Iterator entry arrays borrow their owning set or dictionary. A fresh receiver
+must remain alive for the loop arm and be released when that arm ends, including
+an early return. Key/value unpacking also shares one evaluated dictionary;
+evaluating the two entry views independently used to call its producer twice.
+
+Container lowering now carries the temporary receiver's ownership through
+iteration, views, membership, lookups, and mutation operations. Views and
+lookup results preserve their independent payload before releasing a fresh
+receiver. A found lookup releases its unused owned fallback. The hosted
+compiler also releases enclosing statement temporaries before nested returns.
+
+`native_container_receiver_lifetimes.dewy` covers these lifetimes, single
+evaluation, nested key views, set algebra, early returns, and present/missing
+lookups. It passes on both backends through hosted and native lowering; the
+native direct executable retains zero arena bytes across 512 repetitions.
+
+`native_analysis_scaling.dewy` groups the callback, actual HIR-reader, and
+predicate-path checks so they share one prelude compilation per backend. It
+remains separate from deliberate raw-exposure tests. Before the receiver fix,
+the grouped predicate test already copied zero array payload bytes but retained
+983,392 arena bytes per 512 visits. This larger gate still precedes any full
+native generation comparison.

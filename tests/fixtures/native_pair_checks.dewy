@@ -22,8 +22,11 @@ import p"native_binary_views.dewy" as binaries
 import p"native_casefold_scaling.dewy" as casefold
 import p"native_argument_lifetimes.dewy" as arguments
 import p"native_dict_scalar_widths.dewy" as scalar_dictionaries
+import p"native_container_receiver_lifetimes.dewy" as receivers
 
 let main=():>int64=>{
+    printl('Checking temporary container receivers')
+    if receivers.main() not=?42 return 23
     printl('Checking dictionary scalar widths')
     if scalar_dictionaries.main() not=?42 return 22
     printl('Checking argument snapshot lifetimes')

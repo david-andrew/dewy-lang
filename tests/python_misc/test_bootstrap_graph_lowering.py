@@ -33,6 +33,7 @@ REFINED_TAG_CASES = [
     (ROOT / 'tests/fixtures/native_callback_lifetimes.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_callback_value_semantics.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_dict_scalar_widths.dewy').read_text(),
+    (ROOT / 'tests/fixtures/native_container_receiver_lifetimes.dewy').read_text(),
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(Record[0]) 42 else 1",
     "let test=(value:addr?):>bool=>value is? addr\nlet main=():>int64=>if test(42) and not test(none) 42 else 1",
     "Record:type=const[value:int64]\nlet test=(value:addr|Record):>bool=>value isnt? addr\nlet main=():>int64=>if not test(42) and test(Record[0]) 42 else 1",

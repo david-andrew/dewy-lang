@@ -1,0 +1,45 @@
+# Exercise the real higher-order bounds traversal. Its context carries the
+# HIR arena through recursive calls and optional state results; retaining a
+# context snapshot here makes subsequent graph growth copy the whole arena.
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/analyze/predicate_paths.dewy" as paths
+import p"../../dewy/bootstrap/semantic/analyze/fact_state.dewy" as facts
+import p"../../dewy/bootstrap/semantic/analyze/intervals.dewy" as ranges
+Data:type=[calls:int64]
+let copied=():>int64=>_arena_copied_bytes
+let live=():>int64=>_arena_live_bytes
+let leaf=(state:facts.State condition:addr truth:bool context:paths.Context @data:Data):>facts.State?=>{
+    data.calls+=1
+    return state
+}
+let visit=(state:facts.State condition:addr context:paths.Context @data:Data):>bool=>{
+    let invalidated:set<addr>=set[]
+    let result=paths.refine(state condition true invalidated context @data @leaf)
+    return result isnt? none and result.length =? state.length
+}
+let exercise=():>bool=>{
+    let nodes:array<hir.AST>=[]
+    let loc=Span[0 0]
+    let left=hir.append_node(@nodes hir.ExpressedIdentifier[loc 0 'left' 42])
+    let right=hir.append_node(@nodes hir.ExpressedIdentifier[loc 0 'right' 43])
+    let root=hir.append_node(@nodes hir.ShortCircuit[loc 0 'and' left right])
+    let context=facts.Context[1000]
+    let state:facts.State=[]
+    facts.put(@state facts.nonzero(42) ranges.Interval[1 1])
+    let data=Data[0]
+    loop i in 0.. and i <? 512 {
+        if not visit(state root paths.Context[nodes context] @data) return false
+        hir.append_node(@nodes hir.Integer[loc 0 '0d' i]);
+    }
+    return data.calls =? 2048 and nodes.length =? 515
+}
+let main=():>int64=>{
+    let before=copied()
+    if not exercise() return 1
+    if copied()-before >? 1048576 return 2
+    let baseline=live()
+    if not exercise() return 3
+    if live()-baseline >? 65536 return 4
+    return 42
+}

@@ -1,0 +1,15 @@
+# Share the prelude and compiler modules across related lifetime checks.
+# Keep this bundle separate from tests that deliberately expose raw records;
+# those correctly disable closed-program callback inference for a program.
+import p"native_callback_lifetimes.dewy" as callbacks
+import p"native_hir_reader_scaling.dewy" as readers
+import p"native_predicate_path_scaling.dewy" as predicates
+let main=():>int64=>{
+    printl('Checking callback snapshot lifetimes')
+    if callbacks.main() not=?42 return 1
+    printl('Checking HIR reader scaling')
+    if readers.main() not=?42 return 2
+    printl('Checking predicate path scaling')
+    if predicates.main() not=?42 return 3
+    return 42
+}

@@ -502,6 +502,7 @@ expression_owns = (id:addr @state:State):>bool => {
         if array_valued(source.value_type state) and array_valued(node.value_type state) return expression_owns(node.expr @state)
     }
     if node is? hir.ObjectLiteral|hir.ArrayLiteral|hir.DictView|hir.SetAlgebra return true
+    if node is? hir.DictEntries and temporary_owner(node.dictionary @state) return true
     if node is? hir.MemberAccess and temporary_owner(node.value @state) return true
     if node is? hir.Index and temporary_owner(node.array @state) return true
     if node is? hir.Block|hir.Flow and state.cleanup_enabled return true
@@ -511,11 +512,10 @@ expression_owns = (id:addr @state:State):>bool => {
         let source=hir.node_at(state.input.nodes node.expr)
         if cell_members(source.value_type @state) is? none return true
     }
-    if node is? hir.DictLookup and not node.proven and node.default is? none {
-        let values=array_type(stored_type(node.values state) state)
-        # The stored element decides ownership. A dictionary of optional
-        # values may return an existing cell with the same optional type.
-        if values isnt? none and cell_members(values.element @state) is? none return true
+    if node is? hir.DictLookup {
+        if not node.proven return true
+        let keys=hir.node_at(state.input.nodes node.keys)
+        if keys is? hir.MemberAccess and temporary_owner(keys.value @state) return true
     }
     if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index and cell_members(node.value_type @state) isnt? none {
         if cell_members(stored_type(id state) @state) is? none return true
@@ -2494,7 +2494,7 @@ command_line = (entry:hir.FunctionLiteral @state:State):>CommandLine => {
 # containing function. The condition advances the cursor so `continue`
 # advances exactly once as well. An exhausted sequence never reads an item.
 IteratorStep:type = [prefix:array<addr> condition:addr]
-iterator_step = (node:hir.IteratorExpression @state:State):>IteratorStep => {
+iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @state:State):>IteratorStep => {
     let prefix:array<addr>=[]
     let bool_type=types.primitive('bool' @state.type_nodes)
     let void_type=types.primitive('void' @state.type_nodes)
@@ -2515,8 +2515,26 @@ iterator_step = (node:hir.IteratorExpression @state:State):>IteratorStep => {
         if node.count isnt? none {length=word(node.count node @state)}
         value=word_op('__add__' word(node.first node @state) word_op('__mul__' cursor word(node.step node @state) node @state) node @state)
     } else {
-        let sequence=snapshot(expression(node.iterable @state) @prefix @state)
-        if temporary_owner(node.iterable @state) {
+        let sequence:addr=0
+        if source is? hir.DictEntries {
+            # Key/value iterator leaves share one evaluated receiver. Keep a
+            # fresh receiver alive for the arm, including early returns, rather
+            # than losing it behind its borrowed entry-array descriptor.
+            let parts=sources.get(source.dictionary)
+            if parts is? none {
+                parts=dict_parts(source.dictionary @prefix @state)
+                prefix.push(dict_ensure(parts node @state compact=true))
+                sources[source.dictionary]=parts
+                if parts.owner_type isnt? none {
+                    $runtime_assert state.cleanup_frames.length >? 0
+                    let frame=state.cleanup_frames.pop
+                    frame.push(OwnedLocal[parts.pointer parts.owner_type])
+                    state.cleanup_frames.push(frame)
+                }
+            }
+            sequence=dict_field(parts source.name node @state)
+        } else {sequence=snapshot(expression(node.iterable @state) @prefix @state)}
+        if source isnt? hir.DictEntries and temporary_owner(node.iterable @state) {
             # lower_flow gives iterator setup its own cleanup frame. Body
             # continues keep this owner; leaving the arm or returning from
             # the function releases it after the last borrowed element use.
@@ -2612,7 +2630,8 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
 # availability. Computing the formula must not short-circuit an iterator's
 # advancement: otherwise a later leaf would resume at a different position.
 iterator_condition = (node:hir.AST @state:State):>IteratorStep => {
-    if node is? hir.IteratorExpression return iterator_step(node @state)
+    let sources:dict<addr DictParts>=[]
+    if node is? hir.IteratorExpression return iterator_step(node @sources @state)
     if node isnt? hir.MultiIteratorExpression return IteratorStep[[] reject(node 'this iterator condition' @state)]
     if node.repeats_when_exhausted return IteratorStep[[] reject(node 'repeating exhausted iterator formulas' @state)]
     let prefix:array<addr>=[]
@@ -2621,7 +2640,7 @@ iterator_condition = (node:hir.AST @state:State):>IteratorStep => {
     loop id in node.iterators {
         let iterator=hir.node_at(state.input.nodes id)
         $runtime_assert iterator is? hir.IteratorExpression
-        let step=iterator_step(iterator @state)
+        let step=iterator_step(iterator @sources @state)
         loop setup in step.prefix {prefix.push(setup)}
         values.push(snapshot(step.condition @advance @state))
     }
@@ -2780,19 +2799,31 @@ forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
 # Hashes belong to entries; sparse probe slots contain entry positions, -1
 # for empty, and -2 for a removed slot. Rebuilding moves live handles inside
 # the same owning arrays, so it must not turn those moves into value copies.
-DictParts:type = const [pointer:addr layout:layouts.Record key:addr value:addr?]
+DictParts:type = const [pointer:addr layout:layouts.Record key:addr value:addr? owner_type:addr?=none]
 DictProbe:type = const [found:addr position:addr slot:addr hash:addr]
 dict_parts = (dictionary:addr @prefix:array<addr> @state:State copy:bool=false):>DictParts => {
     let source=hir.node_at(state.input.nodes dictionary)
     let entries=views.container_entry_types(types.unfold(types.strip_refinement(source.value_type state.type_nodes) state.type_nodes) state.type_nodes)
     $runtime_assert entries isnt? none
     let pointer=snapshot((if copy owned_value(dictionary @state) else write_route(dictionary @state)) @prefix @state)
-    return DictParts[pointer object_layout(source.value_type source @state) entries.key entries.value]
+    let owner:addr?=if copy or temporary_owner(dictionary @state) source.value_type else none
+    return DictParts[pointer object_layout(source.value_type source @state) entries.key entries.value owner]
 }
 dict_from_keys = (keys:addr @prefix:array<addr> @state:State):>DictParts => {
     let member=hir.node_at(state.input.nodes keys)
     $runtime_assert member is? hir.MemberAccess
     return dict_parts(member.value @prefix @state)
+}
+# Container operations retain a temporary receiver until their result has
+# been materialized. Iteration instead keeps this owner for the whole arm.
+finish_dictionary = (value:addr parts:DictParts node:hir.AST @prefix:array<addr> @state:State copy_result:bool=false):>addr => {
+    if parts.owner_type isnt? none {
+        if copy_result {value=copy_value(value node.value_type node @state)}
+        value=snapshot(value @prefix @state)
+        prefix.push(release_value(parts.pointer parts.owner_type node @state))
+    }
+    prefix.push(value)
+    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
 }
 dict_field = (parts:DictParts name:string node:hir.AST @state:State):>addr => {
     let offset=parts.layout.offsets.get(name)
@@ -2977,8 +3008,7 @@ dict_contains = (node:hir.DictContains @state:State):>addr => {
     prefix.push(dict_ensure(parts node @state))
     let probe=dict_probe(parts key node @prefix @state)
     if node.position isnt? none {prefix.push(put(hir.Declare[node.loc types.primitive('void' @state.type_nodes) 'let' node.position types.primitive('int64' @state.type_nodes) probe.position] @state))}
-    prefix.push(probe.found)
-    return put(hir.Block[node.loc types.primitive('bool' @state.type_nodes) prefix false] @state)
+    return finish_dictionary(probe.found parts node @prefix @state)
 }
 dict_lookup = (node:hir.DictLookup @state:State):>addr => {
     let prefix:array<addr>=[]
@@ -3005,12 +3035,24 @@ dict_lookup = (node:hir.DictLookup @state:State):>addr => {
             let absent=types.primitive('none' @state.type_nodes)
             fallback=cell_pack(word(0 node @state) absent node.value_type node @state)
             value=cell_pack(value parts.value node.value_type node @state)
-        } else {value=read_value(value parts.value node.value_type node @state)}
+            # An already-optional stored element uses its existing cell;
+            # a lookup result must independently own that payload too.
+            if cell_members(parts.value @state) isnt? none {value=copy_value(value node.value_type node @state)}
+        } else {
+            let selected:array<addr>=[]
+            if cell_members(parts.value @state) is? none and cell_members(node.value_type @state) isnt? none {
+                value=cell_pack(value parts.value node.value_type node @state)
+            } else {value=copy_value(read_value(value parts.value node.value_type node @state) node.value_type node @state)}
+            value=snapshot(value @selected @state)
+            $runtime_assert node.default isnt? none
+            selected.push(release_value(fallback hir.node_at(state.input.nodes node.default).value_type node @state))
+            selected.push(value)
+            value=put(hir.Block[node.loc runtime_type(node.value_type node @state) selected false] @state)
+        }
         let arm=put(hir.IfArm[node.loc runtime_type(node.value_type node @state) found value] @state)
         value=put(hir.Flow[node.loc runtime_type(node.value_type node @state) [arm] fallback] @state)
     }
-    prefix.push(value)
-    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+    return finish_dictionary(value parts node @prefix @state copy_result=node.proven)
 }
 dict_insert = (parts:DictParts key:addr value:addr? node:hir.AST @prefix:array<addr> @state:State):>addr => {
     prefix.push(dict_ensure(parts node @state room=1))
@@ -3041,6 +3083,7 @@ dict_store = (node:hir.DictStore @state:State):>addr => {
     if node.value isnt? none {value=snapshot(owned_value(node.value @state) @prefix @state)}
     let position=dict_insert(parts key value node @prefix @state)
     if node.position isnt? none {prefix.push(put(hir.Declare[node.loc types.primitive('void' @state.type_nodes) 'let' node.position types.primitive('int64' @state.type_nodes) position] @state))}
+    if parts.owner_type isnt? none {prefix.push(release_value(parts.pointer parts.owner_type node @state))}
     return sequence(prefix node @state)
 }
 dict_remove = (node:hir.DictRemove @state:State):>addr => {
@@ -3055,6 +3098,7 @@ dict_remove = (node:hir.DictRemove @state:State):>addr => {
             prefix.push(array_trim(dict_field(parts name node @state) word(0 node @state) element node @state))
         }
         prefix.push(dict_set_field(parts 'live' word(0 node @state) node @state))
+        if parts.owner_type isnt? none {prefix.push(release_value(parts.pointer parts.owner_type node @state))}
         return sequence(prefix node @state)
     }
     let key=snapshot(expression(node.key @state) @prefix @state)
@@ -3076,15 +3120,13 @@ dict_remove = (node:hir.DictRemove @state:State):>addr => {
         let arm=put(hir.IfArm[node.loc runtime_type(node.value_type node @state) probe.found result] @state)
         result=put(hir.Flow[node.loc runtime_type(node.value_type node @state) [arm] fallback] @state)
     }
-    prefix.push(result)
-    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+    return finish_dictionary(result parts node @prefix @state)
 }
 dict_entries = (node:hir.DictEntries @state:State):>addr => {
     let prefix:array<addr>=[]
     let parts=dict_parts(node.dictionary @prefix @state)
     prefix.push(dict_ensure(parts node @state compact=true))
-    prefix.push(dict_field(parts node.name node @state))
-    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    return finish_dictionary(dict_field(parts node.name node @state) parts node @prefix @state copy_result=true)
 }
 dict_view = (node:hir.DictView @state:State):>addr => {
     let prefix:array<addr>=[]
@@ -3113,7 +3155,8 @@ dict_view = (node:hir.DictView @state:State):>addr => {
         prefix.push(dict_set_field(output 'live' dict_field(parts 'live' node @state) node @state))
         prefix.push(destination)
     }
-    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    let result=prefix.pop
+    return finish_dictionary(result parts node @prefix @state)
 }
 
 # Set algebra and dictionary union share insertion/probing with individual

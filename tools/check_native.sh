@@ -63,8 +63,10 @@ for check_target in x86_64 c; do
     expect_exit 0 "$check_udewy" --target "$check_target" udewy/tests/test_guarded_calls.udewy
     expect_exit 42 "$check_dewy" --target "$check_target" "$check_work/scalar.dewy"
     expect_exit 42 "$check_dewy" --target "$check_target" tests/fixtures/native_pair_checks.dewy
-    echo "Checking native HIR reader scaling with $check_target output"
-    expect_exit 42 "$check_dewy" --target "$check_target" tests/fixtures/native_hir_reader_scaling.dewy
+    # Share one prelude across the real readers and callback traversal. Keep
+    # this separate from the raw-storage cases in the integration bundle.
+    echo "Checking native analysis scaling with $check_target output"
+    expect_exit 42 "$check_dewy" --target "$check_target" tests/fixtures/native_analysis_scaling.dewy
     echo "Checking native test discovery with $check_target output"
     test_status=0
     test_output=$(timeout 180s "$check_dewy" test --target "$check_target" --json "$check_work/tests" 2>&1) || test_status=$?
