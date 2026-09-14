@@ -400,3 +400,13 @@ final query, record, object-array and temporary-lifetime regressions pass,
 including fresh brand tables across successive programs. Artifacts:
 `compare-brand-queries.py`, `brand-query-comparison.log`,
 `brand-query-complete-gates.log`, and `brand-preparation-gates.log`.
+
+## C toolchain experiment
+
+Homebrew Clang 22.1.8 at `-O1` did not finish compiling the projection
+checkpoint's 164 MB generated C within a 300-second limit. No executable
+or runtime comparison resulted, and the normal GCC route is unchanged.
+A small native validation compile overlapped the first 32 seconds. The
+timing wrapper's peak RSS does not include the terminated compiler child,
+so it is not a usable memory measurement. Artifacts:
+`c-toolchain/clang-o1{.log,-time.txt}`.

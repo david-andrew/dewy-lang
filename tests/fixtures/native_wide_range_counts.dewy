@@ -1,0 +1,23 @@
+# Finite ranges can contain 2^64 values. Their cardinality is not a signed
+# machine-word length. These guards stop after a small, checkable prefix.
+main=():>int64=>{
+    let total:int64=0
+    loop i in 0..uint64.max and i <? 3 {total+=1}
+    if total not=? 3 return 1
+    total=0
+    loop i in 0..(uint64.max-1) and i <? 3 {total+=1}
+    if total not=? 3 return 2
+    total=0
+    loop i in 1..uint64.max and i <? 4 {
+        if i =? 2 continue
+        total+=i
+    }
+    if total not=? 4 return 3
+    total=0
+    loop i in 0..uint64.max and i <? 5 {
+        if i =? 3 break
+        total+=1
+    }
+    if total not=? 3 return 4
+    return 42
+}

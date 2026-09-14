@@ -2798,10 +2798,22 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
     let into=put(hir.ExpressedIdentifier[node.loc target_type target_name target.binding_id] @state)
     let cursor=snapshot(word(-1 node @state) @prefix @state)
     let length:addr?=none
+    let wide_last:addr?=none
+    let wide_more:addr?=none
     let value:addr=0
     let view_owner:addr?=none
     if source is? hir.Range {
-        if node.count isnt? none {length=word(node.count node @state)}
+        if node.count isnt? none {
+            if node.count >? 9223372036854775807 {
+                if node.count >? 18446744073709551616 return IteratorStep[prefix reject(node 'range cardinality requiring an arbitrary-precision cursor' @state)]
+                # A range may have 2^64 entries, even though every cursor bit
+                # pattern fits one word. Its count does not fit a signed
+                # length (or, at 2^64, any word). Compare with count-1 after
+                # consuming an entry and retain a sticky exhaustion flag.
+                wide_last=word(node.count-1 node @state)
+                wide_more=snapshot(put(hir.Bool[node.loc bool_type true] @state) @prefix @state)
+            } else {length=word(node.count node @state)}
+        }
         value=word_op('__add__' word(node.first node @state) word_op('__mul__' cursor word(node.step node @state) node @state) node @state)
     } else {
         let sequence:addr=0
@@ -2858,6 +2870,13 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
     let store=if boxed array_store(value into target.value_type node @state) else put(hir.Assign[node.loc void_type into '=' value] @state)
     let yes=put(hir.Bool[node.loc bool_type true] @state)
     let no=put(hir.Bool[node.loc bool_type false] @state)
+    if wide_more isnt? none and wide_last isnt? none {
+        let next=intrinsic('__ne__' [cursor wide_last] bool_type node @state)
+        let update=put(hir.Assign[node.loc void_type wide_more '=' next] @state)
+        let body=put(hir.Block[node.loc bool_type [increment update store yes] false] @state)
+        let arm=put(hir.IfArm[node.loc bool_type wide_more body] @state)
+        return IteratorStep[prefix put(hir.Flow[node.loc bool_type [arm] no] @state)]
+    }
     let stores:array<addr>=[]
     if view_owner isnt? none {stores.push(string_runtime('_native_string_release' [view_owner] node @state result_void=true))}
     stores.push(store) stores.push(yes)
