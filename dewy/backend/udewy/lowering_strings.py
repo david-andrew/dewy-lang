@@ -74,109 +74,33 @@ class _StringLowering:
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         from ...semantic.unicode.graphemes import grapheme_boundary_byte_offsets
 
+        # Literal bytes, grapheme offsets, and the descriptor are all known
+        # during compilation. Emit relocatable static data instead of filling
+        # the same static allocation with stores on every evaluation. Keep a
+        # distinct descriptor per lowering site, as before; this is not a new
+        # string-interning or identity rule.
         boundaries = grapheme_boundary_byte_offsets(node.content)
-        grapheme_length = len(boundaries) - 1
-        allocator = '__static_alloca__'
-        boundary_name = self._new_string_temp(
-            node.loc,
-            'int64',
-            'boundaries',
-        ).name
-        boundaries_pointer = hir.ExpressedIdentifier(
-            node.loc,
-            'int64',
-            boundary_name,
-        )
-        target = self._new_string_temp(node.loc, node.type)
-        statements: list[hir.AST] = [
-            hir.Declare(
-                node.loc,
-                ty.VOID_TYPE,
-                'let',
-                boundary_name,
-                'int64',
-                self._intrinsic_call(
-                    allocator,
-                    [
-                        self._int64_literal(
-                            node.loc,
-                            max(4, len(boundaries) * 4),
-                        )
-                    ],
-                    'int64',
-                    node.loc,
-                ),
-            ),
-            hir.Declare(
-                node.loc,
-                ty.VOID_TYPE,
-                'let',
-                target.name,
-                'int64',
-                self._intrinsic_call(
-                    allocator,
-                    [self._int64_literal(node.loc, STRING_DESCRIPTOR_SIZE)],
-                    'int64',
-                    node.loc,
-                ),
-            ),
-        ]
-        for index, offset in enumerate(boundaries):
-            address = (
-                boundaries_pointer
-                if index == 0
-                else self._int64_binary(
-                    '__add__',
-                    boundaries_pointer,
-                    self._int64_literal(node.loc, index * 4),
-                    node.loc,
-                )
+        packed = b''.join(offset.to_bytes(4, 'little') for offset in boundaries)
+
+        def constant(role: str, value: hir.AST) -> hir.ExpressedIdentifier:
+            name = self._new_string_temp(node.loc, 'int64', role).name
+            self.string_literal_globals.append(
+                hir.Declare(node.loc, ty.VOID_TYPE, 'const', name, 'int64', value)
             )
-            statements.append(
-                self._intrinsic_call(
-                    '__store_u32__',
-                    [hir.Integer(node.loc, 'uint32', t0.base10, offset), address],
-                    ty.VOID_TYPE,
-                    node.loc,
-                )
-            )
-        descriptor = replace(target, type='int64')
-        raw_data = replace(node, type='int64')
-        statements.extend(
-            [
-                self._store_i64_field(
-                    descriptor,
-                    STRING_DATA_OFFSET,
-                    raw_data,
-                    node.loc,
-                ),
-                self._store_i64_field(
-                    descriptor,
-                    STRING_BYTE_LENGTH_OFFSET,
-                    self._int64_literal(node.loc, len(node.content.encode('utf-8'))),
-                    node.loc,
-                ),
-                self._store_i64_field(
-                    descriptor,
-                    STRING_BOUNDARIES_OFFSET,
-                    boundaries_pointer,
-                    node.loc,
-                ),
-                self._store_i64_field(
-                    descriptor,
-                    STRING_GRAPHEME_LENGTH_OFFSET,
-                    self._int64_literal(node.loc, grapheme_length),
-                    node.loc,
-                ),
-                self._store_i64_field(
-                    descriptor,
-                    STRING_START_OFFSET,
-                    self._int64_literal(node.loc, 0),
-                    node.loc,
-                ),
-            ]
-        )
-        return statements, target
+            return hir.ExpressedIdentifier(node.loc, 'int64', name)
+
+        data = constant('literal_bytes', replace(node, type='int64'))
+        offsets = constant('literal_boundaries',
+            hir.BasedString(node.loc, 'int64', t0.base16, packed.hex(), packed))
+        descriptor = constant('literal', self._intrinsic_call('__static_words__', [
+            data,
+            self._int64_literal(node.loc, len(node.content.encode('utf-8'))),
+            offsets,
+            self._int64_literal(node.loc, len(boundaries) - 1),
+            self._int64_literal(node.loc, 0),   # start byte
+            self._int64_literal(node.loc, 0),   # static owner
+        ], 'int64', node.loc))
+        return [], replace(descriptor, type=node.type)
 
     def _string_data_start(self, string: hir.AST, loc: Span) -> hir.AST:
         return self._int64_binary(

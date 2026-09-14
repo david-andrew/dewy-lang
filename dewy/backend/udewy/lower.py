@@ -273,6 +273,7 @@ class _Lowerer(
         # Unicode property tables referenced by lowered code: one hidden
         # global per table, declared once and stored at module startup
         self.unicode_table_globals: dict[str, hir.BasedString] = {}
+        self.string_literal_globals: list[hir.Declare] = []
         # bindings whose value is an enum (a union of singletons): a word
         # holding the member index (`ty.enum_members`), no cell
         self.enum_words: dict[int, tuple[ty.TypeExpr, ...]] = {}
@@ -519,6 +520,7 @@ class _Lowerer(
         for name, data in self.unicode_table_globals.items():
             # a packed byte literal is a constant initializer: no startup needed
             globals_.append(hir.Declare(self.root.loc, ty.VOID_TYPE, 'let', name, 'int64', data))
+        globals_.extend(self.string_literal_globals)
         return LoweredProgram(
             lowered_functions,
             globals_,

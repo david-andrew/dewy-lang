@@ -1,4 +1,5 @@
 from pathlib import Path
+from re import search
 from shutil import which
 
 import pytest
@@ -642,8 +643,8 @@ let read = ():>int64 => {
 '''))
 
     assert 'let values:int64 = __alloca__(16)' in emitted
-    assert '__store_i64__(__dewy_string_value_2 values)' in emitted
-    assert '__store_i64__(__dewy_string_value_4 values + 8)' in emitted
+    assert search(r'__store_i64__\(__dewy_string_literal_\d+ values\)', emitted)
+    assert search(r'__store_i64__\(__dewy_string_literal_\d+ values \+ 8\)', emitted)
     assert '__load_i64__(values + 8)' in emitted
     assert '__alloca__(48)' not in emitted
 
