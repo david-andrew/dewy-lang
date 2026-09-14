@@ -109,3 +109,13 @@ library, value-independence and retention cases on both output backends,
 along with native test discovery. A failing compiler cannot launch another
 self-build or receive a fixed-point certificate. The same checker accepts a
 completed pair without a generation argument.
+
+`tests/fixtures/native_owned_union_temporaries.dewy` checks another important
+boundary: optional flows and lookups already create owned cells. Its original
+lookup/flow loop retained 680,000 bytes per 5,000 iterations. The expanded
+fixture now also covers fresh function results, record-family views, and
+smaller children converted to parent records or optional parents; native
+lowering retains **zero bytes** after a second 5,000-iteration run. Existing
+values still copy independently. Adopting a record requires matching storage
+sizes; a differing destination layout copies and releases the original.
+This is a bounded ownership result, not a completed native bootstrap claim.

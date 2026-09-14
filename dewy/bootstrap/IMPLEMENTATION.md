@@ -25,6 +25,18 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
 
 ## Current state
 
+- Native ownership boundaries adopt fresh flow, packing, lookup and call
+  results instead of copying them again and abandoning their allocations.
+  Packing takes ownership of constructors and returned records, but still
+  copies existing values. Logical record casts preserve equal-size storage;
+  differing parent/child layouts copy into the required size and release the
+  original. This rule also applies to dynamically selected union payloads.
+  Installed failure-reporting I/O no longer disables successful-path local
+  cleanup; explicit source effects still participate in the lifetime check.
+  The expanded optional/record fixture retains zero bytes across its second
+  5,000-iteration run and checks independent mutation, absent values, calls,
+  dictionary lookups, and differently sized record-family conversions.
+
 - Late representation selection applies a helper's declared parameter types
   when creating its call. A narrowed nonzero bigint record must be packed
   before a helper accepting the full zero/record union receives it. The
@@ -96,6 +108,15 @@ self-hosting. The Python compiler remains the seed and behavioral reference.
   same-layout calls retain destination forwarding. Regressions cover literal
   and call results, parent copies, nested fields, independent mutation, and
   replacement with a differently shaped descendant on both backends.
+  Returning a local parent also keeps nested child storage independent of
+  that local's cleanup: the unprepared copy helper cannot treat an `adopt`
+  request as an unconditional move. Dynamic and fixed nested-array return
+  regressions pass on both backends.
+
+- Hosted dictionary lookup preserves an already-optional element's stored
+  type when copying it into the result. An optional record element is a
+  cell, not a record address. Regressions cover present, absent, and missing
+  entries and mutation independence on both output backends.
 
 - Checked function defaults are children of native HIR function literals.
   Proof discharge, helper reachability, representation selection, and nested

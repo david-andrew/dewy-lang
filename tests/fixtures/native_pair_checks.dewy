@@ -13,6 +13,8 @@ import p"native_optional_views.dewy" as optionals
 import p"native_dict_detach_growth.dewy" as dictionaries
 import p"native_optional_flow_join.dewy" as flows
 import p"native_range_normalization.dewy" as ranges
+import p"native_bigint_membership.dewy" as membership
+import p"native_owned_union_temporaries.dewy" as owned
 
 let main=():>int64=>{
     printl('Checking sibling field facts')
@@ -41,5 +43,9 @@ let main=():>int64=>{
     if flows.main() not=? 42 return 12
     printl('Checking native range normalization')
     if ranges.main() not=? 42 return 13
+    printl('Checking bigint membership')
+    if membership.main() not=? 42 return 14
+    printl('Checking owned union temporaries')
+    if owned.main() not=? 42 return 15
     return 42
 }

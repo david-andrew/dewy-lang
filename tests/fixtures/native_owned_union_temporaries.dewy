@@ -1,0 +1,58 @@
+# Compiler-shaped optional lookup and flow results already own their storage.
+# Repeating them must not retain an abandoned copy of each temporary.
+Entry:type=[value:int64]
+Node=$abstract type of [loc:int64]
+Left=type of Node & [value:int64]
+Right=type of Node & [padding:int64 value:int64]
+let read_node=(node:Node):>int64=>{
+    if node is? Left|Right {let view=node return view.value}
+    return 0
+}
+let choose=(present:bool):>Entry|none=>if present Entry[42] else none
+let make_entry=():>Entry=>Entry[42]
+let pack_call=():>Entry|none=>make_entry()
+let pack_parent=():>Node|none=>Left[0 42]
+let read=(values:dict<int64 Entry>):>int64=>{
+    let found=values.get(1)
+    if found is? none return 0
+    return found.value
+}
+let exercise=():>bool=>{
+    let values:dict<int64 Entry>=[1->Entry[42]]
+    let root:Node=Right[0 999 42]
+    loop i in 0.. and i <? 5000 {
+        let found=choose(true)
+        let absent=choose(false)
+        let from_call=pack_call()
+        # Left needs less storage than the Node family (which includes
+        # Right). Both a direct upcast and an optional parent must reserve
+        # and release the destination layout's size, without leaking Left.
+        let parent:Node=Left[0 42]
+        let optional_parent=pack_parent()
+        if found is? none or absent isnt? none return false
+        if from_call is? none or from_call.value not=?42 return false
+        if parent isnt? Left or parent.value not=?42 return false
+        if optional_parent isnt? Left or optional_parent.value not=?42 return false
+        if found.value not=? 42 or read(values) not=? 42 return false
+        found.value=99
+        if from_call.value not=?42 return false
+        if read(values) not=? 42 return false
+        if read_node(root) not=? 42 return false
+    }
+    return true
+}
+let live=():>int64=>_arena_live_bytes
+let main=():>int64=>{
+    let optional:dict<int64 Entry|none>=[1->Entry[42]]
+    let selected=optional.get(1)
+    if selected is? none return 3
+    selected.value=99
+    let again=optional.get(1)
+    if again is? none or again.value not=?42 return 4
+    if not exercise() return 2
+    let before=live()
+    if not exercise() return 2
+    let retained=live()-before
+    if retained >? 4096 return 1
+    return 42
+}
