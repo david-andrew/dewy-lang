@@ -37,6 +37,28 @@ if [[ $bootstrap_target == c ]] && ! command -v cc >/dev/null; then
     exit 2
 fi
 mkdir -p -- "$bootstrap_output"
+# Let the Dewy process exit before µDewy (and possibly a C compiler) starts.
+# The first seed can retain a large compilation arena through emission.
+# Record its exact backend arguments, then execute them after that arena is
+# gone. Every real backend failure still stops the build before certification.
+bootstrap_handoff=$(mktemp -d "$bootstrap_output/.backend-handoff.XXXXXX")
+bootstrap_cc_tools=''
+bootstrap_cleanup() {
+    rm -rf -- "$bootstrap_handoff"
+    if [[ -n $bootstrap_cc_tools ]]; then rm -rf -- "$bootstrap_cc_tools"; fi
+}
+trap bootstrap_cleanup EXIT
+export DEWY_BOOTSTRAP_BACKEND_ARGS="$bootstrap_handoff/arguments"
+cat > "$bootstrap_handoff/udewy" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ $# != 4 || $1 != --target || $3 != -c || ! -s $4 ]]; then
+    echo 'Unexpected bootstrap backend invocation' >&2
+    exit 2
+fi
+printf '%s\0' "$@" > "$DEWY_BOOTSTRAP_BACKEND_ARGS"
+EOF
+chmod +x "$bootstrap_handoff/udewy"
 # Optional GCC accelerator for the large generated translation units. Keep
 # the same compiler/options in both generations; byte comparison still
 # decides whether the pair has reached a fixed point. Other C compilers and
@@ -51,7 +73,6 @@ if [[ -n $bootstrap_lto_jobs ]]; then
     DEWY_BOOTSTRAP_REAL_CC=$(command -v cc)
     DEWY_BOOTSTRAP_CC_PATH=$PATH
     bootstrap_cc_tools=$(mktemp -d "$bootstrap_output/.cc-tools.XXXXXX")
-    trap 'rm -rf -- "$bootstrap_cc_tools"' EXIT
     # Check support before starting either expensive compiler generation.
     "$DEWY_BOOTSTRAP_REAL_CC" -flto="$bootstrap_lto_jobs" -x c -o "$bootstrap_cc_tools/probe" - <<'EOF'
 int main(void) { return 0; }
@@ -87,9 +108,17 @@ for bootstrap_generation in 1 2; do
     bootstrap_started=$SECONDS
     "$bootstrap_output/udewy-stage$bootstrap_previous" --target "$bootstrap_target" -c udewy/bootstrap/main.udewy
     cp -- __dewycache__/udewy/bootstrap/main "$bootstrap_output/udewy-stage$bootstrap_generation"
+    rm -f -- "$DEWY_BOOTSTRAP_BACKEND_ARGS"
     DEWY_LIBRARY_ROOT="$bootstrap_root/library" \
-        DEWY_UDEWY="$bootstrap_output/udewy-stage$bootstrap_generation" \
+        DEWY_UDEWY="$bootstrap_handoff/udewy" \
         "$bootstrap_output/dewy-stage$bootstrap_previous" --target "$bootstrap_target" -c dewy/bootstrap/main.dewy
+    if [[ ! -s $DEWY_BOOTSTRAP_BACKEND_ARGS ]]; then
+        echo 'The Dewy seed did not hand off a backend invocation' >&2
+        exit 1
+    fi
+    mapfile -d '' -t bootstrap_backend_args < "$DEWY_BOOTSTRAP_BACKEND_ARGS"
+    echo "Emitted Dewy generation $bootstrap_generation; building its executable"
+    "$bootstrap_output/udewy-stage$bootstrap_generation" "${bootstrap_backend_args[@]}"
     cp -- __dewycache__/dewy/bootstrap/main "$bootstrap_output/dewy-stage$bootstrap_generation"
     "$bootstrap_output/udewy-stage$bootstrap_generation" --help > /dev/null
     "$bootstrap_output/dewy-stage$bootstrap_generation" --version

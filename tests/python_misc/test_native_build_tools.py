@@ -5,6 +5,54 @@ import shutil
 import subprocess
 
 
+def test_backend_runs_after_dewy_exits_and_failure_stops_build(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    work = tmp_path / 'checkout with spaces'
+    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library'):
+        (work / name).mkdir(parents=True, exist_ok=True)
+    script = work / 'tools/bootstrap_native.sh'
+    shutil.copy2(root / 'tools/bootstrap_native.sh', script)
+    (work / 'VERSION').write_text('fixture\n')
+    (work / 'tools/dewy_test.dewy').touch()
+    dewy = work / 'dewy-seed'
+    dewy.write_text('''#!/usr/bin/env bash
+set -eu
+echo "$$" > "$TEST_DEWY_PID"
+mkdir -p __dewycache__/dewy/bootstrap
+source="$PWD/__dewycache__/dewy/bootstrap/main.udewy"
+echo 'let main=()=>42' > "$source"
+"$DEWY_UDEWY" --target "$2" -c "$source"
+echo emitted > "$TEST_DEWY_DONE"
+''')
+    micro = work / 'udewy-seed'
+    micro.write_text('''#!/usr/bin/env bash
+set -eu
+if [[ $4 == udewy/bootstrap/main.udewy ]]; then
+    mkdir -p __dewycache__/udewy/bootstrap
+    cp "$0" __dewycache__/udewy/bootstrap/main
+    exit 0
+fi
+[[ -f "$TEST_DEWY_DONE" ]]
+if kill -0 "$(cat "$TEST_DEWY_PID")" 2>/dev/null; then exit 98; fi
+[[ $# == 4 && $1 == --target && $2 == x86_64 && $3 == -c && -s $4 ]]
+printf '%s\\n' "$4" > "$TEST_BACKEND_SOURCE"
+exit 77
+''')
+    dewy.chmod(0o755)
+    micro.chmod(0o755)
+    env = os.environ | {
+        'TEST_DEWY_PID': str(work / 'dewy.pid'),
+        'TEST_DEWY_DONE': str(work / 'dewy.done'),
+        'TEST_BACKEND_SOURCE': str(work / 'backend.source'),
+    }
+    result = subprocess.run(['bash', script, dewy, micro, work / 'pair'],
+                            env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 77, result.stdout + result.stderr
+    assert (work / 'backend.source').read_text().strip() == str(work / '__dewycache__/dewy/bootstrap/main.udewy')
+    assert not (work / 'pair/SHA256SUMS').exists()
+    assert not list((work / 'pair').glob('.backend-handoff.*'))
+
+
 def test_lto_launcher_keeps_original_compiler_search_path(tmp_path):
     root = Path(__file__).resolve().parents[2]
     for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library'):

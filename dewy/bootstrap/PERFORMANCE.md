@@ -95,3 +95,10 @@ stored-contract acceptance/rejection checks. Set `DEWY_BOOTSTRAP_LTO_JOBS=8`
 for the opt-in bootstrap-script accelerator; the script probes support and
 uses the same options for both generations. This does not replace the
 required fixed-point comparison or establish native self-hosting by itself.
+
+The bootstrap script separates Dewy emission from backend execution. A small
+handoff records the seed's exact compile-only arguments; the script invokes
+µDewy after the Dewy process exits. This releases the first seed's compilation
+arena before µDewy and any C compiler need memory. Backend failures still
+stop generation construction and prevent certification. The handoff uses no
+hosted compiler and applies to both output backends.
