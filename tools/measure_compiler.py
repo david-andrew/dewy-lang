@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def hosted_worker(argv: list[str]) -> int:
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, os.environ.get('DEWY_BENCH_HOSTED_ROOT', str(ROOT)))
     from dewy import __main__ as cli
     from dewy.backend.udewy import emit, lower
     from dewy.semantic import check
@@ -36,10 +36,15 @@ def hosted_worker(argv: list[str]) -> int:
 
         def measured(*args, **kwargs):
             start = time.perf_counter()
+            with Path('phase-events.jsonl').open('a') as events:
+                events.write(json.dumps({'phase': label, 'event': 'start', 'time': start}) + '\n')
             try:
                 return original(*args, **kwargs)
             finally:
-                phases[label] = phases.get(label, 0) + time.perf_counter() - start
+                stop = time.perf_counter()
+                phases[label] = phases.get(label, 0) + stop - start
+                with Path('phase-events.jsonl').open('a') as events:
+                    events.write(json.dumps({'phase': label, 'event': 'finish', 'time': stop}) + '\n')
 
         setattr(owner, name, measured)
 
@@ -64,6 +69,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
     parser.add_argument('--native-executable', type=Path)
+    parser.add_argument('--hosted-root', type=Path, default=ROOT,
+                        help='pin the hosted packages and library to a source snapshot')
     parser.add_argument('--udewy-executable', type=Path)
     parser.add_argument('--target', choices=('x86_64', 'c'), default='x86_64')
     parser.add_argument('--output', type=Path, required=True)
@@ -76,11 +83,15 @@ def main() -> int:
     if args.profile and args.native_executable:
         parser.error('--profile records hosted Python calls only')
     source = args.source.resolve(strict=True)
+    hosted_root = args.hosted_root.resolve(strict=True)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     if (output / 'results.jsonl').exists():
         parser.error('use a new output directory to preserve earlier measurements')
     env = os.environ | {'PYTHONPATH': str(ROOT), 'DEWY_LIBRARY_ROOT': str(ROOT / 'library')}
+    if not args.native_executable:
+        env |= {'PYTHONPATH': str(hosted_root), 'DEWY_LIBRARY_ROOT': str(hosted_root / 'library'),
+                'DEWY_BENCH_HOSTED_ROOT': str(hosted_root)}
     if args.udewy_executable:
         env['DEWY_UDEWY'] = str(args.udewy_executable.resolve(strict=True))
     if args.profile:
@@ -105,6 +116,15 @@ def main() -> int:
     }
     if args.native_executable:
         metadata['compiler_sha256'] = hashlib.sha256(args.native_executable.read_bytes()).hexdigest()
+    else:
+        metadata['hosted_root'] = str(hosted_root)
+        digest = hashlib.sha256()
+        for package in ('dewy', 'udewy', 'library'):
+            for path in sorted((hosted_root / package).rglob('*')):
+                if path.is_file() and path.suffix in ('.py', '.dewy', '.udewy'):
+                    digest.update(str(path.relative_to(hosted_root)).encode() + b'\0')
+                    digest.update(path.read_bytes())
+        metadata['hosted_source_sha256'] = digest.hexdigest()
     if args.udewy_executable:
         metadata['udewy'] = str(args.udewy_executable.resolve())
         metadata['udewy_sha256'] = hashlib.sha256(args.udewy_executable.read_bytes()).hexdigest()
