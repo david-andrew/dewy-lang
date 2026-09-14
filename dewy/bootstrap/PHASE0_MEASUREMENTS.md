@@ -935,3 +935,36 @@ snapshot, and proof-oracle checks pass. Artifacts are `fact-lookup-before`,
 `fact-index-native`, `fact-index-native-before`, and the `fact-index-*gates`
 logs. This is an allocation result; whole-compiler timing with that batch
 remains a separate integration measurement.
+
+### Fact-index integration and deferred type descriptions
+
+The frozen `c4658546` hosted build (`source-fact-index`, archived with its
+manifest beside the measurements) succeeds in **231.76 seconds**, including
+68.59 seconds checking, 57.41 lowering, 4.51 emission, and 95.53 backend.
+It uses the same GCC/LTO/no-PRE options as the previous checkpoint, an empty
+build directory, disabled ccache, and no overlapping compilation jobs.
+Peak process RSS is 2,229,668 KiB; emitted µDewy is 33,768,252 bytes
+(SHA-256 `0cc77ed439516933b56f6f26c4bdef3d377585037a753772037b64d2b07a26b5`).
+The full-build target remains unmet.
+
+That native seed builds the pinned t0 in **19.85 seconds** (previously
+22.21), with byte-identical µDewy: 3,509,937 bytes and SHA-256
+`0b9937ceda2d3f07d24ac688c3210c69094556813adbf6916ef7d56aab5238c2`.
+Its opt-in phase reports divide this into 6.25 seconds frontend checking,
+4.88 validation, 0.04 initialization/reachability, 6.02 lowering,
+0.90 emission, and 1.37 backend. Peak process RSS is 2,151,196 KiB.
+All twelve contract/aliasing/invalidation cases pass through the complete
+hosted and native CLIs. Artifacts: `host-full-fact-index`,
+`native-fact-index-t0`, and `fact-index-contracts` under the Phase 0 root.
+
+The next type-factory batch probes the arena's storage key before building
+recursive structural identity strings and retained descriptions. It keeps
+key/shape encodings and metadata distinctions unchanged. A kernel repeating
+4,000 already-interned object, function, refined, and array types allocates
+**35,808,000 → 3,496,000 bytes** when hosted-compiled (direct and C routes),
+and **174,600,000 → 27,648,000 bytes** when both versions are compiled by the
+same `c4658546` native seed. These are allocation results, not whole-compiler
+speedups. Both variants check their returned identities and arena size;
+existing algebra, display, deep-shape, fork, and rollback tests pass.
+Artifacts: `type-factory-before`, `type-factory-after`,
+`type-factory-native-before`, `type-factory-native-after`, and their logs.

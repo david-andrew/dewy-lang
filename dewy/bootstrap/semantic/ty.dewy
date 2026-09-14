@@ -159,6 +159,13 @@ contains_type = (items:array<addr> id:addr nodes:Table):>bool => {
 }
 
 
+# Factories probe the storage key before constructing a shape or description.
+# A shape recursively includes child identities and can dwarf its small key;
+# producing it again on an intern hit turns cheap type queries into copies.
+# The arena owns this index, so forks and truncation also govern factory hits.
+# Keep declaration metadata in the key: structural equality alone cannot
+# authorize reusing defaults, methods, or resolved proof bindings.
+#
 # Return evidence about the current table on both paths, including reuse.
 intern = (@nodes:Table value:Type):>addr<i => i <? nodes.entries.length> => {
     let known=nodes.positions.get(value.key)
@@ -189,18 +196,38 @@ truncate = (@nodes:Table count:addr):>void => {
     nodes.normal_forms=[]
 }
 
-primitive = (name:string @nodes:Table):>addr => intern(@nodes Primitive[key="P{_quoted(name)}" name=name])
-integer_literal = (value:bigint @nodes:Table):>addr => intern(@nodes IntegerLiteralType[key="I{_bigint_as_string(value)}" value=value])
-string_literal = (value:string @nodes:Table):>addr => intern(@nodes StringLiteralType[key="S{_quoted(value)}" value=value])
+primitive = (name:string @nodes:Table):>addr => {
+    let key="P{_quoted(name)}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes Primitive[key=key name=name])
+}
+integer_literal = (value:bigint @nodes:Table):>addr => {
+    let key="I{_bigint_as_string(value)}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes IntegerLiteralType[key=key value=value])
+}
+string_literal = (value:string @nodes:Table):>addr => {
+    let key="S{_quoted(value)}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes StringLiteralType[key=key value=value])
+}
 binary_literal = (value:array<uint8> @nodes:Table):>addr => {
     let parts:array<string> = []
     loop byte in value { parts.push("{byte}") }
-    return intern(@nodes BinaryLiteralType[key="B{parts.join(',')}" value=value])
+    let key="B{parts.join(',')}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes BinaryLiteralType[key=key value=value])
 }
 rational_literal = (numerator:bigint denominator:bigint & ~0 @nodes:Table):>addr => {
     let value = _bigrational_make(numerator denominator)
-    if value =? 0 return intern(@nodes RationalLiteralType[key='L0/1' numerator=0 denominator=1])
-    let key = "L{_bigint_as_string(value.numerator)}/{_bigint_as_string(value.denominator)}"
+    let key = if value =? 0 'L0/1' else "L{_bigint_as_string(value.numerator)}/{_bigint_as_string(value.denominator)}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    if value =? 0 return intern(@nodes RationalLiteralType[key=key numerator=0 denominator=1])
     return intern(@nodes RationalLiteralType[key=key numerator=value.numerator denominator=value.denominator])
 }
 
@@ -239,7 +266,10 @@ dimension = (powers:array<DimensionPower> @nodes:Table):>addr => {
         normalized.push(DimensionPower[name exponent])
         parts.push("{_quoted(name)}:{_bigint_as_string(exponent)}")
     }
-    return intern(@nodes DimensionType[key="D{parts.join(';')}" powers=normalized])
+    let key="D{parts.join(';')}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes DimensionType[key=key powers=normalized])
 }
 
 dimension_at = (id:addr nodes:Table):>DimensionType => {
@@ -265,7 +295,12 @@ power_dimension = (base:addr exponent:bigint @nodes:Table):>addr => {
     loop power in original.powers { powers.push(DimensionPower[power.name (power.exponent * exponent)]) }
     return dimension(powers @nodes)
 }
-quantity_type = (number:addr dim:addr @nodes:Table):>addr => intern(@nodes QuantityType[key="U{number}:{dim}" shape="U{shapes_key([number dim] nodes)}" number=number dimension=dim])
+quantity_type = (number:addr dim:addr @nodes:Table):>addr => {
+    let key="U{number}:{dim}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes QuantityType[key=key shape="U{shapes_key([number dim] nodes)}" number=number dimension=dim])
+}
 
 items_key = (items:array<addr>):>string => {
     let pieces:array<string> = []
@@ -293,8 +328,13 @@ combine = (items:array<addr> conjunction:bool @nodes:Table):>addr => {
     }
     if flat.length =? 0 return primitive(identity @nodes)
     if flat.length =? 1 return flat[0]
-    if conjunction return intern(@nodes TypeAnd[key="A{items_key(flat)}" shape="A{shapes_key(flat nodes)}" items=flat])
-    return intern(@nodes TypeOr[key="O{items_key(flat)}" shape="O{shapes_key(flat nodes)}" items=flat])
+    let prefix=if conjunction 'A' else 'O'
+    let key="{prefix}{items_key(flat)}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    let shape="{prefix}{shapes_key(flat nodes)}"
+    if conjunction return intern(@nodes TypeAnd[key=key shape=shape items=flat])
+    return intern(@nodes TypeOr[key=key shape=shape items=flat])
 }
 intersect = (items:array<addr> @nodes:Table):>addr => combine(items true @nodes)
 union = (items:array<addr> @nodes:Table):>addr => combine(items false @nodes)
@@ -310,37 +350,70 @@ sequence = (items:array<addr> @nodes:Table):>addr => {
     }
     if flat.length =? 0 return primitive('void' @nodes)
     if flat.length =? 1 return flat[0]
-    return intern(@nodes SequenceType[key="Q{items_key(flat)}" shape="Q{shapes_key(flat nodes)}" items=flat])
+    let key="Q{items_key(flat)}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes SequenceType[key=key shape="Q{shapes_key(flat nodes)}" items=flat])
 }
 
-array_type = (element:addr length:addr? @nodes:Table):>addr => intern(@nodes ArrayType[key="R{element}:{length}" shape="R{shapes_key([element] nodes)}:{length}" element=element length=length])
-string_type = (length:addr? @nodes:Table):>addr => intern(@nodes StringType[key="T{length}" length=length])
-parameterize = (head:addr args:array<addr> @nodes:Table):>addr => intern(@nodes TypeParameterize[key="G{head}:{items_key(args)}" shape="G{shapes_key([head] nodes)}:{shapes_key(args nodes)}" head=head args=args])
+array_type = (element:addr length:addr? @nodes:Table):>addr => {
+    let key="R{element}:{length}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes ArrayType[key=key shape="R{shapes_key([element] nodes)}:{length}" element=element length=length])
+}
+string_type = (length:addr? @nodes:Table):>addr => {
+    let key="T{length}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes StringType[key=key length=length])
+}
+parameterize = (head:addr args:array<addr> @nodes:Table):>addr => {
+    let key="G{head}:{items_key(args)}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes TypeParameterize[key=key shape="G{shapes_key([head] nodes)}:{shapes_key(args nodes)}" head=head args=args])
+}
 
-type_variable = (name:string bound:addr @nodes:Table):>addr => intern(@nodes TypeVariable[key="V{_quoted(name)}:{bound}" shape="V{_quoted(name)}:{shapes_key([bound] nodes)}" name=name bound=bound])
+type_variable = (name:string bound:addr @nodes:Table):>addr => {
+    let key="V{_quoted(name)}:{bound}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes TypeVariable[key=key shape="V{_quoted(name)}:{shapes_key([bound] nodes)}" name=name bound=bound])
+}
 
 function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr params:array<GenericParam> @nodes:Table):>addr => {
     let slots:array<string> = []
-    let shapes:array<string> = []
     loop p in pos {
         let name = if p.name is? none 'none' else _quoted(p.name)
         slots.push("P{name}:{p.value_type}:{p.required}:{p.place}")
-        shapes.push("P{name}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}")
     }
     loop p in kw {
         slots.push("K{_quoted(p.name)}:{p.value_type}:{p.required}:{p.place}")
-        shapes.push("K{_quoted(p.name)}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}")
     }
     loop p in params {
         slots.push("G{_quoted(p.name)}:{p.bound}")
-        shapes.push("G{_quoted(p.name)}:{shapes_key([p.bound] nodes)}")
     }
     let rest_key = if rest is? none 'none' else _quoted(rest)
     let key = "F{slots.join(';')}:R{rest_key}:T{ret}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    let shapes:array<string> = []
+    loop p in pos {
+        let name = if p.name is? none 'none' else _quoted(p.name)
+        shapes.push("P{name}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}")
+    }
+    loop p in kw { shapes.push("K{_quoted(p.name)}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}") }
+    loop p in params { shapes.push("G{_quoted(p.name)}:{shapes_key([p.bound] nodes)}") }
     let shape = "F{shapes.join(';')}:R{rest_key}:T{shapes_key([ret] nodes)}"
     return intern(@nodes FunctionType[key=key shape=shape pos_or_kw=pos kw_only=kw rest=rest ret=ret type_params=params])
 }
-overload_type = (methods:array<addr> @nodes:Table):>addr => intern(@nodes OverloadType[key="M{items_key(methods)}" shape="M{shapes_key(methods nodes)}" methods=methods])
+overload_type = (methods:array<addr> @nodes:Table):>addr => {
+    let key="M{items_key(methods)}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes OverloadType[key=key shape="M{shapes_key(methods nodes)}" methods=methods])
+}
 
 # Compare a single contract without allocating its serialized key. Resolved
 # binding ids describe proof provenance, not contract identity; tested types
@@ -390,6 +463,8 @@ propositions_key = (props:array<facts.Proposition> structural:bool nodes:Table):
 }
 refined_type = (base:addr propositions:array<facts.Proposition> @nodes:Table):>addr => {
     let key = "E{base}:{propositions_key(propositions false nodes)}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
     let shape = "E{shapes_key([base] nodes)}:{propositions_key(propositions true nodes)}"
     return intern(@nodes RefinedType[key=key shape=shape base=base propositions=propositions])
 }
@@ -403,10 +478,8 @@ strip_refinement = (id:addr nodes:Table):>addr => {
 # in the stored description but do not make two layouts different types.
 object_type = (fields:array<ObjectField> brand:string? immutable:bool methods:array<MethodSpec> constructors:array<addr> @nodes:Table minted:bool=false parent:addr?=none abstract:bool=false):>addr => {
     let parts:array<string> = []
-    let shapes:array<string> = []
     loop f in fields {
         parts.push("{_quoted(f.name)}:{f.value_type}:{f.mutable}:{f.default}:{propositions_key(f.refinement false nodes)}")
-        shapes.push("{_quoted(f.name)}:{shapes_key([f.value_type] nodes)}:{f.mutable}")
     }
     let method_keys:array<string> = []
     loop m in methods {
@@ -415,6 +488,10 @@ object_type = (fields:array<ObjectField> brand:string? immutable:bool methods:ar
     }
     let brand_key = if brand is? none 'none' else _quoted(brand)
     let key = "J{brand_key}:{immutable}:{parts.join(';')}:{method_keys.join(';')}:{items_key(constructors)}:{minted}:{parent}:{abstract}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    let shapes:array<string> = []
+    loop f in fields { shapes.push("{_quoted(f.name)}:{shapes_key([f.value_type] nodes)}:{f.mutable}") }
     let shape = "J{brand_key}:{immutable}:{shapes.join(';')}"
     return intern(@nodes ObjectType[key=key shape=shape fields=fields brand=brand immutable=immutable methods=methods constructors=constructors minted=minted parent=parent abstract=abstract])
 }
@@ -443,12 +520,19 @@ path_type = (value:string? methods:array<MethodSpec> @nodes:Table):>addr => {
     let description = node_at(nodes base)
     $runtime_assert description is? ObjectType
     let key = "K{description.key}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
     let shape = "K{shape_of(base nodes)}"
     if value is? none return intern(@nodes PathType[key=key shape=shape fields=description.fields methods=methods])
     return intern(@nodes PathLiteralType[key=key shape=shape fields=description.fields methods=methods value=value])
 }
 
-named_type = (name:string alias_id:addr @nodes:Table):>addr => intern(@nodes NamedType[key="Y{alias_id}" name=name alias_id=alias_id])
+named_type = (name:string alias_id:addr @nodes:Table):>addr => {
+    let key="Y{alias_id}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes NamedType[key=key name=name alias_id=alias_id])
+}
 resolve_alias = (id:addr target:addr @nodes:Table):>void => {
     $runtime_assert id <? nodes.entries.length
     let node = nodes.entries[id]
@@ -462,7 +546,12 @@ unfold = (id:addr nodes:Table):>addr => {
     $runtime_assert node.target isnt? none
     return node.target
 }
-meta_type = (family:addr @nodes:Table):>addr => intern(@nodes MetaType[key="H{family}" shape="H{shapes_key([family] nodes)}" family=family])
+meta_type = (family:addr @nodes:Table):>addr => {
+    let key="H{family}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes MetaType[key=key shape="H{shapes_key([family] nodes)}" family=family])
+}
 alias_key = (value:TypeAliasValue nodes:Table structural:bool):>string => {
     if value is? addr return if structural shape_of(value nodes) else "{value}"
     let params:array<string> = []
@@ -475,14 +564,19 @@ alias_key = (value:TypeAliasValue nodes:Table structural:bool):>string => {
 }
 module_type = (fields:array<ModuleField> @nodes:Table):>addr => {
     let parts:array<string> = []
-    let shapes:array<string> = []
     loop f in fields {
         let stored = if f.type_value is? none 'none' else alias_key(f.type_value nodes false)
         parts.push("{_quoted(f.name)}:{f.value_type}:{f.binding_id}:{stored}")
+    }
+    let key="Z{parts.join(';')}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    let shapes:array<string> = []
+    loop f in fields {
         let value = if f.type_value is? none 'none' else alias_key(f.type_value nodes true)
         shapes.push("{_quoted(f.name)}:{shapes_key([f.value_type] nodes)}:{f.binding_id}:{value}")
     }
-    return intern(@nodes ModuleType[key="Z{parts.join(';')}" shape="Z{shapes.join(';')}" fields=fields])
+    return intern(@nodes ModuleType[key=key shape="Z{shapes.join(';')}" fields=fields])
 }
 module_field = (node:ModuleType name:string):>ModuleField? => {
     loop f in node.fields { if f.name =? name return f }
@@ -550,7 +644,10 @@ negate = (id:addr @nodes:Table):>addr => {
         loop child in node.items { items.push(negate(child @nodes)) }
         return combine(items (node is? TypeOr) @nodes)
     }
-    return intern(@nodes TypeNot[key="N{id}" shape="N{shapes_key([id] nodes)}" item=id])
+    let key="N{id}"
+    let known=nodes.positions.get(key)
+    if known isnt? none return known
+    return intern(@nodes TypeNot[key=key shape="N{shapes_key([id] nodes)}" item=id])
 }
 
 to_nnf = (id:addr @nodes:Table):>addr => {
