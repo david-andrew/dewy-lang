@@ -24,6 +24,9 @@ checked before comparing implementations. `--cases FILE` also accepts negative
 cases, and `--hosted-root PATH` pins a source snapshot while development
 continues. A timeout, crash, or backend failure does not count as a successful
 language rejection. Exact diagnostic wording is not part of parity.
+The default inventory includes ten isolated rejection fixtures for names,
+initialization, types, bounds, const mutation and stored contracts. Both
+baseline compilers reject all ten at the language-checking boundary.
 
 ## Initial bounded baseline — 2026-09-14
 

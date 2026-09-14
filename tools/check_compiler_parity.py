@@ -28,8 +28,10 @@ def fixture_cases() -> list[dict]:
     module = ast.parse((ROOT / 'tests/python_misc/test_cleanparse_udewy_e2e.py').read_text())
     assignment = next(node for node in module.body if isinstance(node, ast.Assign)
                       and any(isinstance(target, ast.Name) and target.id == 'LOWERED_CASES' for target in node.targets))
-    return [{'source': f'dewy/tests/{name}', 'accepts': True, 'exit': status}
-            for name, status in ast.literal_eval(assignment.value)]
+    accepted = [{'source': f'dewy/tests/{name}', 'accepts': True, 'exit': status}
+                for name, status in ast.literal_eval(assignment.value)]
+    rejected = json.loads((ROOT / 'tests/fixtures/compiler_parity_rejections.json').read_text())
+    return [*accepted, *rejected]
 
 
 def invoke(command: list[str], work: Path, env: dict, timeout: float) -> dict:
