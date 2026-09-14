@@ -1,0 +1,31 @@
+# Present, absent and discarded lenient results all own a valid optional
+# cell. Defaults are evaluated eagerly even when the key is present.
+let defaults:int64=0
+fallback=():>string=>{defaults+=1 return 'fallback'}
+exercise=():>bool=>{
+    let numbers:set<int64>=set[20 22]
+    let absent=numbers.pop(99 default=none)
+    if absent isnt? none return false
+    let present=numbers.pop(20 default=none)
+    if present is? none or present not=? 20 return false
+    numbers.pop(99 default=none);
+    let words:set<string>=set['read' 'write']
+    let missing=words.pop('absent' default=none)
+    if missing isnt? none return false
+    let found=words.pop('read' default=none)
+    if found is? none or found not=? 'read' return false
+    words.pop('absent' default=none);
+    let before:int64=defaults
+    let explicit=words.pop('write' default=fallback())
+    let other=words.pop('missing' default=fallback())
+    if defaults not=? before+2 return false
+    words.clear
+    return explicit =? 'write' and other =? 'fallback' and found =? 'read'
+}
+main=():>int64=>{
+    if not exercise() return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 64 {if not exercise() return 2}
+    if _arena_live_bytes not=? before return 3
+    return 42
+}

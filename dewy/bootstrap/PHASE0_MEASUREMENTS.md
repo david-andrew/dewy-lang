@@ -141,3 +141,16 @@ and writes, allowing the complete hosted checker to validate it. Its native
 lowering-driver output is 146,253 bytes, still below the existing 160 KB gate,
 and executes correctly on both routes. The earlier 124,977-byte native kernel
 measurement predates those guards; compare like fixture revisions.
+
+## Isolated parity repair: lenient set pop
+
+The accepted-program inventory exposed a native crash in `sets.dewy`.
+`pop(key default=none)` returned bare payloads on both branches instead of
+the optional cell its checked result type requires; discarding a missing
+result then dereferenced zero during cleanup. Native lowering now packs
+both alternatives and releases an unused packed default with its result
+type. The isolated fixture crashes through both old output backends and
+returns 42 through both updated backends. The hosted version also returns
+42. Cases cover present/absent/discarded integer and string results, eager
+defaults, and zero retained arena growth over 64 repeated scopes. A fresh
+full-native corpus run remains an integration gate.

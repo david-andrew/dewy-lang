@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
     'native_borrowed_string_arrays',
     'native_shared_element_replacement',
     'native_sibling_field_facts',
+    'native_set_pop_defaults',
 ])
 def test_array_sharing(tmp_path, fixture):
     seed = tmp_path / f'{fixture}.udewy'
