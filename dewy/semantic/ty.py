@@ -547,12 +547,17 @@ def brand_ids() -> dict[str, tuple[int, int]]:
     `is? Brand` is one range test on the value's brand word (ids start at 1;
     0 is an unbranded object)."""
     ids: dict[str, tuple[int, int]] = {}
+    # Preserve the parent table's insertion order, matching brand_children,
+    # while visiting its edges once instead of scanning them at every node.
+    children: dict[str, list[str]] = {}
+    for child, parent in USER_BRAND_PARENTS.items():
+        children.setdefault(parent, []).append(child)
     counter = 1
     def number(brand: str) -> None:
         nonlocal counter
         start = counter
         counter += 1
-        for child in brand_children(brand):
+        for child in children.get(brand, ()):
             number(child)
         ids[brand] = (start, counter)
     for brand in USER_BRAND_TYPES:

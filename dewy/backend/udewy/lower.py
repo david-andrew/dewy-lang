@@ -232,6 +232,10 @@ class _Lowerer(
         """Initialize per-program identity maps and deterministic counters."""
         _erase_dimensions(root)
         self.root = root
+        # Checking has finished minting the program's brands. Number the
+        # complete forest once, as the native lowerer does, rather than
+        # rebuilding it for every constructor, type test and copy arm.
+        self.brand_numbers = ty.brand_ids()
         self.srcfile = srcfile
         self.preserve_raw_udewy_shifts = bool(re.search(
             r'(?m)^\s*\$no_prelude\s*=\s*true\b',
@@ -288,6 +292,7 @@ class _Lowerer(
         self.object_copy_symbols: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], bool, str]] = []
         self.object_layouts: dict[int, tuple[ty.ObjectType, tuple[int, dict[str, int]]]] = {}
         self.object_frame_copies: dict[int, tuple[ty.ObjectType, bool]] = {}
+        self.object_prepared_storage: dict[int, tuple[ty.ObjectType, bool]] = {}
         self.member_tags_by_identity: dict[int, tuple[ty.TypeExpr, int]] = {}
         self.pending_object_copies: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], bool, str]] = []
         self.object_release_symbols: list[tuple[ty.ObjectType, bool, str]] = []
@@ -4460,11 +4465,10 @@ class _Lowerer(
         flow_prelude, result = self._extract_expression(flow)
         return [*prelude, *flow_prelude], result
 
-    @staticmethod
-    def _brand_under_test(test_type: ty.TypeExpr) -> str | None:
+    def _brand_under_test(self, test_type: ty.TypeExpr) -> str | None:
         """The brand a type test asks for, when it asks for a minted type."""
         unfolded = ty.unfold(test_type)
-        if isinstance(unfolded, ty.ObjectType) and ty.user_branded(unfolded) and unfolded.brand in ty.brand_ids():
+        if isinstance(unfolded, ty.ObjectType) and ty.user_branded(unfolded) and unfolded.brand in self.brand_numbers:
             return unfolded.brand
         return None
 
@@ -4617,7 +4621,7 @@ class _Lowerer(
             return [], hir.Integer(node.loc, 'int64', t0.base10, 0)
         if isinstance(node, hir.BrandValue):
             # a type as a runtime value: its brand id
-            return [], hir.Integer(node.loc, 'int64', t0.base10, ty.brand_ids()[node.brand][0])
+            return [], hir.Integer(node.loc, 'int64', t0.base10, self.brand_numbers[node.brand][0])
         if isinstance(node, hir.TypeOf):
             # the brand word of the value (0 for a plain value of a carried structure)
             static = ty.unfold(ty.strip_refinement(node.value.type))

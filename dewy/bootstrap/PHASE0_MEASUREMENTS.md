@@ -356,3 +356,47 @@ first sample. A new full compiler checkpoint is pending.
 Artifacts: `scalar-projection/{native-complete-gates,hosted-regressions,
 final-gates,driver-comparison}.log`, its comparison script and emitted kernels,
 and `host-projected-getters-t0`, under the campaign artifact directory.
+
+### Full projection checkpoint
+
+The complete C-backed compiler built from the projection/worklist snapshot
+in **450.51 s**: checking 78.29 s, lowering 85.83 s, emission 10.29 s, and
+backend 269.88 s. Peak process RSS was 4,727,208 KiB. It emitted 69,976,136
+bytes of µDewy (SHA-256
+`c4d12746daa407cd53752cc84af570a7af50d33052c704d8c77b35f8ecd37534`),
+which the C backend expanded to 164,365,560 bytes. Short nonblocking profile
+samples and small validation jobs overlapped this checkpoint; it remains an
+integration observation. The full-build target is not met.
+
+That executable passes both projection fixtures through the **full native
+compiler**, including checking, fact validation and runtime-report installation.
+Both return 42; the allocation fixture still reports `0 0 0`. Native t0 takes
+65.55 s and emits 4,276,283 bytes, with 3,182,356 KiB peak process RSS. Hosted
+regressions overlapped the first portion, and this result does not establish a
+close latency improvement over 66.22 s. Artifacts: `host-full-getter-projections`,
+`native-getter-projections-t0`, and `scalar-projection/full-native-gates.log`.
+
+## Stable brand numbers and record preparation
+
+Hosted lowering now computes the complete brand numbering once per lowerer,
+as native lowering already does. The numbering itself builds parent-to-child
+adjacency once, preserving registration order, preorder ranges and postorder
+table insertion. Each new compilation gets a fresh table after checking has
+finished registering brands. Runtime type tests, constructors, type values
+and record copy/release dispatch reuse it.
+
+A controlled 256-brand lowering/emission kernel, using the same checked HIR
+and other caches, fell from **2.85/2.57 s to 0.195/0.192 s**. The former lookup
+pattern rebuilt the complete forest 1,026 times; the new lowerer builds it
+once. All four outputs are identical: 94,006 bytes, SHA-256
+`bc4255a27582eb191cbe06a84dcccd7c44e88fb7ef5c28ca5d1341b613d9a69c`.
+This is a bounded query result, not a full-build speedup estimate.
+
+The stable per-record query for caller-prepared fixed-array storage is cached
+too. Records needing none skip preparation altogether; scalar fields no
+longer construct address HIR that is immediately discarded. Fixed-array and
+nested prepared storage retain their allocation and lifetime rules. Nineteen
+final query, record, object-array and temporary-lifetime regressions pass,
+including fresh brand tables across successive programs. Artifacts:
+`compare-brand-queries.py`, `brand-query-comparison.log`,
+`brand-query-complete-gates.log`, and `brand-preparation-gates.log`.

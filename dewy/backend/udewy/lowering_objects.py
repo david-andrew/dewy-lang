@@ -200,14 +200,17 @@ class _ObjectLowering:
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, symbol),
                                 [replace(dest, type='int64'), replace(src, type='int64')], {})
 
-    @classmethod
-    def _object_uses_prepared_storage(cls, object_type: ty.ObjectType) -> bool:
-        for field in object_type.fields:
-            if isinstance(field.type, ty.ArrayType) and field.type.length is not None:
-                return True
-            if isinstance(field.type, ty.ObjectType) and cls._object_uses_prepared_storage(field.type):
-                return True
-        return False
+    def _object_uses_prepared_storage(self, object_type: ty.ObjectType) -> bool:
+        cached = self.object_prepared_storage.get(id(object_type))
+        if cached is not None:
+            return cached[1]
+        prepared = any(
+            isinstance(field.type, ty.ArrayType) and field.type.length is not None
+            or isinstance(field.type, ty.ObjectType) and self._object_uses_prepared_storage(field.type)
+            for field in object_type.fields
+        )
+        self.object_prepared_storage[id(object_type)] = (object_type, prepared)
+        return prepared
 
     def _object_copy_uses_frame_storage(self, object_type: ty.ObjectType) -> bool:
         """Whether an ordinary non-moving field copy allocates in its frame.
@@ -426,17 +429,18 @@ class _ObjectLowering:
         loc: Span,
     ) -> list[hir.AST]:
         """Prepare array fields recursively within existing object storage."""
-
+        if not self._object_uses_prepared_storage(object_type):
+            return []
         _size, offsets = self._object_layout(
             object_type,
             hir.Void(loc, ty.VOID_TYPE),
         )
         statements: list[hir.AST] = []
         for field in object_type.fields:
-            address = self._field_address(dest, offsets[field.name], loc)
             if isinstance(field.type, ty.ArrayType) and field.type.length is None:
                 continue  # a handle slot the callee fills with an arena-backed array
             if isinstance(field.type, ty.ArrayType):
+                address = self._field_address(dest, offsets[field.name], loc)
                 nested_statements, nested = self._allocate_array_result_value(
                     field.type,
                     loc,
@@ -445,7 +449,8 @@ class _ObjectLowering:
                 statements.extend(
                     self._value_store(nested, address, field.type, loc)
                 )
-            elif isinstance(field.type, ty.ObjectType):
+            elif isinstance(field.type, ty.ObjectType) and self._object_uses_prepared_storage(field.type):
+                address = self._field_address(dest, offsets[field.name], loc)
                 statements.extend(
                     self._initialize_object_result_storage(
                         address,
@@ -556,7 +561,7 @@ class _ObjectLowering:
         _size, offsets = self._object_layout(object_type, hir.Void(loc, ty.VOID_TYPE))
         if self.BRAND_FIELD not in offsets:
             return []
-        ids = ty.brand_ids()
+        ids = self.brand_numbers
         brand_id = ids[object_type.brand][0] if ty.user_branded(object_type) and object_type.brand in ids else 0
         address = self._field_address(dest, offsets[self.BRAND_FIELD], loc)
         return [self._intrinsic_call('__store_i64__', [self._int64_literal(loc, brand_id), address], ty.VOID_TYPE, loc)]
@@ -567,7 +572,7 @@ class _ObjectLowering:
 
     def _brand_range_test(self, brand_word: hir.AST, brand: str, loc: Span) -> hir.AST:
         """`brand_word in [id, end)`: the value is `brand` or one of its descendants."""
-        start, end = ty.brand_ids()[brand]
+        start, end = self.brand_numbers[brand]
         if end == start + 1:
             return self._typed_equality(brand_word, self._int64_literal(loc, start), 'int64', loc)
         lower = self._int64_comparison('__ge__', brand_word, self._int64_literal(loc, start), loc)
@@ -592,7 +597,7 @@ class _ObjectLowering:
         children = self._descendant_extra_fields(object_type)
         if not children:
             return []
-        ids = ty.brand_ids()
+        ids = self.brand_numbers
         brand_word = self._brand_word_load(source, object_type, loc)
         arms: list[hir.IfArm] = []
         for brand, child_type, extras in children:
@@ -617,7 +622,7 @@ class _ObjectLowering:
         children = self._descendant_extra_fields(object_type)
         if not children:
             return None
-        ids = ty.brand_ids()
+        ids = self.brand_numbers
         brand_word = self._brand_word_load(source, object_type, loc)
         arms = [hir.IfArm(loc, ty.VOID_TYPE,
                     self._typed_equality(brand_word, self._int64_literal(loc, ids[brand][0]), 'int64', loc),
