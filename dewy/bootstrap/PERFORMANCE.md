@@ -413,3 +413,33 @@ checks cover the same value semantics; the stricter retention budget above is
 checked on the native implementation. Reference counts remain provisional,
 and the longer-term question of predictable, ideally zero-cost ownership at
 the start of this document remains open.
+
+## Completed native fixed point (2026-09-14)
+
+The eighteenth pair attempt completed. The first and second generations of
+both compilers are byte-identical; the emitted Dewy µDewy sources also match
+at 96,688,561 bytes. All first-generation execution gates passed before
+generation two began. `tools/bootstrap_native.sh --target c` took 56 minutes
+23 seconds in total with GCC and eight LTO jobs. Generation builds took
+1,494 and 1,521 seconds respectively; the remaining time was execution checks.
+
+The Dewy process building generation two peaked at a sampled 9,421.9 MiB
+(about 9.2 GiB), versus the previous attempt exceeding its 35 GiB guard.
+Its checking/lowering/emission took approximately 1,318 seconds. The initial
+hosted-produced native seed took approximately 1,292 seconds and peaked at
+23,432.4 MiB. Sampling was every five seconds; these are process RSS samples,
+not precise allocator high-water measurements. The original seed still has
+the hosted backend's string-region behavior; subsequent generations use the
+new native string ownership helpers.
+
+The new compiler's bounded direct integration compilation peaked near
+428 MiB instead of 1,541 MiB; grouped actual analysis peaked near 826 MiB
+instead of 3,946 MiB. Those checks were slower in CPU time (roughly 25 versus
+20 seconds and 80 versus 50 seconds in the sampled runs). The change solves
+the memory growth that prevented the bootstrap; it does not solve compile
+latency generally. Native checked-prelude caching, cheaper pure type queries,
+less generated code, and predictable ownership remain performance work.
+
+The full no-C self-bootstrap remains a separate verification goal. Broader
+language parity also remains incomplete; see the observed corpus blockers in
+[IMPLEMENTATION.md](IMPLEMENTATION.md#hosted-parity-gaps).

@@ -1,173 +1,61 @@
 #!/usr/bin/env bash
-# Install udewy and the Python-backed dewy compiler into ~/.dewy.
+# Install the published native Dewy/µDewy pair and its matching library.
 set -euo pipefail
 
 REPO='david-andrew/dewy-lang'
-REPO_REF="${DEWY_REF:-master}"
-UDEWY_ASSET='udewy-linux-x86_64'
+ASSET='dewy-linux-x86_64.tar.gz'
 INSTALL_DIR="${HOME}/.dewy"
-RUNTIME_DIR="${INSTALL_DIR}/runtime"
-UDEWY_URL="https://github.com/${REPO}/releases/latest/download/${UDEWY_ASSET}"
-SOURCE_URL="https://github.com/${REPO}/archive/refs/heads/${REPO_REF}.tar.gz"
+RELEASE="${DEWY_RELEASE:-latest}"
+if [[ "$RELEASE" == latest ]]; then
+    RELEASE_URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
+else
+    RELEASE_URL="https://github.com/${REPO}/releases/download/${RELEASE}/${ASSET}"
+fi
 
 os=$(uname -s)
 arch=$(uname -m)
-if [ "$os" != 'Linux' ] || [ "$arch" != 'x86_64' ]; then
+if [[ "$os" != Linux || "$arch" != x86_64 ]]; then
     echo "This installer currently supports Linux x86_64 only (got ${os} ${arch})." >&2
     exit 1
 fi
 
 temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/dewy-install.XXXXXX")
-runtime_next="${INSTALL_DIR}/.runtime.new.$$"
-runtime_old="${INSTALL_DIR}/.runtime.old.$$"
-
-cleanup() {
-    rm -rf "$temp_dir" "$runtime_next"
-}
+install_next="${INSTALL_DIR}/.current.new.$$"
+cleanup() { rm -rf -- "$temp_dir"; rm -f -- "$install_next"; }
 trap cleanup EXIT
 
-echo "Downloading ${UDEWY_URL}"
-if ! curl -fsSL "$UDEWY_URL" -o "${temp_dir}/udewy"; then
-    echo "Failed to download udewy. Is there a published release at https://github.com/${REPO}/releases ?" >&2
-    exit 1
-fi
-
-echo "Downloading Dewy Python sources from ${SOURCE_URL}"
-if ! curl -fsSL "$SOURCE_URL" -o "${temp_dir}/source.tar.gz"; then
-    echo "Failed to download the Dewy Python sources." >&2
-    exit 1
-fi
-
-mkdir -p "${temp_dir}/source" "${temp_dir}/runtime"
-if ! tar -xzf "${temp_dir}/source.tar.gz" --strip-components=1 -C "${temp_dir}/source"; then
-    echo "Failed to unpack the Dewy Python sources." >&2
-    exit 1
-fi
-
-source_dir="${temp_dir}/source"
-runtime_stage="${temp_dir}/runtime"
-for required_path in VERSION dewy/__main__.py udewy/__main__.py library/arrays.dewy library/path.dewy library/math.dewy library/rational.dewy library/fixed.dewy library/bigint.dewy library/bigrational.dewy library/io.dewy library/reporting.dewy library/units.dewy library/time.dewy library/doc.dewy library/unicode.dewy library/unicode/casefold.bin library/unicode/runtime.dewy library/unicode/graphemes.dewy library/unicode/grapheme_break.bin library/unicode/indic_conjunct_break.bin library/unicode/extended_pictographic.bin library/linux/io.dewy library/linux/files.dewy library/linux/process.dewy library/linux/system.dewy tools/dewy_lldb.py tools/dewy_gdb.py; do
-    if [ ! -f "${source_dir}/${required_path}" ]; then
-        echo "Downloaded source archive is missing ${required_path}." >&2
-        exit 1
-    fi
-done
-
-copy_runtime_file() {
-    local source_file=$1
-    local relative_path=${source_file#"${source_dir}/"}
-    mkdir -p "${runtime_stage}/$(dirname "$relative_path")"
-    cp "$source_file" "${runtime_stage}/${relative_path}"
-}
-
-# Dewy's compiler is all Python. Its tests, docs, and sample programs are not
-# needed at runtime, so only Python modules and the implicit library files
-# are installed. udewy's Python runtime has a smaller, explicit module set.
-while IFS= read -r -d '' source_file; do
-    copy_runtime_file "$source_file"
-done < <(
-    find "${source_dir}/dewy" \
-        -type f -name '*.py' \
-        ! -path "${source_dir}/dewy/tests/*" \
-        ! -path "${source_dir}/dewy/todo.py" \
-        ! -path "${source_dir}/dewy/semantic/unicode/generate.py" \
-        -print0
+echo "Downloading ${RELEASE_URL}"
+curl -fsSL "$RELEASE_URL" -o "${temp_dir}/${ASSET}"
+mkdir -- "${temp_dir}/package"
+tar -xzf "${temp_dir}/${ASSET}" --no-same-owner -C "${temp_dir}/package"
+(
+    cd -- "${temp_dir}/package"
+    for required in dewy udewy VERSION SHA256SUMS library/path.dewy library/unicode/grapheme_break.bin tools/dewy_gdb.py tools/dewy_lldb.py; do
+        if [[ ! -f "$required" ]]; then
+            echo "Downloaded native package is missing ${required}." >&2
+            exit 1
+        fi
+    done
+    sha256sum --check --status SHA256SUMS
+    test -x dewy && test -x udewy
+    ./dewy --version
+    ./udewy --help > /dev/null
 )
 
-for source_file in \
-    "${source_dir}"/udewy/*.py \
-    "${source_dir}"/udewy/backend/*.py \
-    "${source_dir}"/udewy/third_party/sdl/desktop_launch.py; do
-    if [ -f "$source_file" ]; then
-        copy_runtime_file "$source_file"
-    fi
+# The pair and library move together. Switching one symlink makes a complete
+# release active; /proc/self/exe resolves to the versioned directory, where
+# native Dewy discovers its sibling compiler and matching library.
+read -r release_digest _ < <(sha256sum "${temp_dir}/${ASSET}")
+release_dir="${INSTALL_DIR}/releases/${release_digest}"
+mkdir -p -- "${INSTALL_DIR}/releases"
+if [[ ! -d "$release_dir" ]]; then
+    mv -- "${temp_dir}/package" "$release_dir"
+fi
+ln -s -- "releases/${release_digest}" "$install_next"
+mv -Tf -- "$install_next" "${INSTALL_DIR}/current"
+for compiler in dewy udewy; do
+    ln -sfn -- "current/${compiler}" "${INSTALL_DIR}/${compiler}"
 done
-
-copy_runtime_file "${source_dir}/VERSION"
-# the debugger scripts `dewy debug` loads into gdb / lldb (and an editor's launch configuration names)
-copy_runtime_file "${source_dir}/tools/dewy_lldb.py"
-copy_runtime_file "${source_dir}/tools/dewy_gdb.py"
-# Install the library dependency tree, including private Unicode modules and
-# generated tables, rather than maintaining another copy of the prelude list.
-while IFS= read -r -d '' source_file; do
-    copy_runtime_file "$source_file"
-done < <(find "${source_dir}/library" -type f \( -name '*.dewy' -o -name '*.bin' \) -print0)
-if [ -f "${source_dir}/assets/udewy_logo_128x128.png" ]; then
-    copy_runtime_file "${source_dir}/assets/udewy_logo_128x128.png"
-fi
-
-cat > "${temp_dir}/dewy" <<'LAUNCHER'
-#!/bin/sh
-set -eu
-
-dewy_home=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-dewy_runtime="${dewy_home}/runtime"
-python_marker="${dewy_home}/.python-3.14-ok"
-
-if [ ! -f "${dewy_runtime}/dewy/__main__.py" ]; then
-    echo "Dewy runtime not found at ${dewy_runtime}. Re-run the Dewy installer." >&2
-    exit 1
-fi
-
-run_dewy() {
-    DEWY_PYTHON=$1
-    shift
-    export PYTHONPATH="${dewy_runtime}${PYTHONPATH:+:${PYTHONPATH}}"
-    exec "$DEWY_PYTHON" -m dewy "$@"
-}
-
-# A successful first-run check records the interpreter path. Reading this file
-# avoids starting Python once just to check its version on every later run.
-if [ -r "$python_marker" ]; then
-    IFS= read -r cached_python < "$python_marker" || cached_python=''
-    if [ -n "$cached_python" ] && [ -x "$cached_python" ]; then
-        run_dewy "$cached_python" "$@"
-    fi
-fi
-
-found_python=false
-for python_command in python3 python; do
-    python_path=$(command -v "$python_command" 2>/dev/null || true)
-    if [ -z "$python_path" ]; then
-        continue
-    fi
-    found_python=true
-    if "$python_path" -c 'import sys; raise SystemExit(sys.version_info < (3, 14))'; then
-        marker_temp="${python_marker}.tmp.$$"
-        if printf '%s\n' "$python_path" > "$marker_temp"; then
-            mv "$marker_temp" "$python_marker"
-        else
-            rm -f "$marker_temp"
-        fi
-        run_dewy "$python_path" "$@"
-    fi
-done
-
-if [ "$found_python" = true ]; then
-    echo "Dewy requires Python 3.14 or newer; no compatible Python interpreter was found." >&2
-else
-    echo "Dewy requires Python 3.14 or newer, but Python was not found." >&2
-fi
-exit 1
-LAUNCHER
-
-mkdir -p "$INSTALL_DIR"
-rm -rf "$runtime_next" "$runtime_old"
-cp -R "$runtime_stage" "$runtime_next"
-if [ -d "$RUNTIME_DIR" ]; then
-    mv "$RUNTIME_DIR" "$runtime_old"
-    if mv "$runtime_next" "$RUNTIME_DIR"; then
-        rm -rf "$runtime_old"
-    else
-        mv "$runtime_old" "$RUNTIME_DIR"
-        echo "Failed to update ${RUNTIME_DIR}; the previous runtime was restored." >&2
-        exit 1
-    fi
-else
-    mv "$runtime_next" "$RUNTIME_DIR"
-fi
-install -m 755 "${temp_dir}/udewy" "${INSTALL_DIR}/udewy"
-install -m 755 "${temp_dir}/dewy" "${INSTALL_DIR}/dewy"
 
 path_block() {
     cat <<EOF
@@ -221,8 +109,8 @@ case "$shell_name" in
             cat >> "$fish_config" <<EOF
 
 # Include dewy tools in PATH
-if test -d ${INSTALL_DIR}
-  set -gx PATH ${INSTALL_DIR} \$PATH
+if test -d "${INSTALL_DIR}"
+  set -gx PATH "${INSTALL_DIR}" \$PATH
 end
 EOF
             echo "Updated ${fish_config} to include ${INSTALL_DIR} in PATH"

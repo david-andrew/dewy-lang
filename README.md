@@ -26,13 +26,13 @@ A vscode extension for syntax highlighting is available at https://marketplace.v
 
 ## Installation
 
-Linux x86_64. This installs the `udewy` bootstrap compiler and the current Python-backed `dewy` compiler into `~/.dewy`:
+Linux x86_64 with glibc 2.34 or newer. This installs the verified native `dewy`/`udewy` compiler pair and its matching library into `~/.dewy`:
 
 ```
 curl -fsSL https://dewy-lang.org/install.sh | bash
 ```
 
-The first `dewy` invocation checks for Python 3.14 or newer and caches the compatible interpreter path for later runs. You can then run a program with:
+The installed compilers run without Python. Run a program with:
 
 ```
 dewy path/to/my_script.dewy
@@ -44,7 +44,7 @@ Update both the Dewy compiler and the `udewy` bootstrap binary to the latest pub
 dewy update
 ```
 
-From a checkout, the equivalent command is:
+This is a development toolchain. Native self-bootstrap is verified, but some hosted features remain unsupported; see [the native parity notes](dewy/bootstrap/IMPLEMENTATION.md#hosted-parity-gaps). The hosted compiler remains available from a checkout with Python 3.14 or newer:
 
 ```
 python -m dewy path/to/my_script.dewy

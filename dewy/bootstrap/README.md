@@ -67,7 +67,7 @@ record references, immutable field invariants, function result facts, and
 record composition/minting. Deferred defaults and methods retain both their
 source arena and defining lexical scope. Native source tests compare the
 resolved types with the hosted checker and exercise invalid declarations.
-This is one part of semantic checking, not yet the complete native compiler.
+This visitor is one part of the native compiler's semantic checking.
 
 Minted families are also compilation-owned. The brand registry assigns
 preorder intervals after registration, so a runtime test of a parent covers
@@ -147,6 +147,9 @@ Compiler regressions cover the storage, narrowing, bounds, and debug-info
 issues encountered while building the parser.
 
 ## Native pair verification
+
+The C-accelerated route reached a verified fixed point on 2026-09-14. See
+[the verification record and parity gaps](IMPLEMENTATION.md#verified-native-pair).
 
 Given native seed executables, rebuild both compilers twice without invoking
 Python and compare the two resulting generations:

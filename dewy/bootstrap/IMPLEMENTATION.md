@@ -1,7 +1,58 @@
 # Native compiler work
 
-This records verified progress, not a claim that the Dewy compiler is already
-self-hosting. The Python compiler remains the seed and behavioral reference.
+The native Dewy/µDewy pair reached a verified fixed point on 2026-09-14 using
+the C accelerator. Python remains the initial seed route and a behavioral
+reference for the hosted-parity work below.
+
+## Verified native pair
+
+Compiler and library inputs from `ef4b961c6230` rebuilt both compilers twice
+using only native executables after the seeds. Both generation-1 executables
+are byte-identical to generation 2. Dewy also emitted identical 96,688,561-byte
+µDewy source in both generations. The verified binary SHA-256 digests are:
+
+```text
+5140aa2f2bfb5b2a09656d33c59db8f631c49d14e8b1c90ca7adaa99a3243ae8  dewy
+124feb3054ce93efc13ea741a8406bd53b717deff635e97032a3fd9b8084d996  udewy
+```
+
+The [published native pair](https://github.com/david-andrew/dewy-lang/releases/tag/native-ef4b961c6230)
+contains matching libraries, Unicode data, debug helpers, and checksums.
+Installation, library discovery, compilation, and `dewy update` passed in
+an isolated installation whose Python commands fail if invoked. The default
+installer now installs the native package and switches the pair and library
+together through a versioned directory. Linux x86-64 with glibc 2.34 or newer
+is required for this C-built release.
+
+All 26 native integration cases, grouped actual-analysis memory checks,
+test discovery, scalar checks, and µDewy's conditional-only short-circuit
+checks pass through both x86-64 and C output. Fixed-point comparison does
+not establish full language parity. A full bootstrap through the direct
+backend, without C acceleration, remains unverified; the storage helpers
+themselves are Dewy code and their bounded tests pass on both backends.
+
+## Hosted parity gaps
+
+A broader composed corpus checked 12 bundles on both backends. Two bundles
+passed completely (24 ordinary programs, including arrays, process/file I/O,
+strings, and conversions). Ten stopped at their first unsupported construct,
+with the same diagnostic on both backends. Cases after those diagnostics
+were not exercised. In particular, the native implementation still needs:
+
+- Labeled loop exits using `$outer` (`labeled_loop_exits.dewy`).
+- Runtime type values such as `type<Tok>` (`place_slots.dewy`).
+- Implicit declarations in unpacking (`addr_types.dewy`, `unpacking.dewy`).
+- Structural and union string conversions used by generic I/O.
+- Rational denominator refinement propagation (`refined_results_fields.dewy`).
+- Iteration over stored range values (`range_values.dewy`).
+- Non-conjunctive iterator formulas (`multi_iterator_or.dewy`,
+  `multi_iterator_operators.dewy`).
+- Tokenization of quoted isolated combining marks
+  (`runtime_grapheme_strings.dewy`).
+
+This is a list of observed blockers, not an exhaustive list of missing
+features. The hosted compiler and regression corpus remain necessary;
+the native fixed point is not grounds for retiring them yet.
 
 ## Order of work
 

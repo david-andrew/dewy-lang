@@ -43,7 +43,7 @@
     <header class="page-hero">
       <p class="eyebrow">Install</p>
       <h1>Run Dewy on your machine.</h1>
-      <p>The packaged installation currently supports Linux x86-64. It installs a native µDewy bootstrap compiler and the Python-hosted Dewy compiler.</p>
+      <p>The packaged installation supports Linux x86-64 with glibc 2.34 or newer. It installs the verified native Dewy/µDewy compiler pair and its matching library.</p>
     </header>
 
     <section class="content-section">
@@ -53,13 +53,14 @@
         <div class="install-head"><span>shell</span><button class="copy-button" type="button" data-copy="curl -fsSL https://dewy-lang.org/install.sh | bash">Copy</button></div>
         <pre><code>curl -fsSL https://dewy-lang.org/install.sh | bash</code></pre>
       </div>
-      <p>The installer writes to <code>~/.dewy</code> and offers to add that directory to your shell path. Dewy locates Python 3.12 or newer on first use and remembers the compatible interpreter.</p>
+      <p>The installer writes to <code>~/.dewy</code> and adds that directory to your shell path. The installed compilers run without Python. Use <code>dewy update</code> to update the pair and library together.</p>
       <pre><code>dewy hello.dewy
 udewy hello.udewy</code></pre>
     </section>
 
     <section class="content-section">
       <h2>Run from a checkout</h2>
+      <p>The native compiler is a development version with some hosted-parity gaps. The hosted compiler remains available from a checkout with Python 3.14 or newer.</p>
       <pre><code>git clone https://github.com/david-andrew/dewy-lang.git
 cd dewy-lang
 python -m dewy dewy/tests/hello.dewy
@@ -70,7 +71,7 @@ python -m udewy udewy/tests/test_hello.udewy</code></pre>
     <section class="content-section">
       <h2>Targets and present limits</h2>
       <ul class="meta-list">
-        <li><strong>Dewy installer</strong><span>Linux x86-64</span></li>
+        <li><strong>Dewy installer</strong><span>Linux x86-64, glibc 2.34 or newer</span></li>
         <li><strong>µDewy backends</strong><span>x86-64 Linux, WebAssembly, RISC-V, AArch64, and C</span></li>
         <li><strong>Dewy console I/O</strong><span><code>print</code> and <code>printl</code> currently use Linux x86-64 syscalls</span></li>
         <li><strong>Stability</strong><span>Development version; syntax and semantics can change</span></li>

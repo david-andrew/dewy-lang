@@ -1,18 +1,18 @@
 # Installation
 
-The current quick installer supports x86-64 Linux:
+The current quick installer supports x86-64 Linux with glibc 2.34 or newer:
 
 ```bash
 curl -fsSL https://dewy-lang.org/install.sh | bash
 ```
 
-It installs the `dewy` hosted compiler and the `udewy` bootstrap compiler under `~/.dewy`. Open a new terminal and check the installation:
+It installs the verified native `dewy`/`udewy` pair and its matching library under `~/.dewy`; Python is not needed. Open a new terminal and check the installation:
 
 ```bash
 dewy --version
 ```
 
-From a source checkout, run the hosted compiler with:
+The native compiler is still a development version with some hosted-parity gaps. From a source checkout, the hosted compiler remains available with Python 3.14 or newer:
 
 ```bash
 python -m dewy program.dewy

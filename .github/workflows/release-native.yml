@@ -1,0 +1,88 @@
+name: Release native Dewy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'dewy/bootstrap/**/*.dewy'
+      - 'udewy/bootstrap/**/*.udewy'
+      - 'udewy/stdlib/**/*.udewy'
+      - 'library/**/*.dewy'
+      - 'library/**/*.bin'
+      - 'VERSION'
+      - 'tools/bootstrap_native.sh'
+      - 'tools/check_native.sh'
+      - 'tools/package_native.sh'
+      - 'tools/dewy_test.dewy'
+      - 'tools/dewy_gdb.py'
+      - 'tools/dewy_lldb.py'
+      - '.github/workflows/release-native.yml'
+  workflow_dispatch:
+    inputs:
+      seed_release:
+        description: Published native pair to use as the seed (empty means latest)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: native-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download a published native seed pair
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEED_RELEASE: ${{ inputs.seed_release }}
+        run: |
+          mkdir -p seed
+          if [[ -n "$SEED_RELEASE" ]]; then
+            gh release download "$SEED_RELEASE" --pattern dewy-linux-x86_64.tar.gz --dir seed
+          else
+            gh release download --pattern dewy-linux-x86_64.tar.gz --dir seed
+          fi
+          tar -xzf seed/dewy-linux-x86_64.tar.gz -C seed
+          (cd seed && sha256sum --check --status SHA256SUMS)
+          seed/dewy --version
+          seed/udewy --help > /dev/null
+      - name: Rebuild both native compilers and verify matching generations
+        # This includes both-backend execution checks of generation one.
+        # Generation two must then match it byte for byte.
+        env:
+          DEWY_BOOTSTRAP_LTO_JOBS: 2
+        run: bash tools/bootstrap_native.sh --target c seed/dewy seed/udewy native-pair
+      - name: Package the verified pair and matching library
+        run: bash tools/package_native.sh native-pair dewy-linux-x86_64.tar.gz
+      - name: Compare with previous release
+        id: changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p previous
+          if gh release download --pattern dewy-linux-x86_64.tar.gz --dir previous; then
+            if cmp -s dewy-linux-x86_64.tar.gz previous/dewy-linux-x86_64.tar.gz; then
+              echo 'changed=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+      - name: Publish the native pair
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp native-pair/udewy udewy-linux-x86_64
+          sha256sum dewy-linux-x86_64.tar.gz > dewy-linux-x86_64.tar.gz.sha256
+          sha256sum udewy-linux-x86_64 > udewy-linux-x86_64.sha256
+          release_tag="native-${GITHUB_SHA::12}"
+          gh release create "$release_tag" dewy-linux-x86_64.tar.gz dewy-linux-x86_64.tar.gz.sha256 \
+            udewy-linux-x86_64 udewy-linux-x86_64.sha256 \
+            --latest --target "$GITHUB_SHA" --title "Dewy native ${GITHUB_SHA::12}" \
+            --notes "Development native Dewy/µDewy pair from ${GITHUB_SHA} for Linux x86_64; two native generations verified byte-for-byte, with matching runtime library. See dewy/bootstrap/IMPLEMENTATION.md at this commit for validation and remaining hosted-parity gaps."
