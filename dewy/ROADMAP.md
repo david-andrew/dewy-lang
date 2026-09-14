@@ -87,6 +87,33 @@ Exit criteria that the later phases depend on:
   measure after each, since the profile shifts. The checker's share is
   analysis proportional to the program, not the output, and is a separate
   problem (the proof engine's bounded traversals, 1.2).
+- further mechanical wins the self-time profile of that compile shows, none
+  of which changes output (recorded 2026-09-14):
+  - `repr` of whole types as sort and cache keys: `runtime_union_members`
+    and `enum_members` sort members by `repr(member)` (`semantic/ty.py`),
+    and `_member_tag` keys its cache by `repr(plain)`
+    (`backend/udewy/lowering_optionals.py`). A record's repr is its whole
+    nested dataclass text, guarded by `reprlib` — 3.6 million repr calls and
+    7.5 million set operations for one program, the single largest self-time
+    item. Memoize per type object (the types are frozen and hashable), or
+    key by a cheap structural hash;
+  - `location_marker` resolves the source path (`Path(...).resolve()`) for
+    every marker — 52k `realpath` and 181k `lstat` calls, about 1.9 s.
+    Resolve once per source file;
+  - `is_subtype` normalizes both operands on every query (`to_nnf` 276k
+    calls, 3.3 s) and `user_brand_carries` runs 474k times (1.7 s). Memoize
+    `normalize`, or `is_subtype` itself for hashable operands;
+  - the tree rewrites (`ModuleCompiler._rename`, `_uniquify_module_locals`,
+    the analysis walkers) call `dataclasses.fields` per node and `replace`
+    on every node: 331k and 280k calls, about 3.7 s. Cache `fields` per
+    class, and rebuild only changed subtrees — the whole prelude tree is
+    renamed on every compile though its renaming never changes;
+  - the µDewy stage is its own front end: of its 4.6 s, tokenizing and
+    parsing the text are about nine tenths (a character loop with 4.6
+    million `startswith` calls, then a recursive-descent parse); assembling
+    and linking are about a second. A regex-driven tokenizer helps; better,
+    when the hosted compiler drives the µDewy compiler in-process it can hand
+    over its statements or tokens and skip the text round trip entirely.
 
 ## Phase 1: foundations to their intended designs
 
