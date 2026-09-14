@@ -669,3 +669,21 @@ segmentation hook for these ASCII lifetime cases; it does not replace the
 full Unicode runtime tests. Driver build time was 152.50 s, with other small
 checks overlapping. Artifacts: `shared-string-getter-corrected-gates.log`
 and `shared-string-getter-final/{build,corrected-gates}.log`.
+
+## Compare refinement contracts without formatting keys
+
+Native subtype coverage now compares proposition fields directly. It ignores
+resolved subject/term binding ids for contract identity, retains all source
+contract fields, and compares tested types structurally. Storage interning
+continues to preserve proof provenance. A cross-product regression checks
+agreement with the old serialized keys, including absent versus literal
+`none` strings, conditional booleans, large/negative integers, and equivalent
+types with different constructor defaults.
+
+For 100 equivalent typed-proposition comparisons, the hosted-built program
+allocates **6,400 bytes versus 928,000** through formatting; direct and C
+executions pass. The full native CLI builds and runs the same gate, allocating
+**12,800 bytes versus 4,844,800**. Both return the expected 42. These are
+allocation kernel measurements, not full-checker timings. Artifacts:
+`proposition-identity-cost-gates.log` and
+`proposition-identity-native-corrected-gates.log`.

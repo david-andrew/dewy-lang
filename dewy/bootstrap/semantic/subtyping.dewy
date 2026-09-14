@@ -360,10 +360,9 @@ covered = (member:addr other:addr seen:set<string> links:array<Link> @nodes:arra
     if o is? types.RefinedType {
         if m isnt? types.RefinedType return false
         loop required in o.propositions {
-            let key = types.propositions_key([required] true nodes)
             let found:bool = false
             loop actual in m.propositions {
-                if types.propositions_key([actual] true nodes) =? key { found = true break }
+                if types.same_proposition(actual required nodes) { found = true break }
             }
             if not found return false
         }
@@ -375,10 +374,9 @@ covered = (member:addr other:addr seen:set<string> links:array<Link> @nodes:arra
             let actual = types.object_field(m required.name)
             if actual is? none return false
             loop p in required.refinement {
-                let key = types.propositions_key([p] true nodes)
                 let found:bool = false
                 loop q in actual.refinement {
-                    if types.propositions_key([q] true nodes) =? key { found = true break }
+                    if types.same_proposition(q p nodes) { found = true break }
                 }
                 if not found return false
             }

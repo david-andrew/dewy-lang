@@ -320,6 +320,38 @@ function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr
 }
 overload_type = (methods:array<addr> @nodes:array<Type>):>addr => intern(@nodes OverloadType[key="M{items_key(methods)}" shape="M{shapes_key(methods nodes)}" methods=methods])
 
+# Compare a single contract without allocating its serialized key. Resolved
+# binding ids describe proof provenance, not contract identity; tested types
+# use structural identity just as propositions_key(structural=true) does.
+same_proposition = (a:facts.Proposition b:facts.Proposition nodes:array<Type>):>bool => {
+    if a.subject not=? b.subject or a.op not=? b.op or a.value not=? b.value return false
+    if a.projection not=? b.projection or a.term_projection not=? b.term_projection return false
+    if a.term is? none {
+        if b.term isnt? none return false
+    }
+    else {
+        if b.term is? none return false
+        if a.term not=? b.term return false
+    }
+    if a.axiom is? none {
+        if b.axiom isnt? none return false
+    }
+    else {
+        if b.axiom is? none return false
+        if a.axiom not=? b.axiom return false
+    }
+    if a.when is? none {
+        if b.when isnt? none return false
+    }
+    else {
+        if b.when is? none return false
+        if a.when not=? b.when return false
+    }
+    if a.tested_type is? none return b.tested_type is? none
+    if b.tested_type is? none return false
+    return same_type(a.tested_type b.tested_type nodes)
+}
+
 propositions_key = (props:array<facts.Proposition> structural:bool nodes:array<Type>):>string => {
     let parts:array<string> = []
     loop p in props {
