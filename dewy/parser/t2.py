@@ -4,7 +4,7 @@ Post processing steps on tokens to prepare them for expression parsing
 from textwrap import dedent
 from typing import Callable, Literal, cast, get_args, TypeAlias
 from dataclasses import dataclass, field
-from functools import partial
+from functools import partial, singledispatch
 from ..reporting import SrcFile, ReportException, Span, Error, Pointer, Warning
 from . import t1
 
@@ -454,38 +454,59 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None, *, ctx: C
     return None
 
 
+@singledispatch
 def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> None:
     """
     Helper to recursively apply a function to the inner tokens of a token (if it has any)
     It is expected that `func` will call `recurse_into` with itself as the callable.
+    Dispatch caches each concrete token class's handler. Most tokens are
+    leaves, visited by every phase; retesting all container classes at each
+    visit dominated this traversal. Subclasses retain their parent's handler.
     """
-    if isinstance(token, (t1.Block, t1.ParametricEscape)):
-        func(token.inner)
-    elif isinstance(token, t1.IString):
-        for child in token.content:
-            recurse_into(child, func)
-    elif isinstance(token, KeywordExpr):
-        for part in token.parts:
-            recurse_into(part, func)
-    elif isinstance(token, Flow):
-        for arm in token.arms:
-            recurse_into(arm, func)
-        if token.default is not None:
-            recurse_into(token.default, func)
-    elif isinstance(token, Directive):
-        recurse_into(token.condition, func)
-        if token.message is not None:
-            recurse_into(token.message, func)
-    elif isinstance(token, Chain):
-        # skip applying the function to the chain layer itself, and just do it's inner items
-        # this is because the only step using recurse_into after any chains would be present is make_chains,
-        # but we don't want to add an extra layer to something that is already a chain
-        # If there were operations that needed to look at the relationship between items in the chain (e.g. another insert_juxtapose)
-        # then we'd need to reconsider skipping the chain itself. but for now, keep it simple. 
-        for item in token.items:
-            recurse_into(item, func)
-    
-    # else no inner tokens. TODO: would be nice if we could error if there were any unhandled cases with inner tokens...
+    # No inner tokens. TODO: diagnose new, unhandled token containers.
+
+
+@recurse_into.register(t1.Block)
+@recurse_into.register(t1.ParametricEscape)
+def _recurse_inner(token, func):
+    func(token.inner)
+
+
+@recurse_into.register(t1.IString)
+def _recurse_string(token, func):
+    for child in token.content:
+        recurse_into(child, func)
+
+
+@recurse_into.register(KeywordExpr)
+def _recurse_keyword(token, func):
+    for part in token.parts:
+        recurse_into(part, func)
+
+
+@recurse_into.register(Flow)
+def _recurse_flow(token, func):
+    for arm in token.arms:
+        recurse_into(arm, func)
+    if token.default is not None:
+        recurse_into(token.default, func)
+
+
+@recurse_into.register(Directive)
+def _recurse_directive(token, func):
+    recurse_into(token.condition, func)
+    if token.message is not None:
+        recurse_into(token.message, func)
+
+
+@recurse_into.register(Chain)
+def _recurse_chain(token, func):
+    # The only phase visiting existing Chains is make_chains. Visit their
+    # contents without applying the phase to the Chain itself, which would
+    # wrap it in an extra layer. A future phase that needs relationships
+    # between chain items must reconsider this boundary.
+    for item in token.items:
+        recurse_into(item, func)
 
 
 def remove_whitespace(tokens: list[t1.Token]) -> None:

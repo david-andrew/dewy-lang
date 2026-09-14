@@ -996,3 +996,19 @@ An exploratory adjacent-temporary fold reduced the frozen generated C from
 74,384,681 to 68,709,917 bytes, eliminating 134,757 declarations. The Python
 prototype took 10.74 seconds and has no established backend-time benefit;
 it was **not** adopted. Its script and output remain in the artifact tree.
+
+### Hosted token traversal dispatch
+
+The same full-source profile recorded 17.56 million `isinstance` calls from
+`t2.recurse_into`, accounting for 15.32 profiled seconds. The traversal now
+uses standard-library class dispatch, retaining the same phase ordering and
+container boundaries while caching the appropriate handler for leaves and
+containers (including subclasses).
+
+Postprocessing all 112 `.dewy` files in the frozen bootstrap directory takes
+**16.19 → 12.96 seconds** in isolated, unprofiled process runs. Timing excludes
+source reads and verification serialization. Every per-file serialized token
+tree has the same SHA-256 before and after. All 166 parser differential,
+literal-boundary, and partial-operator checks pass. Artifacts are
+`t2-before.json`, `t2-after.json`, their logs, and `t2-dispatch-gates.log`.
+This is a parser workload result, not a new full compiler build measurement.
