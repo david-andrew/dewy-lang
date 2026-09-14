@@ -1,0 +1,41 @@
+# Returning a selected handle must retain it before the getter's locals die.
+# The other fields still get constructed, but need not be copied on return.
+Node=type of [items:array<int64> text:string unused:array<string>]
+read=(nodes:array<Node> id:addr):>Node=>{
+    $runtime_assert id <? nodes.length
+    return nodes[id]
+}
+local=(suffix:string='42'):>Node=>{
+    let node=Node[[20 22] 'value'+suffix ['a' 'b' 'c']]
+    return node
+}
+exercise=(nodes:array<Node>):>int64=>{
+    let total:int64=0
+    loop i in 0.. and i <? 100 {
+        let items=read(nodes 0).items
+        let text=read(nodes 0).text
+        if items.length not=? 2 or text not=? 'value42' return 0
+        total+=items[0]+items[1]
+    }
+    return total
+}
+main=():>int64=>{
+    let nodes:array<Node>=[local()]
+    # Establish the source array's shared-owner counter before measuring
+    # repeated calls; that counter lives with nodes, not with the getter.
+    if exercise(nodes) not=? 4200 return 1
+    let baseline:int64=_arena_live_bytes
+    let allocated:int64=_arena_allocated_bytes
+    if exercise(nodes) not=? 4200 return 1
+    let allocations:int64=_arena_allocated_bytes-allocated
+    let retained:int64=_arena_live_bytes-baseline
+    printl("{allocations} {retained}")
+    if retained not=? 0 return 2
+    let items=local().items
+    let text=local().text
+    let copied=items
+    if items.length not=? 2 or copied.length not=? 2 return 3
+    items[0]=99
+    if copied[0] not=? 20 or copied[1] not=? 22 or text not=? 'value42' return 4
+    return 42
+}

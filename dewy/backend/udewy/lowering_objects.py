@@ -73,8 +73,14 @@ class _ObjectLowering:
         field = record.field(node.name)
         if field is None or node.type != field.type:
             return None
-        # Only plain words can leave the callee without a storage lifetime.
-        if field.type != 'bool' and ty.fixed_integer_layout(field.type) is None:
+        # Scalars have no storage lifetime. Arena-backed strings and dynamic
+        # arrays use the normal owned-result path, retaining just the selected
+        # field before the callee's locals are released.
+        owned_handle = self._has_arena() and (
+            self._is_string_valued(field.type)
+            or isinstance(field.type, ty.ArrayType) and field.type.length is None
+        )
+        if field.type != 'bool' and ty.fixed_integer_layout(field.type) is None and not owned_handle:
             return None
         eligible = self.scalar_projection_bodies.get(id(function))
         if eligible is None:

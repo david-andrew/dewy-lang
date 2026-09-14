@@ -646,12 +646,15 @@ owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if state.result_projection isnt? none and state.result_projection.read =? id {
         let projection=state.result_projection
-        # Read the word while the route and all its enclosing locals are
-        # still alive. The ordinary return cleanup runs after this read.
+        # Keep the selected field while the route and all enclosing locals
+        # are alive. Scalars pass through; aggregate handles acquire their
+        # own lifetime before ordinary return cleanup releases the source.
         let member=hir.MemberAccess[node.loc projection.result id projection.field]
         let prefix:array<addr>=[]
         let receiver=read_operand(id @prefix @state)
         let value=field_read(field_address(receiver.value member @state) projection.result member @state)
+        # finish_read already keeps a field of an owned temporary receiver.
+        if receiver.owner_type is? none {value=copy_value(value projection.result member @state)}
         return finish_read(value receiver member @prefix @state)
     }
     if node is? hir.Suppress return owned_value(node.item @state)
@@ -2211,7 +2214,9 @@ scalar_getter_projection = (node:hir.MemberAccess @state:State):>ScalarProjectio
     if record is? none or literal.rettype not=? call.value_type return none
     let field=types.object_field(record node.name)
     if field is? none or field.value_type not=? node.value_type return none
-    if not types.is_primitive(types.node_at(state.type_nodes node.value_type) 'bool') and views.fixed_integer_layout(node.value_type state.type_nodes) is? none return none
+    let array=array_type(node.value_type state)
+    let owned_handle=state.allocator isnt? none and (owned_string(node.value_type state) or array isnt? none and array.length is? none)
+    if not types.is_primitive(types.node_at(state.type_nodes node.value_type) 'bool') and views.fixed_integer_layout(node.value_type state.type_nodes) is? none and not owned_handle return none
     if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
     let read=state.getter_reads.get(direct default=none)
     if read is? none return none

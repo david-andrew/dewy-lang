@@ -35,9 +35,45 @@ node_at=(nodes:array<Node> id:int64):>Node=>{
 }
 main=():>int64=>{let nodes:array<Node>=[] return node_at(nodes 0).value}
 '''
-    for name, body, expected in [('scalar-projection', text, 42), ('effects', effects, 42), ('guard', guard, 101)]:
+    aggregate = (ROOT / 'tests/fixtures/aggregate_getter_projection.dewy').read_text()
+    aggregate = aggregate.replace('id:addr', 'id:int64').replace(
+        '$runtime_assert id <? nodes.length', 'loop id >=? nodes.length {}')
+    aggregate = aggregate.replace('    printl("{allocations} {retained}")',
+                                  '    if allocations >=? 32000 return 5')
+    temporary = '''
+Node:type=[text:string]
+nodes=(text:string):>array<Node length=1>=>[Node['value:'+text]]
+read=(text:string):>Node=>nodes(text)[0]
+exercise=():>int64=>{
+    let text=read('42').text
+    return if text =? 'value:42' 42 else 1
+}
+main=():>int64=>{
+    if exercise() not=? 42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {if exercise() not=? 42 return 2}
+    if _arena_live_bytes not=? before return 3
+    return 42
+}
+'''
+    # These lifetime kernels use ASCII text. The driver omits the prelude;
+    # supply its segmentation hook with an ASCII-only implementation here.
+    # Native Unicode runtime tests exercise the complete library tables.
+    boundaries = '''
+_utf8_boundaries=(bytes:array<uint8>):>array<int64>|none=>{
+    let result:array<int64>=[0]
+    loop i in 0.. and i <? bytes.length {
+        if bytes[i] >=? 128 return none
+        result.push(i+1)
+    }
+    return result
+}
+'''
+    for name, body, expected in [('scalar-projection', text, 42), ('effects', effects, 42),
+                                 ('guard', guard, 101), ('aggregate', aggregate, 42),
+                                 ('temporary-element', temporary, 42)]:
         source = tmp_path / f'{name}.dewy'
-        source.write_text(ARENA + body)
+        source.write_text(ARENA + (boundaries if name in ('aggregate', 'temporary-element') else '') + body)
         result = subprocess.run([binary, source], capture_output=True, text=True, timeout=45, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
         output = source.with_suffix('.udewy')

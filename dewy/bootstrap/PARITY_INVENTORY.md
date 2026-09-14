@@ -37,8 +37,9 @@ These are outside the original corpus counts:
   matching union alternative, accepting the explicit
   `array<int64 length=2>|array<int64>` return without choosing a different
   representation merely because the fixed array also fits the wider member.
-  Unique-array contextual construction and rejection checks pass; execution
-  of this expanded case awaits the next native integration executable.
+  Unique-array contextual construction and rejection checks pass. The full
+  `32a1570e` integration executable compiles and runs the expanded case with
+  expected result 42 (`runtime-caches-integration/gates.log`).
 - Comparing two separately constructed arrays of equal records with `=?`
   currently returns false in both compilers. The numbering regression exposed
   this while comparing independent snapshots; checking each field confirms

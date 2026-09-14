@@ -603,9 +603,69 @@ The cache work exposed a hosted array-union widening bug: consumers received
 the tag-cell address instead of its active array descriptor. The correction
 covers branches, fresh call results, declarations, assignment, returns and
 arguments on direct/C backends. Native lowering already handles the narrowed
-optional-array case. The expanded explicit overlapping-array-union case is
-still rejected by native checking and is recorded separately in the parity
-inventory. Artifacts: `native-type-cache-final/{gates,widening}.log`,
+optional-array case. The expanded explicit overlapping-array-union case
+subsequently passed native checking and full CLI execution at the checkpoint
+below. Artifacts: `native-type-cache-final/{gates,widening}.log`,
 `native-runtime-type-final-gates.log`, `native-brand-index-final-gates.log`,
 and `array-union-{consumer-corrected,sharing}-gates.log`. The earlier
 `native-type-cache` driver contains the hosted bug and is not a valid seed.
+
+## Runtime-cache integration checkpoint
+
+A frozen `32a1570e` hosted build produced a complete C-backed compiler in
+**343.10 s**: checking 71.51 s, lowering 71.14 s, emission 8.67 s, backend
+185.77 s. Peak RSS was **3,871,900 KiB** and generated µDewy was
+**60,258,591 bytes** (SHA-256
+`45f17e539b4dec92fc51b91ab6d232bcef0628d2b9e2b8c71e901318230a16ed`).
+It used normal GCC `-O2`, `-flto=8`, and bypassed ccache. Small regressions
+overlapped this build, so it is an integration observation, not an isolated
+acceptance measurement or a new native fixed point.
+
+That executable compiles and runs the expanded array-union fixture, scalar
+and aggregate getter fixtures, and the sets corpus fixture with their
+expected results, taking 17.2–18.3 s per invocation. It predates owned-handle
+getter projections and hosted shared string buffers. A subsequent native
+build of the lowering driver exceeded its 240 s bound; samples showed
+refinement key formatting and string cloning during record copies. Further
+full builds are deferred until the corresponding bounded gates pass.
+Artifacts: `source-runtime-caches`, `host-full-runtime-caches`,
+`runtime-caches-integration/gates.log`, and
+`aggregate-getter-native-build{,-stack,-stack-2}.log` (stack samples use
+`.txt` instead of `.log`). The full-build target remains unmet.
+
+## Hosted immutable string buffers
+
+Owned strings now retain shared immutable backing buffers through private
+descriptors. Lasting copies use one outlined clone helper; frame-backed,
+borrowed, and raw-exposed strings retain copying fallbacks. Raw exposure
+separates existing snapshots before pinning storage. This remains a
+provisional accelerator under the ownership design question in
+`PERFORMANCE.md`, not a language-level promise of constant-cost mutation.
+
+The record-copy gate performs 100 copies with 16-byte and 64-KiB text
+payloads. Both sizes allocate the same amount, below **16 KiB**, on direct
+and C backends, with zero retained storage after the calls. Disabling buffer
+sharing provides the positive control. Raw snapshot isolation, Unicode
+views, reassignment, optional returns, discarded calls, and growing arrays
+retain their execution and lifetime checks. Artifacts:
+`shared-string-buffer-gates.log`, `shared-string-lifetime-corrected-gates.log`,
+and `shared-string-getter-corrected-gates.log`.
+
+## Retain only a getter's selected aggregate field
+
+Direct getters can now return a selected owned string or dynamic-array
+handle without first copying the complete result record. The call boundary,
+arguments, defaults, side effects and guards remain intact. The selected
+handle gains its lifetime before the source's locals are released; a field
+of an owned temporary receiver is retained exactly once. Synthetic dictionary
+keys/values routes continue to identify the complete table during lowering.
+
+Hosted selected-field allocation is less than half the full-record control,
+with zero retained storage. A hosted-built native lowering driver passes
+scalar, effect, guard, aggregate, and temporary-element cases on both direct
+and C backends; the aggregate gate allocates less than 32,000 bytes for 100
+pairs of calls and retains none. The small driver supplies an ASCII-only
+segmentation hook for these ASCII lifetime cases; it does not replace the
+full Unicode runtime tests. Driver build time was 152.50 s, with other small
+checks overlapping. Artifacts: `shared-string-getter-corrected-gates.log`
+and `shared-string-getter-final/{build,corrected-gates}.log`.

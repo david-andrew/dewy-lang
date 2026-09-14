@@ -2709,8 +2709,8 @@ class _Lowerer(
         if isinstance(node, hir.DictLookup):
             return replace(
                 node,
-                keys=self._require_node(self._transform_node(node.keys)),
-                values=self._require_node(self._transform_node(node.values)),
+                keys=self._transform_container_member(node.keys),
+                values=self._transform_container_member(node.values),
                 key=self._require_node(self._transform_node(node.key)),
                 default=(
                     self._require_node(self._transform_node(node.default))
@@ -2721,22 +2721,22 @@ class _Lowerer(
         if isinstance(node, hir.DictContains):
             return replace(
                 node,
-                keys=self._require_node(self._transform_node(node.keys)),
+                keys=self._transform_container_member(node.keys),
                 key=self._require_node(self._transform_node(node.key)),
             )
         if isinstance(node, hir.DictStore):
             return replace(
                 node,
-                keys=self._require_node(self._transform_node(node.keys)),
-                values=self._require_node(self._transform_node(node.values)) if node.values is not None else None,
+                keys=self._transform_container_member(node.keys),
+                values=self._transform_container_member(node.values) if node.values is not None else None,
                 key=self._require_node(self._transform_node(node.key)),
                 value=self._require_node(self._transform_node(node.value)) if node.value is not None else None,
             )
         if isinstance(node, hir.DictRemove):
             return replace(
                 node,
-                keys=self._require_node(self._transform_node(node.keys)),
-                values=self._require_node(self._transform_node(node.values)) if node.values is not None else None,
+                keys=self._transform_container_member(node.keys),
+                values=self._transform_container_member(node.values) if node.values is not None else None,
                 key=self._require_node(self._transform_node(node.key)) if node.key is not None else None,
                 default=self._require_node(self._transform_node(node.default)) if node.default is not None else None,
             )

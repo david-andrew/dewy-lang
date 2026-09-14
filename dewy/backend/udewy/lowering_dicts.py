@@ -46,6 +46,14 @@ class _DictParts:
 
 
 class _DictLowering:
+    def _transform_container_member(self, node: hir.AST) -> hir.AST:
+        # Dict HIR uses its keys/values member routes to identify the complete
+        # hash table. These are storage references, not standalone array reads
+        # that a getter variant may replace with an independent result.
+        if not isinstance(node, hir.MemberAccess):
+            raise TypeError('INTERNAL ERROR: dictionary node without a member route')
+        return replace(node, value=self._require_node(self._transform_node(node.value)))
+
     # ------------------------------------------------------------------ parts
     def _dict_parts(self, keys: hir.AST) -> tuple[list[hir.AST], _DictParts]:
         """The dictionary object behind a `keys` member route of a dict node."""
