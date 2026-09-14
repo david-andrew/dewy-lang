@@ -25,4 +25,15 @@ exercise=():>int64=>{
     if text.get('missing') isnt? none return 7
     return 42
 }
-main=():>int64=>exercise()
+let calls:int64=0
+next_key=():>int8=>{calls+=1 return -1}
+main=():>int64=>{
+    let bits:dict<bool int64>=[false->20 true->22]
+    let small:dict<int8 int64>=[-1->42 1->2]
+    let wide:dict<uint64 int64>=[0xffffffffffffffff->42 0->3]
+    if bits.get(false default=0)+bits.get(true default=0) not=? 42 return 8
+    if small.get(next_key() default=0) not=? 42 or calls not=? 1 return 9
+    if wide.get(0xffffffffffffffff default=0) not=? 42 return 10
+    if small.get(2) isnt? none or wide.get(1) isnt? none return 11
+    return exercise()
+}

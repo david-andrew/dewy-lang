@@ -40,5 +40,7 @@ def test_repeated_lookup_sites_share_rebuild_code():
     # implementations, and the calls must actually survive reachable lowering.
     definition = r'^let (__dewy_rebuild_dict_\w*) = '
     assert len(re.findall(definition, large, re.M)) == len(re.findall(definition, small, re.M)) > 0
+    probe = r'^let (__dewy_probe_dict_\w*) = '
+    assert len(re.findall(probe, large, re.M)) == len(re.findall(probe, small, re.M)) > 0
     assert len(large) > len(small)
-    assert len(large) - len(small) < 90_000
+    assert len(large) - len(small) < 40_000

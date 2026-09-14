@@ -844,3 +844,19 @@ Unicode keys, and saved dictionary independence. Repeated lookup sites also
 have an explicit helper-count/code-growth regression. Logs are
 `shared-dict-native-gates.log`, `shared-dict-rebuild-hosted.log`, and
 `shared-dict-execution-gates.log`.
+
+Dictionary probes now share their search loop as well. A probe returns a
+single table slot; reading that slot recovers the matching entry or a miss,
+so the helper needs no allocated result tuple. Hosted helpers share across
+value types when key storage and relevant field offsets match. Native
+insertion retains the already computed hash. Source argument evaluation and
+missing-entry positions remain at the call site.
+
+The native scalar-width dictionary kernel now emits 307,284 bytes, versus
+380,109 with rebuild sharing alone (19% smaller). Direct/C execution passes,
+along with bool, signed-byte, and full-width unsigned keys, exactly-once key
+calls, tombstones, and the aggregate/Unicode kernel. The reusable lowering
+driver emits 41,062,392 bytes with this batch; its source also contains the
+new probe generator, so that is a combined checkpoint rather than a pure
+output comparison. Logs are `shared-dict-probes-hosted.log`,
+`shared-dict-probes-widths.log`, and `shared-dict-probe-driver.log`.

@@ -3350,12 +3350,49 @@ dict_ensure = (parts:DictParts node:hir.AST @state:State room:addr=0 compact:boo
     return conditional(condition dict_rebuild(parts room node @state) node @state)
 }
 dict_probe = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @state:State):>DictProbe => {
+    if state.allocator is? none return dict_probe_body(parts key node @prefix @state)
+    let shape="dict_probe:{parts.key}:{parts.layout.offsets}"
+    let name=state.copy_helpers.get(shape)
+    let word_type=types.primitive('int64' @state.type_nodes)
+    if name is? none {
+        let generated=fresh('probe_dict' @state)
+        name=generated state.copy_helpers[shape]=generated
+        let parameters:array<hir.Param>=[]
+        let signature_slots:array<types.PosOrKwArg>=[]
+        let inputs:array<addr>=[]
+        loop i in 0..2 {
+            let parameter=fresh('probe_input' @state)
+            parameters.push(hir.Param[parameter word_type])
+            signature_slots.push(types.PosOrKwArg[parameter word_type])
+            inputs.push(put(hir.ExpressedIdentifier[node.loc word_type parameter] @state))
+        }
+        $runtime_assert inputs.length =? 3
+        let local=DictParts[inputs[0] parts.layout parts.key none]
+        let body:array<addr>=[]
+        let probe=dict_probe_body(local inputs[1] node @body @state hash_value=inputs[2])
+        # Return only a slot. Its table entry supplies both the found bit and
+        # the position; no result object or scratch allocation crosses this call.
+        body.push(probe.slot)
+        let block=put(hir.Block[node.loc word_type body false] @state)
+        let signature=types.function_type(signature_slots [] none word_type [] @state.type_nodes)
+        let literal=put(hir.FunctionLiteral[node.loc signature parameters [] none word_type block source=state.source_index] @state)
+        state.generated.push(program.Function[generated literal])
+    }
+    $runtime_assert name isnt? none
+    let hash=snapshot(dict_hash(key parts.key node @state) @prefix @state)
+    let slot=snapshot(intrinsic(name [parts.pointer key hash] word_type node @state) @prefix @state)
+    let position=snapshot(dict_element(dict_field(parts 'indices' node @state) slot word_type node @state) @prefix @state)
+    let found=snapshot(compare('__ge__' position word(0 node @state) node @state) @prefix @state)
+    prefix.push(conditional(compare('__lt__' position word(0 node @state) node @state) set_local(position word(-1 node @state) node @state) node @state))
+    return DictProbe[found position slot hash]
+}
+dict_probe_body = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @state:State hash_value:addr?=none):>DictProbe => {
     let word_type=types.primitive('int64' @state.type_nodes)
     let boolean=types.primitive('bool' @state.type_nodes)
     let slots=snapshot(dict_field(parts 'indices' node @state) @prefix @state)
     let keys=snapshot(dict_field(parts 'keys' node @state) @prefix @state)
     let hashes=snapshot(dict_field(parts 'hashes' node @state) @prefix @state)
-    let hash=snapshot(dict_hash(key parts.key node @state) @prefix @state)
+    let hash=if hash_value is? none snapshot(dict_hash(key parts.key node @state) @prefix @state) else hash_value
     let mask=snapshot(word_op('__sub__' read_word(slots layouts.array_descriptor.length node @state) word(1 node @state) node @state) @prefix @state)
     let cursor=snapshot(word_op('__and__' hash mask node @state) @prefix @state)
     let perturb=snapshot(hash @prefix @state)

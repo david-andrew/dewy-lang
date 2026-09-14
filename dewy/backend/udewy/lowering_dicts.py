@@ -179,7 +179,7 @@ class _DictLowering:
     def _dict_rebuild(self, parts: _DictParts, capacity: hir.AST, loc: Span) -> list[hir.AST]:
         # A rebuild is large and cold, but every lookup can request one.
         # Share it by entry storage and field offsets. Only arena-backed
-        # tables can move their allocation into a helper's stack frame.
+        # tables keep new backing storage alive after the helper returns.
         if not self._has_arena():
             return self._dict_rebuild_body(parts, capacity, loc)
         key = (parts.key_type, parts.value_type, tuple(sorted(parts.offsets.items())))
@@ -345,7 +345,53 @@ class _DictLowering:
         needs_table = hir.ShortCircuit(loc, 'bool', 'or', no_table, too_full)
         return [self._if(needs_table, [*capacity_prelude, *self._dict_rebuild(parts, capacity, loc)], loc)]
 
-    def _dict_probe(
+    def _dict_probe(self, parts: _DictParts, key: hir.AST, loc: Span):
+        if not self._has_arena():
+            return self._dict_probe_body(parts, key, loc)
+        # Probe only reads keys, hashes, and slots, so different value types
+        # share it when their key storage and these offsets agree. The result
+        # is a slot: it either names the matching entry or an empty/dummy slot.
+        # Recovering the entry from that slot needs no allocated result tuple.
+        shape = (parts.key_type, tuple((field, parts.offsets[field])
+                                      for field in ('keys', 'hashes', 'indices')))
+        symbol = next((symbol for old, _parts, symbol in self.dict_probe_symbols if old == shape), None)
+        if symbol is None:
+            symbol = self._internal_symbol(f'__dewy_probe_dict_{len(self.dict_probe_symbols)}')
+            entry = (shape, parts, symbol)
+            self.dict_probe_symbols.append(entry)
+            self.pending_dict_probes.append(entry)
+        key_type = self._lower_runtime_value_type(parts.key_type)
+        signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, key_type)], [], None, 'int64')
+        call = hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, signature, symbol),
+                                [replace(parts.pointer, type='int64'), replace(key, type=key_type)], {})
+        slot = self._name('dict_slot', loc)
+        position = self._name('dict_pos', loc)
+        found = self._name('dict_found', loc, 'bool')
+        statements = [self._declare(slot, call, loc),
+                      self._declare(position, self._dict_element(self._dict_descriptor(parts, 'indices', loc), slot, 'int64', loc), loc),
+                      self._declare(found, self._int64_comparison('__ge__', position, self._int64_literal(loc, 0), loc), loc, 'bool'),
+                      self._if(self._typed_equality(found, hir.Bool(loc, 'bool', False), 'bool', loc),
+                               [self._assign(position, self._int64_literal(loc, -1), loc)], loc)]
+        return statements, found, position, slot
+
+    def _synthesize_dict_probes(self) -> list:
+        from .lowering_shared import LoweredFunction
+        result = []
+        while self.pending_dict_probes:
+            _shape, parts, symbol = self.pending_dict_probes.pop(0)
+            loc = self.root.loc
+            pointer = hir.ExpressedIdentifier(loc, 'int64', '__dewy_dictionary')
+            key = hir.ExpressedIdentifier(loc, parts.key_type, '__dewy_key')
+            body, _found, _position, slot = self._dict_probe_body(replace(parts, pointer=pointer), key, loc)
+            key_type = self._lower_runtime_value_type(parts.key_type)
+            signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, key_type)], [], None, 'int64')
+            literal = hir.FunctionLiteral(loc, signature,
+                [hir.Param(pointer.name, 'int64'), hir.Param(key.name, key_type)], [], None, 'int64',
+                hir.Block(loc, 'int64', [*body, hir.Return(loc, ty.BOTTOM_TYPE, slot)], True))
+            result.append(LoweredFunction(symbol, literal))
+        return result
+
+    def _dict_probe_body(
         self,
         parts: _DictParts,
         key: hir.AST,
