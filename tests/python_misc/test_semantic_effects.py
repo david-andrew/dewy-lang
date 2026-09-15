@@ -63,6 +63,20 @@ let measure = (items:array<int64 length=2>):>int64 => items.length
     assert summary.reads == {ROOT}
 
 
+def test_join_reads_its_receiver_and_visits_separator_effects() -> None:
+    root, effects = _analyze('''
+let render = (words:array<string>):>string => words.join('|')
+let separator = (@words:array<string>):>string => {words.push('last') return '|'}
+let render_changing = (@words:array<string>):>string => words.join(separator(@words))
+''')
+    reader = _param_effects(effects, _function(root, 'render'))
+    assert reader.read_only
+    assert reader.reads == {ROOT}
+    changing = _param_effects(effects, _function(root, 'render_changing'))
+    assert changing.reads == {ROOT}
+    assert changing.mutates == {ROOT}
+
+
 def test_index_write_records_element_mutation() -> None:
     root, effects = _analyze('''
 let poke = (@items:array<int64 length=2>):>void => { items[0] = 40 }

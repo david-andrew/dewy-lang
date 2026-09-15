@@ -1407,3 +1407,28 @@ callback effects, worklists, index snapshots, and hosted/native effect agreement
 Two initial fixture issues (an inferred global-counter singleton annotation
 and counting argv without the executable) were corrected before landing.
 Artifacts: `capture-reader-gates`; full self-build impact remains to be measured.
+
+The rebuilt native C seed then builds frozen `8a5c2b6b` through the direct
+backend in **103.57 seconds**, down from 149.47 s. Lowering falls from
+67.48 to **23.37 seconds**. Frontend 27.48 s, validation 23.46 s, preparation
+4.73 s, emission 5.46 s, backend 16.75 s; peak process RSS 5,875,660 KiB.
+This is an isolated fresh executable build and remains above the target.
+Artifacts: `native-reader-effects-c` and `native-reader-effects-full`.
+
+The seed was built with target `c`, while this measurement requested
+`x86_64`. Their emitted µDewy therefore does not have the same hash: after
+normalizing function names, the sole difference is the embedded `$target`
+default in the checker session (`c` versus `x86_64`). Matching-target native
+generations remain necessary for fixed-point certification. The refreshed
+seed also passes the capture fixture with the same 11,599,240-byte allocation.
+
+### Treat joining an array as a read
+
+Both parameter-effect analyzers previously classified all array methods as
+mutations. `join` now records a receiver read, matching its settled semantics
+and the capture/write-target analysis. The separator expression still runs
+through effect analysis, so a separator that writes through a place prevents
+a read-only summary. The HIR descriptions now spell out that distinction.
+Fifteen semantic/effect checks and eighteen join/call-storage checks pass,
+including native/hosted summary agreement and aliasing argument evaluation.
+Artifacts: `capture-reader-gates/join-effects.log` and `join-storage.log`.

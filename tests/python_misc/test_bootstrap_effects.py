@@ -88,6 +88,16 @@ def effect_program():
     default_function = hir.FunctionLiteral(LOC, CALLABLE, [param(24)], [], None,
         'void', store(read(24)))
     function(123, [hir.BoundParam('callback', CALLABLE, default_function, binding_id=25)], [])
+    # Array joining is a read, while evaluating its separator may still write
+    # a place. Compare both cases so the read shortcut cannot erase arguments.
+    words = ty.ArrayType('string')
+    join_type = ty.FunctionType([], [], None, 'string')
+    for binding in (26, 27):
+        separator = [] if binding == 26 else [call(101, [place(read(binding, words))])]
+        join = hir.ArrayMethod(LOC, join_type, read(binding, words), 'join')
+        function(124 + binding - 26, [param(binding, words)], [
+            hir.FunctionCall(LOC, 'string', join, separator, {}),
+        ])
     # A long forwarding chain, in the slow order for whole-program rounds.
     for index in range(32):
         binding = 1000 + index

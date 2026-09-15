@@ -556,11 +556,15 @@ class _EffectAnalyzer:
         params: dict[int, ParameterEffects],
     ) -> None:
         if isinstance(call.func, hir.ArrayMethod):
-            # Growth methods mutate the receiver array in place.
+            # Joining reads the receiver; growth/reordering methods mutate it.
+            # Argument expressions still contribute their own effects below.
             resolved = self._resolve_route(call.func.array, params)
             if resolved is not None:
                 binding_id, route, inner = resolved
-                params[binding_id].add_mutate(route)
+                if call.func.name == 'join':
+                    params[binding_id].add_read(route)
+                else:
+                    params[binding_id].add_mutate(route)
                 for expr in inner:
                     self._visit(expr, params)
             else:

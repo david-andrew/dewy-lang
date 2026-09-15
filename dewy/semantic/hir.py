@@ -506,9 +506,9 @@ class DictMethod(AST):
 class ArrayMethod(AST):
     """A compiler-provided method bound to a named array binding.
 
-    ``type`` is the method's FunctionType; calling it mutates the receiver in
-    place (``push``, ``pop``, ``clear``, ``reserve``), as if ``array`` were a
-    Dewy object type defining these methods.
+    ``type`` is the method's FunctionType. Growth/reordering methods mutate
+    the receiver in place; ``join`` only reads it. The binding behaves as if
+    ``array`` were a Dewy object type defining these methods.
     """
 
     array: AST

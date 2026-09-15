@@ -319,7 +319,10 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis
     let arguments = call.pos_args
     loop argument in call.kw_args.values { arguments.push(argument) }
     if function is? hir.ArrayMethod {
-        let changed = visit_route(function.array 'mutate' [] @params analysis nodes type_nodes)
+        # Joining reads its receiver. A separator or other argument can still
+        # have effects, so retain the ordinary argument walk in either case.
+        let kind:Effect = if function.name =? 'join' 'read' else 'mutate'
+        let changed = visit_route(function.array kind [] @params analysis nodes type_nodes)
         if visit_all(arguments @params analysis nodes type_nodes) { changed = true }
         return changed
     }
