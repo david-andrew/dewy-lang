@@ -120,8 +120,8 @@ initializer length. The capture-boundary fix is now refined so immutable
 bindings retain their initialization-derived read type, while their written
 store contract remains separate. The complete fixture, constant/default/local
 capture cases, and the earlier mutable capture regressions pass isolated
-hosted/native x86-64/C gates. Public CLI follow-up is still pending; the
-completed frozen refresh intentionally records the older rejection.
+hosted/native x86-64/C gates. The refreshed `f1345e78` CLI also passes the
+fixture; the completed `49ad4c12` corpus refresh records the older rejection.
 
 `brand_words.dewy` loses its stack-length evidence across the read-only
 `describe` call. Both bounds checkers now use transitive global-write
@@ -138,9 +138,9 @@ complete `brand_words.dewy` graph. It exposed and fixed the native builtin
 identity difference: arithmetic intrinsics carry bindings explicitly marked
 `builtin`; user bindings with the same names keep ordinary effects. All
 12 native-source cases pass using the compiled validation driver, including
-a user-defined mutating `__add__`. This follow-up has not yet been rebuilt
-into the public CLI; the `cfc7f6fe` accelerator passes the constant capture
-and local capture fixtures but still records the older brand-words rejection.
+a user-defined mutating `__add__`. The refreshed `f1345e78` public CLI passes
+`brand_words.dewy`, `array_call_adapters.dewy`, and `local_captures.dewy`, with
+matching expected results and output (`parity-prelude-cache/results.jsonl`).
 
 ## Execution and output differences
 

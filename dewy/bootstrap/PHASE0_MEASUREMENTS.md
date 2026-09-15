@@ -3049,3 +3049,58 @@ and disabled-cache agreement. Artifacts: `host-prelude-inputs.log` (the initial
 run also contains two fixture setup failures),
 `host-prelude-inputs-transitive-final.log` (both corrected cases pass).
 The measurement metadata now records the cache-disabling environment options.
+
+The frozen `f1345e78` compiler builds through the older `cfc7f6fe` C seed in
+60.538 seconds with direct x86-64 output. Emitted µDewy grows to 52,734,019
+bytes (SHA-256 `1daae15b8e5cf0456d5d460271af2b1e3d510d5f713edb5617627a3268f73ee1`).
+Compiling that output through C with the same LTO8/PRE/code-hoisting options
+produces accelerator SHA-256
+`923687d9b3c4710912be95a219931a105e0ca0acb3fad91d8451bf16178425e6`.
+This is a single-generation accelerator, not a new fixed-point certification.
+
+Using that accelerator, the frozen library, and the verified `4c785f86` µDewy
+compiler, complete direct-output invocations measure:
+
+| Input | Cold | Warm rebuild | Cold/warm frontend | Cold/warm RSS (KiB) | µDewy bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `native_none_forwarding.dewy` | 5.926 s | 4.072 s | 2.356 / 0.475 s | 260,648 / 234,480 | 639,163 |
+| `parser/t0.dewy` | 8.431 s | 6.827 s | 2.611 / 0.919 s | 578,596 / 538,860 | 3,491,668 |
+| `bootstrap/main.dewy` | 57.477 s | 57.638 s | 20.227 / 18.941 s | 5,976,052 / 5,940,208 | 52,734,019 |
+
+Each row's cold/warm emitted source has the same hash. Disabling the cache
+for the small input also gives identical output (6.026 seconds in that
+sample). Its cache file is about 15 MB. Small/module startup improves, but
+the full-build totals show no significant gain in this pair of samples.
+Native validation still takes roughly 3.2–3.9 seconds for small/module input;
+reusing its proof decisions would require preserving their dependencies.
+Artifacts: `source-prelude-cache`, `native-prelude-cache-{full,c-seed}`,
+`prelude-cache-{small,module,full}-{cold,warm}`, `prelude-cache-small-disabled`.
+The refreshed public CLI also passes the capture and brand-word regressions
+with expected execution and output (`parity-prelude-cache`).
+
+### Direct x86-64 local registers
+
+Both µDewy x86-64 backends now promote two frequently accessed locals into
+`rbx`/`r15`, which the existing prologue already preserves. Those registers
+are separate from expression-stack scratch registers. Every slot access is
+recorded; a bounded loop-depth score selects locals for the whole function,
+with deterministic ties. µDewy exposes no address-of-local operation, so the
+selected slots require no memory alias analysis. Debug builds retain stack
+locations; frame size, calling conventions, and allocation rounding remain
+unchanged. No boolean evaluation rules change.
+
+All 57 selected backend/parity gates pass, with 10 unavailable cross-target
+execution cases skipped. The checks include recursion, direct/indirect and
+overflow calls, spills, memory intrinsics, condition-only short circuiting,
+debug metadata, and x86-64's eight-byte allocation rounding. The native pair
+check now includes the new local-register fixture without debug metadata.
+Artifact: `local-register-gates-complete.log`.
+
+On the existing effect-transfer kernel, 31 alternating executions per variant
+change median runtime **16.161 to 14.375 milliseconds** (about 11%); every
+execution returns 42. Assembly changes 4,454,131 to 4,416,532 bytes, and the
+executable 904,320 to 896,128 bytes. One build pair shows generation
+1.004/1.112 seconds and assembly/linking 0.393/0.317 seconds, so this is a
+runtime improvement, not an established compiler-generation speedup.
+Artifact: `local-register-execution/results.json`. Larger direct-compiler
+measurements and µDewy fixed-point checks follow separately.

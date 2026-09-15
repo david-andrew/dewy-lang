@@ -48,6 +48,11 @@ let x86_saved_depth:int = 0
 let x86_spilled_depth:int = 0
 let x86_min_slot_offset:int = 0
 let x86_frame_subtract_index:int = 0   # index into current_fn_code to patch
+# Whole-function local promotion. Scores are indexed by dense frame slot;
+# sites are flattened (instruction index, slot, other register, store flag).
+# %rbx/%r15 are already preserved by the ABI and are not expression scratch.
+let x86_local_scores:int = 0
+let x86_local_sites:int = 0
 
 # Control-flow stacks. The if stack has 3 parallel Vecs; loop stack has 2.
 let x86_if_else_labels:int = 0
@@ -113,6 +118,8 @@ let x86_alloc_state = ():>void => {
     x86_data = vec_new(32)
     x86_extern_symbols = set_new()
     x86_param_slots = vec_new(8)
+    x86_local_scores = vec_new(16)
+    x86_local_sites = vec_new(64)
     x86_if_else_labels = vec_new(4)
     x86_if_end_labels = vec_new(4)
     x86_if_else_emitted = vec_new(4)
@@ -1135,6 +1142,8 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
     x86_saved_depth = 0
     x86_spilled_depth = 0
     x86_min_slot_offset = 0
+    vec_set_len(x86_local_scores 0)
+    vec_set_len(x86_local_sites 0)
 
     let code:int = vec_new(64)
     vec_push(x86_function_ids label_id)
@@ -1185,10 +1194,12 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
         vec_push(x86_param_slots slot)
         x86_note_slot(slot)
         if i <? 6 {
+            x86_note_local_access(slot x86_arg_reg(i) true)
             x86_emit_op_r_mem("movq" x86_arg_reg(i) slot "%rbp")
         } else {
             let caller_off:int = 16 + (i - 6) * 8
             x86_emit_op_mem_r("movq" caller_off "%rbp" "%rax")
+            x86_note_local_access(slot "%rax" true)
             x86_emit_op_r_mem("movq" "%rax" slot "%rbp")
         }
         x86_stack_offset = x86_stack_offset - 8
@@ -1204,6 +1215,7 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
 
 let x86_end_function = ():>void => {
     x86_end_debug_function()
+    x86_promote_locals()
     let fb:int = x86_frame_bytes()
     let bb:int = bb_new(32)
     bb_push_str(bb "    subq $")
@@ -1228,7 +1240,73 @@ let x86_end_function = ():>void => {
 
 let x86_load_param = (index:int):>void => {
     let slot:int = vec_get(x86_param_slots index)
-    x86_emit_op_mem_r("movq" slot "%rbp" "%rax")
+    x86_load_local(slot)
+    return void
+}
+
+let x86_note_local_access = (slot:int other:int store:int):>void => {
+    if be_debug_info {return void}
+    let index:int = (0 - slot - X86_FIXED_FRAME_BYTES) >> 3
+    loop vec_len(x86_local_scores) <=? index {vec_push(x86_local_scores 0)}
+    let depth:int = vec_len(x86_loop_start_labels)
+    if depth >? 3 {depth = 3}
+    let weight:int = 1 << (3 * depth)
+    vec_set(x86_local_scores index vec_get(x86_local_scores index) + weight)
+    vec_push(x86_local_sites vec_len(x86_current_fn_code))
+    vec_push(x86_local_sites slot)
+    vec_push(x86_local_sites other)
+    vec_push(x86_local_sites store)
+    return void
+}
+
+# µDewy has no address-of-local operation, so these recorded accesses cover
+# every use of a selected slot. Whole-function registers survive branches,
+# calls and syscalls. Debug builds retain their existing stack locations;
+# frame sizes and __alloca__ alignment do not change.
+let x86_promote_locals = ():>void => {
+    if be_debug_info {return void}
+    let first:int = -1
+    let second:int = -1
+    let first_score:int = 0
+    let second_score:int = 0
+    let i:int = 0
+    loop i <? vec_len(x86_local_scores) {
+        let score:int = vec_get(x86_local_scores i)
+        if score >? first_score {
+            second = first
+            second_score = first_score
+            first = i
+            first_score = score
+        } else if score >? second_score {
+            second = i
+            second_score = score
+        }
+        i = i + 1
+    }
+    i = 0
+    loop i <? vec_len(x86_local_sites) {
+        let slot:int = vec_get(x86_local_sites i + 1)
+        let index:int = (0 - slot - X86_FIXED_FRAME_BYTES) >> 3
+        let register:int = 0
+        if index =? first {register = "%rbx"}
+        else if index =? second {register = "%r15"}
+        if register not=? 0 {
+            let other:int = vec_get(x86_local_sites i + 2)
+            let bb:int = bb_new(32)
+            bb_push_str(bb "    movq ")
+            if vec_get(x86_local_sites i + 3) {
+                bb_push_str(bb other)
+                bb_push_str(bb ", ")
+                bb_push_str(bb register)
+            } else {
+                bb_push_str(bb register)
+                bb_push_str(bb ", ")
+                bb_push_str(bb other)
+            }
+            vec_set(x86_current_fn_code vec_get(x86_local_sites i) bb_finalize_as_string(bb))
+        }
+        i = i + 4
+    }
     return void
 }
 
@@ -1240,11 +1318,13 @@ let x86_alloc_local = ():>int => {
 }
 
 let x86_load_local = (slot:int):>void => {
+    x86_note_local_access(slot "%rax" false)
     x86_emit_op_mem_r("movq" slot "%rbp" "%rax")
     return void
 }
 
 let x86_store_local = (slot:int):>void => {
+    x86_note_local_access(slot "%rax" true)
     x86_emit_op_r_mem("movq" "%rax" slot "%rbp")
     return void
 }

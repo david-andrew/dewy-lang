@@ -63,6 +63,7 @@ class X86_64Backend(Backend):
     """
     _ARG_REGS = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
     _VALUE_CACHE_REGS = ["%r12", "%r13", "%r14"]
+    _LOCAL_REGS = ["%rbx", "%r15"]
     _REGISTER_SUFFIXES = {64: '', 32: 'd', 16: 'w', 8: 'b'}
     _STORE_OPERATIONS = {64: 'movq', 32: 'movl', 16: 'movw', 8: 'movb'}
     _FIXED_FRAME_BYTES = 48
@@ -92,6 +93,8 @@ class X86_64Backend(Backend):
         self._spilled_depth: int = 0
         self._min_slot_offset: int = 0
         self._frame_subtract_index: int = -1
+        self._local_sites: dict[int, list[tuple[int, str, bool]]] = {}
+        self._local_scores: dict[int, int] = {}
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
@@ -431,6 +434,8 @@ class X86_64Backend(Backend):
         self._saved_depth = 0
         self._spilled_depth = 0
         self._min_slot_offset = 0
+        self._local_sites = {}
+        self._local_scores = {}
         
         self._current_fn_code = []
         self._function_code.append((label_id, self._current_fn_code))
@@ -469,10 +474,12 @@ class X86_64Backend(Backend):
             self._note_slot(slot)
             
             if i < 6:
+                self._note_local_access(slot, self._ARG_REGS[i], True)
                 self._emit(f"movq {self._ARG_REGS[i]}, {slot}(%rbp)")
             else:
                 caller_offset = 16 + (i - 6) * 8
                 self._emit(f"movq {caller_offset}(%rbp), %rax")
+                self._note_local_access(slot, '%rax', True)
                 self._emit(f"movq %rax, {slot}(%rbp)")
             
             self._stack_offset -= 8
@@ -483,6 +490,7 @@ class X86_64Backend(Backend):
         """End function definition."""
         assert self._current_fn_code is not None
         self._end_debug_function()
+        self._promote_locals()
         frame_bytes = self._frame_bytes()
         self._current_fn_code[self._frame_subtract_index] = f"    subq ${frame_bytes}, %rsp"
         self._emit_label(self._current_fn_epilogue)
@@ -724,8 +732,33 @@ class X86_64Backend(Backend):
     
     def load_param(self, index: int) -> None:
         """Push parameter value onto the value stack."""
-        slot = self._param_slots[index]
-        self._emit(f"movq {slot}(%rbp), %rax")
+        self.load_local(self._param_slots[index])
+
+    def _note_local_access(self, slot: int, other: str, store: bool) -> None:
+        if self.debug_info:
+            return
+        assert self._current_fn_code is not None
+        self._local_sites.setdefault(slot, []).append((len(self._current_fn_code), other, store))
+        # A bounded loop-depth weight favors hot cursors over one-use
+        # temporaries. Ties favor earlier slots, independently of map order.
+        weight = 1 << (3 * min(len(self._loop_stack), 3))
+        self._local_scores[slot] = self._local_scores.get(slot, 0) + weight
+
+    def _promote_locals(self) -> None:
+        """Keep two frequently used whole-function locals in saved registers.
+
+        µDewy exposes no address-of-local operation. Every access to these
+        slots is recorded here, so they need no memory home or alias checks.
+        Both registers are already saved by the ABI prologue and are unused
+        by the expression stack, calls, and intrinsics. Debug builds retain
+        their existing stack locations. Frame size/alignment stay unchanged.
+        """
+        assert self._current_fn_code is not None
+        selected = sorted(self._local_scores, key=lambda slot: (-self._local_scores[slot], -slot))[:2]
+        for slot, register in zip(selected, self._LOCAL_REGS):
+            for index, other, store in self._local_sites[slot]:
+                source, destination = (other, register) if store else (register, other)
+                self._current_fn_code[index] = f'    movq {source}, {destination}'
     
     def alloc_local(self) -> int:
         """Allocate a local variable slot."""
@@ -736,10 +769,12 @@ class X86_64Backend(Backend):
     
     def load_local(self, slot: int) -> None:
         """Push local variable value onto the value stack."""
+        self._note_local_access(slot, '%rax', False)
         self._emit(f"movq {slot}(%rbp), %rax")
     
     def store_local(self, slot: int) -> None:
         """Pop value from stack and store to local variable."""
+        self._note_local_access(slot, '%rax', True)
         self._emit(f"movq %rax, {slot}(%rbp)")
     
     # ========================================================================

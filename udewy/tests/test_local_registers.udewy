@@ -1,0 +1,45 @@
+# Whole-function locals must survive calls, recursion, branches, and loops.
+# These are word values: promotion cannot depend on inferred source types.
+let recur = (depth:int seed:int):>int => {
+    let kept:int = seed * 3 + depth
+    if depth =? 0 {return kept}
+    let child:int = recur(depth - 1 seed + 1)
+    return kept + child
+}
+let tail = (a:int b:int c:int d:int e:int f:int g:int h:int i:int j:int):>int => {
+    let count:int = 0
+    let total:int = 0
+    loop count <? 64 {
+        total = total + i + j
+        i = i + 1
+        j = j - 1
+        count = count + 1
+    }
+    return total
+}
+let main = ():>int => {
+    let cursor:int = 0
+    let total:int = 0
+    let call:int = recur
+    loop cursor <? 32 {
+        cursor = cursor + 1
+        let odd:int = cursor and 1
+        if odd {continue}
+        total = total + (@call)(4 3)
+        if cursor =? 24 {break}
+    }
+    if total not=? 1020 or cursor not=? 24 {return 1}
+    if tail(1 2 3 4 5 6 7 8 9 10) not=? 1216 {return 2}
+    # The syscall's result and fixed argument registers may change, while
+    # local values and the allocated buffers survive.
+    let first:int = __alloca__(1)
+    let second:int = __alloca__(1)
+    let alignment:int = (first or second) and 7
+    if alignment not=? 0 {return 3}
+    __store_u8__(42 first)
+    __store_u8__(43 second)
+    if __load_u8__(first) not=? 42 or __load_u8__(second) not=? 43 {return 6}
+    if __syscall0__(39) <=? 0 {return 4}
+    if total not=? 1020 or cursor not=? 24 {return 5}
+    return 0
+}

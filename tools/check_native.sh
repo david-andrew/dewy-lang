@@ -61,6 +61,7 @@ for check_target in x86_64 c; do
     echo "Checking native pair with $check_target output"
     # Ordinary AND/OR stay eager; only if/loop conditions short-circuit.
     expect_exit 0 "$check_udewy" --target "$check_target" udewy/tests/test_guarded_calls.udewy
+    expect_exit 0 "$check_udewy" --no-debug-info --target "$check_target" udewy/tests/test_local_registers.udewy
     expect_exit 42 "$check_dewy" --target "$check_target" "$check_work/scalar.dewy"
     expect_exit 42 "$check_dewy" --target "$check_target" tests/fixtures/native_pair_checks.dewy
     # Share one prelude across the real readers and callback traversal. Keep
