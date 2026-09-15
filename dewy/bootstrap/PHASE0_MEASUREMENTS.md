@@ -3478,3 +3478,42 @@ with the final change. Artifacts: `postok-sharing-measurement/results.json`,
 its before/after sources and build logs, and
 `native-postok-sharing-final-gates.log`. This bounded reduction does not yet
 establish a full native build time under the revised 30-second target.
+
+### Shared descriptor native generation checkpoint
+
+Frozen `7aa76771` includes the string descriptor sharing and token-pass changes,
+and restores saved loop depth after recursive lowering. The latter repairs a
+bootstrap-source obligation exposed by the newly enforced nonnegative stored
+contract; decrementing a field after a recursive place call did not establish
+that obligation. No language rule was relaxed.
+
+The first updated seed still executes storage code emitted by its predecessor.
+It builds the frozen compiler in **60.0848 seconds**. After another native
+emission and C compilation, the seed itself uses shared descriptors and builds
+that same frozen source in **53.3723 seconds** (about 11% faster):
+
+| Phase | Earlier seed | Shared-descriptor seed |
+| --- | ---: | ---: |
+| Frontend | 23.555 s | 19.932 s |
+| Validation | 5.165 s | 4.716 s |
+| Initialization/reachability | 2.063 s | 1.917 s |
+| Lowering | 11.982 s | 10.287 s |
+| Emission | 5.358 s | 5.003 s |
+| Backend | 9.530 s | 9.122 s |
+| Maximum process RSS | 6,178,568 KiB | 5,790,264 KiB |
+
+Both invocations produce direct x86-64 executables from cold artifact
+directories; the seeds use the C accelerator and the verified `2b541de3` µDewy
+compiler. OS page caches are uncontrolled. Emitted µDewy is byte-identical:
+54,400,211 bytes, SHA-256
+`d70858643931a7514e6a946eb8b6305443633d439a49e0e3f0761b94615bc941`.
+This is a single-compiler generation comparison, not a newly certified native
+pair or a fully no-C bootstrap. The revised 30-second target remains open.
+
+Artifacts: `source-shared-descriptors-restored-depth`,
+`native-shared-descriptors-stage2-restored-depth`,
+`native-shared-descriptors-stage2-c` (seed path and SHA-256), and
+`native-shared-descriptors-full`. The preceding `native-shared-descriptors-stage2`
+failed on the loop-depth obligation and is retained as a failure, not a timing
+success. Direct packed-boundary output remains subsequent work and is absent
+from this frozen checkpoint.
