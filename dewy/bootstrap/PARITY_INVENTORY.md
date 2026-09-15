@@ -48,6 +48,25 @@ Two formerly passing fixtures regress: `array_call_adapters.dewy` and
 include the changed diagnostic-report expectation described above; they
 should not be read as six newly implemented language features.
 
+## Refreshed corpus with reusable prelude proofs
+
+The `a8619dab` native accelerator passes **154/211 cases**: 144/201 accepted
+programs and all ten rejection fixtures. The hosted compiler passes all 211
+expected outcomes. All 57 remaining native failures are compilation
+rejections; every accepted native program matches the expected execution and
+output. The two recovered cases are `array_call_adapters.dewy` and
+`brand_words.dewy`, previously checked separately.
+
+This run shares each implementation's checked-prelude cache across isolated
+case directories and fresh compiler processes. It is a semantic inventory,
+not a cold timing comparison or a refreshed fixed point. Native Dewy SHA-256:
+`b38ae85e95b942db0d3aaed26d183eb17f1d4799256c22f3d19a8b34652b24c5`;
+the downstream µDewy is the `d32f29e3` C accelerator. Hosted source identity,
+all commands and per-case results are retained in
+`phase0-performance/parity-shared-prelude-full/{metadata.json,results.jsonl}`.
+The position-only parameter changes now in development are later than this
+inventory and are not included in its pass count.
+
 ## Additional observations from optimization regressions
 
 These are outside the original corpus counts:

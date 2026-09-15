@@ -3221,3 +3221,19 @@ Both pass (`hosted-library-root-final-gates.log`). Prior hosted measurements
 using only `--library-root` did not pin the implicit prelude; `--hosted-root`
 did pin it through the package location. Keep that provenance limitation with
 the historical numbers; the next full checkpoint uses the corrected selection.
+
+With configured-library selection corrected, the hosted cold full build of
+frozen `53cdf9e7` sources completes in **77.280 seconds**: checking 35.714,
+lowering 17.918, emission 3.325, and backend 13.808 seconds. Maximum process
+RSS is 1,262,160 KiB; emitted µDewy is 37,989,575 bytes. Backend observations
+separate 7.970 seconds of code generation and 5.581 of assembly/linking.
+The hosted implementation includes the library-root fix from `ade9f9cc`.
+Artifact: `host-configured-library-full`. The larger cache-enabled source
+and corrected library selection make this a new checkpoint, not a controlled
+comparison to the earlier 66.696-second source. The hosted target remains open.
+
+The refreshed complete shared-prelude corpus passes **154/211** expected
+outcomes, including every hosted case and all ten rejection fixtures on both
+implementations. Every accepted native program matches its expected behavior;
+the 57 remaining failures are native compilation rejections. See
+[PARITY_INVENTORY.md](PARITY_INVENTORY.md) for provenance and feature gaps.
