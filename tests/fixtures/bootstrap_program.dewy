@@ -9,12 +9,15 @@ import p"../../dewy/bootstrap/backend/udewy/program.dewy" as program
 # A shared checked prelude avoids checking Unicode and numeric libraries again
 # for every case. Entry modules and all emitted programs remain independent.
 main=(argv:array<string>):>int64=>{
-    $runtime_assert argv.length =? 4
+    $runtime_assert argv.length >=? 4
     let files=prelude.files(argv[2] 'x86_64')
+    loop index in 4.. and index <? argv.length {files.push(argv[index])}
     let engine=modules.Engine[library_roots=[argv[2]] prelude_files=files]
     engine.prelude_cache=cache.Config[argv[0] argv[3] 'x86_64' [argv[2]] files]
     let entry=modules.load(argv[1] @engine)
     if entry is? Error {entry.fail}
+    let expected=environment('DEWY_TEST_PRELUDE_CACHE')
+    if expected isnt? none and (expected =? 'hit') not=? engine.prelude_cache_restored return 3
     let compilation=graph.compile(entry @engine)
     if compilation is? Error {compilation.fail}
     let emitted=program.render(compilation.lowered.program compilation.lowered.input)

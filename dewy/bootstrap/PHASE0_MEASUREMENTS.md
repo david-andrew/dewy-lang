@@ -3334,3 +3334,29 @@ existing test driver with a fresh cold prelude. The bug affects codecs built
 by the hosted compiler: the earlier hosted self-build timings do not certify
 their cached range-bound behavior. Verification of a freshly hosted-built
 driver's cold/warm output follows with the record formatter integration.
+
+### Record formatter integration
+
+Native records now use one hidden formatter per concrete record type. Its
+signature is registered before checking its fields, allowing recursive
+records to reuse it. Failed speculative preparation rolls back the helper
+and its nested declarations. Runtime brand dispatch shares typename's
+deepest-first choices, so parent and original-structure views preserve child
+fields and overridden conversion methods. Conversion methods precede ordinary
+field formatting; number families without a string protocol remain rejected.
+
+Eleven accepted programs pass through both compiler implementations on x86-64
+and C, with explicit expected results for recursive records, containers of
+records, callable fields, nested methods, runtime brands and evaluation order.
+Three rejection cases agree. A helper prepared in an additional prelude
+module survives cache restoration: cold/warm emitted source is identical,
+and the restored program returns 42. This fresh hosted-built driver includes
+the string-payload correction above. Artifact: `object-text-final-gates.log`
+(189.27 seconds for the complete test, including building the driver and
+all downstream executions; not a compiler-build benchmark).
+
+The session now records formatter bindings and generalizes the method-only
+export exclusion to all hidden helpers. The generated snapshot codec is
+updated and the native prelude format advances to version 3. Earlier
+`object-text-*.log` files retain the initial static-record passes and the
+alias/test-harness/cache issues diagnosed along the way.

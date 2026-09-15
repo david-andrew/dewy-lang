@@ -50,7 +50,10 @@ CheckState:type = [
     # not merge distinct bodies or defaults. Inherited entries reuse owners.
     constructors:dict<addr ConstructorSet>=[]
     methods:dict<string MethodEntry>=[]
-    method_bindings:set<addr>=set[]
+    # Synthesized helpers and method implementations are module declarations,
+    # but do not become source-facing namespace exports.
+    hidden_bindings:set<addr>=set[]
+    object_strings:dict<addr addr>=[]
     preparing_methods:set<addr>=set[]
     prepared_methods:set<addr>=set[]
     registry:bindings.Registry=bindings.Registry[]
@@ -94,7 +97,8 @@ checkpoint = (session:Session):>Checkpoint => {
         hoisted=session.hoisted
         constructors=session.constructors
         methods=session.methods
-        method_bindings=session.method_bindings
+        hidden_bindings=session.hidden_bindings
+        object_strings=session.object_strings
         preparing_methods=session.preparing_methods
         prepared_methods=session.prepared_methods
         registry=session.registry
@@ -146,7 +150,8 @@ restore = (checkpoint:Checkpoint @session:Session):>void => {
     session.hoisted=checkpoint.state.hoisted
     session.constructors=checkpoint.state.constructors
     session.methods=checkpoint.state.methods
-    session.method_bindings=checkpoint.state.method_bindings
+    session.hidden_bindings=checkpoint.state.hidden_bindings
+    session.object_strings=checkpoint.state.object_strings
     session.preparing_methods=checkpoint.state.preparing_methods
     session.prepared_methods=checkpoint.state.prepared_methods
     session.registry=checkpoint.state.registry

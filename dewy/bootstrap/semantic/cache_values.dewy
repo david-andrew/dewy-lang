@@ -398,7 +398,8 @@ encode_Value1=(value:Value1 @out:bytes.Writer):>void=>{
     encode_Value54(value.hoisted @out)
     encode_Value55(value.constructors @out)
     encode_Value57(value.methods @out)
-    encode_Value48(value.method_bindings @out)
+    encode_Value48(value.hidden_bindings @out)
+    encode_Value40(value.object_strings @out)
     encode_Value48(value.preparing_methods @out)
     encode_Value48(value.prepared_methods @out)
     encode_Value59(value.registry @out)
@@ -445,45 +446,47 @@ decode_Value1=(@input:bytes.Reader):>Value1|CacheMiss=>{
     if field_10 is? CacheMiss return field_10
     let field_11=decode_Value48(@input)
     if field_11 is? CacheMiss return field_11
-    let field_12=decode_Value48(@input)
+    let field_12=decode_Value40(@input)
     if field_12 is? CacheMiss return field_12
     let field_13=decode_Value48(@input)
     if field_13 is? CacheMiss return field_13
-    let field_14=decode_Value59(@input)
+    let field_14=decode_Value48(@input)
     if field_14 is? CacheMiss return field_14
-    let field_15=decode_Value77(@input)
+    let field_15=decode_Value59(@input)
     if field_15 is? CacheMiss return field_15
-    let field_16=decode_Value79(@input)
+    let field_16=decode_Value77(@input)
     if field_16 is? CacheMiss return field_16
-    let field_17=decode_Value48(@input)
+    let field_17=decode_Value79(@input)
     if field_17 is? CacheMiss return field_17
-    let field_18=decode_Value82(@input)
+    let field_18=decode_Value48(@input)
     if field_18 is? CacheMiss return field_18
-    let field_19=decode_Value76(@input)
+    let field_19=decode_Value82(@input)
     if field_19 is? CacheMiss return field_19
-    let field_20=decode_Value86(@input)
+    let field_20=decode_Value76(@input)
     if field_20 is? CacheMiss return field_20
-    let field_21=decode_Value48(@input)
+    let field_21=decode_Value86(@input)
     if field_21 is? CacheMiss return field_21
-    let field_22=decode_Value40(@input)
+    let field_22=decode_Value48(@input)
     if field_22 is? CacheMiss return field_22
-    let field_23=decode_Value89(@input)
+    let field_23=decode_Value40(@input)
     if field_23 is? CacheMiss return field_23
-    let field_24=decode_Value95(@input)
+    let field_24=decode_Value89(@input)
     if field_24 is? CacheMiss return field_24
-    let field_25=decode_Value156(@input)
+    let field_25=decode_Value95(@input)
     if field_25 is? CacheMiss return field_25
-    let field_26=decode_Value157(@input)
+    let field_26=decode_Value156(@input)
     if field_26 is? CacheMiss return field_26
-    let field_27=decode_Value214(@input)
+    let field_27=decode_Value157(@input)
     if field_27 is? CacheMiss return field_27
-    let field_28=decode_Value323(@input)
+    let field_28=decode_Value214(@input)
     if field_28 is? CacheMiss return field_28
-    let field_29=decode_Value76(@input)
+    let field_29=decode_Value323(@input)
     if field_29 is? CacheMiss return field_29
-    let field_30=decode_Value13(@input)
+    let field_30=decode_Value76(@input)
     if field_30 is? CacheMiss return field_30
-    return Value1[warnings=field_0 pending_brand_matches=field_1 read_states=field_2 retained_read_states=field_3 value_keys=field_4 return_collectors=field_5 prepared_imports=field_6 next_key_position=field_7 hoisted=field_8 constructors=field_9 methods=field_10 method_bindings=field_11 preparing_methods=field_12 prepared_methods=field_13 registry=field_14 scopes=field_15 brands=field_16 error_types=field_17 links=field_18 builtin_aliases=field_19 pending_aliases=field_20 resolving_aliases=field_21 named_refs=field_22 target=field_23 sources=field_24 syntax_refs=field_25 types=field_26 hir=field_27 hir_edits=field_28 syntax_ref_positions=field_29 syntax_refs_indexed=field_30]
+    let field_31=decode_Value13(@input)
+    if field_31 is? CacheMiss return field_31
+    return Value1[warnings=field_0 pending_brand_matches=field_1 read_states=field_2 retained_read_states=field_3 value_keys=field_4 return_collectors=field_5 prepared_imports=field_6 next_key_position=field_7 hoisted=field_8 constructors=field_9 methods=field_10 hidden_bindings=field_11 object_strings=field_12 preparing_methods=field_13 prepared_methods=field_14 registry=field_15 scopes=field_16 brands=field_17 error_types=field_18 links=field_19 builtin_aliases=field_20 pending_aliases=field_21 resolving_aliases=field_22 named_refs=field_23 target=field_24 sources=field_25 syntax_refs=field_26 types=field_27 hir=field_28 hir_edits=field_29 syntax_ref_positions=field_30 syntax_refs_indexed=field_31]
 }
 
 encode_Value2=(value:Value2 @out:bytes.Writer):>void=>{

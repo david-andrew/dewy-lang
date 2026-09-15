@@ -64,8 +64,10 @@ not a cold timing comparison or a refreshed fixed point. Native Dewy SHA-256:
 the downstream µDewy is the `d32f29e3` C accelerator. Hosted source identity,
 all commands and per-case results are retained in
 `phase0-performance/parity-shared-prelude-full/{metadata.json,results.jsonl}`.
-The position-only parameter changes now in development are later than this
-inventory and are not included in its pass count.
+The completed position-only parameter and structural-formatting changes are
+later than this inventory and are not included in its pass count. Their
+isolated expected-result gates and the hosted string-payload test correction
+are recorded in [PHASE0_MEASUREMENTS.md](PHASE0_MEASUREMENTS.md).
 
 ## Additional observations from optimization regressions
 

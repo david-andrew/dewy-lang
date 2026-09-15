@@ -25,9 +25,8 @@ literal = (id:addr loc:Span @session:contexts.Session):>addr => {
     return hir.append_node(@session.hir hir.String[loc types.string_literal(text @session.types) text])
 }
 Alternative:type = const [value_type:addr depth:addr]
-instance = (value:addr loc:Span @session:contexts.Session):>addr => {
-    let node=hir.node_at(session.hir value)
-    let owner=types.node_at(session.types views.structural_base(node.value_type session.types))
+alternatives = (type:addr session:contexts.Session):>array<Alternative> => {
+    let owner=types.node_at(session.types views.structural_base(type session.types))
     let choices:array<Alternative>=[]
     if owner is? types.ObjectType {
         loop brand in session.brands.entries {
@@ -46,6 +45,11 @@ instance = (value:addr loc:Span @session:contexts.Session):>addr => {
             }
         }
     }
+    return choices
+}
+instance = (value:addr loc:Span @session:contexts.Session):>addr => {
+    let node=hir.node_at(session.hir value)
+    let choices=alternatives(node.value_type session)
     let fallback=literal(node.value_type loc @session)
     # Match the hosted constant-name path. TODO: audit whether an effectful
     # receiver should still run when its name needs no runtime brand dispatch.

@@ -4205,7 +4205,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let binding=bindings.binding_at(session.registry binding_id)
         binding.value_type=full binding.store_type=full
         session.registry.by_id[binding_id]=binding
-        session.method_bindings.add(binding_id)
+        session.hidden_bindings.add(binding_id)
         session.methods[method_key(type_id spec)]=contexts.MethodEntry[binding_id if instance type_id else none mutates]
     }
     # Prefer callees before callers so inferred methods have concrete results.
@@ -4358,6 +4358,9 @@ explicit_conversion = (value:addr target:addr id:addr env:Environment @session:c
     if numeric_values.is_family(node.value_type 'BigInt' env.lexical session) and views.fixed_integer_layout(types.strip_refinement(target session.types) session.types) isnt? none return against(value target id env @session)
     if subtyping.is_subtype(node.value_type target session.links @session.types) return value
     if subtyping.is_subtype(node.value_type types.primitive('int' @session.types) session.links @session.types) and views.fixed_integer_layout(target session.types) isnt? none return put(hir.ValueCast[node.loc target value] @session)
+    # An object can carry a descendant's brand, conversion method and fields.
+    # Dispatch before choosing the base type's conversion protocol.
+    if views.string_valued(target session.types) and types.node_at(session.types views.structural_base(node.value_type session.types)) is? types.ObjectType return text_part(value id env @session)
     let converted=conversion_method(value target id env @session)
     if converted is? Error return converted
     if converted isnt? none return converted
@@ -4414,14 +4417,18 @@ spelling_string = (value:addr @session:contexts.Session):>addr? => {
 # evaluated once into a hidden local, then each arm reads its narrowed member.
 # Keeping the declaration inside the expression preserves left-to-right
 # interpolation effects, including calls and fields of temporary records.
-text_part = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+text_part = (value:addr id:addr env:Environment @session:contexts.Session dispatch_brands:bool=true):>addr|Error => {
     let node=node_at(value session)
     let string=types.primitive('string' @session.types)
     let spelled=spelling_string(value @session)
     if spelled isnt? none return spelled
-    let type=types.node_at(session.types types.strip_refinement(node.value_type session.types))
+    let type=types.node_at(session.types views.structural_base(node.value_type session.types))
     if types.is_primitive(type 'none') return put(hir.String[node.loc types.string_literal('none' @session.types) 'none'] @session)
     if types.is_primitive(type 'void') or types.is_primitive(type 'never') return problem(id 'string interpolation needs a value' 'this expression does not produce one' env session)
+    if dispatch_brands and type is? types.ObjectType {
+        let choices=type_names.alternatives(node.value_type session)
+        if choices.length >? 0 return branded_text(value choices id env @session)
+    }
     let converted=conversion_method(value string id env @session)
     if converted is? Error return converted
     if converted isnt? none return converted
@@ -4468,8 +4475,113 @@ text_part = (value:addr id:addr env:Environment @session:contexts.Session):>addr
         }
         return library_call(structure.helper arguments id env @session)
     }
+    if type is? types.ObjectType {
+        loop name in ['Rational' 'BigRational' 'Fixed'] {
+            if numeric_values.is_family(node.value_type name env.lexical session) return problem(id 'no string conversion for this value' "`{name}` has no string conversion yet" env session)
+        }
+        if type.brand is? none or type.minted return object_text(value id env @session)
+    }
     if type is? types.ObjectType|types.ArrayType|types.TypeOr return pending(id 'structural string interpolation' env session)
     return value
+}
+
+# A value viewed as a parent (or its original structural shape) retains its
+# most specific runtime brand. Use the same deepest-first choices as typename;
+# each selected arm then uses that type's own conversion and field layout.
+branded_text = (value:addr choices:array<type_names.Alternative> id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let node=node_at(value session)
+    let name="__dewy_branded_text_{session.registry.next_id}"
+    let binding_id=bindings.allocate(@session.registry none name 'value' node.loc)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=node.value_type binding.store_type=node.value_type
+    let declaration=put(hir.Declare[node.loc types.primitive('void' @session.types) 'let' name node.value_type value binding_id] @session)
+    binding.declaration=declaration
+    session.registry.by_id[binding_id]=binding
+    let reference=put(hir.ExpressedIdentifier[node.loc node.value_type name binding_id] @session)
+    let arms:array<addr>=[]
+    let string=types.primitive('string' @session.types)
+    loop choice in choices {
+        let narrowed=put(hir.ExpressedIdentifier[node.loc choice.value_type name binding_id] @session)
+        let body=text_part(narrowed id env @session dispatch_brands=false)
+        if body is? Error return body
+        let condition=put(hir.TypeTest[node.loc types.primitive('bool' @session.types) reference choice.value_type false] @session)
+        arms.push(put(hir.IfArm[node.loc string condition body] @session))
+    }
+    let fallback=text_part(reference id env @session dispatch_brands=false)
+    if fallback is? Error return fallback
+    let flow=put(hir.Flow[node.loc string arms fallback] @session)
+    return put(hir.Block[node.loc string [declaration flow] false] @session)
+}
+
+# A record printer is an ordinary hidden function, shared by all conversions
+# of that record type. Publish its signature before preparing the fields:
+# `Node[next:Node|none]` needs to call the same printer from its optional arm.
+# The function parameter also evaluates an effectful receiver exactly once.
+object_text = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let node=node_at(value session)
+    let owner=views.structural_base(node.value_type session.types)
+    let helper=session.object_strings.get(owner)
+    if helper is? none {
+        let saved=contexts.checkpoint(session)
+        let prepared=object_text_function(owner id env @session)
+        if prepared is? Error {
+            # A failed speculative conversion must not leave a signature for
+            # a helper whose body never finished, including nested helpers.
+            contexts.restore(saved @session)
+            return prepared
+        }
+        helper=prepared
+    }
+    let binding=bindings.binding_at(session.registry helper)
+    $runtime_assert binding.value_type isnt? none
+    let callee=put(hir.ExpressedIdentifier[node.loc binding.value_type binding.name helper] @session)
+    return call(callee [value] [] id env @session)
+}
+object_text_function = (owner:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let type=types.node_at(session.types owner)
+    $runtime_assert type is? types.ObjectType
+    let loc=contexts.node_at(id env.lexical session).loc
+    let string=types.primitive('string' @session.types)
+    let signature=types.function_type([types.PosOrKwArg['__dewy_value' owner]] [] none string [] @session.types)
+    let name="__dewy_object_string_{session.registry.next_id}"
+    let helper=bindings.allocate(@session.registry none name 'function' loc)
+    let binding=bindings.binding_at(session.registry helper)
+    binding.value_type=signature binding.store_type=signature
+    session.registry.by_id[helper]=binding
+    session.object_strings[owner]=helper
+    session.hidden_bindings.add(helper)
+
+    let parameter=bindings.allocate_param(@session.registry '__dewy_value' owner loc)
+    let receiver=put(hir.ExpressedIdentifier[loc owner '__dewy_value' parameter] @session)
+    let parts:array<addr>=[]
+    let brand=if type.minted and type.brand isnt? none type.brand else ''
+    loop index in 0.. and index <? type.fields.length {
+        let field=type.fields[index]
+        let prefix="{if index =? 0 "{brand}[" else ' '}{field.name}="
+        parts.push(put(hir.String[loc types.string_literal(prefix @session.types) prefix] @session))
+        let member=put(hir.MemberAccess[loc field.value_type receiver field.name field.mutable and not type.immutable] @session)
+        let prepared=text_part(member id env @session)
+        if prepared is? Error return prepared
+        let text=if views.string_valued(node_at(prepared session).value_type session.types) prepared else put(hir.InterpolatedString[loc string [prepared]] @session)
+        if text_formatting.quoted_member(field.value_type @session.types) {
+            let quoted=library_call('_quoted' [text] id env @session)
+            if quoted is? Error return quoted
+            text=quoted
+        }
+        parts.push(text)
+    }
+    let suffix=if type.fields.length >? 0 ']' else if brand not=? '' brand else '[]'
+    parts.push(put(hir.String[loc types.string_literal(suffix @session.types) suffix] @session))
+    let formatted=put(hir.InterpolatedString[loc string parts] @session)
+    let owned=library_call('_arena_text' [formatted] id env @session)
+    if owned is? Error return owned
+    let body=put(hir.Return[loc types.primitive('never' @session.types) owned] @session)
+    let function=put(hir.FunctionLiteral[loc signature [hir.Param['__dewy_value' owner parameter]] [] none string body source=env.lexical.source] @session)
+    let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name none function helper] @session)
+    binding.function=function binding.declaration=declaration
+    session.registry.by_id[helper]=binding
+    session.hoisted.push(declaration)
+    return helper
 }
 interpolated_string = (id:addr node:parser.IString env:Environment @session:contexts.Session):>addr|Error => {
     let parts:array<addr>=[]
@@ -4513,7 +4625,7 @@ declare_constructor = (constructor:hir.TypeValue literal_id:addr id:addr env:Env
     let declaration=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'const' name none checked binding_id] @session)
     binding.declaration=declaration
     session.registry.by_id[binding_id]=binding
-    session.method_bindings.add(binding_id)
+    session.hidden_bindings.add(binding_id)
     session.hoisted.push(declaration)
     overloads.bindings.push(binding_id)
     session.constructors[owner]=overloads
