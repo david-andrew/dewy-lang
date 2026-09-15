@@ -1178,3 +1178,23 @@ type tests pass (including the 4,356-pair subtype matrix, normalization,
 dispatch, joins, metadata, deep encodings, forks and rollback); the query
 kernel passes through both hosted backends and the native CLI. No full-build
 speedup is claimed for this batch yet. Artifacts: `type-query-reuse-*`.
+
+
+### Hosted syntax and debug-binding traversal
+
+Hosted growth/write scans now visit parsed syntax children without walking
+operator tokens, locations, or literal payload metadata. A loop's mutated
+and replaced names come from one traversal, preserving their distinct sets.
+Debug-binding collection uses the existing HIR child traversal, retaining
+its function/parameter boundaries without descending through type metadata.
+Class metadata is cached; mutable AST contents are always read anew.
+
+The complete scan workload over 98 frozen compiler sources takes
+**4.64 → 0.50 seconds**, excluding source reading and parsing. All growth,
+mutation, replacement, and container-route results match exactly. This
+workload scans each whole source for all four queries; ordinary checking
+runs write scans on loop bodies, so it is not a full-checking speedup claim.
+The sources exclude bootstrap test fixtures containing intentionally reserved
+or invalid syntax. Thirty-one focused loop/iterator and debugger metadata
+checks pass. Artifacts: `syntax-scans-{before,after}.{json,log}`,
+`measure-syntax-scans.py`, and `syntax-traversal-gates.log`.

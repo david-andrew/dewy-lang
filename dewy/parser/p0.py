@@ -7,12 +7,13 @@ from typing import NoReturn, Sequence, Callable, TypeAlias, Literal, cast, overl
 from dataclasses import dataclass
 from enum import Enum, auto
 from collections import defaultdict
+from functools import cache
 
 from . import t0
 from . import t1
 from . import t2
 from ..reporting import SrcFile, ReportException, Error, Pointer, Span, Warning
-from ..utils import ordinalize, concrete_groupby
+from ..utils import ordinalize, concrete_groupby, dataclass_fields
 
 import pdb
 
@@ -305,6 +306,29 @@ class AssertDirective(AST):
     name: str
     condition: AST | None       # `None` only for `$fail`
     message: AST | None = None
+
+
+@cache
+def _child_fields(cls: type[AST]) -> tuple[str, ...]:
+    return tuple(field.name for field in dataclass_fields(cls) if field.name != 'loc')
+
+
+def children(node: AST):
+    """Immediate syntax children, without descending into tokens or spans.
+
+    Atoms wrap leaves after parsing; keyword/string containers contain ASTs
+    alongside tokens or literal text. Scope and evaluation boundaries belong
+    to each visitor, while this traversal only describes the syntax tree.
+    Cache class metadata, never the contents of a mutable node.
+    """
+    for name in _child_fields(type(node)):
+        value = getattr(node, name)
+        if isinstance(value, AST):
+            yield value
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                if isinstance(item, AST):
+                    yield item
 
 
 @dataclass

@@ -16,6 +16,7 @@ from ..parser import p0, t2, t1, t0
 from . import bindings as sb
 from . import builtins, hir, ty
 from .analyze import predicate_effects
+from .analyze.effects import _iter_children as hir_children
 from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, user_warning, not_implemented, require_valued
 from .hir_display import type_to_dewy
 from ..reporting import SrcFile, ReportException, Pointer, Span, Error
@@ -448,7 +449,7 @@ def _debug_formatter_declarations(module: hir.Block, *, formatters: bool, ctx: C
     """
     bindings: dict[int, ty.Type] = {}
 
-    def collect(node: object, inside_function: bool) -> None:
+    def collect(node: hir.AST, inside_function: bool) -> None:
         if isinstance(node, hir.FunctionLiteral):
             for param in [*node.pos_or_kw_args, *node.kw_only_args]:
                 if param.binding_id is not None:
@@ -465,15 +466,8 @@ def _debug_formatter_declarations(module: hir.Block, *, formatters: bool, ctx: C
             bindings.setdefault(node.binding_id, declared)
         if isinstance(node, hir.IteratorExpression) and inside_function and node.target.binding_id is not None:
             bindings.setdefault(node.target.binding_id, node.target.type)
-        if is_dataclass(node) and not isinstance(node, type) and type(node).__module__ != ty.__name__:
-            for field_ in fields(node):
-                collect(getattr(node, field_.name), inside_function)
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                collect(item, inside_function)
-        elif isinstance(node, dict):
-            for item in node.values():
-                collect(item, inside_function)
+        for child in hir_children(node):
+            collect(child, inside_function)
 
     collect(module, False)
     declarations: list[hir.AST] = []
@@ -4981,8 +4975,7 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         # initial length can turn `loop pending.length >? 0` into `loop true`.
         # Facts established by the checked condition then hold at each entry
         # to the body, including iterator predicates.
-        mutated_names = _mutated_binding_names(body_ast)
-        replaced_names = _mutated_binding_names(body_ast, replacements_only=True)
+        mutated_names, replaced_names = _binding_write_names(body_ast)
         for name in mutated_names:
             binding = ctx.binding_scopes.get(name)
             if binding is None:
@@ -8321,7 +8314,7 @@ def _grown_array_names(ast: p0.AST) -> frozenset[str]:
     """
     names: set[str] = set()
 
-    def walk(node: object) -> None:
+    def walk(node: p0.AST) -> None:
         if (
             isinstance(node, p0.BinOp)
             and isinstance(node.op, t1.Operator)
@@ -8333,12 +8326,8 @@ def _grown_array_names(ast: p0.AST) -> frozenset[str]:
             and node.right.item.name in _ARRAY_METHOD_NAMES
         ):
             names.add(node.left.item.name)
-        if is_dataclass(node) and not isinstance(node, type):
-            for field_ in fields(node):
-                walk(getattr(node, field_.name))
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                walk(item)
+        for child in p0.children(node):
+            walk(child)
 
     walk(ast)
     return frozenset(names)
@@ -8399,7 +8388,7 @@ def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
                     return name, (*path, node.right.item.name), False
         return None
 
-    def walk(node: object) -> None:
+    def walk(node: p0.AST) -> None:
         target: p0.AST | None = None
         if isinstance(node, p0.Prefix) and isinstance(node.op, t1.Operator) and node.op.symbol == '@':
             target = node.item
@@ -8416,12 +8405,8 @@ def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
             found = route(target)
             if found is not None:
                 routes.add(found[:2])
-        if is_dataclass(node) and not isinstance(node, type):
-            for field_ in fields(node):
-                walk(getattr(node, field_.name))
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                walk(item)
+        for child in p0.children(node):
+            walk(child)
 
     walk(ast)
     return routes
@@ -8430,21 +8415,23 @@ def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
 _MUTATING_METHOD_NAMES = frozenset({*(_ARRAY_METHOD_NAMES - _READ_ONLY_ARRAY_METHOD_NAMES), 'add'})  # arrays, dictionaries, sets
 
 
-def _mutated_binding_names(ast: p0.AST, *, replacements_only: bool = False) -> set[str]:
+def _binding_write_names(ast: p0.AST) -> tuple[set[str], set[str]]:
     """Names a syntax tree may replace or mutate (a conservative pre-scan).
 
     A place argument may replace its storage. Array methods and indexed
     stores change contents, but cannot change the receiver's union tag.
+    Collect both sets in one pass over the same syntax.
     """
     names: set[str] = set()
+    replacements: set[str] = set()
 
-    def walk(node: object) -> None:
+    def walk(node: p0.AST) -> None:
         if isinstance(node, p0.Prefix) and isinstance(node.op, t1.Operator) and node.op.symbol == '@':
             target = node.item
             while isinstance(target, p0.BinOp) and isinstance(target.op, (t1.Operator, t2.IndexJuxtapose)):
                 target = target.left
             if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
-                names.add(target.item.name)
+                replacements.add(target.item.name)
         if isinstance(node, p0.BinOp):
             left_name = (
                 node.left.item.name
@@ -8455,10 +8442,9 @@ def _mutated_binding_names(ast: p0.AST, *, replacements_only: bool = False) -> s
                 (isinstance(node.op, t1.Operator) and node.op.symbol in {'=', ':=', '::'})
                 or isinstance(node.op, t2.CombinedAssignmentOp)
             ):
-                names.add(left_name)
+                replacements.add(left_name)
             if (
-                not replacements_only
-                and left_name is None
+                left_name is None
                 and isinstance(node.op, t1.Operator)
                 and node.op.symbol == '='
                 and isinstance(node.left, p0.BinOp)
@@ -8468,8 +8454,7 @@ def _mutated_binding_names(ast: p0.AST, *, replacements_only: bool = False) -> s
                 # `d[k] = v` mutates the indexed binding (a dictionary or array).
                 names.add(node.left.left.item.name)
             if (
-                not replacements_only
-                and left_name is not None
+                left_name is not None
                 and isinstance(node.op, t1.Operator)
                 and node.op.symbol == '.'
                 and isinstance(node.right, p0.Atom)
@@ -8477,15 +8462,11 @@ def _mutated_binding_names(ast: p0.AST, *, replacements_only: bool = False) -> s
                 and node.right.item.name in _MUTATING_METHOD_NAMES
             ):
                 names.add(left_name)
-        if is_dataclass(node) and not isinstance(node, type):
-            for field_ in fields(node):
-                walk(getattr(node, field_.name))
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                walk(item)
+        for child in p0.children(node):
+            walk(child)
 
     walk(ast)
-    return names
+    return names | replacements, replacements
 
 
 def _tcr_array_method(
