@@ -410,7 +410,9 @@ function_args = (id:addr context:contexts.Context @session:contexts.Session lite
             let inner=contexts.Context[context.source context.scope parsed.name]
             let declared=resolve(parsed.annotation inner @session)
             if declared is? Error return declared
-            type=declared
+            let stored=value_type(declared parsed.annotation inner @session)
+            if stored is? Error return stored
+            type=stored
         } else if parsed.default isnt? none {
             let inferred=infer_default(parsed.default context @session)
             if inferred is? Error return inferred
@@ -466,7 +468,9 @@ function_result = (id:addr context:contexts.Context @session:contexts.Session):>
         }
         if all_facts return attach_facts(types.primitive('void' @session.types) promises id context @session)
     }
-    return resolve(id context @session)
+    let declared=resolve(id context @session)
+    if declared is? Error return declared
+    return value_type(declared id context @session)
 }
 
 # Defaults remain syntax. Infer their storage shape here when the expression

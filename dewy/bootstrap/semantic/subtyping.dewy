@@ -276,13 +276,30 @@ meet_atoms = (a_id:addr b_id:addr links:Graph @nodes:types.Table):>addr? => {
     }
     if a is? types.RefinedType {
         let met = meet_atoms(a.base b_id links @nodes)
-        if met isnt? none and types.same_type(met a.base nodes) return a_id
-        return none
+        if met is? none return none
+        if types.same_type(met a.base nodes) return a_id
+        # Refining a positive meet keeps its promises; a narrower base is
+        # not evidence that the intersection is empty. The proof pass still
+        # checks those promises at value boundaries.
+        let nested=types.node_at(nodes met)
+        if nested is? types.RefinedType {
+            let promises=nested.propositions
+            loop promise in a.propositions {promises.push(promise)}
+            return types.refined_type(nested.base promises @nodes)
+        }
+        return types.refined_type(met a.propositions @nodes)
     }
     if b is? types.RefinedType {
         let met = meet_atoms(b.base a_id links @nodes)
-        if met isnt? none and types.same_type(met b.base nodes) return b_id
-        return none
+        if met is? none return none
+        if types.same_type(met b.base nodes) return b_id
+        let nested=types.node_at(nodes met)
+        if nested is? types.RefinedType {
+            let promises=nested.propositions
+            loop promise in b.propositions {promises.push(promise)}
+            return types.refined_type(nested.base promises @nodes)
+        }
+        return types.refined_type(met b.propositions @nodes)
     }
     # The hosted positive meet still treats distinct callable atoms as
     # disjoint; signature coverage belongs to implication below. Preserve

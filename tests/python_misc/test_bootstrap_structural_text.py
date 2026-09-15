@@ -63,7 +63,7 @@ def check_structural_text(binary, tmp_path, *, cases=None, errors=None):
         with pytest.raises((TypeCheckError, UserError)):
             codegen(SrcFile.from_path(source), debug_locations=False)
         result = compile_native(source)
-        assert result.returncode == 1 and 'Error' in result.stderr, result
+        assert result.returncode == 1 and 'Error' in result.stderr, (text, result.returncode, result.stderr)
 
 
 def test_native_structural_text(tmp_path):

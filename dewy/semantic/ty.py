@@ -1581,7 +1581,17 @@ class TypeSystem:
             if a == b:
                 return a
             refined, other = (a, b) if isinstance(a, RefinedType) else (b, a)
-            return refined if self._meet_atoms(refined.base, other) == refined.base else None
+            met = self._meet_atoms(refined.base, other)
+            if met is None:
+                return None
+            if met == refined.base:
+                return refined
+            # A narrower positive shape does not make the intersection
+            # empty. Keep its predicates for the separate proof boundary;
+            # applicability alone does not establish or refute them.
+            if isinstance(met, RefinedType):
+                return RefinedType(met.base, (*met.propositions, *refined.propositions))
+            return RefinedType(met, refined.propositions)
         for literal, other in ((a, b), (b, a)):
             if (
                 isinstance(literal, (IntegerLiteralType, RationalLiteralType))

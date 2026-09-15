@@ -4825,6 +4825,12 @@ class _Lowerer(
                 string_members = [index for index, member in enumerate(members)
                                   if string_tests and self._is_string_valued(member)
                                   and not system.is_subtype(member, node.test_type)]
+                integer_tests = [member for member in (node.test_type.items if isinstance(node.test_type, ty.TypeOr) else [node.test_type])
+                                 if isinstance(member, ty.IntegerLiteralType)]
+                integer_members = [index for index, member in enumerate(members)
+                                   if integer_tests and not system.is_subtype(member, node.test_type)
+                                   and ty.fixed_integer_layout(ty.strip_refinement(member)) is not None
+                                   and any(ty.integer_literal_fits(literal.value, ty.strip_refinement(member)) for literal in integer_tests)]
                 # a minted member the test descends from (`Token | none` tested
                 # `is? Name`): its tag, and then the brand word of the payload
                 branded = [
@@ -4839,12 +4845,12 @@ class _Lowerer(
                 matching = [
                     index
                     for index, member in enumerate(members)
-                    if index not in branded and index not in string_members
+                    if index not in branded and index not in string_members and index not in integer_members
                     and system.is_subtype(member, node.test_type) != node.negated
                 ]
                 if len(matching) == len(members):
                     return union_prelude, hir.Bool(node.loc, 'bool', True)
-                if not matching and not branded and not string_members:
+                if not matching and not branded and not string_members and not integer_members:
                     return union_prelude, hir.Bool(node.loc, 'bool', False)
                 cell = (
                     replace(union_value, type='int64')
@@ -4884,6 +4890,22 @@ class _Lowerer(
                     if node.negated:
                         in_brand = hir.FunctionCall(node.loc, 'bool', hir.ExpressedIdentifier(node.loc, ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', []), '__not__'), [in_brand], {})
                     comparison = hir.ShortCircuit(node.loc, 'bool', 'and', member_test(members[index]), in_brand)
+                    test = comparison if test is None else hir.ShortCircuit(node.loc, 'bool', 'or', test, comparison)
+                for index in integer_members:
+                    # A literal inside a word payload needs value equality,
+                    # just as a string literal needs a descriptor comparison.
+                    # Keep the load behind its tag, including negated tests.
+                    subject = self._union_source_pointer(cell, node.loc)
+                    in_integers: hir.AST | None = None
+                    for literal_type in integer_tests:
+                        if not ty.integer_literal_fits(literal_type.value, ty.strip_refinement(members[index])):
+                            continue
+                        literal = self._int64_literal(node.loc, literal_type.value)
+                        part = self._int64_comparison('__ne__' if node.negated else '__eq__', subject, literal, node.loc)
+                        in_integers = part if in_integers is None else hir.ShortCircuit(
+                            node.loc, 'bool', 'and' if node.negated else 'or', in_integers, part)
+                    assert in_integers is not None
+                    comparison = hir.ShortCircuit(node.loc, 'bool', 'and', member_test(members[index]), in_integers)
                     test = comparison if test is None else hir.ShortCircuit(node.loc, 'bool', 'or', test, comparison)
                 if string_members:
                     # Every string alternative shares one tag and descriptor

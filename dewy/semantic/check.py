@@ -2234,6 +2234,8 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
     if isinstance(target, hir.ExpressedIdentifier) and target.binding_id is not None:
         binding = ctx.binding_registry.by_id.get(target.binding_id)
         contract = binding.store_type if binding is not None else None
+        if contract is None and binding is not None and binding.declaration is not None:
+            contract = binding.declaration.annotation
         if contract is not None:
             result = check_against(result, contract, ctx=ctx)
     if isinstance(target, hir.MemberAccess):
@@ -8119,7 +8121,7 @@ def _tcr_object_literal(
             continue
         field_expected: ty.Type | None = None
         if annotation_ast is not None:
-            field_expected = ast_to_type(annotation_ast, ctx=replace(ctx, refinement_subject=name))
+            field_expected = _value_type(ast_to_type(annotation_ast, ctx=replace(ctx, refinement_subject=name)), loc=annotation_ast.loc, ctx=ctx)
         elif expected_object is not None:
             field_expected = _field_expectation(expected_object.fields[index])
         prechecked = entries[index][2]
@@ -8162,7 +8164,7 @@ def _tcr_object_literal(
             continue
         field_expected = field_bindings[index].type
         if annotation_ast is not None:
-            field_expected = ast_to_type(annotation_ast, ctx=replace(ctx, refinement_subject=name))
+            field_expected = _value_type(ast_to_type(annotation_ast, ctx=replace(ctx, refinement_subject=name)), loc=annotation_ast.loc, ctx=ctx)
         elif expected_object is not None:
             field_expected = _field_expectation(expected_object.fields[index])
         value = typecheck_and_resolve_inner(value_ast, ctx=ctx, expected=field_expected)
@@ -8189,14 +8191,18 @@ def _tcr_object_literal(
     )
     fields: list[hir.ObjectField] = []
     types: list[ty.ObjectField] = []
-    for index, (name, _annotation, _value_ast, loc, mutable) in enumerate(specs):
+    for index, (name, annotation, _value_ast, loc, mutable) in enumerate(specs):
         value = checked_fields[index]
         assert value is not None
         binding = field_bindings[index]
         fields.append(hir.ObjectField(loc, name, value, binding.id, mutable))
         field_type = binding.type or value.type
-        # a field invariant is not part of the literal's shape — except the facts that are a type's name (`addr`, `nat64`)
-        types.append(ty.ObjectField(name, ty.strip_refinement(field_type), mutable, refinement=ty.named_refinement(field_type)))
+        # A written annotation is the field's store contract. Inferred facts
+        # about its initializer are only a current value, except those that
+        # belong to a type's name (`addr`, `nat64`).
+        invariant = (field_type.propositions if annotation is not None and isinstance(field_type, ty.RefinedType)
+                     else ty.named_refinement(field_type))
+        types.append(ty.ObjectField(name, ty.strip_refinement(field_type), mutable, refinement=invariant))
     # a literal built where an immutable record is expected is that record: what it holds never changes
     object_type = ty.ObjectType(tuple(types), immutable=expected_object.immutable if expected_object is not None else False)
     if expected_object is not None:
@@ -10642,6 +10648,16 @@ def _integer_singleton_test(value: hir.AST, test_type: ty.Type, *, negated: bool
     members = list(test_type.items) if isinstance(test_type, ty.TypeOr) else [test_type]
     if not members or not all(isinstance(m, ty.IntegerLiteralType) for m in members):
         return None
+    if base in ty.FIXED_INTEGER_TYPES:
+        members = [member for member in members if ty.integer_literal_fits(member.value, base)]
+    if not members:
+        # No matching value fits the operand's width, but evaluating the
+        # operand still matters (including calls with a singleton result).
+        return hir.Block(loc, 'bool', [hir.Suppress(value.loc, 'void', value), hir.Bool(loc, 'bool', negated)], False)
+    prefix: list[hir.AST] = []
+    if len(members) > 1 and not isinstance(value, (hir.ExpressedIdentifier, hir.Integer)) and sb.member_path(value) is None:
+        declaration, value = _equality_snapshot(value, ctx)
+        prefix.append(declaration)
     tests = [
         _dispatch_builtin(
             '__ne__' if negated else '__eq__',
@@ -10653,7 +10669,7 @@ def _integer_singleton_test(value: hir.AST, test_type: ty.Type, *, negated: bool
     combined = tests[0]
     for test in tests[1:]:
         combined = hir.ShortCircuit(loc, 'bool', 'and' if negated else 'or', combined, test)
-    return combined
+    return hir.Block(loc, 'bool', [*prefix, combined], False) if prefix else combined
 
 
 def _literal_member_test(args: list[hir.AST], *, negated: bool, loc: Span, ctx: Context) -> hir.AST | None:
@@ -12522,7 +12538,7 @@ def _void_facts_annotation(ast: p0.AST, *, ctx: Context) -> ty.RefinedType | Non
 def _function_result_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
     """A signature and a literal interpret their result annotation alike."""
     facts = _void_facts_annotation(ast, ctx=ctx)
-    return facts if facts is not None else ast_to_type(ast, ctx=ctx)
+    return facts if facts is not None else _value_type(ast_to_type(ast, ctx=ctx), loc=ast.loc, ctx=ctx)
 
 
 def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
@@ -13017,7 +13033,8 @@ def _function_type_args(ast: p0.AST, *, ctx: Context) -> list[ty.PosOrKwArg]:
             and isinstance(item.left, p0.Atom)
             and isinstance(item.left.item, t1.Identifier)
         ):
-            args.append(ty.PosOrKwArg(item.left.item.name, ast_to_type(item.right, ctx=replace(ctx, refinement_subject=item.left.item.name)), place=place))
+            declared = ast_to_type(item.right, ctx=replace(ctx, refinement_subject=item.left.item.name))
+            args.append(ty.PosOrKwArg(item.left.item.name, _value_type(declared, loc=item.right.loc, ctx=ctx), place=place))
         elif isinstance(item, p0.Atom) and isinstance(item.item, t1.Identifier):
             # Types and parameter names share the identifier syntax. A bare
             # identifier is therefore a parameter name with an unconstrained

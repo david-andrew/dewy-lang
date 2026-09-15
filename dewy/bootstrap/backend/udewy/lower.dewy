@@ -1102,6 +1102,7 @@ read_value = (value:addr stored:addr read:addr node:hir.AST @state:State):>addr 
     # pairs of alternatives in a large AST union when no narrowing occurred.
     if stored =? read return value
     if enum_members(stored state) isnt? none return enum_read(value stored read node @state)
+    if enum_members(read state) isnt? none and views.fixed_integer_layout(views.structural_base(stored state.type_nodes) state.type_nodes) isnt? none return enum_pack(value stored read node @state)
     # Narrowing a branded parent to several children changes the read's
     # representation: the parent is one record handle, the child union is a
     # tagged cell. Its first record field must never be mistaken for a tag.
@@ -1324,6 +1325,14 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
     }
     let members=cell_members(actual @state)
     if members is? none {
+        if views.fixed_integer_layout(views.structural_base(actual state.type_nodes) state.type_nodes) isnt? none {
+            let prefix:array<addr>=[]
+            let source=snapshot(operand @prefix @state)
+            let result=integer_predicate(source actual node.test_type node @state)
+            if node.negated {result=intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state)}
+            prefix.push(result)
+            return put(hir.Block[node.loc node.value_type prefix false] @state)
+        }
         if string_type(actual state) {
             let result=string_type_test(operand node.test_type node @state)
             return if node.negated intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state) else result
@@ -1351,6 +1360,11 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
         } else if subtyping.is_subtype(member node.test_type state.links @state.type_nodes) {
             let matches=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] boolean node @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)
+        } else if views.fixed_integer_layout(views.structural_base(member state.type_nodes) state.type_nodes) isnt? none {
+            let active=intrinsic('__eq__' [tag word(tag_number node @state)] boolean node @state)
+            let matches=integer_predicate(cell_payload(source member node @state) member node.test_type node @state)
+            let selected=put(hir.ShortCircuit[node.loc boolean 'and' active matches] @state)
+            result=put(hir.ShortCircuit[node.loc boolean 'or' result selected] @state)
         } else if object_valued(member state) and not type_tests.disjoint(member node.test_type state.links @state.type_nodes) {
             let active=intrinsic('__eq__' [tag word(tag_number node @state)] boolean node @state)
             let matches=object_matches(cell_payload(source member node @state) member node.test_type node @state)
@@ -2466,6 +2480,33 @@ object_literal = (node:hir.ObjectLiteral @state:State):>addr => {
     prefix.push(destination)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+# A word's singleton tests compare its value, not an enum tag. Boolean type
+# expressions combine those comparisons without changing the word's ABI.
+# The caller snapshots the receiver and guards any enclosing union payload.
+integer_predicate = (value:addr actual:addr tested:addr node:hir.AST @state:State):>addr => {
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let type=types.node_at(state.type_nodes types.unfold(tested state.type_nodes))
+    if type is? types.TypeOr|types.TypeAnd {
+        let conjunction=type is? types.TypeAnd
+        let result=put(hir.Bool[node.loc boolean conjunction] @state)
+        loop member in type.items {
+            let matches=integer_predicate(value actual member node @state)
+            result=put(hir.ShortCircuit[node.loc boolean if conjunction 'and' else 'or' result matches] @state)
+        }
+        return result
+    }
+    if type is? types.TypeNot return intrinsic('__not__' [integer_predicate(value actual type.item node @state)] boolean node @state)
+    if type is? types.IntegerLiteralType {
+        let layout=views.fixed_integer_layout(views.structural_base(actual state.type_nodes) state.type_nodes)
+        $runtime_assert layout isnt? none
+        if not subtyping.integer_fits(type.value layout.name) return put(hir.Bool[node.loc boolean false] @state)
+        return intrinsic('__eq__' [value word(type.value node @state)] boolean node @state)
+    }
+    let decided=type_tests.decide(actual tested state.links @state.type_nodes)
+    if decided isnt? none return put(hir.Bool[node.loc boolean decided] @state)
+    return reject(node 'this runtime integer type test' @state)
+}
+
 # Boolean type expressions combine predicates on the same runtime brand.
 # Evaluate the source once; a tagged union must also select its record payload
 # before reading that brand, since an inactive payload may be none or a scalar.
@@ -3237,6 +3278,29 @@ enum_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State):>ad
         let prefix:array<addr>=[]
         snapshot(value @prefix @state);
         prefix.push(word(enum_tag(member @state) node @state))
+        return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    }
+    # A word narrowed to several singletons still contains its numeric value.
+    # Materialize the enum view by comparing it once against the admitted
+    # members. The checker proves membership before requesting this conversion.
+    if views.fixed_integer_layout(views.structural_base(actual state.type_nodes) state.type_nodes) isnt? none {
+        loop member in members {
+            if types.node_at(state.type_nodes member) isnt? types.IntegerLiteralType return reject(node 'a mixed enum view of an integer word' @state)
+        }
+        let prefix:array<addr>=[]
+        let source=snapshot(value @prefix @state)
+        let arms:array<addr>=[]
+        let fallback:addr?=none
+        loop member in members {
+            if fallback isnt? none {arms.push(fallback)}
+            let literal=enum_literal(member node @state)
+            let condition=compare('__eq__' source literal node @state)
+            fallback=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) condition word(enum_tag(member @state) node @state)] @state)
+        }
+        $runtime_assert fallback isnt? none
+        let last=hir.node_at(state.nodes fallback)
+        $runtime_assert last is? hir.IfArm
+        prefix.push(put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) arms last.body] @state))
         return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
     }
     return reject(node 'converting a runtime value into a literal enum' @state)

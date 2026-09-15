@@ -265,3 +265,22 @@ ordered-call checks pass, alongside direct/C execution for positional defaults,
 indirect calls and place updates. Artifacts: `position-only-checking-gates.log`
 and the passing execution case in `position-only-final-gates.log`. These are
 isolated gates; the 154/211 complete inventory above predates this change.
+
+## Integer singleton value contracts
+
+Both compilers now interpret integer singleton sets consistently in binding,
+inline record field, parameter and named function signature annotations.
+Assignments and compound assignments retain those declared contracts after a
+narrowed read. Positive intersections keep the predicates when their underlying
+shape becomes narrower, rather than incorrectly declaring the overlap empty.
+
+Runtime integer-set tests compare the value, including payloads of tagged
+unions, filter literals outside the operand's fixed width, and evaluate an
+effectful operand once. Native narrowed integer views convert values to enum
+tags when that representation is required. The complete `literal_unions.dewy`
+fixture and ten isolated programs return their explicit expected result through
+both compilers and both backends (44 executions); six invalid contracts are
+rejected by both. The compound-refinement kernel also passes. Artifacts:
+`integer-set-integration-gates.log` (2 tests, 166.43 seconds) and
+`integer-set-hosted-final-gates.log` (56 hosted regressions). This is an isolated
+integration gate, not a refreshed whole-corpus count or native fixed point.

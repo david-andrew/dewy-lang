@@ -1258,6 +1258,8 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         target_id = target.left
         let type = declarations.resolve(target.right env.lexical @session)
         if type is? Error return type
+        type = declarations.value_type(type target.right env.lexical @session)
+        if type is? Error return type
         let resolved=declarations.resolve_scope_terms(type target.right env.lexical @session)
         if resolved is? Error return resolved
         annotation = resolved
@@ -2391,6 +2393,8 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
             let field_context=contexts.Context[inner.lexical.source inner.lexical.scope subject]
             let resolved = declarations.resolve(target.right field_context @session)
             if resolved is? Error return resolved
+            resolved = declarations.value_type(resolved target.right field_context @session)
+            if resolved is? Error return resolved
             let bound=declarations.resolve_scope_terms(resolved target.right inner.lexical @session)
             if bound is? Error return bound
             annotation = bound
@@ -2420,7 +2424,14 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
         let mutable = if field is? none true else field.mutable
         if wanted is? types.ObjectType and wanted.immutable { mutable = false }
         fields.push(hir.ObjectField[row.loc name value binding mutable])
-        layout.push(if field is? none types.ObjectField[name type] else field)
+        if field isnt? none {layout.push(field)}
+        else {
+            # An inline annotation and a separately declared record field
+            # have the same storage contract. Store its predicates on the
+            # field so later member reads retain them after type erasure.
+            let declared=types.node_at(session.types type)
+            layout.push(if declared is? types.RefinedType types.ObjectField[name declared.base refinement=declared.propositions] else types.ObjectField[name type])
+        }
     }
     if wanted is? types.ObjectType {
         loop field in wanted.fields {
@@ -2807,11 +2818,7 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     if read isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return problem(id 'assignment requires mutable storage' 'select a binding, record field, or array element' env session)
     let error = writable(target id env session)
     if error isnt? none return error
-    let required = read.value_type
-    if read is? hir.ExpressedIdentifier and read.binding_id isnt? none {
-        let binding = bindings.binding_at(session.registry read.binding_id)
-        if binding.store_type isnt? none { required = binding.store_type }
-    }
+    let required = store_type(target @session)
     # The hosted placeholder remains until lowering preserves one evaluation
     # of the array route and index across both the read and the write.
     if read is? hir.Index return pending(id 'compound indexed assignment' env session)
@@ -3877,18 +3884,18 @@ match_read = (id:addr env:Environment @session:contexts.Session):>addr => {
 }
 # A narrowed read does not narrow the destination's assignment contract.
 store_type = (id:addr @session:contexts.Session):>addr => {
+    let node=node_at(id session)
+    if node is? hir.MemberAccess {
+        let owner=types.node_at(session.types views.structural_base(node_at(node.value session).value_type session.types))
+        if owner is? types.ObjectType {
+            let field=types.object_field(owner node.name)
+            if field isnt? none return if field.refinement.length =? 0 field.value_type else types.refined_type(field.value_type field.refinement @session.types)
+        }
+    }
     let route=bindings.array_route_id(id session.hir @session.registry)
     if route isnt? none {
         let binding=bindings.binding_at(session.registry route)
         if binding.store_type isnt? none return binding.store_type
-        let node=node_at(id session)
-        if node is? hir.MemberAccess {
-            let owner=types.node_at(session.types views.structural_base(node_at(node.value session).value_type session.types))
-            if owner is? types.ObjectType {
-                let field=types.object_field(owner node.name)
-                if field isnt? none return field.value_type
-            }
-        }
         let declared=binding.value_type
         if declared isnt? none return declared
     }
