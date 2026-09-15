@@ -1,0 +1,71 @@
+from reporting import SrcFile, Span, Error, Warning
+import p"../../dewy/bootstrap/semantic/cache_values.dewy" as codec
+import p"../../dewy/bootstrap/semantic/module_state.dewy" as state
+import p"../../dewy/bootstrap/semantic/context.dewy" as contexts
+import p"../../dewy/bootstrap/semantic/bindings.dewy" as bindings
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/parser/p0.dewy" as parser
+
+# Include polymorphic syntax/HIR/type nodes, optional values, a large integer,
+# and dictionaries with deleted entries. Physical lookup tables may change;
+# their logical insertion order and every arena identity must survive.
+main=():>int64=>{
+    let source=SrcFile['snapshot.dewy' 'let greet=(name:string)=>"Hello \{name}!"']
+    let parsed=parser.parse(source)
+    if parsed is? Error return 1
+    let session=contexts.Session[]
+    session.sources.push(contexts.Source[source parsed.nodes])
+    session.scopes.push(bindings.Scope[])
+    let context=contexts.Context[0 0]
+    let syntax=contexts.syntax_ref(parsed.root context @session)
+    let word=types.primitive('int64' @session.types)
+    let text=types.string_type(none @session.types)
+    let span=Span[0 1]
+    let integer=hir.Integer[span word '0d' 123456789012345678901234567890]
+    session.hir.push(integer)
+    session.hir.push(hir.TargetString[span text 'x86_64'])
+    session.hir_edits.push(contexts.HirEdit[0 integer])
+    let binding=bindings.allocate(@session.registry syntax 'answer' 'value' span)
+    let record=bindings.binding_at(session.registry binding)
+    record.type_value=types.GenericTypeAlias[[types.GenericParam['T' word]] word]
+    record.value_type=word
+    session.registry.by_id[binding]=record
+    session.methods['deleted']=contexts.MethodEntry[binding]
+    session.methods.pop('deleted');
+    session.methods['retained']=contexts.MethodEntry[binding word true]
+    session.retained_read_states.add(0)
+    session.warnings.push(Warning[message='preserve this note'])
+    let module=state.Module[source.path context 0 ['answer'->binding] prelude=true]
+    let original=state.PreludeSnapshot[session [module] [source.path->0] ['answer'->binding]]
+    let encoded=codec.encode(original)
+    if encoded is? codec.CacheMiss return 2
+    let restored=codec.decode(encoded)
+    if restored is? codec.CacheMiss return 3
+    let copy=restored.session
+    if types.primitive('int64' @copy.types) not=? word return 4
+    if contexts.syntax_ref(parsed.root context @copy) not=? syntax return 5
+    if restored.prelude_bindings.get('answer') not=? binding return 6
+    if copy.hir.length not=? 2 or copy.sources.length not=? 1 return 7
+    let first=copy.hir[0]
+    if first isnt? hir.Integer or first.value not=? integer.value return 8
+    if copy.hir[1] isnt? hir.TargetString return 9
+    if copy.methods.length not=? 1 or 'retained' not in? copy.methods return 10
+    let again=codec.encode(restored)
+    if again is? codec.CacheMiss or again.length not=? encoded.length return 11
+    loop i in 0.. and i <? encoded.length {
+        if encoded[i] not=? again[i] return 12
+    }
+    let truncated=encoded
+    if truncated.length =? 0 return 13
+    truncated.pop;
+    if codec.decode(truncated) isnt? codec.CacheMiss return 14
+    let trailing=encoded
+    trailing.push(0)
+    if codec.decode(trailing) isnt? codec.CacheMiss return 15
+    let damaged=encoded
+    $runtime_assert damaged.length >? 0
+    damaged[0]=255
+    if codec.decode(damaged) isnt? codec.CacheMiss return 16
+    return 42
+}

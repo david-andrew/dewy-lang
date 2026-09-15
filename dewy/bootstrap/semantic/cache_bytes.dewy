@@ -10,7 +10,7 @@ entire decoded snapshot without installing a partially restored session.
 Every allocation length is bounded by the remaining file bytes first.
 """
 
-Writer:type = [bytes:array<uint8>=[]]
+Writer:type = [bytes:array<uint8>=[] failed:bool=false]
 Reader:type = [bytes:array<uint8> position:addr=0 failed:bool=false]
 
 let write_byte = (value:uint8 @out:Writer):>void => {out.bytes.push(value)}

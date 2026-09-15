@@ -14,6 +14,7 @@ import p"match_patterns.dewy" as patterns
 import p"target_values.dewy" as target_values
 import p"module_directives.dewy" as directives
 import p"test_syntax.dewy" as tests
+import p"module_state.dewy" as state
 
 doc"""
 File-relative source modules, corresponding to semantic/modules.py.
@@ -29,7 +30,7 @@ representation validation remain work for the full driver. A checked HIR
 graph is not yet permission to emit an executable.
 """
 
-Module:type = const [path:string context:contexts.Context root:addr exports:dict<string addr> no_prelude:bool=false options:directives.Options=directives.Options[] prelude:bool=false]
+Module:type = state.Module
 Engine:type = [
     session:contexts.Session=contexts.Session[]
     modules:array<Module>=[]

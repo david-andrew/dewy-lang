@@ -1,0 +1,21 @@
+import p"context.dewy" as contexts
+import p"module_directives.dewy" as directives
+
+# A loaded module's identities live in the shared Session. Keep this data
+# separate from the loader so snapshots can describe it without importing
+# the code which reads or restores those snapshots.
+Module:type = const [
+    path:string context:contexts.Context root:addr exports:dict<string addr>
+    no_prelude:bool=false options:directives.Options=directives.Options[]
+    prelude:bool=false
+]
+
+# Restore these together: arena indices, exported bindings, and path lookup
+# must refer to the same checked graph. Invocation state (the active import
+# stack, library search roots, and test entry name) belongs to the new caller.
+PreludeSnapshot:type = const [
+    session:contexts.Session
+    modules:array<Module>
+    by_path:dict<string addr>
+    prelude_bindings:dict<string addr>
+]
