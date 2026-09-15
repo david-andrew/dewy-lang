@@ -278,6 +278,10 @@ class _Lowerer(
         # types have no registry dependencies, and keeping them on this lowerer
         # prevents mutable FunctionType objects from crossing compilations.
         self.primitive_equality_types: dict[str, ty.FunctionType] = {}
+        # A checked callable has one runtime ABI, shared by its definition
+        # and references. Keep input objects alive with the cached signatures;
+        # a later compilation or freshly specialized type gets a fresh entry.
+        self.callable_types: dict[int, tuple[ty.FunctionType, ty.FunctionType]] = {}
         self.primitive_intrinsic_types: dict[tuple[str, ...], ty.FunctionType] = {}
         self.word_binary_type = ty.FunctionType(
             [ty.PosOrKwArg('left', 'int64'), ty.PosOrKwArg('right', 'int64')],
@@ -1201,6 +1205,9 @@ class _Lowerer(
     def _lower_callable_type(self, type_: ty.Type) -> ty.Type:
         if not isinstance(type_, ty.FunctionType):
             return type_
+        cached = self.callable_types.get(id(type_))
+        if cached is not None:
+            return cached[1]
         pos: list[ty.PosOrKwArg] = []
         for param in type_.pos_or_kw:
             pos.append(ty.PosOrKwArg(
@@ -1235,13 +1242,15 @@ class _Lowerer(
         ):
             pos.append(ty.PosOrKwArg(None, 'int64'))
             rettype = ty.VOID_TYPE
-        return replace(
+        lowered = replace(
             type_,
             pos_or_kw=pos,
             kw_only=[],
             rest=None,
             ret=rettype,
         )
+        self.callable_types[id(type_)] = (type_, lowered)
+        return lowered
 
     def _extract_or_throw(self, node: hir.OrThrow) -> tuple[list[hir.AST], hir.AST]:
         """`value or_throw`: materialize the value's cell under the hidden

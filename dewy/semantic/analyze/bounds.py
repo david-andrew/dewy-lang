@@ -4415,6 +4415,7 @@ def _union_intervals(intervals: list[Interval]) -> Interval:
     return result
 
 
+@ty.runtime_query_scope()
 def validate_bounds(
     root: hir.Block,
     registry: sb.BindingRegistry,
@@ -4429,6 +4430,9 @@ def validate_bounds(
     With ``unfit`` given, abstract-integer values that cannot be proven to fit
     a 64-bit word are collected there (keyed by node id) for the representation
     pass instead of being reported as errors.
+
+    Types and the nominal graph are stable throughout this read-only pass.
+    Representation selection happens afterward and outside its query cache.
     """
 
     validator = _BoundsValidator(registry, srcfile, root, target=target)

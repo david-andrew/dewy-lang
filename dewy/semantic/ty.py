@@ -15,8 +15,9 @@ _runtime_query_cache: ContextVar[dict | None] = ContextVar('dewy_runtime_queries
 def runtime_query_scope() -> Iterator[None]:
     """Memoize representation queries only while checked types are stable.
 
-    The checker can resolve aliases and change type descriptions, so its
-    calls stay uncached. Lowering/emission opt into one scope per compilation.
+    Type resolution can change descriptions, so its calls stay uncached.
+    Read-only validation opts in for one pass; lowering/emission use one
+    scope per compilation. Never span representation selection or imports.
     Entries retain their input objects: identity keys cannot be reused while
     cached, and do not recursively hash mutable unions or recursive aliases.
     """

@@ -7,6 +7,57 @@ from dewy.reporting import SrcFile
 from dewy.semantic import check, ty
 
 
+def test_callable_abi_reused_without_crossing_compilations():
+    source = SrcFile(None, 'main=():>int64=>42')
+    checked = check.typecheck_and_resolve(source, include_prelude=False)
+    first = lower._Lowerer(checked, source)
+    record = ty.ObjectType((ty.ObjectField('text', 'string'),))
+    signature = ty.FunctionType(
+        [ty.PosOrKwArg('value', record, place=True)],
+        [ty.KwOnlyArg('fallback', 'string', required=False)], None, record,
+    )
+    abi = first._lower_callable_type(signature)
+    assert abi.ret == ty.VOID_TYPE
+    assert [param.type for param in abi.pos_or_kw] == ['int64', 'int64', 'bool', 'int64']
+    assert abi.kw_only == []
+    assert first._lower_callable_type(signature) is abi
+    assert signature.ret is record and signature.pos_or_kw[0].place
+
+    # Later checking can change descriptions; a new lowerer must not reuse
+    # the previous signature or its hidden aggregate return slot.
+    signature.ret = 'int64'
+    second = lower._Lowerer(checked, source)
+    revised = second._lower_callable_type(signature)
+    assert revised is not abi and revised.ret == 'int64'
+    assert [param.type for param in revised.pos_or_kw] == ['int64', 'int64', 'bool']
+
+
+def test_bounds_query_scope_expires_before_type_changes(monkeypatch):
+    from dewy.semantic.analyze import bounds
+    from dewy.semantic import bindings, hir
+    from dewy.reporting import Span
+
+    choice = ty.TypeOr(['int64', 'none'])
+    observations = []
+    original = bounds._BoundsValidator.validate
+
+    def validate(self, root):
+        assert ty._runtime_query_cache.get() is not None
+        observations.append(ty.optional_payload(choice))
+        original(self, root)
+
+    monkeypatch.setattr(bounds._BoundsValidator, 'validate', validate)
+    source = SrcFile(None, '')
+    root = hir.Block(Span(0, 0), ty.VOID_TYPE, [], True)
+    registry = bindings.BindingRegistry()
+    bounds.validate_bounds(root, registry, source)
+    assert ty._runtime_query_cache.get() is None
+    choice.items.append('bool')
+    bounds.validate_bounds(root, registry, source)
+    assert observations == ['int64', None]
+    assert ty._runtime_query_cache.get() is None
+
+
 def test_mutable_union_queries_are_live_outside_lowering():
     choice = ty.TypeOr(['int64', 'none'])
     assert ty.optional_payload(choice) == 'int64'

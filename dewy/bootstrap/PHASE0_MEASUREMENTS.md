@@ -1876,3 +1876,26 @@ bounded sample, not a new full-build result. Emitted µDewy is identical after
 normalizing include paths, with all included bytes verified identical.
 Artifacts: `hosted-call-shapes-{before,after}`, `call-shapes-output-check.json`,
 `call-shape-fixed-gates.log` and `call-shape-namespace-gates.log`.
+
+The field-aware getter checkpoint built two C generations of frozen
+`3789e114` source/library in 141.297 and 140.457 seconds. Generation two
+contains five getter variants and 430 call sites. Its full direct executable
+build took **67.855 seconds**, effectively flat against 67.754. Frontend,
+validation, preparation, lowering, emission and backend took 17.958, 8.156,
+4.517, 16.245, 4.896 and 13.673 seconds; peak process RSS was 5,916,856 KiB.
+The emitted µDewy is 49,178,122 bytes. The working tree had unrelated hosted
+edits, but both source and library inputs came from the recorded snapshot.
+Artifacts: `source-getter-fields.json`, `native-getter-fields-c{1,2}` and
+`native-getter-fields-full`. This remains a measurement rather than a new
+matching-target fixed-point certificate.
+
+### Hosted stable-pass queries
+
+Read-only bounds validation now shares representation/normalization queries
+for one pass. Its scope ends before imports or representation selection can
+change type descriptions. Lowering also builds each callable's runtime ABI
+once, retaining the original type with its cached signature. Both caches
+expire before later compilations; no cache spans mutable type resolution.
+Sixty-nine targeted tests pass, covering cache lifetimes, callable ABI slots,
+keyword calls, generics, places, conditional bounds and big-integer selection.
+Artifact: `stable-pass-query-gates.log`. Full-build measurement is pending.
