@@ -1298,3 +1298,18 @@ validation 10.73 s, preparation 0.12 s, lowering 3.73 s, emission 0.85 s,
 backend 1.22 s. Lowering improved from the preceding native-built executable's
 4.49 s, but total runtime did not improve; the native-built code needs its
 own profile. Artifacts: `native-structural-ids-c`, `native-built-structural-ids-t0`.
+
+### Defer discarded diagnostic rendering
+
+`ReportException` now carries the report as its exception argument, allowing
+Python's ordinary exception formatting to render it on demand. A failed
+speculative interpretation of valid source no longer lays out a source
+excerpt only to discard it. Explicit exception text and notebook tracebacks
+still render the same report; final color policy is applied at display time,
+and the structured report survives exception pickling.
+
+Twenty-eight diagnostic/ambiguity/assertion checks pass. A bounded kernel of
+2,500 constructed diagnostics takes 0.153 s when eagerly rendered and 0.0044 s
+when merely carried; this demonstrates the removed work, not a full-checking
+speedup. Artifacts: `lazy-report-{kernel.json,gates.log}`. Full checking with
+the parser and diagnostic batches remains an integration measurement.

@@ -1048,10 +1048,16 @@ class Hint(Report):
 
 
 class ReportException(Exception):
-    """Exception raised when a Report is thrown. Contains the report for handling."""
+    """Carry a report; render it only if the exception is displayed.
+
+    Speculative typechecking throws reports for rejected interpretations of
+    valid code. Laying out source excerpts there is both wasteful and too
+    early to know the eventual output stream's color policy. Exception's
+    ordinary single-argument formatting calls str(report) on demand.
+    """
     def __init__(self, report: Report) -> None:
         self.report = report
-        super().__init__(str(report))
+        super().__init__(report)
 
     def _render_traceback_(self) -> list[str]:
         return str(self.report).splitlines()
