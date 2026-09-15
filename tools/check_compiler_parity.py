@@ -93,6 +93,8 @@ def main() -> int:
     parser.add_argument('--target', choices=('x86_64', 'c'), default='x86_64')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--timeout', type=float, default=120)
+    parser.add_argument('--shared-prelude-cache', action='store_true',
+                        help='share checked preludes across cases; keep all other artifacts isolated')
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error('timeout must be positive')
@@ -116,7 +118,10 @@ def main() -> int:
                     if path.is_file() and path.suffix in ('.py', '.dewy', '.udewy'))).hexdigest(),
                 'native': str(native), 'native_sha256': hashlib.sha256(native.read_bytes()).hexdigest(),
                 'udewy': str(micro), 'udewy_sha256': hashlib.sha256(micro.read_bytes()).hexdigest(),
-                'target': args.target, 'cases': cases}
+                'target': args.target, 'cases': cases,
+                'shared_prelude_cache': args.shared_prelude_cache,
+                'analysis_environment': {name: os.environ[name] for name in
+                    ('DEWY_NO_PRELUDE_CACHE', 'DEWY_NO_RESIDENT_PRELUDE') if name in os.environ}}
     (output / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     env = os.environ | {'PYTHONPATH': str(ROOT), 'DEWY_LIBRARY_ROOT': str(ROOT / 'library'), 'DEWY_UDEWY': str(micro)}
     passed = 0
@@ -127,6 +132,15 @@ def main() -> int:
         for label, compiler in [('hosted', [sys.executable, '-m', 'dewy']), ('native', [str(native)])]:
             work = output / f'{index:03}-{source.stem}' / label
             work.mkdir(parents=True)
+            if args.shared_prelude_cache:
+                # Only checked preludes cross case boundaries. Each compiler
+                # retains its own cache format, and emitted programs remain
+                # local so an earlier executable cannot satisfy a later case.
+                shared = output / 'prelude-cache' / label
+                shared.mkdir(parents=True, exist_ok=True)
+                cache = work / '__dewycache__'
+                cache.mkdir()
+                (cache / 'prelude').symlink_to(shared, target_is_directory=True)
             compiler_env = env | {'PYTHONPATH': str(hosted_root), 'DEWY_LIBRARY_ROOT': str(hosted_root / 'library')} if label == 'hosted' else env
             compiled = invoke([*compiler, '--target', args.target, '-c', str(source)], work, compiler_env, args.timeout)
             result = {'compile': compiled}

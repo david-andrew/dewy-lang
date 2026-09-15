@@ -3193,3 +3193,13 @@ All four emitted sources are identical after normalizing the benchmark work
 path. This provides no clear benefit, so JIT remains disabled; it does not
 justify an additional full-build comparison. Artifacts:
 `host-jit-module-{0,1}-{0,1}`, `host-jit-module-normalized.json`.
+
+### Sharing checked preludes in the parity inventory
+
+`tools/check_compiler_parity.py --shared-prelude-cache` gives each implementation
+one checked-prelude directory for the run. Cases still have separate working
+directories, emitted programs and executables, and run in separate processes.
+The default remains a cold, isolated cache per case. Metadata records the
+choice and cache-disable environment settings; these corpus runs are semantic
+checks, not cold performance measurements. The capture, array-call and brand
+regressions pass through the shared-cache route (`parity-shared-prelude-probe`).
