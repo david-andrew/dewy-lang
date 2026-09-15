@@ -389,6 +389,17 @@ main = ():>int64 => {
     printl(subtyping.is_subtype(types.meta_type(child @nodes) types.meta_type(parent @nodes) subtyping.default_links @nodes))
     # Proven widening queries must not grow the type arena with temporary
     # complements/differences. These exact lengths have not been queried.
+    let bool=types.primitive('bool' @nodes)
+    let unit=types.primitive('none' @nodes)
+    let part=types.union([plain bool] @nodes)
+    let choice=types.union([plain bool unit] @nodes)
+    let object=types.primitive('object' @nodes)
+    let narrowed=types.intersect([plain object] @nodes)
+    let before=nodes.entries.length
+    $runtime_assert subtyping.is_subtype(part choice subtyping.default_links @nodes)
+    $runtime_assert subtyping.is_subtype(plain choice subtyping.default_links @nodes)
+    $runtime_assert subtyping.is_subtype(narrowed plain subtyping.default_links @nodes)
+    $runtime_assert nodes.entries.length =? before
     let general=types.array_type(int none @nodes)
     loop size in 100.. and size <? 164 {
         let exact=types.array_type(int size @nodes)

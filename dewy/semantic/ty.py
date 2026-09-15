@@ -1392,18 +1392,32 @@ class TypeSystem:
             if s == TOP_TYPE or t == BOTTOM_TYPE:
                 return s == t
             return self._is_nom_subtype(s, t)
-        # A successful atom implication is already a proof. Common record,
-        # array, literal and callable queries need not first normalize every
-        # nested field to build their Boolean difference. A failed shortcut
-        # still takes the general route: normalization or an empty source can
-        # establish relationships that are invisible in the unnormalized atoms.
+        # Shared descriptions prove Boolean containment without inspecting
+        # their structure: A <= A|B, and A&B <= A. Extend that evidence to
+        # subsets of union members and supersets of intersection members.
+        # Identity is sufficient, not necessary; misses use the general rule.
+        if isinstance(t, TypeOr):
+            members = {id(member) for member in t.items}
+            if id(s) in members or (isinstance(s, TypeOr)
+                    and all(id(member) in members for member in s.items)):
+                return True
+        if isinstance(s, TypeAnd):
+            members = {id(member) for member in s.items}
+            if id(t) in members or (isinstance(t, TypeAnd)
+                    and all(id(member) in members for member in t.items)):
+                return True
+        # For two structural atoms the Boolean difference has exactly one
+        # positive and one negative literal. The atom relation decides it
+        # directly. A positive raw proof avoids normalization too; otherwise
+        # normalize their children equally before asking that same relation.
         if (isinstance(s, (ObjectType, ArrayType, StringType, StringLiteralType,
                            IntegerLiteralType, FunctionType, OverloadType))
                 and isinstance(t, (str, ObjectType, ArrayType, StringType,
                                    StringLiteralType, IntegerLiteralType,
-                                   FunctionType, OverloadType))
-                and self._atom_implies_atom(s, t)):
-            return True
+                                   FunctionType, OverloadType))):
+            if self._atom_implies_atom(s, t):
+                return True
+            return self._atom_implies_atom(to_nnf(s), to_nnf(t))
         return self.is_empty(intersect(s, negate(t)))
 
     def join(self, *types: TypeExpr) -> TypeExpr:

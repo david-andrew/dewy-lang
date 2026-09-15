@@ -2075,3 +2075,20 @@ Packing, partial-byte, offset, invalid-digit, comment, scanner and constant
 binding checks pass as part of the 59-test integration group. Artifacts:
 `measure-bulk-data.log` and `direct-atoms-bulk-data-gates.log`. Full hosted
 build impact is not measured yet.
+
+### Direct atomic decisions and shared Boolean members
+
+Both subtype implementations now decide an atom-to-atom comparison directly
+after child normalization when the initial raw proof fails. Such a comparison
+has one positive and one negative literal, so it does not require constructing
+a Boolean formula. They also recognize shared-description containment among
+union members and the dual rule for intersections. Membership misses retain
+the general solver, and there is no persistent mutable checker cache.
+
+The hosted all-pairs comparison includes raw nested conjunctions, reordered
+unions, strengthened intersections, and immutable records. Native matrix and
+dispatch comparisons pass; fresh union widenings and intersection projections
+add no auxiliary type entries. These and the binary-data/scanner/cache checks
+pass in the 59-test group (`direct-atoms-bulk-data-gates.log`). The preceding
+atom checkpoint showed no hosted benefit; measure this broader replacement
+before attributing a speedup.

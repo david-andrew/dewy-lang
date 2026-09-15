@@ -371,13 +371,34 @@ is_subtype = (source:addr target:addr links:Graph @nodes:types.Table):>bool => {
         if left.name =? 'any' or right.name =? 'never' return left.name =? right.name
         return nominal_subtype(left.name right.name links)
     }
-    # A positive atom implication is already sufficient evidence. Avoid
-    # interning a complement, a difference, and its normal form for the
-    # common successful record/array/literal/callable relationships. Failed
-    # probes still use emptiness, including normalization and empty sources.
+    # The existing member ids themselves prove Boolean containment. No
+    # structural query or temporary type is needed for these common narrowed
+    # unions and strengthened intersections. A miss remains inconclusive.
+    if right is? types.TypeOr {
+        if source in? right.items return true
+        if left is? types.TypeOr {
+            let covered=true
+            loop item in left.items {if item not in? right.items {covered=false break}}
+            if covered return true
+        }
+    }
+    if left is? types.TypeAnd {
+        if target in? left.items return true
+        if right is? types.TypeAnd {
+            let covered=true
+            loop item in right.items {if item not in? left.items {covered=false break}}
+            if covered return true
+        }
+    }
+    # Two structural atoms need one implication query, not an interned
+    # complement and difference. A positive raw proof needs no normalization;
+    # otherwise normalize both atoms' children before deciding the relation.
     if left is? types.ObjectType|types.ArrayType|types.StringType|types.StringLiteralType|types.IntegerLiteralType|types.FunctionType|types.OverloadType and
        right is? types.Primitive|types.ObjectType|types.ArrayType|types.StringType|types.StringLiteralType|types.IntegerLiteralType|types.FunctionType|types.OverloadType {
         if atom_implies(source target links @nodes) return true
+        let a=types.to_nnf(source @nodes)
+        let b=types.to_nnf(target @nodes)
+        return atom_implies(a b links @nodes)
     }
     let excluded = types.negate(target @nodes)
     let difference = types.intersect([source excluded] @nodes)
