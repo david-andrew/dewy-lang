@@ -734,7 +734,7 @@ collect = (root:addr @checker:Checker):>void => {
 }
 validate = (root:addr @checker:Checker):>void => {
     collect(root @checker)
-    checker.call_writes=effects.analyze_global_writes(root checker.data.env.nodes checker.mutable_globals)
+    checker.call_writes=effects.analyze_global_writes(root checker.data.env.nodes checker.mutable_globals checker.data.env.registry)
     checker.path_context=paths.Context[checker.data.env.nodes checker.data.relations.facts checker.call_writes]
     let node=node_at(root checker)
     $runtime_assert node is? hir.Block

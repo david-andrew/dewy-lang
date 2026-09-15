@@ -116,12 +116,18 @@ summaries instead of blanket invalidation. Function entry still discards
 mutable-global flow facts; a possibly mutating call clears scalar, length,
 and member-route evidence. The hosted checker previously cleared only scalar
 facts, leaving stale array bounds. Predicate paths now also account for
-callee writes in later short-circuit operands. Ten explicit acceptance and
+callee writes in later short-circuit operands. Eleven explicit acceptance and
 rejection cases cover reads, direct/transitive/recursive writes, defaults,
 unknown callbacks, unrelated globals, nested literals, and predicate history.
 The native/hosted bounds comparison, predicate-effect comparison, and existing
-parameter-effect suite pass (16 gates, `global-effects-bounds.log`). The full
-public CLI regression remains pending until the next integration build.
+parameter-effect suite pass (16 gates, `global-effects-bounds.log`). A subsequent native-source gate also checks those eleven cases plus the
+complete `brand_words.dewy` graph. It exposed and fixed the native builtin
+identity difference: arithmetic intrinsics carry bindings explicitly marked
+`builtin`; user bindings with the same names keep ordinary effects. All
+12 native-source cases pass using the compiled validation driver, including
+a user-defined mutating `__add__`. This follow-up has not yet been rebuilt
+into the public CLI; the `cfc7f6fe` accelerator passes the constant capture
+and local capture fixtures but still records the older brand-words rejection.
 
 ## Execution and output differences
 

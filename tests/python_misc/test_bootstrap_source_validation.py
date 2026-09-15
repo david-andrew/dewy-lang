@@ -2,6 +2,8 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
@@ -11,12 +13,18 @@ ROOT = Path(__file__).resolve().parents[2]
 STORED_HANDLE = (ROOT / 'tests/fixtures/native_stored_refinement_contracts.dewy').read_text()
 
 
-def test_native_stored_refinement_contracts(tmp_path):
-    seed = tmp_path / 'source-validation.udewy'
-    seed.write_text(codegen(SrcFile.from_path(ROOT / 'tests/fixtures/bootstrap_source_validation.dewy')))
+@pytest.fixture(scope='module')
+def source_validation_binary(tmp_path_factory):
+    work = tmp_path_factory.mktemp('source-validation')
+    seed = work / 'source-validation.udewy'
+    seed.write_text(codegen(SrcFile.from_path(ROOT / 'tests/fixtures/bootstrap_source_validation.dewy'),
+                            debug_locations=False))
     assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
-    binary = cache_artifact(seed).resolve()
-    check_stored_refinement_contracts(binary, tmp_path)
+    return cache_artifact(seed).resolve()
+
+
+def test_native_stored_refinement_contracts(source_validation_binary, tmp_path):
+    check_stored_refinement_contracts(source_validation_binary, tmp_path)
 
 
 def check_stored_refinement_contracts(binary, tmp_path):
@@ -37,3 +45,24 @@ def check_stored_refinement_contracts(binary, tmp_path):
         if status:
             expected = 'refinement refuted' if index == 2 else 'cannot prove refinement'
             assert expected in result.stdout + result.stderr
+
+
+def test_native_global_call_facts_from_source(source_validation_binary, tmp_path):
+    check_global_call_facts(source_validation_binary, tmp_path)
+
+
+def check_global_call_facts(binary, tmp_path):
+    # Native builtin calls carry binding ids, unlike hosted HIR adapters.
+    # Exercise the checker-to-bounds boundary as well as the isolated visitor.
+    from tests.python_misc.test_bootstrap_bounds import GLOBAL_CALL_CASES
+    from dewy.semantic.prelude import prelude_files
+
+    cases = [*GLOBAL_CALL_CASES.items(), ((ROOT / 'dewy/tests/brand_words.dewy').read_text(), 'ok')]
+    for index, (body, expectation) in enumerate(cases):
+        source = tmp_path / f'global-call-{index}.dewy'
+        source.write_text(body)
+        prelude = prelude_files('x86_64') if index == len(cases) - 1 else []
+        result = subprocess.run([binary, source, *prelude], capture_output=True, text=True, timeout=60)
+        assert result.returncode == (0 if expectation == 'ok' else 1), result.stdout + result.stderr
+        if expectation != 'ok':
+            assert expectation in result.stdout + result.stderr
