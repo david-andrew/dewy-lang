@@ -15,6 +15,15 @@ def _declarations(source: str) -> dict[str, hir.AST]:
     }
 
 
+@pytest.mark.parametrize('parameters', [
+    'x:int64 x:int64', '<x:int64> x:int64',
+    'x:int64 ... x:int64', '... x:int64 x:int64', 'x:int64 ...x',
+])
+def test_parameters_have_distinct_lexical_names(parameters):
+    with pytest.raises(UserError, match='duplicate function parameter'):
+        _declarations(f'let f=({parameters}):>int64=>0')
+
+
 def test_named_arguments_can_be_reordered() -> None:
     declarations = _declarations("""
 let subtract = (x:int64 y:int64):>int64 => x - y

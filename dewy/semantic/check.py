@@ -14641,6 +14641,16 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
             case _:
                 not_implemented(ctx.srcfile, item.loc, f'{type(item).__name__} in function signature')
 
+    # Public argument names and lexical parameter names are different:
+    # position-only parameters still occupy a binding in the body, as does
+    # the rest parameter. Do not let building the scope silently overwrite
+    # one of them with a later parameter of the same name.
+    names: set[str] = set()
+    for param in [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args else [])]:
+        if param.name in names:
+            user_error(ctx.srcfile, f'duplicate function parameter `{param.name}`',
+                       Pointer(span=signature.loc, message='each parameter needs its own lexical name'))
+        names.add(param.name)
     return pos_or_kw_args, kw_only_args, rest_args
 
 
