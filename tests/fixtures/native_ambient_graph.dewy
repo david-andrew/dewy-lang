@@ -40,13 +40,25 @@ main=():>int64=>{
     loop id in graph.globals {initial.add(id)}
     let ambient=borrowing.propagate_ambient(initial graph.callers)
     let opaque=borrowing.propagate_ambient(graph.opaque graph.callers)
-    let retaining=borrowing.propagate_ambient(graph.opaque graph.shared_callers)
+    let retaining=borrowing.propagate_ambient(graph.exposes_storage graph.shared_callers)
+    # Word-only memory access remains opaque to borrowing, but cannot expose
+    # an aggregate descriptor that has never been passed to a raw operation.
+    if retaining.length not=? 0 return 7
+    if place_caller not in? graph.shared_callers.get(leaf []) or value_caller in? graph.shared_callers.get(leaf []) return 8
     if graph.opaque.length not=? 2 or graph.globals.length not=? 1 return 1
-    if ambient.length not=? 7 or opaque.length not=? 5 or retaining.length not=? 4 return 2
+    if ambient.length not=? 7 or opaque.length not=? 5 or retaining.length not=? 0 return 2
     loop id in [leaf value_caller place_caller captured capture_caller global_writer global_caller] {if id not in? ambient return 3}
     loop id in [leaf value_caller place_caller captured capture_caller] {if id not in? opaque return 4}
-    loop id in [leaf place_caller captured capture_caller] {if id not in? retaining return 5}
     if separate in? ambient or value_caller in? retaining or global_writer in? opaque return 6
+    # An unresolved source binding is never an intrinsic just because its
+    # spelling matches one. Its effects remain unknown even for word operands.
+    let shadow_name=hir.append_node(@nodes hir.ExpressedIdentifier[loc signature '__load_i64__' 900])
+    let shadow_call=hir.append_node(@nodes hir.FunctionCall[loc word shadow_name [zero] []])
+    let shadow=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none word shadow_call])
+    let shadow_plan=captures.Plan[source_bindings=set[900]]
+    shadow_plan.functions[shadow]=captures.Function[shadow]
+    let shadow_graph=borrowing.ambient_graph(shadow_plan nodes ts)
+    if shadow not in? shadow_graph.opaque or shadow not in? shadow_graph.exposes_storage return 9
     printl(_arena_allocated_bytes-before)
     return 42
 }

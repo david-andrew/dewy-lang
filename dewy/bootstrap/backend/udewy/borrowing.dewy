@@ -110,10 +110,11 @@ shares_storage = (call:hir.FunctionCall target:addr plan:captures.Plan nodes:arr
 # These three summaries differ in their initial facts and propagation edges,
 # not in which syntax they inspect. Collect the function graph once and keep
 # the ownership boundary explicit on a separate reverse edge map.
-AmbientGraph:type = const [globals:set<addr> opaque:set<addr> callers:dict<addr array<addr>> shared_callers:dict<addr array<addr>>]
+AmbientGraph:type = const [globals:set<addr> opaque:set<addr> exposes_storage:set<addr> callers:dict<addr array<addr>> shared_callers:dict<addr array<addr>>]
 ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table indirect:dict<addr array<addr>>=[]):>AmbientGraph => {
     let globals:set<addr>=set[]
     let opaque:set<addr>=set[]
+    let exposes_storage:set<addr>=set[]
     let callers:dict<addr array<addr>>=[]
     let shared_callers:dict<addr array<addr>>=[]
     loop [id function] in plan.functions {
@@ -142,7 +143,7 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
             # Reinterpreting scalar bits does not expose aggregate storage.
             # Pointer/aggregate transmutes and raw memory calls still prevent
             # borrowing: they can escape or mutate an otherwise read-only value.
-            if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) {opaque.add(id)}
+            if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) {opaque.add(id) exposes_storage.add(id)}
             if node is? hir.FunctionCall {
                 let callee=hir.node_at(nodes node.func)
                 let direct=captures.resolve(node.func node.selected_method_index plan nodes)
@@ -153,17 +154,29 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
                         if shares_storage(node target plan nodes) {shared.add(target)}
                     }
                 } else if callee is? hir.ExpressedIdentifier {
-                    if (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix) or callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') {opaque.add(id)}
+                    let memory=callee.name.startswith('__load_') or callee.name.startswith('__store_')
+                    let unknown=(callee.binding_id isnt? none and callee.binding_id in? plan.source_bindings) or (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix)
+                    if unknown or callee.name.startswith('__syscall') {opaque.add(id) exposes_storage.add(id)}
+                    else if memory {
+                        # Raw memory can alias caller storage, so still copy
+                        # value arguments. Word-only operands do not expose
+                        # the descriptor of that private copy. Aggregate raw
+                        # operands and aggregate transmutes keep retention.
+                        opaque.add(id)
+                        loop argument in arguments(node) {
+                            if not word_value(hir.node_at(nodes argument).value_type type_nodes) {exposes_storage.add(id)}
+                        }
+                    }
                 } else if callee is? hir.ArrayMethod {
                     # A sort invokes its key inside the method. In particular
                     # a function-valued parameter can hide ambient writes;
                     # it is not an ordinary HIR call with a known dependency.
-                    if callee.name =? 'sort' and 'key' in? node.kw_args {opaque.add(id)}
+                    if callee.name =? 'sort' and 'key' in? node.kw_args {opaque.add(id) exposes_storage.add(id)}
                 } else if callee is? hir.FunctionLiteral {
                     called.add(node.func)
                     if shares_storage(node node.func plan nodes) {shared.add(node.func)}
                 }
-                else {opaque.add(id)}
+                else {opaque.add(id) exposes_storage.add(id)}
             }
             loop next in hir.children(node) {pending.push(next)}
         }
@@ -178,7 +191,7 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
             shared_callers[target]=users
         }
     }
-    return AmbientGraph[globals opaque callers shared_callers]
+    return AmbientGraph[globals opaque exposes_storage callers shared_callers]
 }
 propagate_ambient = (initial:set<addr> callers:dict<addr array<addr>>):>set<addr> => {
     let dirty=initial
@@ -200,7 +213,7 @@ propagate_ambient = (initial:set<addr> callers:dict<addr array<addr>>):>set<addr
 # shares one graph across its three queries instead of rebuilding it here.
 ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table opaque_only:bool=false value_boundaries:bool=false indirect:dict<addr array<addr>>=[]):>set<addr> => {
     let graph=ambient_graph(plan nodes type_nodes indirect)
-    let initial=graph.opaque
+    let initial=if value_boundaries graph.exposes_storage else graph.opaque
     if not opaque_only {loop id in graph.globals {initial.add(id)}}
     return propagate_ambient(initial (if value_boundaries graph.shared_callers else graph.callers))
 }
@@ -240,7 +253,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # Borrowing must also exclude indirect raw writes that could alias caller
     # storage. Releasing an already independent snapshot only requires proving
     # that this snapshot was not itself exposed beyond the call.
-    let retaining=propagate_ambient(ambient.opaque ambient.shared_callers)
+    let retaining=propagate_ambient(ambient.exposes_storage ambient.shared_callers)
     let places:set<addr>=set[]
     loop id in plan.functions.keys {
         let literal=hir.node_at(nodes id)

@@ -12,7 +12,7 @@ def test_native_string_descriptor_sharing(tmp_path):
     cases = [(ROOT / 'tests/fixtures' / f'{name}.dewy').read_text() for name in (
         'native_string_descriptor_sharing', 'native_string_lifetimes',
         'native_string_scratch', 'native_string_materialization',
-        'native_static_strings',
+        'native_static_strings', 'native_string_boundary_storage', 'native_word_memory_arguments',
     )]
     # Allocation budgets belong to native lowering. Hosted strings retain
     # their existing frame-region policy, so test those semantics separately.

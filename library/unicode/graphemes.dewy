@@ -40,8 +40,13 @@ property = (table:array<uint8> scalar:int64):>int64 => {
 # all preceding scalars. A byte offset marks the beginning of each cluster;
 # the final offset is included, and empty text has the sole boundary zero.
 # Offsets remain words here; descriptor storage decides its physical width.
-let boundaries = (bytes:array<uint8>):>array<int64>|none => {
-    let result:array<int64>=[0]
+# A zero destination collects public word offsets. The native string runtime
+# supplies space for (byte_length+1) uint32 offsets instead, so segmentation
+# writes the final table without a growable word array and a narrowing copy.
+# Both consumers run the same validation and UAX #29 state machine.
+let segment = (bytes:array<uint8> @result:array<int64> destination:int64):>int64|none => {
+    if destination =? 0 {result.push(0)} else {__store_u32__(0 destination)}
+    let boundaries:int64=1
     let offset:int64=0
     let previous:int64=GCB.other
     let regional_run:int64=0
@@ -96,7 +101,11 @@ let boundaries = (bytes:array<uint8>):>array<int64>|none => {
         else if indic =? INCB.consonant and indic_context =? 2 {boundary=false}
         else if pictographic and previous =? GCB.zwj and zwj_after_pictographic {boundary=false}
         else if previous =? GCB.regional_indicator and current =? GCB.regional_indicator and regional_run % 2 =? 1 {boundary=false}
-        if offset >? 0 and boundary {result.push(offset)}
+        if offset >? 0 and boundary {
+            if destination =? 0 {result.push(offset)}
+            else {__store_u32__(offset transmute uint32 destination+boundaries*4)}
+            boundaries+=1
+        }
 
         regional_run=if current =? GCB.regional_indicator regional_run+1 else 0
         zwj_after_pictographic=current =? GCB.zwj and pictographic_chain
@@ -107,6 +116,26 @@ let boundaries = (bytes:array<uint8>):>array<int64>|none => {
         previous=current
         offset+=count
     }
-    if offset >? 0 {result.push(offset)}
+    if offset >? 0 {
+        if destination =? 0 {result.push(offset)}
+        else {__store_u32__(offset transmute uint32 destination+boundaries*4)}
+        boundaries+=1
+    }
+    return boundaries-1
+}
+
+let boundaries = (bytes:array<uint8>):>array<int64>|none => {
+    let result:array<int64>=[]
+    let count=segment(bytes @result 0)
+    if count is? none return none
     return result
+}
+
+# Internal storage interface, not a different segmentation rule. The caller
+# owns the destination, including on invalid input, and reserves four bytes
+# for every possible boundary (one more than the input byte count).
+let write_boundaries = (bytes:array<uint8> destination:int64):>int64|none => {
+    if destination =? 0 or bytes.length >? uint32.max return none
+    let unused:array<int64>=[]
+    return segment(bytes @unused destination)
 }

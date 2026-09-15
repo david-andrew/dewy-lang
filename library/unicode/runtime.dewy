@@ -5,3 +5,7 @@
 # Unicode tables as the hosted backend. Invalid input bytes yield none.
 import p"graphemes.dewy" as _graphemes
 let _utf8_boundaries = (bytes:array<uint8>):>array<int64>|none => _graphemes.boundaries(bytes)
+
+# The supplied buffer is the final native string boundary table. Keep the
+# word-array entry above for older bootstrap seeds and the public library API.
+let _utf8_boundaries_into = (bytes:array<uint8> destination:int64):>int64|none => _graphemes.write_boundaries(bytes destination)

@@ -3517,3 +3517,55 @@ Artifacts: `source-shared-descriptors-restored-depth`,
 failed on the loop-depth obligation and is retained as a failure, not a timing
 success. Direct packed-boundary output remains subsequent work and is absent
 from this frozen checkpoint.
+
+### Write native grapheme boundaries into their final buffer
+
+The native string runtime can now fill a supplied uint32 boundary buffer.
+The public word-offset API and the new internal writer share one UTF-8/UAX #29
+state machine; the caller owns the output array or buffer. Native lowering
+reserves `4 * (byte_length + 1)` bytes, records that capacity in the backing
+owner, and keeps the actual grapheme count separately. Invalid input releases
+the destination and input bytes. Older helper-only preludes retain the previous
+word-array conversion path. Unicode text may reserve more boundary capacity
+than it uses; this trades bounded capacity for removal of temporary growth
+and conversion. It does not change string indexing or normalization rules.
+
+The retention gates exposed a distinct over-conservative ownership rule:
+word-only raw memory operations blocked both borrowing and disposal of argument
+snapshots. They still block borrowing, because their pointers may alias caller
+storage. They no longer imply that a private descriptor escapes the call.
+Aggregate raw operands, aggregate transmutes, syscalls, unknown calls, and
+unresolved source bindings retain the conservative rule. Place/capture edges
+still propagate exposure. A direct/C execution case writes through an alias
+of the original array, observes an independent value argument, and retains no
+additional snapshots after 1,024 calls.
+
+For a 262,144-byte ASCII join, native-generated kernels allocate **10,748,312
+bytes before and 2,621,936 after**. Four alternating samples per output route:
+
+| Output route | Before | After |
+| --- | ---: | ---: |
+| Direct x86-64 | 22.07 / 24.82 ms | 15.77 / 15.70 ms |
+| C | 10.48 / 9.13 ms | 5.35 / 6.81 ms |
+
+Elapsed times include process startup, fragment construction and counter
+printing; allocation counts cover the join itself. The silent committed
+fixture separately checks exact content, the 3 MiB allocation ceiling, and
+complete reclamation. The benchmark omits that final retention assertion so
+counter-printing lifetime differences do not become part of its correctness
+criterion. These small-kernel timings do not establish a full-build speedup.
+
+Validation: six Unicode library checks (Unicode 16 conformance cases, all
+16,384 ASCII pairs, malformed UTF-8, public and packed APIs, direct/C runtime
+conversion); six native effect/borrowing checks; seven complete native string
+and raw-memory programs on both output backends; and one expected-result case
+through both compiler implementations and output backends. The generated driver
+predates the final conservative handling of an unresolved intrinsic-named source
+binding; that handling has its own final ambient-graph regression.
+
+Artifacts: `packed-boundaries-measurement/results.json`, its before/after
+sources and build logs, `packed-boundaries-place-gates.log`,
+`packed-boundaries-disposable-gates.log`, and
+`word-memory-borrowing-final-gates.log`. Earlier failing retention attempts are
+preserved in `packed-boundaries-native-gates.log` and
+`packed-boundaries-integration.log`.

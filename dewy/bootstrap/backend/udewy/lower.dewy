@@ -1626,7 +1626,61 @@ binary_array_view = (node:hir.RepresentationCast state:State):>bool => {
 # concatenation boundary. The library returns validated word offsets; the
 # runtime string layout stores those offsets as uint32, as the hosted one
 # does. Call by installed helper identity to preserve lexical shadowing.
+# The current runtime can fill the final uint32 table directly. Reserve its
+# byte-count upper bound once and retain that allocation size in the backing
+# control; the actual grapheme count may be much smaller for Unicode text.
+segmented_string_into = (data:addr length:addr node:hir.AST optional:bool @state:State):>addr => {
+    let prefix:array<addr>=[]
+    data=snapshot(data @prefix @state) length=snapshot(length @prefix @state)
+    # Reject oversized inputs through the helper without overflowing the
+    # table's capacity arithmetic or allocating an unusable giant table.
+    let fits=intrinsic('__le__' [length word(uint32.max node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let capacity_arm=put(hir.IfArm[node.loc word_type fits word_op('__add__' length word(1 node @state) node @state)] @state)
+    let capacity=put(hir.Flow[node.loc word_type [capacity_arm] word(0 node @state)] @state)
+    let size=snapshot(word_op('__mul__' capacity word(4 node @state) node @state) @prefix @state)
+    let boundaries=snapshot(allocation(size node @state) @prefix @state)
+    let bytes=snapshot(byte_descriptor(data length node @state) @prefix @state)
+    let checked=snapshot(string_runtime('_utf8_boundaries_into' [bytes boundaries] node @state) @prefix @state)
+    prefix.push(release_block(bytes word(layouts.array_descriptor.size node @state) node @state))
+    let valid=intrinsic('__ne__' [read_word(checked 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    let success:array<addr>=[]
+    let count=snapshot(read_word(checked 8 node @state) @success @state)
+    let owner=string_runtime('_native_string_owner' [data length boundaries size] node @state)
+    let result=string_memory(data length boundaries count word(0 node @state) node @state owner=owner)
+    let empty=types.primitive('void' @state.type_nodes)
+    if optional {
+        let cell=snapshot(allocation(word(16 node @state) node @state) @prefix @state)
+        prefix.push(store_word(word(0 node @state) cell 0 node @state))
+        prefix.push(store_word(word(0 node @state) cell 8 node @state))
+        success.push(store_word(result cell 8 node @state))
+        success.push(store_word(word(member_tag(types.primitive('string' @state.type_nodes) @state) node @state) cell 0 node @state))
+        let discard=sequence([release_block(data length node @state) release_block(boundaries size node @state)] node @state)
+        let arm=put(hir.IfArm[node.loc empty valid sequence(success node @state)] @state)
+        prefix.push(put(hir.Flow[node.loc empty [arm] discard] @state))
+        prefix.push(cell)
+    } else {
+        # Concatenation starts with valid strings; invalid joined UTF-8 is
+        # unreachable. Retain the existing backend policy for that boundary.
+        let yes=put(hir.Bool[node.loc types.primitive('bool' @state.type_nodes) true] @state)
+        let forever=put(hir.LoopArm[node.loc empty yes sequence([] node @state)] @state)
+        let impossible=put(hir.Flow[node.loc types.primitive('never' @state.type_nodes) [forever] none] @state)
+        success.push(result)
+        let body=put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) success false] @state)
+        let selected=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) valid body] @state)
+        prefix.push(put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [selected] impossible] @state))
+    }
+    $runtime_assert prefix.length >? 0
+    let selected=prefix.pop
+    let output=snapshot(selected @prefix @state)
+    # The helper returns only an optional word, with no scratch array tree.
+    prefix.push(release_block(checked word(16 node @state) node @state))
+    prefix.push(output)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+
 segmented_string = (data:addr length:addr node:hir.AST optional:bool @state:State):>addr => {
+    if state.allocator isnt? none and '_utf8_boundaries_into' in? state.runtime_helpers return segmented_string_into(data length node optional @state)
     let binding=state.runtime_helpers.get('_utf8_boundaries')
     if binding is? none return reject(node 'runtime UTF-8 materialization needs the prelude segmentation helper' @state)
     let name=state.symbols.get(binding)

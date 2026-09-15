@@ -25,7 +25,7 @@ def test_grapheme_runtime_tables_match_generated_data():
         assert (ROOT / 'library/unicode' / name).read_bytes() == content
 
 
-@pytest.mark.parametrize(('mode', 'target'), [('library', 'x86_64'), ('runtime', 'x86_64'), ('runtime', 'c')])
+@pytest.mark.parametrize(('mode', 'target'), [('library', 'x86_64'), ('packed', 'x86_64'), ('packed', 'c'), ('runtime', 'x86_64'), ('runtime', 'c')])
 def test_dewy_utf8_grapheme_boundaries(tmp_path, mode, target):
     texts = ['', 'ASCII', 'e\u0301', '👩‍👩‍👧‍👦', '🇺🇸🇨🇦🇫', '\r\n', 'क्\u200dष']
     for line in (ROOT / 'tests/data/GraphemeBreakTest-16.0.0.txt').read_text().splitlines():
@@ -56,6 +56,25 @@ def test_dewy_utf8_grapheme_boundaries(tmp_path, mode, target):
             parts.push("{boundary}")
         }
     '''
+    if mode == 'packed':
+        segment = """
+        let size=(bytes.length+1)*4
+        let storage=_arena_alloc(size)
+        let count=segmentation.write_boundaries(bytes storage)
+        if count is? none {
+            _arena_release(storage size)
+            printl('invalid')
+            continue
+        }
+        let parts:array<string>=[]
+        let i:int64=0
+        loop i <=? count {
+            let boundary=__load_u32__(storage+i*4)
+            parts.push("{boundary}")
+            i+=1
+        }
+        _arena_release(storage size)
+        """
     source = tmp_path / 'graphemes.dewy'
     source.write_text(f'''
 import p"{ROOT / 'library/unicode/graphemes.dewy'}" as segmentation

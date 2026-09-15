@@ -1,0 +1,23 @@
+# ASCII output should allocate its final byte and uint32 boundary buffers,
+# without also growing and copying a temporary array of word-sized offsets.
+let allocated=():>int64=>_arena_allocated_bytes
+let live=():>int64=>_arena_live_bytes
+let exercise=():>bool=>{
+    let parts:array<string>=[]
+    loop i in 0.. and i <? 8192 {parts.push('abcdefghijklmnopqrstuvwxyz012345')}
+    let before=allocated()
+    let text=parts.join
+    let traffic=allocated()-before
+    if text.length not=? 262144 return false
+    if text[0] not=? 'a' or text[end] not=? '5' return false
+    # Arena size classes round the 1,048,580-byte boundary table to 2 MiB.
+    # Together with the bytes and fixed overhead this fits in 3 MiB. The
+    # earlier growable word-offset scratch consumes several times that.
+    return traffic <? 3145728
+}
+let main=():>int64=>{
+    let before=live()
+    if not exercise() return 1
+    if live() not=? before return 2
+    return 42
+}

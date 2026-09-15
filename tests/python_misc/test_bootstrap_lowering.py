@@ -570,7 +570,7 @@ main = (argv:array<string>):>int64 => {{
     let helpers:dict<string addr>=[]
     let release=bindings.lookup(session.scopes env.lexical.scope '_arena_release')
     if release isnt? none {{helpers['_arena_release']=release}}
-    loop name in ['_utf8_boundaries' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop'] {{
+    loop name in ['_utf8_boundaries' '_utf8_boundaries_into' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop'] {{
         let helper=bindings.lookup(session.scopes env.lexical.scope name)
         if helper isnt? none {{helpers[name]=helper}}
     }}

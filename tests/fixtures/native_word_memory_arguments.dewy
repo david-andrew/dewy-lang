@@ -1,0 +1,25 @@
+# A raw destination can alias the caller's array. The value argument must
+# still be copied, but that private snapshot does not escape a word-only
+# memory write and should be released when the call returns.
+let observe=(values:array<uint8> destination:int64):>uint8=>{
+    __store_u8__(99 destination)
+    if values.length >? 0 return values[0]
+    return 0
+}
+let live=():>int64=>_arena_live_bytes
+let exercise=(values:array<uint8> destination:int64):>bool=>{
+    loop i in 0.. and i <? 1024 {
+        __store_u8__(42 destination)
+        if observe(values destination) not=? 42 return false
+        if __load_u8__(destination) not=? 99 return false
+    }
+    return true
+}
+let main=():>int64=>{
+    let values:array<uint8>=[42]
+    let destination=__load_i64__(values transmute int64)
+    let before=live()
+    if not exercise(values destination) return 1
+    if live() not=? before return 2
+    return 42
+}
