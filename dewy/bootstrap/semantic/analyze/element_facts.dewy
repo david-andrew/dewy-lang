@@ -136,7 +136,7 @@ store = (@state:facts.State array:addr value:addr word_type:addr loc:Span env:va
 # contract separately so the bounds evaluator can apply its ordinary binding
 # refinement rule (including interval, field, and parameter predicates).
 declared_refinement = (array:addr type_nodes:types.Table registry:bindings.Registry):>types.RefinedType? => {
-    let binding = registry.by_id.get(array)
+    let binding = bindings.find_binding(registry array)
     if binding is? none or binding.value_type is? none return none
     let declared = types.node_at(type_nodes types.strip_refinement(binding.value_type type_nodes))
     if declared isnt? types.ArrayType return none

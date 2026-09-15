@@ -466,7 +466,7 @@ analyze_global_writes = (root:addr nodes:array<hir.AST> globals:set<addr> regist
             if function is? hir.ExpressedIdentifier {
                 if function.binding_id is? none {intrinsic=true}
                 else {
-                    let binding=registry.by_id.get(function.binding_id)
+                    let binding=bindings.find_binding(registry function.binding_id)
                     intrinsic=binding isnt? none and binding.builtin
                 }
             }

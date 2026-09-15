@@ -1,3 +1,4 @@
+import p"bindings.dewy" as bindings
 import p"module_state.dewy" as state
 import p"cache_values.dewy" as codec
 import p"cache_bytes.dewy" as bytes
@@ -9,7 +10,7 @@ import p"hir.dewy" as hir
 # This is an optional compiler artifact. A failed read, stale input, incomplete
 # write, or incompatible snapshot simply returns control to ordinary checking.
 # The loader installs a restored snapshot only after every check succeeds.
-const FORMAT='dewy-native-prelude-3'
+const FORMAT='dewy-native-prelude-4'
 Config:type = const [
     compiler:string directory:string target:targets.Target
     library_roots:array<string> prelude_files:array<string>
@@ -74,11 +75,11 @@ inputs_match = (snapshot:state.PreludeSnapshot entry:Entry):>bool => {
         let current=p(module.path).read_text
         if current isnt? string or current not=? source.body return false
         loop binding in module.exports.values {
-            if binding not in? snapshot.session.registry.by_id return false
+            if not bindings.has_binding(snapshot.session.registry binding) return false
         }
     }
     loop binding in snapshot.prelude_bindings.values {
-        if binding not in? snapshot.session.registry.by_id return false
+        if not bindings.has_binding(snapshot.session.registry binding) return false
     }
     # Included binary files are inputs too. Their length participates in
     # checking, and lowering may embed their bytes directly from disk.

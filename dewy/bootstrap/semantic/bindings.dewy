@@ -47,7 +47,15 @@ Registry:type = [
     # The hosted bounds pass packs ids in 20 bits; retain its route range for
     # now. The native fact representation must not silently truncate an id.
     next_route_id:addr=524288
-    by_id:dict<addr Binding>=[]
+    # Value snapshots share these small binding pages. Updating one binding
+    # copies its page and the page index, rather than every binding record in
+    # the compilation. Sparse validation ids use the same address space.
+    binding_pages:dict<addr dict<addr Binding>>=[]
+    # Keep the active page outside the index. Sequential declarations and
+    # repeated edits can update it directly, without taking another snapshot
+    # of the page on every write. Snapshots still own all three fields.
+    current_page:addr?=none
+    current_bindings:dict<addr Binding>=[]
     by_syntax:dict<addr addr>=[]
     # A route belongs to one root binding. Keep that grouping as the primary
     # representation: queries and invalidation need only that root's fields.
@@ -56,8 +64,35 @@ Registry:type = [
     generic_instances:dict<addr GenericInstance>=[]
 ]
 
+const BINDING_PAGE_SIZE:addr=128
+find_binding = (registry:Registry id:addr):>Binding? => {
+    let page_id=id // BINDING_PAGE_SIZE
+    let current=registry.current_page
+    if current isnt? none and current =? page_id return registry.current_bindings.get(id)
+    let page=registry.binding_pages.get(page_id)
+    if page is? none return none
+    return page.get(id)
+}
+has_binding = (registry:Registry id:addr):>bool => {
+    let page_id=id // BINDING_PAGE_SIZE
+    let current=registry.current_page
+    if current isnt? none and current =? page_id return id in? registry.current_bindings
+    let page=registry.binding_pages.get(page_id)
+    return page isnt? none and id in? page
+}
+store_binding = (@registry:Registry id:addr binding:Binding):>void => {
+    let page_id=id // BINDING_PAGE_SIZE
+    let current=registry.current_page
+    if current is? none or current not=? page_id {
+        if current isnt? none {registry.binding_pages[current]=registry.current_bindings}
+        registry.current_bindings=registry.binding_pages.pop(page_id default=[])
+        registry.current_page=page_id
+    }
+    registry.current_bindings[id]=binding
+}
+
 binding_at = (registry:Registry id:addr):>Binding => {
-    let binding = registry.by_id.get(id)
+    let binding = find_binding(registry id)
     $runtime_assert binding isnt? none
     return binding
 }
@@ -65,7 +100,7 @@ binding_at = (registry:Registry id:addr):>Binding => {
 allocate = (@registry:Registry syntax:addr? name:string kind:BindingKind loc:Span):>addr => {
     let id = registry.next_id
     registry.next_id += 1
-    registry.by_id[id] = Binding[id=id name=name kind=kind loc=loc syntax=syntax]
+    store_binding(@registry id Binding[id=id name=name kind=kind loc=loc syntax=syntax])
     if syntax isnt? none { registry.by_syntax[syntax] = id }
     return id
 }
@@ -74,7 +109,7 @@ allocate_param = (@registry:Registry name:string value_type:addr loc:Span):>addr
     let id = allocate(@registry none name 'param' loc)
     let binding = binding_at(registry id)
     binding.value_type = value_type
-    registry.by_id[id] = binding
+    store_binding(@registry id binding)
     return id
 }
 
@@ -92,14 +127,14 @@ route_id = (@registry:Registry root:addr path:array<string> value_type:addr loc:
     let owner = binding_at(registry root)
     let id = registry.next_route_id
     registry.next_route_id += 1
-    registry.by_id[id] = Binding[id=id name="{owner.name}.{path.join('.')}" kind='value' loc=loc value_type=value_type route_root=root]
+    store_binding(@registry id Binding[id=id name="{owner.name}.{path.join('.')}" kind='value' loc=loc value_type=value_type route_root=root])
     routes.push(Route[id=id root=root path=path])
     registry.routes_by_root[root]=routes
     return id
 }
 
 route_at = (registry:Registry id:addr):>Route? => {
-    let binding=registry.by_id.get(id)
+    let binding=find_binding(registry id)
     if binding is? none or binding.route_root is? none return none
     loop route in registry.routes_by_root.get(binding.route_root []) {
         if route.id =? id return route
@@ -214,7 +249,7 @@ array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
     let fields = member_fields(path nodes)
     if fields is? none return none
     if fields.length =? 0 return root.binding_id
-    if root.binding_id not in? registry.by_id return none
+    if not has_binding(registry root.binding_id) return none
     let node = hir.node_at(nodes id)
     return route_id(@registry root.binding_id fields node.value_type node.loc)
 }

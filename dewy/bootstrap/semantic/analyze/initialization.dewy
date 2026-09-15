@@ -249,7 +249,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
         let array = hir.node_at(checker.nodes node.array)
         if array is? hir.ExpressedIdentifier {
             if array.binding_id is? none or array.binding_id in? seen return none
-            let binding = checker.registry.by_id.get(array.binding_id)
+            let binding = bindings.find_binding(checker.registry array.binding_id)
             if binding is? none or binding.declaration is? none return none
             let declaration = hir.node_at(checker.nodes binding.declaration)
             $runtime_assert declaration is? hir.Declare
@@ -287,7 +287,7 @@ object_field_value = (id:addr name:string parameters:dict<addr CallableEffect> s
     }
     if node is? hir.ExpressedIdentifier {
         if node.binding_id is? none or node.binding_id in? seen or node.binding_id in? checker.reassigned_objects return none
-        let binding = checker.registry.by_id.get(node.binding_id)
+        let binding = bindings.find_binding(checker.registry node.binding_id)
         if binding is? none or binding.declaration is? none or node.binding_id in? checker.reassigned_callables return none
         let declaration = hir.node_at(checker.nodes binding.declaration)
         $runtime_assert declaration is? hir.Declare

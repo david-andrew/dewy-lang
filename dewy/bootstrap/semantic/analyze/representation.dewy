@@ -107,7 +107,7 @@ mark = (id:addr @seen:set<addr> @state:State @session:contexts.Session):>void =>
         if binding.kind =? 'value' and binding.value_type isnt? none and abstract_integer(binding.value_type session literals=initializer) {
             state.big_bindings.add(binding_id)
             binding.value_type=state.big_type binding.store_type=state.big_type
-            session.registry.by_id[binding_id]=binding
+            bindings.store_binding(@session.registry binding_id binding)
             if binding.declaration isnt? none {
                 let declaration=node_at(binding.declaration session)
                 $runtime_assert declaration is? hir.Declare

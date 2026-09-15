@@ -39,9 +39,9 @@ main=():>int64=>{{
     let no=hir.append_node(@nodes hir.Bool[span boolean false])
     let yes=hir.append_node(@nodes hir.Bool[span boolean true])
     let registry=bindings.Registry[]
-    registry.by_id[1]=bindings.Binding[1 'i' 'value' span value_type=word]
-    registry.by_id[2]=bindings.Binding[2 'text' 'value' span value_type=string]
-    registry.by_id[3]=bindings.Binding[3 'object' 'value' span value_type=record]
+    bindings.store_binding(@registry 1 bindings.Binding[1 'i' 'value' span value_type=word])
+    bindings.store_binding(@registry 2 bindings.Binding[2 'text' 'value' span value_type=string])
+    bindings.store_binding(@registry 3 bindings.Binding[3 'object' 'value' span value_type=record])
     let env=values.Environment[nodes type_nodes registry 1024]
     let state:facts.State=facts.State[]
     facts.set_value(@state facts.Term[1] ranges.Interval[3 7])

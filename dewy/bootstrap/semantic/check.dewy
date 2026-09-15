@@ -139,7 +139,7 @@ begin = (source:contexts.Context @session:contexts.Session inherited:dict<string
         let binding = bindings.binding_at(session.registry binding_id)
         binding.value_type = value_type
         binding.builtin = true
-        session.registry.by_id[binding_id] = binding
+        bindings.store_binding(@session.registry binding_id binding)
         bindings.bind(@session.scopes source.scope name binding_id)
     }
     # Builtins and prelude exports are outer bindings. Module declarations
@@ -426,7 +426,7 @@ include_declaration = (name:string value:addr id:addr env:Environment @session:c
     binding.value_type=node.value_type binding.store_type=node.value_type
     let declaration=put(hir.Declare[node.loc types.primitive('void' @session.types) 'let' name node.value_type value binding_id] @session)
     binding.declaration=declaration
-    session.registry.by_id[binding_id]=binding
+    bindings.store_binding(@session.registry binding_id binding)
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
     return declaration
 }
@@ -632,7 +632,7 @@ snapshot_value = (value:addr @session:contexts.Session):>SnapshotValue => {
     binding.value_type=node.value_type binding.store_type=node.value_type
     let declaration=put(hir.Declare[node.loc types.primitive('void' @session.types) 'let' name node.value_type value binding_id] @session)
     binding.declaration=declaration
-    session.registry.by_id[binding_id]=binding
+    bindings.store_binding(@session.registry binding_id binding)
     return SnapshotValue[declaration put(hir.ExpressedIdentifier[node.loc node.value_type name binding_id] @session)]
 }
 snapshot_read = (value:addr member:addr @session:contexts.Session):>addr => {
@@ -1472,7 +1472,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         # alternatives live only in the flow state above.
         binding.value_type = read
     }
-    session.registry.by_id[binding_id] = binding
+    bindings.store_binding(@session.registry binding_id binding)
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
     container_state.seed(binding_id value env.state @session)
     container_state.seed_fields(binding_id value env.state @session)
@@ -1483,7 +1483,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         if rhs is? parser.BinOp {binding.literal_path_parameter=source_views.path_parameter(rhs env.lexical session)}
     }
     if checked is? hir.OverloadedFunction {binding.function=value binding.kind='overload'}
-    session.registry.by_id[binding_id] = binding
+    bindings.store_binding(@session.registry binding_id binding)
     return declared
 }
 
@@ -1712,7 +1712,7 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
         session.retained_read_states.add(env.state)
         binding.function = put(hir.GenericFunction[literal.loc shape name hir.GenericSource[literal_ref env.state signature_type.type_params]] @session)
     }
-    session.registry.by_id[binding_id] = binding
+    bindings.store_binding(@session.registry binding_id binding)
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
     return none
 }
@@ -1805,7 +1805,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         let binding_id = bindings.allocate_param(@session.registry parsed.name param.value_type literal.loc)
         let binding = bindings.binding_at(session.registry binding_id)
         binding.store_type = param.value_type
-        session.registry.by_id[binding_id] = binding
+        bindings.store_binding(@session.registry binding_id binding)
         bindings.bind(@session.scopes inner.lexical.scope parsed.name binding_id)
         if default is? none { parameters.push(hir.Param[parsed.name param.value_type binding_id position_only=parsed.position_only place=param.place]) }
         else { parameters.push(hir.BoundParam[parsed.name param.value_type binding_id position_only=parsed.position_only value=default place=param.place]) }
@@ -1822,7 +1822,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
             let binding=bindings.binding_at(session.registry param.binding_id)
             binding.value_type=resolved
             binding.store_type=resolved
-            session.registry.by_id[param.binding_id]=binding
+            bindings.store_binding(@session.registry param.binding_id binding)
         }
     }
     if method isnt? none and owner isnt? none {
@@ -2280,7 +2280,7 @@ index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:con
     let binding_id = bindings.allocate_param(@session.registry 'end' node_at(last session).value_type loc)
     let binding = bindings.binding_at(session.registry binding_id)
     binding.replacement = last binding.read_only_reason = 'sequence index end'
-    session.registry.by_id[binding_id] = binding
+    bindings.store_binding(@session.registry binding_id binding)
     bindings.bind(@session.scopes inner.lexical.scope 'end' binding_id)
     let index = expression(item inner @session)
     if index is? Error return index
@@ -2441,7 +2441,7 @@ forwarding_member = (receiver:addr union:types.TypeOr name:string id:addr env:En
     let binding_id=bindings.allocate(@session.registry none hidden 'value' loc)
     let binding=bindings.binding_at(session.registry binding_id)
     binding.value_type=node_at(receiver session).value_type
-    session.registry.by_id[binding_id]=binding
+    bindings.store_binding(@session.registry binding_id binding)
     return put(hir.ForwardingAccess[loc types.union(results @session.types) receiver name hidden binding_id types.union(exceptions @session.types)] @session)
 }
 
@@ -2570,7 +2570,7 @@ bind_field = (name:string type:addr loc:Span env:Environment @session:contexts.S
     let id = bindings.allocate(@session.registry none name 'value' loc)
     let binding = bindings.binding_at(session.registry id)
     binding.value_type = type binding.store_type = type
-    session.registry.by_id[id] = binding
+    bindings.store_binding(@session.registry id binding)
     bindings.bind(@session.scopes env.lexical.scope name id)
     return id
 }
@@ -2805,7 +2805,7 @@ array_method = (receiver:addr read:types.ArrayType name:string id:addr env:Envir
                 # method. An explicitly fixed length remains a store contract.
                 declared = types.array_type(stored.element none @session.types)
                 binding.value_type = declared binding.store_type = declared
-                session.registry.by_id[binding.id] = binding
+                bindings.store_binding(@session.registry binding.id binding)
                 $runtime_assert declaration_id <? session.hir.length
                 contexts.replace_hir(declaration_id hir.Declare[declaration.loc declaration.value_type declaration.decltype declaration.name declared declaration.expr declaration.binding_id] @session)
             }
@@ -2900,7 +2900,7 @@ compound_container = (lookup:hir.DictLookup right_id:addr operator:string id:add
     binding.value_type=key.value_type binding.store_type=key.value_type
     let declaration=put(hir.Declare[key.loc types.primitive('void' @session.types) 'let' name key.value_type lookup.key binding_id] @session)
     binding.declaration=declaration
-    session.registry.by_id[binding_id]=binding
+    bindings.store_binding(@session.registry binding_id binding)
     let local=put(hir.ExpressedIdentifier[key.loc key.value_type name binding_id] @session)
     let original_key=lookup.key
     lookup.key=local
@@ -3137,7 +3137,7 @@ iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|E
     let binding = bindings.binding_at(session.registry binding_id)
     binding.store_type = target
     if types.node_at(session.types types.strip_refinement(target session.types)) is? types.ObjectType { binding.read_only_reason = 'borrows the array element; copy it with `let` to change it' }
-    session.registry.by_id[binding_id] = binding
+    bindings.store_binding(@session.registry binding_id binding)
     bindings.bind(@session.scopes inner.lexical.scope name binding_id)
     let target_node = put(hir.ExpressedIdentifier[contexts.node_at(node.left env.lexical session).loc target name binding_id] @session)
     let type = types.parameterize(types.primitive('iterator' @session.types) [target] @session.types)
@@ -3546,7 +3546,7 @@ container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.Entry
         let binding = bindings.binding_at(session.registry binding_id)
         binding.store_type = element
         if types.node_at(session.types types.strip_refinement(element session.types)) is? types.ObjectType { binding.read_only_reason = 'borrows the array element; copy it with `let` to change it' }
-        session.registry.by_id[binding_id] = binding
+        bindings.store_binding(@session.registry binding_id binding)
         bindings.bind(@session.scopes inner.lexical.scope name binding_id)
         let target = put(hir.ExpressedIdentifier[contexts.node_at(targets[i] env.lexical session).loc element name binding_id] @session)
         let entries = put(hir.DictEntries[node.loc types.array_type(element none @session.types) iterable fields[i]] @session)
@@ -3745,7 +3745,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
         let parameter_id = bindings.allocate_param(@session.registry name types.primitive('type' @session.types) generic.loc)
         let parameter = bindings.binding_at(session.registry parameter_id)
         parameter.type_value = actual
-        session.registry.by_id[parameter_id] = parameter
+        bindings.store_binding(@session.registry parameter_id parameter)
         bindings.bind(@session.scopes lexical.scope name parameter_id)
     }
     let resolved = types.substitute_function(signature arguments true @session.types)
@@ -3753,7 +3753,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
     let binding_id = bindings.allocate(@session.registry none name 'function' generic.loc)
     let binding = bindings.binding_at(session.registry binding_id)
     binding.value_type = resolved binding.store_type = resolved
-    session.registry.by_id[binding_id] = binding
+    bindings.store_binding(@session.registry binding_id binding)
     # Register before checking: a recursive call with these same types must
     # refer to this declaration, rather than instantiate another body.
     session.registry.generic_instances[binding_id] = bindings.GenericInstance[callee.binding_id arguments contexts.syntax_ref(id env.lexical @session)]
@@ -3768,7 +3768,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
     let declared = put(hir.Declare[generic.loc types.primitive('void' @session.types) 'let' name none value binding_id] @session)
     binding = bindings.binding_at(session.registry binding_id)
     binding.declaration = declared binding.function = value
-    session.registry.by_id[binding_id] = binding
+    bindings.store_binding(@session.registry binding_id binding)
     session.hoisted.push(declared)
     return put(hir.ExpressedIdentifier[callee.loc resolved name binding_id] @session)
 }
@@ -3901,7 +3901,7 @@ match_bind = (name:string value:addr id:addr env:Environment @session:contexts.S
     binding.value_type=type binding.store_type=type
     let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name none checked binding_id] @session)
     binding.declaration=declaration
-    session.registry.by_id[binding_id]=binding
+    bindings.store_binding(@session.registry binding_id binding)
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
     set_read_type(binding_id type env @session)
     container_state.seed(binding_id checked env.state @session)
@@ -4333,7 +4333,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let binding_id=bindings.allocate(@session.registry none hidden_name 'function' literal.loc)
         let binding=bindings.binding_at(session.registry binding_id)
         binding.value_type=full binding.store_type=full
-        session.registry.by_id[binding_id]=binding
+        bindings.store_binding(@session.registry binding_id binding)
         session.hidden_bindings.add(binding_id)
         session.methods[method_key(type_id spec)]=contexts.MethodEntry[binding_id if instance type_id else none mutates]
     }
@@ -4371,7 +4371,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         binding.value_type=node_at(checked session).value_type binding.store_type=binding.value_type binding.function=checked
         let declared=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'const' binding.name none checked binding.id] @session)
         binding.declaration=declared
-        session.registry.by_id[binding.id]=binding
+        bindings.store_binding(@session.registry binding.id binding)
         session.hoisted.push(declared)
     }
     session.prepared_methods.add(type_id)
@@ -4441,7 +4441,7 @@ bind_member_proxy = (name:string value:addr lexical:contexts.Context @session:co
     let id=bindings.allocate(@session.registry none name 'value' node.loc)
     let binding=bindings.binding_at(session.registry id)
     binding.value_type=node.value_type binding.store_type=node.value_type binding.replacement=value
-    session.registry.by_id[id]=binding
+    bindings.store_binding(@session.registry id binding)
     bindings.bind(@session.scopes lexical.scope name id)
 }
 
@@ -4572,7 +4572,7 @@ text_part = (value:addr id:addr env:Environment @session:contexts.Session dispat
         binding.value_type=node.value_type binding.store_type=node.value_type
         let declaration=put(hir.Declare[node.loc types.primitive('void' @session.types) 'let' name node.value_type value binding_id] @session)
         binding.declaration=declaration
-        session.registry.by_id[binding_id]=binding
+        bindings.store_binding(@session.registry binding_id binding)
         let reference=put(hir.ExpressedIdentifier[node.loc node.value_type name binding_id] @session)
         let arms:array<addr>=[]
         let otherwise:addr?=none
@@ -4625,7 +4625,7 @@ branded_text = (value:addr choices:array<type_names.Alternative> id:addr env:Env
     binding.value_type=node.value_type binding.store_type=node.value_type
     let declaration=put(hir.Declare[node.loc types.primitive('void' @session.types) 'let' name node.value_type value binding_id] @session)
     binding.declaration=declaration
-    session.registry.by_id[binding_id]=binding
+    bindings.store_binding(@session.registry binding_id binding)
     let reference=put(hir.ExpressedIdentifier[node.loc node.value_type name binding_id] @session)
     let arms:array<addr>=[]
     let string=types.primitive('string' @session.types)
@@ -4676,7 +4676,7 @@ object_text_function = (owner:addr id:addr env:Environment @session:contexts.Ses
     let helper=bindings.allocate(@session.registry none name 'function' loc)
     let binding=bindings.binding_at(session.registry helper)
     binding.value_type=signature binding.store_type=signature
-    session.registry.by_id[helper]=binding
+    bindings.store_binding(@session.registry helper binding)
     session.object_strings[owner]=helper
     session.hidden_bindings.add(helper)
 
@@ -4708,7 +4708,7 @@ object_text_function = (owner:addr id:addr env:Environment @session:contexts.Ses
     let function=put(hir.FunctionLiteral[loc signature [hir.Param['__dewy_value' owner parameter]] [] none string body source=env.lexical.source] @session)
     let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name none function helper] @session)
     binding.function=function binding.declaration=declaration
-    session.registry.by_id[helper]=binding
+    bindings.store_binding(@session.registry helper binding)
     session.hoisted.push(declaration)
     return helper
 }
@@ -4758,7 +4758,7 @@ declare_constructor = (constructor:hir.TypeValue literal_id:addr id:addr env:Env
     binding.value_type=node_at(checked session).value_type binding.store_type=binding.value_type binding.function=checked
     let declaration=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'const' name none checked binding_id] @session)
     binding.declaration=declaration
-    session.registry.by_id[binding_id]=binding
+    bindings.store_binding(@session.registry binding_id binding)
     session.hidden_bindings.add(binding_id)
     session.hoisted.push(declaration)
     overloads.bindings.push(binding_id)
@@ -4919,7 +4919,7 @@ loop_capture = (id:addr syntax:addr env:Environment @session:contexts.Session ex
     let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name type initial binding_id] @session)
     let binding=bindings.binding_at(session.registry binding_id)
     binding.declaration=declaration binding.store_type=type
-    session.registry.by_id[binding_id]=binding
+    bindings.store_binding(@session.registry binding_id binding)
     let filled=capture_pushes(checked receiver element id env @session)
     if filled is? Error return filled
     # Local result storage stays in the expression's evaluation position.

@@ -149,7 +149,7 @@ def test_native_initialization_matches_hosted(tmp_path):
             declaration = names.get(id(binding.declaration), 'none')
             function = names.get(id(binding.function), 'none')
             value_type = 'none' if binding.type is None else build_type(binding.type)
-            binding_lines.append(f'    registry.by_id[{binding.id}] = bindings.Binding[id={binding.id} name={json.dumps(binding.name)} kind={json.dumps(binding.kind)} loc=span value_type={value_type} declaration={declaration} function={function}]')
+            binding_lines.append(f'    bindings.store_binding(@registry {binding.id} bindings.Binding[id={binding.id} name={json.dumps(binding.name)} kind={json.dumps(binding.kind)} loc=span value_type={value_type} declaration={declaration} function={function}])')
         functions.append(f'''
 case_{index} = ():>void => {{
     let span = Span[0 0]

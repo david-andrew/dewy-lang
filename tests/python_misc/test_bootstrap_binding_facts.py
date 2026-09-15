@@ -38,8 +38,8 @@ main=():>int64=>{{
     let f=hir.append_node(@nodes hir.ExpressedIdentifier[span function 'measure'])
     let called=hir.append_node(@nodes hir.FunctionCall[span word f [text] []])
     let registry=bindings.Registry[]
-    registry.by_id[1]=bindings.Binding[1 'i' 'value' span value_type=word]
-    registry.by_id[2]=bindings.Binding[2 'text' 'value' span value_type=string]
+    bindings.store_binding(@registry 1 bindings.Binding[1 'i' 'value' span value_type=word])
+    bindings.store_binding(@registry 2 bindings.Binding[2 'text' 'value' span value_type=string])
     # Allocate destination ids through the registry so projected routes
     # cannot accidentally collide with the fixture's explicit ids.
     registry.next_id=10

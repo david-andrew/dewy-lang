@@ -72,7 +72,7 @@ def test_native_refinement_facts_match_hosted(tmp_path):
     build = type_builder(type_lines)
     lines, _, names = emit_hir(root, type_value=build, with_names=True)
     word = build('int64')
-    registry_lines = [f'    registry.by_id[{b.id}] = bindings.Binding[{b.id} {json.dumps(b.name)} "value" span value_type={build(b.type)}]'
+    registry_lines = [f'    bindings.store_binding(@registry {b.id} bindings.Binding[{b.id} {json.dumps(b.name)} "value" span value_type={build(b.type)}])'
                       for b in base_bindings]
     state, checks, expected = {}, [], []
 

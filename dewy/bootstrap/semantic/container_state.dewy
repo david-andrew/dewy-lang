@@ -156,7 +156,7 @@ seed = (binding:addr value:addr state:addr @session:contexts.Session):>void => {
 inherited = (state:addr session:contexts.Session):>array<keys.Fact> => {
     let result:array<keys.Fact> = []
     loop fact in facts(state session) {
-        let binding = session.registry.by_id.get(fact.container)
+        let binding = bindings.find_binding(session.registry fact.container)
         if binding isnt? none and binding.route_root is? none and binding.read_only_reason =? 'const binding' {
             # Capturing a logical value does not capture a caller's search
             # temporary or promise that a view will keep its physical slots.

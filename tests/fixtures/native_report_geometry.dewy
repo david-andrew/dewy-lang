@@ -22,7 +22,7 @@ main=():>int64=>{
         let id=bindings.allocate(@session.registry none name 'function' loc)
         let binding=bindings.binding_at(session.registry id)
         binding.value_type=signature
-        session.registry.by_id[id]=binding
+        bindings.store_binding(@session.registry id binding)
         helpers[name]=id
     }
     let first=hir.append_node(@session.hir hir.RuntimeFailure[Span[2 5] never 0 'condition' 'assert'])

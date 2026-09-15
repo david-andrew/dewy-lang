@@ -32,7 +32,12 @@ main=():>int64=>{
     let record=bindings.binding_at(session.registry binding)
     record.type_value=types.GenericTypeAlias[[types.GenericParam['T' word]] word]
     record.value_type=word
-    session.registry.by_id[binding]=record
+    bindings.store_binding(@session.registry binding record)
+    # Persist both the active page and retired pages, then mutate a decoded
+    # copy to check that its pages remain independent of the saved snapshot.
+    let last:addr=0
+    loop i in 0..129 {last=bindings.allocate_param(@session.registry 'parameter' word span)}
+    let route=bindings.route_id(@session.registry binding ['field'] word span)
     session.methods['deleted']=contexts.MethodEntry[binding]
     session.methods.pop('deleted');
     session.methods['retained']=contexts.MethodEntry[binding word true]
@@ -55,6 +60,15 @@ main=():>int64=>{
     if first isnt? hir.Integer or first.value not=? integer.value return 8
     if copy.hir[1] isnt? hir.TargetString return 9
     if copy.methods.length not=? 1 or 'retained' not in? copy.methods return 10
+    if not bindings.has_binding(copy.registry last) return 20
+    if bindings.binding_at(copy.registry last).name not=?'parameter' return 21
+    if bindings.route_at(copy.registry route) is?none return 22
+    let prior=copy.registry
+    let changed=bindings.binding_at(copy.registry last)
+    changed.name='updated'
+    bindings.store_binding(@copy.registry last changed)
+    if bindings.binding_at(copy.registry last).name not=?'updated' return 23
+    if bindings.binding_at(prior last).name not=?'parameter' return 24
     let proof=restored.validation
     if proof is? none or proof.decisions.length not=? 1 return 17
     let unfit=proof.decisions[0].unfit.get(0)

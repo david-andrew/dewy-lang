@@ -1,0 +1,44 @@
+# Registry edits must retain the binding metadata in independent snapshots,
+# including when updates cross a page boundary or use sparse route ids.
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/bindings.dewy" as bindings
+let allocated=():>int64=>_arena_allocated_bytes
+let exercise=(count:addr & ~0):>int64=>{
+    let registry=bindings.Registry[]
+    let loc=Span[0 1]
+    loop i in 0.. and i <? count {
+        bindings.allocate(@registry none 'entry' 'value' loc);
+    }
+    let initial=registry
+    let before=allocated()
+    loop i in 0.. and i <? 64 {
+        let id=1+(i*31)%count
+        let saved=registry
+        let binding=bindings.binding_at(registry id)
+        let previous=binding.value_type
+        let changed:addr=i+1
+        binding.value_type=changed
+        bindings.store_binding(@registry id binding)
+        if bindings.binding_at(saved id).value_type not=?previous return -1
+        let actual=bindings.binding_at(registry id).value_type
+        if actual is?none or actual not=?changed return -2
+        if bindings.binding_at(initial id).value_type isnt?none return -3
+    }
+    let traffic=allocated()-before
+    let saved=registry
+    let route=bindings.route_id(@registry 1 ['nested' 'field'] 42 loc)
+    if bindings.has_binding(saved route) return -4
+    if not bindings.has_binding(registry route) return -5
+    let actual=bindings.binding_at(registry route).value_type
+    if actual is?none or actual not=?42 return -6
+    registry=saved
+    if bindings.has_binding(registry route) return -7
+    return traffic
+}
+let main=(args:array<string>):>int64=>{
+    let traffic=exercise(if args.length >?1 4096 else 1024)
+    if traffic <?0 return -traffic
+    if traffic >?4000000 return 8
+    printl(traffic)
+    return 42
+}

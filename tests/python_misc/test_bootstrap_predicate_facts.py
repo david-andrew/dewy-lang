@@ -56,10 +56,10 @@ main=():>int64=>{{
     let selected=hir.append_node(@nodes hir.TypeTest[span boolean result absent true])
     let unsigned_selected=hir.append_node(@nodes hir.TypeTest[span boolean result unsigned false])
     let registry=bindings.Registry[]
-    registry.by_id[1]=bindings.Binding[1 'i' 'value' span value_type=word]
-    registry.by_id[2]=bindings.Binding[2 'j' 'value' span value_type=word]
-    registry.by_id[3]=bindings.Binding[3 'text' 'value' span value_type=string]
-    registry.by_id[4]=bindings.Binding[4 'result' 'value' span value_type=result_type]
+    bindings.store_binding(@registry 1 bindings.Binding[1 'i' 'value' span value_type=word])
+    bindings.store_binding(@registry 2 bindings.Binding[2 'j' 'value' span value_type=word])
+    bindings.store_binding(@registry 3 bindings.Binding[3 'text' 'value' span value_type=string])
+    bindings.store_binding(@registry 4 bindings.Binding[4 'result' 'value' span value_type=result_type])
     let env=values.Environment[nodes type_nodes registry 1024]
     let state:facts.State=facts.State[]
     facts.set_value(@state facts.Term[1] ranges.Interval[0 100])

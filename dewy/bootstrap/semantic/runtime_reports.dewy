@@ -49,7 +49,7 @@ materialize = (node:hir.RuntimeFailure helpers:dict<string addr> index:lines.Ind
     let declaration=hir.append_node(@session.hir hir.Declare[node.loc empty 'let' name type report binding_id])
     let binding=bindings.binding_at(session.registry binding_id)
     binding.value_type=type binding.store_type=type binding.declaration=declaration
-    session.registry.by_id[binding_id]=binding
+    bindings.store_binding(@session.registry binding_id binding)
     let value=hir.append_node(@session.hir hir.ExpressedIdentifier[node.loc type name binding_id])
     let rendered=helper('_assertion_render' [value text(source.path node @session) integer(source.first_row+line node @session) text(contents node @session)] node helpers @session)
     if rendered is? Error return rendered

@@ -100,11 +100,11 @@ def test_native_value_bounds_match_hosted(tmp_path):
     lines, _, names = emit_hir(root, type_value=build, with_names=True)
     registry_lines = []
     for binding in registry.by_id.values():
-        registry_lines.append(f'''    registry.by_id[{binding.id}] = bindings.Binding[
+        registry_lines.append(f'''    bindings.store_binding(@registry {binding.id} bindings.Binding[
         id={binding.id} name={json.dumps(binding.name)} kind="value" loc=span
         value_type={build(binding.type)} declaration={names[id(binding.declaration)]}
         store_type={"none" if binding.store_type is None else build(binding.store_type)}
-    ]''')
+    ])''')
     checks, expected = [], []
 
     def emit(label, expression, value):

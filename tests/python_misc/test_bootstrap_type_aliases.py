@@ -76,7 +76,7 @@ main = ():>int64 => {{
     let export = types.module_field(namespace 'Box')
     $runtime_assert export isnt? none and export.type_value isnt? none
     let registry = bindings.Registry[]
-    registry.by_id[21] = bindings.Binding[id=21 name='Box' kind='value' loc=span type_value=export.type_value]
+    bindings.store_binding(@registry 21 bindings.Binding[id=21 name='Box' kind='value' loc=span type_value=export.type_value])
     let bound = bindings.binding_at(registry 21)
     $runtime_assert bound.type_value isnt? none
     let nodes:array<hir.AST> = []

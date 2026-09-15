@@ -92,3 +92,22 @@ def test_route_queries_do_not_copy_unrelated_roots(tmp_path):
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 42, result.stderr
     assert 0 <= int(result.stdout) < 25_000_000
+
+
+def test_native_binding_snapshot_pages(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver
+
+    binary = build_program_driver(tmp_path)
+    source = ROOT / 'tests/fixtures/native_binding_snapshots.dewy'
+    compiled = subprocess.run([binary, source, ROOT / 'library', tmp_path / 'prelude-cache'],
+                              capture_output=True, text=True, timeout=120)
+    assert compiled.returncode == 0, compiled.stderr
+    output = tmp_path / 'pages.udewy'
+    output.write_text(compiled.stdout)
+    for target in ('x86_64', 'c'):
+        assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+        for args in ([], ['large']):
+            result = subprocess.run([cache_artifact(output).resolve(), *args],
+                                    capture_output=True, text=True, timeout=15)
+            assert result.returncode == 42, (target, args, result)
+            assert 0 < int(result.stdout) < 4_000_000

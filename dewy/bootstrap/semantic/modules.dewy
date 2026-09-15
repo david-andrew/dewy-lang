@@ -125,7 +125,7 @@ install = (spec:imports.Import module:Module id:addr env:checking.Environment @e
         let binding = bindings.binding_at(engine.session.registry binding_id)
         binding.value_type = types.module_type(fields @engine.session.types)
         binding.read_only_reason = 'module namespace'
-        engine.session.registry.by_id[binding_id] = binding
+        bindings.store_binding(@engine.session.registry binding_id binding)
         bindings.bind(@engine.session.scopes env.lexical.scope name binding_id)
     } else {
         let names:array<imports.Name> = []
@@ -221,7 +221,7 @@ fresh_prelude_session = (engine:Engine):>bool => {
     if engine.session.sources.length not=? 0 or engine.session.scopes.length not=? 0 return false
     if engine.session.hir.length not=? 0 or engine.session.syntax_refs.length not=? 0 return false
     if engine.session.types.entries.length not=? 0 return false
-    return engine.session.registry.by_id.length =? 0
+    return engine.session.registry.binding_pages.length =? 0 and engine.session.registry.current_bindings.length =? 0
 }
 ensure_prelude = (@engine:Engine):>Error? => {
     if engine.prelude_loaded or engine.prelude_loading return none

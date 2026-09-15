@@ -53,7 +53,13 @@ Checker:type = [
 # state. The driver prepares these once while the checked graph is frozen.
 prepare = (env:values.Environment):>facts.Context => {
     let context=facts.Context[env.cap element_roots=elements.roots(env.registry)]
-    loop [id binding] in env.registry.by_id {
+    loop [page_id page] in env.registry.binding_pages {
+        loop id in page.keys {
+            let interval=values.type_interval(id env)
+            if interval isnt? none {context.widths[id]=interval}
+        }
+    }
+    loop id in env.registry.current_bindings.keys {
         let interval=values.type_interval(id env)
         if interval isnt? none {context.widths[id]=interval}
     }
@@ -304,7 +310,7 @@ length_contract = (id:addr method:hir.ArrayMethod array:addr after:ranges.Interv
     let declared=checker.declared.get(array)
     if declared isnt? none {loop p in declared.propositions {conditions.push(p)}}
     # Selecting an optional array payload preserves its storage contract.
-    let binding=checker.data.registry.by_id.get(array)
+    let binding=bindings.find_binding(checker.data.registry array)
     if binding isnt? none and binding.store_type isnt? none {
         let storage=types.node_at(checker.data.env.types binding.store_type)
         if storage is? types.TypeOr {

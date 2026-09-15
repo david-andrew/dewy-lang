@@ -149,7 +149,7 @@ def test_native_bounds_visitor_matches_hosted(tmp_path):
         for binding in registry.by_id.values():
             type_ = 'none' if binding.type is None else build(binding.type)
             storage = 'none' if binding.store_type is None else build(binding.store_type)
-            binding_lines.append(f'    registry.by_id[{binding.id}]=bindings.Binding[{binding.id} {json.dumps(binding.name)} {json.dumps(binding.kind)} span value_type={type_} store_type={storage} declaration={names.get(id(binding.declaration), "none")}]')
+            binding_lines.append(f'    bindings.store_binding(@registry {binding.id} bindings.Binding[{binding.id} {json.dumps(binding.name)} {json.dumps(binding.kind)} span value_type={type_} store_type={storage} declaration={names.get(id(binding.declaration), "none")}])')
         functions.append(f'''case_{index}=():>void=>{{
     let span=Span[0 0]
     let srcfile=SrcFile['fixture' '']

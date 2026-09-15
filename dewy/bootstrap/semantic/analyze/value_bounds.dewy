@@ -85,7 +85,7 @@ declared_interval = (id:addr env:Environment):>ranges.Interval? => {
     return interval
 }
 type_interval = (binding_id:addr env:Environment):>ranges.Interval? => {
-    let binding = env.registry.by_id.get(binding_id)
+    let binding = bindings.find_binding(env.registry binding_id)
     if binding is? none return none
     let declared = binding_type(binding env.nodes)
     return if declared is? none none else declared_interval(declared env)
@@ -126,7 +126,7 @@ binding_interval = (term:facts.Term state:facts.State env:Environment):>ranges.I
 constant_binding = (id:addr? nodes:array<hir.AST> type_nodes:types.Table registry:bindings.Registry @seen:set<addr>):>ranges.Interval? => {
     if id is? none return none
     if id in? seen return none
-    let binding = registry.by_id.get(id)
+    let binding = bindings.find_binding(registry id)
     if binding is? none return none
     let declaration_id = binding.declaration
     if declaration_id is? none return none

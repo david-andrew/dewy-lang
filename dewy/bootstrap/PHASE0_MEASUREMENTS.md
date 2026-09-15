@@ -3686,3 +3686,67 @@ Artifacts: `phase-storage-observation-gates.log` (initial storage-annotation
 failure plus five passes), `phase-storage-inferred-locals-gates.log`,
 `inferred-storage-representation-gates.log`, and
 `native-phase-storage-observation`.
+
+### Dependency-free hosted checkpoint after compact emission
+
+Frozen `a6e18feb` builds the complete compiler through hosted Python in
+**75.667 seconds**, with 1,378,636 KiB maximum process RSS. Checking takes
+36.940 s, lowering 15.922 s, emission 2.919 s and the backend 12.658 s
+(loading 0.133 s, code generation 6.733 s, toolchain 5.783 s). Generated µDewy
+is 38,137,217 bytes, SHA-256
+`f2c24c8e3b79b384941ff64de17fc460da84763ad22f9ec733bc0107680563a8`.
+No additional Python dependency is used. This remains close to the preceding
+75.713-second hosted checkpoint; it is a maintenance/parity observation,
+not a claimed hosted speedup. Artifacts: `source-phase-storage` and
+`hosted-compact-literals-full`.
+
+### Page binding metadata to bound snapshot edit costs
+
+The refreshed native sample (`native-compact-literal-samples`, 289 stops,
+45 in the backend wait) still spends substantial time in arena allocation,
+release and copying. Binding-registry updates appear in the copying stacks:
+a write into a shared flat dictionary can clone every rich binding record.
+
+The registry now uses 128-id pages, with its active page stored separately.
+Sequential declarations and repeated edits mutate that page directly; switching
+pages seals the old page and retrieves the next. The complete registry remains
+a value: forks, rollback, sparse route ids and cached snapshots carry the page
+index and active page together. Lookup/store helpers hide this representation.
+Bounds preparation iterates keys instead of copying unused binding values.
+The checked-prelude format advances to version 4, with regenerated typed codecs.
+
+A first paging prototype fetched/copied a page for every write. Although its
+edit allocations fell, complete kernel time regressed from 15/56 ms to
+24/88–95 ms. It was replaced by the active-page implementation below.
+Four alternating direct-output samples, using the same staged C seed and
+frozen library for both kernels:
+
+| Registry size | Complete kernel before | Complete kernel after | Edit allocations before → after |
+| --- | ---: | ---: | ---: |
+| 1,024 bindings | 16.91 / 15.85 ms | 5.46 / 4.74 ms | 17,545,720 → 2,517,792 bytes |
+| 4,096 bindings | 63.02 / 61.59 ms | 10.61 / 10.01 ms | 69,450,232 → 2,747,000 bytes |
+
+Times include registry construction, 64 edits, snapshot assertions, route
+rollback and printing. Allocation counts cover the edits. The committed native
+kernel has a 4 MB edit budget and runs on direct and C output. This is not yet
+a full-build speedup claim; cold-page lookup adds a page-index lookup.
+
+Validation: ten final binding/page, cache round-trip/invalidation, bounds and
+query regressions pass, including full native checking/lowering of the budget
+kernel and execution at both sizes on both backends. Thirteen other migrated
+analysis cases passed on the first paging representation. Final cache tests
+include active and retired pages and an independently mutated decoded copy.
+A test-file construction mistake and three standalone hosted bounds queries
+without initialized call-effect state were corrected; the latter retains a
+conservative empty map until full validation computes effects.
+
+An attempted nested dictionary place (`pages[page][id]=value`) remains unsupported
+by existing checking/storage routes; the active-page design uses existing member
+stores and dictionary pop. Extending indexed container places is a separate
+settled implementation gap, not a language-semantic change made in this batch.
+
+Artifacts: `paged-bindings-measurement/{results.json,active-results.json}`
+(first and final implementations), `paged-bindings-initial-gate.log`,
+`paged-bindings-schema-and-analysis-gates.log`,
+`paged-bindings-integration-gates.log` (initial failures),
+`paged-bindings-active-integration-gates.log` (10 passes), and codec build logs.

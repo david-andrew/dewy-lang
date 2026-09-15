@@ -853,7 +853,7 @@ predeclare_alias = (id:addr context:contexts.Context @session:contexts.Session):
     let binding_id = bindings.allocate(@session.registry reference name 'value' node.loc)
     let binding = bindings.binding_at(session.registry binding_id)
     binding.value_type = types.primitive('type' @session.types)
-    session.registry.by_id[binding_id] = binding
+    bindings.store_binding(@session.registry binding_id binding)
     bindings.bind(@session.scopes context.scope name binding_id)
     session.pending_aliases[binding_id] = contexts.PendingAlias[contexts.SyntaxRef[context.source node.right context.scope]]
     return binding_id
@@ -884,7 +884,7 @@ generic_parameters = (parameters:parser.Block context:contexts.Context @session:
         let binding_id = bindings.allocate_param(@session.registry name types.primitive('type' @session.types) node.loc)
         let binding = bindings.binding_at(session.registry binding_id)
         binding.type_value = types.type_variable(name bound @session.types)
-        session.registry.by_id[binding_id] = binding
+        bindings.store_binding(@session.registry binding_id binding)
         bindings.bind(@session.scopes inner.scope name binding_id)
     }
     return GenericParameters[params inner]
@@ -987,7 +987,7 @@ resolve_alias = (binding_id:addr @session:contexts.Session):>types.TypeAliasValu
         types.resolve_alias(named value @session.types)
     }
     binding.type_value = value
-    session.registry.by_id[binding_id] = binding
+    bindings.store_binding(@session.registry binding_id binding)
     return value
 }
 

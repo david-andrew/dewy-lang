@@ -67,9 +67,9 @@ def test_native_integer_representations(tmp_path):
     lines, root_id, names = emit_hir(root, type_value=build, with_names=True)
     registry_lines = []
     for binding in registry.by_id.values():
-        registry_lines.append(f'''registry.by_id[{binding.id}]=bindings.Binding[id={binding.id} name={json.dumps(binding.name)} kind={json.dumps(binding.kind)} loc=span
+        registry_lines.append(f'''bindings.store_binding(@registry {binding.id} bindings.Binding[id={binding.id} name={json.dumps(binding.name)} kind={json.dumps(binding.kind)} loc=span
 value_type={"none" if binding.type is None else build(binding.type)} type_value={"none" if binding.type_value is None else build(binding.type_value)}
-declaration={"none" if binding.declaration is None else names[id(binding.declaration)]}]''')
+declaration={"none" if binding.declaration is None else names[id(binding.declaration)]}])''')
     big_id, nonzero_id = build(big), build(nonzero)
     prelude_text = '[' + ' '.join(f'{json.dumps(name)}->{binding.id}' for name, binding in prelude.items()) + ']'
     flags_text = '[' + ' '.join(f'{names[id(node)]}->representations.Unfit[none "int64"]' for node in flagged) + ']'

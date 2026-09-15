@@ -218,7 +218,7 @@ verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<
         }
         let node=hir.node_at(data.env.nodes expressions.strip_casts(value data.env.nodes))
         if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id not in? assigned {
-            let binding=data.registry.by_id.get(node.binding_id)
+            let binding=bindings.find_binding(data.registry node.binding_id)
             if binding isnt? none and binding.declaration isnt? none {
                 let declaration=hir.node_at(data.env.nodes binding.declaration)
                 if declaration is? hir.Declare and declaration.annotation isnt? none {

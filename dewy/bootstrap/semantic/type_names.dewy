@@ -57,7 +57,7 @@ instance = (value:addr loc:Span @session:contexts.Session):>addr => {
     let id=bindings.allocate(@session.registry none "__dewy_typename_{session.registry.next_id}" 'value' loc)
     let binding=bindings.binding_at(session.registry id)
     binding.value_type=node.value_type binding.store_type=node.value_type
-    session.registry.by_id[id]=binding
+    bindings.store_binding(@session.registry id binding)
     let declared=hir.append_node(@session.hir hir.Declare[loc types.primitive('void' @session.types) 'const' binding.name none value id])
     let read=hir.append_node(@session.hir hir.ExpressedIdentifier[loc node.value_type binding.name id])
     let arms:array<addr>=[]
