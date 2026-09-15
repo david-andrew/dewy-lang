@@ -1229,3 +1229,46 @@ writes through the exposed live field; a negative count is rejected. A real
 container fixture checks counts after removal and clearing. Existing native
 seeds lack this length fact, so the updated hosted compiler provides the next
 seed before native compilation of this new source is verified.
+
+### Structural identity integration and hosted ASCII segmentation
+
+The hosted C build of `13b1ee96` completes in **203.58 seconds**, peak process
+RSS 2,239,740 KiB: checking 61.41 s, lowering 35.82 s, emission 4.66 s,
+backend 95.43 s. Its executable builds pinned t0 in **11.59 seconds**
+(previously 12.49 s), with lowering **2.23 → 1.39 s**, and identical emitted
+µDewy. The structural-identity kernel passes through the native CLI with
+allocation **220,538,976 → 563,040 bytes** and key length **299,511 → 39**;
+the dictionary/set length fixture also passes through the full native CLI.
+
+A full direct native build of frozen `13b1ee96` completes in **94.81 seconds**
+(previously 128.43 s), peak process RSS **7,851,532 KiB** (previously
+8,557,888 KiB). Frontend 26.07 s, validation 12.52 s, preparation 2.80 s,
+lowering 19.60 s, emission 12.88 s, backend 18.23 s. It emits 48,818,721 bytes
+of µDewy, SHA-256
+`3ba35c9e07fcfbf4f16626ced7d0cafc5679075abbbb637c6c7172b26f1589f7`.
+These are isolated fresh-process/empty-output measurements on the recorded
+machine and toolchains, with OS page caches uncontrolled. This is one native
+generation, not a refreshed fixed point or the sub-minute acceptance target.
+Artifacts: `host-full-structural-ids`, `native-structural-ids-{t0,full}`,
+`structural-ids-native-gates`.
+
+The remaining emission cost exposed a hosted/native implementation mismatch:
+hosted-generated string materialization binary-searched three Unicode property
+tables even for ASCII. Hosted lowering now uses the same ASCII properties as
+the native library, retaining the complete grapheme state machine for CR/LF
+and non-ASCII transitions. No Unicode data or string semantics changed.
+
+A repeated join of 7.4 MB of ASCII takes **5.26 → 0.32 seconds** on the direct
+backend and **0.60 → 0.070 seconds** on GCC (medians of three isolated runtime
+samples, excluding compilation). All return the expected total length.
+Twenty-nine selected checks pass, including the full Unicode 16 grapheme
+corpus, all 16,384 ASCII pairs and invalid UTF-8 through runtime decoding on
+both backends, independent library segmentation, and string join/slice checks.
+Artifacts: `ascii-segmentation/{before,after}.udewy`, `results.json`, `gates.log`.
+Full compiler timing with this hosted optimization remains an integration gate.
+
+An updated checking-only hosted profile is retained in
+`host-check-structural-ids-profile`. Parsing accounts for 76.4 of its 207.1
+profiled seconds, and bounds validation 34.1. These include instrumentation
+overhead (and brief overlapping small regressions); they identify candidates,
+not new baseline timings. The next batch should address those measured costs.

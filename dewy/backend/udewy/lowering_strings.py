@@ -579,6 +579,33 @@ class _StringLowering:
             ],
             None,
         )
+        # These three Unicode tables have constant ASCII properties except
+        # for the four grapheme classes. Match the native library's shortcut:
+        # property lookup changes, but the segmentation state machine still
+        # handles CR/LF, combining marks, and prepend characters across seams.
+        ascii: hir.AST = hir.Block(loc, ty.VOID_TYPE, [], True)
+        if role == 'gcb':
+            def is_byte(value: int) -> hir.AST:
+                return self._int64_comparison('__eq__', scalar, self._int64_literal(loc, value), loc)
+
+            ascii = hir.Flow(loc, ty.VOID_TYPE, [
+                hir.IfArm(loc, ty.VOID_TYPE, condition,
+                          hir.Assign(loc, ty.VOID_TYPE, result, '=', self._int64_literal(loc, value)))
+                for condition, value in (
+                    (is_byte(13), GCB_CR),
+                    (is_byte(10), GCB_LF),
+                    (hir.ShortCircuit(loc, 'bool', 'or',
+                        self._int64_comparison('__lt__', scalar, self._int64_literal(loc, 32), loc),
+                        is_byte(127)), GCB_CONTROL),
+                )
+            ], None)
+        elif role not in {'ep', 'incb'}:
+            raise ValueError(f'unknown Unicode property role: {role}')
+        lookup = hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
+            loc, ty.VOID_TYPE,
+            self._int64_comparison('__lt__', scalar, self._int64_literal(loc, 128), loc),
+            ascii,
+        )], loop)
         return [
             hir.Declare(
                 loc,
@@ -612,7 +639,7 @@ class _StringLowering:
                 'int64',
                 self._int64_literal(loc, default),
             ),
-            loop,
+            lookup,
         ], result
 
     def _grapheme_array_to_string(

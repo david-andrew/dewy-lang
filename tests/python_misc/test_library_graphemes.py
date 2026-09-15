@@ -3,6 +3,8 @@ import struct
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic.unicode.data import (
@@ -23,7 +25,8 @@ def test_grapheme_runtime_tables_match_generated_data():
         assert (ROOT / 'library/unicode' / name).read_bytes() == content
 
 
-def test_dewy_utf8_grapheme_boundaries(tmp_path):
+@pytest.mark.parametrize(('mode', 'target'), [('library', 'x86_64'), ('runtime', 'x86_64'), ('runtime', 'c')])
+def test_dewy_utf8_grapheme_boundaries(tmp_path, mode, target):
     texts = ['', 'ASCII', 'e\u0301', '👩‍👩‍👧‍👦', '🇺🇸🇨🇦🇫', '\r\n', 'क्\u200dष']
     for line in (ROOT / 'tests/data/GraphemeBreakTest-16.0.0.txt').read_text().splitlines():
         tokens = line.split('#')[0].split()
@@ -38,6 +41,21 @@ def test_dewy_utf8_grapheme_boundaries(tmp_path):
     expected.extend(['invalid'] * len(invalid))
     data = tmp_path / 'cases.bin'
     data.write_bytes(b''.join(struct.pack('<I', len(case)) + case for case in cases))
+    segment = '''
+        let result=segmentation.boundaries(bytes)
+        if result is? none {printl('invalid') continue}
+        let parts:array<string>=[]
+        loop boundary in result {parts.push("{boundary}")}
+    ''' if mode == 'library' else '''
+        let result=bytes as string|none
+        if result is? none {printl('invalid') continue}
+        let parts:array<string>=['0']
+        let boundary:int64=0
+        loop cluster in result {
+            boundary+=(cluster as array<uint8>).length
+            parts.push("{boundary}")
+        }
+    '''
     source = tmp_path / 'graphemes.dewy'
     source.write_text(f'''
 import p"{ROOT / 'library/unicode/graphemes.dewy'}" as segmentation
@@ -56,10 +74,7 @@ main=(argv:array<string>):>int64=>{{
             bytes.push(data[offset])
             offset+=1 index+=1
         }}
-        let result=segmentation.boundaries(bytes)
-        if result is? none {{printl('invalid') continue}}
-        let parts:array<string>=[]
-        loop boundary in result {{parts.push("{{boundary}}")}}
+        {segment}
         printl(parts.join(','))
     }}
     return 0
@@ -67,7 +82,7 @@ main=(argv:array<string>):>int64=>{{
 ''')
     output = source.with_suffix('.udewy')
     output.write_text(codegen(SrcFile.from_path(source)))
-    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
     result = subprocess.run([cache_artifact(output).resolve(), data], capture_output=True, text=True, timeout=180, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.splitlines() == expected
