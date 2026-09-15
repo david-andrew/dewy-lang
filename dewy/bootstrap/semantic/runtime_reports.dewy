@@ -4,6 +4,7 @@ import p"source_views.dewy" as sources
 import p"bindings.dewy" as bindings
 import p"hir.dewy" as hir
 import p"ty.dewy" as types
+import p"source_lines.dewy" as lines
 
 # Runtime failures become ordinary calls to the installed reporting library.
 # Resolve the compiler's helper identities, so a source declaration named
@@ -24,12 +25,13 @@ helper = (name:string arguments:array<addr> node:hir.RuntimeFailure helpers:dict
 text = (value:string node:hir.RuntimeFailure @session:contexts.Session):>addr => hir.append_node(@session.hir hir.String[node.loc types.string_literal(value @session.types) value])
 integer = (value:int64 node:hir.RuntimeFailure @session:contexts.Session):>addr => hir.append_node(@session.hir hir.Integer[node.loc types.primitive('int64' @session.types) '0d' value])
 
-materialize = (node:hir.RuntimeFailure helpers:dict<string addr> @session:contexts.Session):>addr|Error => {
+materialize = (node:hir.RuntimeFailure helpers:dict<string addr> index:lines.Index @session:contexts.Session):>addr|Error => {
     let span=if node.condition is? none node.loc else hir.node_at(session.hir node.condition).loc
     let source=sources.file_at(node.source_file session)
-    let line=source.line_of(span.start)
-    let begin=source.line_start(line)
-    let limit=source.line_end(line)
+    let location=lines.locate(index span.start)
+    let line=location.row
+    let begin=location.begin
+    let limit=location.end
     let stop=if span.stop <? limit span.stop else limit
     let dim=if node.dimmed is? none stop else if node.dimmed.stop <? limit node.dimmed.stop else limit
     # Source geometry is already expressed in Dewy graphemes, the same units
@@ -69,6 +71,9 @@ materialize = (node:hir.RuntimeFailure helpers:dict<string addr> @session:contex
 lower = (root:addr helpers:dict<string addr> @session:contexts.Session):>Error? => {
     let pending:array<addr>=[root]
     let seen:set<addr>=set[]
+    # Source bodies remain fixed throughout this pass. Keep the cache local
+    # to that snapshot, and build nothing for sources with no runtime report.
+    let indexed:dict<addr lines.Index>=[]
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
@@ -76,7 +81,12 @@ lower = (root:addr helpers:dict<string addr> @session:contexts.Session):>Error? 
         let node=hir.node_at(session.hir id)
         loop child in hir.children(node) {pending.push(child)}
         if node isnt? hir.RuntimeFailure or node.lowered isnt? none continue
-        let result=materialize(node helpers @session)
+        let index=indexed.get(node.source_file)
+        if index is? none {
+            index=lines.build(sources.file_at(node.source_file session).body)
+            indexed[node.source_file]=index
+        }
+        let result=materialize(node helpers index @session)
         if result is? Error return result
         $runtime_assert id <? session.hir.length
         node.lowered=result

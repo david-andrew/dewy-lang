@@ -1,0 +1,38 @@
+# Geometry for one immutable source snapshot. Build once, then locate each
+# diagnostic in logarithmic time instead of rescanning the file prefix.
+# Offsets are graphemes, matching SrcFile and HIR spans. A CRLF is one
+# grapheme; a lone CR remains source content, exactly as in reporting.dewy.
+Index:type = const [starts:array<addr> ends:array<addr>]
+Location:type = const [row:addr begin:addr end:addr]
+
+build = (body:string):>Index => {
+    let starts:array<addr>=[0]
+    let ends:array<addr>=[]
+    loop offset in 0.. and offset <? body.length {
+        let grapheme=body[offset]
+        if grapheme =? '\n' or grapheme =? '\r\n' {
+            ends.push(offset)
+            starts.push(offset+1)
+        }
+    }
+    # Even an empty file, or a file ending in a newline, has a final row.
+    ends.push(body.length)
+    return Index[starts ends]
+}
+
+locate = (index:Index offset:addr):>Location => {
+    let low:addr=0
+    let high=index.starts.length
+    loop low <? high {
+        let middle=low+(high-low)//2
+        $runtime_assert middle <? index.starts.length
+        if index.starts[middle] <=? offset {low=middle+1}
+        else {high=middle}
+    }
+    # Upper-bound search retains the preceding row at a line-end grapheme.
+    # An offset at/past EOF belongs to the final row, as in SrcFile.line_of.
+    $runtime_assert low >? 0
+    let row=low-1
+    $runtime_assert row <? index.starts.length and row <? index.ends.length
+    return Location[row index.starts[row] index.ends[row]]
+}

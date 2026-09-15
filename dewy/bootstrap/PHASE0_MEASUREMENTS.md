@@ -1432,3 +1432,28 @@ a read-only summary. The HIR descriptions now spell out that distinction.
 Fifteen semantic/effect checks and eighteen join/call-storage checks pass,
 including native/hosted summary agreement and aliasing argument evaluation.
 Artifacts: `capture-reader-gates/join-effects.log` and `join-storage.log`.
+
+### Index source lines while materializing runtime reports
+
+A bounded profile of validation and preparation found runtime-report
+materialization in 69 of 190 stacks. Source line lookup repeatedly scanned
+the file prefix: line number, line start, and line end each repeated that
+work. The lowering pass now builds a grapheme-based line index lazily for
+each source it reports on, then uses binary search. The cache dies with the
+pass; mutable source files cannot leave stale geometry in a later session.
+
+In an isolated native-compiled kernel, locating 1,000 end-of-file reports in
+a 1,000-line source takes **10.88 seconds before and 0.0053 seconds after**,
+including index construction. Arena payload allocation drops from
+**5,184,003,544 to 1,796,656 bytes**. Both compute the expected location sum.
+The first timing overlapped regression checks; `isolated-measurement.json`
+is the retained performance comparison. Full-build impact remains unmeasured.
+
+Hosted-built and native-built fixtures pass the same explicit geometry and
+report-construction checks: empty sources, CRLF, trailing newline, combining
+characters, emoji sequences, EOF offsets, multiline clipping, multiple source
+identities, first-row offsets, assertion/expectation/fail reports, and repeated
+lowering without duplicate helper construction. The geometry test compares
+array entries explicitly; aggregate comparison remains the separately recorded
+design/parity question. Artifacts: `source-lines-gates`,
+`native-reader-validation-samples`, and `source-lines-*-gate*.log`.
