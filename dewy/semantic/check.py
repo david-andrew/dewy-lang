@@ -47,7 +47,7 @@ class LoopBoundary:
     parent_label_scope: LabelScope
 
 
-@dataclass
+@dataclass(repr=False)
 class Context:
     """global context for the typechecker"""
     srcfile: SrcFile
@@ -104,6 +104,18 @@ class Context:
     target: str = 'x86_64'  # backend target: `$target`
     allow_place_expression: bool = False
     # TODO: etc stuff
+
+    def __repr__(self) -> str:
+        # Scopes share declarations and point back to module contexts. A
+        # recursive dataclass repr can expand that DAG exponentially while
+        # reporting an unrelated exception. Describe this scope without
+        # rendering the compiler state reachable from it.
+        source = str(self.srcfile.path) if self.srcfile.path is not None else '<input>'
+        return (
+            f'Context(source={source!r}, target={self.target!r}, '
+            f'scopes={len(self.binding_scopes.maps)}, '
+            f'bindings={len(self.binding_registry.by_id)})'
+        )
 
 
 class _ModuleNamespace:
