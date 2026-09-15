@@ -1,0 +1,27 @@
+import p"../../dewy/bootstrap/semantic/analyze/dense_ids.dewy" as dense
+
+main=():>int64=>{
+    let values=dense.Set[]
+    if dense.contains(values 0) or dense.contains(values 64) return 1
+    loop id in [0 63 64 127 128] {dense.add(@values id)}
+    loop id in 0..130 {
+        let expected=id =? 0 or id =? 63 or id =? 64 or id =? 127 or id =? 128
+        if dense.contains(values id) not=? expected return 2
+    }
+    let saved=values
+    dense.add(@values 65)
+    dense.add(@values 100000)
+    if dense.contains(saved 65) or dense.contains(saved 100000) return 3
+    dense.add(@saved 66)
+    if dense.contains(values 66) return 4
+    if not dense.includes(values set[0 63 64 65 127 128 100000]) return 5
+    if dense.includes(values set[0 1]) return 6
+
+    # Duplicate insertion is a read, including through shared storage.
+    let shared=values
+    let before:int64=_arena_allocated_bytes
+    loop i in 0..9999 {dense.add(@values 64)}
+    if _arena_allocated_bytes not=? before return 7
+    if not dense.contains(shared 100000) return 8
+    return 42
+}

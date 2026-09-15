@@ -3,6 +3,7 @@ import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
 import p"../bindings.dewy" as bindings
 import p"effects.dewy" as effects
+import p"dense_ids.dewy" as dense
 
 doc"""
 Source-order initialization of checked HIR, before target-specific lowering.
@@ -19,7 +20,7 @@ for shared call graphs: repeatedly traversing every path would be exponential.
 
 CallableEffect:type = const [targets:array<addr>]
 MemberRoute:type = const [binding_id:addr path:array<string>]
-CheckFrame:type = [function_id:addr available:set<addr> required:set<addr>=set[] assumed_calls:set<addr>=set[]]
+CheckFrame:type = [function_id:addr available:dense.Set required:set<addr>=set[] assumed_calls:set<addr>=set[]]
 CheckedCall:type = const [required:set<addr> assumed_calls:set<addr>]
 Checker:type = [
     nodes:array<hir.AST> type_nodes:types.Table
@@ -41,7 +42,7 @@ Checker:type = [
 record_requirements = (required:set<addr> assumed:set<addr> @checker:Checker):>void => {
     loop i in 0.. and i <? checker.frames.length {
         let frame = checker.frames[i]
-        loop id in required { if id in? frame.available { frame.required.add(id) } }
+        loop id in required { if dense.contains(frame.available id) { frame.required.add(id) } }
         loop id in assumed { if id not=? frame.function_id { frame.assumed_calls.add(id) } }
         checker.frames[i] = frame
     }
@@ -311,9 +312,9 @@ object_field_value = (id:addr name:string parameters:dict<addr CallableEffect> s
     return none
 }
 
-require_initialized = (node:hir.ExpressedIdentifier initialized:set<addr> @checker:Checker):>void => {
+require_initialized = (node:hir.ExpressedIdentifier initialized:dense.Set @checker:Checker):>void => {
     if node.binding_id is? none return void
-    if node.binding_id in? initialized { record_requirements(set[node.binding_id] set[] @checker) return void }
+    if dense.contains(initialized node.binding_id) { record_requirements(set[node.binding_id] set[] @checker) return void }
     let binding = bindings.binding_at(checker.registry node.binding_id)
     if binding.builtin return void
     checker.problem = Error[
@@ -322,13 +323,13 @@ require_initialized = (node:hir.ExpressedIdentifier initialized:set<addr> @check
         hint='move the declaration before the call that can reach this use'
     ]
 }
-check_defaults = (function:hir.FunctionLiteral initialized:set<addr> parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>set<addr> => {
+check_defaults = (function:hir.FunctionLiteral initialized:dense.Set parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>dense.Set => {
     let current = initialized
     let params = effects.literal_params(function)
     loop param in params { if param is? hir.BoundParam { current = check_eager(param.value current parameters stack @checker) } }
     return current
 }
-check_block = (block:hir.Block initialized:set<addr> parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>set<addr> => {
+check_block = (block:hir.Block initialized:dense.Set parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>dense.Set => {
     let current = initialized
     loop id in block.items {
         if checker.problem isnt? none return current
@@ -340,19 +341,19 @@ check_block = (block:hir.Block initialized:set<addr> parameters:dict<addr Callab
             let expr = hir.node_at(checker.nodes item.expr)
             if expr is? hir.FunctionLiteral { current = check_defaults(expr current parameters stack @checker) }
             else { current = check_eager(item.expr current parameters stack @checker) }
-            if item.binding_id isnt? none { current.add(item.binding_id) }
+            if item.binding_id isnt? none { dense.add(@current item.binding_id) }
         }
         else { current = check_eager(id current parameters stack @checker) }
         checker.srcfile=source
     }
     return current
 }
-check_children = (children:array<addr> initialized:set<addr> parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>set<addr> => {
+check_children = (children:array<addr> initialized:dense.Set parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>dense.Set => {
     let current = initialized
     loop id in children { current = check_eager(id current parameters stack @checker) }
     return current
 }
-check_eager = (id:addr initialized:set<addr> parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>set<addr> => {
+check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>dense.Set => {
     if checker.problem isnt? none return initialized
     let node = hir.node_at(checker.nodes id)
     if node is? hir.ExpressedIdentifier { require_initialized(node initialized @checker) return initialized }
@@ -363,7 +364,7 @@ check_eager = (id:addr initialized:set<addr> parameters:dict<addr CallableEffect
     }
     if node is? hir.Declare {
         let current = check_eager(node.expr initialized parameters stack @checker)
-        if node.binding_id isnt? none { current.add(node.binding_id) }
+        if node.binding_id isnt? none { dense.add(@current node.binding_id) }
         return current
     }
     if node is? hir.FunctionCall {
@@ -405,7 +406,7 @@ check_eager = (id:addr initialized:set<addr> parameters:dict<addr CallableEffect
                     $runtime_assert iterator is? hir.IteratorExpression
                     let target = hir.node_at(checker.nodes iterator.target)
                     $runtime_assert target is? hir.ExpressedIdentifier
-                    if target.binding_id isnt? none { body_initialized.add(target.binding_id) }
+                    if target.binding_id isnt? none { dense.add(@body_initialized target.binding_id) }
                 }
                 check_eager(arm.body body_initialized parameters stack @checker);
                 continue
@@ -442,7 +443,7 @@ check_eager = (id:addr initialized:set<addr> parameters:dict<addr CallableEffect
         let current = initialized
         loop field in node.fields {
             current = check_eager(field.value current parameters stack @checker)
-            if field.binding_id isnt? none { current.add(field.binding_id) }
+            if field.binding_id isnt? none { dense.add(@current field.binding_id) }
         }
         return initialized
     }
@@ -475,7 +476,7 @@ subset = (left:set<addr> right:set<addr>):>bool => {
     loop id in left { if id not in? right return false }
     return true
 }
-check_function = (id:addr initialized:set<addr> arguments:array<addr> keywords:dict<string addr> outer_parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>void => {
+check_function = (id:addr initialized:dense.Set arguments:array<addr> keywords:dict<string addr> outer_parameters:dict<addr CallableEffect> stack:set<addr> @checker:Checker):>void => {
     if checker.problem isnt? none return void
     if id in? stack { record_requirements(set[] set[id] @checker) return void }
     let function = hir.node_at(checker.nodes id)
@@ -497,7 +498,7 @@ check_function = (id:addr initialized:set<addr> arguments:array<addr> keywords:d
     }
     let key = call_key(id parameter_effects)
     loop checked in checker.checked.get(key []) {
-        if subset(checked.required initialized) and subset(checked.assumed_calls stack) {
+        if dense.includes(initialized checked.required) and subset(checked.assumed_calls stack) {
             record_requirements(checked.required checked.assumed_calls @checker)
             return void
         }
@@ -506,9 +507,9 @@ check_function = (id:addr initialized:set<addr> arguments:array<addr> keywords:d
     # A cached proof depends only on reads supplied by the caller, so a cache
     # hit never needs to build or detach the body-local availability set.
     let available = initialized
-    loop field in function.object_fields { available.add(field.id) }
-    loop param in params { if param.binding_id isnt? none { available.add(param.binding_id) } }
-    if function.rest_args isnt? none and function.rest_args.binding_id isnt? none { available.add(function.rest_args.binding_id) }
+    loop field in function.object_fields { dense.add(@available field.id) }
+    loop param in params { if param.binding_id isnt? none { dense.add(@available param.binding_id) } }
+    if function.rest_args isnt? none and function.rest_args.binding_id isnt? none { dense.add(@available function.rest_args.binding_id) }
     checker.frames.push(CheckFrame[id initialized])
     stack.add(id)
     let source=checker.srcfile
@@ -558,7 +559,7 @@ validate_initialization = (root:addr nodes:array<hir.AST> type_nodes:types.Table
     collect(root @checker)
     let block = hir.node_at(nodes root)
     $runtime_assert block is? hir.Block
-    let initialized = check_block(block set[] [] set[] @checker)
+    let initialized = check_block(block dense.Set[] [] set[] @checker)
     if checker.problem isnt? none return checker.problem
     loop id in block.items {
         let declaration = hir.node_at(nodes id)

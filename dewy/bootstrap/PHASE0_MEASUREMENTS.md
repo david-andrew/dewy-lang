@@ -1923,3 +1923,31 @@ already used static storage. Its assertion now matches that representation
 and executes the program to verify startup initialization. Artifacts:
 `initialization-caller-cache-gates.log`, `initialization-indexed-gates.log` and
 `initialization-indexed-callback-gates.log`.
+
+The next cold hosted full executable build took **99.962 seconds**, versus
+106.375 at the previous hosted checkpoint. Both use frozen `3c699a2f` source
+and library; hosted packages are now `dacac211`. Checking took 41.710 seconds,
+lowering 23.109, emission 4.611 and the backend 24.374. Peak process RSS was
+1,378,740 KiB; emitted µDewy was 34,759,636 bytes. This includes the offset lexer,
+call-shape selection, stable query scopes and initialization certificates.
+It remains above the one-minute target. Artifacts: `host-stable-passes-full`
+and `source-initialization-index.json`.
+
+### Packed initialization availability
+
+Native initialization now represents available binding ids with a packed
+bitmap. Compiler binding ids are allocated densely; certificates and recursion
+sets remain sparse. A snapshot still has value semantics, but its first write
+copies words of bits rather than the full availability hash table. Duplicate
+insertion performs no write or detachment. The internal module documents why
+this representation is inappropriate for arbitrary sparse ids.
+
+The same initialization kernel took a median **0.098 seconds with indexed hash
+sets and 0.025 with bitmaps**. Cumulative payload allocation fell from
+43,036,392 to **9,539,288 bytes**, retaining 256 certificates in both cases.
+Boundary checks cover ids 0, 63, 64, 127, 128 and 100,000, independent writes
+to both snapshots, sparse requirement queries, and zero allocation for 10,000
+duplicate insertions. They pass on direct and C output, alongside the native
+initialization comparisons. Artifacts: `dense-initialization-measurement` and
+`dense-initialization-unsigned-gates.log` (the final run uses an explicitly
+unsigned shift count). No full native rebuild includes this batch yet.

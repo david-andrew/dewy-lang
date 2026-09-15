@@ -1,0 +1,30 @@
+# Initialization tracks densely allocated compiler binding ids. A packed
+# bitmap makes a branch or function-entry snapshot proportional to the id
+# range in bits, rather than copying a hash table of machine-word entries.
+# This is an internal set for arena ids, not a replacement for sparse sets:
+# inserting a very large isolated id would allocate its entire prefix.
+Set:type = [words:array<uint64>=[]]
+
+contains = (items:Set id:addr):>bool => {
+    let index=id >> 6
+    if index >=? items.words.length return false
+    let mask:uint64=1 << ((id % 64) as uint64)
+    return (items.words[index] and mask) not=? 0
+}
+
+add = (@items:Set id:addr):>void => {
+    # An already present id must not detach a shared snapshot.
+    if contains(items id) return
+    let index=id >> 6
+    let mask:uint64=1 << ((id % 64) as uint64)
+    loop items.words.length <=? index {items.words.push(0)}
+    $runtime_assert index <? items.words.length
+    items.words[index]=items.words[index] or mask
+}
+
+# Certificates contain a few required ids. Keep those sparse and test them
+# directly against the dense caller state, without building another bitmap.
+includes = (items:Set required:set<addr>):>bool => {
+    loop id in required {if not contains(items id) return false}
+    return true
+}
