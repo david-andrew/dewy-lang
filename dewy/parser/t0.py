@@ -11,6 +11,7 @@ During `tokenize`, we never hard-code a list of token types.
 Instead, we dynamically (with caching) determine which tokens are allowed in a given context:
 - look up all subclasses of `Token` via `descendants(Token)`,
 - filter them by whether the current context type appears in their `valid_contexts`,
+- filter tokens with a declared first-character set against the current character,
 - then call `eat(src[i:], ctx)` on each allowed token class remaining.
 
 Any token whose `eat` method returns a non-`None` length is considered a match.
@@ -30,7 +31,7 @@ from typing import NoReturn, TypeAlias, ClassVar, get_origin, get_args, Union, P
 from types import UnionType
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from functools import cache
+from functools import cache, lru_cache
 
 
 import pdb
@@ -265,6 +266,9 @@ class Token[T:Context](ABC):
     loc: Span
     idx: int
     valid_contexts: ClassVar[set[type[Context]]] = None # must be defined by subclass type parameters
+    # A conservative candidate filter, independent of matching/precedence. None
+    # keeps context-dependent matchers and new extensions on the exhaustive path.
+    first_chars: ClassVar[frozenset[str] | None] = None
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}: {self.src}>"
@@ -299,6 +303,10 @@ class Token[T:Context](ABC):
         """verify that subclasses parameterize Token with a context argument and set the valid_contexts class variable"""
         super().__init_subclass__(**kwargs)
         cls.valid_contexts = set(cls._get_ctx_params())
+        # Changing the matcher invalidates an inherited prefix promise unless
+        # the subclass explicitly supplies its own. Merely inheriting eat is safe.
+        if 'eat' in cls.__dict__ and 'first_chars' not in cls.__dict__:
+            cls.first_chars = None
 
     @classmethod
     def _get_ctx_params(cls: type[Token]) -> list[type[Context]]:
@@ -326,6 +334,7 @@ class Token[T:Context](ABC):
 
 # TODO: want a warning if there is a lone \r not followed by \n
 class Whitespace(Token[WhitespaceOrCommentContexts]):
+    first_chars = frozenset(whitespace)
     @staticmethod
     def eat(src:str, ctx:WhitespaceOrCommentContexts) -> int|None:
         """white space is any sequence of whitespace characters"""
@@ -348,6 +357,7 @@ class Whitespace(Token[WhitespaceOrCommentContexts]):
 
 
 class LineComment(Token[WhitespaceOrCommentContexts]):
+    first_chars = frozenset('#')
     @staticmethod
     def eat(src:str, ctx:WhitespaceOrCommentContexts) -> int|None:
         """line comments are any sequence of characters after a # until the end of the line"""
@@ -366,6 +376,7 @@ class LineComment(Token[WhitespaceOrCommentContexts]):
 
 
 class BlockComment(Token[WhitespaceOrCommentContexts]):
+    first_chars = frozenset('#')
     @staticmethod
     def eat(src: str, ctx:WhitespaceOrCommentContexts) -> int | None:
         """
@@ -412,6 +423,7 @@ class BlockComment(Token[WhitespaceOrCommentContexts]):
 # Identifier-like things: plain identifiers and variants such as hashtags.
 
 class Identifier(Token[GeneralBodyContexts]):
+    first_chars = frozenset(start_characters | decoration_characters)
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """
@@ -441,6 +453,7 @@ class Identifier(Token[GeneralBodyContexts]):
 
 
 class Symbol(Token[GeneralBodyContexts]):
+    first_chars = frozenset(symbols_by_start)
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """symbolic operators are any sequence of characters in the symbolic_operators set"""
@@ -453,6 +466,7 @@ class Symbol(Token[GeneralBodyContexts]):
 
 
 class ShiftSymbol(Token[BodyWithoutTypeContexts]):
+    first_chars = frozenset(op[0] for op in shift_operators)
     @staticmethod
     def eat(src:str, ctx:BodyWithoutTypeContexts) -> int|None:
         """shift operators are any sequence of characters in the shift_operators set"""
@@ -463,6 +477,7 @@ class ShiftSymbol(Token[BodyWithoutTypeContexts]):
 
 
 class Metatag(Token[GeneralBodyContexts]):
+    first_chars = frozenset('$')
     @staticmethod
     def eat(src: str, ctx:GeneralBodyContexts) -> int | None:
         """metatags are just special identifiers that start with $"""
@@ -481,6 +496,7 @@ class Metatag(Token[GeneralBodyContexts]):
 
 # NOTE: square brackets and parenthesis can mix and match for range syntax, e.g. `[1..10)`
 class LeftSquareBracket(Token[GeneralBodyContexts]):
+    first_chars = frozenset('[')
     matching_right: 'RightSquareBracket|RightParenthesis' = None
     
     @staticmethod
@@ -493,6 +509,7 @@ class LeftSquareBracket(Token[GeneralBodyContexts]):
 
 
 class RightSquareBracket(Token[BlockBody]):
+    first_chars = frozenset(']')
     matching_left: 'LeftSquareBracket|LeftParenthesis|BasedBlockOpener' = None
     
     @staticmethod
@@ -524,6 +541,7 @@ class RightSquareBracket(Token[BlockBody]):
 
 
 class LeftParenthesis(Token[GeneralBodyContexts]):
+    first_chars = frozenset('(')
     matching_right: 'RightParenthesis|RightSquareBracket' = None
     
     @staticmethod
@@ -536,6 +554,7 @@ class LeftParenthesis(Token[GeneralBodyContexts]):
 
 
 class RightParenthesis(Token[BlockBody]):
+    first_chars = frozenset(')')
     matching_left: 'LeftParenthesis|LeftSquareBracket' = None
     
     @staticmethod
@@ -567,6 +586,7 @@ class RightParenthesis(Token[BlockBody]):
 
 
 class LeftCurlyBrace(Token[Root|BlockBody|TypeBody|StringBody]):
+    first_chars = frozenset('{')
     matching_right: 'RightCurlyBrace' = None
     
     @staticmethod
@@ -579,6 +599,7 @@ class LeftCurlyBrace(Token[Root|BlockBody|TypeBody|StringBody]):
 
 
 class TemplateLeftCurlyBrace(Token[TemplateStringBody]):
+    first_chars = frozenset('$')
     matching_right: 'RightCurlyBrace' = None
 
     @staticmethod
@@ -591,6 +612,7 @@ class TemplateLeftCurlyBrace(Token[TemplateStringBody]):
 
 
 class RightCurlyBrace(Token[BlockBody]):
+    first_chars = frozenset('}')
     matching_left: 'LeftCurlyBrace|TemplateLeftCurlyBrace' = None
     
     @staticmethod
@@ -622,6 +644,7 @@ class RightCurlyBrace(Token[BlockBody]):
 
 
 class LeftAngleBracket(Token[GeneralBodyContexts]):
+    first_chars = frozenset('<')
     matching_right: 'RightAngleBracket' = None
     
     @staticmethod
@@ -634,6 +657,7 @@ class LeftAngleBracket(Token[GeneralBodyContexts]):
 
 
 class RightAngleBracket(Token[TypeBody]):
+    first_chars = frozenset('>')
     matching_left: 'LeftAngleBracket' = None
     
     @staticmethod
@@ -649,6 +673,7 @@ class RightAngleBracket(Token[TypeBody]):
 
 
 class BasedBlockOpener(Token[GeneralBodyContexts]):
+    first_chars = frozenset('0')
     matching_right: 'RightSquareBracket'
     base: BasePrefix
 
@@ -672,6 +697,7 @@ class BasedBlockOpener(Token[GeneralBodyContexts]):
 # strings, raw strings, heredocs, and "rest-of-file" strings.
 
 class StringQuoteOpener(Token[GeneralBodyContexts]):
+    first_chars = frozenset("\"'")
     matching_quote: 'StringQuoteCloser' = None
 
     @staticmethod
@@ -698,6 +724,7 @@ class StringQuoteOpener(Token[GeneralBodyContexts]):
 
 
 class StringQuoteCloser(Token[StringBody|RawStringBody|TemplateStringBody|BasedStringBody]):
+    first_chars = frozenset("\"'")
     matching_quote: 'StringQuoteOpener|RawStringQuoteOpener|TemplateStringQuoteOpener|BasedStringQuoteOpener' = None
 
     @staticmethod
@@ -753,6 +780,7 @@ class StringChars(Token[StringBody|TemplateStringBody]):
 
 
 class StringEscape(Token[StringBody|TemplateStringBody]):
+    first_chars = frozenset('\\')
     @staticmethod
     def eat(src:str, ctx:StringBody|TemplateStringBody) -> int|None:
         r"""
@@ -861,6 +889,7 @@ class StringEscape(Token[StringBody|TemplateStringBody]):
 
 
 class ParametricStringEscape(Token[StringBody|TemplateStringBody]):
+    first_chars = frozenset('\\')
     matching_right: 'RightCurlyBrace' = None
     @staticmethod
     def eat(src:str, ctx:StringBody|TemplateStringBody) -> int|None:
@@ -876,6 +905,7 @@ class ParametricStringEscape(Token[StringBody|TemplateStringBody]):
     def action_on_eat(self, ctx:StringBody|TemplateStringBody): return Push(BlockBody(ctx.srcfile, ctx.tokens_so_far, self, base16))
 
 class RawStringQuoteOpener(Token[GeneralBodyContexts]):
+    first_chars = frozenset('r')
     matching_quote: 'StringQuoteCloser' = None  # raw strings are closed by regular quotes
     
     @staticmethod
@@ -906,6 +936,7 @@ class RawStringChars(Token[RawStringBody]):
 
 
 class TemplateStringQuoteOpener(Token[GeneralBodyContexts]):
+    first_chars = frozenset('t')
     matching_quote: 'StringQuoteCloser' = None  # template strings are closed by regular quotes
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
@@ -920,6 +951,7 @@ class TemplateStringQuoteOpener(Token[GeneralBodyContexts]):
 
 
 class RestOfFileStringQuote(Token[Root]):
+    first_chars = frozenset('$')
     @staticmethod
     def eat(src:str, ctx:Root) -> int|None:
         """a string that has an opening delimiter but no closing delimiter (consumes until EOF)
@@ -932,6 +964,7 @@ class RestOfFileStringQuote(Token[Root]):
     def action_on_eat(self, ctx:Root): return Push(StringBody(ctx.srcfile, ctx.tokens_so_far, self))
 
 class RawRestOfFileStringQuote(Token[Root]):
+    first_chars = frozenset('$')
     @staticmethod
     def eat(src:str, ctx:Root) -> int|None:
         """a raw string that has an opening delimiter but no closing delimiter (consumes until EOF)
@@ -945,6 +978,7 @@ class RawRestOfFileStringQuote(Token[Root]):
 
 
 class TemplateRestOfFileStringQuote(Token[Root]):
+    first_chars = frozenset('$')
     @staticmethod
     def eat(src:str, ctx:Root) -> int|None:
         """a template string that has an opening delimiter but no closing delimiter (consumes until EOF)
@@ -958,6 +992,7 @@ class TemplateRestOfFileStringQuote(Token[Root]):
 
 
 class HeredocStringOpener(Token[GeneralBodyContexts]):
+    first_chars = frozenset('$')
     matching_quote: 'HeredocStringCloser' = None
 
     @staticmethod
@@ -1069,6 +1104,7 @@ class HeredocStringCloser(Token[StringBody|RawStringBody|TemplateStringBody]):
 
 
 class RawHeredocStringOpener(Token[GeneralBodyContexts]):
+    first_chars = frozenset('$')
     matching_quote: 'HeredocStringCloser' = None
 
     @staticmethod
@@ -1091,6 +1127,7 @@ class RawHeredocStringOpener(Token[GeneralBodyContexts]):
 
 
 class TemplateHeredocStringOpener(Token[GeneralBodyContexts]):
+    first_chars = frozenset('$')
     matching_quote: 'HeredocStringCloser' = None
 
     @staticmethod
@@ -1114,6 +1151,7 @@ class TemplateHeredocStringOpener(Token[GeneralBodyContexts]):
 
 
 class BasedStringQuoteOpener(Token[GeneralBodyContexts]):
+    first_chars = frozenset('0')
     matching_quote: 'StringQuoteCloser'
     base: BasePrefix
 
@@ -1210,6 +1248,7 @@ class Number(Token[GeneralBodyContexts]):
         error.throw()
 
 class ExponentMarker(Token[GeneralBodyContexts]):
+    first_chars = frozenset('eEpP')
     power: Number
 
     @staticmethod
@@ -1377,12 +1416,17 @@ def collect_remaining_context_errors(ctx_stack: list[Context], max_pos:int|None=
 ##### TOKENIZER MAIN LOOP #####
 # The main `tokenize` function drives the context-sensitive, declarative
 # tokenization process described in the module docstring.
-@cache
-def get_allowed_tokens(ctx_type: type[Context]) -> list[type[Token]]:
+@lru_cache(maxsize=2048)
+def get_allowed_tokens(ctx_type: type[Context], first: str | None = None) -> list[type[Token]]:
     """For a given context type, return all token types that are allowed in that context. Cached for performance
     WARNING: because this is cached, creating new Token classes after this is called may not be reflected in the cached result
     """
-    return [t for t in descendants(Token) if ctx_type in t.valid_contexts]
+    if first is None:
+        return [t for t in descendants(Token) if ctx_type in t.valid_contexts]
+    # Bound the cache: arbitrary Unicode input must not retain one list per
+    # character forever. Filtering preserves exhaustive candidate order.
+    return [t for t in get_allowed_tokens(ctx_type)
+            if t.first_chars is None or first in t.first_chars]
 
 def tokenize(srcfile: SrcFile) -> list[Token]:
     tokens: list[Token] = []
@@ -1395,7 +1439,7 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     while i < len(src):
         # try to eat all allowed tokens at the current position
         ctx = ctx_stack[-1]
-        allowed_tokens = get_allowed_tokens(type(ctx))
+        allowed_tokens = get_allowed_tokens(type(ctx), src[i])
         # All probes see the same suffix. Copying it once per token class
         # dominated large-module parsing, especially for Unicode source.
         remaining = src[i:]

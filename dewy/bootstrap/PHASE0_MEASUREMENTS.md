@@ -1477,3 +1477,29 @@ covering scope/route identities, lookup cost, transaction rollback and ID
 reuse, element promises, nested length terms, bounds validation, and container
 membership snapshots. The kernel also passes through the native CLI.
 Artifacts: `root-route-measurement`, `root-route-*-gate*.log`.
+
+The native C compiler rebuilt with these changes (`3c699a2f`) completes a
+fresh full direct-backend self-build in **91.00 seconds**, versus 103.57 s
+before the batch. Frontend 26.78 s, validation **10.51 s** (was 23.46 s),
+preparation 4.90 s, lowering 23.48 s, emission 5.71 s, backend 17.27 s;
+peak process RSS 5,895,944 KiB. The generated µDewy is 49,055,931 bytes.
+Both the source and library are frozen together. The resulting compiler
+still exceeds the full-build target; matching-target generation verification
+also remains separate from this measurement. Artifacts:
+`native-indexed-validation-c`, `native-indexed-validation-full`.
+
+### Filter hosted t0 probes by their possible starting character
+
+Token classes now declare conservative first-character sets. The context
+candidate cache filters against those sets while retaining match order,
+longest-match selection, and precedence. Context-dependent number/string
+matchers remain unfiltered. An extension overriding `eat` must redeclare
+its prefix promise; otherwise it automatically uses exhaustive matching.
+The cache is bounded so arbitrary Unicode input cannot grow it indefinitely.
+
+Parsing the same 112 frozen compiler sources through t2 falls from **10.22
+to 8.12 seconds**, with byte-identical serialized token streams in every
+case. Seventy-two targeted checks pass, including exhaustive/indexed token
+and diagnostic comparisons, subclass extensions, and incomplete-source
+reporting. Artifacts: `hosted-t0-probes-{before,after}.json` and
+`hosted-t0-candidate-gates.log`. Full hosted build impact is not yet measured.
