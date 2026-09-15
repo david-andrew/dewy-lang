@@ -99,6 +99,13 @@ These are outside the original corpus counts:
   The native full `type_facts.dewy` fixture still has the earlier type-test
   predicate gap listed below.
 
+- A focused global-effects case also exposed an operator lookup difference:
+  after a user declaration of `__add__`, `__add__(1 2)` uses that binding in
+  both checkers, but `1+2` still uses a builtin in the hosted checker while
+  native checking resolves the lexical binding. The global-effects rejection
+  deliberately uses the explicit call; operator desugaring parity remains
+  separate follow-up work.
+
 ## Regressions found by the refresh
 
 The `49ad4c12` refresh rejects `array_call_adapters.dewy`, which passed in

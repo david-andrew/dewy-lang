@@ -99,7 +99,7 @@ FIELD_EXPECTATIONS.update(LITERAL_RESULT_CASES)
 # Global writes cross call boundaries even without a place argument.
 GLOBAL_CALL_CASES = {
     # The intrinsic spelling grants no effect promise to a user binding.
-    'let xs:array<int64>=[]\nlet __add__=(a:int64 b:int64):>int64=>{xs.clear return a}\nlet main=():>int64=>{xs.push(42) let ignored=1+2 return xs[0]}': 'array index is not proven in bounds',
+    'let xs:array<int64>=[]\nlet __add__=(a:int64 b:int64):>int64=>{xs.clear return a}\nlet main=():>int64=>{xs.push(42) let ignored=__add__(1 2) return xs[0]}': 'array index is not proven in bounds',
 
     'let xs:array<int64>=[]\nlet clear=():>bool=>{xs.clear return true}\nlet main=():>int64=>{xs.push(42) if xs.length >? 0 and clear() return xs[0] return 0}': 'array index is not proven in bounds',
 
