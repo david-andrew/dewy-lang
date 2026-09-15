@@ -2518,35 +2518,6 @@ class _StringLowering:
             return self._intrinsic_call('__static_alloca__' if self.lowering_module_startup else '__alloca__', [size], 'int64', loc)
         return self._arena_allocation(size, loc)
 
-    def _with_descriptor_owners_zeroed(self, body: hir.AST) -> hir.AST:
-        """Every string descriptor built on the stack (`__alloca__(48)`, whose bytes are
-        not zeroed) gets its owner word cleared right after its declaration, so a
-        release by owner word (an owning local's, a temporary's) leaves it alone."""
-        def is_descriptor_allocation(expr: hir.AST) -> bool:
-            return (
-                isinstance(expr, hir.FunctionCall)
-                and isinstance(expr.func, hir.ExpressedIdentifier)
-                and expr.func.name in ('__alloca__', '__static_alloca__')
-                and len(expr.pos_args) == 1
-                and isinstance(expr.pos_args[0], hir.Integer)
-                and int(expr.pos_args[0].value) == STRING_DESCRIPTOR_SIZE
-            )
-
-        def walk(node: hir.AST) -> hir.AST:
-            if isinstance(node, hir.Block):
-                items: list[hir.AST] = []
-                for item in node.items:
-                    items.append(walk(item))
-                    if isinstance(item, hir.Declare) and is_descriptor_allocation(item.expr):
-                        word = hir.ExpressedIdentifier(item.loc, 'int64', item.name)
-                        items.append(self._store_i64_field(word, STRING_OWNER_OFFSET, self._int64_literal(item.loc, 0), item.loc))
-                return replace_changed(node, items=items)
-            if isinstance(node, hir.Flow):
-                return replace_changed(node, arms=[replace_changed(arm, body=walk(arm.body)) for arm in node.arms], default=walk(node.default) if node.default is not None else None)
-            return node
-
-        return walk(body)
-
     def _frame_region(self, loc: Span) -> hir.ExpressedIdentifier:
         """The current function's region (declared at entry, released at every exit, on first use)."""
         if self.frame_region is None:

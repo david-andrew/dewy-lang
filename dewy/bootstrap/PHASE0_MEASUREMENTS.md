@@ -3411,3 +3411,24 @@ that variation rather than attributing all wall-time differences to the
 cache. No new full-build result is claimed. Artifacts:
 `measure-proof-queries.py`, `proof-query-experiment.log`,
 `host-proof-queries-{before,after}-{a,b}`.
+
+### Hosted frame preparation: one statement walk
+
+The dynamic-temporary placement pass and stack string-owner initialization
+pass now share one traversal. Release insertion and loop allocation hoisting
+remain in their original order; explicit source allocations retain their
+placement. Twenty-four storage, region and lifetime regressions pass
+(`frame-preparation-gates.log`).
+
+Four alternating fresh-process samples on the frozen `53cdf9e7`
+`semantic/cache_values.dewy` input and matching library compare the old walks
+with the merged traversal. Lowering takes 2.559/2.595 seconds before and
+2.367/2.386 after; total checking/lowering/emission takes 16.009/16.758 before
+and 15.400/15.946 after. The checking variation is not a claimed benefit.
+Peak RSS is 250224/251792 KiB before and 245020/245348 KiB after. All emitted
+outputs have normalized SHA-256
+`fca2a89b18f73543e2e1f569b9296e98576d620645fbee359d2c06734184db26`.
+Inputs, monkeypatch of the previous walks, and complete records are retained
+as `measure-frame-preparation.py`, `frame-preparation-experiment.log` and
+`host-frame-preparation-{before,after}-{a,b}` under the campaign artifact root.
+This is a bounded lowering comparison, not a new full-build timing.

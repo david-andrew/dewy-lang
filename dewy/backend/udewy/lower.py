@@ -54,6 +54,8 @@ from .lowering_optionals import _OptionalLowering
 from .lowering_places import _PlaceLowering
 from .lowering_shared import (
     STRING_BYTE_LENGTH_OFFSET,
+    STRING_DESCRIPTOR_SIZE,
+    STRING_OWNER_OFFSET,
     LocalBindingKey,
     local_binding_key,
     replace_changed,
@@ -3232,8 +3234,7 @@ class _Lowerer(
             lowered = (replace(lowered, items=[*prologue, *lowered.items])
                        if isinstance(lowered, hir.Block) else
                        hir.Block(lowered.loc, lowered.type, [*prologue, lowered], True))
-        lowered = self._region_back_dynamic_temporaries(lowered)
-        lowered = self._with_descriptor_owners_zeroed(lowered)
+        lowered = self._prepare_frame_storage(lowered)
         regions = [*([self.frame_region] if self.frame_region is not None else []), *self.loop_region_headers]
         exit_statements = [self._region_call('_region_release', [region], node.loc, ty.VOID_TYPE) for region in regions]
         lowered = self._insert_releases(lowered, exit_statements)
@@ -3262,41 +3263,64 @@ class _Lowerer(
         ) = previous_state
         return self._hoist_loop_allocations(lowered)
 
-    def _region_back_dynamic_temporaries(self, body: hir.AST) -> hir.AST:
-        """Runtime-sized compiler temporaries live in the function's region.
+    def _prepare_frame_storage(self, body: hir.AST) -> hir.AST:
+        """Place dynamic temporaries and initialize stack descriptor owners.
 
-        A value copy can be arbitrarily large. Allocating each copy on the
-        machine stack exhausted it while checking ordinary compiler source,
-        even at modest expression depth. The existing frame region has the
-        same lifetime and is released at every exit. Constant small storage
-        remains on the stack; explicit source __alloca__ calls retain their
-        requested behavior. Only compiler-generated declarations qualify.
+        Both policies inspect the same lowered statement tree before release
+        insertion. Runtime-sized compiler copies use the frame region, whose
+        lifetime ends on every function exit; small constant storage and
+        explicit source allocations keep their existing placement. A string
+        descriptor's uninitialized owner word must be zeroed immediately after
+        allocation so later release does not interpret stack bytes as an owner.
         """
-        if self.lowering_module_startup or self.current_literal is None:
-            return body
-        helpers = ('_region_new', '_region_alloc', '_region_release')
-        if not all(self._runtime_helper(name) is not None for name in helpers):
-            return body
+        use_region = (
+            not self.lowering_module_startup and self.current_literal is not None
+            and all(self._runtime_helper(name) is not None
+                    for name in ('_region_new', '_region_alloc', '_region_release'))
+        )
 
-        def walk(node: hir.AST) -> hir.AST:
-            if isinstance(node, hir.Declare) and node.binding_id is None and node.name.startswith('__dewy_'):
-                call = node.expr
-                if (
-                    isinstance(call, hir.FunctionCall)
-                    and isinstance(call.func, hir.ExpressedIdentifier)
-                    and call.func.name == '__alloca__'
-                    and len(call.pos_args) == 1
-                    and not isinstance(call.pos_args[0], hir.Integer)
-                ):
+        def allocation(node: hir.AST) -> hir.FunctionCall | None:
+            if not isinstance(node, hir.Declare):
+                return None
+            call = node.expr
+            return call if (
+                isinstance(call, hir.FunctionCall)
+                and isinstance(call.func, hir.ExpressedIdentifier)
+                and call.func.name in ('__alloca__', '__static_alloca__')
+                and len(call.pos_args) == 1
+            ) else None
+
+        def walk(node: hir.AST, zero_owners: bool = True) -> hir.AST:
+            if isinstance(node, hir.Declare):
+                call = allocation(node)
+                if (use_region and node.binding_id is None and node.name.startswith('__dewy_')
+                        and call is not None and call.func.name == '__alloca__'
+                        and not isinstance(call.pos_args[0], hir.Integer)):
                     region = self._frame_region(node.loc)
-                    return replace_changed(node, expr=self._region_call('_region_alloc', [region, call.pos_args[0]], node.loc, 'int64'))
+                    return replace_changed(node, expr=self._region_call(
+                        '_region_alloc', [region, call.pos_args[0]], node.loc, 'int64'))
+                return node
             if isinstance(node, hir.Block):
-                return replace_changed(node, items=[walk(item) for item in node.items])
+                items: list[hir.AST] = []
+                for item in node.items:
+                    rewritten = walk(item, zero_owners)
+                    items.append(rewritten)
+                    call = allocation(rewritten) if zero_owners else None
+                    if (call is not None and isinstance(call.pos_args[0], hir.Integer)
+                            and int(call.pos_args[0].value) == STRING_DESCRIPTOR_SIZE):
+                        word = hir.ExpressedIdentifier(item.loc, 'int64', item.name)
+                        items.append(self._store_i64_field(
+                            word, STRING_OWNER_OFFSET, self._int64_literal(item.loc, 0), item.loc))
+                return replace_changed(node, items=items)
             if isinstance(node, hir.Flow):
-                return replace_changed(node, arms=[replace_changed(arm, body=walk(arm.body)) for arm in node.arms],
-                               default=walk(node.default) if node.default is not None else None)
-            if isinstance(node, hir.Suppress):
-                return replace_changed(node, item=walk(node.item))
+                return replace_changed(node,
+                    arms=[replace_changed(arm, body=walk(arm.body, zero_owners)) for arm in node.arms],
+                    default=walk(node.default, zero_owners) if node.default is not None else None)
+            if isinstance(node, hir.Suppress) and use_region:
+                # Suppression is transparent to placement. Owner initialization
+                # has always operated on statement blocks/arms only; expression
+                # extraction supplies the descriptor declarations it sees.
+                return replace_changed(node, item=walk(node.item, False))
             return node
 
         return walk(body)
