@@ -380,11 +380,15 @@ is_subtype = (source:addr target:addr links:Graph @nodes:types.Table):>bool => {
 # target's base may be applicable to a call, but a join must never obtain
 # the target's predicates merely by asking that applicability question.
 covered = (member:addr other:addr seen:set<string> links:Graph @nodes:types.Table):>bool => {
+    # The very same description carries the very same contracts. Structural
+    # equality alone cannot take this shortcut: it omits proof provenance.
+    if member =? other return true
     let pair = "{member}:{other}"
     if pair in? seen return true
     seen.add(pair)
     let m_id = types.unfold(member nodes)
     let o_id = types.unfold(other nodes)
+    if m_id =? o_id return true
     let m = types.node_at(nodes m_id)
     let o = types.node_at(nodes o_id)
     if o is? types.RefinedType {

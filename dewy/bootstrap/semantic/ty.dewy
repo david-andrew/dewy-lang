@@ -112,6 +112,10 @@ Table:type = [
     # Completed descriptions are stable: normalize each tree once per arena.
     # Alias resolution only changes the target of an atomic NamedType.
     normal_forms:dict<addr addr>=[]
+    # These queries depend only on retained descriptions, never alias targets
+    # or the inheritance graph. Drop their ids on speculative truncation.
+    combinations:dict<string addr>=[]
+    positional_functions:dict<string addr>=[]
 ]
 
 
@@ -194,6 +198,8 @@ truncate = (@nodes:Table count:addr):>void => {
     # suffix. Invalidate before those result ids can be reused. This scalar
     # dictionary releases its buffers without walking type descriptions.
     nodes.normal_forms=[]
+    nodes.combinations=[]
+    nodes.positional_functions=[]
 }
 
 primitive = (name:string @nodes:Table):>addr => {
@@ -314,6 +320,14 @@ is_primitive = (node:Type name:string):>bool => node is? Primitive and node.name
 # apply identity/annihilator laws. They deliberately do not consult subtyping:
 # int64 | int remains a syntactic union until a semantic join asks to simplify.
 combine = (items:array<addr> conjunction:bool @nodes:Table):>addr => {
+    let request="{conjunction}:{items_key(items)}"
+    let known=nodes.combinations.get(request)
+    if known isnt? none return known
+    let result=combine_uncached(items conjunction @nodes)
+    nodes.combinations[request]=result
+    return result
+}
+combine_uncached = (items:array<addr> conjunction:bool @nodes:Table):>addr => {
     let identity = if conjunction 'any' else 'never'
     let annihilator = if conjunction 'never' else 'any'
     let flat:array<addr> = []
@@ -407,6 +421,21 @@ function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr
     loop p in params { shapes.push("G{_quoted(p.name)}:{shapes_key([p.bound] nodes)}") }
     let shape = "F{shapes.join(';')}:R{rest_key}:T{shapes_key([ret] nodes)}"
     return intern(@nodes FunctionType[key=key shape=shape pos_or_kw=pos kw_only=kw rest=rest ret=ret type_params=params])
+}
+
+# Lowered operations have required, unnamed value arguments. Keep that common
+# signature query in terms of type ids, so an intern hit does not first build
+# and destroy a record for every parameter. The general factory remains the
+# authority for its identity and full description on a miss.
+positional_function = (arguments:array<addr> ret:addr @nodes:Table):>addr => {
+    let request="{items_key(arguments)}:{ret}"
+    let known=nodes.positional_functions.get(request)
+    if known isnt? none return known
+    let slots:array<PosOrKwArg>=[]
+    loop argument in arguments {slots.push(PosOrKwArg[none argument])}
+    let result=function_type(slots [] none ret [] @nodes)
+    nodes.positional_functions[request]=result
+    return result
 }
 overload_type = (methods:array<addr> @nodes:Table):>addr => {
     let key="M{items_key(methods)}"

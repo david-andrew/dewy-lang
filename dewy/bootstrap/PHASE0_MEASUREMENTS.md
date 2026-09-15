@@ -1147,3 +1147,34 @@ hosted direct/C output and the native CLI (`union-interpolation-*`). The
 32 focused union/conversion/printing tests pass after correcting the newly
 accepted expression-body test's parameter to prove its index in bounds.
 Structural conversion and brand-dispatch hoisting remain separate work.
+
+
+### Native-built code and repeated type-query batch
+
+Native µDewy compiles the preceding native-emitted compiler source through
+GCC in **133.79 seconds**, peak process RSS 3,682,976 KiB, with the same
+O2/LTO/no-PRE flags, disabled ccache, and empty output directory. This times
+only the backend and does not replace the complete invocation measurement.
+The resulting native-built executable builds pinned t0 in **23.76 seconds**,
+peak RSS **540,256 KiB**, producing the same µDewy bytes/hash as the hosted-built
+seed. Frontend is 6.90 s, validation 9.86 s, preparation 0.12 s, lowering
+4.49 s, emission 0.87 s, backend 1.21 s. Its lower memory use accompanies a
+runtime regression against the hosted-built seed; the remaining native
+lowering costs must be measured on this native-built code too. Artifacts:
+`native-dictionary-layout-c` and `native-built-dictionary-layout-t0`.
+
+The next type-query batch caches Boolean constructor requests in their arena,
+keeps generated anonymous function signatures in terms of type ids until an
+intern miss, and makes contract coverage reflexive without recursively
+comparing the same record's fields. Truncation clears both new caches before
+ids can be reused. Alias target updates cannot change these constructors'
+structural identities; subtype answers depending on inheritance are not
+cached here. Required/named/place signatures remain distinct.
+
+A 500-iteration query kernel allocates **41,765,632 → 600,000 bytes** in
+hosted-generated direct code and **61,404,008 → 3,408,000 bytes** when both
+variants are compiled by the same native-built C executable. Five focused
+type tests pass (including the 4,356-pair subtype matrix, normalization,
+dispatch, joins, metadata, deep encodings, forks and rollback); the query
+kernel passes through both hosted backends and the native CLI. No full-build
+speedup is claimed for this batch yet. Artifacts: `type-query-reuse-*`.

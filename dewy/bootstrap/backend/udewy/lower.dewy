@@ -487,9 +487,9 @@ array_type = (id:addr state:State):>types.ArrayType? => {
 }
 word = (value:bigint node:hir.AST @state:State):>addr => put(hir.Integer[node.loc types.primitive('int64' @state.type_nodes) '0d' value] @state)
 intrinsic = (name:string arguments:array<addr> result:addr node:hir.AST @state:State):>addr => {
-    let params:array<types.PosOrKwArg>=[]
-    loop id in arguments {params.push(types.PosOrKwArg[none hir.node_at(state.nodes id).value_type])}
-    let type=types.function_type(params [] none result [] @state.type_nodes)
+    let params:array<addr>=[]
+    loop id in arguments {params.push(hir.node_at(state.nodes id).value_type)}
+    let type=types.positional_function(params result @state.type_nodes)
     let function=put(hir.ExpressedIdentifier[node.loc type name] @state)
     return put(hir.FunctionCall[node.loc result function arguments []] @state)
 }
