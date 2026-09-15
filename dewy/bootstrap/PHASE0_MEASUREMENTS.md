@@ -2888,3 +2888,25 @@ seconds** for the latter single pair). Both retained identical emitted source.
 The current implementation keeps fresh generated leaves. Artifacts:
 `lowering-dispatch-module/results.json`, `generated-word-leaves-module/results.json`,
 `generated-word-leaves-full-analysis/results.json`.
+
+### Integrated native pair checkpoint
+
+The frozen `4c785f86` source builds two byte-identical native generations
+through `tools/bootstrap_native.sh --target c`, without Python. Generation
+one takes 118 seconds and generation two 132 seconds, including both Dewy
+and µDewy builds and C compilation. These are bootstrap generation timings,
+not the earlier direct-output single-compiler performance measurement.
+The execution gates pass with both x86-64 and C output, including ownership,
+array sharing, analysis scaling, Unicode, and native test discovery.
+
+Dewy stage 1/stage 2 SHA-256:
+`82b6bb83ba06fa590f6cb030f383b6ba960ca6e0e2516ccd46ea86bc67f933a1`.
+µDewy stage 1/stage 2 SHA-256:
+`fe37eb31f17df3398fa277d5080cb65af9a7a22a30e81bad6f63a4c280175631`.
+Artifacts: `source-current-pair`, `native-current-pair.log`,
+`native-current-pair/SHA256SUMS`. Inputs are the previously recorded PGO
+Dewy seed and intrinsic-operand C µDewy stage 2; C compilation uses LTO with
+8 jobs, PRE/code hoisting disabled, and ccache disabled. The build handoff
+now accepts the current `--no-debug-info` argument as well as older seeds'
+four-argument invocation; ten focused build-tool gates pass. This refreshes
+the C-accelerated fixed point, not the full corpus or a bootstrap without C.
