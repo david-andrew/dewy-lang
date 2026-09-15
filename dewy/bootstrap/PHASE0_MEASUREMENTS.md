@@ -1353,3 +1353,32 @@ memo before landing. Eleven selected checks pass, including the native/hosted
 4,356-pair type-algebra matrix, deep shapes, mutation between queries, shared
 normalized children, metadata retention, and nested lowering-scope lifetime.
 Artifacts: `measure-nnf.py`, `nnf-*`, and `nnf-gates-final.log`.
+
+### Refreshed native generations and hosted direct integration
+
+Current µDewy generations two and three build in 3.42/3.32 seconds and have
+identical executable SHA-256
+`80f0edde749624a4f24c31f6dcda7a09aad3780e9e2c5c736f5f8fc044741222`.
+Generation one refreshed the source from the older seed; generation two also
+uses the new C helpers in its own executable. Subsequent native measurements
+use generation three, recorded in `udewy-memory-generations.json`.
+
+The current native-built Dewy executable, with that µDewy, builds frozen
+`13b1ee96` through the direct backend in **149.47 seconds**, peak process RSS
+5,877,064 KiB. Frontend 27.66 s, validation 24.65 s, preparation 5.14 s,
+lowering 67.48 s, emission 5.52 s, backend 16.75 s. Its emitted µDewy exactly
+matches the preceding generation: 48,818,721 bytes and SHA-256
+`3ba35c9e07fcfbf4f16626ced7d0cafc5679075abbbb637c6c7172b26f1589f7`.
+This verifies repeatable native Dewy emission and a µDewy executable fixed
+point; it does not replace the remaining full pair/corpus/release gates.
+The native lowerer's poor full-source scaling was not visible in the smaller
+t0 benchmark. Artifacts: `native-built-structural-ids-full`.
+
+The hosted direct-backend build of frozen `091eab3b` completes in **134.53
+seconds**, peak process RSS 1,616,756 KiB: checking 54.54 s, lowering 34.27 s,
+emission 4.67 s, hosted µDewy backend 35.25 s. It emits 34,492,849 bytes,
+SHA-256 `15d4197a7f50978e5fa63a942d2938e82e011ab229eebee740aacecf867f91e1`.
+This is a fresh full executable build with no C backend or preexisting build
+cache; it remains above the sub-minute target. Its overall time is not a
+like-for-like comparison with the earlier C-backend invocation. Artifacts:
+`host-full-queries-direct`; frozen source and manifest: `source-hosted-queries`.
