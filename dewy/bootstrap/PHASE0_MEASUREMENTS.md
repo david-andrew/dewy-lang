@@ -3287,3 +3287,23 @@ ca75e36dd7bfae27cee76d07de912bf89a966922f5c67632446aa7fcf5b7cd8b  udewy
 This verifies the accumulated cache, checking, and backend changes on the
 C-accelerated bootstrap route. It does not establish a fully direct bootstrap
 or a new full-build performance measurement.
+
+### Container and union text parity
+
+Native explicit string conversion now shares interpolation's union dispatch
+and calls the existing `_array_as_string`, `_set_as_string`, and
+`_dict_as_string` library generics for containers. String alternatives receive
+the library's quoting flag, including optional and mixed union elements.
+The hosted nested-container rejection and byte-decoding boundary remain.
+
+Nine accepted programs produce their explicit expected result through both
+compilers on x86-64 and C (36 executions), covering escaped strings, optional
+and mixed elements, empty containers, and effectful union expressions.
+Four rejection cases agree, and the existing conversion-method regression
+passes. Artifacts: `structural-text-gates.log`,
+`structural-text-rejection-gates.log`, `structural-text-conversion-gates.log`.
+The first log contains the successful executions followed by a test-harness
+exception mismatch; the corrected rejection pass reuses the unchanged driver.
+These tests use real library modules and checked-prelude caching through
+`tests/fixtures/bootstrap_program.dewy`. Record formatting is the next gap;
+no refreshed full-corpus count is claimed for this batch.

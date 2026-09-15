@@ -1,0 +1,26 @@
+import p"ty.dewy" as types
+import p"type_queries.dewy" as views
+
+# Formatting uses the public container shape, never its backing hash-table
+# fields. String alternatives are quoted by the library at runtime, so an
+# optional string's `none` arm remains unquoted.
+Structure:type = const [helper:string members:array<addr>]
+structure = (id:addr nodes:types.Table):>Structure? => {
+    let plain=types.unfold(types.strip_refinement(id nodes) nodes)
+    let type=types.node_at(nodes plain)
+    if type is? types.ArrayType return Structure['_array_as_string' [type.element]]
+    let entries=views.container_entry_types(plain nodes)
+    if entries is? none return none
+    if entries.value is? none return Structure['_set_as_string' [entries.key]]
+    return Structure['_dict_as_string' [entries.key entries.value]]
+}
+quoted_member = (id:addr @nodes:types.Table):>bool => {
+    let plain=types.strip_refinement(id nodes)
+    if views.string_valued(plain nodes) return true
+    let members=views.runtime_union_members(plain @nodes)
+    if members isnt? none {
+        loop member in members {if views.string_valued(member nodes) return true}
+    }
+    let payload=views.optional_payload(plain @nodes)
+    return payload isnt? none and views.string_valued(payload nodes)
+}

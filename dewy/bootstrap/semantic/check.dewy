@@ -30,6 +30,7 @@ import p"inferred_results.dewy" as inferred_results
 import p"type_names.dewy" as type_names
 import p"function_contracts.dewy" as contracts
 import p"text_shapes.dewy" as text_shapes
+import p"text_formatting.dewy" as text_formatting
 import p"target_values.dewy" as target_values
 import p"type_tests.dewy" as type_tests
 import p"integer_ranges.dewy" as integer_ranges
@@ -4355,7 +4356,11 @@ explicit_conversion = (value:addr target:addr id:addr env:Environment @session:c
     if converted is? Error return converted
     if converted isnt? none return converted
     let owner=types.node_at(session.types views.structural_base(node.value_type session.types))
-    if views.string_valued(target session.types) and owner is? types.ObjectType|types.ArrayType|types.TypeOr return pending(id 'structural and union string conversion' env session)
+    if views.string_valued(target session.types) and owner is? types.ObjectType|types.ArrayType|types.TypeOr {
+        let part=text_part(value id env @session)
+        if part is? Error return part
+        return if views.string_valued(node_at(part session).value_type session.types) part else put(hir.InterpolatedString[node.loc target [part]] @session)
+    }
     return problem(id 'unsupported value conversion' "cannot convert `{display.type_to_dewy(node.value_type session.types)}` to `{display.type_to_dewy(target session.types)}`" env session)
 }
 
@@ -4443,6 +4448,19 @@ text_part = (value:addr id:addr env:Environment @session:contexts.Session):>addr
         }
         let flow=put(hir.Flow[node.loc string arms otherwise] @session)
         return put(hir.Block[node.loc string [declaration flow] false] @session)
+    }
+    let structure=text_formatting.structure(node.value_type session.types)
+    if structure isnt? none {
+        let arguments:array<addr>=[value]
+        loop member in structure.members {
+            # Preserve the hosted container-iteration boundary. A formatter
+            # must not accept nested containers that its generic loop cannot
+            # visit, nor expose a dict's implementation as an ordinary record.
+            if text_formatting.structure(member session.types) isnt? none return problem(id 'no string conversion for this value' 'container members cannot themselves be containers yet' env session)
+            let quote=text_formatting.quoted_member(member @session.types)
+            arguments.push(put(hir.Bool[node.loc types.primitive('bool' @session.types) quote] @session))
+        }
+        return library_call(structure.helper arguments id env @session)
     }
     if type is? types.ObjectType|types.ArrayType|types.TypeOr return pending(id 'structural string interpolation' env session)
     return value
