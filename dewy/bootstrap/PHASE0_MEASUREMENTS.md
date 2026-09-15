@@ -3432,3 +3432,23 @@ Inputs, monkeypatch of the previous walks, and complete records are retained
 as `measure-frame-preparation.py`, `frame-preparation-experiment.log` and
 `host-frame-preparation-{before,after}-{a,b}` under the campaign artifact root.
 This is a bounded lowering comparison, not a new full-build timing.
+
+### Integer-contract checkpoint and rejected syntax-slots experiment
+
+Frozen `1b466da8` builds the complete compiler through the hosted direct
+backend in **75.713 seconds**, with 1,371,232 KiB peak process RSS. Checking
+is 36.116 s, lowering 16.412 s, emission 2.923 s and the downstream backend
+12.871 s (code generation 6.884 s, toolchain 5.853 s). The cold invocation
+emits 38,468,202 bytes of µDewy. This includes the corrected string/word
+payload tests and integer value contracts. The under-60-second hosted target
+remains open. The frozen source, metadata, phase events, generated source and
+executable are retained in `source-integer-contracts` and
+`host-integer-contracts-full`. This build is not a new native fixed point.
+
+A subsequent experiment gave hosted p0 syntax records slots, retaining weak
+references and disk-cache round trips. On the same frozen cache-codec module
+used above, checking took 12.958/13.241 s before and 13.599/13.285 s after;
+total times were 15.716/16.276 s before and 16.521/15.999 s after. Peak RSS
+dropped from 244760–256060 to 231836–231844 KiB, and normalized output was
+unchanged. Since the experiment did not improve compile latency, it was not
+retained. Records: `syntax-slots-experiment.log` and `host-syntax-slots-*`.
