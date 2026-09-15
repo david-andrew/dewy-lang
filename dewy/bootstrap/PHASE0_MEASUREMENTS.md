@@ -1994,3 +1994,27 @@ emits 1,916,646 bytes versus 1,917,447 before. Single cold invocations took
 justify attributing that timing difference to this change. Artifacts:
 `measure-exit-suffix.log`, `exit-suffix-gates.log` and
 `exit-suffix-hosted-gates.log`.
+
+### Initialization and owned-return integration checkpoint
+
+Two C generations built from `8876bec6` source with the recorded compiler
+wrapper in 140.530 and 136.057 seconds. The second generation applies the
+new owned-return lowering to the compiler itself. Using that seed on the
+same frozen `3789e114` source and library as the field-getter checkpoint,
+a complete direct executable build took **63.796 seconds**, down from
+67.855. Frontend: 18.114; validation: 7.529; initialization/reachability:
+1.626; lowering: 15.871; emission: 4.796; backend: 13.535 seconds. Peak
+process RSS was 5,902,900 KiB and output was 48,662,145 bytes. The target
+is still unmet. This is an integration measurement, not a new fixed-point
+certificate. Artifacts: `native-owned-exits-c1`, `native-owned-exits-c2`,
+`source-owned-exits.json` and `native-owned-exits-full`.
+
+### Hosted string body indexes
+
+The read-only string return, initializer, candidate and iterator queries
+share a body traversal, preserving shared HIR nodes and excluding nested
+function bodies. Rewritten literals and new lowerers get fresh indexes.
+Destination-ABI escape checks reuse discovery's runtime calls and identifier
+bindings instead of traversing the whole program twice. Twenty-six focused
+string ownership, region, local, scratch and index checks pass. Performance
+measurement is pending. Artifact: `string-body-index-gates.log`.

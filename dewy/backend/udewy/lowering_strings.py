@@ -1102,6 +1102,45 @@ class _StringLowering:
         self.string_result_bounds[key] = bound
         return bound
 
+    def _string_body_nodes(self, literal: hir.FunctionLiteral) -> tuple[hir.AST, ...]:
+        """One read-only body traversal shared by the string storage queries.
+
+        A rewritten function has a fresh literal identity. Retain that literal
+        with its index, and never include a nested function's independent body.
+        The checked HIR is a DAG: repeated references need one query visit.
+        """
+        cached = self.string_body_queries.get(id(literal))
+        if cached is not None:
+            return cached[1]
+        from .lower import _hir_child_fields
+
+        found: list[hir.AST] = []
+        seen: set[int] = set()
+
+        def walk(value: object) -> None:
+            if isinstance(value, hir.FunctionLiteral):
+                return
+            if isinstance(value, hir.AST):
+                if id(value) in seen:
+                    return
+                seen.add(id(value))
+                found.append(value)
+                for name in _hir_child_fields(type(value)):
+                    walk(getattr(value, name))
+            elif isinstance(value, hir.ObjectField):
+                walk(value.value)
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    walk(item)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    walk(item)
+
+        walk(literal.body)
+        result = tuple(found)
+        self.string_body_queries[id(literal)] = (literal, result)
+        return result
+
     def _returned_string_expressions(self, literal: hir.FunctionLiteral) -> list[hir.AST]:
         cached = self.string_return_queries.get(id(literal))
         if cached is not None:
@@ -1128,26 +1167,9 @@ class _StringLowering:
                 return
             note(expr)
 
-        def walk(node: object) -> None:
-            if isinstance(node, hir.FunctionLiteral) and node is not literal:
-                return
+        for node in self._string_body_nodes(literal):
             if isinstance(node, hir.Return) and node.item is not None:
                 note(node.item)
-            if isinstance(node, hir.AST):
-                for field_ in dataclass_fields(node):
-                    value = getattr(node, field_.name)
-                    for child in (
-                        value if isinstance(value, (list, tuple)) else [value]
-                    ):
-                        if isinstance(child, hir.AST):
-                            walk(child)
-                        elif isinstance(child, hir.ObjectField):
-                            walk(child.value)
-                        elif isinstance(child, dict):
-                            for item in child.values():
-                                walk(item)
-
-        walk(literal.body)
         trailing(literal.body)
         self.string_return_queries[id(literal)] = (literal, results)
         return results
@@ -1161,9 +1183,7 @@ class _StringLowering:
             return cached[1]
         candidates: dict[int, list[hir.AST]] = {}
 
-        def walk(node: object) -> None:
-            if isinstance(node, hir.FunctionLiteral) and node is not literal:
-                return
+        for node in self._string_body_nodes(literal):
             if (
                 isinstance(node, hir.Declare)
                 and node.binding_id is not None
@@ -1176,21 +1196,6 @@ class _StringLowering:
                 and self._is_string_valued(node.target.type)
             ):
                 candidates.setdefault(node.target.binding_id, []).append(node.value)
-            if isinstance(node, hir.AST):
-                for field_ in dataclass_fields(node):
-                    value = getattr(node, field_.name)
-                    for child in (
-                        value if isinstance(value, (list, tuple)) else [value]
-                    ):
-                        if isinstance(child, hir.AST):
-                            walk(child)
-                        elif isinstance(child, hir.ObjectField):
-                            walk(child.value)
-                        elif isinstance(child, dict):
-                            for item in child.values():
-                                walk(item)
-
-        walk(literal.body)
         self.string_candidate_queries[id(literal)] = (literal, candidates)
         return candidates
 
@@ -1324,72 +1329,29 @@ class _StringLowering:
         Their lowered signature carries a hidden result parameter, so an
         indirect call through a plain function type would corrupt memory.
         """
-        call_positions: set[int] = set()
-
-        def mark(node: object) -> None:
-            if (
-                isinstance(node, hir.FunctionCall)
-                and self._direct_call_function(node) is not None
-            ):
-                func = self._unwrap_transparent(node.func)
-                call_positions.add(id(func))
-            if isinstance(node, hir.AST):
-                for field_ in dataclass_fields(node):
-                    value = getattr(node, field_.name)
-                    for child in (
-                        value if isinstance(value, (list, tuple)) else [value]
-                    ):
-                        if isinstance(child, hir.AST):
-                            mark(child)
-                        elif isinstance(child, hir.ObjectField):
-                            mark(child.value)
-                        elif isinstance(child, dict):
-                            for item in child.values():
-                                mark(item)
-
-        def check(node: object) -> None:
-            if isinstance(node, hir.ExpressedIdentifier) and id(node) not in call_positions:
-                binding = self.identifier_bindings.get(id(node))
-                if (
-                    binding is not None
-                    and binding.kind == 'function'
+        # Discovery already resolved every runtime call and identifier. Do
+        # not walk the whole module twice again just to recover those nodes.
+        call_positions = {
+            id(self._unwrap_transparent(call.func))
+            for _caller, call in self.direct_calls
+            if self._direct_call_function(call) is not None
+        }
+        for node_id, node in self.identifier_nodes.items():
+            if node_id in call_positions:
+                continue
+            binding = self.identifier_bindings.get(node_id)
+            if (binding is not None and binding.kind == 'function'
                     and binding.function is not None
-                    and id(binding.function) in self.string_result_needs_dest
-                ):
-                    self._target_error(
-                        node,
-                        'a function returning a materialized string used as a value',
-                    )
-            if (
-                isinstance(node, hir.FunctionLiteral)
-                and id(node) not in call_positions
-            ):
-                function = self.function_by_literal.get(id(node))
-                if (
-                    function is not None
-                    and id(function) in self.string_result_needs_dest
-                    and function.logical_name == 'anon'
-                ):
-                    self._target_error(
-                        node,
-                        'a function literal returning a materialized string used as a value',
-                    )
-            if isinstance(node, hir.AST):
-                for field_ in dataclass_fields(node):
-                    value = getattr(node, field_.name)
-                    for child in (
-                        value if isinstance(value, (list, tuple)) else [value]
-                    ):
-                        if isinstance(child, hir.AST):
-                            check(child)
-                        elif isinstance(child, hir.ObjectField):
-                            check(child.value)
-                        elif isinstance(child, dict):
-                            for item in child.values():
-                                check(item)
-
-        mark(self.root)
-        check(self.root)
+                    and id(binding.function) in self.string_result_needs_dest):
+                self._target_error(
+                    node, 'a function returning a materialized string used as a value')
+        for function in self.functions:
+            if (function.logical_name == 'anon'
+                    and id(function.literal) not in call_positions
+                    and id(function) in self.string_result_needs_dest):
+                self._target_error(
+                    function.literal,
+                    'a function literal returning a materialized string used as a value')
 
     def _string_result_write(self, item: hir.AST) -> list[hir.AST]:
         """Write one returned string into the caller-owned result block."""
@@ -3066,47 +3028,20 @@ class _StringLowering:
         """Every local's initializers and assigned values, by binding (any type: a `match` temporary is an optional)."""
         found: dict[int, list[hir.AST]] = {}
 
-        def walk(node: object) -> None:
-            if isinstance(node, hir.FunctionLiteral) and node is not literal:
-                return
+        for node in self._string_body_nodes(literal):
             if isinstance(node, hir.Declare) and node.binding_id is not None:
                 found.setdefault(node.binding_id, []).append(node.expr)
             if isinstance(node, hir.Assign) and node.target.binding_id is not None:
                 found.setdefault(node.target.binding_id, []).append(node.value)
-            if isinstance(node, hir.AST):
-                for field_ in dataclass_fields(node):
-                    value = getattr(node, field_.name)
-                    for child in (value if isinstance(value, (list, tuple)) else [value]):
-                        if isinstance(child, hir.AST):
-                            walk(child)
-                        elif isinstance(child, hir.ObjectField):
-                            walk(child.value)
-                        elif isinstance(child, dict):
-                            for item in child.values():
-                                walk(item)
-
-        walk(literal.body)
         return found
 
     def _array_element_string_targets(self, literal: hir.FunctionLiteral) -> set[int]:
         """Iterator targets over arrays of strings: their values are the elements (arena or static), not frame strings."""
         targets: set[int] = set()
 
-        def walk(node: object) -> None:
-            if isinstance(node, hir.FunctionLiteral) and node is not literal:
-                return
+        for node in self._string_body_nodes(literal):
             if isinstance(node, hir.IteratorExpression) and isinstance(node.iterable.type, ty.ArrayType) and node.target.binding_id is not None:
                 targets.add(node.target.binding_id)
-            if isinstance(node, hir.AST):
-                for field_ in dataclass_fields(node):
-                    value = getattr(node, field_.name)
-                    for child in (value if isinstance(value, (list, tuple)) else [value]):
-                        if isinstance(child, hir.AST):
-                            walk(child)
-                        elif isinstance(child, hir.ObjectField):
-                            walk(child.value)
-
-        walk(literal.body)
         return targets
 
     def _string_storage(self, node: hir.AST, *, visiting: set[int] | None = None) -> str:
