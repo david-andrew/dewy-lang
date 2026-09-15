@@ -75,7 +75,11 @@ export DEWY_BOOTSTRAP_BACKEND_ARGS="$bootstrap_handoff/arguments"
 cat > "$bootstrap_handoff/udewy" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ $# != 4 || $1 != --target || $3 != -c || ! -s $4 ]]; then
+if [[ $# == 5 && $1 == --target && $3 == --no-debug-info && $4 == -c && -s $5 ]]; then
+    : # Current seeds explicitly omit debugger metadata for ordinary builds.
+elif [[ $# == 4 && $1 == --target && $3 == -c && -s $4 ]]; then
+    : # Older native seeds predate the optional debugger metadata flag.
+else
     echo 'Unexpected bootstrap backend invocation' >&2
     exit 2
 fi

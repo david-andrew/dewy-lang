@@ -6,7 +6,8 @@ import subprocess
 import pytest
 
 
-def test_backend_runs_after_dewy_exits_and_failure_stops_build(tmp_path):
+@pytest.mark.parametrize('omit_debug', [False, True])
+def test_backend_runs_after_dewy_exits_and_failure_stops_build(tmp_path, omit_debug):
     root = Path(__file__).resolve().parents[2]
     work = tmp_path / 'checkout with spaces'
     for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'udewy/stdlib', 'library'):
@@ -22,7 +23,9 @@ echo "$$" > "$TEST_DEWY_PID"
 mkdir -p __dewycache__/dewy/bootstrap
 source="$PWD/__dewycache__/dewy/bootstrap/main.udewy"
 echo 'let main=()=>42' > "$source"
-"$DEWY_UDEWY" --target "$2" -c "$source"
+flags=()
+if [[ $TEST_OMIT_DEBUG == 1 ]]; then flags+=(--no-debug-info); fi
+"$DEWY_UDEWY" --target "$2" "${flags[@]}" -c "$source"
 echo emitted > "$TEST_DEWY_DONE"
 ''')
     micro = work / 'udewy-seed'
@@ -35,8 +38,12 @@ if [[ $4 == udewy/bootstrap/main.udewy ]]; then
 fi
 [[ -f "$TEST_DEWY_DONE" ]]
 if kill -0 "$(cat "$TEST_DEWY_PID")" 2>/dev/null; then exit 98; fi
-[[ $# == 4 && $1 == --target && $2 == x86_64 && $3 == -c && -s $4 ]]
-printf '%s\\n' "$4" > "$TEST_BACKEND_SOURCE"
+if [[ $TEST_OMIT_DEBUG == 1 ]]; then
+    [[ $# == 5 && $1 == --target && $2 == x86_64 && $3 == --no-debug-info && $4 == -c && -s $5 ]]
+else
+    [[ $# == 4 && $1 == --target && $2 == x86_64 && $3 == -c && -s $4 ]]
+fi
+printf '%s\\n' "${!#}" > "$TEST_BACKEND_SOURCE"
 exit 77
 ''')
     dewy.chmod(0o755)
@@ -45,6 +52,7 @@ exit 77
         'TEST_DEWY_PID': str(work / 'dewy.pid'),
         'TEST_DEWY_DONE': str(work / 'dewy.done'),
         'TEST_BACKEND_SOURCE': str(work / 'backend.source'),
+        'TEST_OMIT_DEBUG': str(int(omit_debug)),
     }
     result = subprocess.run(['bash', script, dewy, micro, work / 'pair'],
                             env=env, capture_output=True, text=True, timeout=10)
