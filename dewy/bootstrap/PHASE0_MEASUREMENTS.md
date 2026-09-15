@@ -3569,3 +3569,32 @@ sources and build logs, `packed-boundaries-place-gates.log`,
 `word-memory-borrowing-final-gates.log`. Earlier failing retention attempts are
 preserved in `packed-boundaries-native-gates.log` and
 `packed-boundaries-integration.log`.
+
+### Construct literal type keys without per-element text objects
+
+String literal keys now use their type tag followed by the exact string. They
+are complete leaf keys; parent descriptions use interned ids, so quoting the
+contents did not prevent an ambiguity. Binary literal keys use a single ASCII
+hex buffer instead of a joined array of separately formatted decimal strings.
+These are internal lookup representations, not changes to literal equality.
+Compiler fingerprinting invalidates earlier checked-prelude cache entries.
+
+Native-generated direct-output kernels, using the same `7aa76771` C seed and
+frozen library on each side, performed 1,000 repeated lookups after warming the
+entry. Process times include startup and printing; allocation covers lookups.
+
+| Literal | Before | After | Allocated before → after |
+| --- | ---: | ---: | ---: |
+| 512 ASCII characters | 301 / 309 ms | 42 / 42 ms | 125,744,000 → 21,856,000 bytes |
+| 256 binary bytes | 357 / 381 ms | 56 / 54 ms | 156,072,000 → 24,080,000 bytes |
+
+The interning regression distinguishes empty values, quotes, delimiters,
+canonical-equivalent but byte-distinct Unicode, and ambiguous variable-width
+binary encodings. It checks repeated hits, independent forks and id reuse after
+truncation on direct and C backends. Type-algebra regressions also pass. The
+first expanded test used unsupported nested-array iteration; indexed access
+keeps it within the existing language rules.
+
+Artifacts: `literal-key-measurement/results.json`, before/after sources and
+build logs, `literal-key-final-gates.log` (two algebra passes and that test
+construction failure), and `literal-key-interning-retry.log` (corrected test).

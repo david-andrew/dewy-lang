@@ -59,6 +59,31 @@ BODY = '''let main=():>int64=>{
     if types.named_type('Later' 7 @fork) not=? alias return 20
     if types.unfold(alias fork) not=? 0 return 21
     if fork.positions.length not=? fork.entries.length return 22
+    let literals=types.Table[]
+    let texts:array<string>=['' 'x' '\"x\"' 'a:1,b' 'B00' 'é' 'é']
+    let text_ids:set<addr>=set[]
+    loop text in texts {
+        let id=types.string_literal(text @literals)
+        if types.string_literal(text @literals) not=? id return 23
+        text_ids.add(id)
+    }
+    if text_ids.length not=? texts.length return 24
+    let binaries:array<array<uint8>>=[[] [0] [0 0] [1 23] [12 3] [255] [10 11] [171]]
+    let binary_ids:set<addr>=set[]
+    loop i in 0.. and i <? binaries.length {
+        let bytes=binaries[i]
+        let id=types.binary_literal(bytes @literals)
+        if types.binary_literal(bytes @literals) not=? id return 25
+        if id in? text_ids return 26
+        binary_ids.add(id)
+    }
+    if binary_ids.length not=? binaries.length return 27
+    let original=literals
+    types.truncate(@literals 0)
+    let replacement=types.binary_literal([255] @literals)
+    if replacement not=? 0 return 28
+    if types.string_literal('x' @original) not in? text_ids return 29
+    if types.binary_literal([255] @original) not in? binary_ids return 30
     printl('Independent, forked, and cleared type arenas passed')
     return 42
 }

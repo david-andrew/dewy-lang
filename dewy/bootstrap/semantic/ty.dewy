@@ -230,15 +230,26 @@ integer_literal = (value:bigint @nodes:Table):>addr => {
     return intern(@nodes IntegerLiteralType[key=key value=value])
 }
 string_literal = (value:string @nodes:Table):>addr => {
-    let key="S{_quoted(value)}"
+    # This is a complete leaf key, not source text embedded in another key.
+    # The distinct tag plus the exact contents is already injective. Parent
+    # descriptions refer to interned ids, so escaping every character here
+    # adds work without preventing any additional ambiguity.
+    let key='S'+value
     let known=nodes.positions.get(key)
     if known isnt? none return known
     return intern(@nodes StringLiteralType[key=key value=value])
 }
 binary_literal = (value:array<uint8> @nodes:Table):>addr => {
-    let parts:array<string> = []
-    loop byte in value { parts.push("{byte}") }
-    let key="B{parts.join(',')}"
+    # Build one ASCII byte buffer, rather than format every byte into a
+    # separately owned decimal string and join all those descriptors.
+    let alphabet=0x"30313233343536373839616263646566" as array<uint8>
+    let encoded:array<uint8>=[66] # the binary-literal tag B
+    loop byte in value {
+        encoded.push(alphabet[byte // 16])
+        encoded.push(alphabet[byte % 16])
+    }
+    let key=encoded as string|none
+    $runtime_assert key isnt? none
     let known=nodes.positions.get(key)
     if known isnt? none return known
     return intern(@nodes BinaryLiteralType[key=key value=value])
