@@ -562,3 +562,34 @@ facts, transfers, predicates, obligations, bounds, and slicing. Existing
 expected-result and Python differential comparisons remain the oracle;
 changing the index did not change the proof rules. Full self-build timing
 with this representation is still a separate integration checkpoint.
+
+## Optional profile-guided C seed
+
+`tools/profile_dewy_seed.sh` builds a separate optimized variant of a Dewy
+compiler whose C output already exists. Instrumentation, training, and profile
+use are ordinary GCC operations; training runs the native Dewy/µDewy pair.
+It does not change either language or replace bootstrap verification.
+
+```sh
+DEWY_UDEWY=/absolute/path/to/native/udewy \
+DEWY_LIBRARY_ROOT=/absolute/path/to/pinned/library \
+tools/profile_dewy_seed.sh /absolute/path/to/generated/main.c \
+    /absolute/path/to/new/profile-build /absolute/path/to/bootstrap/main.dewy
+```
+
+The output contains `compiler`, the instrumented binary, counter data, command
+and input hashes, and separate build/training logs with timings. Multiple
+training sources may be supplied. Missing counters or mismatched profiles
+fail the build. The default uses GCC, eight LTO jobs, and the existing PRE/
+code-hoisting exclusions for these large generated translation units; select
+the compiler with `DEWY_PGO_CC`, job count with `DEWY_BOOTSTRAP_LTO_JOBS`, or
+restore those passes with `DEWY_BOOTSTRAP_GCC_NO_PRE=0`.
+
+The first experiment built the full compiler in 54.894 seconds using the
+optimized seed, versus 61.487 with the corresponding ordinary C seed, with
+identical emitted µDewy. Instrumentation compilation cost 92.025 seconds,
+training 78.251 seconds, and profile-use compilation 85.826 seconds. Those
+are seed preparation costs, separate from the measured compiler invocation.
+This is an optional C accelerator; performance of a complete bootstrap
+without C acceleration remains a separate goal. Details and verification
+limits are in `PHASE0_MEASUREMENTS.md`.

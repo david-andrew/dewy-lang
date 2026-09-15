@@ -2218,9 +2218,43 @@ borrowing/backend group passes 36 tests. Artifacts: `measure-hir-children.log`,
 `hir-children-gates.log`, `hir-children-shared-gates.log`.
 
 The compiler built through the hosted backend bridge passed the x86-64
-integration bundle, then the larger native-pair script stopped at the known
-optional-array narrowing case in `native_predicate_path_scaling.dewy`.
+integration bundle, then the larger native-pair script stopped at a stale
+`State.length` access in `native_predicate_path_scaling.dewy`.
 The preceding `host-direct-atoms-full` executable rejects the same case with
-the same diagnostic. The complete pair gate remains open; this is not a
-bridge regression. Artifacts: `check-host-backend-bridge-pair.log` and the two
+the same diagnostic. The indexed fact store exposes `State.values.length`;
+the fixture is corrected accordingly. This was not an optional-array or
+bridge regression. The rerun with the profile-guided seed passes the pair
+execution script on both x86-64 and C, including analysis scaling and test
+discovery (`check-pgo-native-pair.log`). Artifacts:
+`check-host-backend-bridge-pair.log` and the two
 `host-*-full-predicate-check/result.json` records.
+
+### Profile-guided native seed experiment
+
+The saved `cb6db449` native C2 source was recompiled with GCC 16.2.1 using
+`-O2 -flto=8 -fno-tree-pre -fno-code-hoisting`, first with instrumentation and
+then with the resulting profile. Training compiled frozen `3c699a2f` compiler
+source/library; measurement compiled frozen `3789e114` source/library through
+the direct backend, as in the preceding 61.487-second native checkpoint.
+Profile mismatches and missing data were compilation errors.
+
+The resulting full invocation took **54.894 seconds**: frontend 12.098,
+validation 6.621, preparation 1.203, lowering 14.413, emission 4.078, and backend
+14.436. Peak process RSS was 5,820,112 KiB. Generated µDewy was byte-identical
+to the ordinary seed's output: 48,662,145 bytes, SHA-256
+`de9ee754cbbd12840510b42a06ff5ee30854f30534a9160a750c053ff5bcb654`.
+Focused tests may have overlapped part of this experiment; repeat the final
+acceptance measurements without competing work. This first result crosses
+the native time target, but does not complete Phase 0 or certify a release.
+
+Instrumented seed compilation took 92.025 seconds, the training command
+78.251, and profile-use compilation 85.826. These preparation costs are
+reported separately; no training is needed for each later compiler invocation.
+The reproducible shell procedure is `tools/profile_dewy_seed.sh`; real GCC
+tests verify counter generation/use, an untrained execution path, and failure
+when training produces no counters (two tests).
+
+Artifacts: `pgo-seed-experiment/steps.json`, `metadata.json`, counter files,
+`full-measurement/results.jsonl`, and `pgo-script-gates.log`. The pair execution
+script passes both output backends (`check-pgo-native-pair.log`). The
+unaccelerated bootstrap goal, full corpus/parity and release gates remain open.
