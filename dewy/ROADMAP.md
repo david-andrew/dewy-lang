@@ -62,17 +62,21 @@ the native compiler, which makes it:
 - a from-source bootstrap path with no trusted binary seed;
 - a convenient development loop for prototyping and inspecting analyses in
   Python before porting them. The 2026-09-15 complete direct-output build
-  checkpoints for the larger, cache-enabled compiler are about 77 seconds
+  checkpoints for the larger, cache-enabled compiler are about 76 seconds
   hosted and 58 seconds native, the latter using a C-built seed pair and
-  direct x86-64 output. The native time target is met on that route; the
-  hosted target and the fully direct bootstrap remain open. The hosted
-  checkpoint predates the string-payload test fix required for correct
-  cached range bounds and is not a certification of that build's behavior.
+  direct x86-64 output. Both remain above the revised native target; the
+  fully direct bootstrap remains open. These are single-generation measurements, not a new
+  fixed-point certification.
   Recorded inputs, seeds and phase timings live in
   [`bootstrap/PHASE0_MEASUREMENTS.md`](bootstrap/PHASE0_MEASUREMENTS.md);
 - the way around staged seeds when the language changes: the compiler's
   own source will use each new feature, and a hosted compiler that already
   supports it avoids a two-generation staging dance for every change.
+
+The hosted compiler must remain dependency-free beyond Python and the existing
+system build tools. Do not introduce Cython or another required Python package
+as a performance strategy. Native performance takes priority; keep measuring
+and improving the hosted path, but it may lag behind the native time target.
 
 That independence has limits: the compilers share the µDewy execution layer
 and runtime library. Keep explicit expected-result tests alongside
@@ -116,9 +120,9 @@ Exit criteria that the later phases depend on:
   0 exit criterion;
 - compile-time performance adequate for dogfooding, measured against explicit
   time and memory budgets. The dedicated campaign below targets a complete
-  compiler build in under one minute through each compiler implementation,
-  with builds on the order of seconds as the stretch goal. Record cold and
-  warm compilation separately for a small program, a representative compiler
+  native compiler build in under 30 seconds, with under 10 seconds as the
+  stretch goal. Hosted performance is secondary and may lag behind. Record
+  cold and warm compilation separately for a small program, a representative compiler
   module, and the full compiler.
   Record checking, lowering, emission, and backend timings; peak memory;
   generated µDewy size; and copied bytes, shared snapshots, and detachments.
@@ -150,10 +154,12 @@ not a guarantee that the target will be achieved within a week. This
 milestone consolidates the performance work below and selected parts of
 Phase 1.1, rather than spreading it across ordinary feature development.
 
-**Acceptance target:** both the Python-hosted compiler and the native
-compiler build the Dewy compiler from source into an executable in **under
-60 seconds** on a recorded benchmark machine. Builds on the order of seconds
-are the stretch goal. Time the complete invocation, including checking,
+**Acceptance target (revised 2026-09-15):** the native compiler builds the
+Dewy compiler from source into an executable in **under 30 seconds** on a
+recorded benchmark machine; **under 10 seconds** is the stretch goal. Keep
+the dependency-free Python-hosted compiler usable and measured, but it need
+not reach the native target before the campaign can succeed. Time the complete
+invocation, including checking,
 lowering, emission, µDewy compilation, and linking; include C compilation
 when that route uses it. Measure one compiler generation separately from
 the two-generation bootstrap verification and its execution checks.
@@ -163,6 +169,15 @@ with the machine, toolchain, backend, options, and cache state. A cached
 executable or an incremental result cannot establish the full-build target.
 Retain semantic and expected-result tests, deterministic bootstrap checks,
 and bounded memory budgets throughout the campaign.
+
+Use the machine's compute and memory throughput to challenge the amount of
+work performed: record source and output bytes, node counts, allocation and
+copy volume, and repeated visits alongside elapsed time. Distinguish an
+idealized bandwidth/cycle budget from an achievable compiler time; parsing,
+proofs, pointer chasing and toolchain startup cannot be priced as a single
+streaming copy. Prioritize eliminating redundant representations and passes
+when costs exceed those justified by the workload, rather than chasing small
+speedups in already cheap operations.
 
 The campaign covers the whole compilation path:
 

@@ -1,8 +1,12 @@
 # Phase 0 performance campaign
 
-The acceptance target remains a complete compiler executable build in under
-60 seconds through **each** implementation. The module measurements below
-are bounded development gates; they do not establish that full-build target.
+The acceptance target, revised on 2026-09-15, is a complete native compiler
+executable build in **under 30 seconds**, with **under 10 seconds** as the
+stretch goal. The Python-hosted compiler remains dependency-free and measured;
+its performance is secondary and may lag behind. Earlier sub-minute targets
+below describe historical checkpoints, not the current acceptance criterion.
+The module measurements are bounded development gates; they do not establish
+the full-build target.
 See [ROADMAP.md](../ROADMAP.md#dedicated-performance-campaign).
 
 ## Reproduction and isolation
