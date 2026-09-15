@@ -3360,3 +3360,33 @@ export exclusion to all hidden helpers. The generated snapshot codec is
 updated and the native prelude format advances to version 3. Earlier
 `object-text-*.log` files retain the initial static-record passes and the
 alias/test-harness/cache issues diagnosed along the way.
+
+### Refreshed record-formatting compiler checkpoint
+
+Frozen `3bd41743` builds through the verified `2b541de3` C-built compiler
+pair into a direct x86-64 executable in **57.883 seconds**. Phases: frontend
+23.554, validation 5.038, initialization/reachability 1.690, lowering 11.284,
+emission 5.003, backend 8.951 seconds. Peak process RSS is 6,008,772 KiB;
+emitted µDewy is 53,112,523 bytes. Artifacts: `source-object-text`,
+`native-object-text-full`. This is one generation, not a refreshed fixed
+point or a fully no-C bootstrap.
+
+The resulting direct executable SHA-256 is
+`197bb6a2926c816e36377b25d276b897fd491fe13d525f1a1b2f13645ddf46ea`.
+A C accelerator built from its emitted µDewy passes nine of ten selected
+public CLI corpus cases against hosted `260c11b0` (`parity-object-text`).
+The remaining integer-singleton annotation gap is recorded in the inventory.
+The hosted binding-identity fix in that comparison has nine passing tests:
+bare annotations retain their store contract through subsequent assignments,
+including captured globals and annotated function declarations.
+
+A separate hosted experiment freezes the already-checked Python object graph
+only during lowering, then unfreezes it. Four fresh, alternating samples of
+the frozen `53cdf9e7` cache-codec module produce identical normalized µDewy.
+Lowering takes 2.423/2.297 seconds normally and 2.240/2.190 with freezing;
+total checking/lowering/emission times overlap (17.013/16.166 versus
+16.764/16.487). Peak RSS rises from about 239 MiB to
+about 260 MiB (245,132–245,292 versus 265,388–265,776 KiB). No production
+GC policy changes are adopted: this does not establish a useful total-build
+improvement. Artifacts: `measure-frozen-lowering.py`,
+`frozen-lowering-experiment.log`, `host-frozen-lowering-{plain,freeze}-{a,b}`.

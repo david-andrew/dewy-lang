@@ -71,6 +71,16 @@ are recorded in [PHASE0_MEASUREMENTS.md](PHASE0_MEASUREMENTS.md).
 
 ## Additional observations from optimization regressions
 
+The `3bd41743` native accelerator passes nine of ten selected public CLI
+cases against hosted `260c11b0`: array call adapters, printing, union
+containers, token arrays, brand words, protocol tables, dynamic strings,
+narrowed union copies, and position-only calls. The remaining literal-union
+case rejects `flip(s:-1|1):>-1|1 => -s`: parameter and result annotations
+have not received the refined-word treatment already used for record fields.
+Artifact: `phase0-performance/parity-object-text`; native SHA-256
+`a02fb5f3595dcb65be804f5f94252606bf3c1db3d8b7df75178bc22dc74e1454`.
+This targeted run does not update the full-corpus count above.
+
 These are outside the original corpus counts:
 
 - `tests/fixtures/array_union_widening.dewy` now passes hosted direct/C
