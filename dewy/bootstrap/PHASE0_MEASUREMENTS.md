@@ -2284,3 +2284,45 @@ that the result equals 1. Common member/call dispatch was also moved ahead
 of unrelated expression kinds; call transfer rules and argument order are
 unchanged. The bounds/conditional-result/bigint group passes 27 tests.
 Artifact: `literal-result-effects-gates.log`.
+
+### Consume saved x86 operands in their cache registers
+
+At `e806569f`, both µDewy implementations consume saved binary operands and
+store values directly from the x86 register cache. Division and shifts retain
+the hardware-register staging they require. Spill, argument evaluation, narrow
+store and boolean semantics are unchanged. The new deep-expression fixture
+covers spills across direct/indirect calls, side effects, comparisons and stores;
+the register/bridge group passes 46 tests (10 unavailable backends skipped),
+and the final parity/ABI/extern group passes 44 tests.
+
+On the frozen t0 module, assembly shrank from 6,497,957 to 5,527,668 bytes and
+the executable from 1,291,912 to 1,144,456 bytes, with identical tokenization
+output. That small compile-time sample did not improve (1.367 to 1.567 seconds).
+The full hosted checkpoint took **85.529 seconds**, with checking 37.220,
+lowering 19.556, emission 4.578 and backend 18.047; peak process RSS was
+1,430,748 KiB. Artifacts: `cached-operands-module-results.json`,
+`host-cached-operands-full`, `source-cached-operands.json`.
+
+The initial native checkpoint took **54.579 seconds**, but used a directly
+compiled µDewy seed where the preceding 46.560-second run used a C-compiled
+µDewy seed. It is a separate route measurement, not a regression comparison.
+The Dewy seed was still the same profile-guided C executable. Generated µDewy
+remained byte-identical (48,662,145 bytes, SHA-256 `de9ee754…654`).
+
+A quiet comparison recompiling that same emitted µDewy isolates the backend:
+
+| µDewy seed | Complete backend invocation | Peak process RSS (KiB) | Assembly bytes | Executable bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Previous, C-compiled | 12.841 s | 2,555,412 | 141,645,447 | 27,714,256 |
+| Cached operands, C-compiled | 11.187 s | 2,243,732 | 118,210,066 | 24,347,344 |
+| Cached operands, directly compiled | 19.704 s | 2,242,276 | 118,210,066 | 24,347,344 |
+
+The two new seeds emit byte-identical assembly. The directly compiled µDewy
+compiler reaches a byte-identical generation-2/3 fixed point (SHA-256
+`0b822aac254e823c39a1f769b7ef5bc4e7125ce2d055a95702175c10ffd499a4`);
+the C route also reaches an identical two-generation result (SHA-256
+`e1336b24e1bd74c653c2f24cd203e51c7f0c789162b6e81f7ed5fe1f76f43e8c`).
+These certify the µDewy builds only; the complete direct Dewy bootstrap and
+remaining Phase 0 corpus/parity gates are still open. Artifacts:
+`build-cached-operands-micro.log`, `build-cached-operands-c-micro.log`,
+`cached-operands-micro-routes.json` and `native-cached-operands-full`.

@@ -62,8 +62,9 @@ the native compiler, which makes it:
 - a from-source bootstrap path with no trusted binary seed;
 - a convenient development loop for prototyping and inspecting analyses in
   Python before porting them. The 2026-09-15 complete direct-output build
-  checkpoints are about 96 seconds hosted and 63 seconds native; native is
-  now faster on this workload, and both remain above the one-minute target.
+  checkpoints are about 86 seconds hosted and 47 seconds native with a
+  profile-guided C seed and direct output. The native time target is met on
+  that route; the hosted target and the fully direct bootstrap remain open.
   Recorded inputs, seeds and phase timings live in
   [`bootstrap/PHASE0_MEASUREMENTS.md`](bootstrap/PHASE0_MEASUREMENTS.md);
 - the way around staged seeds when the language changes: the compiler's
