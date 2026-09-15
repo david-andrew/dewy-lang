@@ -9,6 +9,7 @@ from test_bootstrap_initialization import type_builder
 from dewy.backend.udewy import codegen, emit
 from dewy.reporting import Span, SrcFile
 from dewy.semantic import hir, ty
+from udewy.p0 import decode_string_literal
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
 
@@ -38,6 +39,8 @@ def test_native_emitter_words_and_functions(tmp_path):
         integer(42), integer(-17), integer(255, prefix='0x'), integer(5, prefix='0b'),
         hir.String(LOC, ty.StringType(), 'quote" slash\\\nStraße 😀'),
         hir.BasedString(LOC, ty.BinaryLiteralType(b'\x00\x80\xff'), '0x', '0080ff', b'\x00\x80\xff'),
+        hir.String(LOC, ty.StringType(), ''.join(map(chr, range(128))) + 'é é 😀 $include_bytes(p"absent")'),
+        hir.BasedString(LOC, ty.BinaryLiteralType(bytes(range(256))), '0x', bytes(range(256)).hex(), bytes(range(256))),
         add,
         call('__mul__', [add, integer(3)]),
         call('__add__', [integer(250, 'uint8'), integer(10, 'uint8')], 'uint8'),
@@ -115,6 +118,12 @@ main = ():>int64 => {{
     context = emit.EmitContext({'direct', 'main'}, set(), debug_locations=False)
     expected = [emit.emit_string(hir.String(LOC, ty.StringType(), emit.emit_ast(case, context))) for case in cases]
     assert observations.splitlines() == expected
+    for case, observed in zip(cases, observations.splitlines()):
+        spelling = decode_string_literal(observed, 0, len(observed)).decode('utf-8')
+        if isinstance(case, hir.String):
+            assert decode_string_literal(spelling, 0, len(spelling)) == case.content.encode('utf-8')
+        elif isinstance(case, hir.BasedString):
+            assert bytes.fromhex(spelling[3:-1]) == case.content
     assert program.strip() == emit.emit_function_decl('main', main, context)
     for name, text, expected_exit in [('main', program, 42), ('startup', startup_program, 42), ('empty', empty_program, 0)]:
         output = tmp_path / f'native-emitted-{name}.udewy'

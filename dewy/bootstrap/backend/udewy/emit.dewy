@@ -79,12 +79,35 @@ annotation = (id:addr input:Input):>string => {
     return if types.is_primitive(node 'never') 'void' else display.type_to_dewy(id input.types)
 }
 hex_byte = (byte:uint8):>string => alphabet[byte // 16] + alphabet[byte % 16]
+# Build one ASCII buffer for each literal. Escaping every printable byte
+# expanded text fourfold, and formatting one string per byte multiplied both
+# allocation traffic and the writer's fragment count.
+# µDewy rejects interpolation syntax, so braces remain escaped too.
+const hex_digits=0x"30313233343536373839616263646566" as array<uint8>
 text_literal = (text:string):>string => {
     let bytes=text as array<uint8>
-    let parts:array<string>=['"']
-    loop byte in bytes {parts.push("\\x{hex_byte(byte)}")}
-    parts.push('"')
-    return parts.join
+    let encoded:array<uint8>=[34]
+    loop byte in bytes {
+        if byte >=? 32 and byte <=? 126 and byte not=? 34 and byte not=? 92 and byte not=? 123 and byte not=? 125 {encoded.push(byte)}
+        else {
+            encoded.push(92) encoded.push(120)
+            encoded.push(hex_digits[byte // 16]) encoded.push(hex_digits[byte % 16])
+        }
+    }
+    encoded.push(34)
+    let result=encoded as string|none
+    $runtime_assert result isnt? none
+    return result
+}
+binary_literal = (bytes:array<uint8>):>string => {
+    let encoded:array<uint8>=[48 120 34]
+    loop byte in bytes {
+        encoded.push(hex_digits[byte // 16]) encoded.push(hex_digits[byte % 16])
+    }
+    encoded.push(34)
+    let result=encoded as string|none
+    $runtime_assert result isnt? none
+    return result
 }
 integer_literal = (node:hir.Integer):>string => {
     if node.prefix not in? ['0x' '0b'] return _bigint_as_string(node.value)
@@ -280,9 +303,7 @@ write_ast = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void =>
             state.includes[path]=name
             write(name @out) return
         }
-        write('0x"' @out)
-        loop byte in node.content {write(hex_byte(byte) @out)}
-        write('"' @out) return
+        write(binary_literal(node.content) @out) return
     }
     if node is? hir.ExpressedIdentifier {
         if types.node_at(input.types node.value_type) is? types.CallableType {write('@' @out)}

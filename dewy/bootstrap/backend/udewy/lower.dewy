@@ -1421,30 +1421,29 @@ string_memory = (data:addr byte_length:addr boundaries:addr length:addr start:ad
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 string_literal = (node:hir.String @state:State):>addr => {
-    let prefix:array<addr>=[]
     let bytes=node.content as array<uint8>
     if bytes.length >? uint32.max return reject(node 'a string literal exceeding the runtime boundary offset range' @state)
-    # Segmentation here is a compile-time operation using Dewy's own string
-    # indexing. Runtime concatenation/UTF-8 decoding must segment the joined
-    # bytes afresh: concatenating two boundary tables is not Unicode-correct.
-    let offsets:array<addr>=[0]
+    # Segment at compile time using Dewy's own grapheme indexing. Emit the
+    # final uint32 offsets as bytes, rather than an allocation and one runtime
+    # store per boundary. Runtime joins still segment their combined bytes.
+    let packed:array<uint8>=[0 0 0 0]
     let offset:addr=0
     loop i in 0.. and i <? node.content.length {
         let grapheme=node.content[i] as array<uint8>
         offset+=grapheme.length
-        offsets.push(offset)
+        let remaining=offset
+        loop shift in 0..3 {
+            packed.push((remaining % 256) as uint8)
+            remaining //=256
+        }
     }
-    let boundaries=snapshot(intrinsic('__static_alloca__' [word(offsets.length*4 node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
-    loop i in 0.. and i <? offsets.length {
-        let value=put(hir.Integer[node.loc types.primitive('uint32' @state.type_nodes) '0d' offsets[i]] @state)
-        prefix.push(intrinsic('__store_u32__' [value word_op('__add__' boundaries word(i*4 node @state) node @state)] types.primitive('void' @state.type_nodes) node @state))
-    }
-    let data=put(hir.String[node.loc types.primitive('int64' @state.type_nodes) node.content] @state)
-    # Every descriptor field is constant for this literal site. Like its
-    # bytes and boundary table, the descriptor can be reused across calls;
-    # allocating it on each evaluation retains space for immutable data.
-    prefix.push(string_memory(data word(bytes.length node @state) boundaries word(node.content.length node @state) word(0 node @state) node @state static_storage=true))
-    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let boundaries=put(hir.BasedString[node.loc word_type '0x' '' packed none] @state)
+    let data=put(hir.String[node.loc word_type node.content] @state)
+    # All six descriptor words are compile-time stable. The existing µDewy
+    # primitive emits the pointer relocations as static data, preserving one
+    # descriptor per literal site without rebuilding it on every evaluation.
+    return intrinsic('__static_words__' [data word(bytes.length node @state) boundaries word(node.content.length node @state) word(0 node @state) word(0 node @state)] word_type node @state)
 }
 string_data = (value:addr node:hir.AST @state:State):>addr => word_op('__add__' read_word(value layouts.string_descriptor.data node @state) read_word(value layouts.string_descriptor.start node @state) node @state)
 string_view = (value:addr first:addr count:addr node:hir.AST @state:State):>addr => {

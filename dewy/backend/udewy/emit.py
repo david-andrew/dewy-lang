@@ -539,7 +539,9 @@ def emit_loop_exit(ast: hir.Break | hir.Continue, keyword: str) -> str:
 def emit_string(string: hir.String) -> str:
     """Emit decoded Dewy text as an exact UTF-8 byte literal for udewy."""
 
-    content = ''.join(f'\\x{byte:02x}' for byte in string.content.encode('utf-8'))
+    content = ''.join(
+        chr(byte) if 32 <= byte <= 126 and byte not in (34, 92, 123, 125) else f'\\x{byte:02x}'
+        for byte in string.content.encode('utf-8'))
     return f'"{content}"'
 
 

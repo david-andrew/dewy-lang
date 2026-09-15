@@ -14,6 +14,23 @@ def test_native_string_descriptor_sharing(tmp_path):
         'native_string_scratch', 'native_string_materialization',
         'native_static_strings', 'native_string_boundary_storage', 'native_word_memory_arguments',
     )]
+    # A long literal crosses the uint32 offset table's low-byte boundary.
+    # Its embedded NUL and multi-scalar graphemes also check static byte order,
+    # counts and shifted views, rather than merely comparing emitted syntax.
+    long_literal = 'x' * 1024 + r'\u0000' + 'é🇺🇸👩‍👩‍👧‍👦'
+    cases.append("let literal=():>string=>'" + long_literal + "'\n" + """
+let main=():>int64=>{
+    let text=literal()
+    if text.length not=?1028 return 1
+    if text[1024] not=?'\\u0000' return 2
+    if text[1025] not=?'é' return 3
+    if text[1026] not=?'🇺🇸' return 4
+    if text[1027] not=?'👩‍👩‍👧‍👦' return 5
+    let tail=text[1025..1028)
+    if tail.length not=?3 or tail[1] not=?'🇺🇸' return 6
+    return 42
+}
+""")
     # Allocation budgets belong to native lowering. Hosted strings retain
     # their existing frame-region policy, so test those semantics separately.
     for index, text in enumerate(cases):

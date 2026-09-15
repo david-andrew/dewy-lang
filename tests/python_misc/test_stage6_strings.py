@@ -52,7 +52,7 @@ let read = ():>uint8 => {
 
     assert '__dewy_string_boundaries_' not in emitted
     assert '__dewy_string_value_' not in emitted
-    assert '"\\x63\\x61\\x66\\xc3\\xa9"' in emitted
+    assert '"caf\\xc3\\xa9"' in emitted
     assert '__store_i64__(5 __dewy_array_1 + 8)' in emitted
 
 

@@ -3598,3 +3598,31 @@ keeps it within the existing language rules.
 Artifacts: `literal-key-measurement/results.json`, before/after sources and
 build logs, `literal-key-final-gates.log` (two algebra passes and that test
 construction failure), and `literal-key-interning-retry.log` (corrected test).
+
+### Emit literal boundaries and descriptors as static data
+
+Native lowering now emits a literal's final little-endian uint32 boundaries
+as one based string and its six descriptor words through the existing
+`__static_words__` primitive. This removes the generated per-boundary store
+instructions and repeated descriptor initialization. Segmentation remains a
+compile-time operation; runtime joins keep their separate segmentation path.
+The hosted compiler already used this representation.
+
+The native emitter constructs each quoted or binary literal in one ASCII byte
+buffer. Both emitters leave safe printable ASCII unescaped; quote, backslash,
+braces, control and non-ASCII bytes retain exact hex escapes. Braces must stay
+escaped because µDewy rejects interpolation syntax. The first emitter test run
+caught that requirement; µDewy's lexer and semantics were left unchanged.
+
+Validation: eight complete native string/storage programs on direct and C
+backends, including a 1,024-character prefix followed by NUL and multi-scalar
+Unicode graphemes and a shifted slice; a value-alias program through both
+compiler implementations and backends; and 25 emitter/string checks. The
+latter cover all ASCII bytes, all 256 binary byte values, Unicode, include
+paths requiring escapes, deep output, and decoding back to the exact bytes.
+The full string driver tested static lowering before the compact-emitter edit;
+the emitter has its own subsequent gates. Full compiler integration follows.
+
+Artifacts: `static-literal-data-gates.log`,
+`compact-literal-emitter-gates.log` (unescaped-brace failure), and
+`compact-literal-emitter-retry.log` (25 passes).
