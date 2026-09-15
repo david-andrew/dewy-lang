@@ -4135,29 +4135,10 @@ class _Lowerer(
                     prelude, expr = self._kept_string_value(node.expr)
             else:
                 prelude, expr = self._extract_expression(node.expr)
-            annotation = (
-                'int64'
-                if isinstance(
-                    node.annotation or node.expr.type,
-                    (
-                        ty.ArrayType,
-                        ty.ObjectType,
-                        ty.StringLiteralType,
-                        ty.BinaryLiteralType,
-                        ty.StringType,
-                    ),
-                )
-                or (
-                    isinstance(node.annotation or node.expr.type, str)
-                    and (node.annotation or node.expr.type)
-                    in {'string', 'grapheme', 'char'}
-                )
-                else self._lower_runtime_value_type(node.annotation)
-                if node.annotation is not None
-                else 'int64'
-                if ty.enum_members(node.expr.type) is not None   # an inferred enum binding is its tag word
-                else None
-            )
+            # Every local stores a runtime representation, including an
+            # inferred singleton/refinement. Emitting its semantic type (for
+            # example `let copy:42`) is not a µDewy storage annotation.
+            annotation = self._lower_runtime_value_type(declared_type)
             return [
                 *prelude,
                 replace(
