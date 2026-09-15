@@ -3626,3 +3626,40 @@ the emitter has its own subsequent gates. Full compiler integration follows.
 Artifacts: `static-literal-data-gates.log`,
 `compact-literal-emitter-gates.log` (unescaped-brace failure), and
 `compact-literal-emitter-retry.log` (25 passes).
+
+### Compact literal checkpoint: 43.70 seconds, 38.25 MB of µDewy
+
+Frozen source `e8e88ea5` includes packed runtime boundaries, temporary
+reclamation, literal-key construction and static/compact literal emission.
+Three builds of that same frozen compiler source into a direct x86-64
+executable show the staging boundary explicitly:
+
+| Executing Dewy seed | Complete invocation | Frontend | Validation | Init/reachability | Lowering | Emission | Backend | Peak process RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Previous shared-descriptor seed | 54.477 s | 19.324 s | 5.275 s | 1.923 s | 10.904 s | 5.043 s | 9.600 s | 5,765,308 KiB |
+| New algorithms, previous generated storage | 47.110 s | 19.950 s | 5.050 s | 1.840 s | 7.513 s | 3.798 s | 7.134 s | 5,529,224 KiB |
+| New algorithms and generated storage | **43.704 s** | 18.834 s | 4.872 s | 1.892 s | 6.867 s | 2.653 s | 7.049 s | **3,527,444 KiB** |
+
+The first emits 54,005,870 bytes; the last two emit **38,251,445 bytes**,
+byte-identical with SHA-256
+`dea26bfc17ea40c63c7a0ea5d5770b5cc133977aa075e3724a21c02ea38eb042`.
+The preceding 53.372-second checkpoint on the earlier source used
+5,790,264 KiB (about 5.52 GiB), compared with about 3.36 GiB now. These are
+single samples with no other agent-launched heavy jobs overlapping timing.
+The 30-second target is still unmet. Frontend and validation account for
+23.7 seconds of this checkpoint, so downstream size reduction alone cannot
+reach the stretch target.
+
+All executing seeds are C-built; all measured outputs are direct x86-64.
+The separate C preparation is not part of these direct-output invocations.
+The unchanged native µDewy seed is the verified `2b541de3` pair. New Dewy C
+seed hashes, in generation order:
+
+- `31047b4e101db224e5285f0d9684a8ec134b68eef969530350f540feab8bd1ac`
+- `e9058fc624cc7f8ec1b7ce46d4fd1da77564f412f467fb4ed12a6f6c0e31673a`
+
+Artifacts: `source-compact-literals`, `native-compact-literals-stage1`,
+`native-compact-literals-stage1-c`, `native-compact-literals-stage2`,
+`native-compact-literals-stage2-c`, and `native-compact-literals-full`.
+The last two µDewy outputs stabilize this Dewy generation. This is not a
+new two-compiler fixed-point certification or a full no-C bootstrap.
