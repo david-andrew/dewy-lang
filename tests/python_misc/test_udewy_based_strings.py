@@ -130,3 +130,29 @@ let main = ():>int => {
 
     with pytest.raises(SyntaxError, match="TK_LEFT_BRACKET"):
         parse_c(src)
+
+
+@pytest.mark.parametrize('base', ['b', 'x'])
+def test_bulk_based_data_retains_offsets_comments_and_partial_bytes(base):
+    payload = bytes(range(256)) * 32
+    digits = payload.hex() if base == 'x' else ''.join(f'{byte:08b}' for byte in payload)
+    # End with a partial byte and include quotes/invalid digits in comments.
+    pieces = [digits[i:i+71] for i in range(0, len(digits), 71)]
+    content = ' _ # ignored " g2\n'.join(pieces) + '1'
+    source = 'let data:int64 = 0' + base + '"' + content + '"'
+    token = t1.tokenize(source)[-1]
+    expected_tail = b'\x10' if base == 'x' else b'\x80'
+    assert p0.decode_string_token(source, token) == payload + expected_tail
+    assert source[token.location:token.location+token.value] == '0' + base + '"' + content + '"'
+
+
+@pytest.mark.parametrize('base', ['b', 'x'])
+def test_bulk_based_data_stops_at_first_invalid_digit(base, monkeypatch):
+    source = '0' + base + '"' + '01_' * 1024 + '# ignored g\n  z"'
+    def fail(text, offset, message):
+        assert text is source
+        assert offset == source.index('z')
+        raise SyntaxError(message)
+    monkeypatch.setattr(t1, 'error', fail)
+    with pytest.raises(SyntaxError, match="invalid base-.* string digit 'z'"):
+        t1.tokenize(source)

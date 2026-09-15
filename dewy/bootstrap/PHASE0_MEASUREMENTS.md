@@ -2048,3 +2048,30 @@ and a zero-extra-type-entry gate for 64 fresh array widenings pass, alongside
 hosted normalization and immutable-record checks (35 tests). No mutable
 checker query is cached across calls. Measurement is pending. Artifact:
 `atomic-subtype-pair-gates.log`.
+
+The atom-proof checkpoint's two C generations (`dd972e99`) emitted identical
+µDewy (SHA-256 `1b728a38679865b941059730ee27f0fd69e6b0f571a3c960eb669c124faf364e`).
+The resulting seed built frozen `3789e114` source/library in **62.840 seconds**,
+with 5,900,800 KiB peak process RSS and exactly the same emitted µDewy as the
+owned-exit checkpoint. Phase timings were frontend 17.603, validation 8.117,
+preparation 1.372, lowering 15.750, emission 4.669 and backend 12.997 seconds.
+The small timing change is not strong evidence of a large win. The hosted
+tokenizer comparison regressed from 9.983 to 11.136 seconds (checking 6.438
+to 6.859); neither this single sample nor its earlier passes establishes a
+hosted speedup. Artifacts: `native-atomic-subtypes-full` and
+`measure-atomic-subtypes-module.log`.
+
+### Bulk hosted µDewy based-data scanning and decoding
+
+Valid binary/hex runs are scanned in bulk, preserving the first invalid
+character's location. Packing removes comments and the existing separators,
+then uses byte/integer conversion with the same right-padding of partial
+bytes. No µDewy token kinds or expression semantics change.
+
+For 256 KiB of payload with separators and comments, median scan-plus-decode
+time over three runs fell from **0.275 to 0.00506 seconds for hex**, and from
+**0.860 to 0.0186 seconds for binary**. Both produced identical expected bytes.
+Packing, partial-byte, offset, invalid-digit, comment, scanner and constant
+binding checks pass as part of the 59-test integration group. Artifacts:
+`measure-bulk-data.log` and `direct-atoms-bulk-data-gates.log`. Full hosted
+build impact is not measured yet.

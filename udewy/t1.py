@@ -18,6 +18,10 @@ _IDENT_RUN = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 _HEX_RUN = re.compile(r'[0-9A-Fa-f_]*')
 _BIN_RUN = re.compile(r'[01_]*')
 _DEC_RUN = re.compile(r'[0-9_]*')
+# Based data can contain megabytes of generated tables. Scan its valid runs
+# in bulk while retaining the first invalid character's exact source offset.
+_HEX_DATA_RUN = re.compile(r'(?:[0-9A-Fa-f_ \t\r\n]+|#[^\n]*)*')
+_BIN_DATA_RUN = re.compile(r'(?:[01_ \t\r\n]+|#[^\n]*)*')
 
 
 # some basic type aliases
@@ -209,24 +213,14 @@ def bracketed_type_end(src: str, start: int) -> int:
 
 def based_string_end(src: str, start: int) -> int:
     base = src[start + 1]
-    valid_digits = "01" if base == "b" else "0123456789abcdefABCDEF"
-    i = start + 3
-
-    while i < len(src):
-        c = src[i]
-        if c == '"':
+    scanner = _BIN_DATA_RUN if base == 'b' else _HEX_DATA_RUN
+    match = scanner.match(src, start + 3)
+    assert match is not None
+    i = match.end()
+    if i < len(src):
+        if src[i] == '"':
             return i + 1
-        if c in t0.whitespace or c == '_':
-            i += 1
-            continue
-        if c == '#':
-            i += 1
-            while i < len(src) and src[i] != '\n':
-                i += 1
-            continue
-        if c not in valid_digits:
-            error(src, i, f"invalid base-{2 if base == 'b' else 16} string digit {c!r}")
-        i += 1
+        error(src, i, f"invalid base-{2 if base == 'b' else 16} string digit {src[i]!r}")
 
     error(src, start, "unterminated based string")
     raise AssertionError

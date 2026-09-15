@@ -240,38 +240,23 @@ def decode_string_literal(src: str, start: int, length: int) -> bytes:
     return bytes(processed)
 
 
+_BASED_DATA_COMMENTS = re.compile(r'#[^\n]*')
+_BASED_DATA_SEPARATORS = str.maketrans('', '', ' \t\r\n_')
+
+
 def decode_based_string_literal(src: str, start: int, length: int) -> bytes:
-    base = src[start + 1]
-    digit_width = 1 if base == 'b' else 4
-    processed: list[int] = []
-    byte = 0
-    used_bits = 0
-    i = start + 3
-    end = start + length - 1
-
-    while i < end:
-        c = src[i]
-        if c in t0.whitespace or c == '_':
-            i += 1
-            continue
-        if c == '#':
-            i += 1
-            while i < end and src[i] != '\n':
-                i += 1
-            continue
-
-        value = ord(c) - ord('0') if base == 'b' else t0.hex_value(c)
-        byte = byte << digit_width | value
-        used_bits += digit_width
-        if used_bits == 8:
-            processed.append(byte)
-            byte = 0
-            used_bits = 0
-        i += 1
-
-    if used_bits:
-        processed.append(byte << (8 - used_bits))
-    return bytes(processed)
+    # t1 already validated the digits. Strip only the language's separators,
+    # then pack with the bulk integer/byte routines instead of Python work
+    # per bit or nibble. Partial final bytes are padded on the right.
+    digits = _BASED_DATA_COMMENTS.sub('', src[start + 3:start + length - 1]).translate(_BASED_DATA_SEPARATORS)
+    if not digits:
+        return b''
+    if src[start + 1] == 'x':
+        if len(digits) % 2:
+            digits += '0'
+        return bytes.fromhex(digits)
+    padding = -len(digits) % 8
+    return (int(digits, 2) << padding).to_bytes((len(digits) + 7) // 8, 'big')
 
 
 def decode_string_token(src: str, token: t1.Token) -> bytes:
