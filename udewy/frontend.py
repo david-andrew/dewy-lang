@@ -12,6 +12,7 @@ class EntryPointOptions:
     target: BackendName = "x86_64"
     split_wasm: bool = False
     serve_wasm: bool = False
+    debug_info: bool = True
 
 @compiler_allocation_scope()
 def entry_point(input_file: Path, script_args: list[str], options: EntryPointOptions|None=None) -> int:
@@ -34,6 +35,7 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
 
     # possible raise SyntaxError
     backend = get_backend(options.target)
+    backend.debug_info = options.debug_info
     loaded = t0.load_program(input_file, target_backend=options.target)
     backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
     toks = t1.tokenize(loaded.source)

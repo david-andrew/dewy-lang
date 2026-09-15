@@ -10,9 +10,10 @@ import sys
 
 
 USAGE = """\
-Usage: python -m udewy [-c] [--target TARGET] [--split-wasm] [--serve-wasm] <file.udewy> [args...]
+Usage: python -m udewy [-c] [--target TARGET] [--no-debug-info] [--split-wasm] [--serve-wasm] <file.udewy> [args...]
   -c              Compile only, don't run
   --target TARGET Target backend (x86_64, wasm32, riscv, arm, c)
+  --no-debug-info Omit source/variable debug metadata
   --split-wasm    For wasm32: output separate .wasm file instead of embedded HTML
   --serve-wasm    For wasm32: serve the generated HTML over HTTP
   -h, --help      Show this help and exit"""
@@ -35,6 +36,9 @@ while arg_idx < len(sys.argv) and sys.argv[arg_idx].startswith("-"):
     elif sys.argv[arg_idx] == "--target":
         arg_idx += 1
         options.target = cast(BackendName, sys.argv[arg_idx])
+        arg_idx += 1
+    elif sys.argv[arg_idx] == "--no-debug-info":
+        options.debug_info = False
         arg_idx += 1
     elif sys.argv[arg_idx] == "--split-wasm":
         options.split_wasm = True

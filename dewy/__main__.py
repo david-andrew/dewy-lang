@@ -139,6 +139,7 @@ def _build_and_run(
         options = EntryPointOptions(
             compile_only=compile_only,
             target=target,
+            debug_info=debug_values,
             # TODO: for now wasm extra args are ignored
         )
         udewy_path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,7 +276,7 @@ def _build_test_driver(target: BackendName) -> Path:
     udewy_path.parent.mkdir(parents=True, exist_ok=True)
     udewy_path.write_text(codegen(SrcFile.from_path(TEST_DRIVER), target=target))
     with redirect_stdout(io.StringIO()):
-        status = entry_point(udewy_path, [], EntryPointOptions(compile_only=True, target=target))
+        status = entry_point(udewy_path, [], EntryPointOptions(compile_only=True, target=target, debug_info=False))
     if status != 0 or not binary.is_file():
         raise RuntimeError(f'could not build the test driver ({TEST_DRIVER})')
     return binary
@@ -330,7 +331,7 @@ def test(argv: list[str]) -> int:
         udewy_path.parent.mkdir(parents=True, exist_ok=True)
         udewy_path.write_text(udewy_src)
         try:
-            return entry_point(udewy_path, program_args, EntryPointOptions(target=target))
+            return entry_point(udewy_path, program_args, EntryPointOptions(target=target, debug_info=False))
         except Exception as e:
             print(f'Error: {e}', file=sys.stderr)
             recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{udewy_path}`)'])

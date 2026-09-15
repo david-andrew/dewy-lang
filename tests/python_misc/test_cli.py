@@ -66,10 +66,14 @@ def test_ordinary_and_debug_builds_keep_separate_metadata_and_caches(tmp_path) -
     assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
     code = cache_artifact(source, '.udewy').read_text()
     assert '# @loc ' not in code and '# @var ' not in code
+    ordinary_asm = cache_artifact(source, '.s').read_text()
+    assert '.debug_' not in ordinary_asm and '    .loc ' not in ordinary_asm
     debug = _dewy('debug', '--build', str(source))
     assert debug.returncode == 0, debug.stdout + debug.stderr
     debug_code = cache_artifact(source, '.debug.udewy').read_text()
     assert '# @loc ' in debug_code and '# @var ' in debug_code
+    debug_asm = cache_artifact(source, '.debug.s').read_text()
+    assert '.section .debug_info' in debug_asm and '    .loc ' in debug_asm
     assert cache_artifact(source, '.udewy').read_text() == code
     for suffix in ['', '.debug']:
         assert subprocess.run([cache_artifact(source, suffix)], check=False).returncode == 42

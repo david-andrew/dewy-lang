@@ -174,9 +174,15 @@ let ps_new = (src:int toks:int):>int => {
     __store__(intset_new() s + PS_TOP_LEVEL_FN_REFS)
     __store__(intmap_new() s + PS_STATIC_WORD_FN_LOCS)
     __store__(0 s + PS_SOURCE_PATH)
-    __store__(line_starts_of(src) s + PS_LINE_STARTS)
-    __store__(collect_loc_markers(src) s + PS_LOC_MARKERS)
-    __store__(collect_var_markers(src) s + PS_VAR_MARKERS)
+    if be_debug_info {
+        __store__(line_starts_of(src) s + PS_LINE_STARTS)
+        __store__(collect_loc_markers(src) s + PS_LOC_MARKERS)
+        __store__(collect_var_markers(src) s + PS_VAR_MARKERS)
+    } else {
+        __store__(0 s + PS_LINE_STARTS)
+        __store__(0 s + PS_LOC_MARKERS)
+        __store__(0 s + PS_VAR_MARKERS)
+    }
     __store__(0 s + PS_LAST_LOC)
     __store__(-1 s + PS_PREV_STMT)
     __store__(-1 s + PS_CUR_STMT)
@@ -365,6 +371,7 @@ let last_marker_before = (markers:int offset:int):>int => {
 }
 
 let mark_statement_location = (state:int offset:int):>void => {
+    if not be_debug_info { return void }
     let markers:int = __load__(state + PS_LOC_MARKERS)
     let index:int = last_marker_before(markers offset)
     let path:int = 0
@@ -421,6 +428,7 @@ let variable_marker_for = (state:int name:int declaration_offset:int):>int => {
 
 # Tell the backend about a declared variable or parameter (see `note_local`).
 let note_declared_variable = (state:int slot:int name:int declaration_offset:int annotation:int parameter:int):>void => {
+    if not be_debug_info { return void }
     let m:int = variable_marker_for(state name declaration_offset)
     if m =? 0 {
         (@be_note_local)(slot name annotation 0 parameter)

@@ -150,6 +150,8 @@ def mark_statement_location(state: "ParseState", offset: int) -> None:
     The latest marker before the statement wins; without one the position is
     the udewy source's own. Repeats of the last reported position are skipped.
     """
+    if not state.backend.debug_info:
+        return
     markers = state.location_markers
     index = bisect.bisect_right(markers, (offset, "", 0, 0)) - 1
     if index >= 0:
@@ -1339,9 +1341,10 @@ def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
     slot = backend.alloc_local()
     var_declare(state.scope_stack, name, LocalEntry(slot=slot, is_const=is_const, const_value=const_value), state.src, name_loc)
     backend.store_local(slot)
-    shown, type_name, formatter = declared_variable(state, name, name_loc, annotation)
-    if type_name != "-":   # `# @var name -`: a compiler's temporary, not shown to the debugger
-        backend.note_local(slot, shown, type_name, formatter)
+    if backend.debug_info:
+        shown, type_name, formatter = declared_variable(state, name, name_loc, annotation)
+        if type_name != "-":   # `# @var name -`: a compiler's temporary, not shown to the debugger
+            backend.note_local(slot, shown, type_name, formatter)
     
     return idx
 
@@ -1413,9 +1416,10 @@ def parse_fn_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
         backend.load_param(i)
         backend.store_local(slot)
         var_declare(state.scope_stack, param_name, LocalEntry(slot=slot, is_const=False), state.src, param_locs[i])
-        shown, type_name, formatter = declared_variable(state, param_name, param_locs[i], param_annotations[i])
-        if type_name != "-":
-            backend.note_local(slot, shown, type_name, formatter, parameter=True)
+        if backend.debug_info:
+            shown, type_name, formatter = declared_variable(state, param_name, param_locs[i], param_annotations[i])
+            if type_name != "-":
+                backend.note_local(slot, shown, type_name, formatter, parameter=True)
     
     idx, body_returns = parse_block(toks, idx, state)
     
@@ -1738,9 +1742,9 @@ def parse(toks: list[t1.Token], src: str, backend: Backend, source_path: str | N
         type_decl_stack=type_decl_stack,
         ctx=ctx,
         source_path=source_path,
-        line_starts=[0, *(match.end() for match in _NEWLINE.finditer(src))],
-        location_markers=collect_location_markers(src),
-        variable_markers=collect_variable_markers(src),
+        line_starts=[0, *(match.end() for match in _NEWLINE.finditer(src))] if backend.debug_info else [],
+        location_markers=collect_location_markers(src) if backend.debug_info else [],
+        variable_markers=collect_variable_markers(src) if backend.debug_info else [],
     )
     
     parse_program(toks, state)

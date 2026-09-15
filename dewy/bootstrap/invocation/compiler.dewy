@@ -59,6 +59,7 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
     let backend=platform.udewy(executable cwd)
     if backend is? Error return backend
     let arguments:array<string>=['--target' request.target]
+    if request.command not=? 'debug' {arguments.push('--no-debug-info')}
     if request.compile_only or request.command is? 'debug'|'test' {arguments.push('-c')}
     arguments.push(source)
     if request.command =? 'run' {loop argument in request.arguments {arguments.push(argument)}}

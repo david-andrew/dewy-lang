@@ -223,7 +223,7 @@ class X86_64Backend(Backend):
     
     def mark_location(self, path: str, line: int, column: int) -> None:
         """A `.loc` row: the assembler builds the DWARF line table from these."""
-        if self._current_fn_code is None:
+        if not self.debug_info or self._current_fn_code is None:
             return   # nothing is emitted between functions
         number = self._source_files.get(path)
         if number is None:
@@ -421,11 +421,12 @@ class X86_64Backend(Backend):
         if is_main:
             self._emit_label("__main__")
         self._emit_label(label)
-        end_label = f".L{label}_end"
-        self._debug_function = _DebugFunction(name, label, end_label, _DebugScope(label, end_label), label_id)
-        self._debug_functions.append(self._debug_function)
-        self._debug_scope = self._debug_function.scope
-        self._debug_frames = []
+        if self.debug_info:
+            end_label = f".L{label}_end"
+            self._debug_function = _DebugFunction(name, label, end_label, _DebugScope(label, end_label), label_id)
+            self._debug_functions.append(self._debug_function)
+            self._debug_scope = self._debug_function.scope
+            self._debug_frames = []
         
         # Prologue
         self._emit("pushq %rbp")

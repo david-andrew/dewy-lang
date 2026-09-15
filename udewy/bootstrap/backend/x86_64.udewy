@@ -186,6 +186,7 @@ let x86_new_label = (prefix:int):>int => {
 # ----------------------------------------------------------------------------
 
 let x86_mark_location = (path:int line:int column:int):>void => {
+    if not be_debug_info { return void }
     if x86_current_fn_code =? 0 { return void }   # nothing is emitted between functions
     let number:int = 0
     if map_has_str(x86_source_files path) {
@@ -1122,20 +1123,22 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
         x86_emit_label_str("__main__")
     }
     x86_emit_label_str(label)
-    let endbb:int = bb_new(str_len(label) + 8)
-    bb_push_str(endbb ".L")
-    bb_push_str(endbb label)
-    bb_push_str(endbb "_end")
-    let f:int = arena_alloc(DF_SIZE)
-    __store__(name f + DF_NAME)
-    __store__(label f + DF_LABEL)
-    __store__(bb_finalize_as_string(endbb) f + DF_END)
-    __store__(x86_debug_scope_new(label __load__(f + DF_END)) f + DF_SCOPE)
-    __store__(label_id f + DF_LABEL_ID)
-    vec_push(x86_debug_functions f)
-    x86_debug_function = f
-    x86_debug_scope = __load__(f + DF_SCOPE)
-    vec_set_len(x86_debug_frames 0)
+    if be_debug_info {
+        let endbb:int = bb_new(str_len(label) + 8)
+        bb_push_str(endbb ".L")
+        bb_push_str(endbb label)
+        bb_push_str(endbb "_end")
+        let f:int = arena_alloc(DF_SIZE)
+        __store__(name f + DF_NAME)
+        __store__(label f + DF_LABEL)
+        __store__(bb_finalize_as_string(endbb) f + DF_END)
+        __store__(x86_debug_scope_new(label __load__(f + DF_END)) f + DF_SCOPE)
+        __store__(label_id f + DF_LABEL_ID)
+        vec_push(x86_debug_functions f)
+        x86_debug_function = f
+        x86_debug_scope = __load__(f + DF_SCOPE)
+        vec_set_len(x86_debug_frames 0)
+    }
     x86_emit_indented("pushq %rbp")
     x86_emit_indented("movq %rsp, %rbp")
     x86_frame_subtract_index = vec_len(x86_current_fn_code)

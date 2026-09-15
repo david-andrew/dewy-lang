@@ -68,6 +68,10 @@ class Backend(ABC):
     only knows that expressions produce values and operations consume them.
     """
     
+    # Set before parsing. This controls metadata only; source diagnostics and
+    # breakpoint instructions remain available when it is false.
+    debug_info: bool = True
+
     # ========================================================================
     # Module lifecycle
     # ========================================================================

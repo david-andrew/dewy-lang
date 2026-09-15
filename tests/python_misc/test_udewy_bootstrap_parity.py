@@ -440,3 +440,33 @@ def test_c_signed_load_supplies_unsigned_helper(bootstrap_binary, tmp_path, widt
     }}'''
     binary = _compile_with([str(bootstrap_binary)], source, 'c', tmp_path)
     assert subprocess.run([str(binary)], check=False, timeout=5).returncode == 0
+
+
+@pytest.mark.parametrize('debug_info', [True, False])
+def test_debug_metadata_selection_matches_between_compilers(bootstrap_binary, tmp_path, debug_info):
+    from udewy.cache import cache_artifact
+    program = '''
+let main = ():>int => {
+    let answer:int = 6 * 7
+    return answer
+}
+'''
+    for name, command in [('hosted', ['python', '-m', 'udewy']),
+                          ('native', [str(bootstrap_binary)])]:
+        work = tmp_path / name
+        work.mkdir()
+        flags = [] if debug_info else ['--no-debug-info']
+        binary = _compile_with(command + flags, program, 'x86_64', work)
+        asm = (work / cache_artifact(work / 'smoke.udewy', suffix='.s', cwd=work)).read_text()
+        assert ('.section .debug_info' in asm) == debug_info
+        assert ('    .loc ' in asm) == debug_info
+        assert subprocess.run([binary], timeout=10).returncode == 42
+
+        # Metadata selection must not suppress normal compile diagnostics.
+        bad = work / 'bad.udewy'
+        bad.write_text('let main = ():>int => { return missing }')
+        result = subprocess.run(command + flags + ['-c', str(bad)],
+                                cwd=work, text=True, capture_output=True, timeout=10,
+                                env={**environ, 'PYTHONPATH': str(REPO_ROOT)})
+        assert result.returncode != 0
+        assert 'missing' in result.stdout + result.stderr

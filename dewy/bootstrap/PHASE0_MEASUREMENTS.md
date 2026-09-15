@@ -1634,3 +1634,31 @@ backend-stage measurement, not a new full-build result. Artifacts:
 `micro-scanner-gates.log`. All 42 targeted scanner, annotation, precedence,
 debug-location, and conditional-short-circuit checks passed, including execution
 through the hosted and bootstrap µDewy compilers.
+
+### Optional µDewy debug metadata
+
+Both µDewy CLIs now accept `--no-debug-info`; their default remains unchanged.
+Ordinary Dewy builds request it, while `dewy debug` retains source maps and
+variable metadata. Skipping metadata also skips source-line/marker indexing,
+variable-scope construction and DWARF assembly; diagnostics and breakpoint
+instructions remain intact. This changes tooling metadata, not µDewy evaluation
+or its conditional-only short-circuit rule.
+
+On the same saved hosted input as the scanner measurement, parsing/emission
+fell from 11.855 to 8.526 seconds; assembly fell from 154,658,886 to 111,248,215
+bytes. With the native µDewy compiler and the saved native self-build input,
+complete backend invocations took 16.93 seconds with metadata and 13.04 without;
+peak RSS fell from 2,994,132 to 2,570,892 KiB. Assembly fell from 222,639,473 to
+143,027,454 bytes, and executable size from 42,767,192 to 27,914,448 bytes.
+The two executable `.text` sections have identical SHA-256
+`8504e2c43893b2ae399e21e5388ab2f912facffbd827e1b6de09de370ef7944c`.
+These are backend measurements, not full Dewy-build timings.
+
+Three C-accelerated native µDewy generations produced the same executable hash
+`7e3fd2d95de4497361564aadc47f876c1a66872f7ae68455f36bc33adecc49fd`.
+Fourteen targeted µDewy metadata/diagnostic/short-circuit checks and four Dewy
+CLI, source-map and invocation-option checks passed. The Dewy CLI regression
+checks ordinary and debug assembly, execution and separate cache artifacts.
+Artifacts: `phase0-performance/hosted-micro-no-debug.json`,
+`native-micro-debug-metadata.json`, `udewy-debug-stages.json`,
+`micro-debug-metadata-gates.log`, `dewy-debug-metadata-gates.log`.

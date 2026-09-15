@@ -1047,6 +1047,12 @@ For the hosted `c` backend, "portable" usually means keeping direct operations w
 
 ## 4.4 Backend Selection
 
+The hosted and native command-line compilers include source/variable debug
+metadata by default. `--no-debug-info` skips that metadata without changing
+program evaluation, compile diagnostics, or `__breakpoint__()` instructions.
+Dewy's ordinary compilation uses this option for generated µDewy; `dewy debug`
+keeps the metadata and source mappings.
+
 The target backend is selected at compile time via the `--target` flag:
 
 ```bash

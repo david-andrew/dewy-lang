@@ -126,3 +126,26 @@ def test_many_declarations_do_not_overflow_debug_scope_traversal() -> None:
 def test_line_positions_count_unicode_characters_and_crlf():
     asm = assemble('# αβ\r\nlet main = ():>int => {\r\n  return 42\r\n}\r\n')
     assert '    .loc 1 3 3' in asm
+
+
+def test_omitting_debug_info_keeps_breakpoints_and_avoids_metadata(monkeypatch):
+    def unexpected_scan(src):
+        raise AssertionError('debug markers scanned with metadata disabled')
+
+    monkeypatch.setattr(p0, 'collect_location_markers', unexpected_scan)
+    monkeypatch.setattr(p0, 'collect_variable_markers', unexpected_scan)
+    backend = get_backend('x86_64')
+    backend.debug_info = False
+    src = '''
+# @loc /src/main.dewy:12:9
+let main = ():>int => {
+    # @var x shown - int64
+    let x:int = 42
+    __breakpoint__()
+    return x
+}
+'''
+    asm = p0.parse(t1.tokenize(src), src, backend, source_path='/work/program.udewy')
+    assert '    int3' in asm
+    assert '.debug_' not in asm and '.loc ' not in asm and '.file ' not in asm
+    assert '.Ldbg' not in asm
