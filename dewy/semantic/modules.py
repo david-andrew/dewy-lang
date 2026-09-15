@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, is_dataclass, replace
+from dataclasses import dataclass, is_dataclass
+from ..utils import dataclass_replace as replace
 from os import PathLike
 from pathlib import Path
 from typing import Any

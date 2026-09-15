@@ -5,7 +5,7 @@ Split from ``lower.py``; methods run as part of ``_Lowerer``.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from ...utils import dataclass_replace as replace
 
 from ...semantic import hir, ty
 from ...semantic.hir_display import type_to_dewy

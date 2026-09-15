@@ -5,7 +5,8 @@ Split from ``lower.py``; see that module's docstring for the overall design.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
+from ...utils import dataclass_replace as replace
 from typing import Literal
 
 from ...reporting import Span, SrcFile

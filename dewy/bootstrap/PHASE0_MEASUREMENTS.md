@@ -2591,3 +2591,30 @@ changes 9.133 to **8.381 seconds**, with checking 5.848 to 5.732 and lowering
 This small workload does not establish a full-build benefit or memory cost.
 Artifacts: `hir-child-plan-gates.log`, `collection-batch-gates.log`,
 `measure-hir-plan.log`.
+
+The quiet full checkpoint at `f356a528` takes **73.711 seconds**: checking
+33.419, lowering 16.952, emission 4.465 and backend 13.474; peak process RSS
+1,280,744 KiB. This combines nominal token classification and HIR child plans
+with the collection policy. Collection counts fall substantially, but their
+total observed cost is still about four seconds, so the timing does not
+establish a substantial collection-time improvement. Artifact:
+`host-token-hir-collection-full`.
+
+### Constructor field inventory
+
+Ordinary dataclass reconstruction in lowering, emission and checking now
+reuses the constructor field-name inventory. It still reads current instance
+contents, skips reading overridden fields, calls the normal constructor and
+post-init hook, and creates a fresh record even for an unchanged replacement.
+Records with pseudo-fields or non-init fields retain standard dataclass
+replacement. This caches class rules rather than mutable object values.
+
+The 22 initial passing reconstruction/storage checks, four final constructor
+and reference-output checks, and 45 checker/type/prelude-cache checks pass.
+The source-output comparison uses standard reconstruction throughout both
+checking and lowering as its reference. The bounded module comparison for
+the lowering/emission part changes **9.333 to 8.229 seconds**; lowering changes
+0.871 to 0.779. Checking/startup variation also contributes to the total.
+The checker extension's full-build effect remains unmeasured. Artifacts:
+`reconstruction-gates.log`, `compilation-reconstruction-reference-gates.log`,
+`checker-reconstruction-corrected-gates.log`, `measure-reconstruction.log`.

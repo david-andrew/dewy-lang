@@ -6,7 +6,7 @@ Split from ``lower.py``; methods run as part of ``_Lowerer``.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import replace
+from ...utils import dataclass_replace as replace
 from typing import Literal
 
 from ...parser import t0

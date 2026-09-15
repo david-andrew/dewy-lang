@@ -33,7 +33,8 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from dataclasses import is_dataclass, replace
+from dataclasses import is_dataclass
+from ...utils import dataclass_replace as replace
 from functools import cache
 from ...utils import dataclass_fields as fields
 from typing import Literal, NoReturn

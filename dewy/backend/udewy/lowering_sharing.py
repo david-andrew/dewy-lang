@@ -7,7 +7,7 @@ Only arena data can be shared. Mutation detaches before exposing an element
 place; final release visits the elements exactly once. See bootstrap/PERFORMANCE.md
 for the open long-term predictability/zero-cost design question.
 """
-from dataclasses import replace
+from ...utils import dataclass_replace as replace
 
 from ...semantic import hir, ty
 from .lowering_shared import (

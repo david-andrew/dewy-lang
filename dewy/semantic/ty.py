@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
+from ..utils import dataclass_replace as replace
 from collections import defaultdict
 from contextlib import contextmanager
 from contextvars import ContextVar

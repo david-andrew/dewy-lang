@@ -1,6 +1,7 @@
 """Emit udewy source from HIR prepared by the udewy lowering pass."""
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
+from ...utils import dataclass_replace as replace
 from functools import cached_property
 from pathlib import Path
 from textwrap import indent

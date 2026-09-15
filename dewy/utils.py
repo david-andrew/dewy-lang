@@ -1,6 +1,6 @@
 from typing import Generator, Callable, Iterable
 from itertools import groupby
-from dataclasses import fields as _fields, Field
+from dataclasses import fields as _fields, Field, replace as _replace
 from functools import cache
 
 
@@ -12,6 +12,37 @@ def _class_fields(cls: type) -> tuple[Field, ...]:
 def dataclass_fields(value: object) -> tuple[Field, ...]:
     """Reuse static class metadata without caching mutable instance contents."""
     return _class_fields(value if isinstance(value, type) else type(value))
+
+
+@cache
+def _replacement_fields(cls: type) -> tuple[str, ...] | None:
+    """Constructor-only records have one fixed replacement field inventory."""
+    declared = getattr(cls, '__dataclass_fields__', None)
+    if declared is None:
+        return None
+    fields = _class_fields(cls)
+    # InitVar/ClassVar pseudo-fields and init=False have additional replace
+    # rules. Keep the standard implementation for those uncommon records.
+    if len(fields) != len(declared) or any(not field.init for field in fields):
+        return None
+    return tuple(field.name for field in fields)
+
+
+def dataclass_replace[T](value: T, /, **changes) -> T:
+    """Reconstruct through the normal constructor, reusing class metadata.
+
+    Always makes a fresh record, even with no changes. It neither copies
+    mutable children nor bypasses __init__/__post_init__. Only the field-rule
+    checks are cached; changing instance contents is observed on every call.
+    """
+    cls = type(value)
+    names = _replacement_fields(cls)
+    if names is None:
+        return _replace(value, **changes)
+    for name in names:
+        if name not in changes:
+            changes[name] = getattr(value, name)
+    return cls(**changes)
 
 def first_line(s:str) -> str:
     return s.split('\n')[0]

@@ -19,7 +19,8 @@ over UTF-8 bytes for strings.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from ...utils import dataclass_replace as replace
 
 from ...reporting import Span
 from ...semantic import hir, ty

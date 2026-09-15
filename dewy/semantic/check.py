@@ -6,7 +6,8 @@ semantic analysis pass 0:
 import copy
 import os
 from pathlib import Path
-from dataclasses import dataclass, replace, field, is_dataclass
+from dataclasses import dataclass, field, is_dataclass
+from ..utils import dataclass_replace as replace
 from ..utils import dataclass_fields as fields
 from fractions import Fraction
 from collections import ChainMap
