@@ -97,6 +97,7 @@ class ParseState:
     current_statement_offset: int = -1
 
 
+_NEWLINE = re.compile(r"\n")
 _LOCATION_MARKER = re.compile(r"^[ \t]*#[ \t]*@loc[ \t]+(.+?):(\d+):(\d+)[ \t]*$", re.MULTILINE)
 _VARIABLE_MARKER = re.compile(r"^[ \t]*#[ \t]*@var[ \t]+(\S+)[ \t]+(\S+)(?:[ \t]+(\S+)[ \t]+(.+?))?[ \t]*$", re.MULTILINE)
 
@@ -777,24 +778,23 @@ PREC_ADD = 7
 PREC_MUL = 8
 
 
+# Query once per expression edge; tokens which are not binary operators
+# have binding power zero. The condition flag below still selects the only
+# contexts in which AND/OR short circuit.
+_BINARY_PRECEDENCE = {
+    t1.Kind.TK_OR: PREC_OR,
+    t1.Kind.TK_XOR: PREC_XOR,
+    t1.Kind.TK_AND: PREC_AND,
+    **dict.fromkeys((t1.Kind.TK_EQ, t1.Kind.TK_NOT_EQ, t1.Kind.TK_GT,
+                    t1.Kind.TK_LT, t1.Kind.TK_GT_EQ, t1.Kind.TK_LT_EQ), PREC_CMP),
+    **dict.fromkeys((t1.Kind.TK_LEFT_SHIFT, t1.Kind.TK_RIGHT_SHIFT), PREC_SHIFT),
+    **dict.fromkeys((t1.Kind.TK_PLUS, t1.Kind.TK_MINUS), PREC_ADD),
+    **dict.fromkeys((t1.Kind.TK_MUL, t1.Kind.TK_IDIV, t1.Kind.TK_MOD), PREC_MUL),
+}
+
+
 def get_precedence(kind: t1.Kind) -> int:
-    if kind == t1.Kind.TK_OR:
-        return PREC_OR
-    if kind == t1.Kind.TK_XOR:
-        return PREC_XOR
-    if kind == t1.Kind.TK_AND:
-        return PREC_AND
-    if kind == t1.Kind.TK_EQ or kind == t1.Kind.TK_NOT_EQ:
-        return PREC_CMP
-    if kind == t1.Kind.TK_GT or kind == t1.Kind.TK_LT or kind == t1.Kind.TK_GT_EQ or kind == t1.Kind.TK_LT_EQ:
-        return PREC_CMP
-    if kind == t1.Kind.TK_LEFT_SHIFT or kind == t1.Kind.TK_RIGHT_SHIFT:
-        return PREC_SHIFT
-    if kind == t1.Kind.TK_PLUS or kind == t1.Kind.TK_MINUS:
-        return PREC_ADD
-    if kind == t1.Kind.TK_MUL or kind == t1.Kind.TK_IDIV or kind == t1.Kind.TK_MOD:
-        return PREC_MUL
-    return 0
+    return _BINARY_PRECEDENCE.get(kind, 0)
 
 
 def is_binop(kind: t1.Kind) -> bool:
@@ -1048,11 +1048,8 @@ def _parse_expr(
             backend.call_indirect(arg_count)
             continue
         
-        if not is_binop(kind):
-            break
-
         prec = get_precedence(kind)
-        if prec < min_prec:
+        if prec == 0 or prec < min_prec:
             break
         
         idx = idx + 1
@@ -1741,7 +1738,7 @@ def parse(toks: list[t1.Token], src: str, backend: Backend, source_path: str | N
         type_decl_stack=type_decl_stack,
         ctx=ctx,
         source_path=source_path,
-        line_starts=[0, *(index + 1 for index, char in enumerate(src) if char == "\n")],
+        line_starts=[0, *(match.end() for match in _NEWLINE.finditer(src))],
         location_markers=collect_location_markers(src),
         variable_markers=collect_variable_markers(src),
     )

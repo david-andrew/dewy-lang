@@ -1470,9 +1470,8 @@ let parse_expr_inner = (state:int idx:int min_prec:int is_condition:int):>int =>
             (@be_call_indirect)(arg_count)
             continue
         }
-        if not is_binop(k) { break }
         let prec:int = get_precedence(k)
-        if prec <? min_prec { break }
+        if (prec =? 0) or (prec <? min_prec) { break }
         idx = idx + 1
         if is_condition and (k =? TK_AND) {
             let label:int = (@be_cond_and_split)()

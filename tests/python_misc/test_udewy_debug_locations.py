@@ -121,3 +121,8 @@ def test_many_declarations_do_not_overflow_debug_scope_traversal() -> None:
     asm = assemble('let main = ():>int => {\n' + declarations + '\n    return value1099\n}\n')
     assert '    .string "value1099"' in asm
     assert asm.count('    .uleb128 5\n') == 1100
+
+
+def test_line_positions_count_unicode_characters_and_crlf():
+    asm = assemble('# αβ\r\nlet main = ():>int => {\r\n  return 42\r\n}\r\n')
+    assert '    .loc 1 3 3' in asm

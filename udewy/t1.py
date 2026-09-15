@@ -12,8 +12,8 @@ from .diagnostics import error
 # compiled run-scanners for the hot paths; the token structure stays the
 # straightforward single-pass loop (each of these is a memchr-style run scan
 # in a low-level translation)
-_WS_RUN = re.compile(r'[ \t\r\n]+')
-_LINE_REST = re.compile(r'[^\n]*')
+_TRIVIA_RUN = re.compile(r'(?:[ \t\r\n]+|#[^\n]*)+')
+_IDENT_START = frozenset('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_')
 _IDENT_RUN = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 _HEX_RUN = re.compile(r'[0-9A-Fa-f_]*')
 _BIN_RUN = re.compile(r'[01_]*')
@@ -97,6 +97,8 @@ POSSIBLE_IN_PLACE_OPS: set[Kind] = {
     Kind.TK_LEFT_SHIFT,
     Kind.TK_RIGHT_SHIFT,
 }
+
+_PROVISIONAL_COLONS = frozenset((Kind._TK_COLON, Kind._TK_FN_COLON))
 
 # placeholder for tokens that don't have a value
 MAX_U64: Value = 0xFFFF_FFFF_FFFF_FFFF
@@ -238,28 +240,26 @@ def tokenize(src:str)->list[Token]:
     while i < n:
         # running sanity check(s) for prototype tokens that shouldn't be in the final output
         # check here so that we can maintain a single pass tokenizer
-        if len(toks) > 1 and toks[-2].kind in (Kind._TK_COLON, Kind._TK_FN_COLON):
+        if len(toks) > 1 and toks[-2].kind in _PROVISIONAL_COLONS:
             error(src, i, f"colon must be followed by a type annotation, got {src[i]!r}")
         
-        # whitespace
-        if src[i] in t0.whitespace: #c == " " or c == "\t" or c == "\r" or c == "\n":
-            i = _WS_RUN.match(src, i).end()   # type: ignore[union-attr]
-            continue
-
-        # line comment: # ...
-        if src[i] == "#":
-            i = _LINE_REST.match(src, i + 1).end()   # type: ignore[union-attr]
-            continue
+        # Skip the whole layout run, then scan its following token in this
+        # iteration. No token state changes during trivia, so the provisional
+        # colon check above need not run again for each whitespace/comment gap.
+        if src[i] in t0.whitespace or src[i] == '#':
+            i = _TRIVIA_RUN.match(src, i).end()   # type: ignore[union-attr]
+            if i == n:
+                break
 
         # based string
-        if src.startswith(('0b"', '0x"'), i):
+        if src[i] == '0' and src.startswith(('0b"', '0x"'), i):
             start = i
             i = based_string_end(src, start)
             toks.append(Token(i - start, start, Kind.TK_BASED_STRING))
             continue
 
         # identifier or keyword
-        if t0.is_ident_start(src[i]):
+        if src[i] in _IDENT_START:
             start = i
             match = _IDENT_RUN.match(src, i)
             assert match is not None

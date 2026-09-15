@@ -1615,3 +1615,22 @@ boundaries, zero/small requests, width wrapping, reused-block clearing, live-byt
 accounting, and string/loop regions; the boundary test runs on both backends.
 Full native build impact is not yet measured. Artifacts:
 `arena-class-measurement`, `arena-class-storage-gates.log`.
+
+### µDewy trivia and precedence queries
+
+The hosted scanner now consumes adjacent whitespace/comments as one run and
+continues directly to its following token; provisional-colon diagnostics still
+run before skipping layout. Identifier starts and provisional token kinds use
+precomputed sets. The hosted expression parser uses a precedence table, and
+both expression parsers query precedence once per edge. Hosted line indexing
+scans newline matches rather than iterating every character in Python.
+
+On the saved 34,845,199-byte hosted self-build input (3,238,688 tokens), isolated
+stage measurements before/after were 6.430/5.838 seconds for tokenization and
+14.752/11.855 seconds for parsing plus assembly emission. Both token hashes
+and the complete 154,658,886-byte assembly hashes are identical. This is a
+backend-stage measurement, not a new full-build result. Artifacts:
+`phase0-performance/hosted-micro-stages-{before,after}.json` and
+`micro-scanner-gates.log`. All 42 targeted scanner, annotation, precedence,
+debug-location, and conditional-short-circuit checks passed, including execution
+through the hosted and bootstrap µDewy compilers.

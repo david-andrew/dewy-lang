@@ -35,3 +35,19 @@ def test_contextual_tokens(source, expected):
 def test_scanning_keeps_literal_and_annotation_errors(source, message):
     with pytest.raises(SyntaxError, match=message):
         t1.tokenize(source)
+
+
+@pytest.mark.parametrize('layout', [' ', '\t\r\n', '# one\n # two\n', ' # eof'])
+def test_trivia_keeps_pending_annotation_and_eof(layout):
+    source = 'let x:' + layout
+    # A trailing provisional colon remains provisional just as without layout;
+    # completing the annotation must replace it and retain the type's offset.
+    assert t1.tokenize(source)[-1].kind == t1.Kind._TK_COLON
+    source += '\nint'
+    token = t1.tokenize(source)[-1]
+    assert (token.kind, token.location, token.value) == (t1.Kind.TK_TYPE, len(source) - 3, 3)
+
+
+def test_bad_annotation_reports_before_skipping_trivia():
+    with pytest.raises(SyntaxError, match=r'line 1, column 4'):
+        t1.tokenize('x:1 # comment\n int')
