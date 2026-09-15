@@ -1,0 +1,27 @@
+# Testing and reading a union member must not re-evaluate its producer or
+# move it ahead of other fields, branches, or surrounding calls.
+let calls:int64=0
+tick=():>int64=>{calls+=1 return calls}
+maybe=():>int64?=>tick()
+format=():>string=>"{maybe()}"
+Box:type=[value:int64?]
+box=():>Box=>Box[maybe()]
+text=():>string?=>"text:{tick()}"
+format_text=():>string=>"{text()}"
+main=():>int64=>{
+    let ordered="{tick()}:{maybe()}"
+    if ordered not=? '1:2' or calls not=? 2 return 1
+    let skipped=if false "{maybe()}" else 'skip'
+    if skipped not=? 'skip' or calls not=? 2 return 2
+    let member="{box().value}"
+    if member not=? '3' or calls not=? 3 return 3
+    let expressed=format()
+    if expressed not=? '4' or calls not=? 4 return 4
+    let retained=format_text()
+    if retained not=? 'text:5' or calls not=? 5 return 5
+    let later=format_text()
+    if retained not=? 'text:5' or later not=? 'text:6' return 6
+    let missing:int64?=none
+    if "{missing}" not=? 'none' return 7
+    return 42
+}

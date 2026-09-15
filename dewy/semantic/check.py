@@ -998,24 +998,6 @@ _BASED_STRING_DIGIT_WIDTHS: dict[t0.BasePrefix, int] = {
 }
 
 
-def _hoisted_union_field(value: hir.AST, *, ctx: Context) -> hir.AST | None:
-    """A union-valued interpolation field that is not a name: bound to a
-    hidden local hoisted before the current statement (see `Context.hoisted`),
-    so the member flow reads a name. None outside a block body."""
-    if ctx.hoisted is None:
-        return None
-    loc = value.loc
-    name = f'__dewy_field_{ctx.binding_registry.next_id}'
-    binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'value', loc)
-    binding.type = value.type
-    declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, value.type, value, binding_id=binding.id)
-    binding.declaration = declaration
-    ctx.declarations[name] = value.type
-    ctx.binding_scopes[name] = binding
-    ctx.hoisted.append(declaration)
-    return _optional_field_flow(hir.ExpressedIdentifier(loc, value.type, name, binding_id=binding.id), ctx=ctx)
-
-
 def _readable_object(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     """The value as something read once per arm without effects: itself when it
     is a name or a field, else a hidden local hoisted before the statement
@@ -1079,10 +1061,9 @@ def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     """A union-typed value (an optional, or a container union of words,
     strings, `none`, and objects) as a string: a flow with one arm per
     member — the text `none`, a member's one-part interpolation, or an
-    object member's literal syntax. The value must be a name or a field, so
-    reading it once per arm is free of effects."""
-    if not isinstance(value, (hir.ExpressedIdentifier, hir.MemberAccess)):
-        return None
+    object member's literal syntax. Computed values are captured inside this
+    expression, preserving conditional execution and interpolation order.
+    Even a member access can have an effectful receiver."""
     if _number_object(value.type, ctx=ctx) is not None:
         # Numeric representations may themselves be tagged unions (bigint's
         # zero/nonzero cases). Their print protocol precedes the generic
@@ -1100,6 +1081,14 @@ def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
     else:
         return None
     loc = value.loc
+    declaration = None
+    if not isinstance(value, hir.ExpressedIdentifier):
+        name = f'__dewy_field_{ctx.binding_registry.next_id}'
+        binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'value', loc)
+        binding.type = binding.store_type = value.type
+        declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, value.type, value, binding_id=binding.id)
+        binding.declaration = declaration
+        value = hir.ExpressedIdentifier(loc, value.type, name, binding_id=binding.id)
 
     def member_text(member: ty.TypeExpr) -> hir.AST:
         if member == 'none':
@@ -1118,7 +1107,8 @@ def _optional_field_flow(value: hir.AST, *, ctx: Context) -> hir.AST | None:
         hir.IfArm(loc, ty.StringType(), hir.TypeTest(loc, 'bool', value, member, False), member_text(member))
         for member in members[:-1]
     ]
-    return hir.Flow(loc, ty.StringType(), arms, member_text(members[-1]))
+    flow = hir.Flow(loc, ty.StringType(), arms, member_text(members[-1]))
+    return flow if declaration is None else hir.Block(loc, flow.type, [declaration, flow], True)
 
 
 def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
@@ -1179,20 +1169,6 @@ def tcr_istring(ast: p0.IString, *, ctx: Context) -> hir.InterpolatedString:
         if optional_flow is not None:
             parts.append(optional_flow)   # `none`, or the payload's text
             continue
-        if _number_object(value.type, ctx=ctx) is None and (_optional_container_element(ty.strip_refinement(value.type)) or _union_container_element(ty.strip_refinement(value.type))):
-            # any other union-valued expression (`xs[i]`, a call): evaluate it
-            # once into a hidden local declared before the statement, then the
-            # flow tests and reads the local
-            named = _hoisted_union_field(value, ctx=ctx)
-            if named is not None:
-                parts.append(named)
-                continue
-            user_error(
-                ctx.srcfile,
-                'a union value in an interpolation must be a name here',
-                Pointer(span=value.loc, message=f'this has type `{type_to_dewy(value.type)}`; its member is tested and read separately, and there is no statement to evaluate it before'),
-                hint='bind it first: `let item = xs[i]` then `"{item}"`',
-            )
         require_valued(
             value.type,
             ctx.srcfile,

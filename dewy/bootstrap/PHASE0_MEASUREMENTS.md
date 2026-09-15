@@ -1112,3 +1112,38 @@ offset, a missing values field, and retained snapshots; it passes through
 hosted direct/C code and the full native CLI. Existing dictionary growth,
 compaction, sharing, and helper-count gates pass too. Artifacts:
 `dictionary-layout-key-*`. The full native build is retried separately.
+
+
+### Complete native direct build and interpolation parity
+
+The `661c5b88` hosted seed compiles frozen `4e86c14f` source
+(`source-dictionary-layout`, archive and manifest retained) into a complete
+native executable through native µDewy's direct x86-64 backend in
+**128.43 seconds**. No Python participates in compilation; Python only drives
+the measurement. Frontend is 40.25 s, validation 12.77 s, startup/reachability
+2.62 s, lowering 37.48 s, emission 12.57 s, backend 19.91 s. Peak process RSS
+is **8,557,888 KiB**. The isolated invocation uses an empty build directory,
+with OS page caches uncontrolled. This is one generation, not a refreshed
+fixed point or evidence of the under-60-second target. Emitted µDewy is
+48,828,932 bytes, SHA-256
+`8087f70d6231135978b5025de4845d86484ce4c9be1485a0e3b1446a7a14407c`.
+Artifacts: `native-dictionary-layout-full`.
+
+A separate GDB sampling run of the same source and seed records 314 stacks
+(`native-full-proof-identities-samples`). Type construction and Boolean
+combination remain prominent in frontend/lowering; 27 lowering samples
+include `function_type`, and 23 include `shapes_key`. Rendering spends most
+of its sampled time in the program-level renderer rather than expression
+visits. These are diagnostic samples with debugger overhead, not new timing
+baselines. Backend wait samples do not identify the child compiler's costs.
+
+The hosted compiler now captures a computed union interpolation field inside
+its expression, matching the native approach. It no longer hoists a call
+before its containing statement or treats a member's effectful receiver as
+free to re-evaluate. Expression-bodied functions consequently work too.
+Expected-result execution checks cover field order, skipped branches,
+returned record fields, optional strings, and retained results; they pass on
+hosted direct/C output and the native CLI (`union-interpolation-*`). The
+32 focused union/conversion/printing tests pass after correcting the newly
+accepted expression-body test's parameter to prove its index in bounds.
+Structural conversion and brand-dispatch hoisting remain separate work.

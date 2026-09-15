@@ -4,7 +4,7 @@ import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import ty
-from dewy.semantic.errors import TypeCheckError, UserError
+from dewy.semantic.errors import TypeCheckError
 
 
 def _compile(source: str) -> str:
@@ -60,11 +60,11 @@ def test_object_unions_print_member_by_member() -> None:
     assert '__dewy_object_string_' in emitted   # each object member has its literal-syntax conversion
 
 
-def test_union_valued_fields_that_are_not_names_are_hoisted() -> None:
+def test_union_valued_fields_capture_inside_the_expression() -> None:
     emitted = _compile(TOKENS + 'let main = ():>int64 => {\n    let ts:array<Token> = [Number("1" 1)]\n    printl"{ts[0]}"\n    return 0\n}\n')
     assert '__dewy_field_' in emitted   # `ts[0]` evaluated once into a hidden local, then tested and read
-    with pytest.raises(UserError, match='must be a name here'):
-        _compile(TOKENS + 'let f = (ts:array<Token>):>string => "{ts[0]}"\n')   # no statement to hoist before
+    expression = _compile(TOKENS + 'let f = (ts:array<Token length=1>):>string => "{ts[0]}"\n')
+    assert '__dewy_field_' in expression   # expression-bodied functions need no enclosing statement
 
 
 def test_owned_cell_arrays_release_their_cells() -> None:
