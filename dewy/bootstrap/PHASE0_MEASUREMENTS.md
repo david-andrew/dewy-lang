@@ -66,6 +66,30 @@ Each step is measured on the full self-build with the phase counters and
 stack samples above; a step that does not move both the allocation bytes
 and the wall time is not kept.
 
+### First borrowing batch — quiet paired measurement (2026-09-15)
+
+Same machine, same seeds, no other jobs; cold prelude cache; compiler
+built through the C route with plain `cc -O2`, direct x86-64 output for the
+self-build. Two alternating runs each:
+
+| Compiler source | Wall | Frontend | Validation | Lowering | Emission | Backend |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline `7834ca7a` | 39.48 / 39.45 s | 15.97 / 16.00 | 3.90 / 3.92 | 6.91 / 6.81 | 2.52 / 2.50 | 6.72 / 6.80 |
+| with `24514d04` | 36.32 / 36.24 s | 14.20 / 14.40 | 3.74 / 3.72 | 6.51 / 6.52 | 1.59 / 1.59 | 7.02 / 6.70 |
+
+The 8 % is the borrowing batch above plus the grapheme fast path (most of
+the emission gain). Emitted µDewy: 39.43 MB before, 39.10 MB after. The
+allocation count barely moved: the batch removed copies at a few hundred
+sites, while the billion allocations come from option cells and
+descriptors materialized at every value boundary. Those need placement
+changes (frame cells and descriptors for non-escaping values, null handles
+for optional aggregates), not more borrow sites.
+
+An exposure-based relaxation of *argument* borrowing was tried and reverted:
+it borrowed arrays into callees that then took value copies (shares) of
+them, so the caller detached its own array on every later write, and one
+fixture crashed outright. Argument borrowing keeps the call-graph rule.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted
