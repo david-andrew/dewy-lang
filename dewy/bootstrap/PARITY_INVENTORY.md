@@ -106,6 +106,12 @@ These are outside the original corpus counts:
   deliberately uses the explicit call; operator desugaring parity remains
   separate follow-up work.
 
+- Snapshot codec development found a hosted lowering gap when a binding
+  narrowed to `none` crosses an ordinary call boundary. The absent member
+  has no payload to load; it now uses the established unit word. Explicit
+  optional/union/record-field checks pass hosted direct/C output and native
+  direct output in `native_none_forwarding.dewy`.
+
 ## Regressions found by the refresh
 
 The `49ad4c12` refresh rejects `array_call_adapters.dewy`, which passed in

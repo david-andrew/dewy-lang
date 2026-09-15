@@ -4620,6 +4620,11 @@ class _Lowerer(
 
     def _extract_identifier(self, node: hir.ExpressedIdentifier) -> tuple[list[hir.AST], hir.AST]:
         """Select a binding's current storage view, then finish the leaf read."""
+        if node.type == 'none':
+            # The absent alternative has no payload to load. Once a binding
+            # is narrowed to it, forwarding the value uses the ordinary unit
+            # word, regardless of its enclosing optional/union cell layout.
+            return [], hir.Integer(node.loc, 'int64', t0.base10, 0)
         if node.binding_id is None:
             return [], node
         for base, object_type, field_names in reversed(self.object_literal_contexts):

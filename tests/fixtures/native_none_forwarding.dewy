@@ -1,0 +1,21 @@
+Missing=type of any & []
+Box:type=[value:bool?]
+let accept=(value:none):>int64=>42
+let optional=(value:bool?):>int64=>{
+    if value is? none return accept(value)
+    return 0
+}
+let union=(value:string|none|Missing):>int64=>{
+    if value is? none return accept(value)
+    return 0
+}
+let field=(box:Box):>int64=>{
+    if box.value is? none return accept(box.value)
+    return 0
+}
+main=():>int64=>{
+    if optional(none) not=? 42 or optional(false) not=? 0 return 1
+    if union(none) not=? 42 or union('present') not=? 0 or union(Missing[]) not=? 0 return 2
+    if field(Box[none]) not=? 42 or field(Box[false]) not=? 0 return 3
+    return 42
+}

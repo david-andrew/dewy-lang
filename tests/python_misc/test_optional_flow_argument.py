@@ -1,11 +1,22 @@
 """A contextual optional flow constructs a cell even when both arms are present."""
 
 import subprocess
+from pathlib import Path
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
+
+
+def test_narrowed_none_crosses_an_ordinary_call_boundary(tmp_path):
+    source = Path(__file__).resolve().parents[2] / 'tests/fixtures/native_none_forwarding.dewy'
+    output = tmp_path / 'none_forwarding.udewy'
+    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    for target in ['x86_64', 'c']:
+        assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+        result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, timeout=15)
+        assert result.returncode == 42, (target, result)
 
 
 def test_optional_flow_arguments_keep_their_tagged_representation(tmp_path):
