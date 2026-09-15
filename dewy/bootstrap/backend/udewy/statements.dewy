@@ -19,12 +19,34 @@ fresh = (@state:State):>string => {state.serial+=1 return "__dewy_step_{state.se
 # Binding discovery already gave each lexical local a unique symbol. µDewy
 # has braces on control-flow bodies, but no standalone lexical block statement.
 # Flatten statement scopes while keeping every conditional body's boundary.
+leaves_block = (id:addr state:State):>bool => {
+    let node=node_at(id state)
+    if node is? hir.Return|hir.Break|hir.Continue return true
+    if node is? hir.Suppress return leaves_block(node.item state)
+    if node is? hir.Block {
+        loop item in node.items {if leaves_block(item state) return true}
+    }
+    if node is? hir.Flow and node.default isnt? none {
+        loop arm_id in node.arms {
+            let arm=node_at(arm_id state)
+            # A loop can execute zero times or exit normally. Its body alone
+            # is not evidence that the containing statement cannot continue.
+            if arm isnt? hir.IfArm or not leaves_block(arm.body state) return false
+        }
+        return leaves_block(node.default state)
+    }
+    return false
+}
 flatten = (items:array<addr> state:State):>array<addr> => {
     let result:array<addr>=[]
     loop id in items {
         let node=node_at(id state)
         if node is? hir.Block {append(@result flatten(node.items state))}
         else {result.push(id)}
+        # Ownership lowering has already checked and expanded every source
+        # expression. Omit only the now-unreachable generated suffix, such
+        # as a second return or normal-exit cleanup after an explicit return.
+        if leaves_block(id state) break
     }
     return result
 }

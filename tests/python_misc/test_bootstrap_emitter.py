@@ -180,6 +180,16 @@ def test_native_function_tails_preserve_early_and_implicit_returns(tmp_path):
     flag = hir.ExpressedIdentifier(LOC, 'bool', 'flag')
     void_signature = ty.FunctionType([ty.PosOrKwArg('flag', 'bool')], [], None, 'void')
     value_signature = ty.FunctionType([ty.PosOrKwArg('flag', 'bool')], [], None, 'int64')
+    # This name deliberately has no definition: unreachable generated work
+    # must be absent before the next compiler sees the emitted source.
+    dead = call('unreachable_after_exit', [], 'void')
+    finished = hir.FunctionLiteral(LOC, void_signature, [hir.Param('flag', 'bool')],
+        [], None, 'void', hir.Block(LOC, 'void', [hir.Return(LOC, 'never'), dead], True))
+    exhaustive = hir.FunctionLiteral(LOC, value_signature, [hir.Param('flag', 'bool')],
+        [], None, 'int64', hir.Block(LOC, 'never', [
+            hir.Flow(LOC, 'void', [hir.IfArm(LOC, 'void', flag,
+                hir.Return(LOC, 'never', integer(40)))], hir.Return(LOC, 'never', integer(2))),
+            dead], True))
     early_void = hir.Flow(LOC, 'void', [hir.IfArm(
         LOC, 'void', flag, hir.Return(LOC, 'never'))], None)
     early_value = hir.Flow(LOC, 'void', [hir.IfArm(
@@ -198,6 +208,8 @@ def test_native_function_tails_preserve_early_and_implicit_returns(tmp_path):
             call('stop', [], 'never')], True))
     yes, no = hir.Bool(LOC, 'bool', True), hir.Bool(LOC, 'bool', False)
     answer = call('__add__', [call('choose', [yes]), call('choose', [no])])
+    exhausted = call('__add__', [call('exhaustive', [yes]), call('exhaustive', [no])])
+    answer = call('__add__', [answer, call('__sub__', [exhausted, integer(42)])])
     argc = hir.ExpressedIdentifier(LOC, 'int64', 'argc')
     normal = call('__eq__', [argc, integer(1)], 'bool')
     answer = call('__add__', [answer, call('__sub__', [call('diverging', [normal]), integer(42)])])
@@ -222,8 +234,8 @@ def test_native_function_tails_preserve_early_and_implicit_returns(tmp_path):
     main = hir.FunctionLiteral(LOC, main_signature, [hir.Param('argc', 'int64'), hir.Param('argv', 'int64')], [],
         None, 'int64', hir.Block(LOC, 'int64', [
             x_decl, callback_decl,
-            call('early_void', [yes], 'void'), call('early_void', [no], 'void'), answer], True))
-    functions = [('early_void', empty), ('choose', choose), ('stop', stop), ('diverging', diverging), ('main', main)]
+            call('finished', [yes], 'void'), call('early_void', [yes], 'void'), call('early_void', [no], 'void'), answer], True))
+    functions = [('finished', finished), ('exhaustive', exhaustive), ('early_void', empty), ('choose', choose), ('stop', stop), ('diverging', diverging), ('main', main)]
     root = hir.Block(LOC, 'void', [function for _, function in functions], True)
     type_lines = []
     node_lines, _, names = emit_hir(root, type_value=type_builder(type_lines), with_names=True)
@@ -255,6 +267,7 @@ let main=():>int64=>{{
     emitted = subprocess.run([cache_artifact(seed).resolve()], capture_output=True,
                              text=True, timeout=60, check=False)
     assert emitted.returncode == 0, emitted.stdout + emitted.stderr
+    assert 'unreachable_after_exit' not in emitted.stdout
     output = tmp_path / 'native-tails.udewy'
     output.write_text(emitted.stdout)
     for target in ['x86_64', 'c']:
@@ -262,6 +275,20 @@ let main=():>int64=>{{
         executable = cache_artifact(output).resolve()
         assert subprocess.run([executable], timeout=10, check=False).returncode == 42
         assert subprocess.run([executable, 'stop'], timeout=10, check=False).returncode == 87
+
+
+def test_hosted_emitter_removes_exit_suffix_but_keeps_loop_continuation():
+    ctx = emit.EmitContext(set(), set(), debug_locations=False)
+    dead = call('unreachable_after_exit', [], 'void')
+    terminal = hir.Block(LOC, 'void', [hir.Return(LOC, 'never'), dead], True)
+    assert 'unreachable_after_exit' not in emit.emit_block(terminal, ctx)
+    for exit_ in [hir.Break(LOC, 'never'), hir.Continue(LOC, 'never')]:
+        body = hir.Block(LOC, 'void', [exit_, dead], True)
+        loop = hir.Flow(LOC, 'void', [hir.LoopArm(LOC, 'void', hir.Bool(LOC, 'bool', False), body)], None)
+        after = call('reachable_after_loop', [], 'void')
+        text = emit.emit_block(hir.Block(LOC, 'void', [loop, after], True), ctx)
+        assert 'unreachable_after_exit' not in text
+        assert 'reachable_after_loop' in text
 
 
 def test_native_emitter_deep_output_is_identical(tmp_path):

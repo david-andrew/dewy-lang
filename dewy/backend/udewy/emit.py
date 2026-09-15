@@ -181,6 +181,20 @@ def variable_marker(name: str, binding_id: int | None, ctx: EmitContext) -> str 
     return f'# @var {name} {shown if shown != name else "-"} {formatter_name or "-"} {spelled}'
 
 
+def _leaves_block(node: hir.AST) -> bool:
+    """A lowered statement with no continuation in its containing block."""
+    if isinstance(node, (hir.Return, hir.Break, hir.Continue)):
+        return True
+    if isinstance(node, hir.Suppress):
+        return _leaves_block(node.item)
+    if isinstance(node, hir.Block):
+        return any(_leaves_block(item) for item in node.items)
+    if isinstance(node, hir.Flow) and node.default is not None:
+        return all(isinstance(arm, hir.IfArm) and _leaves_block(arm.body)
+                   for arm in node.arms) and _leaves_block(node.default)
+    return False
+
+
 def emit_statements(items: list[hir.AST], ctx: EmitContext) -> list[str]:
     """Statements in order, each behind its location marker (and a declaration
     behind its variable marker); declarations shadow direct names from then on."""
@@ -196,6 +210,10 @@ def emit_statements(items: list[hir.AST], ctx: EmitContext) -> list[str]:
         lines.append(emit_ast(item, ctx))
         if isinstance(item, hir.Declare):
             ctx.local_names.add(item.name)
+        # Source checking and ownership lowering have completed. Dead exit
+        # cleanup need not become source text for the next compiler to parse.
+        if _leaves_block(item):
+            break
     return lines
 
 @compiler_allocation_scope()

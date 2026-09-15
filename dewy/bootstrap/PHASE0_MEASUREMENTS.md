@@ -1978,3 +1978,19 @@ projection, guard and temporary-lifetime checks. Artifact:
 `return-move-storage-gates.log`. Lowering test drivers now omit debugger
 metadata, which these execution checks do not consume. Full measurement of
 the native initialization and return batches is pending.
+
+### Generated exit suffixes
+
+Both emitters stop a lowered statement list after an unconditional return,
+break, continue, or exhaustive conditional whose arms all exit. Loops remain
+conservative. This runs after source validation and ownership lowering, so
+unreachable source still receives its semantic checks. It removes duplicate
+returns and normal-exit cleanup that can never execute.
+
+Native emission checks pass on direct and C output; hosted exit, initialization
+and conditional-bounds checks also pass. The frozen `3c699a2f` tokenizer module
+emits 1,916,646 bytes versus 1,917,447 before. Single cold invocations took
+10.033 and 11.089 seconds respectively; the small text reduction does not
+justify attributing that timing difference to this change. Artifacts:
+`measure-exit-suffix.log`, `exit-suffix-gates.log` and
+`exit-suffix-hosted-gates.log`.
