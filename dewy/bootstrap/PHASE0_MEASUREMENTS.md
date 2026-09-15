@@ -1662,3 +1662,22 @@ checks ordinary and debug assembly, execution and separate cache artifacts.
 Artifacts: `phase0-performance/hosted-micro-no-debug.json`,
 `native-micro-debug-metadata.json`, `udewy-debug-stages.json`,
 `micro-debug-metadata-gates.log`, `dewy-debug-metadata-gates.log`.
+
+### Full-build checkpoint after metadata and allocator changes
+
+Revision `3c89ce12`: a fresh hosted full executable build of the same frozen
+`3c699a2f` source/library used by the previous hosted baseline took **109.877
+seconds** (117.493 previously). Checking/lowering/emission/backend were
+51.694/24.138/4.610/23.777 seconds; peak RSS 1,379,052 KiB. The updated native
+C seed built frozen `3c89ce12` source/library into a direct executable in
+**72.661 seconds** (79.460 for the previous seed/source checkpoint). Native
+frontend/validation/preparation/lowering/emission/backend were
+18.738/9.728/4.653/18.333/5.584/13.294 seconds; peak RSS 5,916,612 KiB.
+The native comparison includes the allocator and source changes, not just
+metadata. Neither result meets the 60-second target. The native executable
+still embeds a different target than its C seed; this is not a matching-target
+Dewy fixed-point certificate.
+
+Artifacts: `phase0-performance/host-debug-metadata-full`,
+`native-debug-metadata-c`, and `native-debug-metadata-full`. All use fresh
+processes and build directories; OS caches are uncontrolled.

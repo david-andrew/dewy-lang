@@ -958,8 +958,10 @@ class _FlowLowering:
         """Return an udewy-representable initializer for a flow temporary."""
         if isinstance(node.type, ty.RefinedType):
             node = replace(node, type=node.type.base)   # `int64<0..100>` is an int64 word
-        if isinstance(node.type, ty.ObjectType) and node.type.brand not in ('dict', 'set'):
-            return hir.Integer(node.loc, 'int64', t0.base10, 0)   # an object value is a pointer word (see `_enum_aware_extract`)
+        if isinstance(node.type, ty.ObjectType):
+            # Dictionaries and sets use the record ABI too; each selected arm
+            # builds or copies its owned record through `_enum_aware_extract`.
+            return hir.Integer(node.loc, 'int64', t0.base10, 0)
         if ty.enum_members(node.type) is not None:
             return hir.Integer(node.loc, 'int64', t0.base10, 0)   # an enum is its tag word
         if node.type == 'bool':

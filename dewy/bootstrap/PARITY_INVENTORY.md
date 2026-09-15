@@ -135,3 +135,9 @@ These are outside the original corpus counts:
 | [runtime_grapheme_strings.dewy](../tests/runtime_grapheme_strings.dewy) | No implemented token starts here |
 | [keyword_default_calls.dewy](../tests/keyword_default_calls.dewy) | BinOp expression |
 | [position_only_calls.dewy](../tests/position_only_calls.dewy) | write this parameter as name:type |
+
+- Hosted dictionary/set flow results now use the ordinary record temporary
+  representation. Both branches, literal and binding results, and independent
+  mutation after selection execute on direct x86-64 and C in
+  `test_container_flow_values.py`. This closes the lowering restriction found
+  while sharing the native borrowing analysis graph.
