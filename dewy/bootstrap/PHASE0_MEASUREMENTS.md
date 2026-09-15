@@ -1732,3 +1732,23 @@ and ordinary/debug CLI checks passed.
 Artifacts: `phase0-performance/string-candidate-{before,after}.json`,
 `hosted-string-queries-{before,after}`, `hosted-string-query-output-check.json`,
 and `hosted-string-query-gates.log`.
+
+### Resolve transitive effects only for places
+
+Both effect analyzers now resolve and pair a callee only when a call contains
+a place argument. Evaluating the callee and every argument still contributes
+its effects. Ordinary value arguments cross an independent-value boundary,
+so the callee's parameter summary cannot add a mutation or escape to the
+caller's value. Native pairing is deferred to the first place in the call;
+subsequent places reuse it. Existing opaque-call and recursive-place behavior
+is unchanged.
+
+For 64 functions with 32 value calls each, analyzed eight times, native median
+runtime fell from 0.466 to 0.329 seconds across three runs; cumulative payload
+allocation fell from 195,842,016 to 136,594,144 bytes. All 512 checked parameter
+summaries remained root reads with no mutation, rebinding or escape. The same
+hosted query workload improved more modestly: median 0.210 to 0.194 seconds.
+Fifteen hosted/native effect tests passed, including value versus place calls,
+indirect calls, recursive propagation, routes and dependency-worklist budgets.
+Artifacts: `phase0-performance/value-call-effect-measurement`,
+`value-call-effects-{before,after}.json`, and `value-call-effect-gates.log`.

@@ -573,7 +573,11 @@ class _EffectAnalyzer:
                 self._visit(argument, params)
             return
         self._visit(call.func, params)
-        targets = self._direct_targets(call)
+        arguments = [*call.pos_args, *call.kw_args.values()]
+        # Only a place can carry the callee's effects back to this function's
+        # parameters. Ordinary arguments still evaluate, but target resolution
+        # and parameter pairing cannot contribute to their read-only boundary.
+        targets = self._direct_targets(call) if any(isinstance(arg, hir.Place) for arg in arguments) else None
         pairings: list[list[tuple[hir.AST, hir.Param | None]]] | None = None
         if targets is not None:
             resolved_pairs = [
@@ -581,7 +585,6 @@ class _EffectAnalyzer:
             ]
             if all(pairs is not None for pairs in resolved_pairs):
                 pairings = [pairs for pairs in resolved_pairs if pairs is not None]
-        arguments = [*call.pos_args, *call.kw_args.values()]
         for argument in arguments:
             if isinstance(argument, hir.Place):
                 self._visit_place_argument(argument, call, targets, pairings, params)

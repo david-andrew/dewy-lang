@@ -327,23 +327,30 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis
         return changed
     }
     let changed = visit(call.func @params analysis nodes type_nodes)
-    let targets = direct_targets(call analysis nodes)
     let pairings:array<Pairing> = []
-    let known:bool = targets isnt? none
-    if targets isnt? none {
-        loop id in targets {
-            let target = hir.node_at(nodes id)
-            $runtime_assert target is? hir.FunctionLiteral
-            let pairs = pair_arguments(call target)
-            if pairs is? none { known = false break }
-            pairings.push(Pairing[id pairs])
-        }
-    }
+    let known=false
+    let paired=false
     loop argument in arguments {
         let node = hir.node_at(nodes argument)
         if node isnt? hir.Place {
             if visit_route(argument 'read' [] @params analysis nodes type_nodes) { changed = true }
             continue
+        }
+        # A value boundary only reads its argument. Resolve/pair the callee
+        # once on the first place, where a transitive summary is relevant.
+        if not paired {
+            paired=true
+            let targets=direct_targets(call analysis nodes)
+            known=targets isnt? none
+            if targets isnt? none {
+                loop id in targets {
+                    let target=hir.node_at(nodes id)
+                    $runtime_assert target is? hir.FunctionLiteral
+                    let pairs=pair_arguments(call target)
+                    if pairs is? none {known=false break}
+                    pairings.push(Pairing[id pairs])
+                }
+            }
         }
         let resolved = resolve_route(node.target params nodes)
         if resolved is? none {
