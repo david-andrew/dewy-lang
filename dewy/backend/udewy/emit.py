@@ -229,9 +229,31 @@ def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False, debu
     build) adds the per-type formatters that let a debugger show Dewy
     values; they cost compile time and size, so an ordinary build has none.
     """
+    return prepare_program(srcfile, target=target, test=test,
+                           debug_locations=debug_locations, debug_values=debug_values).source(
+                               debug_locations=debug_locations)
+
+
+@dataclass
+class PreparedProgram:
+    """One checked and legalized module, shared by text and backend emission."""
+    program: lower.LoweredProgram
+    root: hir.Block
+
+    @ty.runtime_query_scope()
+    @compiler_allocation_scope()
+    def source(self, *, debug_locations: bool = True) -> str:
+        return _emit_program(self.program, self.root, debug_locations=debug_locations)
+
+
+@compiler_allocation_scope()
+def prepare_program(srcfile: SrcFile, *, target: str = 'x86_64', test: bool = False,
+                    debug_locations: bool = True, debug_values: bool = False) -> PreparedProgram:
     with timing.phase('checking'):
-        ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test, debug=debug_locations and debug_values, debug_variables=debug_locations)
-    return codegen_inner(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main', debug_locations=debug_locations)
+        ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test,
+                                         debug=debug_locations and debug_values,
+                                         debug_variables=debug_locations)
+    return _prepare_checked(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main')
 
 @ty.runtime_query_scope()
 @compiler_allocation_scope()
@@ -241,6 +263,11 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: s
     ``lower_for_udewy`` supplies concrete module-level function units, global
     storage, and the ordered items for module startup.
     """
+    prepared = _prepare_checked(ast, srcfile, entry_name=entry_name)
+    return _emit_program(prepared.program, prepared.root, debug_locations=debug_locations)
+
+
+def _prepare_checked(ast: hir.AST, srcfile: SrcFile | None, *, entry_name: str) -> PreparedProgram:
     if not isinstance(ast, hir.Block):
         raise TypeError(f"Expected Block, got {type(ast)}")
 
@@ -248,11 +275,11 @@ def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: s
         srcfile = SrcFile(None, ' ' * ast.loc.stop)
     with timing.phase('lowering'):
         program = lower.lower_for_udewy(ast, srcfile, entry_name=entry_name)
-    return _emit_program(program, ast, debug_locations=debug_locations)
+    return PreparedProgram(program, ast)
 
 
-@timing.phase('emission')
-def _emit_program(program: lower.LoweredProgram, ast: hir.Block, *, debug_locations: bool) -> str:
+def module_functions(program: lower.LoweredProgram, ast: hir.Block) -> dict[str, hir.FunctionLiteral]:
+    """Complete lowered function units with the shared startup/entry wrappers."""
     functions: dict[str, hir.FunctionLiteral] = {}
     for function in program.functions:
         functions[function.symbol] = function.literal
@@ -296,6 +323,12 @@ def _emit_program(program: lower.LoweredProgram, ast: hir.Block, *, debug_locati
             ),
         )
 
+    return functions
+
+
+@timing.phase('emission')
+def _emit_program(program: lower.LoweredProgram, ast: hir.Block, *, debug_locations: bool) -> str:
+    functions = module_functions(program, ast)
     code: list[str] = []
     global_names = {declaration.name for declaration in program.globals}
     ctx = EmitContext(

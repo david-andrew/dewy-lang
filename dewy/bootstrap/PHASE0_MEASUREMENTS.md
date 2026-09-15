@@ -2142,3 +2142,26 @@ from the 63.796-second checkpoint (48,662,145 bytes). Both C generations
 emitted identical µDewy. The one-minute target remains unmet. Artifacts:
 `native-direct-atoms-full`, `native-direct-atoms-c1`, `native-direct-atoms-c2`
 and `source-direct-atoms.json`.
+
+### Hosted HIR to backend bridge
+
+Ordinary hosted x86-64 and C builds now pass legalized HIR to the existing
+µDewy backend protocol. They retain the emitted µDewy artifact, linker inputs,
+and CLI behavior. Debugger builds and other targets keep the source route.
+The bridge shares module setup, function reachability, static data, uncommon
+word operations, and condition parsing with µDewy; it does not change µDewy's
+conditional-only short circuiting. Checking and lowering run once.
+
+In an in-process comparison using frozen `3c699a2f` parser `t0` source/library,
+backend generation took 1.101 seconds through source/token parsing and 0.573
+through the bridge. This is a bounded backend measurement, not a complete
+invocation or an acceptance-target result. The resulting module programs
+agreed on their missing-input diagnostic and exit status. Artifact:
+`direct-bridge-module/results.json`.
+
+Independent expected-result comparisons cover both backends for aggregate
+snapshots, conditional side effects, indirect callee/argument order, Unicode,
+integer widths, and static data. CLI checks cover binary includes, arguments,
+timings, cached builds, and separate debugger metadata. The static/reference
+group passes 51 tests; the initial CLI/cache/include group passes 31 tests.
+Artifacts: `direct-bridge-static-gates.log`, `direct-bridge-cli-gates.log`.

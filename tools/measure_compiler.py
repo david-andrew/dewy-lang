@@ -70,7 +70,7 @@ def hosted_worker(argv: list[str]) -> int:
 
     observe(check, 'typecheck_and_resolve', 'checking_seconds')
     observe(lower, 'lower_for_udewy', 'lowering_seconds')
-    observe(emit, 'codegen_inner', 'lowering_and_emission_seconds')
+    observe(emit, '_emit_program', 'emission_seconds')
     observe(cli, 'entry_point', 'backend_seconds')
     profiler = cProfile.Profile() if os.environ.get('DEWY_BENCH_PROFILE') else None
     gc.callbacks.append(observe_collection)
@@ -84,7 +84,6 @@ def hosted_worker(argv: list[str]) -> int:
         if profiler:
             profiler.disable()
             profiler.dump_stats('hosted.prof')
-        phases['emission_seconds'] = phases.get('lowering_and_emission_seconds', 0) - phases.get('lowering_seconds', 0)
         Path('phases.json').write_text(json.dumps(phases, indent=2) + '\n')
 
 

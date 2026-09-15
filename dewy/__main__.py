@@ -25,6 +25,7 @@ from udewy.frontend import EntryPointOptions, entry_point
 
 from . import failure_log, timing
 from .backend.udewy import codegen
+from .backend.udewy import direct, emit
 from .reporting import Info, Pointer, ReportException, SrcFile, color_enabled
 from .targets import TARGETS, identify_host_target
 
@@ -132,7 +133,12 @@ def _build_and_run(
     with failure_log.recording(['dewy', *argv]) as recorder:
         # compile the program and output udewy source code
         srcfile = SrcFile.from_path(path)
-        udewy_src = codegen(srcfile, target=target, debug_locations=debug_values, debug_values=debug_values)
+        prepared = None
+        if not debug_values and target in ('x86_64', 'c'):
+            prepared = emit.prepare_program(srcfile, target=target, debug_locations=False)
+            udewy_src = prepared.source(debug_locations=False)
+        else:
+            udewy_src = codegen(srcfile, target=target, debug_locations=debug_values, debug_values=debug_values)
         print_prototype_warnings()
 
         # set up udewy options, and save the udewy source code to a cache file
@@ -148,7 +154,9 @@ def _build_and_run(
         # run the udewy compiler/executor
         try:
             with timing.phase('backend' if compile_only else 'backend_and_run'):
-                return entry_point(udewy_path, program_args, options)
+                generate = None if prepared is None else lambda backend: direct.compile_program(
+                    prepared.program, prepared.root, backend)
+                return entry_point(udewy_path, program_args, options, generate=generate)
         except Exception as e:
             print(f'Error: {e}')
             recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{udewy_path}`)'])

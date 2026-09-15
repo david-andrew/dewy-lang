@@ -1711,6 +1711,13 @@ def parse(toks: list[t1.Token], src: str, backend: Backend, source_path: str | N
         Generated code as a string or bytes.
     """
 
+    state = begin_parse(backend, src, source_path)
+    parse_program(toks, state)
+    return finish_parse(state)
+
+
+def begin_parse(backend: Backend, src: str = '', source_path: str | None = None) -> ParseState:
+    """Begin backend emission with the same symbol and reachability state."""
     backend.begin_module()
     
     fn_table: FunctionTable = {}
@@ -1732,7 +1739,13 @@ def parse(toks: list[t1.Token], src: str, backend: Backend, source_path: str | N
         variable_markers=collect_variable_markers(src) if backend.debug_info else [],
     )
     
-    parse_program(toks, state)
+    return state
+
+
+def finish_parse(state: ParseState) -> str:
+    """Finish module initialization, reference validation and reachability."""
+    backend = state.backend
+    fn_table = state.fn_table
 
     globals_init_label_id: int | None = None
     if state.global_init_label_ids:

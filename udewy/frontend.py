@@ -1,10 +1,11 @@
 from . import t0, t1, p0
-from .backend import BackendName, get_backend
+from .backend import Backend, BackendName, get_backend
 from .backend.common import RunOptions
 from .cache import cache_layout
 from .compilation import compiler_allocation_scope
 from pathlib import Path
 from dataclasses import dataclass
+from collections.abc import Callable
 
 @dataclass
 class EntryPointOptions:
@@ -15,7 +16,8 @@ class EntryPointOptions:
     debug_info: bool = True
 
 @compiler_allocation_scope()
-def entry_point(input_file: Path, script_args: list[str], options: EntryPointOptions|None=None) -> int:
+def entry_point(input_file: Path, script_args: list[str], options: EntryPointOptions|None=None,
+                *, generate: Callable[[Backend], str] | None = None) -> int:
     """
     Entry point for the udewy compiler.
 
@@ -23,6 +25,8 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
         input_file: Path to the input file
         script_args: Command-line arguments to pass to the program
         options: Options for the compiler
+        generate: Optional internal backend producer for an already lowered
+            module. Loading still supplies its link artifacts and source inputs.
 
     Returns:
         Exit code of the program or 0 if in compile-only mode
@@ -38,8 +42,11 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
     backend.debug_info = options.debug_info
     loaded = t0.load_program(input_file, target_backend=options.target)
     backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
-    toks = t1.tokenize(loaded.source)
-    asm = p0.parse(toks, loaded.source, backend, source_path=str(Path(input_file).resolve()))
+    if generate is None:
+        toks = t1.tokenize(loaded.source)
+        asm = p0.parse(toks, loaded.source, backend, source_path=str(Path(input_file).resolve()))
+    else:
+        asm = generate(backend)
 
     
     cache_dir, input_name = cache_layout(input_file)
