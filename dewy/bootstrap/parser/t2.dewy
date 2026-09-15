@@ -95,24 +95,31 @@ chain = (items:array<addr> @nodes:array<compound.Token>):>addr => {
 
 # Recurse through containers without putting another Chain around an existing
 # Chain. That distinction matters when the final pass reaches keyword parts.
+# Retain unchanged arena ids: a pass that only affects another branch must
+# not manufacture a new copy of every enclosing token and child array.
 rewrite_child = (id:addr pass:uint8 srcfile:SrcFile @nodes:array<compound.Token>):>addr | compound.TokenError => {
     let node = compound.node_at(nodes id)
     if node is? compound.Block | compound.ParametricEscape {
         let children = rewrite_list(node.inner pass srcfile @nodes)
         if children is? compound.TokenError return children
+        if children =? node.inner return id
         if node is? compound.Block return compound.append_node(@nodes compound.Block[loc=node.loc inner=children delims=node.delims base=node.base])
         return compound.append_node(@nodes compound.ParametricEscape[loc=node.loc inner=children])
     }
+    # Most visits are leaves. They have no child vector to snapshot or edit.
+    if node isnt? compound.IString | Chain | KeywordExpr | Flow | Directive return id
     let children:array<addr> = []
     if node is? compound.IString { children = node.content }
     else if node is? Chain { children = node.items }
     else if node is? KeywordExpr { children = node.parts }
     else if node is? Flow { children = node.arms }
+    let changed_children=false
     loop i in 0.. and i <? children.length {
         let changed = rewrite_child(children[i] pass srcfile @nodes)
         if changed is? compound.TokenError return changed
-        children[i] = changed
+        if children[i] not=? changed {children[i] = changed changed_children=true}
     }
+    if not changed_children and node is? compound.IString | Chain | KeywordExpr return id
     if node is? compound.IString return compound.append_node(@nodes compound.IString[loc=node.loc content=children])
     if node is? Chain return compound.append_node(@nodes Chain[loc=node.loc items=children])
     if node is? KeywordExpr return compound.append_node(@nodes KeywordExpr[loc=node.loc parts=children])
@@ -123,6 +130,7 @@ rewrite_child = (id:addr pass:uint8 srcfile:SrcFile @nodes:array<compound.Token>
             if changed is? compound.TokenError return changed
             default = changed
         }
+        if not changed_children and default =? node.default return id
         return compound.append_node(@nodes Flow[loc=node.loc arms=children default=default])
     }
     if node is? Directive {
@@ -138,6 +146,7 @@ rewrite_child = (id:addr pass:uint8 srcfile:SrcFile @nodes:array<compound.Token>
             if changed is? compound.TokenError return changed
             message = changed
         }
+        if condition =? node.condition and message =? node.message return id
         return compound.append_node(@nodes Directive[loc=node.loc name=node.name condition=condition message=message])
     }
     return id
@@ -182,7 +191,7 @@ rewrite_list = (input:array<addr> pass:uint8 srcfile:SrcFile @nodes:array<compou
                 output.push(compound.append_node(@nodes compound.Identifier[loc=Span[node.loc.start node.loc.start] name='void']))
             }
         }
-        if i+1 <? items.length {
+        if pass >=? 3 and pass <=? 6 and i+1 <? items.length {
             let right = compound.node_at(nodes items[i+1])
             let loc = Span[node.loc.start right.loc.stop]
             let replacement:compound.Token? = none

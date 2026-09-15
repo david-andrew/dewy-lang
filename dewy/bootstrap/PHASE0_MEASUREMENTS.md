@@ -3456,3 +3456,25 @@ total times were 15.716/16.276 s before and 16.521/15.999 s after. Peak RSS
 dropped from 244760–256060 to 231836–231844 KiB, and normalized output was
 unchanged. Since the experiment did not improve compile latency, it was not
 retained. Records: `syntax-slots-experiment.log` and `host-syntax-slots-*`.
+
+### Native post-tokenization preserves unchanged subtrees
+
+The native t2 pass driver now preserves unchanged container ids and child
+vectors, skips empty child-vector construction for leaves, and reads a right
+neighbor only in the four passes that combine it with the current token.
+Pass ordering and resulting source trees remain unchanged.
+
+On frozen `3bd41743` `bootstrap/backend/udewy/lower.dewy` (273,306 bytes), four
+alternating runs of native-built direct parser kernels measure **4.65/4.46
+seconds before, 3.80/3.72 after**. Cumulative arena payload allocation falls
+from **3,074,076,968 to 2,505,704,352 bytes**, and the token arena from 179,056
+to 177,305 nodes, with 225 roots in both. These timings include loading,
+post-tokenization, and printing the three counters, with OS caches uncontrolled.
+Both kernels use the same `3bd41743` C seed and frozen library; this isolates
+these parser changes from the new shared string descriptor implementation.
+
+The 152 parser parity, fixture, diagnostic, Unicode-span and CLI checks pass
+with the final change. Artifacts: `postok-sharing-measurement/results.json`,
+its before/after sources and build logs, and
+`native-postok-sharing-final-gates.log`. This bounded reduction does not yet
+establish a full native build time under the revised 30-second target.
