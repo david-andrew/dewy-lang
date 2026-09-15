@@ -112,3 +112,29 @@ def test_context_inventory_preserves_recursive_phase_order(source, monkeypatch):
         t2.make_chains(tokens, ctx=ctx)
     monkeypatch.setattr(t2, 'postok_inner', recursive_pipeline)
     assert pickle.dumps(p0.parse(SrcFile(None, source))) == current
+
+
+@pytest.mark.parametrize('source', [
+    'a + b', 'a - b', 'a * b', 'a ^ b', '-a', '+a', 'not a', '@a',
+    'a or_throw', 'a as T', 'a transmute T', 'a[b]', 'f(x)', '2x',
+    'a + b * c - d', 'a^b^c', 'f(x)^2 + 2x^2', 'not a =? b',
+    'a,b', '0..3', '0,2..8', 'a;b', ';a', 'a;',
+    'let f=(x:int64=1):>int64=>x+1', 'let values=[a b c]',
+    '(+)', '(* 2)', '(.length)', 'a not <? b', 'a .+ b',
+])
+def test_isolated_reductions_match_general_shunting(source, monkeypatch):
+    file = SrcFile(None, source)
+    actual = pickle.dumps(p0.parse(file))
+    monkeypatch.setattr(p0, '_single_reduction', lambda items, ctx: None)
+    assert pickle.dumps(p0.parse(file)) == actual
+
+
+@pytest.mark.parametrize('source', ['a..b..c', 'a:b:c', 'let a = 0..1..2'])
+def test_isolated_reductions_keep_nonassociative_errors(source, monkeypatch):
+    file = SrcFile(None, source)
+    with pytest.raises(Exception) as actual:
+        p0.parse(file)
+    monkeypatch.setattr(p0, '_single_reduction', lambda items, ctx: None)
+    with pytest.raises(type(actual.value)) as expected:
+        p0.parse(file)
+    assert str(expected.value) == str(actual.value)

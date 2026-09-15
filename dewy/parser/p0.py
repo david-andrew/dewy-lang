@@ -560,6 +560,59 @@ def parse_flow(flow: t2.Flow, ctx: Context) -> Flow:
     return Flow(loc=flow.loc, arms=arms, default=default)
 
 
+def _validate_nonassociative(op: t2.Operator, left: AST, right: AST, ctx: Context) -> None:
+    if isinstance(left, BinOp) and t2.op_equals(left.op, op):
+        _throw_nested_nonassociative_operator_error(ctx=ctx, outer_op=op, inner_op=left.op, left_expr=left, right_expr=right)
+    if isinstance(right, BinOp) and t2.op_equals(right.op, op):
+        _throw_nested_nonassociative_operator_error(ctx=ctx, outer_op=op, inner_op=right.op, left_expr=left, right_expr=right)
+
+
+def _single_reduction(items: list, ctx: Context) -> AST | None:
+    """Reduce an isolated ordinary operator with no precedence competition.
+
+    Quantum precedence may describe binary and unary uses of the same token;
+    two operands select its binary use, as identify_reductions does. Keep
+    flat operators on the general path and share its nonassociative validation.
+    Semicolon atoms retain their special shift rule on that path too.
+    """
+    if len(items) == 3:
+        left, op, right = items
+        if not isinstance(left, AST) or not isinstance(right, AST) or not t2.is_operator(op):
+            return None
+        if ((isinstance(left, Atom) and isinstance(left.item, t1.Semicolon))
+                or (isinstance(right, Atom) and isinstance(right.item, t1.Semicolon))):
+            return None
+        assoc = get_associativity(op)
+        if isinstance(assoc, list):
+            if Associativity.flat in assoc or Associativity.fail in assoc:
+                return None
+            binary = Associativity.left in assoc or Associativity.right in assoc
+        else:
+            binary = assoc is Associativity.left or assoc is Associativity.right
+            if assoc is Associativity.fail:
+                _validate_nonassociative(op, left, right, ctx)
+                binary = True
+        if binary:
+            return BinOp(Span(left.loc.start, right.loc.stop), op, left, right)
+    elif len(items) == 2:
+        left, right = items
+        if t2.is_operator(left) and isinstance(right, AST):
+            op, item, kind = left, right, Associativity.prefix
+        elif isinstance(left, AST) and t2.is_operator(right):
+            op, item, kind = right, left, Associativity.postfix
+        else:
+            return None
+        if isinstance(item, Atom) and isinstance(item.item, t1.Semicolon):
+            return None
+        assoc = get_associativity(op)
+        matches = kind in assoc if isinstance(assoc, list) else kind is assoc
+        if matches:
+            if kind is Associativity.prefix:
+                return Prefix(Span(op.loc.start, item.loc.stop), op, item)
+            return Postfix(Span(item.loc.start, op.loc.stop), op, item)
+    return None
+
+
 def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
     """
     repeatedly apply shunting reductions until no more occur. modifies `tokens` in place
@@ -570,6 +623,10 @@ def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
     """
     if len(chain.items) == 1 and isinstance(chain.items[0], AST):
         return chain.items[0]
+    single = _single_reduction(chain.items, ctx)
+    if single is not None:
+        chain.items[:] = [single]
+        return single
     _chain_items = chain.items.copy()  # used for reporting
 
     chains: list[ProtoAST] = [chain]
@@ -654,6 +711,10 @@ def shunt_pass(chains: list[ProtoAST], ctx: Context) -> None:
     for chain_idx, chain in enumerate(chains):
         if len(chain.items) == 1:
             continue  # an ambiguity alternative can finish before its peers
+        single = _single_reduction(chain.items, ctx)
+        if single is not None:
+            chain.items[:] = [single]
+            continue
         raw_shift_dirs, raw_candidate_operator_idxs, reverse_ast_idxs_map = identify_shifts(chain, ctx)
 
         if all(isinstance(shift_dir, int) for shift_dir in raw_shift_dirs):
@@ -860,10 +921,7 @@ def identify_reductions(chain: ProtoAST, shift_dirs: list[ShiftDir], candidate_o
                 validate_rangejux(ast, ctx)  # check that 
                 reductions.append((ast, bounds, a))
             elif (a == Associativity.fail) and (left_ast_shift_dir == 1 and right_ast_shift_dir == -1):
-                if isinstance(left_ast, BinOp) and t2.op_equals(left_ast.op, op):
-                    _throw_nested_nonassociative_operator_error(ctx=ctx, outer_op=op, inner_op=left_ast.op, left_expr=left_ast, right_expr=right_ast)
-                if isinstance(right_ast, BinOp) and t2.op_equals(right_ast.op, op):
-                    _throw_nested_nonassociative_operator_error(ctx=ctx, outer_op=op, inner_op=right_ast.op, left_expr=left_ast, right_expr=right_ast)
+                _validate_nonassociative(op, left_ast, right_ast, ctx)
                 reductions.append((BinOp(Span(left_ast.loc.start, right_ast.loc.stop), op, left_ast, right_ast), (left_ast_idx, right_ast_idx+1), a))
         
         if len(reductions) == 0:

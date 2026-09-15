@@ -2814,3 +2814,40 @@ time **0.369 to 0.317 seconds**. Assembly shrinks **4,678,466 to 4,080,748 bytes
 and the executable **955,688 to 865,576 bytes**. These are bounded backend
 samples, not complete compiler builds. Artifacts: `intrinsic-operands-gates.log`,
 `intrinsic-operands-module/results.json`.
+
+
+Two native generations of the updated µDewy compiler agree for each backend:
+C takes 6.52/6.30 seconds, SHA-256
+`6fc6155115b3c7937bf67a6c81d83302741513fca346fcebf008d25b93f9c947`;
+x86-64 takes 0.30/0.43 seconds, SHA-256
+`165b26f81e6429b305113466b283cf56e18d7fe73e2e26910c884b7422a4d3fa`.
+Artifacts: `build-intrinsic-micro.log`, `udewy-intrinsic-{c,x86_64}-stage{1,2}`.
+This is a µDewy fixed-point check, not a new full Dewy fixed point.
+
+The complete checkpoint at `b4830c5d` takes **66.696 seconds hosted**:
+checking 32.845, lowering 15.192, emission 2.932 and backend 9.978
+(code generation 4.563, toolchain 5.285); peak process RSS 1,158,380 KiB.
+The same PGO native Dewy seed with the updated C-built µDewy takes
+**43.903 seconds**: frontend 11.813, validation 5.177,
+initialization/reachability 1.041, lowering 10.970, emission 3.807 and
+backend 8.947; peak process RSS 5,820,500 KiB. Native emitted µDewy remains
+byte identical. Hosted remains above the full-build target. These are fresh
+processes with empty build directories and the previously recorded frozen
+compiler/library inputs; OS page caches remain uncontrolled.
+Artifacts: `host-effect-intrinsic-full`, `native-intrinsic-full`.
+
+### Isolated operator reductions
+
+The hosted parser directly reduces a single binary, prefix or postfix
+operator when its operands are already parsed and no precedence competition
+remains. Binary uses still win over unary readings, quantum juxtaposition
+alternatives stay on the operator, and nonassociative errors share the same
+validation as the general shunting path. Flat operators and semicolon atoms
+retain their existing handling.
+
+All 225 targeted parser checks pass, including direct comparisons with the
+general shunting path and matching nonassociative diagnostics. The 125 frozen
+compiler/library parse-tree hashes are unchanged. Parsing changes **6.472 to
+6.340 seconds** in one bounded pair; this is a small local improvement, not
+a full-build result. Artifacts: `parser-isolated-complete-gates.log`,
+`parser-isolated-{before,after}.json`, `measure-parser-isolated.log`.
