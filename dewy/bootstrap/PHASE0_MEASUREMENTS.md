@@ -2092,3 +2092,24 @@ add no auxiliary type entries. These and the binary-data/scanner/cache checks
 pass in the 59-test group (`direct-atoms-bulk-data-gates.log`). The preceding
 atom checkpoint showed no hosted benefit; measure this broader replacement
 before attributing a speedup.
+
+The next cold hosted full build, using `cb6db449` packages and frozen
+`3c699a2f` source/library, took **95.701 seconds**, down from 99.962 at the
+previous full hosted checkpoint. Checking: 41.337; lowering: 20.653; emission:
+4.752; backend: 23.142 seconds. Peak process RSS was 1,379,396 KiB and emitted
+µDewy was 34,750,055 bytes. This includes body indexes, signed normalization,
+bulk based data and the direct atom/shared-member rules. It remains well
+above the target. Artifact: `host-direct-atoms-full`.
+
+The measurement tool now records garbage-collection duration and reclaimed
+objects by phase without changing collection policy. In this full invocation,
+GC took 1.395 seconds during checking, 2.963 during lowering and 2.154 in the
+backend (73, 103 and 66 collections respectively). There were no uncollectable
+objects. These times are included in the phase and total invocation timings.
+
+The preceding `dd972e99` C compiler generations also have byte-identical
+executables: 6,108,840 bytes, SHA-256
+`7fa1e6bf0378d1d5bfc357243c9e57df3ec5b03c96844d7ecdf80caf1b67798f`.
+This confirms that Dewy checkpoint's binary fixed point; it does not replace
+the complete paired corpus/release gates. Artifact:
+`atomic-seed-binary-comparison.json`.

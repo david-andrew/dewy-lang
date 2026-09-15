@@ -18,6 +18,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import gc
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,23 @@ def hosted_worker(argv: list[str]) -> int:
     from dewy.semantic import check
 
     phases: dict[str, float] = {}
+    active_phases: list[str] = []
+    collections: dict[str, dict] = {}
+    collection_started: dict[int, tuple[float, str]] = {}
+
+    def observe_collection(event, info):
+        generation = info['generation']
+        if event == 'start':
+            collection_started[generation] = (
+                time.perf_counter(), active_phases[-1] if active_phases else 'outside_phases')
+        elif event == 'stop' and generation in collection_started:
+            start, phase = collection_started.pop(generation)
+            row = collections.setdefault(phase, {'seconds': 0.0, 'collections': 0,
+                                                'collected': 0, 'uncollectable': 0})
+            row['seconds'] += time.perf_counter() - start
+            row['collections'] += 1
+            row['collected'] += info['collected']
+            row['uncollectable'] += info['uncollectable']
 
     def observe(owner, name, label):
         original = getattr(owner, name)
@@ -38,10 +56,12 @@ def hosted_worker(argv: list[str]) -> int:
             start = time.perf_counter()
             with Path('phase-events.jsonl').open('a') as events:
                 events.write(json.dumps({'phase': label, 'event': 'start', 'time': start}) + '\n')
+            active_phases.append(label)
             try:
                 return original(*args, **kwargs)
             finally:
                 stop = time.perf_counter()
+                active_phases.pop()
                 phases[label] = phases.get(label, 0) + stop - start
                 with Path('phase-events.jsonl').open('a') as events:
                     events.write(json.dumps({'phase': label, 'event': 'finish', 'time': stop}) + '\n')
@@ -53,11 +73,14 @@ def hosted_worker(argv: list[str]) -> int:
     observe(emit, 'codegen_inner', 'lowering_and_emission_seconds')
     observe(cli, 'entry_point', 'backend_seconds')
     profiler = cProfile.Profile() if os.environ.get('DEWY_BENCH_PROFILE') else None
+    gc.callbacks.append(observe_collection)
     try:
         if profiler:
             profiler.enable()
         return cli.run(argv)
     finally:
+        gc.callbacks.remove(observe_collection)
+        Path('garbage-collection.json').write_text(json.dumps(collections, indent=2) + '\n')
         if profiler:
             profiler.disable()
             profiler.dump_stats('hosted.prof')
@@ -174,6 +197,9 @@ def main() -> int:
         phases = work / 'phases.json'
         if phases.exists():
             record.update(json.loads(phases.read_text()))
+        collection_report = work / 'garbage-collection.json'
+        if collection_report.is_file():
+            record['garbage_collection'] = json.loads(collection_report.read_text())
         if args.phase_timings:
             reported = {}
             for line in (work / 'stderr.log').read_text().splitlines():
