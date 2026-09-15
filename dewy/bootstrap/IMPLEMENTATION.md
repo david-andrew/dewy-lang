@@ -40,7 +40,11 @@ and one differed only in diagnostic value notes. The hosted baseline passed
 all expected results. Ten separate language-rejection cases passed on both
 implementations. Follow-up fixes and their bounded regressions are recorded
 in [the campaign measurements](PHASE0_MEASUREMENTS.md); they still need a new
-full native corpus and fixed-point checkpoint.
+full native corpus checkpoint. The refreshed shared-prelude corpus passes
+154/211 outcomes, with all remaining failures being native compilation
+rejections; position-only calls also pass a subsequent isolated CLI check.
+Frozen `2b541de3` sources pass two-generation C-accelerated verification of
+both compilers; the hashes and scope are recorded in the campaign measurements.
 
 A broader composed corpus checked 12 bundles on both backends. Two bundles
 passed completely (24 ordinary programs, including arrays, process/file I/O,

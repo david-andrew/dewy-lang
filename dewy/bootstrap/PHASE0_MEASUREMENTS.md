@@ -3271,3 +3271,19 @@ work-directory path gives identical emitted source in all four samples.
 Artifacts: `helper-selection-{final-gates,identity-gate,comparison}.log`,
 `helper-selection-{before,after}-{0,1}`. This bounded batch does not establish
 a new full-build time.
+
+The frozen `2b541de3` source now passes two-generation verification of both
+compilers with C output, using the position-only Dewy accelerator and
+`d32f29e3` µDewy seed. Generation 1 passes `tools/check_native.sh` on x86-64
+and C, and both generation-2 executables are byte-identical to generation 1.
+Artifacts: `native-position-only-pair`, `native-position-only-pair.log`.
+The resulting SHA-256 digests are:
+
+```text
+08639996f59cbd59a2e96a79cff21c57e37fadb1d0b38428da63a293fb53f072  dewy
+ca75e36dd7bfae27cee76d07de912bf89a966922f5c67632446aa7fcf5b7cd8b  udewy
+```
+
+This verifies the accumulated cache, checking, and backend changes on the
+C-accelerated bootstrap route. It does not establish a fully direct bootstrap
+or a new full-build performance measurement.
