@@ -13,11 +13,12 @@ _runtime_query_cache: ContextVar[dict | None] = ContextVar('dewy_runtime_queries
 
 @contextmanager
 def runtime_query_scope() -> Iterator[None]:
-    """Memoize representation queries only while checked types are stable.
+    """Memoize type queries only while descriptions and registries are stable.
 
-    Type resolution can change descriptions, so its calls stay uncached.
-    Read-only validation opts in for one pass; lowering/emission use one
-    scope per compilation. Never span representation selection or imports.
+    Type resolution can change descriptions, so checking opts in only for
+    individual pure decisions. Read-only validation opts in for one pass;
+    lowering/emission use one scope per compilation. Never span representation
+    selection, fact updates, generic body checking or imports.
     Entries retain their input objects: identity keys cannot be reused while
     cached, and do not recursively hash mutable unions or recursive aliases.
     """
@@ -1345,6 +1346,9 @@ class TypeSystem:
         self._type_parents[child].add(parent)
         self._type_children[parent].add(child)
         self._nominal_ancestors.clear()
+        scope = _runtime_query_cache.get()
+        if scope is not None:
+            scope.pop(self, None)
 
     def add_promote_rule(self, a: str, b: str, result: str) -> None:
         """Register promote_type(a, b) == result (order-independent). Extensible for user types."""
@@ -1393,6 +1397,21 @@ class TypeSystem:
             if s == TOP_TYPE or t == BOTTOM_TYPE:
                 return s == t
             return self._is_nom_subtype(s, t)
+        scope = _runtime_query_cache.get()
+        if scope is None:
+            return self._compound_subtype(s, t)
+        relations = scope.setdefault(self, {})
+        key = (id(s), id(t))
+        found = relations.get(key)
+        if found is not None:
+            return found[2]
+        result = self._compound_subtype(s, t)
+        # Keep operands alive: aliases and unions are mutable and may contain
+        # cycles, so neither recursive hashing nor unretained ids are keys.
+        relations[key] = (s, t, result)
+        return result
+
+    def _compound_subtype(self, s: TypeExpr, t: TypeExpr) -> bool:
         # Shared descriptions prove Boolean containment without inspecting
         # their structure: A <= A|B, and A&B <= A. Extend that evidence to
         # subsets of union members and supersets of intersection members.
@@ -1426,6 +1445,7 @@ class TypeSystem:
             return self._atom_implies_atom(_to_nnf(s, memo), _to_nnf(t, memo))
         return self.is_empty(intersect(s, negate(t)))
 
+    @runtime_query_scope()
     def join(self, *types: TypeExpr) -> TypeExpr:
         """Join value types, absorbing members already covered by another.
 
@@ -2294,6 +2314,7 @@ class TypeSystem:
         geq = all(self.is_subtype(b.type, a.type) for a, b in zip(m1.pos_or_kw, m2.pos_or_kw))
         return leq and not geq
 
+    @runtime_query_scope()
     def match_best_function(
         self,
         methods: list[FunctionType],

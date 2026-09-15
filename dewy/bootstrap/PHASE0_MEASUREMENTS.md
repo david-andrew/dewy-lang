@@ -2516,3 +2516,22 @@ literal-boundary, partial-operator and precedence checks pass. Artifacts:
 `parser-context-integration-gates.log`. The preceding profile is
 `host-parser-compact.prof` (42.618 profiled seconds); no full-build improvement
 is inferred from that profile or the standalone parse measurement.
+
+### Scoped subtype decisions
+
+Subtype results and normalization are reused inside individual pure type-test,
+join, and overload decisions. Checking never carries that cache across an
+alias/fact update or generic body check. The existing stable validation and
+lowering scopes also reuse compound subtype results. Entries retain operands,
+separate type systems, and invalidate that system's relations when its nominal
+graph changes. Primitive reachability keeps its direct path.
+
+The cache/type/dispatch group passes 59 cases; a further 46 join, narrowing,
+literal and type-fact cases pass. The full `type_facts.dewy` fixture fails in
+both the changed compiler and the frozen pre-cache compiler: a known prefix
+length is not substituted into a symbolic slice-remainder relation. That
+existing proof gap is separate follow-up work, not a passing gate.
+A quiet module comparison changes **9.182 to 8.230 seconds**, with checking
+5.918 to 5.634; startup/checking variation contributes to the whole-invocation
+difference. Artifacts: `subtype-decision-gates.log`, `subtype-flow-gates.log`,
+`type-facts-prior-cache-baseline.log`, `measure-subtype-decision.log`.

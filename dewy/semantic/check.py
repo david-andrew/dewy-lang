@@ -3495,6 +3495,7 @@ def _metatype_test(value: hir.AST, test: ty.TypeExpr, *, negated: bool, loc: Spa
     return hir.TypeTest(loc, 'bool', value, tested, negated)
 
 
+@ty.runtime_query_scope()
 def _decided_type_test(value_type: ty.Type, test: ty.TypeExpr, *, ctx: Context) -> bool | None:
     """The result of `value is? T` when the value's static type settles it —
     every alternative is a `T` (true) or none can be (false) — else None
@@ -3561,6 +3562,7 @@ def _excluded(fact_id: int, test: ty.TypeExpr, *, ctx: Context) -> bool:
     return all(excludes(alternative) for alternative in alternatives)
 
 
+@ty.runtime_query_scope()
 def _refine_type_test(
     current: ty.Type,
     test: ty.TypeExpr,
@@ -3568,6 +3570,8 @@ def _refine_type_test(
     matches: bool,
     ctx: Context,
 ) -> ty.Type:
+    # This decision reads existing types and returns a new description. Its
+    # normalization/subtype cache ends before the caller updates flow facts.
     if isinstance(current, ty.MetaType):
         # `kind is? Whitespace`: the type value names a type under `Whitespace`
         tested = ty.unfold(test)
