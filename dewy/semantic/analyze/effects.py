@@ -115,6 +115,10 @@ class ParameterEffects:
 
     def merge_translated(self, other: ParameterEffects, prefix: Route) -> bool:
         """Fold ``other`` (a callee place parameter's effects) in at ``prefix``."""
+        if other is self:
+            # Recursive field forwarding may add/remove routes in this very
+            # summary. Propagate a snapshot, then let the worklist revisit it.
+            other = other.copy()
         changed = False
         for route in other.reads:
             changed |= self.add_read(prefix + route)
@@ -200,7 +204,9 @@ class _EffectAnalyzer:
             )
             for literal in self.literals
         }
-        self.dependents: dict[int, set[int]] = {}
+        # callee -> (caller, caller parameter, callee parameter, route prefix)
+        # All these routes come from checked syntax, independent of summaries.
+        self.transfers: dict[int, set[tuple[int, int, int, Route]]] = {}
 
     # ------------------------------------------------------------------
     # program structure collection
@@ -326,24 +332,24 @@ class _EffectAnalyzer:
     # per-function summarization
 
     def solve(self) -> ProgramEffects:
-        # Every body runs once to discover its effects and summary reads.
-        # Thereafter only callers of a changed summary need another visit.
-        # Recursive place routes still converge under prefix normalization
-        # and MAX_ROUTE_DEPTH; value calls introduce no such dependency.
-        pending = deque(self.literals)
-        queued = {id(literal) for literal in self.literals}
+        # Scan each body/default once for local effects and place-call edges.
+        # Then solve those additive equations without traversing HIR again.
+        # Prefix normalization and MAX_ROUTE_DEPTH bound recursive forwarding;
+        # ordinary value arguments never introduce a transfer edge.
+        for literal in self.literals:
+            self.current_literal = id(literal)
+            self.effects[id(literal)] = self._summarize(literal)
+        pending = deque(self.effects)
+        queued = set(pending)
         while pending:
-            literal = pending.popleft()
-            key = id(literal)
+            key = pending.popleft()
             queued.remove(key)
-            self.current_literal = key
-            summary = self._summarize(literal)
-            if summary.params != self.effects[key].params:
-                self.effects[key] = summary
-                for caller in self.dependents.get(key, ()):
-                    if caller not in queued:
-                        queued.add(caller)
-                        pending.append(self.effects[caller].literal)
+            source = self.effects[key].params
+            for caller, caller_param, callee_param, prefix in self.transfers.get(key, ()):
+                target = self.effects[caller].params[caller_param]
+                if target.merge_translated(source[callee_param], prefix) and caller not in queued:
+                    queued.add(caller)
+                    pending.append(caller)
         by_param: dict[int, ParameterEffects] = {}
         for function_effects in self.effects.values():
             by_param.update(function_effects.params)
@@ -609,14 +615,15 @@ class _EffectAnalyzer:
             if parameter is None or parameter.binding_id is None:
                 effects.add_opaque(route)
                 continue
-            self.dependents.setdefault(id(target), set()).add(self.current_literal)
             callee_effects = self.effects[id(target)].params.get(
                 parameter.binding_id
             )
             if callee_effects is None:
                 effects.add_opaque(route)
                 continue
-            effects.merge_translated(callee_effects, route)
+            self.transfers.setdefault(id(target), set()).add(
+                (self.current_literal, binding_id, parameter.binding_id, route)
+            )
 
 
 def analyze_effects(root: hir.AST) -> ProgramEffects:

@@ -251,4 +251,4 @@ def test_place_call_chain_schedules_only_changed_dependents(monkeypatch):
     monkeypatch.setattr(_EffectAnalyzer, '_summarize', counted)
     result = analyze_effects(root)
     assert all(result.by_param_binding[1000 + index].mutates == {(INDEX_STEP,)} for index in range(count))
-    assert visits < 3 * count   # the former solver visited over 40,000 bodies
+    assert visits == count   # summary propagation never scans a body again

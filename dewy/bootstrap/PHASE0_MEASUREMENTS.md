@@ -2717,3 +2717,32 @@ parser cases pass. All 125 frozen compiler/library files retain identical
 serialized parse-tree hashes; parsing changes **7.145 to 6.455 seconds**.
 Artifacts: `parser-terminal-gates.log`, `measure-parser-terminal.log`,
 `parser-terminal-{before,after}.json`.
+
+The quiet complete checkpoint at `38759e1b` takes **68.252 seconds hosted**:
+checking 32.722, lowering 16.199, emission 2.655 and backend 11.105 (code
+generation 4.690, toolchain 6.295); peak process RSS 1,199,328 KiB. Native
+takes **45.507 seconds** with the same PGO Dewy seed and the new C-built
+µDewy seed: frontend 11.980, validation 5.044, initialization/reachability
+0.866, lowering 10.653, emission 3.896 and backend 10.996; peak process RSS
+5,819,860 KiB. Native µDewy output remains byte identical. These combine the
+immediate, source-dispatch and terminal-reduction batches; the hosted target
+remains unmet. Artifacts: `host-immediate-dispatch-full`, `native-immediate-full`.
+
+### Effect transfer equations
+
+Hosted effect analysis now scans each function body and its defaults once
+for local effects and statically resolved place-argument transfers. The
+worklist propagates parameter summaries along those routes without rescanning
+caller syntax. Value boundaries, opaque calls, selected overloads and the
+finite route-depth abstraction retain their existing rules. Recursive
+self-transfers snapshot their source before extending its route sets.
+
+All 32 effect, native comparison and borrowing checks pass. The 200-function
+forwarding test now requires exactly one scan per body. Three paired samples
+on the full compiler's checked HIR compare every effect set against the old
+solver: all summaries agree for **1,385 functions**. Body visits fall from
+2,264 to 1,385 and median analysis time from **1.632 to 0.720 seconds**.
+The input HIR is prepared once; those are analysis-only timings, not full
+builds. The native solver remains the independent comparison implementation
+at this checkpoint. Artifacts: `effect-transfers-gates.log`,
+`effect-transfers-full-analysis/results.json`, `measure-effect-transfers-fixed.log`.
