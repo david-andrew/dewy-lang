@@ -50,7 +50,12 @@ print('dewy timing frontend', number * 10, 'ns', file=sys.stderr)
     work = output / 'run-00'
     assert (work / 'phase-events.jsonl').read_text() == f'{invocations}\n'
     assert (work / '__dewycache__/prelude/retained.pickle').read_text() == str(invocations)
-    assert json.loads((output / 'metadata.json').read_text())['cache_mode'] == mode
+    metadata = json.loads((output / 'metadata.json').read_text())
+    assert metadata['cache_mode'] == mode
+    assert metadata['python_jit'] == {
+        'available': hasattr(sys, '_jit') and sys._jit.is_available(),
+        'enabled': hasattr(sys, '_jit') and sys._jit.is_enabled(),
+    }
     if mode == 'warm':
         assert record['priming']['status'] == 0
         assert (work / 'priming/phase-events.jsonl').read_text() == '1\n'

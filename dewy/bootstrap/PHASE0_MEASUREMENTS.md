@@ -3182,3 +3182,14 @@ include used only for its constant length, as well as the earlier proof,
 source, target and compiler identity cases. Artifacts:
 `cache-schema/input-ledger-final-gates.log`,
 `cache-schema/binary-final-matrices.log`.
+
+### Bounded hosted JIT comparison
+
+The benchmark metadata now records CPython JIT availability, enablement and
+`PYTHON_JIT`. On the recorded Python 3.14.7 installation the JIT is available
+but disabled by default. Alternating cold tokenizer builds with it disabled
+measure 7.479/7.378 seconds; enabled builds measure 7.781/7.429 seconds.
+All four emitted sources are identical after normalizing the benchmark work
+path. This provides no clear benefit, so JIT remains disabled; it does not
+justify an additional full-build comparison. Artifacts:
+`host-jit-module-{0,1}-{0,1}`, `host-jit-module-normalized.json`.

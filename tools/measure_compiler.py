@@ -193,6 +193,10 @@ def main() -> int:
         'platform': platform.platform(), 'machine': platform.machine(),
         'cpu': next((line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')), None),
         'python': sys.version, 'compiler': compiler, 'target': args.target,
+        'python_jit': {
+            'available': hasattr(sys, '_jit') and sys._jit.is_available(),
+            'enabled': hasattr(sys, '_jit') and sys._jit.is_enabled(),
+        },
         'source': str(source), 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
         'cache_state': ('fresh process and empty build directory' if args.cache_state == 'cold' else
                         'fresh process after a priming build; analysis caches retained, executable removed') + '; OS page caches uncontrolled',
@@ -203,7 +207,7 @@ def main() -> int:
         'backend_environment': {key: value for key, value in env.items()
                                 if key.startswith(('UDEWY_', 'DEWY_BOOTSTRAP_'))},
         'analysis_environment': {key: env[key] for key in
-                                 ('DEWY_NO_PRELUDE_CACHE', 'DEWY_NO_RESIDENT_PRELUDE')
+                                 ('DEWY_NO_PRELUDE_CACHE', 'DEWY_NO_RESIDENT_PRELUDE', 'PYTHON_JIT')
                                  if key in env},
     }
     if args.native_executable:
