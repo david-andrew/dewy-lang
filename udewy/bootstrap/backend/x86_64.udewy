@@ -690,6 +690,27 @@ let x86_pop_saved_into = (reg:int):>void => {
     return void
 }
 
+# Consume a logical-stack value in its cache register. Once popped, that
+# register may hold the result. A spilled value needs one scratch-register
+# load; neither path disturbs the right operand in %rax.
+let x86_pop_saved_operand = (width:int):>int => {
+    let reg:int = 0
+    if x86_spilled_depth =? 0 {
+        x86_saved_depth = x86_saved_depth - 1
+        reg = x86_value_cache_reg(x86_saved_depth)
+    } else {
+        reg = "%r10"
+        x86_pop_saved_into(reg)
+    }
+    if width =? 64 { return reg }
+    let bb:int = bb_new(8)
+    bb_push_str(bb reg)
+    if width =? 32 { bb_push_str(bb "d") }
+    else if width =? 16 { bb_push_str(bb "w") }
+    else if width =? 8 { bb_push_str(bb "b") }
+    return bb_finalize_as_string(bb)
+}
+
 # ----------------------------------------------------------------------------
 # Call argument preparation
 # ----------------------------------------------------------------------------
@@ -1322,8 +1343,8 @@ let x86_emit_signed_mod = ():>void => {
     return void
 }
 
-let x86_emit_set_cc_negq = (cc:int):>void => {
-    x86_emit_indented("cmpq %rcx, %rax")
+let x86_emit_set_cc_negq = (cc:int left:int):>void => {
+    x86_emit_op_2("cmpq" "%rax" left)
     let bb:int = bb_new(16)
     bb_push_str(bb "    set")
     bb_push_str(bb cc)
@@ -1335,24 +1356,32 @@ let x86_emit_set_cc_negq = (cc:int):>void => {
 }
 
 let x86_binary_op = (op_kind:int):>void => {
-    x86_emit_op_2("movq" "%rax" "%rcx")
-    x86_pop_saved_into("%rax")
-    if op_kind =? TK_PLUS         { x86_emit_op_2("addq" "%rcx" "%rax") }
-    else if op_kind =? TK_MINUS   { x86_emit_op_2("subq" "%rcx" "%rax") }
-    else if op_kind =? TK_MUL     { x86_emit_op_2("imulq" "%rcx" "%rax") }
-    else if op_kind =? TK_IDIV    { x86_emit_signed_idiv() }
-    else if op_kind =? TK_MOD     { x86_emit_signed_mod() }
-    else if op_kind =? TK_LEFT_SHIFT  { x86_emit_op_2("shlq" "%cl" "%rax") }
-    else if op_kind =? TK_RIGHT_SHIFT { x86_emit_op_2("shrq" "%cl" "%rax") }
-    else if op_kind =? TK_AND     { x86_emit_op_2("andq" "%rcx" "%rax") }
-    else if op_kind =? TK_OR      { x86_emit_op_2("orq" "%rcx" "%rax") }
-    else if op_kind =? TK_XOR     { x86_emit_op_2("xorq" "%rcx" "%rax") }
-    else if op_kind =? TK_EQ      { x86_emit_set_cc_negq("e") }
-    else if op_kind =? TK_NOT_EQ  { x86_emit_set_cc_negq("ne") }
-    else if op_kind =? TK_GT      { x86_emit_set_cc_negq("g") }
-    else if op_kind =? TK_LT      { x86_emit_set_cc_negq("l") }
-    else if op_kind =? TK_GT_EQ   { x86_emit_set_cc_negq("ge") }
-    else if op_kind =? TK_LT_EQ   { x86_emit_set_cc_negq("le") }
+    # Division and shifts still need the fixed hardware operand registers.
+    if op_kind =? TK_IDIV or op_kind =? TK_MOD or op_kind =? TK_LEFT_SHIFT or op_kind =? TK_RIGHT_SHIFT {
+        x86_emit_op_2("movq" "%rax" "%rcx")
+        x86_pop_saved_into("%rax")
+        if op_kind =? TK_IDIV { x86_emit_signed_idiv() }
+        else if op_kind =? TK_MOD { x86_emit_signed_mod() }
+        else if op_kind =? TK_LEFT_SHIFT { x86_emit_op_2("shlq" "%cl" "%rax") }
+        else { x86_emit_op_2("shrq" "%cl" "%rax") }
+        return void
+    }
+    let left:int = x86_pop_saved_operand(64)
+    if op_kind =? TK_PLUS { x86_emit_op_2("addq" left "%rax") }
+    else if op_kind =? TK_MINUS {
+        x86_emit_op_2("subq" "%rax" left)
+        x86_emit_op_2("movq" left "%rax")
+    }
+    else if op_kind =? TK_MUL { x86_emit_op_2("imulq" left "%rax") }
+    else if op_kind =? TK_AND { x86_emit_op_2("andq" left "%rax") }
+    else if op_kind =? TK_OR { x86_emit_op_2("orq" left "%rax") }
+    else if op_kind =? TK_XOR { x86_emit_op_2("xorq" left "%rax") }
+    else if op_kind =? TK_EQ { x86_emit_set_cc_negq("e" left) }
+    else if op_kind =? TK_NOT_EQ { x86_emit_set_cc_negq("ne" left) }
+    else if op_kind =? TK_GT { x86_emit_set_cc_negq("g" left) }
+    else if op_kind =? TK_LT { x86_emit_set_cc_negq("l" left) }
+    else if op_kind =? TK_GT_EQ { x86_emit_set_cc_negq("ge" left) }
+    else if op_kind =? TK_LT_EQ { x86_emit_set_cc_negq("le" left) }
     return void
 }
 
@@ -1377,11 +1406,11 @@ let x86_load_mem = (width:int signed:int):>void => {
 }
 
 let x86_store_mem = (width:int):>void => {
-    x86_pop_saved_into("%rbx")
-    if width =? 64      { x86_emit_op_2("movq" "%rbx" "(%rax)") }
-    else if width =? 32 { x86_emit_op_2("movl" "%ebx" "(%rax)") }
-    else if width =? 16 { x86_emit_op_2("movw" "%bx" "(%rax)") }
-    else if width =? 8  { x86_emit_op_2("movb" "%bl" "(%rax)") }
+    let value:int = x86_pop_saved_operand(width)
+    if width =? 64      { x86_emit_op_2("movq" value "(%rax)") }
+    else if width =? 32 { x86_emit_op_2("movl" value "(%rax)") }
+    else if width =? 16 { x86_emit_op_2("movw" value "(%rax)") }
+    else if width =? 8  { x86_emit_op_2("movb" value "(%rax)") }
     x86_emit_indented("xorq %rax, %rax")
     return void
 }
@@ -1436,19 +1465,13 @@ let x86_unsigned_mod = ():>void => {
 }
 
 let x86_unsigned_cmp = (kind:int):>void => {
-    x86_emit_op_2("movq" "%rax" "%rcx")
-    x86_pop_saved_into("%rax")
-    x86_emit_indented("cmpq %rcx, %rax")
-    let bb:int = bb_new(16)
-    bb_push_str(bb "    set")
-    if kind =? 0      { bb_push_str(bb "a") }
-    else if kind =? 1 { bb_push_str(bb "b") }
-    else if kind =? 2 { bb_push_str(bb "ae") }
-    else if kind =? 3 { bb_push_str(bb "be") }
-    bb_push_str(bb " %al")
-    vec_push(x86_current_fn_code bb_finalize_as_string(bb))
-    x86_emit_indented("movzbq %al, %rax")
-    x86_emit_indented("negq %rax")
+    let left:int = x86_pop_saved_operand(64)
+    let cc:int = ""
+    if kind =? 0 { cc = "a" }
+    else if kind =? 1 { cc = "b" }
+    else if kind =? 2 { cc = "ae" }
+    else if kind =? 3 { cc = "be" }
+    x86_emit_set_cc_negq(cc left)
     return void
 }
 

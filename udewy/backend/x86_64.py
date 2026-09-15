@@ -63,6 +63,8 @@ class X86_64Backend(Backend):
     """
     _ARG_REGS = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
     _VALUE_CACHE_REGS = ["%r12", "%r13", "%r14"]
+    _REGISTER_SUFFIXES = {64: '', 32: 'd', 16: 'w', 8: 'b'}
+    _STORE_OPERATIONS = {64: 'movq', 32: 'movl', 16: 'movw', 8: 'movb'}
     _FIXED_FRAME_BYTES = 48
     _XMM_ARG_REGS = [f"%xmm{i}" for i in range(8)]
     
@@ -167,6 +169,21 @@ class X86_64Backend(Backend):
             if cache_reg != reg:
                 self._emit(f"movq {cache_reg}, {reg}")
     
+    def _saved_operand(self, width: int = 64) -> str:
+        """Consume a saved value where it lives; a spill needs one load.
+
+        The popped cache register is free to become an instruction's result.
+        Unconsumed values keep their register/stack assignments, including
+        across calls. %rax still holds the right operand.
+        """
+        if self._spilled_depth == 0:
+            self._saved_depth -= 1
+            reg = self._VALUE_CACHE_REGS[self._saved_depth]
+        else:
+            reg = '%r10'
+            self._pop_saved_into(reg)
+        return reg + self._REGISTER_SUFFIXES[width]
+
     def _prepare_call_args(self, num_args: int, fn_reg: str | None = None) -> int:
         reg_count = min(num_args, len(self._ARG_REGS))
         stack_count = num_args - reg_count
@@ -764,22 +781,37 @@ class X86_64Backend(Backend):
         elif op_kind == t1.Kind.TK_NOT:
             self._emit("notq %rax")
     
+    _COMMUTATIVE_OPS = {
+        t1.Kind.TK_PLUS: 'addq', t1.Kind.TK_MUL: 'imulq',
+        t1.Kind.TK_AND: 'andq', t1.Kind.TK_OR: 'orq', t1.Kind.TK_XOR: 'xorq',
+    }
+    _SIGNED_COMPARISONS = {
+        t1.Kind.TK_EQ: 'e', t1.Kind.TK_NOT_EQ: 'ne', t1.Kind.TK_GT: 'g',
+        t1.Kind.TK_LT: 'l', t1.Kind.TK_GT_EQ: 'ge', t1.Kind.TK_LT_EQ: 'le',
+    }
+
     def binary_op(self, op_kind: t1.Kind) -> None:
-        """
-        Apply binary operator to top two values on stack.
-        
-        Assumes left operand was saved via save_value(), right is in rax.
-        """
-        self._emit("movq %rax, %rcx")  # right in rcx
-        self._pop_saved_into("%rax")   # left in rax
-        
-        if op_kind == t1.Kind.TK_PLUS:
-            self._emit("addq %rcx, %rax")
-        elif op_kind == t1.Kind.TK_MINUS:
-            self._emit("subq %rcx, %rax")
-        elif op_kind == t1.Kind.TK_MUL:
-            self._emit("imulq %rcx, %rax")
-        elif op_kind == t1.Kind.TK_IDIV:
+        """Combine the saved left value and %rax without staging extra copies."""
+        operation = self._COMMUTATIVE_OPS.get(op_kind)
+        if operation is not None:
+            self._emit(f'{operation} {self._saved_operand()}, %rax')
+            return
+        if op_kind == t1.Kind.TK_MINUS:
+            left = self._saved_operand()
+            self._emit(f'subq %rax, {left}')
+            self._emit(f'movq {left}, %rax')
+            return
+        condition = self._SIGNED_COMPARISONS.get(op_kind)
+        if condition is not None:
+            self._emit(f'cmpq %rax, {self._saved_operand()}')
+            self._emit(f'set{condition} %al')
+            self._emit('movzbq %al, %rax')
+            self._emit('negq %rax')
+            return
+        # Division and shifts require the hardware's fixed operand registers.
+        self._emit("movq %rax, %rcx")
+        self._pop_saved_into("%rax")
+        if op_kind == t1.Kind.TK_IDIV:
             self._emit_signed_idiv()
         elif op_kind == t1.Kind.TK_MOD:
             self._emit_signed_mod()
@@ -787,43 +819,7 @@ class X86_64Backend(Backend):
             self._emit("shlq %cl, %rax")
         elif op_kind == t1.Kind.TK_RIGHT_SHIFT:
             self._emit("shrq %cl, %rax")
-        elif op_kind == t1.Kind.TK_AND:
-            self._emit("andq %rcx, %rax")
-        elif op_kind == t1.Kind.TK_OR:
-            self._emit("orq %rcx, %rax")
-        elif op_kind == t1.Kind.TK_XOR:
-            self._emit("xorq %rcx, %rax")
-        elif op_kind == t1.Kind.TK_EQ:
-            self._emit("cmpq %rcx, %rax")
-            self._emit("sete %al")
-            self._emit("movzbq %al, %rax")
-            self._emit("negq %rax")
-        elif op_kind == t1.Kind.TK_NOT_EQ:
-            self._emit("cmpq %rcx, %rax")
-            self._emit("setne %al")
-            self._emit("movzbq %al, %rax")
-            self._emit("negq %rax")
-        elif op_kind == t1.Kind.TK_GT:
-            self._emit("cmpq %rcx, %rax")
-            self._emit("setg %al")
-            self._emit("movzbq %al, %rax")
-            self._emit("negq %rax")
-        elif op_kind == t1.Kind.TK_LT:
-            self._emit("cmpq %rcx, %rax")
-            self._emit("setl %al")
-            self._emit("movzbq %al, %rax")
-            self._emit("negq %rax")
-        elif op_kind == t1.Kind.TK_GT_EQ:
-            self._emit("cmpq %rcx, %rax")
-            self._emit("setge %al")
-            self._emit("movzbq %al, %rax")
-            self._emit("negq %rax")
-        elif op_kind == t1.Kind.TK_LT_EQ:
-            self._emit("cmpq %rcx, %rax")
-            self._emit("setle %al")
-            self._emit("movzbq %al, %rax")
-            self._emit("negq %rax")
-    
+
     # ========================================================================
     # Memory operations
     # ========================================================================
@@ -849,18 +845,12 @@ class X86_64Backend(Backend):
                 self._emit("movzbq (%rax), %rax")
     
     def store_mem(self, width: int) -> None:
-        """Store to memory. Stack: [value addr] -> pushes 0."""
-        self._pop_saved_into("%rbx")  # value
-        if width == 64:
-            self._emit("movq %rbx, (%rax)")
-        elif width == 32:
-            self._emit("movl %ebx, (%rax)")
-        elif width == 16:
-            self._emit("movw %bx, (%rax)")
-        elif width == 8:
-            self._emit("movb %bl, (%rax)")
-        self._emit("xorq %rax, %rax")  # return 0
-    
+        """Store the saved value at %rax and return the intrinsic's zero."""
+        value = self._saved_operand(width)
+        instruction = self._STORE_OPERATIONS[width]
+        self._emit(f'{instruction} {value}, (%rax)')
+        self._emit("xorq %rax, %rax")
+
     def signed_shr(self) -> None:
         """Signed (arithmetic) right shift. Stack: [value bits] -> result."""
         self._emit("movq %rax, %rcx")
@@ -954,9 +944,7 @@ class X86_64Backend(Backend):
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
-        self._emit("movq %rax, %rcx")
-        self._pop_saved_into("%rax")
-        self._emit("cmpq %rcx, %rax")
+        self._emit(f'cmpq %rax, {self._saved_operand()}')
         if kind == "gt":
             self._emit("seta %al")
         elif kind == "lt":

@@ -1,0 +1,37 @@
+# Saved operands survive nested expressions/calls, spills and narrow stores.
+# These assertions also cover noncommutative operand order and boolean words.
+let trace:int = 0
+let touch = (value:int):>int => {
+    trace = trace * 10 + value
+    return value
+}
+let sum8 = (a:int b:int c:int d:int e:int f:int g:int h:int):>int => {
+    return a + b + c + d + e + f + g + h
+}
+let main = ():>int => {
+    let nested:int = touch(1) - (touch(2) - (touch(3) - (touch(4) - (touch(5) - touch(6)))))
+    if nested not=? -3 or trace not=? 123456 { return 1 }
+    trace = 0
+    let indirect:int = @sum8
+    let total:int = (@indirect)(touch(1) touch(2) touch(3) touch(4) touch(5) touch(6) touch(7) touch(8))
+    if total not=? 36 or trace not=? 12345678 { return 2 }
+    if (5 * (4 + (3 xor (2 or (1 and 7))))) not=? 20 { return 3 }
+    if (9 - 12) not=? -3 or (12 - 9) not=? 3 { return 4 }
+    if (-1 <? 0) not=? -1 or (0 >=? 1) not=? 0 { return 5 }
+    if __unsigned_gt__(-1 0) not=? -1 or __unsigned_lte__(-1 0) not=? 0 { return 6 }
+    if __unsigned_lt__(0 (-1)) not=? -1 or __unsigned_gte__(0 (-1)) not=? 0 { return 7 }
+    if -7 // 3 not=? -2 or -7 % 3 not=? -1 { return 8 }
+    if __signed_shr__(-16 2) not=? -4 or (-1 >> 63) not=? 1 { return 9 }
+    if __unsigned_idiv__(-1 2) not=? 9223372036854775807 { return 10 }
+    let memory:int = __alloca__(8)
+    __store_u64__(0 memory)
+    # The outer call fills the cache before these intrinsics consume their
+    # saved values, exercising %r10b/%r10w/%r10d on the spill path.
+    total = sum8(1 2 3 4 __store_u8__(255 memory) __store_u16__(0xabcd memory + 2) __store_u32__(0x12345678 memory + 4) 0)
+    if total not=? 10 { return 11 }
+    if __load_u64__(memory) not=? 0x12345678abcd00ff { return 12 }
+    if __load_i8__(memory) not=? -1 or __load_u16__(memory + 2) not=? 0xabcd { return 13 }
+    __store_i64__(-1 memory)
+    if __load_i64__(memory) not=? -1 { return 14 }
+    return 0
+}
