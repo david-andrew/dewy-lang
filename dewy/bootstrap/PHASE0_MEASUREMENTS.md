@@ -1899,3 +1899,27 @@ expire before later compilations; no cache spans mutable type resolution.
 Sixty-nine targeted tests pass, covering cache lifetimes, callable ABI slots,
 keyword calls, generics, places, conditional bounds and big-integer selection.
 Artifact: `stable-pass-query-gates.log`. Full-build measurement is pending.
+
+### Initialization certificates indexed by call
+
+Native initialization indexes successful certificates by function and concrete
+callback arguments. It previously scanned every certificate for every call.
+Both implementations now record only caller-supplied initialization requirements;
+parameters and receiver fields are initialized by the invocation. A cached
+check therefore avoids copying the caller's full availability set. Recursive
+ancestor assumptions and callback-dependent reads remain part of reuse checks.
+
+The native kernel with 256 functions, 2,048 calls and 2,048 initialized bindings
+took a median **0.603 seconds before and 0.088 after**, across three runs each.
+Cumulative payload allocation fell from **311,951,160 to 43,036,392 bytes**;
+both retained 256 certificates and returned the expected result. Both kernels
+were compiled with the same field-getter C seed and µDewy seed. This is not
+a new full-build measurement. Artifact: `initialization-cache-measurement`.
+
+Hosted recursion, captures, objects and callback checks pass, as do the native
+initialization comparisons with explicit ready/pending callback cases. An older
+test still expected a copied global string literal; the preceding revision
+already used static storage. Its assertion now matches that representation
+and executes the program to verify startup initialization. Artifacts:
+`initialization-caller-cache-gates.log`, `initialization-indexed-gates.log` and
+`initialization-indexed-callback-gates.log`.

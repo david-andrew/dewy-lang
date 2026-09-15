@@ -20,7 +20,7 @@ for shared call graphs: repeatedly traversing every path would be exponential.
 CallableEffect:type = const [targets:array<addr>]
 MemberRoute:type = const [binding_id:addr path:array<string>]
 CheckFrame:type = [function_id:addr available:set<addr> required:set<addr>=set[] assumed_calls:set<addr>=set[]]
-CheckedCall:type = const [key:string required:set<addr> assumed_calls:set<addr>]
+CheckedCall:type = const [required:set<addr> assumed_calls:set<addr>]
 Checker:type = [
     nodes:array<hir.AST> type_nodes:types.Table
     registry:bindings.Registry srcfile:SrcFile
@@ -29,7 +29,10 @@ Checker:type = [
     functions:array<addr>=[]
     reassigned_callables:set<addr>=set[] reassigned_objects:set<addr>=set[]
     reassigned_members:array<MemberRoute>=[]
-    frames:array<CheckFrame>=[] checked:array<CheckedCall>=[]
+    frames:array<CheckFrame>=[]
+    # Only certificates for this function and its concrete callback arguments
+    # can apply. Index those alternatives instead of scanning all prior calls.
+    checked:dict<string array<CheckedCall>>=[]
     # Keep the first diagnostic as a value. Recursive helpers unwind without
     # exiting the process, so checking remains usable by analysis/test tools.
     problem:Error?=none
@@ -477,15 +480,12 @@ check_function = (id:addr initialized:set<addr> arguments:array<addr> keywords:d
     if id in? stack { record_requirements(set[] set[id] @checker) return void }
     let function = hir.node_at(checker.nodes id)
     $runtime_assert function is? hir.FunctionLiteral
-    let available = initialized
-    loop field in function.object_fields { available.add(field.id) }
     let parameter_effects:dict<addr CallableEffect> = []
     let params = function.pos_or_kw_args
     loop param in function.kw_only_args { params.push(param) }
     loop i in 0.. and i <? params.length {
         let param = params[i]
         if param.binding_id is? none continue
-        available.add(param.binding_id)
         let argument:addr? = none
         if i <? function.pos_or_kw_args.length and i <? arguments.length { argument = arguments[i] }
         else { argument = keywords.get(param.name) }
@@ -495,15 +495,21 @@ check_function = (id:addr initialized:set<addr> arguments:array<addr> keywords:d
             if targets isnt? none { parameter_effects[param.binding_id] = CallableEffect[targets] }
         }
     }
-    if function.rest_args isnt? none and function.rest_args.binding_id isnt? none { available.add(function.rest_args.binding_id) }
     let key = call_key(id parameter_effects)
-    loop checked in checker.checked {
-        if checked.key =? key and subset(checked.required available) and subset(checked.assumed_calls stack) {
+    loop checked in checker.checked.get(key []) {
+        if subset(checked.required initialized) and subset(checked.assumed_calls stack) {
             record_requirements(checked.required checked.assumed_calls @checker)
             return void
         }
     }
-    checker.frames.push(CheckFrame[id available])
+    # Parameters and receiver fields are initialized by the call itself.
+    # A cached proof depends only on reads supplied by the caller, so a cache
+    # hit never needs to build or detach the body-local availability set.
+    let available = initialized
+    loop field in function.object_fields { available.add(field.id) }
+    loop param in params { if param.binding_id isnt? none { available.add(param.binding_id) } }
+    if function.rest_args isnt? none and function.rest_args.binding_id isnt? none { available.add(function.rest_args.binding_id) }
+    checker.frames.push(CheckFrame[id initialized])
     stack.add(id)
     let source=checker.srcfile
     if function.source isnt? none {checker.srcfile=hir.source_at(function.source checker.source_files)}
@@ -513,7 +519,11 @@ check_function = (id:addr initialized:set<addr> arguments:array<addr> keywords:d
     checker.srcfile=source
     $runtime_assert checker.frames.length >? 0
     let frame = checker.frames.pop
-    if checker.problem is? none { checker.checked.push(CheckedCall[key frame.required frame.assumed_calls]) }
+    if checker.problem is? none {
+        let checked=checker.checked.get(key [])
+        checked.push(CheckedCall[frame.required frame.assumed_calls])
+        checker.checked[key]=checked
+    }
 }
 
 main_error = (declaration:hir.Declare title:string message:string @checker:Checker):>void => {

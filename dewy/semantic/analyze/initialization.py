@@ -82,7 +82,8 @@ class _InitializationChecker:
             # Locals initialized inside this body need not be ready at its
             # call site. Only reads supplied by the entry state are required.
             frame.required.update(required & frame.available)
-            frame.assumed_calls.update(assumed - {frame.function_id})
+            if assumed:
+                frame.assumed_calls.update(assumed - {frame.function_id})
 
     def _collect_functions(self, node: object) -> None:
         """Every function literal in the program: the candidates for a call
@@ -702,13 +703,9 @@ class _InitializationChecker:
         if id(function) in call_stack:
             self._record_requirements(set(), {id(function)})
             return
-        available = set(initialized)
-        for binding_id, _name in function.object_fields:
-            available.add(binding_id)
         parameter_effects: dict[int, CallableEffect] = {}
         for index, param in enumerate(function.pos_or_kw_args):
             if param.binding_id is not None:
-                available.add(param.binding_id)
                 if index < len(arguments):
                     targets = self._callable_targets(
                         arguments[index],
@@ -741,7 +738,6 @@ class _InitializationChecker:
                         )
         for param in function.kw_only_args:
             if param.binding_id is not None:
-                available.add(param.binding_id)
                 argument = keyword_arguments.get(param.name)
                 if argument is None and isinstance(param, hir.BoundParam):
                     argument = param.value
@@ -755,22 +751,30 @@ class _InitializationChecker:
                         parameter_effects[param.binding_id] = CallableEffect(
                             tuple(targets)
                         )
-        if function.rest_args is not None and function.rest_args.binding_id is not None:
-            available.add(function.rest_args.binding_id)
         effect_key = tuple(sorted(
             (binding_id, tuple(id(target) for target in effect.targets))
             for binding_id, effect in parameter_effects.items()
         ))
         key = (id(function), effect_key)
         for checked in self._checked_calls.get(key, ()):
-            if checked.required <= available and checked.assumed_calls <= call_stack:
+            if checked.required <= initialized and checked.assumed_calls <= call_stack:
                 self._record_requirements(checked.required, checked.assumed_calls)
                 return
         # Cache successful checks by their actual dependencies, not the whole
         # caller state (which contains unrelated locals). A check that skipped
         # an active recursive ancestor is reusable only under that assumption.
         # Self-recursion needs no external assumption: this body is checked.
-        frame = _CheckFrame(id(function), set(available))
+        # Parameters and receiver fields are initialized by this invocation,
+        # not requirements on its caller. Keep the certificate relative to
+        # the caller's entry set, and copy that set only for an actual body
+        # check. The caller cannot change it while this frame is active.
+        frame = _CheckFrame(id(function), initialized)
+        available = set(initialized)
+        available.update(binding_id for binding_id, _name in function.object_fields)
+        available.update(param.binding_id for param in function.pos_or_kw_args if param.binding_id is not None)
+        available.update(param.binding_id for param in function.kw_only_args if param.binding_id is not None)
+        if function.rest_args is not None and function.rest_args.binding_id is not None:
+            available.add(function.rest_args.binding_id)
         self._check_frames.append(frame)
         body = function.body
         stack = {*call_stack, id(function)}

@@ -34,6 +34,11 @@ CASES = [
     'let main = ():>bool => true',
     'let main = (args:array<string>):>int64 => 0',
     'let main = ():>void => void',
+    # A cached ready callback must not hide a different callback's pending read.
+    'let invoke=(fn:<():>int64>):>int64=>fn()\nlet ready=():>int64=>42\nlet pending=():>int64=>later()\ninvoke(@ready)\ninvoke(@pending)\nlet later=():>int64=>0',
+    # Calls supply their own parameters; a transitive capture still comes
+    # from the caller's initialized bindings on both cold and cached checks.
+    'let offset:int64=2\nlet add=(value:int64):>int64=>value+offset\nadd(40)\nadd(40)',
 ]
 
 

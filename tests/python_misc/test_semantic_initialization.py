@@ -187,6 +187,29 @@ let later = ():>int64 => 42
         checker._check_function(declared['second'].expr, available, (), {}, {}, set())
 
 
+def test_call_certificate_requires_captured_reads_but_not_its_own_parameters():
+    from dewy.semantic.analyze.initialization import _InitializationChecker
+
+    source = SrcFile(None, '''
+let offset:int64=2
+let add=(value:int64):>int64=>value+offset
+''')
+    root, context = check._typecheck_module(source)
+    declared = {item.name: item for item in root.items if isinstance(item, hir.Declare)}
+    checker = _InitializationChecker(root, context.binding_registry, source)
+    available = {item.binding_id for item in declared.values()}
+    function = declared['add'].expr
+    checker._check_function(function, available, (), {}, {}, set())
+    certificates = checker._checked_calls[(id(function), ())]
+    assert len(certificates) == 1
+    assert certificates[0].required == {declared['offset'].binding_id}
+    checker._check_function(function, available, (), {}, {}, set())
+    assert len(certificates) == 1
+    available.remove(declared['offset'].binding_id)
+    with pytest.raises(UserError, match='`offset` used before initialization'):
+        checker._check_function(function, available, (), {}, {}, set())
+
+
 def test_local_function_use_before_declaration_is_rejected() -> None:
     source = """
 let main = ():>int64 => {
@@ -393,14 +416,23 @@ let main = ():>int64 => value
     assert '__dewy_top_level' not in emitted
 
 
-def test_global_string_storage_is_initialized_during_startup() -> None:
+def test_global_string_storage_is_initialized_during_startup(tmp_path) -> None:
+    import subprocess
+    from udewy.cache import cache_artifact
+    from udewy.frontend import EntryPointOptions, entry_point
+
     source = """
 let message = "hello"
-let main = ():>int64 => 0
+let main = ():>int64 => message.length
 """
     emitted = _codegen(source)
     assert 'let message:int64 = 0' in emitted
-    assert 'message = __dewy_string_value_' in emitted
+    assert 'message = __dewy_string_literal_' in emitted
+    output = tmp_path / 'global-string.udewy'
+    output.write_text(emitted)
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], timeout=10)
+    assert result.returncode == 5
 
 
 def test_generated_startup_symbol_avoids_source_bindings() -> None:
