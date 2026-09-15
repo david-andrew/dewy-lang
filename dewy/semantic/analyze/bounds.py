@@ -770,6 +770,7 @@ class _BoundsValidator:
         self.srcfile = srcfile
         self.unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None
         self.checked_functions: set[int] = set()
+        self.call_writes: dict[int, set[int]] = {}
         self.predicate_bindings = predicate_effects.BindingQueries()
         self.declared_intervals: dict[int, tuple[ty.Type, Interval | None]] = {}
         self.member_invariants: dict[int, tuple[hir.AST, tuple[ty.Proposition, ...]]] = {}
