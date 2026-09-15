@@ -11,7 +11,7 @@ from udewy.frontend import EntryPointOptions, entry_point
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize('fixture', ['native_borrowing_failure_effects', 'native_callback_effects', 'native_analysis_worklists', 'native_index_borrowing'])
+@pytest.mark.parametrize('fixture', ['native_borrowing_failure_effects', 'native_callback_effects', 'native_analysis_worklists', 'native_index_borrowing', 'native_ambient_graph'])
 def test_source_effects_and_storage_boundaries(tmp_path, fixture):
     source = ROOT / f'tests/fixtures/{fixture}.dewy'
     seed = tmp_path / 'borrowing.udewy'

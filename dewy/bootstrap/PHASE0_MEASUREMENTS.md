@@ -1681,3 +1681,29 @@ Dewy fixed-point certificate.
 Artifacts: `phase0-performance/host-debug-metadata-full`,
 `native-debug-metadata-c`, and `native-debug-metadata-full`. All use fresh
 processes and build directories; OS caches are uncontrolled.
+
+### Shared ambient-effect graph for native borrowing
+
+Borrowing now traverses each function once to collect opaque operations,
+global writes, reverse call edges, and the subset of edges which share caller
+storage through places or captures. Three separate worklist propagations
+retain the previous distinctions: ambient mutation, opaque effects affecting
+borrowing, and actual storage retention. Standalone ambient queries remain
+available. Installed failure-support code remains separate from source-message
+effects, as before.
+
+A 256-function/16,640-node synthetic graph queried eight times took a median
+**1.190 seconds before and 0.406 seconds after** (three runs each, native C seed
+`3c89ce12`, direct x86-64 kernel). Cumulative payload allocation fell from
+**496,219,552 to 168,786,208 bytes**; both returned checksum 4104 and exit 42.
+Artifacts: `phase0-performance/ambient-graph-measurement` (inputs, build logs,
+three samples and results). The comparison compiles the prior graph walk from
+frozen `3c89ce12` and the shared walk from the working source using the same
+compiler and runtime library.
+
+All five source-effects/storage-boundary fixtures passed, including the new
+explicit global-write/value-call/place-call/capture-call distinction in
+`native_ambient_graph.dewy`; the existing fixtures cover recursive propagation,
+unknown callbacks, failure messages and indexed borrowing. Four additional
+hosted container-flow execution checks passed on direct x86-64 and C. This
+batch has not yet received a full native self-build performance measurement.

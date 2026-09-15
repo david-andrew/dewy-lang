@@ -1,0 +1,52 @@
+# Global writes propagate across every call. Opaque storage exposure also
+# propagates across every call for borrowing, but ownership retention crosses
+# only calls sharing a place or capture. Keep these three questions distinct.
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/backend/udewy/captures.dewy" as captures
+import p"../../dewy/bootstrap/backend/udewy/borrowing.dewy" as borrowing
+main=():>int64=>{
+    let nodes:array<hir.AST>=[]
+    let ts=types.Table[]
+    let loc=Span[0 0]
+    let empty=types.primitive('void' @ts)
+    let word=types.primitive('int64' @ts)
+    let signature=types.function_type([] [] none empty [] @ts)
+    let zero=hir.append_node(@nodes hir.Integer[loc word '0d' 0])
+    let raw=hir.append_node(@nodes hir.ExpressedIdentifier[loc signature '__store_i64__'])
+    let raw_call=hir.append_node(@nodes hir.FunctionCall[loc empty raw [zero zero] []])
+    let leaf=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty raw_call])
+    let value_call=hir.append_node(@nodes hir.FunctionCall[loc empty leaf [] []])
+    let value_caller=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty value_call])
+    let place=hir.append_node(@nodes hir.Place[loc word zero])
+    let place_call=hir.append_node(@nodes hir.FunctionCall[loc empty leaf [place] []])
+    let place_caller=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty place_call])
+    let captured=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty raw_call])
+    let captured_call=hir.append_node(@nodes hir.FunctionCall[loc empty captured [] []])
+    let capture_caller=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty captured_call])
+    let blank=hir.append_node(@nodes hir.Void[loc empty])
+    let global_writer=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty blank])
+    let global_call=hir.append_node(@nodes hir.FunctionCall[loc empty global_writer [] []])
+    let global_caller=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty global_call])
+    let separate=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty blank])
+    let plan=captures.Plan[globals=set[500]]
+    loop id in [leaf value_caller place_caller captured capture_caller global_writer global_caller separate] {
+        plan.functions[id]=captures.Function[id captures=(if id =? captured set[600] else set[]) writes=(if id =? global_writer set[500] else set[])]
+    }
+    let before:int64=_arena_allocated_bytes
+    let graph=borrowing.ambient_graph(plan nodes ts)
+    let initial=graph.opaque
+    loop id in graph.globals {initial.add(id)}
+    let ambient=borrowing.propagate_ambient(initial graph.callers)
+    let opaque=borrowing.propagate_ambient(graph.opaque graph.callers)
+    let retaining=borrowing.propagate_ambient(graph.opaque graph.shared_callers)
+    if graph.opaque.length not=? 2 or graph.globals.length not=? 1 return 1
+    if ambient.length not=? 7 or opaque.length not=? 5 or retaining.length not=? 4 return 2
+    loop id in [leaf value_caller place_caller captured capture_caller global_writer global_caller] {if id not in? ambient return 3}
+    loop id in [leaf value_caller place_caller captured capture_caller] {if id not in? opaque return 4}
+    loop id in [leaf place_caller captured capture_caller] {if id not in? retaining return 5}
+    if separate in? ambient or value_caller in? retaining or global_writer in? opaque return 6
+    printl(_arena_allocated_bytes-before)
+    return 42
+}
