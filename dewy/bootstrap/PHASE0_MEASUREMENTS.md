@@ -2018,3 +2018,21 @@ Destination-ABI escape checks reuse discovery's runtime calls and identifier
 bindings instead of traversing the whole program twice. Twenty-six focused
 string ownership, region, local, scratch and index checks pass. Performance
 measurement is pending. Artifact: `string-body-index-gates.log`.
+
+The hosted body-index tokenizer measurement took 11.437 seconds before and
+10.635 after; lowering took **1.068 and 0.944 seconds**. Both use frozen
+`3c699a2f` source/library, with hosted packages `8876bec6` and `6dd53cbb`.
+Generated output is identical after included bytes are verified and their
+physical paths normalized. Artifacts: `measure-string-index.log` and
+`string-index-output-check.json`.
+
+### Signed structural normalization correction
+
+A subtype comparison exposed an existing inconsistency: the positive side of
+an array/record atom normalized its children, while the negative side could
+retain a redundant intersection such as `int64 & any`. Both implementations
+now normalize those children before complementing the outer atom. This does
+not complement the element type. Hosted normalization and dispatch checks,
+and native identity/rollback checks on direct and C output, pass (13 tests).
+Artifact: `signed-normalization-gates.log`. This is a correctness fix needed
+before comparing faster atom proofs against the general Boolean relation.

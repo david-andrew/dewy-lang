@@ -704,7 +704,9 @@ to_nnf = (id:addr @nodes:Table):>addr => {
 
 to_nnf_uncached = (id:addr @nodes:Table):>addr => {
     let node = node_at(nodes id)
-    if node is? TypeNot return negate(node.item @nodes)
+    # Normalize an atom's children equally on both sides of a Boolean
+    # difference. Complementing array<T> still leaves T positive.
+    if node is? TypeNot return negate(to_nnf(node.item @nodes) @nodes)
     if node is? TypeAnd | TypeOr | SequenceType {
         let items:array<addr> = []
         loop child in node.items { items.push(to_nnf(child @nodes)) }

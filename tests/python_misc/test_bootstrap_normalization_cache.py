@@ -25,9 +25,12 @@ main=():>int64=>{
     let negated=types.intern(@nodes types.TypeNot[key='raw-not' item=word])
     let double=types.intern(@nodes types.TypeNot[key='raw-double-not' item=negated])
     let original=types.intern(@nodes types.ArrayType[key='raw-array' element=double])
-    let checkpoint=nodes.entries.length
+    let before=nodes.entries.length
     let normalized=types.to_nnf(original @nodes)
-    if normalized <? checkpoint return 1
+    if normalized <? before return 1
+    # Normalizing a negative child can intern intermediate atoms first.
+    # Roll back the final array slot to exercise reuse of that exact id.
+    let checkpoint=normalized
     let array=types.node_at(nodes normalized)
     if array isnt? types.ArrayType or array.element not=? word return 2
     let fork=nodes
@@ -43,6 +46,10 @@ main=():>int64=>{
     if types.to_nnf(alias @nodes) not=? alias return 7
     types.resolve_alias(alias replacement @nodes)
     if types.unfold(types.to_nnf(alias @nodes) nodes) not=? replacement return 8
+    let negative=types.intern(@nodes types.TypeNot[key='raw-negative-array' item=original])
+    let negative_id=types.to_nnf(negative @nodes)
+    let normalized_negative=types.node_at(nodes negative_id)
+    if normalized_negative isnt? types.TypeNot or normalized_negative.item not=? restored return 11
     # Repeated normal queries must not reconstruct an unchanged record's
     # fields. Compare with the real uncached walk as a positive cost control.
     let fields:array<types.ObjectField>=[]

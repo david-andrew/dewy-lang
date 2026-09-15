@@ -80,3 +80,17 @@ def test_normalization_reuses_only_the_current_stable_lowering_scope():
     with ty.runtime_query_scope():
         next_ = ty.to_nnf(value)
         assert next_ == first and next_ is not first
+
+
+def test_signed_structural_atoms_have_the_same_normalized_children():
+    redundant = ty.TypeAnd(['int64', ty.TOP_TYPE])
+    for value in (
+        ty.ArrayType(redundant),
+        ty.ObjectType((ty.ObjectField('value', redundant),)),
+    ):
+        positive = ty.to_nnf(value)
+        negative = ty.to_nnf(ty.TypeNot(value))
+        assert negative == ty.TypeNot(positive)
+        assert ty.to_nnf(negative) == negative
+        assert ty.TypeSystem().is_empty(ty.intersect(value, ty.negate(value)))
+        assert ty.TypeSystem().is_subtype(positive, value)

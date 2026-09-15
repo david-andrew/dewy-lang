@@ -2527,7 +2527,10 @@ def _to_nnf(t: TypeExpr, memo: dict) -> TypeExpr:
 def _to_nnf_inner(t: TypeExpr, memo: dict) -> TypeExpr:
     # Preserve unchanged subtrees and all declaration metadata.
     if isinstance(t, TypeNot):
-        return negate(t.type)
+        # Signed structural atoms need the same normalization. Otherwise an
+        # array's positive element can lose `& any` while its negative copy
+        # keeps it, and even two equivalent arrays fail the subtype query.
+        return negate(_to_nnf(t.type, memo))
     if isinstance(t, TypeOr):
         result = union(*(_to_nnf(x, memo) for x in t.items))
         return t if isinstance(result, TypeOr) and len(result.items) == len(t.items) and all(a is b for a, b in zip(result.items, t.items)) else result
