@@ -1415,9 +1415,14 @@ class TypeSystem:
                 and isinstance(t, (str, ObjectType, ArrayType, StringType,
                                    StringLiteralType, IntegerLiteralType,
                                    FunctionType, OverloadType))):
-            if self._atom_implies_atom(s, t):
-                return True
-            return self._atom_implies_atom(to_nnf(s), to_nnf(t))
+            proven = self._atom_implies_atom(s, t)
+            # A nominal target only inspects the atom's outer category or
+            # brand; normalizing its fields cannot change a rejection.
+            if proven or isinstance(t, str):
+                return proven
+            scope = _runtime_query_cache.get()
+            memo = {} if scope is None else scope.setdefault(to_nnf, {})
+            return self._atom_implies_atom(_to_nnf(s, memo), _to_nnf(t, memo))
         return self.is_empty(intersect(s, negate(t)))
 
     def join(self, *types: TypeExpr) -> TypeExpr:

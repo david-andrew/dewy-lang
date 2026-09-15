@@ -2124,3 +2124,21 @@ unprovable `$assert` inside a loop; the corrected hosted and native visitors
 both reject it and accept its explicitly guarded counterpart. These cases
 and nominal/conditional-bound regressions pass (22 tests). Artifact:
 `nominal-rejections-loop-functions-gates.log`.
+
+### Nominal atom rejection and paired child normalization
+
+A nominal target depends only on the source atom's outer category/brand.
+Both implementations now keep its negative result without normalizing fields.
+When two structural atoms do require child normalization, hosted queries
+share one memo across both inputs. Tests retain mutable-description behavior
+and require one visit per shared child; the complete native algebra matrix
+also passes (`nominal-rejections-loop-functions-gates.log`).
+
+The `cb6db449` native checkpoint, before this final nominal rejection change,
+built frozen `3789e114` source/library in **61.487 seconds**: frontend 17.509,
+validation 7.742, preparation 1.373, lowering 14.732, emission 5.000 and backend
+12.828. Peak process RSS was 5,821,176 KiB and generated µDewy was unchanged
+from the 63.796-second checkpoint (48,662,145 bytes). Both C generations
+emitted identical µDewy. The one-minute target remains unmet. Artifacts:
+`native-direct-atoms-full`, `native-direct-atoms-c1`, `native-direct-atoms-c2`
+and `source-direct-atoms.json`.

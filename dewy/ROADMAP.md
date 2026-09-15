@@ -60,10 +60,12 @@ the native compiler, which makes it:
   fixed-point check cannot, and matter most while lowering and ownership
   are being rewritten (Phase 1);
 - a from-source bootstrap path with no trusted binary seed;
-- the faster development loop while native compile time lags (about six
-  minutes to emit the compiler's own source versus roughly twenty-five
-  natively, as of September 2026); analysis changes are prototyped in
-  Python and then ported;
+- a convenient development loop for prototyping and inspecting analyses in
+  Python before porting them. The 2026-09-15 complete direct-output build
+  checkpoints are about 96 seconds hosted and 63 seconds native; native is
+  now faster on this workload, and both remain above the one-minute target.
+  Recorded inputs, seeds and phase timings live in
+  [`bootstrap/PHASE0_MEASUREMENTS.md`](bootstrap/PHASE0_MEASUREMENTS.md);
 - the way around staged seeds when the language changes: the compiler's
   own source will use each new feature, and a hosted compiler that already
   supports it avoids a two-generation staging dance for every change.

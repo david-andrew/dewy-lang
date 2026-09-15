@@ -395,7 +395,10 @@ is_subtype = (source:addr target:addr links:Graph @nodes:types.Table):>bool => {
     # otherwise normalize both atoms' children before deciding the relation.
     if left is? types.ObjectType|types.ArrayType|types.StringType|types.StringLiteralType|types.IntegerLiteralType|types.FunctionType|types.OverloadType and
        right is? types.Primitive|types.ObjectType|types.ArrayType|types.StringType|types.StringLiteralType|types.IntegerLiteralType|types.FunctionType|types.OverloadType {
-        if atom_implies(source target links @nodes) return true
+        let proven=atom_implies(source target links @nodes)
+        # Nominal applicability depends on the outer category/brand, so its
+        # rejection cannot be changed by normalizing children either.
+        if proven or right is? types.Primitive return proven
         let a=types.to_nnf(source @nodes)
         let b=types.to_nnf(target @nodes)
         return atom_implies(a b links @nodes)

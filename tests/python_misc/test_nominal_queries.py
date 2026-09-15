@@ -112,3 +112,32 @@ def test_atomic_rejections_and_normalized_children_need_no_boolean_formula(monke
     assert not system.is_subtype(ty.IntegerLiteralType(256), 'uint8')
     raw = ty.ArrayType(ty.TypeAnd(['int64', 'any']))
     assert system.is_subtype(raw, ty.ArrayType('int64'))
+
+
+def test_nominal_atom_rejections_do_not_walk_children(monkeypatch):
+    system = ty.TypeSystem()
+    record = ty.ObjectType((ty.ObjectField('items', ty.ArrayType('int64')),))
+    def unexpected(*_args):
+        raise AssertionError('a nominal target only needs the outer atom')
+    monkeypatch.setattr(ty, '_to_nnf', unexpected)
+    assert not system.is_subtype(record, 'int64')
+    assert not system.is_subtype(ty.ArrayType(record), 'function')
+    assert system.is_subtype(record, 'object')
+
+
+def test_atomic_pair_normalization_shares_its_child_memo(monkeypatch):
+    system = ty.TypeSystem()
+    shared = ty.TypeNot(ty.TypeNot('int64'))
+    for _ in range(10):
+        shared = ty.ObjectType((ty.ObjectField('left', shared), ty.ObjectField('right', shared)))
+    left = ty.ObjectType((ty.ObjectField('a', shared),))
+    right = ty.ObjectType((ty.ObjectField('b', shared),))
+    original = ty._to_nnf_inner
+    visits = {}
+    def counted(value, memo):
+        visits[id(value)] = visits.get(id(value), 0) + 1
+        return original(value, memo)
+    monkeypatch.setattr(ty, '_to_nnf_inner', counted)
+    assert not system.is_subtype(left, right)
+    assert visits[id(shared)] == 1
+    assert all(count == 1 for count in visits.values())
