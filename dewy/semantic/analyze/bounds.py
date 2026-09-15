@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from functools import cache
 
 from ...reporting import Error, Pointer, Span, SrcFile
 from ...targets import ADDRESS_BITS, max_length
@@ -2220,354 +2221,388 @@ class _BoundsValidator:
     ) -> Interval | None:
         # A known result is a value fact, not evidence that evaluation is
         # pure. Calls, indexing and casts can still mutate the proof state.
-        interval = self._eval_inner(node, state, validate=validate)
+        interval = self._eval_handler(type(node))(self, node, state, validate=validate)
         return Interval.exact(node.type.value) if isinstance(node.type, ty.IntegerLiteralType) else interval
 
-    def _eval_inner(self, node: hir.AST, state: State, *, validate: bool) -> Interval | None:
-        if isinstance(node, hir.Block):
-            return self._eval_value_body(node, state, validate=validate)
-        if isinstance(node, hir.Flow):
-            if any(isinstance(arm, hir.LoopArm) for arm in node.arms):
-                updated = self._analyze_flow(node, state, validate=validate)
-                state.clear()
-                state.update(updated)
-                return None
-            return self._eval_value_flow(node, state, validate=validate)
-        if isinstance(node, hir.Suppress):
-            self._eval(node.item, state, validate=validate)
+    def _eval_block(self, node: hir.Block, state: State, *, validate: bool) -> Interval | None:
+        return self._eval_value_body(node, state, validate=validate)
+
+    def _eval_flow(self, node: hir.Flow, state: State, *, validate: bool) -> Interval | None:
+        if any(isinstance(arm, hir.LoopArm) for arm in node.arms):
+            updated = self._analyze_flow(node, state, validate=validate)
+            state.clear()
+            state.update(updated)
             return None
-        if isinstance(node, hir.Obligation):
-            # A constant owes facts about other bindings too (`30 <=? src.length`).
-            interval = self._eval(node.value, state, validate=validate)
-            if validate:
-                self._validate_obligation(node, interval, state)
+        return self._eval_value_flow(node, state, validate=validate)
+
+    def _eval_suppress(self, node: hir.Suppress, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.item, state, validate=validate)
+        return None
+
+    def _eval_obligation(self, node: hir.Obligation, state: State, *, validate: bool) -> Interval | None:
+        # A constant owes facts about other bindings too (`30 <=? src.length`).
+        interval = self._eval(node.value, state, validate=validate)
+        if validate:
+            self._validate_obligation(node, interval, state)
+        return interval
+
+    def _eval_integer(self, node: hir.Integer, state: State, *, validate: bool) -> Interval | None:
+        return Interval.exact(node.value)
+
+    def _eval_expressed_identifier(self, node: hir.ExpressedIdentifier, state: State, *, validate: bool) -> Interval | None:
+        interval = (
+            state.get(node.binding_id)
+            if node.binding_id is not None
+            else None
+        )
+        # A narrowed payload may carry a contract even when its source
+        # was a container lookup, rather than a function result.
+        if isinstance(node.type, ty.RefinedType):
+            own = self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
+            if own is not None:
+                interval = (interval or UNKNOWN_INTERVAL).intersect(own)
+        if interval is not None:
+            # a `not=? 0` fact moves a bound that sits on zero past it
+            if node.binding_id is not None and _nonzero_key(node.binding_id) in state and (interval.lower == 0 or interval.upper == 0):
+                return Interval(1 if interval.lower == 0 else interval.lower, -1 if interval.upper == 0 else interval.upper)
             return interval
-        if isinstance(node, hir.Integer):
-            return Interval.exact(node.value)
-        if isinstance(node, hir.ObjectLiteral) and node.integer_value is not None:
-            return Interval.exact(node.integer_value)
-        if isinstance(node, hir.ExpressedIdentifier):
-            interval = (
-                state.get(node.binding_id)
-                if node.binding_id is not None
-                else None
-            )
-            # A narrowed payload may carry a contract even when its source
-            # was a container lookup, rather than a function result.
-            if isinstance(node.type, ty.RefinedType):
-                own = self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
-                if own is not None:
-                    interval = (interval or UNKNOWN_INTERVAL).intersect(own)
+        constant = self._constant_binding(node.binding_id, set())
+        if constant is not None:
+            return constant
+        declared = self._type_interval(node.binding_id) if node.binding_id is not None else None
+        layout = ty.fixed_integer_layout(ty.strip_refinement(node.type))
+        if layout is not None:
+            # A call may erase flow facts while preserving the storage
+            # contract (`@position:addr` still cannot contain -1).
+            width, signed = layout
+            width_range = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+            return width_range if declared is None else width_range.intersect(declared)
+        return declared
+
+    def _eval_member_access(self, node: hir.MemberAccess, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.value, state, validate=validate)
+        route_id = sb.array_route_id(node, self.registry)
+        self._seed_sibling_relations(node, state)
+        interval = state.get(route_id) if route_id is not None else None
+        declared = self._bounds_of(_member_invariant(node))
+        if declared is not None:
+            interval = declared if interval is None else interval.intersect(declared)
+        width = self._field_declared_interval(node, state)   # the field's width, and its sibling relations
+        if width is not None:
+            interval = width if interval is None else interval.intersect(width)
+        return interval
+
+    def _eval_place(self, node: hir.Place, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.target, state, validate=validate)
+        root = node.target
+        while isinstance(root, (hir.MemberAccess, hir.Index)):
+            root = root.value if isinstance(root, hir.MemberAccess) else root.array
+        if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
+            state.pop(root.binding_id, None)
+            self._invalidate_length(root.binding_id, state)
+            _drop_index_facts(state, index_id=root.binding_id)
+            self._drop_route_facts(state, root.binding_id)   # the callee may store anything
+        return None
+
+    def _eval_value_cast(self, node: hir.ValueCast, state: State, *, validate: bool) -> Interval | None:
+        inner = self._eval(node.expr, state, validate=validate)
+        if inner is None:
+            # any fixed-width-typed expression lies in its type's range
+            source_layout = ty.fixed_integer_layout(ty.strip_refinement(node.expr.type))
+            if source_layout is not None:
+                width, signed = source_layout
+                inner = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+        fitted = self._fit_type(inner, node.type)
+        if validate and fitted is not None and inner is not None and inner.capped and self._fit_type(Interval(inner.lower, None), node.type) is None:
+            self._cap_note(node, f'fits `{type_to_dewy(node.type)}`')
+        if (
+            validate
+            and fitted is None
+            and self.prototype_sites is not None
+            and ty.fixed_integer_layout(ty.strip_refinement(node.expr.type)) is not None
+            and ty.fixed_integer_layout(node.type) is not None
+        ):
+            # `$prototype`: a fixed-width narrowing becomes a runtime range check
+            self._proof_failure(node, 'cast', Error(
+                srcfile=self.srcfile,
+                title=f'cannot prove this integer fits `{node.type}`',
+                pointer_messages=[Pointer(span=node.loc, message=f'the value is a `{ty.strip_refinement(node.expr.type)}`, whose range is not proven inside `{node.type}`')],
+                hint='narrow the value with a comparison to prove it',
+            ))
+            return fitted
+        if (
+            validate
+            and fitted is None
+            and (node.expr.type in ('int', 'uint') or ty.fixed_integer_layout(ty.strip_refinement(node.expr.type)) is not None)
+            and ty.fixed_integer_layout(node.type) is not None
+        ):
+            # Narrowing an arbitrary-precision integer — or another fixed
+            # width — to a fixed width is only allowed when the analysis
+            # proves the value fits.
+            self._report_unfit(node, inner, node.type)
+        return fitted
+
+    def _eval_representation_cast(self, node: hir.RepresentationCast, state: State, *, validate: bool) -> Interval | None:
+        # Packing or extracting a representation preserves this observed
+        # value. Numeric conversions and bit reinterpretation have their
+        # own ValueCast/Transmute rules below and above this boundary.
+        return self._eval(node.expr, state, validate=validate)
+
+    def _eval_transmute(self, node: hir.Transmute, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.expr, state, validate=validate)
+        return None
+
+    def _eval_array_length(self, node: hir.ArrayLength, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.array, state, validate=validate)
+        if isinstance(node.array.type, ty.ArrayType):
+            interval = self._length_interval(node.array, state)   # exact, a route's fact, a field's declared bound
             if interval is not None:
-                # a `not=? 0` fact moves a bound that sits on zero past it
-                if node.binding_id is not None and _nonzero_key(node.binding_id) in state and (interval.lower == 0 or interval.upper == 0):
-                    return Interval(1 if interval.lower == 0 else interval.lower, -1 if interval.upper == 0 else interval.upper)
                 return interval
-            constant = self._constant_binding(node.binding_id, set())
-            if constant is not None:
-                return constant
-            declared = self._type_interval(node.binding_id) if node.binding_id is not None else None
-            layout = ty.fixed_integer_layout(ty.strip_refinement(node.type))
-            if layout is not None:
-                # A call may erase flow facts while preserving the storage
-                # contract (`@position:addr` still cannot contain -1).
-                width, signed = layout
-                width_range = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
-                return width_range if declared is None else width_range.intersect(declared)
-            return declared
-        if isinstance(node, hir.MemberAccess):
+            return self._length_default()
+        return None
+
+    def _eval_array_method(self, node: hir.ArrayMethod, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.array, state, validate=validate)
+        return None
+
+    def _eval_dict_lookup(self, node: hir.DictLookup, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.key, state, validate=validate)
+        if node.default is not None:
+            self._eval(node.default, state, validate=validate)
+        if isinstance(node.type, ty.RefinedType):
+            # The dictionary enforces its value contract at every store;
+            # a checked fallback satisfies that same contract.
+            return self._bounds_of([p for p in node.type.propositions if p.subject == 'self' and p.term is None])
+        return None
+
+    def _eval_dict_contains(self, node: hir.DictContains, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.key, state, validate=validate)
+        return None
+
+    def _eval_dict_remove(self, node: hir.DictRemove, state: State, *, validate: bool) -> Interval | None:
+        if node.key is not None:
+            self._eval(node.key, state, validate=validate)
+        if node.default is not None:
+            self._eval(node.default, state, validate=validate)
+        for array in (node.keys, *([node.values] if node.values is not None else [])):
+            array_id = _runtime_array_id(array, self.registry)
+            if array_id is not None:
+                key = _length_key(array_id)
+                if node.key is None:
+                    state[key] = Interval.exact(0)
+                else:
+                    state.pop(key, None)  # tombstone now, compaction later
+                _drop_index_facts(state, array_id=array_id)
+        if isinstance(node.type, ty.RefinedType):
+            return self._bounds_of([p for p in node.type.propositions if p.subject == 'self' and p.term is None])
+        return None
+
+    def _eval_dict_entries(self, node: hir.DictEntries, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.dictionary, state, validate=validate)
+        return None
+
+    def _eval_set_algebra(self, node: hir.SetAlgebra, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.left, state, validate=validate)
+        self._eval(node.right, state, validate=validate)
+        return None
+
+    def _eval_dict_view(self, node: hir.DictView, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.dictionary, state, validate=validate)
+        return None
+
+    def _eval_dict_store(self, node: hir.DictStore, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.key, state, validate=validate)
+        if node.value is not None:
             self._eval(node.value, state, validate=validate)
-            route_id = sb.array_route_id(node, self.registry)
-            self._seed_sibling_relations(node, state)
-            interval = state.get(route_id) if route_id is not None else None
-            declared = self._bounds_of(_member_invariant(node))
+        # A store may append to both hidden arrays.
+        for array in (node.keys, *([node.values] if node.values is not None else [])):
+            array_id = _runtime_array_id(array, self.registry)
+            if array_id is not None:
+                state.pop(_length_key(array_id), None)
+                _drop_index_facts(state, array_id=array_id)
+        return None
+
+    def _eval_string_length(self, node: hir.StringLength, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.string, state, validate=validate)
+        # an exact length, a slice's, a route's fact, a field's declared bound (`ctx.ending.text` as `nonemptystring`)
+        interval = self._length_interval(node.string, state)
+        return interval if interval is not None else self._length_default()
+
+    def _eval_index(self, node: hir.Index, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.array, state, validate=validate)
+        length = self._length_interval(node.array, state)
+        interval = self._eval(node.index, state, validate=validate)
+        if validate:
+            self._validate_index(node, interval, state, length_interval=length)
+        if isinstance(node.type, ty.RefinedType):
+            return self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
+        return None
+
+    def _eval_index_assign(self, node: hir.IndexAssign, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.target, state, validate=validate)
+        self._eval(node.value, state, validate=validate)
+        self._forget_container_value(node.target.array, state)
+        return None
+
+    def _eval_string_index(self, node: hir.StringIndex, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.string, state, validate=validate)
+        length = self._length_interval(node.string, state)
+        interval = self._eval(node.index, state, validate=validate)
+        if validate:
+            self._validate_index(node, interval, state, length_interval=length)
+        return None
+
+    def _eval_string_slice(self, node: hir.StringSlice, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.string, state, validate=validate)
+        left = (
+            Interval.exact(0)
+            if node.range.left is None
+            else self._eval(node.range.left, state, validate=validate)
+        )
+        length = self._string_length(node.string.type)
+        if node.range.right is None:
+            right = None if length is None else Interval.exact(length - 1)
+        else:
+            right = self._eval(node.range.right, state, validate=validate)
+        if validate:
+            self._validate_string_slice(node, left, right, length, state)
+        return None
+
+    def _eval_string_equal(self, node: hir.StringEqual, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.left, state, validate=validate)
+        self._eval(node.right, state, validate=validate)
+        return None
+
+    def _eval_string_concat(self, node: hir.StringConcat, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.left, state, validate=validate)
+        self._eval(node.right, state, validate=validate)
+        return None
+
+    def _eval_interpolated_string(self, node: hir.InterpolatedString, state: State, *, validate: bool) -> Interval | None:
+        for part in node.parts:
+            self._eval(part, state, validate=validate)
+        return None
+
+    def _eval_array_literal(self, node: hir.ArrayLiteral, state: State, *, validate: bool) -> Interval | None:
+        for item in node.items:
+            self._eval(item, state, validate=validate)
+        return None
+
+    def _eval_spread(self, node: hir.Spread, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.value, state, validate=validate)
+        return None
+
+    def _eval_short_circuit(self, node: hir.ShortCircuit, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.left, state, validate=validate)
+        # The right runs only on the continuing path. Join its effects
+        # with the path that short-circuited; do not discard mutations
+        # merely because the boolean result itself needs no interval.
+        continuing_truth = node.op in {'and', 'nand'}
+        right_state = self._refine(state, node.left, truth=continuing_truth)
+        shortcut_state = self._refine(state, node.left, truth=not continuing_truth)
+        if right_state is not None:
+            self._eval(node.right, right_state, validate=validate)
+        joined = self._join_alternatives(shortcut_state, right_state)
+        if joined is not None:
+            state.clear()
+            state.update(joined)
+        return None
+
+    def _eval_range_membership(self, node: hir.RangeMembership, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.value, state, validate=validate)
+        self._eval(node.range, state, validate=validate)
+        return None
+
+    def _eval_range(self, node: hir.Range, state: State, *, validate: bool) -> Interval | None:
+        items = [
+            *([] if node.step_pair is None else node.step_pair),
+            *([] if node.left is None else [node.left]),
+            *([] if node.right is None else [node.right]),
+        ]
+        seen: set[int] = set()
+        for item in items:
+            if id(item) in seen:
+                continue
+            seen.add(id(item))
+            self._eval(item, state, validate=validate)
+        return None
+
+    def _eval_iterator_expression(self, node: hir.IteratorExpression, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.iterable, state, validate=validate)
+        return None
+
+    def _eval_multi_iterator_expression(self, node: hir.MultiIteratorExpression, state: State, *, validate: bool) -> Interval | None:
+        for iterator in node.iterators:
+            self._eval(iterator.iterable, state, validate=validate)
+        return None
+
+    def _eval_type_test(self, node: hir.TypeTest, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.value, state, validate=validate)
+        return None
+
+    def _eval_type_block(self, node: hir.TypeBlock, state: State, *, validate: bool) -> Interval | None:
+        for item in node.items:
+            self._eval(item, state, validate=validate)
+        return None
+
+    def _eval_overloaded_function(self, node: hir.OverloadedFunction, state: State, *, validate: bool) -> Interval | None:
+        for alternate in node.alternates:
+            if isinstance(alternate, hir.FunctionLiteral):
+                self._analyze_function(alternate, validate=validate)
+        return None
+
+    def _eval_function_literal(self, node: hir.FunctionLiteral, state: State, *, validate: bool) -> Interval | None:
+        self._analyze_function(node, validate=validate, enclosing=state)
+        return None
+
+    def _eval_object_literal(self, node: hir.ObjectLiteral, state: State, *, validate: bool) -> Interval | None:
+        if node.integer_value is not None:
+            return Interval.exact(node.integer_value)
+        object_type = ty.unfold(node.type) if isinstance(node.type, (ty.ObjectType, ty.NamedType)) else None
+        for field in node.fields:
+            interval = self._eval(field.value, state, validate=validate)
+            if field.binding_id is None:
+                continue
+            # the field's value is a binding while the literal is built: a later
+            # field's default or refinement reads it (`radix:uint8 = alphabet.length`),
+            # with the value's facts and the field's declared ones
+            self._set_interval(state, field.binding_id, interval)
+            value = _strip_casts(field.value)
+            known = self._string_length(value.type) if not isinstance(value.type, ty.ArrayType) else value.type.length
+            if known is not None:
+                state[_length_key(field.binding_id)] = Interval.exact(known)
+            self._seed_value_facts(field.binding_id, field.value, state, field.loc)
+            declared = object_type.field(field.name) if isinstance(object_type, ty.ObjectType) else None
+            if declared is not None and declared.refinement:
+                self._seed_binding_refinement(field.binding_id, ty.RefinedType(declared.type, tuple(declared.refinement)), state, field.loc)
+        return None
+
+    def _eval_forwarding_access(self, node: hir.ForwardingAccess, state: State, *, validate: bool) -> Interval | None:
+        # `remaining[0].length` on a union of objects: the field's invariant, when every member declares it
+        self._eval(node.value, state, validate=validate)
+        interval = self._bounds_of(_member_invariant(node))
+        if node.exception_type == ty.BOTTOM_TYPE:
+            declared = self._declared_field_interval(node.value.type, node.field)
             if declared is not None:
                 interval = declared if interval is None else interval.intersect(declared)
-            width = self._field_declared_interval(node, state)   # the field's width, and its sibling relations
-            if width is not None:
-                interval = width if interval is None else interval.intersect(width)
-            return interval
-        if isinstance(node, hir.FunctionCall):
-            return self._eval_call(node, state, validate=validate)
-        if isinstance(node, hir.Place):
-            self._eval(node.target, state, validate=validate)
-            root = node.target
-            while isinstance(root, (hir.MemberAccess, hir.Index)):
-                root = root.value if isinstance(root, hir.MemberAccess) else root.array
-            if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
-                state.pop(root.binding_id, None)
-                self._invalidate_length(root.binding_id, state)
-                _drop_index_facts(state, index_id=root.binding_id)
-                self._drop_route_facts(state, root.binding_id)   # the callee may store anything
-            return None
-        if isinstance(node, hir.ValueCast):
-            inner = self._eval(node.expr, state, validate=validate)
-            if inner is None:
-                # any fixed-width-typed expression lies in its type's range
-                source_layout = ty.fixed_integer_layout(ty.strip_refinement(node.expr.type))
-                if source_layout is not None:
-                    width, signed = source_layout
-                    inner = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
-            fitted = self._fit_type(inner, node.type)
-            if validate and fitted is not None and inner is not None and inner.capped and self._fit_type(Interval(inner.lower, None), node.type) is None:
-                self._cap_note(node, f'fits `{type_to_dewy(node.type)}`')
-            if (
-                validate
-                and fitted is None
-                and self.prototype_sites is not None
-                and ty.fixed_integer_layout(ty.strip_refinement(node.expr.type)) is not None
-                and ty.fixed_integer_layout(node.type) is not None
-            ):
-                # `$prototype`: a fixed-width narrowing becomes a runtime range check
-                self._proof_failure(node, 'cast', Error(
-                    srcfile=self.srcfile,
-                    title=f'cannot prove this integer fits `{node.type}`',
-                    pointer_messages=[Pointer(span=node.loc, message=f'the value is a `{ty.strip_refinement(node.expr.type)}`, whose range is not proven inside `{node.type}`')],
-                    hint='narrow the value with a comparison to prove it',
-                ))
-                return fitted
-            if (
-                validate
-                and fitted is None
-                and (node.expr.type in ('int', 'uint') or ty.fixed_integer_layout(ty.strip_refinement(node.expr.type)) is not None)
-                and ty.fixed_integer_layout(node.type) is not None
-            ):
-                # Narrowing an arbitrary-precision integer — or another fixed
-                # width — to a fixed width is only allowed when the analysis
-                # proves the value fits.
-                self._report_unfit(node, inner, node.type)
-            return fitted
-        if isinstance(node, hir.RepresentationCast):
-            # Packing or extracting a representation preserves this observed
-            # value. Numeric conversions and bit reinterpretation have their
-            # own ValueCast/Transmute rules below and above this boundary.
-            return self._eval(node.expr, state, validate=validate)
-        if isinstance(node, hir.Transmute):
-            self._eval(node.expr, state, validate=validate)
-            return None
-        if isinstance(node, hir.ArrayLength):
-            self._eval(node.array, state, validate=validate)
-            if isinstance(node.array.type, ty.ArrayType):
-                interval = self._length_interval(node.array, state)   # exact, a route's fact, a field's declared bound
-                if interval is not None:
-                    return interval
-                return self._length_default()
-            return None
-        if isinstance(node, hir.ArrayMethod):
-            self._eval(node.array, state, validate=validate)
-            return None
-        if isinstance(node, hir.DictLookup):
-            self._eval(node.key, state, validate=validate)
-            if node.default is not None:
-                self._eval(node.default, state, validate=validate)
-            if isinstance(node.type, ty.RefinedType):
-                # The dictionary enforces its value contract at every store;
-                # a checked fallback satisfies that same contract.
-                return self._bounds_of([p for p in node.type.propositions if p.subject == 'self' and p.term is None])
-            return None
-        if isinstance(node, hir.DictContains):
-            self._eval(node.key, state, validate=validate)
-            return None
-        if isinstance(node, hir.DictRemove):
-            if node.key is not None:
-                self._eval(node.key, state, validate=validate)
-            if node.default is not None:
-                self._eval(node.default, state, validate=validate)
-            for array in (node.keys, *([node.values] if node.values is not None else [])):
-                array_id = _runtime_array_id(array, self.registry)
-                if array_id is not None:
-                    key = _length_key(array_id)
-                    if node.key is None:
-                        state[key] = Interval.exact(0)
-                    else:
-                        state.pop(key, None)  # tombstone now, compaction later
-                    _drop_index_facts(state, array_id=array_id)
-            if isinstance(node.type, ty.RefinedType):
-                return self._bounds_of([p for p in node.type.propositions if p.subject == 'self' and p.term is None])
-            return None
-        if isinstance(node, hir.DictEntries):
-            self._eval(node.dictionary, state, validate=validate)
-            return None
-        if isinstance(node, hir.SetAlgebra):
-            self._eval(node.left, state, validate=validate)
-            self._eval(node.right, state, validate=validate)
-            return None
-        if isinstance(node, hir.DictView):
-            self._eval(node.dictionary, state, validate=validate)
-            return None
-        if isinstance(node, hir.DictStore):
-            self._eval(node.key, state, validate=validate)
-            if node.value is not None:
-                self._eval(node.value, state, validate=validate)
-            # A store may append to both hidden arrays.
-            for array in (node.keys, *([node.values] if node.values is not None else [])):
-                array_id = _runtime_array_id(array, self.registry)
-                if array_id is not None:
-                    state.pop(_length_key(array_id), None)
-                    _drop_index_facts(state, array_id=array_id)
-            return None
-        if isinstance(node, hir.Obligation):
-            interval = self._eval(node.value, state, validate=validate)
-            if validate:
-                self._validate_obligation(node, interval, state)
-            return interval
-        if isinstance(node, hir.StringLength):
-            self._eval(node.string, state, validate=validate)
-            # an exact length, a slice's, a route's fact, a field's declared bound (`ctx.ending.text` as `nonemptystring`)
-            interval = self._length_interval(node.string, state)
-            return interval if interval is not None else self._length_default()
-        if isinstance(node, hir.Index):
-            self._eval(node.array, state, validate=validate)
-            length = self._length_interval(node.array, state)
-            interval = self._eval(node.index, state, validate=validate)
-            if validate:
-                self._validate_index(node, interval, state, length_interval=length)
-            if isinstance(node.type, ty.RefinedType):
-                return self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
-            return None
-        if isinstance(node, hir.IndexAssign):
-            self._eval(node.target, state, validate=validate)
-            self._eval(node.value, state, validate=validate)
-            self._forget_container_value(node.target.array, state)
-            return None
-        if isinstance(node, hir.StringIndex):
-            self._eval(node.string, state, validate=validate)
-            length = self._length_interval(node.string, state)
-            interval = self._eval(node.index, state, validate=validate)
-            if validate:
-                self._validate_index(node, interval, state, length_interval=length)
-            return None
-        if isinstance(node, hir.StringSlice):
-            self._eval(node.string, state, validate=validate)
-            left = (
-                Interval.exact(0)
-                if node.range.left is None
-                else self._eval(node.range.left, state, validate=validate)
-            )
-            length = self._string_length(node.string.type)
-            if node.range.right is None:
-                right = None if length is None else Interval.exact(length - 1)
-            else:
-                right = self._eval(node.range.right, state, validate=validate)
-            if validate:
-                self._validate_string_slice(node, left, right, length, state)
-            return None
-        if isinstance(node, hir.StringEqual):
-            self._eval(node.left, state, validate=validate)
-            self._eval(node.right, state, validate=validate)
-            return None
-        if isinstance(node, hir.StringConcat):
-            self._eval(node.left, state, validate=validate)
-            self._eval(node.right, state, validate=validate)
-            return None
-        if isinstance(node, hir.InterpolatedString):
-            for part in node.parts:
-                self._eval(part, state, validate=validate)
-            return None
-        if isinstance(node, hir.ArrayLiteral):
-            for item in node.items:
-                self._eval(item, state, validate=validate)
-            return None
-        if isinstance(node, hir.Spread):
-            self._eval(node.value, state, validate=validate)
-            return None
-        if isinstance(node, hir.ShortCircuit):
-            self._eval(node.left, state, validate=validate)
-            # The right runs only on the continuing path. Join its effects
-            # with the path that short-circuited; do not discard mutations
-            # merely because the boolean result itself needs no interval.
-            continuing_truth = node.op in {'and', 'nand'}
-            right_state = self._refine(state, node.left, truth=continuing_truth)
-            shortcut_state = self._refine(state, node.left, truth=not continuing_truth)
-            if right_state is not None:
-                self._eval(node.right, right_state, validate=validate)
-            joined = self._join_alternatives(shortcut_state, right_state)
-            if joined is not None:
-                state.clear()
-                state.update(joined)
-            return None
-        if isinstance(node, hir.RangeMembership):
-            self._eval(node.value, state, validate=validate)
-            self._eval(node.range, state, validate=validate)
-            return None
-        if isinstance(node, hir.Range):
-            items = [
-                *([] if node.step_pair is None else node.step_pair),
-                *([] if node.left is None else [node.left]),
-                *([] if node.right is None else [node.right]),
-            ]
-            seen: set[int] = set()
-            for item in items:
-                if id(item) in seen:
-                    continue
-                seen.add(id(item))
-                self._eval(item, state, validate=validate)
-            return None
-        if isinstance(node, hir.IteratorExpression):
-            self._eval(node.iterable, state, validate=validate)
-            return None
-        if isinstance(node, hir.MultiIteratorExpression):
-            for iterator in node.iterators:
-                self._eval(iterator.iterable, state, validate=validate)
-            return None
-        if isinstance(node, hir.TypeTest):
-            self._eval(node.value, state, validate=validate)
-            return None
-        if isinstance(node, hir.TypeBlock):
-            for item in node.items:
-                self._eval(item, state, validate=validate)
-            return None
-        if isinstance(node, hir.OverloadedFunction):
-            for alternate in node.alternates:
-                if isinstance(alternate, hir.FunctionLiteral):
-                    self._analyze_function(alternate, validate=validate)
-            return None
-        if isinstance(node, hir.FunctionLiteral):
-            self._analyze_function(node, validate=validate, enclosing=state)
-            return None
-        if isinstance(node, hir.ObjectLiteral):
-            object_type = ty.unfold(node.type) if isinstance(node.type, (ty.ObjectType, ty.NamedType)) else None
-            for field in node.fields:
-                interval = self._eval(field.value, state, validate=validate)
-                if field.binding_id is None:
-                    continue
-                # the field's value is a binding while the literal is built: a later
-                # field's default or refinement reads it (`radix:uint8 = alphabet.length`),
-                # with the value's facts and the field's declared ones
-                self._set_interval(state, field.binding_id, interval)
-                value = _strip_casts(field.value)
-                known = self._string_length(value.type) if not isinstance(value.type, ty.ArrayType) else value.type.length
-                if known is not None:
-                    state[_length_key(field.binding_id)] = Interval.exact(known)
-                self._seed_value_facts(field.binding_id, field.value, state, field.loc)
-                declared = object_type.field(field.name) if isinstance(object_type, ty.ObjectType) else None
-                if declared is not None and declared.refinement:
-                    self._seed_binding_refinement(field.binding_id, ty.RefinedType(declared.type, tuple(declared.refinement)), state, field.loc)
-            return None
-        if isinstance(node, hir.ForwardingAccess):
-            # `remaining[0].length` on a union of objects: the field's invariant, when every member declares it
-            self._eval(node.value, state, validate=validate)
-            interval = self._bounds_of(_member_invariant(node))
-            if node.exception_type == ty.BOTTOM_TYPE:
-                declared = self._declared_field_interval(node.value.type, node.field)
-                if declared is not None:
-                    interval = declared if interval is None else interval.intersect(declared)
-            return interval
-        if isinstance(node, hir.MemberAssign):
-            self._eval(node.target, state, validate=validate)
-            value = self._eval(node.value, state, validate=validate)
-            self._forget_container_value(node.target.value, state)
-            assigned = sb.member_path(node.target)
-            if assigned is not None:
-                root_id, path = assigned
-                self._drop_route_facts(state, root_id, path)
-                route_id = sb.array_route_id(node.target, self.registry)
-                if route_id is not None:
-                    self._set_interval(state, route_id, value)  # the field now holds the assigned value
-            return None
-        if isinstance(node, hir.TypeValue):
-            return None
+        return interval
+
+    def _eval_member_assign(self, node: hir.MemberAssign, state: State, *, validate: bool) -> Interval | None:
+        self._eval(node.target, state, validate=validate)
+        value = self._eval(node.value, state, validate=validate)
+        self._forget_container_value(node.target.value, state)
+        assigned = sb.member_path(node.target)
+        if assigned is not None:
+            root_id, path = assigned
+            self._drop_route_facts(state, root_id, path)
+            route_id = sb.array_route_id(node.target, self.registry)
+            if route_id is not None:
+                self._set_interval(state, route_id, value)  # the field now holds the assigned value
         return None
+
+    def _eval_type_value(self, node: hir.TypeValue, state: State, *, validate: bool) -> Interval | None:
+        return None
+
 
     def _eval_call(self, node: hir.FunctionCall, state: State, *, validate: bool) -> Interval | None:
         """Call transfers share one dispatch, before unrelated expression kinds.
@@ -4411,6 +4446,68 @@ class _BoundsValidator:
                     interval = interval.intersect(declared)
             widened[binding_id] = interval
         return widened
+
+
+    @staticmethod
+    @cache
+    def _eval_handler(node_type: type[hir.AST]) -> Callable:
+        # Select by class once, preserving the old first-matching rule for
+        # subclasses too. Only dispatch is cached; intervals and effects
+        # always use the current state and validation mode.
+        for kind, handler in _BoundsValidator._eval_handlers.items():
+            if issubclass(node_type, kind):
+                return handler
+        return _BoundsValidator._eval_no_effect
+
+    def _eval_no_effect(self, node: hir.AST, state: State, *, validate: bool) -> None:
+        return None
+
+    _eval_handlers = {
+        hir.Block: _eval_block,
+        hir.Flow: _eval_flow,
+        hir.Suppress: _eval_suppress,
+        hir.Obligation: _eval_obligation,
+        hir.Integer: _eval_integer,
+        hir.ExpressedIdentifier: _eval_expressed_identifier,
+        hir.MemberAccess: _eval_member_access,
+        hir.FunctionCall: _eval_call,
+        hir.Place: _eval_place,
+        hir.ValueCast: _eval_value_cast,
+        hir.RepresentationCast: _eval_representation_cast,
+        hir.Transmute: _eval_transmute,
+        hir.ArrayLength: _eval_array_length,
+        hir.ArrayMethod: _eval_array_method,
+        hir.DictLookup: _eval_dict_lookup,
+        hir.DictContains: _eval_dict_contains,
+        hir.DictRemove: _eval_dict_remove,
+        hir.DictEntries: _eval_dict_entries,
+        hir.SetAlgebra: _eval_set_algebra,
+        hir.DictView: _eval_dict_view,
+        hir.DictStore: _eval_dict_store,
+        hir.StringLength: _eval_string_length,
+        hir.Index: _eval_index,
+        hir.IndexAssign: _eval_index_assign,
+        hir.StringIndex: _eval_string_index,
+        hir.StringSlice: _eval_string_slice,
+        hir.StringEqual: _eval_string_equal,
+        hir.StringConcat: _eval_string_concat,
+        hir.InterpolatedString: _eval_interpolated_string,
+        hir.ArrayLiteral: _eval_array_literal,
+        hir.Spread: _eval_spread,
+        hir.ShortCircuit: _eval_short_circuit,
+        hir.RangeMembership: _eval_range_membership,
+        hir.Range: _eval_range,
+        hir.IteratorExpression: _eval_iterator_expression,
+        hir.MultiIteratorExpression: _eval_multi_iterator_expression,
+        hir.TypeTest: _eval_type_test,
+        hir.TypeBlock: _eval_type_block,
+        hir.OverloadedFunction: _eval_overloaded_function,
+        hir.FunctionLiteral: _eval_function_literal,
+        hir.ObjectLiteral: _eval_object_literal,
+        hir.ForwardingAccess: _eval_forwarding_access,
+        hir.MemberAssign: _eval_member_assign,
+        hir.TypeValue: _eval_type_value,
+    }
 
 
 def _union_intervals(intervals: list[Interval]) -> Interval:

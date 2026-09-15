@@ -2326,3 +2326,20 @@ These certify the µDewy builds only; the complete direct Dewy bootstrap and
 remaining Phase 0 corpus/parity gates are still open. Artifacts:
 `build-cached-operands-micro.log`, `build-cached-operands-c-micro.log`,
 `cached-operands-micro-routes.json` and `native-cached-operands-full`.
+
+### Bounds rules selected once per HIR class
+
+The hosted bounds evaluator now has separate handlers for its expression
+kinds, with cached class dispatch that preserves first-match inheritance.
+Each visit still evaluates against the current fact state, including effects,
+obligations and conditional evaluation. An unreachable duplicate obligation
+branch was removed. Tagged integer records retain their existing constant rule.
+
+The representative module's checking time changed only modestly, from 6.155
+to 6.075 seconds; the complete samples were 9.283 and 9.482 seconds. This is
+primarily a simplification and removal of repeated dispatch work, not evidence
+of a major full-build speedup. Generated µDewy differs only in four artifact
+include paths. The bounds/refinements/result-facts/HIR group passes 28 tests;
+an additional inherited-node regression checks changing state and mutable-place
+invalidation. Artifacts: `measure-bounds-dispatch.log`,
+`bounds-dispatch-gates.log`, `bounds-dispatch-inheritance.log`.
