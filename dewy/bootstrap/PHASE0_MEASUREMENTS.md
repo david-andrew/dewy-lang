@@ -1859,3 +1859,20 @@ original local value by taking the copy fallback. Both output targets and
 all preceding getter/projection lifetime cases pass. Artifact:
 `getter-field-locals-gates.log`. This extension is not yet in a native seed or
 full-build timing; the 67.754-second result above covers whole-binding proofs.
+
+### Hosted callable-shape selection
+
+Juxtaposition with a resolved function name or namespace function export now
+selects the call interpretation before checking impossible indexing/product
+alternatives. Union types and functions accepting zero arguments retain the
+general path: `make[0]` can index an implicitly called function's result.
+Failed calls preserve the existing definite-error classification. Namespace,
+object, keyword, generic and precedence checks pass, including execution of
+the implicit-call indexing case and a budget against discarded index probes.
+
+One cold build of the frozen `t0.dewy` module took **11.386 seconds before and
+10.134 after**; checking took 7.203 and 6.699 seconds, respectively. This is a
+bounded sample, not a new full-build result. Emitted µDewy is identical after
+normalizing include paths, with all included bytes verified identical.
+Artifacts: `hosted-call-shapes-{before,after}`, `call-shapes-output-check.json`,
+`call-shape-fixed-gates.log` and `call-shape-namespace-gates.log`.

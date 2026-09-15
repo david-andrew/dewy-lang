@@ -42,3 +42,46 @@ let main = ():>int64 => {{
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ['7', '5', '4', '9', '9']
+
+
+def test_resolved_namespace_call_does_not_probe_indexing(tmp_path, monkeypatch):
+    from dewy.semantic import check
+    from dewy.parser import p0, t1
+
+    library = tmp_path / 'operations.dewy'
+    library.write_text('square=(value:int64):>int64=>value*value\n')
+    source = tmp_path / 'caller.dewy'
+    source.write_text(f'''
+import p"{library}" as operations
+let main=():>int64=>operations.square(6)+6
+''')
+    attempted = []
+    original = check._tcr_index
+
+    def index(binop, **kwargs):
+        left = binop.left
+        if (isinstance(left, p0.BinOp) and isinstance(left.left, p0.Atom)
+                and isinstance(left.left.item, t1.Identifier)
+                and left.left.item.name == 'operations'):
+            attempted.append(binop.loc)
+        return original(binop, **kwargs)
+
+    monkeypatch.setattr(check, '_tcr_index', index)
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    assert attempted == []
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], timeout=10)
+    assert result.returncode == 42
+
+
+def test_implicit_zero_argument_result_keeps_index_interpretation(tmp_path):
+    source = SrcFile(None, '''
+make=():>array<int64 length=1>=>[42]
+main=():>int64=>make[0]
+''')
+    output = tmp_path / 'zero-argument-index.udewy'
+    output.write_text(codegen(source, debug_locations=False))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], timeout=10)
+    assert result.returncode == 42

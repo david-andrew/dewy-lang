@@ -11800,11 +11800,33 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         if constructor is not None:
             # a type cannot be multiplied: `Span(1 9)` is only ever a construction
             return tcr_function_call(constructor, _construction_arguments(binop.right), ctx=ctx, expected=expected)
+        can_call = any(isinstance(option, t2.CallJuxtapose) for option in binop.op.options)
+        if can_call and isinstance(binop.left, p0.Atom) and isinstance(binop.left.item, t1.Identifier):
+            # A resolved callable name chooses call precedence. Do not check
+            # an impossible index/product reading (or format its diagnostic)
+            # for every invocation. Union-typed names retain the candidate
+            # path; this lookup does not evaluate an arbitrary left expression.
+            declared = ctx.declarations.get(binop.left.item.name)
+            if isinstance(declared, (ty.FunctionType, ty.OverloadType)) and not _accepts_no_arguments(declared):
+                left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block, call_target=True)
+                try:
+                    return tcr_function_call(left, binop.right, ctx=ctx, expected=expected)
+                except TypeCheckError as error:
+                    # The sole substantive reading failed, as in the general
+                    # Ambiguous path. Preserve its definite-error classification.
+                    raise UserError(error.report) from error
         if isinstance(binop.left, p0.BinOp) and _operator_symbol(binop.left.op) == '.':
             # `s.grow(2)`: a method is only ever called, never multiplied
             member = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block, call_target=True)
             if isinstance(member, (hir.BoundMethod, hir.ArrayMethod, hir.DictMethod)):
                 return tcr_function_call(member, binop.right, ctx=ctx, expected=expected)
+            # Namespace exports resolve to their original function binding,
+            # rather than a receiver-bound method. They follow the same rule.
+            if can_call and isinstance(member, hir.ExpressedIdentifier) and isinstance(member.type, (ty.FunctionType, ty.OverloadType)) and not _accepts_no_arguments(member.type):
+                try:
+                    return tcr_function_call(member, binop.right, ctx=ctx, expected=expected)
+                except TypeCheckError as error:
+                    raise UserError(error.report) from error
         candidates: list[p0.AST] = [replace(binop, op=option) for option in binop.op.options]
         return typecheck_and_resolve_inner(p0.Ambiguous(binop.loc, candidates), ctx=ctx, type_block=type_block, expected=expected)
 
