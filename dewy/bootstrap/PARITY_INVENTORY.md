@@ -233,3 +233,23 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [runtime_grapheme_strings.dewy](../tests/runtime_grapheme_strings.dewy) | No implemented token starts here |
 | [keyword_default_calls.dewy](../tests/keyword_default_calls.dewy) | BinOp expression |
 | [position_only_calls.dewy](../tests/position_only_calls.dewy) | write this parameter as name:type |
+
+## Position-only parameters
+
+Native function literals now accept the hosted `(<name:Type>)` form, including
+defaults, generic parameters, inferred callable values and place parameters.
+A shared source-parameter reader retains the lexical name while the callable
+slot omits its public keyword name. Signature reservation, default checking,
+contextual inference and body binding use that same interpretation. Named
+calls to these slots, malformed angle blocks, duplicate names and place
+defaults are rejected. Position-only parameters in explicit function-type
+annotations remain unsupported in both compilers; this change adds no spelling
+for that separate gap.
+
+The rejection tests also exposed hosted duplicate lexical parameters being
+silently overwritten in the body scope. Hosted checking now rejects duplicates
+across positional, keyword-only and rest parameters. Nineteen signature and
+ordered-call checks pass, alongside direct/C execution for positional defaults,
+indirect calls and place updates. Artifacts: `position-only-checking-gates.log`
+and the passing execution case in `position-only-final-gates.log`. These are
+isolated gates; the 154/211 complete inventory above predates this change.

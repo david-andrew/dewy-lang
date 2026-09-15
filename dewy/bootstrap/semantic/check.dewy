@@ -1543,13 +1543,12 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
         let arguments = contexts.node_at(parameter_id env.lexical session)
         let rows:array<addr> = if arguments is? parser.Block arguments.inner else [parameter_id]
         loop item in rows {
-            let row = contexts.node_at(item env.lexical session)
-            if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) { row = contexts.node_at(row.left env.lexical session) }
-            if row is? parser.Prefix and source_views.is_operator(row.op '@' env.lexical session) { row = contexts.node_at(row.item env.lexical session) }
-            if row isnt? parser.BinOp or not source_views.is_operator(row.op ':' env.lexical session) return problem(item 'a generic function needs every parameter type declared' 'annotate this parameter' env session)
+            let parsed=declarations.parameter_source(item env.lexical session)
+            if parsed is? Error return parsed
+            if parsed.annotation is? none return problem(item 'a generic function needs every parameter type declared' 'annotate this parameter' env session)
         }
     }
-    let args = declarations.function_args(parameter_id lexical @session)
+    let args = declarations.function_args(parameter_id lexical @session literal=true)
     if args is? Error return args
     let parameters:array<types.PosOrKwArg> = []
     loop arg in args {
@@ -1585,9 +1584,10 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
         let arguments=contexts.node_at(signature.left env.lexical session)
         let rows:array<addr>=if arguments is? parser.Block arguments.inner else [signature.left]
         loop i in 0.. and i <? rows.length and i <? signature_type.pos_or_kw.length {
-            let row=contexts.node_at(rows[i] env.lexical session)
-            if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) {
-                let value=expression(row.right env @session expected=signature_type.pos_or_kw[i].value_type)
+            let parsed=declarations.parameter_source(rows[i] env.lexical session)
+            if parsed is? Error return parsed
+            if parsed.default isnt? none {
+                let value=expression(parsed.default env @session expected=signature_type.pos_or_kw[i].value_type)
                 if value is? Error return none
             }
         }
@@ -1625,8 +1625,8 @@ contextual_parameters = (literal:parser.BinOp shape:types.FunctionType expected:
         let parameter=parameters[i]
         # Defaults already supply a concrete inferred type in function_args.
         if parameter.place or not parameter.required continue
-        let bare=source_views.identifier(rows[i] env.lexical session)
-        if bare is? none continue
+        let parsed=declarations.parameter_source(rows[i] env.lexical session)
+        if parsed is? Error or parsed.annotation isnt? none continue
         let type=types.strip_refinement(wanted.pos_or_kw[i].value_type session.types)
         if types.is_primitive(types.node_at(session.types type) 'any') continue
         parameters[i]=types.PosOrKwArg[parameter.name type parameter.required parameter.place]
@@ -1679,28 +1679,28 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     let rows:array<addr> = if arguments is? parser.Block arguments.inner else [parameter_id]
     let position:addr = 0
     loop param in shape.pos_or_kw {
-        $runtime_assert param.name isnt? none
+        $runtime_assert position <? rows.length
+        let parsed=declarations.parameter_source(rows[position] env.lexical session)
+        if parsed is? Error return parsed
         let scope = bindings.scope_at(session.scopes inner.lexical.scope)
-        if param.name in? scope.names return problem(id 'duplicate function parameter' param.name env session)
+        if parsed.name in? scope.names return problem(id 'duplicate function parameter' parsed.name env session)
         # Defaults run in the callee but resolve in the defining outer scope,
         # as in the hosted checker. BoundParam retains the checked expression
         # without evaluating it while declaring the function.
-        $runtime_assert position <? rows.length
-        let row = contexts.node_at(rows[position] env.lexical session)
         let default:addr? = none
-        if row is? parser.BinOp and source_views.is_operator(row.op '=' env.lexical session) {
-            let value = expression(row.right defining @session expected=param.value_type)
+        if parsed.default isnt? none {
+            let value = expression(parsed.default defining @session expected=param.value_type)
             if value is? Error return value
             default = value
         }
         position += 1
-        let binding_id = bindings.allocate_param(@session.registry param.name param.value_type literal.loc)
+        let binding_id = bindings.allocate_param(@session.registry parsed.name param.value_type literal.loc)
         let binding = bindings.binding_at(session.registry binding_id)
         binding.store_type = param.value_type
         session.registry.by_id[binding_id] = binding
-        bindings.bind(@session.scopes inner.lexical.scope param.name binding_id)
-        if default is? none { parameters.push(hir.Param[param.name param.value_type binding_id place=param.place]) }
-        else { parameters.push(hir.BoundParam[param.name param.value_type binding_id value=default place=param.place]) }
+        bindings.bind(@session.scopes inner.lexical.scope parsed.name binding_id)
+        if default is? none { parameters.push(hir.Param[parsed.name param.value_type binding_id position_only=parsed.position_only place=param.place]) }
+        else { parameters.push(hir.BoundParam[parsed.name param.value_type binding_id position_only=parsed.position_only value=default place=param.place]) }
     }
     # Parameter defaults above retain the defining scope. The body sees
     # member proxies in a parent of its parameter scope, so local bindings

@@ -363,43 +363,61 @@ field_refinement_base = (base:addr promises:array<facts.Proposition> nodes:types
     return if selected is? none base else selected
 }
 
-function_args = (id:addr context:contexts.Context @session:contexts.Session):>array<types.PosOrKwArg>|Error => {
-    let node = contexts.node_at(id context session)
-    let items:array<addr> = if node is? parser.Block and node.delims =? '()' node.inner else [id]
-    let result:array<types.PosOrKwArg> = []
+# Keep lexical names separate from the callable's public argument names.
+# A position-only parameter still has a name in its body and its contracts.
+ParameterSource:type = const [name:string annotation:addr? default:addr? place:bool position_only:bool]
+parameter_source = (id:addr context:contexts.Context session:contexts.Session):>ParameterSource|Error => {
+    let target_id=id
+    let row=contexts.node_at(target_id context session)
+    let position_only=false
+    if row is? parser.Block and row.delims =? '<>' {
+        if row.inner.length not=? 1 return contexts.problem(id 'invalid position-only parameter' '`<>` must contain exactly one named parameter' context session)
+        position_only=true target_id=row.inner[0]
+        row=contexts.node_at(target_id context session)
+    }
+    let default:addr?=none
+    if row is? parser.BinOp and source_views.is_operator(row.op '=' context session) {
+        default=row.right target_id=row.left
+        row=contexts.node_at(target_id context session)
+    }
+    let place=false
+    if row is? parser.Prefix and source_views.is_operator(row.op '@' context session) {
+        place=true target_id=row.item
+        row=contexts.node_at(target_id context session)
+    }
+    let annotation:addr?=none
+    if row is? parser.BinOp and source_views.is_operator(row.op ':' context session) {
+        annotation=row.right target_id=row.left
+        let target=contexts.node_at(target_id context session)
+        if target is? parser.Prefix and source_views.is_operator(target.op '@' context session) {place=true target_id=target.item}
+    }
+    let name=source_views.identifier(target_id context session)
+    if name is? none return contexts.problem(id 'function type parameter requires a name' 'write this parameter as `name:type`' context session)
+    if place and default isnt? none return contexts.problem(id 'place parameters cannot have defaults' 'every call must explicitly supply the storage' context session)
+    return ParameterSource[name annotation default place position_only]
+}
+
+function_args = (id:addr context:contexts.Context @session:contexts.Session literal:bool=false):>array<types.PosOrKwArg>|Error => {
+    let node=contexts.node_at(id context session)
+    let items:array<addr>=if node is? parser.Block and node.delims =? '()' node.inner else [id]
+    let result:array<types.PosOrKwArg>=[]
     loop item in items {
-        let row = contexts.node_at(item context session)
-        let target_id = item
-        let default:addr? = none
-        if row is? parser.BinOp and source_views.is_operator(row.op '=' context session) {
-            default = row.right target_id = row.left
-            row = contexts.node_at(target_id context session)
-        }
-        let place = false
-        if row is? parser.Prefix and source_views.is_operator(row.op '@' context session) {
-            place = true target_id = row.item
-            row = contexts.node_at(target_id context session)
-        }
-        let name = source_views.identifier(target_id context session)
-        let type = types.primitive('any' @session.types)
-        if default isnt? none and name isnt? none {
-            let inferred = infer_default(default context @session)
-            if inferred is? Error return inferred
-            type = inferred
-        }
-        if row is? parser.BinOp and source_views.is_operator(row.op ':' context session) {
-            let target = contexts.node_at(row.left context session)
-            let target_id = row.left
-            if target is? parser.Prefix and source_views.is_operator(target.op '@' context session) { place = true target_id = target.item }
-            name = source_views.identifier(target_id context session)
-            let inner = contexts.Context[context.source context.scope name]
-            let declared = resolve(row.right inner @session)
+        let parsed=parameter_source(item context session)
+        if parsed is? Error return parsed
+        if parsed.position_only and not literal return contexts.unsupported(item 'position-only function type parameters' context session)
+        let type=types.primitive('any' @session.types)
+        if parsed.annotation isnt? none {
+            let inner=contexts.Context[context.source context.scope parsed.name]
+            let declared=resolve(parsed.annotation inner @session)
             if declared is? Error return declared
-            type = declared
+            type=declared
+        } else if parsed.default isnt? none {
+            let inferred=infer_default(parsed.default context @session)
+            if inferred is? Error return inferred
+            type=inferred
         }
-        if name is? none return contexts.problem(item 'function type parameter requires a name' 'write this parameter as `name:type`' context session)
-        if place and default isnt? none return contexts.problem(item 'place parameters cannot have defaults' 'every call must explicitly supply the storage' context session)
-        result.push(types.PosOrKwArg[name type required=default is? none place=place])
+        let name:string?=if parsed.position_only none else parsed.name
+        result.push(types.PosOrKwArg[name type required=parsed.default is? none place=parsed.place])
     }
     return result
 }
