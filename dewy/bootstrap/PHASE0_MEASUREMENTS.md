@@ -2547,3 +2547,27 @@ excessive advancement and source mutation, and a compiled native transfer
 check for both facts and invalidation. Artifact: `named-prefix-fact-gates.log`.
 This closes the proof regression noted above; it does not close the native
 fixture's earlier type-predicate acceptance gap.
+
+The next quiet complete checkpoint, at `aa5af033`, takes **76.564 seconds**:
+checking 36.298, lowering 17.064, emission 4.446 and backend 13.084; peak
+process RSS 1,344,956 KiB. This includes the static-data, token-context, scoped
+subtype and named-prefix batches. The hosted target remains unmet. Artifact:
+`host-static-context-subtype-full`.
+
+### Nominal token classification
+
+Token kinds now use ordinary Python inheritance tests, preserving ABC
+abstract-method enforcement. Virtual registration is explicitly unsupported:
+it cannot supply token fields or enter the existing descendant-based token
+inventory. Contexts likewise use ordinary inheritance. This removes the
+virtual-subclass bookkeeping from millions of parser membership tests without
+changing grammar, precedence, candidate order or subclass extension handling.
+
+The 122 parser, extension, abstract-contract and diagnostic checks pass.
+Quiet parsing of all 125 compiler/library files changes **8.872 to 7.428
+seconds**, with identical serialized AST hashes. Full-build impact remains
+unmeasured. Artifacts: `token-membership-fixed-gates.log`,
+`measure-token-membership.log`, `parser-token-membership-{before,after}.json`.
+An exploratory conservative count of lowered function references found only
+one unreferenced function (357 bytes) in this self-build, so moving function
+reachability earlier was not pursued as a performance optimization.

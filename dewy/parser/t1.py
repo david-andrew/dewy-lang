@@ -8,7 +8,7 @@ Second phase of tokenization. Mainly building up a few types of compound tokens 
 Additionally symbols are separated into operators and identifiers. And identifiers from the previous step have keywords and keyword operators split off
 """
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from dataclasses import dataclass
 from functools import cache
 from itertools import groupby
@@ -61,7 +61,7 @@ class Context:
 
 
 @dataclass
-class Token(ABC):
+class Token(metaclass=t0._TokenMeta):
     loc: Span
     # An optional first-token filter, not a replacement for eat's full match.
     # Undeclared filters stay exhaustive so new token kinds cannot disappear.

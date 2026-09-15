@@ -30,7 +30,7 @@ from ..utils import truncate, descendants, ordinalize, first_line
 from typing import NoReturn, TypeAlias, ClassVar, Callable, get_origin, get_args, Union, Protocol, Literal
 from types import UnionType
 from dataclasses import dataclass
-from abc import ABC, abstractmethod
+from abc import ABCMeta, abstractmethod
 from functools import cache, lru_cache
 
 
@@ -166,7 +166,7 @@ legal_heredoc_delim_chars = (
 # i.e. current state the tokenizer is in + any relevant state for that context
 
 @dataclass
-class Context(ABC):
+class Context:
     srcfile: SrcFile
     tokens_so_far: list[Token]
 
@@ -228,8 +228,23 @@ ContextAction: TypeAlias = Push | Pop | None
 
 ##### TOKEN CLASSES AND EATING LOGIC #####
 
+class _TokenMeta(ABCMeta):
+    """Tokens use real inheritance, including for candidate discovery.
+
+    Abstract `eat` implementations still prevent instantiation. Virtual ABC
+    membership cannot supply token fields or enter the descendant inventory,
+    and is deliberately unsupported. Ordinary Python membership avoids the
+    virtual-subclass cache on every token test in the four parser stages.
+    """
+    __instancecheck__ = type.__instancecheck__
+    __subclasscheck__ = type.__subclasscheck__
+
+    def register(cls, subclass):
+        raise TypeError('token kinds must inherit from their token base')
+
+
 @dataclass
-class Token[T:Context](ABC):
+class Token[T:Context](metaclass=_TokenMeta):
     """
     Base class for all tokens.
 

@@ -3,7 +3,7 @@ import pickle
 
 import pytest
 
-from dewy.parser import p0, t1, t2
+from dewy.parser import p0, t0, t1, t2
 from dewy.reporting import Span, SrcFile
 
 
@@ -39,6 +39,28 @@ def test_operator_classification_honors_inherited_tokens():
     assert t2.is_operator(ExtendedCall(Span(1, 1)))
     assert not t2.is_operator(t1.Identifier(Span(0, 1), 'x'))
     assert not t2.is_operator(None)
+
+
+def test_token_membership_retains_abstract_and_inherited_contracts():
+    class AbstractToken(t1.Token):
+        pass
+
+    with pytest.raises(TypeError, match='abstract'):
+        AbstractToken(Span(0, 0))
+    with pytest.raises(TypeError, match='abstract'):
+        t0.Token()
+
+    class ExtendedIdentifier(t1.Identifier):
+        pass
+
+    node = ExtendedIdentifier(Span(0, 1), 'x')
+    assert isinstance(node, t1.Identifier)
+    assert isinstance(node, t1.Token)
+    assert issubclass(ExtendedIdentifier, t1.Token)
+    assert not isinstance(node, t1.Operator)
+    assert not issubclass(ExtendedIdentifier, t1.Operator)
+    with pytest.raises(TypeError, match='must inherit'):
+        t1.Token.register(str)
 
 
 def test_quantum_precedence_uses_current_alternatives():
