@@ -365,7 +365,16 @@ class Backend(ABC):
         - Comparison: TK_EQ, TK_NOT_EQ, TK_LT, TK_GT, TK_LT_EQ, TK_GT_EQ
         """
 
-    @abstractmethod
+    def binary_immediate(self, op_kind: t1.Kind, value: int) -> None:
+        """Combine the current value with a literal, preserving older operands.
+
+        Targets may consume the literal directly; the ordinary value-stack
+        sequence remains the default and defines the operation's semantics.
+        """
+        self.save_value()
+        self.push_const_i64(value)
+        self.binary_op(op_kind)
+
     # ========================================================================
     # Memory operations (intrinsics)
     # ========================================================================

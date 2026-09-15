@@ -789,6 +789,36 @@ class X86_64Backend(Backend):
         t1.Kind.TK_EQ: 'e', t1.Kind.TK_NOT_EQ: 'ne', t1.Kind.TK_GT: 'g',
         t1.Kind.TK_LT: 'l', t1.Kind.TK_GT_EQ: 'ge', t1.Kind.TK_LT_EQ: 'le',
     }
+    _IMMEDIATE_OPERATIONS = {
+        **{kind: (op, None, False) for kind, op in _COMMUTATIVE_OPS.items()},
+        **{kind: ('cmpq', cc, False) for kind, cc in _SIGNED_COMPARISONS.items()},
+        t1.Kind.TK_MINUS: ('subq', None, False),
+        t1.Kind.TK_LEFT_SHIFT: ('shlq', None, True),
+        t1.Kind.TK_RIGHT_SHIFT: ('shrq', None, True),
+    }
+
+    def binary_immediate(self, op_kind: t1.Kind, value: int) -> None:
+        # Literals are unsigned words; unary minus wraps in the same word.
+        # Most x86 immediate operands sign-extend 32 bits, unlike movabsq.
+        instruction = self._IMMEDIATE_OPERATIONS.get(op_kind)
+        if instruction is not None:
+            operation, condition, shift = instruction
+            if shift:
+                value &= 63
+            elif not -2147483648 <= value <= 2147483647:
+                word = value & 0xffffffffffffffff
+                signed = word if word < (1 << 63) else word - (1 << 64)
+                if not -2147483648 <= signed <= 2147483647:
+                    super().binary_immediate(op_kind, value)
+                    return
+                value = signed
+            self._emit(f'{operation} ${value}, %rax')
+            if condition is not None:
+                self._emit(f'set{condition} %al')
+                self._emit('movzbq %al, %rax')
+                self._emit('negq %rax')
+            return
+        super().binary_immediate(op_kind, value)
 
     def binary_op(self, op_kind: t1.Kind) -> None:
         """Combine the saved left value and %rax without staging extra copies."""

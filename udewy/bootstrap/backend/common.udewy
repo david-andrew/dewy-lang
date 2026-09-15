@@ -104,6 +104,16 @@ let be_restore_value:int = 0          # fn ():>void
 # Operators
 let be_unary_op:int = 0               # fn (op_kind:int):>void
 let be_binary_op:int = 0              # fn (op_kind:int):>void
+let be_binary_immediate:int = 0       # fn (op_kind:int value:int):>void
+
+# A target may use immediate instructions without disturbing older saved
+# operands. This default is the ordinary stack sequence for the same operation.
+let be_default_binary_immediate = (op_kind:int value:int):>void => {
+    (@be_save_value)()
+    (@be_push_const_i64)(value)
+    (@be_binary_op)(op_kind)
+    return void
+}
 
 # Control flow
 let be_begin_if:int = 0

@@ -2640,3 +2640,40 @@ the existing aggregate backend phase to locate the remaining complete-build
 cost. Artifacts: `host-backend-current-module/backend.prof`,
 `profile-bridge-fragments.log`, `bridge-dispatch-gates.log`,
 `bridge-dispatch-occurrence-gates.log`, `bridge-dispatch-module/results.json`.
+
+The quiet complete checkpoint at `11edf7b6` takes **70.904 seconds**:
+checking 32.801, lowering 15.891, emission 4.432 and backend 12.263; peak
+process RSS 1,281,348 KiB. Within the backend, code generation takes 5.055
+seconds and assembly/linking 7.091. The hosted target remains unmet.
+Artifact: `host-reconstruction-dispatch-full`.
+
+On that exact assembly, GNU `as` takes 6.426 seconds, LLVM `llvm-mc` 6.779
+and Clang's integrated assembler 7.179; linking takes 0.866–0.917 seconds.
+Each resulting compiler passes a `--help` smoke check. This is a toolchain
+timing experiment, not full compiler verification; GNU remains the default.
+Artifact: `assembler-comparison/results.json`.
+
+### Immediate word operands
+
+Both µDewy parsers recognize a literal right operand only when it occupies
+the complete expression at the current precedence. Calls, casts and tighter
+operators retain recursive parsing. The backend protocol supplies a normal
+stack-sequence fallback; x86-64 uses immediate arithmetic, bitwise operations,
+signed comparisons and masked shifts where encodable. The HIR bridge uses
+the same operation. Older saved operands remain untouched, boolean results
+remain all-zero/all-one words, and condition-only short circuiting is unchanged.
+
+The 38 µDewy parity, precedence, immediate and HIR bridge cases pass, including
+both hosted and native µDewy compilers on direct/C output. A separate 1,400
+operation boundary matrix uses independently calculated expected word results.
+The two immediate tests pass again after simplifying instruction dispatch.
+Artifacts: `immediate-complete-gates.log`, `immediate-dispatch-gates.log`.
+
+For the frozen tokenizer module, assembly shrinks **5,524,929 to 4,678,466
+bytes** and its executable **1,144,104 to 955,688 bytes**. Three paired samples
+against the generic operand sequence give median generation 0.285 to 0.327
+seconds and toolchain 0.404 to 0.348 seconds. The combined times are close;
+this establishes smaller output, not a substantial hosted compile-time win.
+The first version's higher dispatch cost was reduced before this measurement.
+Full-build and native-seed effects remain to be measured. Artifacts:
+`immediate-operands-module/results.json`, `immediate-dispatch-module/results.json`.

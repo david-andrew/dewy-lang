@@ -1345,6 +1345,11 @@ let x86_emit_signed_mod = ():>void => {
 
 let x86_emit_set_cc_negq = (cc:int left:int):>void => {
     x86_emit_op_2("cmpq" "%rax" left)
+    x86_emit_bool_from_cc(cc)
+    return void
+}
+
+let x86_emit_bool_from_cc = (cc:int):>void => {
     let bb:int = bb_new(16)
     bb_push_str(bb "    set")
     bb_push_str(bb cc)
@@ -1352,6 +1357,46 @@ let x86_emit_set_cc_negq = (cc:int left:int):>void => {
     vec_push(x86_current_fn_code bb_finalize_as_string(bb))
     x86_emit_indented("movzbq %al, %rax")
     x86_emit_indented("negq %rax")
+    return void
+}
+
+let x86_binary_immediate = (op_kind:int value:int):>void => {
+    # µDewy words already use signed 64-bit storage here. Arithmetic immediates
+    # sign-extend 32 bits; shifts use only the low six bits of the count.
+    if op_kind =? TK_LEFT_SHIFT {
+        x86_emit_op_imm("shlq" value and 63 "%rax")
+        return void
+    }
+    if op_kind =? TK_RIGHT_SHIFT {
+        x86_emit_op_imm("shrq" value and 63 "%rax")
+        return void
+    }
+    if value >=? -2147483648 and value <=? 2147483647 {
+        let op:int = 0
+        if op_kind =? TK_PLUS { op = "addq" }
+        else if op_kind =? TK_MINUS { op = "subq" }
+        else if op_kind =? TK_MUL { op = "imulq" }
+        else if op_kind =? TK_AND { op = "andq" }
+        else if op_kind =? TK_OR { op = "orq" }
+        else if op_kind =? TK_XOR { op = "xorq" }
+        if op {
+            x86_emit_op_imm(op value "%rax")
+            return void
+        }
+        let cc:int = 0
+        if op_kind =? TK_EQ { cc = "e" }
+        else if op_kind =? TK_NOT_EQ { cc = "ne" }
+        else if op_kind =? TK_GT { cc = "g" }
+        else if op_kind =? TK_LT { cc = "l" }
+        else if op_kind =? TK_GT_EQ { cc = "ge" }
+        else if op_kind =? TK_LT_EQ { cc = "le" }
+        if cc {
+            x86_emit_op_imm("cmpq" value "%rax")
+            x86_emit_bool_from_cc(cc)
+            return void
+        }
+    }
+    be_default_binary_immediate(op_kind value)
     return void
 }
 
@@ -2074,6 +2119,7 @@ let x86_install_backend = ():>void => {
 
     be_unary_op = x86_unary_op
     be_binary_op = x86_binary_op
+    be_binary_immediate = x86_binary_immediate
 
     be_begin_if = x86_begin_if
     be_begin_else = x86_begin_else

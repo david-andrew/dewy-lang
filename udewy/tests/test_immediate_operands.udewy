@@ -1,0 +1,56 @@
+# Immediate encoding must agree with full 64-bit operands, even at the signed
+# 32-bit boundary. These expected results do not depend on another compiler.
+let trace:int = 0
+let touch = (value:int):>int => {
+    trace = trace * 10 + value
+    return value
+}
+let sum8 = (a:int b:int c:int d:int e:int f:int g:int h:int):>int => {
+    return a + b + c + d + e + f + g + h
+}
+let main = ():>int => {
+    let n:int = 7
+    if n + 2147483647 not=? 2147483654 { return 1 }
+    if n + 2147483648 not=? 2147483655 { return 2 }
+    if n - 2147483648 not=? -2147483641 { return 3 }
+    if n + -2147483648 not=? -2147483641 { return 4 }
+    if n + -2147483649 not=? -2147483642 { return 5 }
+    if n + 0xffffffffffffffff not=? 6 { return 6 }
+    if n - -0xffffffffffffffff not=? 6 { return 7 }
+    if n * -2147483648 not=? -15032385536 { return 8 }
+    if n * 2147483648 not=? 15032385536 { return 9 }
+    if n * 0xffffffffffffffff not=? -7 { return 10 }
+    if (n and 0xffffffff) not=? 7 { return 11 }
+    if (n or 0xffffffff) not=? 4294967295 { return 12 }
+    if (n xor 0xffffffffffffffff) not=? -8 { return 13 }
+    if (n and -2147483648) not=? 0 { return 14 }
+    if (n =? 7) not=? -1 or (n not=? 7) not=? 0 { return 15 }
+    if (n <? 8) not=? -1 or (n >? 8) not=? 0 { return 16 }
+    if (n <=? 7) not=? -1 or (n >=? 8) not=? 0 { return 17 }
+    if (n <? 0xffffffffffffffff) not=? 0 { return 18 }
+    if (n >? -2147483648) not=? -1 { return 19 }
+    if (n <? 2147483648) not=? -1 { return 20 }
+    if (n << 65) not=? 14 or (n >> 65) not=? 3 { return 21 }
+    if (n << -1) not=? 0x8000000000000000 { return 22 }
+    if (-1 >> 0xffffffffffffffff) not=? 1 { return 23 }
+    if n // 0 not=? -1 or n % 0 not=? 7 { return 24 }
+    if -0x8000000000000000 // -1 not=? 0x8000000000000000 { return 25 }
+    if n + 2 * 3 not=? 13 or n - 2 - 3 not=? 2 { return 26 }
+    if n << 2 + 1 not=? 56 { return 27 }
+    if n + 2 transmute int not=? 9 { return 28 }
+    # The innermost immediate operates while both cached and spilled operands
+    # are live. A nested call must still evaluate exactly once and in order.
+    let total:int = sum8(1 2 3 4 5 6 7 touch(8) + 1)
+    if total not=? 37 or trace not=? 8 { return 29 }
+    trace = 0
+    total = touch(1) - (touch(2) - (touch(3) - (touch(4) - (touch(5) + 6))))
+    if total not=? 9 or trace not=? 12345 { return 30 }
+    # Free-standing boolean expressions stay eager and bitwise; conditions
+    # retain their short-circuit behavior, including literal right operands.
+    trace = 0
+    total = (false and touch(1)) or touch(2)
+    if total not=? 2 or trace not=? 12 { return 31 }
+    if false and touch(3) { return 32 }
+    if true or touch(4) { if trace not=? 12 { return 33 } }
+    return 0
+}

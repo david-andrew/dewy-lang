@@ -1050,6 +1050,23 @@ def _parse_expr(
             idx = _parse_expr(toks, idx, state, prec + 1, condition=True)
             backend.cond_or_join(done_label)
         else:
+            # Consume a literal directly only when it is the complete RHS at
+            # this precedence. A following call, cast or tighter operator
+            # belongs to the recursive parser, even when it starts with a number.
+            literal_idx = idx
+            negative = idx < len(toks) and toks[idx].kind == t1.Kind.TK_MINUS
+            if negative:
+                literal_idx += 1
+            if literal_idx < len(toks) and toks[literal_idx].kind == t1.Kind.TK_NUMBER:
+                end = literal_idx + 1
+                following = toks[end].kind if end < len(toks) else None
+                if (following not in (t1.Kind.TK_EXPR_CALL, t1.Kind.TK_TRANSMUTE)
+                        and (following is None or get_precedence(following) <= prec)):
+                    value = toks[literal_idx].value
+                    assert isinstance(value, int)
+                    backend.binary_immediate(kind, -value if negative else value)
+                    idx = end
+                    continue
             backend.save_value()
             idx = _parse_expr(toks, idx, state, prec + 1, condition=False)
             backend.binary_op(kind)

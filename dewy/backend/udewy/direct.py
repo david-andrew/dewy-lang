@@ -264,9 +264,12 @@ class _DirectEmitter:
             left, right = node.pos_args
             symbol = emit.DERIVED_BITWISE_DUNDERS.get(name, symbol)
             self.expression(left)
-            backend.save_value()
-            self.expression(right)
-            backend.binary_op(_KINDS[symbol])
+            if isinstance(right, hir.Integer):
+                backend.binary_immediate(_KINDS[symbol], right.value)
+            else:
+                backend.save_value()
+                self.expression(right)
+                backend.binary_op(_KINDS[symbol])
             if name in emit.DERIVED_BITWISE_DUNDERS:
                 backend.unary_op(t1.Kind.TK_NOT)
             if name in emit.NARROW_WRAPPING_DUNDERS:

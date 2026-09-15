@@ -1490,6 +1490,23 @@ let parse_expr_inner = (state:int idx:int min_prec:int is_condition:int):>int =>
             idx = parse_expr_inner(state idx prec + 1 true)
             (@be_cond_or_join)(label)
         } else {
+            # A literal can bypass recursive parsing only when no call, cast
+            # or tighter-precedence operation extends this right operand.
+            let literal_idx:int = idx
+            let negative:int = tok_kind(state idx) =? TK_MINUS
+            if negative { literal_idx = literal_idx + 1 }
+            if literal_idx <? n and tok_kind(state literal_idx) =? TK_NUMBER {
+                let end:int = literal_idx + 1
+                let following:int = 0
+                if end <? n { following = tok_kind(state end) }
+                if following not=? TK_EXPR_CALL and following not=? TK_TRANSMUTE and get_precedence(following) <=? prec {
+                    let value:int = tok_value(state literal_idx)
+                    if negative { value = -value }
+                    (@be_binary_immediate)(k value)
+                    idx = end
+                    continue
+                }
+            }
             (@be_save_value)()
             idx = parse_expr_inner(state idx prec + 1 false)
             (@be_binary_op)(k)
