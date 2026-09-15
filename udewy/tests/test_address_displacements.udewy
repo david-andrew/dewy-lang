@@ -1,0 +1,38 @@
+# Loads and stores may fold an immediately preceding adjustment into x86's
+# signed 32-bit displacement. Word arithmetic and evaluation order stay intact.
+let trace:int = 0
+let touch = (n:int):>int => { trace = trace * 10 + n return n }
+let sum8 = (a:int b:int c:int d:int e:int f:int g:int h:int):>int => {
+    return a + b + c + d + e + f + g + h
+}
+let main = ():>int => {
+    let p:int = __alloca__(64)
+    __store__(42 p + 8)
+    if __load__(p + 8) not=? 42 { return 1 }
+    let middle:int = p + 16
+    if __load__(middle - 8) not=? 42 { return 2 }
+    __store_u8__(255 p + 1)
+    if __load_u8__(p + 1) not=? 255 or __load_i8__(p + 1) not=? -1 { return 3 }
+    __store_u16__(0xff80 p + 3)
+    if __load_u16__(p + 3) not=? 65408 or __load_i16__(p + 3) not=? -128 { return 4 }
+    __store_u32__(0x80000001 p + 48)
+    if __load_u32__(p + 48) not=? 2147483649 or __load_i32__(p + 48) not=? -2147483647 { return 5 }
+    let far:int = p + 2147483648
+    __store__(43 far + -2147483648)
+    if __load__(far + -2147483648) not=? 43 { return 6 }
+    far = p - 2147483647
+    if __load__(far + 2147483647) not=? 43 { return 7 }
+    far = p - 2147483648
+    # Negating INT32_MIN is outside the displacement range: keep arithmetic.
+    if __load__(far - -2147483648) not=? 43 { return 8 }
+    far = p + 1
+    if __load__(far + 0xffffffffffffffff) not=? 43 { return 9 }
+    if __load__(p + 0) not=? 43 { return 10 }
+    if sum8(1 2 3 4 5 6 7 __store__(44 p + 24)) not=? 28 { return 11 }
+    if sum8(1 2 3 4 5 6 7 __load__(p + 24)) not=? 72 { return 12 }
+    if __load__((p + 8) + touch(0)) not=? 42 { return 13 }
+    if __load__((p + 8) and -1) not=? 42 { return 14 }
+    __store__(touch(1) p + touch(2))
+    if trace not=? 12 or __load__(p + 2) not=? 1 { return 15 }
+    return 0
+}

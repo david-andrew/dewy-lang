@@ -77,6 +77,7 @@ class X86_64Backend(Backend):
         self._debug_scope: _DebugScope | None = None        # the innermost open scope node
         self._debug_frames: list[tuple[_DebugScope, str, _DebugScope]] = []   # (frame root, its end label, the node to return to)
         self._current_fn_code: list[str] | None = None
+        self._address_adjustment: tuple[list[str], int, int] | None = None
         self._reachable_fn_label_ids: set[int] | None = None
         self._data: list[str] = []
         self._next_label: int = 0
@@ -813,6 +814,10 @@ class X86_64Backend(Backend):
                     return
                 value = signed
             self._emit(f'{operation} ${value}, %rax')
+            if op_kind in (t1.Kind.TK_PLUS, t1.Kind.TK_MINUS):
+                offset = value if op_kind == t1.Kind.TK_PLUS else -value
+                if -2147483648 <= offset <= 2147483647:
+                    self._address_adjustment = (self._current_fn_code, len(self._current_fn_code), offset)
             if condition is not None:
                 self._emit(f'set{condition} %al')
                 self._emit('movzbq %al, %rax')
@@ -854,31 +859,50 @@ class X86_64Backend(Backend):
     # Memory operations
     # ========================================================================
     
+    def _memory_address(self) -> str:
+        """Fold an immediately preceding word adjustment into a displacement.
+
+        Any intervening instruction, label or debug directive is a barrier.
+        Capture this before popping a store operand: a spill pop may emit code.
+        The memory operation consumes the address, so its adjusted value is
+        not needed afterwards. Effective addresses retain 64-bit wrapping.
+        """
+        adjustment = self._address_adjustment
+        self._address_adjustment = None
+        if adjustment is not None:
+            code, length, offset = adjustment
+            if code is self._current_fn_code and len(code) == length:
+                code.pop()
+                return f'{offset}(%rax)'
+        return '(%rax)'
+
     def load_mem(self, width: int, signed: bool = False) -> None:
         """Load from memory address in rax."""
+        address = self._memory_address()
         if width == 64:
-            self._emit("movq (%rax), %rax")
+            self._emit(f"movq {address}, %rax")
         elif width == 32:
             if signed:
-                self._emit("movslq (%rax), %rax")
+                self._emit(f"movslq {address}, %rax")
             else:
-                self._emit("movl (%rax), %eax")
+                self._emit(f"movl {address}, %eax")
         elif width == 16:
             if signed:
-                self._emit("movswq (%rax), %rax")
+                self._emit(f"movswq {address}, %rax")
             else:
-                self._emit("movzwq (%rax), %rax")
+                self._emit(f"movzwq {address}, %rax")
         elif width == 8:
             if signed:
-                self._emit("movsbq (%rax), %rax")
+                self._emit(f"movsbq {address}, %rax")
             else:
-                self._emit("movzbq (%rax), %rax")
+                self._emit(f"movzbq {address}, %rax")
     
     def store_mem(self, width: int) -> None:
         """Store the saved value at %rax and return the intrinsic's zero."""
+        address = self._memory_address()
         value = self._saved_operand(width)
         instruction = self._STORE_OPERATIONS[width]
-        self._emit(f'{instruction} {value}, (%rax)')
+        self._emit(f'{instruction} {value}, {address}')
         self._emit("xorq %rax, %rax")
 
     def signed_shr(self) -> None:

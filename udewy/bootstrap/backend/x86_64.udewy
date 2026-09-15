@@ -18,6 +18,11 @@ let x86_function_codes:int = 0
 
 # The currently-being-emitted function's code Vec, or 0 when between functions.
 let x86_current_fn_code:int = 0
+# A final add/sub immediate can become the following memory displacement.
+# The code vector and its length identify adjacency, including debug barriers.
+let x86_address_code:int = 0
+let x86_address_length:int = 0
+let x86_address_offset:int = 0
 
 # IntSet of label_ids that are reachable (may be 0 = all reachable).
 let x86_reachable_fn_label_ids:int = 0
@@ -102,6 +107,7 @@ let x86_debug_scope_new = (low:int high:int):>int => {
 # ----------------------------------------------------------------------------
 
 let x86_alloc_state = ():>void => {
+    x86_address_code = 0
     x86_function_ids = vec_new(16)
     x86_function_codes = vec_new(16)
     x86_data = vec_new(32)
@@ -1381,6 +1387,15 @@ let x86_binary_immediate = (op_kind:int value:int):>void => {
         else if op_kind =? TK_XOR { op = "xorq" }
         if op {
             x86_emit_op_imm(op value "%rax")
+            if op_kind =? TK_PLUS or op_kind =? TK_MINUS {
+                let offset:int = value
+                if op_kind =? TK_MINUS { offset = 0 - value }
+                if offset >=? -2147483648 and offset <=? 2147483647 {
+                    x86_address_code = x86_current_fn_code
+                    x86_address_length = vec_len(x86_current_fn_code)
+                    x86_address_offset = offset
+                }
+            }
             return void
         }
         let cc:int = 0
@@ -1434,28 +1449,45 @@ let x86_binary_op = (op_kind:int):>void => {
 # Memory ops
 # ----------------------------------------------------------------------------
 
+let x86_memory_address = ():>int => {
+    let code:int = x86_address_code
+    x86_address_code = 0
+    # Conditions short-circuit: never read a missing code vector.
+    if code not=? 0 and code =? x86_current_fn_code and vec_len(code) =? x86_address_length {
+        vec_pop(code)
+        let bb:int = bb_new(32)
+        bb_push_int(bb x86_address_offset)
+        bb_push_str(bb "(%rax)")
+        return bb_finalize_as_string(bb)
+    }
+    return "(%rax)"
+}
+
 let x86_load_mem = (width:int signed:int):>void => {
+    let address:int = x86_memory_address()
     if width =? 64 {
-        x86_emit_op_2("movq" "(%rax)" "%rax")
+        x86_emit_op_2("movq" address "%rax")
     } else if width =? 32 {
-        if signed { x86_emit_op_2("movslq" "(%rax)" "%rax") }
-        else      { x86_emit_op_2("movl" "(%rax)" "%eax") }
+        if signed { x86_emit_op_2("movslq" address "%rax") }
+        else      { x86_emit_op_2("movl" address "%eax") }
     } else if width =? 16 {
-        if signed { x86_emit_op_2("movswq" "(%rax)" "%rax") }
-        else      { x86_emit_op_2("movzwq" "(%rax)" "%rax") }
+        if signed { x86_emit_op_2("movswq" address "%rax") }
+        else      { x86_emit_op_2("movzwq" address "%rax") }
     } else if width =? 8 {
-        if signed { x86_emit_op_2("movsbq" "(%rax)" "%rax") }
-        else      { x86_emit_op_2("movzbq" "(%rax)" "%rax") }
+        if signed { x86_emit_op_2("movsbq" address "%rax") }
+        else      { x86_emit_op_2("movzbq" address "%rax") }
     }
     return void
 }
 
 let x86_store_mem = (width:int):>void => {
+    # Capture the address before a spilled saved value emits its pop.
+    let address:int = x86_memory_address()
     let value:int = x86_pop_saved_operand(width)
-    if width =? 64      { x86_emit_op_2("movq" value "(%rax)") }
-    else if width =? 32 { x86_emit_op_2("movl" value "(%rax)") }
-    else if width =? 16 { x86_emit_op_2("movw" value "(%rax)") }
-    else if width =? 8  { x86_emit_op_2("movb" value "(%rax)") }
+    if width =? 64      { x86_emit_op_2("movq" value address) }
+    else if width =? 32 { x86_emit_op_2("movl" value address) }
+    else if width =? 16 { x86_emit_op_2("movw" value address) }
+    else if width =? 8  { x86_emit_op_2("movb" value address) }
     x86_emit_indented("xorq %rax, %rax")
     return void
 }

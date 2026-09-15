@@ -432,6 +432,7 @@ def test_short_circuit_contexts_match_between_compilers(bootstrap_binary, tmp_pa
 @pytest.mark.parametrize('fixture', [
     'test_cached_operands.udewy', 'test_alloca_spills.udewy', 'test_immediate_operands.udewy',
     'test_intrinsic_operands.udewy',
+    'test_address_displacements.udewy',
 ])
 def test_cached_operand_execution_and_spills(bootstrap_binary, tmp_path, target, fixture):
     source = (REPO_ROOT / 'udewy/tests' / fixture).read_text()

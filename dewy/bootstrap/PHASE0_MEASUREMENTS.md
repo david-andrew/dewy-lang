@@ -2851,3 +2851,40 @@ compiler/library parse-tree hashes are unchanged. Parsing changes **6.472 to
 6.340 seconds** in one bounded pair; this is a small local improvement, not
 a full-build result. Artifacts: `parser-isolated-complete-gates.log`,
 `parser-isolated-{before,after}.json`, `measure-parser-isolated.log`.
+
+### Direct memory displacements
+
+Both x86-64 µDewy backends fold an immediately preceding add/subtract
+immediate into a load/store's signed 32-bit displacement. The function code
+buffer and its length establish adjacency; instructions, labels and debug
+directives are barriers. Store operands may still spill, and effective
+addresses keep 64-bit wrapping. Other backends retain their existing code.
+
+The 49 existing targeted checks pass. The new displacement fixture initially
+reused overlapping test buffers; after separating those buffers, both native
+and hosted compilers pass it on x86-64 and C. It covers every memory width,
+signedness, displacement limits, intervening operations and spilled stores.
+Artifacts: `address-displacements-gates.log`,
+`address-displacements-boundary-gates.log`.
+
+Three module pairs with folding disabled/enabled retain roughly equal code
+generation time (median **0.278/0.279 seconds**), while toolchain time changes
+**0.316 to 0.293 seconds**. Assembly shrinks **4,080,748 to 3,926,235 bytes**
+and the executable **865,576 to 836,904 bytes**. The disabled measurement
+still includes bookkeeping for potential displacements. A separate comparison
+against the previous backend on the native effect-analysis workload changes
+code generation **0.867 to 0.908 seconds**, toolchain **0.399 to 0.344 seconds**,
+and executable size **941,184 to 904,320 bytes**. Nine paired executions all
+return 42; runtime remains about 17 milliseconds with no material measured
+improvement. This is a code-size and toolchain improvement, not a demonstrated
+full-compiler runtime gain. Artifacts: `address-displacements-module/results.json`,
+`address-displacement-execution/results.json`.
+
+Two other hosted lowering prototypes were discarded after measurement:
+class-based transformation/extraction dispatch added substantial handler code
+for little module improvement; sharing generated word leaves was slower in
+both the module and full-program lowering comparisons (**13.735 to 15.073
+seconds** for the latter single pair). Both retained identical emitted source.
+The current implementation keeps fresh generated leaves. Artifacts:
+`lowering-dispatch-module/results.json`, `generated-word-leaves-module/results.json`,
+`generated-word-leaves-full-analysis/results.json`.
