@@ -25,12 +25,15 @@ ParameterEffects:type = [
 ]
 FunctionEffects:type = [literal:addr params:dict<addr ParameterEffects>]
 ProgramEffects:type = [by_literal:dict<addr FunctionEffects> by_param_binding:dict<addr ParameterEffects>]
+EffectTransfer:type = const [caller:addr caller_parameter:addr callee_parameter:addr prefix:Route]
 Analysis:type = [
     literals:array<addr>=[] declares:dict<addr addr>=[]
     reassigned:set<addr>=set[] param_ids:set<addr>=set[]
     effects:dict<addr FunctionEffects>=[]
     callback_targets:dict<addr array<addr>>=[]
     value_casts_escape:bool=true
+    current_literal:addr=0
+    transfers:dict<addr array<EffectTransfer>>=[]
 ]
 ResolvedRoute:type = [binding_id:addr route:Route inner:array<addr>]
 ArgumentPair:type = const [argument:addr parameter:addr?]
@@ -210,37 +213,37 @@ resolve_route = (id:addr params:dict<addr ParameterEffects> nodes:array<hir.AST>
     }
 }
 
-visit_all = (ids:array<addr> @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
+visit_all = (ids:array<addr> @params:dict<addr ParameterEffects> @analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let changed:bool = false
-    loop id in ids { if visit(id @params analysis nodes type_nodes) { changed = true } }
+    loop id in ids { if visit(id @params @analysis nodes type_nodes) { changed = true } }
     return changed
 }
-visit_route = (id:addr kind:Effect suffix:array<string> @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
+visit_route = (id:addr kind:Effect suffix:array<string> @params:dict<addr ParameterEffects> @analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let resolved = resolve_route(id params nodes)
-    if resolved is? none return visit(id @params analysis nodes type_nodes)
+    if resolved is? none return visit(id @params @analysis nodes type_nodes)
     let steps = resolved.route.steps
     loop step in suffix { steps.push(step) }
     let changed = record(resolved.binding_id kind Route[steps] @params)
-    if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+    if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }
     return changed
 }
 
-visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
+visit = (id:addr @params:dict<addr ParameterEffects> @analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     if params.length =? 0 return false
     let node = hir.node_at(nodes id)
-    if node is? hir.FunctionCall return visit_call(node @params analysis nodes type_nodes)
+    if node is? hir.FunctionCall return visit_call(node @params @analysis nodes type_nodes)
     if node is? hir.IndexAssign | hir.MemberAssign {
         let target = hir.node_at(nodes node.target)
         let changed:bool = false
         if target is? hir.Index {
-            changed = visit_route(target.array 'mutate' ['[]'] @params analysis nodes type_nodes)
-            if visit(target.index @params analysis nodes type_nodes) { changed = true }
+            changed = visit_route(target.array 'mutate' ['[]'] @params @analysis nodes type_nodes)
+            if visit(target.index @params @analysis nodes type_nodes) { changed = true }
         }
         else {
             $runtime_assert target is? hir.MemberAccess
-            changed = visit_route(target.value 'mutate' [target.name] @params analysis nodes type_nodes)
+            changed = visit_route(target.value 'mutate' [target.name] @params @analysis nodes type_nodes)
         }
-        if visit(node.value @params analysis nodes type_nodes) { changed = true }
+        if visit(node.value @params @analysis nodes type_nodes) { changed = true }
         return changed
     }
     if node is? hir.Assign | hir.IteratorExpression {
@@ -249,7 +252,7 @@ visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:arr
         let changed:bool = false
         if target.binding_id isnt? none { changed = record(target.binding_id 'rebind' Route[[]] @params) }
         let value = if node is? hir.Assign node.value else node.iterable
-        if visit(value @params analysis nodes type_nodes) { changed = true }
+        if visit(value @params @analysis nodes type_nodes) { changed = true }
         return changed
     }
     if node is? hir.MemberAccess {
@@ -258,33 +261,33 @@ visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:arr
             # A runtime function-valued field captures its receiver. Reading
             # it may expose sibling fields to mutation through that capture.
             let resolved = resolve_route(node.value params nodes)
-            if resolved is? none return visit(node.value @params analysis nodes type_nodes)
+            if resolved is? none return visit(node.value @params @analysis nodes type_nodes)
             let changed = opaque(resolved.binding_id resolved.route @params)
-            if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+            if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }
             return changed
         }
     }
     if node is? hir.Index | hir.MemberAccess {
         let resolved = resolve_route(id params nodes)
-        if resolved is? none return visit_all(hir.children(node) @params analysis nodes type_nodes)
+        if resolved is? none return visit_all(hir.children(node) @params @analysis nodes type_nodes)
         let changed = record(resolved.binding_id 'read' resolved.route @params)
-        if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+        if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }
         return changed
     }
-    if node is? hir.ArrayLength return visit_route(node.array 'read' [] @params analysis nodes type_nodes)
+    if node is? hir.ArrayLength return visit_route(node.array 'read' [] @params @analysis nodes type_nodes)
     if node is? hir.DictStore | hir.DictRemove {
-        let changed = visit_route(node.keys 'mutate' [] @params analysis nodes type_nodes)
+        let changed = visit_route(node.keys 'mutate' [] @params @analysis nodes type_nodes)
         let values = node.values
         if values isnt? none {
-            if visit_route(values 'mutate' [] @params analysis nodes type_nodes) { changed = true }
+            if visit_route(values 'mutate' [] @params @analysis nodes type_nodes) { changed = true }
         }
         let key = node.key
-        if key isnt? none { if visit(key @params analysis nodes type_nodes) { changed = true } }
+        if key isnt? none { if visit(key @params @analysis nodes type_nodes) { changed = true } }
         if node is? hir.DictStore and node.value isnt? none {
-            if visit(node.value @params analysis nodes type_nodes) { changed = true }
+            if visit(node.value @params @analysis nodes type_nodes) { changed = true }
         }
         if node is? hir.DictRemove and node.default isnt? none {
-            if visit(node.default @params analysis nodes type_nodes) { changed = true }
+            if visit(node.default @params @analysis nodes type_nodes) { changed = true }
         }
         return changed
     }
@@ -293,7 +296,7 @@ visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:arr
         let resolved = resolve_route(value params nodes)
         if resolved is? none {
             if node is? hir.Place return false
-            return visit(value @params analysis nodes type_nodes)
+            return visit(value @params @analysis nodes type_nodes)
         }
         let changed:bool = false
         if node is? hir.Place { changed = opaque(resolved.binding_id resolved.route @params) }
@@ -304,17 +307,17 @@ visit = (id:addr @params:dict<addr ParameterEffects> analysis:Analysis nodes:arr
             changed = record(resolved.binding_id 'read' resolved.route @params)
             if analysis.value_casts_escape and record(resolved.binding_id 'escape' resolved.route @params) { changed = true }
         }
-        if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+        if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }
         return changed
     }
     if node is? hir.ExpressedIdentifier {
         if node.binding_id is? none return false
         return record(node.binding_id 'read' Route[[]] @params)
     }
-    return visit_all(hir.children(node) @params analysis nodes type_nodes)
+    return visit_all(hir.children(node) @params @analysis nodes type_nodes)
 }
 
-visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
+visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> @analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let function = hir.node_at(nodes call.func)
     let arguments = call.pos_args
     loop argument in call.kw_args.values { arguments.push(argument) }
@@ -322,18 +325,18 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis
         # Joining reads its receiver. A separator or other argument can still
         # have effects, so retain the ordinary argument walk in either case.
         let kind:Effect = if function.name =? 'join' 'read' else 'mutate'
-        let changed = visit_route(function.array kind [] @params analysis nodes type_nodes)
-        if visit_all(arguments @params analysis nodes type_nodes) { changed = true }
+        let changed = visit_route(function.array kind [] @params @analysis nodes type_nodes)
+        if visit_all(arguments @params @analysis nodes type_nodes) { changed = true }
         return changed
     }
-    let changed = visit(call.func @params analysis nodes type_nodes)
+    let changed = visit(call.func @params @analysis nodes type_nodes)
     let pairings:array<Pairing> = []
     let known=false
     let paired=false
     loop argument in arguments {
         let node = hir.node_at(nodes argument)
         if node isnt? hir.Place {
-            if visit_route(argument 'read' [] @params analysis nodes type_nodes) { changed = true }
+            if visit_route(argument 'read' [] @params @analysis nodes type_nodes) { changed = true }
             continue
         }
         # A value boundary only reads its argument. Resolve/pair the callee
@@ -355,10 +358,10 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis
         let resolved = resolve_route(node.target params nodes)
         if resolved is? none {
             let target = hir.node_at(nodes node.target)
-            if visit_all(hir.children(target) @params analysis nodes type_nodes) { changed = true }
+            if visit_all(hir.children(target) @params @analysis nodes type_nodes) { changed = true }
             continue
         }
-        if visit_all(resolved.inner @params analysis nodes type_nodes) { changed = true }
+        if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }
         if not known {
             if opaque(resolved.binding_id resolved.route @params) { changed = true }
             continue
@@ -374,57 +377,41 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> analysis
             if summary is? none {
                 if opaque(resolved.binding_id resolved.route @params) { changed = true }
             }
-            else if translated(resolved.binding_id summary resolved.route @params) { changed = true }
+            else {
+                $runtime_assert parameter isnt? none
+                # The route and parameter pairing depend only on checked
+                # syntax. Record the equation; solve it after all local scans.
+                let transfers = analysis.transfers.get(pairing.target [])
+                transfers.push(EffectTransfer[analysis.current_literal resolved.binding_id parameter resolved.route])
+                analysis.transfers[pairing.target] = transfers
+            }
         }
     }
     return changed
-}
-
-summary_callers = (analysis:Analysis nodes:array<hir.AST>):>dict<addr set<addr>> => {
-    let callers:dict<addr set<addr>>=[]
-    loop caller in analysis.literals {
-        let literal=hir.node_at(nodes caller)
-        $runtime_assert literal is? hir.FunctionLiteral
-        let pending:array<addr>=[literal.body]
-        loop parameter in literal_params(literal) {
-            if parameter is? hir.BoundParam {pending.push(parameter.value)}
-        }
-        let seen:set<addr>=set[]
-        loop pending.length >? 0 {
-            let id=pending.pop
-            if id in? seen continue
-            seen.add(id)
-            let node=hir.node_at(nodes id)
-            if node is? hir.FunctionLiteral|hir.GenericFunction continue
-            if node is? hir.FunctionCall {
-                let placed=false
-                loop argument in node.pos_args {if hir.node_at(nodes argument) is? hir.Place {placed=true}}
-                loop argument in node.kw_args.values {if hir.node_at(nodes argument) is? hir.Place {placed=true}}
-                if placed {
-                    let targets=direct_targets(node analysis nodes)
-                    if targets isnt? none {
-                        loop target in targets {
-                            let users=callers.get(target set[])
-                            users.add(caller)
-                            callers[target]=users
-                        }
-                    }
-                }
-            }
-            loop child in hir.children(node) {pending.push(child)}
-        }
-    }
-    return callers
 }
 
 analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:types.Table callback_targets:dict<addr array<addr>>=[] value_casts_escape:bool=true):>ProgramEffects => {
     let analysis = collect(root nodes)
     analysis.callback_targets=callback_targets
     analysis.value_casts_escape=value_casts_escape
-    # These are may-effects: updates only add coverage. Revisit callers of
-    # changed summaries, instead of rescanning every function each round.
-    # Prefix normalization plus MAX_ROUTE_DEPTH bounds recursive place routes.
-    let callers=summary_callers(analysis nodes)
+    # Scan bodies/defaults once for local effects and place-call transfers.
+    # Propagating summaries later never needs to revisit syntax or resolve a
+    # callee again. Value boundaries contribute local reads, not transfers.
+    loop id in analysis.literals {
+        if id not in? analysis.effects continue
+        analysis.current_literal=id
+        let summary=analysis.effects[id]
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        visit(literal.body @summary.params @analysis nodes type_nodes);
+        loop parameter in literal_params(literal) {
+            if parameter is? hir.BoundParam {visit(parameter.value @summary.params @analysis nodes type_nodes);}
+        }
+        analysis.effects[id]=summary
+    }
+    # May-effects only add coverage. Prefix normalization and MAX_ROUTE_DEPTH
+    # bound recursive routes. Value semantics give self-transfers a snapshot
+    # of the source summary while the destination grows.
     let pending=analysis.literals
     let queued:set<addr>=set[]
     loop id in pending {queued.add(id)}
@@ -432,19 +419,15 @@ analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:types.Table callbac
         let id=pending.pop
         queued.pop(id default=id);
         if id not in? analysis.effects continue
-        let summary = analysis.effects[id]
-        let literal = hir.node_at(nodes id)
-        $runtime_assert literal is? hir.FunctionLiteral
-        let updated=visit(literal.body @summary.params analysis nodes type_nodes)
-        loop parameter in literal_params(literal) {
-            if parameter is? hir.BoundParam and visit(parameter.value @summary.params analysis nodes type_nodes) {updated=true}
-        }
-        if updated {
-            analysis.effects[id] = summary
-            loop caller in callers.get(id set[]) {
-                if caller in? queued continue
-                queued.add(caller)
-                pending.push(caller)
+        let callee=analysis.effects[id]
+        loop transfer in analysis.transfers.get(id []) {
+            if transfer.callee_parameter not in? callee.params or transfer.caller not in? analysis.effects continue
+            let caller=analysis.effects[transfer.caller]
+            if translated(transfer.caller_parameter callee.params[transfer.callee_parameter] transfer.prefix @caller.params) {
+                analysis.effects[transfer.caller]=caller
+                if transfer.caller in? queued continue
+                queued.add(transfer.caller)
+                pending.push(transfer.caller)
             }
         }
     }

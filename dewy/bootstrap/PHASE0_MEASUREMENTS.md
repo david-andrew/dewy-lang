@@ -2746,3 +2746,20 @@ The input HIR is prepared once; those are analysis-only timings, not full
 builds. The native solver remains the independent comparison implementation
 at this checkpoint. Artifacts: `effect-transfers-gates.log`,
 `effect-transfers-full-analysis/results.json`, `measure-effect-transfers-fixed.log`.
+
+The native analyzer now records the same transfer equations during its local
+body/default scan. This also removes its separate caller-discovery traversal.
+The analysis record owns the graph; mutable place parameters carry updates
+through the visitor, and ordinary value semantics snapshot recursive sources.
+
+The native/hosted effect comparison and five existing storage/callback graph
+fixtures pass. A new 128-function recursive graph with 32 local reads per
+body verifies propagation, retained reads and absence of spurious escapes or
+rebindings. Five paired executions through the old/new direct x86-64 programs
+return 42; median runtime, including graph construction, changes **21.5 to
+17.0 milliseconds**. This is a bounded kernel, not a full-build result.
+The existing PGO native seed also compiles the updated analyzer and kernel;
+that native-built executable returns 42. Its build overlaps an isolated
+regression check, so its phase timings are not a performance sample.
+Artifacts: `native-effect-transfers-gates.log`, `native-effect-graph-place-gate.log`,
+`native-effect-transfer-kernel/results.json`, `native-effect-transfer-seed-check`.

@@ -1,0 +1,50 @@
+# A recursive forwarding graph with substantial local bodies. Propagating a
+# callee's effects must preserve local reads and reach every caller.
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/semantic/analyze/effects.dewy" as effects
+main=():>int64=>{
+    let nodes:array<hir.AST>=[]
+    let ts:types.Table=types.Table[]
+    let loc=Span[0 0]
+    let empty=types.primitive('void' @ts)
+    let word=types.primitive('int64' @ts)
+    let array=types.array_type(word 1 @ts)
+    let signature=types.function_type([] [] none empty [] @ts)
+    let declarations:array<addr>=[]
+    loop i in 0.. and i <? 128 {
+        let binding:addr=1000+i
+        let body:array<addr>=[]
+        let value=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' binding])
+        loop j in 0.. and j <? 32 {
+            body.push(hir.append_node(@nodes hir.ArrayLength[loc word value]))
+        }
+        if i =? 127 {
+            let zero=hir.append_node(@nodes hir.Integer[loc word '0d' 0])
+            let index=hir.append_node(@nodes hir.Index[loc word value zero 0])
+            body.push(hir.append_node(@nodes hir.IndexAssign[loc empty index zero]))
+        }
+        let next:addr=if i =? 127 0 else i+1
+        let callee=hir.append_node(@nodes hir.ExpressedIdentifier[loc signature 'next' 2000+next])
+        let place=hir.append_node(@nodes hir.Place[loc array value])
+        body.push(hir.append_node(@nodes hir.FunctionCall[loc empty callee [place] []]))
+        let block=hir.append_node(@nodes hir.Block[loc empty body true])
+        let parameter=hir.Param['values' array binding place=true]
+        let literal=hir.append_node(@nodes hir.FunctionLiteral[loc signature [parameter] [] none empty block])
+        declarations.push(hir.append_node(@nodes hir.Declare[loc empty 'let' "f{i}" signature literal 2000+i]))
+    }
+    let root=hir.append_node(@nodes hir.Block[loc empty declarations true])
+    let result=effects.analyze_effects(root nodes ts)
+    loop i in 0.. and i <? 128 {
+        let binding:addr=1000+i
+        if binding not in? result.by_param_binding return 1
+        let summary=result.by_param_binding[binding]
+        if summary.reads.length not=? 1 or summary.mutates.length not=? 1 return 2
+        if summary.rebinds.length not=? 0 or summary.escapes.length not=? 0 return 3
+        if summary.reads[0].steps.length not=? 0 return 4
+        let path=summary.mutates[0].steps
+        if path.length not=? 1 or path[0] not=? '[]' return 5
+    }
+    return 42
+}
