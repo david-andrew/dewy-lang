@@ -2496,3 +2496,23 @@ The quiet module comparison changes 9.533 to **8.380 seconds**, with backend
 whole-invocation difference. Full-build impact of this last batch is not yet
 measured. Artifacts: `direct-static-data-gates.log`,
 `direct-static-relocation-gates.log`, `measure-static-data.log`.
+
+### Token context inventory and recursion dispatch
+
+The first seven t2 rewrites operate independently inside token lists and do
+not replace list-containing tokens. They now share one inventory of those
+lists, retaining phase order. Partial operators, operator functions and
+keyword/chaining passes keep their recursive ordering because they inspect
+or replace containers. Recursive helpers remain available for the reference
+comparison. Token recursion also reuses the fixed registry's concrete-class
+handler, including inherited handlers, without repeating generic dispatch's
+weak-key bookkeeping at every leaf.
+
+Across the same 125 compiler/library source files, quiet parsing changes
+**10.389 to 9.310 seconds**. Every serialized AST hash matches the preceding
+parser. The 18 grammar/dispatch/reference-pipeline checks and 103 token,
+literal-boundary, partial-operator and precedence checks pass. Artifacts:
+`parser-contexts-{before,after}.json`, `token-context-inventory-expanded-gates.log`,
+`parser-context-integration-gates.log`. The preceding profile is
+`host-parser-compact.prof` (42.618 profiled seconds); no full-build improvement
+is inferred from that profile or the standalone parse measurement.

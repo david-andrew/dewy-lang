@@ -467,36 +467,36 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None, *, ctx: C
 
 
 @singledispatch
-def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> None:
+def _recurse_dispatch(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> None:
     """
     Helper to recursively apply a function to the inner tokens of a token (if it has any)
     It is expected that `func` will call `recurse_into` with itself as the callable.
-    Dispatch caches each concrete token class's handler. Most tokens are
+    The registry selects each concrete token class's handler. Most tokens are
     leaves, visited by every phase; retesting all container classes at each
     visit dominated this traversal. Subclasses retain their parent's handler.
     """
     # No inner tokens. TODO: diagnose new, unhandled token containers.
 
 
-@recurse_into.register(t1.Block)
-@recurse_into.register(t1.ParametricEscape)
+@_recurse_dispatch.register(t1.Block)
+@_recurse_dispatch.register(t1.ParametricEscape)
 def _recurse_inner(token, func):
     func(token.inner)
 
 
-@recurse_into.register(t1.IString)
+@_recurse_dispatch.register(t1.IString)
 def _recurse_string(token, func):
     for child in token.content:
         recurse_into(child, func)
 
 
-@recurse_into.register(KeywordExpr)
+@_recurse_dispatch.register(KeywordExpr)
 def _recurse_keyword(token, func):
     for part in token.parts:
         recurse_into(part, func)
 
 
-@recurse_into.register(Flow)
+@_recurse_dispatch.register(Flow)
 def _recurse_flow(token, func):
     for arm in token.arms:
         recurse_into(arm, func)
@@ -504,14 +504,14 @@ def _recurse_flow(token, func):
         recurse_into(token.default, func)
 
 
-@recurse_into.register(Directive)
+@_recurse_dispatch.register(Directive)
 def _recurse_directive(token, func):
     recurse_into(token.condition, func)
     if token.message is not None:
         recurse_into(token.message, func)
 
 
-@recurse_into.register(Chain)
+@_recurse_dispatch.register(Chain)
 def _recurse_chain(token, func):
     # The only phase visiting existing Chains is make_chains. Visit their
     # contents without applying the phase to the Chain itself, which would
@@ -521,14 +521,27 @@ def _recurse_chain(token, func):
         recurse_into(item, func)
 
 
-def remove_whitespace(tokens: list[t1.Token]) -> None:
+@cache
+def _recurse_handler(cls: type[t1.Token]):
+    # The registry above is fixed once this module is initialized. Reuse its
+    # normal subclass resolution without repeating singledispatch's weak-key
+    # and virtual-ABC bookkeeping at every leaf of every token pass.
+    return _recurse_dispatch.dispatch(cls)
+
+
+def recurse_into(token: t1.Token, func: Callable[[list[t1.Token]], None]) -> None:
+    _recurse_handler(type(token))(token, func)
+
+
+def remove_whitespace(tokens: list[t1.Token], *, recursive: bool = True) -> None:
     """Remove whitespace tokens from the tokens list (recursively)"""
     tokens[:] = [token for token in tokens if not isinstance(token, t1.Whitespace)]
-    for token in tokens:
-        recurse_into(token, remove_whitespace)
+    if recursive:
+        for token in tokens:
+            recurse_into(token, remove_whitespace)
 
 
-def insert_juxtapose(tokens: list[t1.Token], *, ctx: Context) -> None:
+def insert_juxtapose(tokens: list[t1.Token], *, ctx: Context, recursive: bool = True) -> None:
     """
     Insert juxtapose tokens between adjacent (atom) tokens if their spans touch (which indicates there was no whitespace between them)
     TODO: this is vaguely inefficient with all the insertions. If this is a performance bottleneck, consider some type of e.g. heap or rope or etc. data structure
@@ -539,7 +552,8 @@ def insert_juxtapose(tokens: list[t1.Token], *, ctx: Context) -> None:
     i = 0
     while i < len(tokens):
         # recursively handle inserting juxtaposes for blocks
-        recurse_into(tokens[i], lambda inner: insert_juxtapose(inner, ctx=ctx))
+        if recursive:
+            recurse_into(tokens[i], lambda inner: insert_juxtapose(inner, ctx=ctx))
 
         # insert juxtapose if adjacent (atom) tokens' spans touch
         if i + 1 < len(tokens) and tokens[i].loc.stop == tokens[i+1].loc.start:
@@ -552,7 +566,7 @@ def insert_juxtapose(tokens: list[t1.Token], *, ctx: Context) -> None:
         i += 1
 
 
-def insert_comma_voids(tokens: list[t1.Token]) -> None:
+def insert_comma_voids(tokens: list[t1.Token], *, recursive: bool = True) -> None:
     """Insert void tokens between any instances of `,,` or comma at the beginning or end of a context"""
     if len(tokens) == 0:
         return
@@ -564,7 +578,8 @@ def insert_comma_voids(tokens: list[t1.Token]) -> None:
     
     while i < len(tokens):
         token = tokens[i]
-        recurse_into(token, insert_comma_voids)
+        if recursive:
+            recurse_into(token, insert_comma_voids)
         
         if i+1 < len(tokens) and is_comma(token) and is_comma(tokens[i+1]):
             tokens.insert(i+1, t1.Identifier(Span(token.loc.stop, token.loc.stop), 'void'))
@@ -575,7 +590,7 @@ def insert_comma_voids(tokens: list[t1.Token]) -> None:
         tokens.append(t1.Identifier(Span(tokens[-1].loc.stop, tokens[-1].loc.stop), 'void'))
 
 
-def make_type_of_operators(tokens: list[t1.Token]) -> None:
+def make_type_of_operators(tokens: list[t1.Token], *, recursive: bool = True) -> None:
     """`type` followed by `of` becomes the prefix operator `type of`: minting
     binds tighter than `&`/`|` (`type of Token & [text:string]` is
     `(type of Token) & [...]`), while the infix `of` of a generic bound
@@ -583,7 +598,8 @@ def make_type_of_operators(tokens: list[t1.Token]) -> None:
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        recurse_into(token, make_type_of_operators)
+        if recursive:
+            recurse_into(token, make_type_of_operators)
 
         if isinstance(token, t1.Identifier) and token.name == 'type':
             if len(tokens) > i+1 and isinstance(tokens[i+1], t1.Operator) and tokens[i+1].symbol == 'of':
@@ -591,12 +607,13 @@ def make_type_of_operators(tokens: list[t1.Token]) -> None:
         i += 1
 
 
-def make_inverted_comparisons(tokens: list[t1.Token]) -> None:
+def make_inverted_comparisons(tokens: list[t1.Token], *, recursive: bool = True) -> None:
     """`not` followed by a comparison operator becomes an inverted comparison operator"""
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        recurse_into(token, make_inverted_comparisons)
+        if recursive:
+            recurse_into(token, make_inverted_comparisons)
         
         if isinstance(token, t1.Operator) and token.symbol == 'not':
             if len(tokens) > i+1 and is_binary_op(tokens[i+1]) and tokens[i+1].symbol in INVERTABLE_COMPARISON_OPS:
@@ -605,12 +622,13 @@ def make_inverted_comparisons(tokens: list[t1.Token]) -> None:
 
 
 
-def make_broadcast_operators(tokens: list[t1.Token]) -> None:
+def make_broadcast_operators(tokens: list[t1.Token], *, recursive: bool = True) -> None:
     """Convert any . operator next to a unary or binary operator into a broadcast operator"""
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        recurse_into(token, make_broadcast_operators)
+        if recursive:
+            recurse_into(token, make_broadcast_operators)
         
         if isinstance(token, t1.Operator) and token.symbol == '.':
             if len(tokens) > i+1 and (is_binary_op(tokens[i+1]) or is_prefix_op(tokens[i+1])):
@@ -618,12 +636,13 @@ def make_broadcast_operators(tokens: list[t1.Token]) -> None:
         i += 1
 
 
-def make_combined_assignment_operators(tokens: list[t1.Token]) -> None:
+def make_combined_assignment_operators(tokens: list[t1.Token], *, recursive: bool = True) -> None:
     """Convert any combined assignment operators into a single token"""
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        recurse_into(token, make_combined_assignment_operators)
+        if recursive:
+            recurse_into(token, make_combined_assignment_operators)
         
         if is_binary_op(token) or isinstance(token, BroadcastOp):
             if len(tokens) > i+1 and isinstance(tokens[i+1], t1.Operator) and tokens[i+1].symbol == '=':
@@ -1195,21 +1214,26 @@ def postok(srcfile: SrcFile) -> list[Chain]:
 
 def postok_inner(tokens: list[t1.Token], *, ctx: Context) -> None:
     """apply postprocessing steps to the tokens. Converts list[Token] into list[Chain] in place"""
-    # remove whitespace and insert juxtapose tokens
-    remove_whitespace(tokens)
-    insert_juxtapose(tokens, ctx=ctx)
+    # These lexical rewrites inspect one token list at a time and never
+    # replace a token containing another list. Inventory those lists once,
+    # then preserve phase order without rediscovering every container/leaf
+    # in seven recursive walks. Later partial/operator-function and keyword
+    # passes inspect or replace containers, so keep their recursive ordering.
+    contexts = [tokens]
+    for inner in contexts:
+        for token in inner:
+            recurse_into(token, contexts.append)
 
-    # insert void between any instances of `,,` or comma at the beginning or end of a context
-    insert_comma_voids(tokens)
+    for inner in contexts:
+        remove_whitespace(inner, recursive=False)
+    for inner in contexts:
+        insert_juxtapose(inner, ctx=ctx, recursive=False)
+    for rewrite in (insert_comma_voids, make_type_of_operators,
+                    make_inverted_comparisons, make_broadcast_operators,
+                    make_combined_assignment_operators):
+        for inner in contexts:
+            rewrite(inner, recursive=False)
 
-    # `type of` is one prefix operator
-    make_type_of_operators(tokens)
-    # combine not with comparison operators into a single token
-    make_inverted_comparisons(tokens)
-    # convert any . operator next to a binary operator (e.g. .+ .^/-) into a broadcast operator
-    make_broadcast_operators(tokens)
-    # convert any combined assignment operators (e.g. += -= etc.) into a single token
-    make_combined_assignment_operators(tokens)
     # `(<? n)`, `(.length)`, `(* 2)`: a partial operator is a one-parameter lambda
     make_partial_operators(tokens)
     # convert any (op) into an identifier token for that operator (e.g. (+=) -> +=)
