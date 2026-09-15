@@ -55,6 +55,7 @@ from .lowering_shared import (
     STRING_BYTE_LENGTH_OFFSET,
     LocalBindingKey,
     local_binding_key,
+    replace_changed,
     LoopRegion,
     CopyNote,
     MoveNote,
@@ -3276,14 +3277,14 @@ class _Lowerer(
                     and not isinstance(call.pos_args[0], hir.Integer)
                 ):
                     region = self._frame_region(node.loc)
-                    return replace(node, expr=self._region_call('_region_alloc', [region, call.pos_args[0]], node.loc, 'int64'))
+                    return replace_changed(node, expr=self._region_call('_region_alloc', [region, call.pos_args[0]], node.loc, 'int64'))
             if isinstance(node, hir.Block):
-                return replace(node, items=[walk(item) for item in node.items])
+                return replace_changed(node, items=[walk(item) for item in node.items])
             if isinstance(node, hir.Flow):
-                return replace(node, arms=[replace(arm, body=walk(arm.body)) for arm in node.arms],
+                return replace_changed(node, arms=[replace_changed(arm, body=walk(arm.body)) for arm in node.arms],
                                default=walk(node.default) if node.default is not None else None)
             if isinstance(node, hir.Suppress):
-                return replace(node, item=walk(node.item))
+                return replace_changed(node, item=walk(node.item))
             return node
 
         return walk(body)
@@ -3323,26 +3324,26 @@ class _Lowerer(
                     if in_loop and is_frame_allocation(item):
                         # at function entry it has no source position of its own: a
                         # breakpoint on its original line must not resolve to it
-                        hoisted.append(replace(item, loc=Span(0, 0)))
+                        hoisted.append(replace_changed(item, loc=Span(0, 0)))
                         continue
                     items.append(walk(item, in_loop))
-                return replace(node, items=items)
+                return replace_changed(node, items=items)
             if isinstance(node, hir.Flow):
                 arms = [
-                    replace(arm, body=walk(arm.body, in_loop or isinstance(arm, hir.LoopArm)))
+                    replace_changed(arm, body=walk(arm.body, in_loop or isinstance(arm, hir.LoopArm)))
                     for arm in node.arms
                 ]
                 default = walk(node.default, in_loop) if node.default is not None else None
-                return replace(node, arms=arms, default=default)
+                return replace_changed(node, arms=arms, default=default)
             if isinstance(node, hir.Suppress):
-                return replace(node, item=walk(node.item, in_loop))
+                return replace_changed(node, item=walk(node.item, in_loop))
             return node
 
         rewritten = walk(body, False)
         if not hoisted:
             return body
         if isinstance(rewritten, hir.Block) and rewritten.scoped:
-            return replace(rewritten, items=[*hoisted, *rewritten.items])
+            return replace_changed(rewritten, items=[*hoisted, *rewritten.items])
         return hir.Block(rewritten.loc, rewritten.type, [*hoisted, rewritten], True)
 
     def _note_owned_object(self, node: hir.Declare, declared_type: ty.Type) -> None:
@@ -3640,7 +3641,7 @@ class _Lowerer(
                     moved = value.name if isinstance(value, hir.ExpressedIdentifier) and (value.name in self.owned_strings or value.name in self.owned_cells) else None
                     items.extend(releases(live, moved))
                     items.extend(exit_statements)
-                    items.append(replace(item, item=value))
+                    items.append(replace_changed(item, item=value))
                 elif isinstance(item, (hir.Break, hir.Continue)):
                     inner = loop_marks[-1] if loop_marks else len(scopes)
                     items.extend(releases([*scopes[inner:], here]))
@@ -3655,7 +3656,7 @@ class _Lowerer(
                 items.extend(releases([here]))
             if not scopes and exit_statements and not (items and diverges(items[-1])):
                 items.extend(exit_statements)   # the function body's fall-through exit
-            return replace(block, items=items)
+            return replace_changed(block, items=items)
 
         def walk_body(node: hir.AST, scopes: list[list[hir.ExpressedIdentifier]], loop_marks: list[int]) -> hir.AST:
             if isinstance(node, hir.Block):
@@ -3673,9 +3674,9 @@ class _Lowerer(
             arms = []
             for arm in flow.arms:
                 marks = [*loop_marks, len(scopes)] if isinstance(arm, hir.LoopArm) else loop_marks
-                arms.append(replace(arm, body=walk_body(arm.body, scopes, marks)))
+                arms.append(replace_changed(arm, body=walk_body(arm.body, scopes, marks)))
             default = walk_body(flow.default, scopes, loop_marks) if flow.default is not None else None
-            return replace(flow, arms=arms, default=default)
+            return replace_changed(flow, arms=arms, default=default)
 
         return walk_block(body, [], [])
 

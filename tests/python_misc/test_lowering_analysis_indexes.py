@@ -70,3 +70,43 @@ def test_captured_write_inside_keyword_argument_is_rejected():
     ''')
     with pytest.raises(NotImplementedYet, match='writing to `n`'):
         codegen(source, debug_locations=False)
+
+
+def test_storage_cleanup_shares_unchanged_children_without_merging_occurrences():
+    from dewy.backend.udewy.lowering_shared import replace_changed
+    from dewy.semantic import hir
+    from dewy.reporting import Span
+
+    loc = Span(0, 0)
+    leaf = hir.Integer(loc, 'int64', '0d', 42)
+    body = hir.Block(loc, 'void', [leaf], True)
+    assert replace_changed(body, items=[leaf]) is body
+    # An equal, distinct occurrence is a real replacement. The old list and
+    # leaf must remain available to its earlier analysis/diagnostic consumers.
+    other = hir.Integer(loc, 'int64', '0d', 42)
+    updated = replace_changed(body, items=[other])
+    assert updated is not body and updated.items[0] is other
+    assert body.items[0] is leaf
+
+
+def test_storage_cleanup_matches_unconditionally_rebuilt_output(monkeypatch):
+    from dataclasses import replace
+    from dewy.backend.udewy import lowering_strings
+
+    source = SrcFile(None, '''
+        main=():>int64=>{
+            let output:array<string>=[]
+            loop i in 0..2 {
+                let data=[text="item {i}" numbers=[i i+1]]
+                if i=?1 continue
+                output.push(data.text)
+            }
+            if output.length=?2 and output[1]=?'item 2' return 42
+            return 0
+        }
+    ''')
+    shared = codegen(source, debug_locations=False)
+    monkeypatch.setattr(lower, 'replace_changed', replace)
+    monkeypatch.setattr(lowering_strings, 'replace_changed', replace)
+    rebuilt = codegen(source, debug_locations=False)
+    assert shared == rebuilt

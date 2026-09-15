@@ -5,13 +5,34 @@ Split from ``lower.py``; see that module's docstring for the overall design.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from ...reporting import Span, SrcFile
 from ...semantic import hir
 
 type LocalBindingKey = int | str
+
+
+def replace_changed[T](node: T, /, **changes) -> T:
+    """Rebuild a storage-cleanup node only when its children changed.
+
+    These final passes already share leaves and never mutate input syntax.
+    A fresh list of the same child objects is likewise unchanged. Compare
+    identity, never structural equality: distinct source occurrences and
+    their analysis metadata must not be merged. This is not a substitute
+    for cloning where a later transformation needs an independent node.
+    """
+    for name, value in changes.items():
+        old = getattr(node, name)
+        if old is value:
+            continue
+        if (isinstance(old, list) and isinstance(value, list)
+                and len(old) == len(value)
+                and all(a is b for a, b in zip(old, value))):
+            continue
+        return replace(node, **changes)
+    return node
 
 
 def local_binding_key(node: hir.Declare | hir.ExpressedIdentifier) -> LocalBindingKey:

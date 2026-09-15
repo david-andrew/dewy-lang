@@ -27,17 +27,26 @@ def test_an_object_local_releases_its_string_and_array_members_at_scope_exit() -
     release = re.search(r'(__dewy_release_object_\d+)\(one\)', body)
     assert release is not None
     body = _function(emitted, release[1])
-    # the string field by its owner word, then the tags array's elements, then its buffer
-    assert re.search(r'__load_i64__\(__dewy_string_field_string_\d+ \+ 40\) =\? 1', body)
-    assert re.search(r'__load_i64__\(__dewy_string_release_element_\d+ \+ 40\)', body)
-    assert re.search(r'__load_i64__\(__dewy_string_field_array_\d+ \+ 40\) =\? 1', body)
+    # The shared helpers release the string and the array's elements/buffer.
+    # Ownership checks live in those helpers rather than at every field site.
+    assert re.search(r'__dewy_release_string\(__dewy_string_field_string_\d+\)', body)
+    array_release = re.search(r'(__dewy_release_array_\d+)\(__dewy_string_field_array_\d+\)', body)
+    assert array_release is not None
+    array_body = _function(emitted, array_release[1])
+    assert re.search(r'__dewy_release_string\(__dewy_string_release_element_\d+\)', array_body)
+    assert '_arena_release(' in array_body
 
 
 def test_a_returned_literal_moves_its_array_field_elements_instead_of_cloning() -> None:
     emitted = _compile(POINT + 'let main = ():>int64 => make(3).tags.length\n')
     make = _function(emitted, 'make')
-    # the literal's elements change owner as words: no per-element clone of a dying temporary
-    assert '__dewy_string_clone(' not in make
+    # Materializing the interpolated strings may copy frame storage. The
+    # later element-transfer loop must move those handles without cloning.
+    transfer = re.search(r'loop __dewy_array_copy_index_\d+ .*?\n    \}', make, re.S)
+    assert transfer is not None
+    assert '__store_i64__(__load_i64__(' in transfer[0]
+    assert '__dewy_string_clone(' not in transfer[0]
+    assert re.search(r'__store_i64__\(0 __dewy_array_shared_source_\d+ \+ 8\)', make)
 
 
 def test_a_copied_object_owns_its_copies_and_a_field_store_releases_the_old_string() -> None:
@@ -88,7 +97,9 @@ def test_a_returned_local_object_hands_its_strings_to_the_result_and_releases_no
     copied = re.search(r'(__dewy_copy_object_\d+)\(__dewy_result_\d+ pt\)', build)
     assert copied is not None
     assert re.search(r'__store_i64__\(0 __dewy_src\)', _function(emitted, copied[1]))
-    # … and the scope release skips an empty slot before reading its owner word
+    # … and the shared string release skips an empty slot before its owner read.
     released = re.search(r'(__dewy_release_object_\d+)\(pt\)', build)
     assert released is not None
-    assert re.search(r'if __dewy_string_field_string_\d+ =\? 0 \{', _function(emitted, released[1]))
+    assert re.search(r'__dewy_release_string\(__dewy_string_field_string_\d+\)', _function(emitted, released[1]))
+    string_release = _function(emitted, '__dewy_release_string')
+    assert string_release.index('if __dewy_value =? 0') < string_release.index('__dewy_value + 40')

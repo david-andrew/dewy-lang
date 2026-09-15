@@ -35,6 +35,7 @@ from .lowering_shared import (
     CopyNote,
     LoopRegion,
     StringResultBound,
+    replace_changed,
 )
 from .runtime_unicode import (
     EXTENDED_PICTOGRAPHIC_RECORDS,
@@ -2539,9 +2540,9 @@ class _StringLowering:
                     if isinstance(item, hir.Declare) and is_descriptor_allocation(item.expr):
                         word = hir.ExpressedIdentifier(item.loc, 'int64', item.name)
                         items.append(self._store_i64_field(word, STRING_OWNER_OFFSET, self._int64_literal(item.loc, 0), item.loc))
-                return replace(node, items=items)
+                return replace_changed(node, items=items)
             if isinstance(node, hir.Flow):
-                return replace(node, arms=[replace(arm, body=walk(arm.body)) for arm in node.arms], default=walk(node.default) if node.default is not None else None)
+                return replace_changed(node, arms=[replace_changed(arm, body=walk(arm.body)) for arm in node.arms], default=walk(node.default) if node.default is not None else None)
             return node
 
         return walk(body)
