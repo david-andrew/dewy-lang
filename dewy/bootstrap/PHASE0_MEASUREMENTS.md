@@ -2367,7 +2367,10 @@ metadata in dimension erasure, captured-write checks and string lifetime
 queries. These passes now use the shared HIR child declarations, retaining
 parameter/default traversal where required. Effect coverage probes the bounded
 prefixes of a queried route instead of scanning every stored sibling route.
-A full-build measurement of this batch is pending.
+The quiet full hosted build took **82.525 seconds**: checking 36.142,
+lowering 17.325, emission 4.436 and backend 18.074, with peak process RSS
+1,473,360 KiB. Artifact: `host-lowering-syntax-full` (frozen `b6c5b387`
+packages and the same frozen compiler/library workload).
 
 The capture scan now reaches keyword argument expressions: a nested function
 writing `n` inside `consume(value={n=7; 0})` previously passed hosted lowering.
@@ -2381,3 +2384,48 @@ now use `hir.children`, and all 2,478 Python tests collect. Collection success
 is not a full-suite execution result. Artifacts: `lowering-syntax-gates.log`,
 `lowering-syntax-units-gates.log`, `lowering-syntax-capture-gates.log`,
 `lowering-syntax-collection.log`, and `host-lowering-after-dispatch/lowering.prof`.
+
+
+The corresponding quiet native checkpoint took **45.809 seconds** with the
+same profile-guided C Dewy seed and the new C-built µDewy seed: frontend
+11.924, validation 4.990, preparation 0.892, lowering 11.115, emission 3.895
+and backend 11.022; peak process RSS 5,820,252 KiB. Generated µDewy remains
+byte-identical at 48,662,145 bytes (SHA-256 `de9ee754…654`). The native pair
+execution script passes both x86-64 and C output, including analysis scaling
+and test discovery. Artifacts: `native-spill-safe-full`,
+`check-spill-safe-native-pair.log`.
+
+The allocation-corrected µDewy compiler again reaches identical two-generation
+results through C (SHA-256
+`a0c16d6859f7a33c30e4b29fb111eebfcb818ef394d5cee42f32f31807b9607a`)
+and direct x86-64 (SHA-256
+`036d0428f2d195ce7d54c85726ae28fb6b3ff322dfc09765fc68d15382fedc3c`).
+The C generations took about 6.6 seconds each; direct generations took 0.30
+and 0.44 seconds. This refreshes µDewy verification, not the complete Dewy
+fixed point or release. Artifacts: `build-spill-safe-micro.log`,
+`source-lowering-syntax.json`.
+
+### Compact hosted compiler records
+
+HIR, type descriptions, source spans and bounds intervals now use Python
+slotted dataclasses. Their declared fields, mutability, weak references and
+shared/cyclic pickle graphs retain their behavior; each instance no longer
+needs an attribute dictionary. Parser cache identities now include the
+reporting module, whose `Span` representation participates in cached syntax.
+The custom path-literal constructor explicitly initializes its inherited
+`immutable=False` field, previously supplied by the class default.
+
+This also exposed `DictContains.hoisted`, which the hosted checker assigned
+dynamically. It is now a declared field, matching native HIR and surviving
+replacement/pickling. The initial failure took excessive memory while pytest
+rendered a checker context; shorter traceback reporting isolated it. This was
+a test-reporting cost, not a successful compiler invocation measurement.
+
+The core/cache/type/recursive group passes 85 cases, followed by 109 storage,
+units, effects, ownership, strings and container checks (including the corrected
+new storage fixture). A quiet t0 module comparison changed 9.282 to **8.780
+seconds**, checking 6.221 to 5.866, with peak process RSS 141,768 to 134,396 KiB.
+Generated µDewy differs only in four include paths. A full-build result remains
+to be measured. Artifacts: `slotted-records-core-fixed-gates.log`,
+`slotted-records-execution-gates.log`, `measure-record-storage-module.log`,
+`slotted-records.diff`.

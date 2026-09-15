@@ -219,8 +219,10 @@ def _parse_cache_path(srcfile: SrcFile) -> Path | None:
 def _parser_source_digest() -> bytes:
     import hashlib
     from ..parser import t0, t2
+    from .. import reporting
     digest = hashlib.sha256()
-    for module in (t0, t1, t2, p0):
+    # Cached syntax contains reporting.Span records as well as parser nodes.
+    for module in (t0, t1, t2, p0, reporting):
         digest.update(Path(module.__file__).read_bytes())
     return digest.digest()
 
@@ -3708,7 +3710,7 @@ def _refine_condition_context(
             refined = replace(ctx, refinements=refinements, key_facts=key_facts)
             _record_key_fact(
                 dictionary, condition.key, ctx=refined,
-                position=condition.position if getattr(condition, 'hoisted', False) else None,
+                position=condition.position if condition.hoisted else None,
             )
             return refined
     predicate_call = _strip_obligations(condition)

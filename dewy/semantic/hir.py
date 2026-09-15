@@ -32,7 +32,7 @@ from . import ty
 
 # Type: TypeAlias = ty.TypeExpr
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class AST:
     loc: Span
     type: ty.Type # All ASTs have a type. typechecking involves propogating the type upward through expressions
@@ -46,28 +46,28 @@ class AST:
         return hir_to_dewy(self)
 
     def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
+        super(AST, cls).__init_subclass__(**kwargs)
         # @dataclass would otherwise generate a field repr that hides these.
         cls.__repr__ = AST.__repr__  # type: ignore[method-assign]
         cls.__str__ = AST.__str__  # type: ignore[method-assign]
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Void(AST): ...
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Suppress(AST):
     """Evaluate ``item`` for its effects without expressing its value."""
 
     item: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class NoneValue(AST):
     """The first-class singleton value denoting absence."""
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ErrorValue(AST):
     """The canonical inhabitant of a unit-like nominal error type (`type` is its name)."""
 
@@ -90,7 +90,7 @@ class GenericSource:
         return f'GenericSource(<{len(self.params)} type parameters, {len(self.instances)} instances>)'
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class GenericFunction(AST):
     """A generic function declaration (`type` is its FunctionType with type
     parameters). Bodies are checked per instantiation; the instances are
@@ -100,7 +100,7 @@ class GenericFunction(AST):
     source: GenericSource
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ForwardingAccess(AST):
     """``receiver.name`` on an exception-bearing receiver ``V… | X…``: the
     member is read from an ordinary alternative, an exception alternative is
@@ -114,7 +114,7 @@ class ForwardingAccess(AST):
     exception_type: ty.TypeExpr
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class OrThrow(AST):
     """``value or_throw``: return the exception alternative from the enclosing
     function, else continue with the ordinary alternatives (``type``).
@@ -131,12 +131,12 @@ class OrThrow(AST):
     propagated: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Return(AST):
     item: AST|None = None
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class IfArm(AST):
     """One boolean conditional arm in an ordered flow chain."""
 
@@ -144,7 +144,7 @@ class IfArm(AST):
     body: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class LoopArm(AST):
     """One loop arm whose condition is boolean or a stateful iterator."""
 
@@ -152,7 +152,7 @@ class LoopArm(AST):
     body: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Flow(AST):
     """An ordered `if`/`loop` chain with an optional final default body."""
 
@@ -160,14 +160,14 @@ class Flow(AST):
     default: AST | None = None
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ScopeMetatag(AST):
     """A generic metatag declared throughout its containing lexical scope."""
 
     name: str = ''
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Obligation(AST):
     """``value`` must satisfy ``refined``'s propositions: proven by the bounds analysis
     from facts (intervals, nonzero guards, length facts), reported like an assertion
@@ -182,7 +182,7 @@ TEST_ENTRY_NAME = '__dewy_test_main'
 """The generated test runner (`dewy --test`): the program's entry instead of `main`."""
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Assert(AST):
     """A compile-time `$assert`: the analyses must prove ``condition``; nothing is lowered."""
 
@@ -194,7 +194,7 @@ class Assert(AST):
     expect: bool = False  # a `$expect`: a refuted condition is a warning (the test fails when it runs)
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Break(AST):
     """Exit an enclosing loop, optionally selected through a scope metatag."""
 
@@ -202,7 +202,7 @@ class Break(AST):
     loop_levels: int = 0
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Continue(AST):
     """Continue an enclosing loop, optionally selected through a scope metatag."""
 
@@ -210,7 +210,7 @@ class Continue(AST):
     loop_levels: int = 0
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ShortCircuit(AST):
     """A lazy boolean logical operator selected through operator dispatch."""
 
@@ -219,7 +219,7 @@ class ShortCircuit(AST):
     right: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TypeTest(AST):
     """A runtime `is?` or `isnt?` test against a type expression."""
 
@@ -228,7 +228,7 @@ class TypeTest(AST):
     negated: bool
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Declare(AST):
     decltype: Literal['let', 'const'] # others tbd
     name: str                         #TBD future handling of unpacking assignment
@@ -236,20 +236,20 @@ class Declare(AST):
     expr: AST
     binding_id: int | None = field(default=None, kw_only=True)
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ExpressedIdentifier(AST):
     name: str
     binding_id: int | None = field(default=None, kw_only=True)
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Place(AST):
     """A mutable binding or projected field/index passed by reference with ``@``."""
 
     target: ExpressedIdentifier | MemberAccess | Index
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Assign(AST):
     """Assignment statement; compound operators remain explicit until MIR lowering."""
     target: ExpressedIdentifier
@@ -257,12 +257,12 @@ class Assign(AST):
     value: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Bool(AST):
     value: bool
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TargetBool(Bool):
     """A boolean folded from a compile-time `$target` comparison.
 
@@ -271,7 +271,7 @@ class TargetBool(Bool):
     """
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class DecidedBool(Bool):
     """A boolean the checker decided from static types: `x is? T` when `x`'s
     type is `T` (or cannot be). A flow conditioned on one checks only the
@@ -279,13 +279,13 @@ class DecidedBool(Bool):
     its ordinary scope.
     """
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Integer(AST):
     prefix: t0.BasePrefix
     value: int
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class RationalConstant(AST):
     """An exact compile-time rational (optionally dimensioned).
 
@@ -297,7 +297,7 @@ class RationalConstant(AST):
     denominator: int
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ArrayLiteral(AST):
     """A one-dimensional homogeneous array value. An item may be a ``Spread``
     of another array, in which case the literal's length is the sum (runtime
@@ -306,14 +306,14 @@ class ArrayLiteral(AST):
     items: list[AST]
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Spread(AST):
     """``xs...`` inside an array literal: every element of ``value`` in order."""
 
     value: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ObjectField:
     """One initialized field of an object literal."""
 
@@ -324,7 +324,7 @@ class ObjectField:
     mutable: bool = True
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ObjectLiteral(AST):
     """A structural object value with source-order fields."""
 
@@ -334,7 +334,7 @@ class ObjectLiteral(AST):
     integer_value: int | None = field(default=None, kw_only=True)
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class MemberAccess(AST):
     """A named field read from an object."""
 
@@ -343,7 +343,7 @@ class MemberAccess(AST):
     mutable: bool = True
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class MemberAssign(AST):
     """Mutation of one object field."""
 
@@ -351,7 +351,7 @@ class MemberAssign(AST):
     value: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class BoundMethod(AST):
     """`value.method`: a type's method with its receiver; only ever called (see `tcr_function_call`)."""
 
@@ -359,7 +359,7 @@ class BoundMethod(AST):
     receiver: AST | None           # None for a static method: it takes no receiver
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TypeValue(AST):
     """A compile-time type used as a named alias."""
 
@@ -367,35 +367,35 @@ class TypeValue(AST):
     name: str | None = None  # the alias name it was spelled with, for diagnostics
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class BrandValue(AST):
     """A minted type as a runtime value of `type<Family>`: its brand id."""
 
     brand: str
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TypeOf(AST):
     """`typeof(value)`: the minted type a value carries, as a `type<Family>` value (its brand word)."""
 
     value: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ModuleNamespace(AST):
     """A compile-time namespace for one imported source module."""
 
     name: str
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ArrayLength(AST):
     """The element count of an array value."""
 
     array: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class DictLookup(AST):
     """A dictionary read.
 
@@ -416,7 +416,7 @@ class DictLookup(AST):
     default: AST | None = None
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class DictStore(AST):
     """``d[key] = value``: replace the value of an existing key, else append
     the entry (insertion order is the entry order). ``position`` names the
@@ -431,7 +431,7 @@ class DictStore(AST):
     """``values``/``value`` are None for a set (`s.add(key)`)."""
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class DictContains(AST):
     """``key in? d`` on a dictionary. ``position`` names the hidden local that
     receives the found index when the test directly guards an ``if`` arm, so
@@ -440,9 +440,12 @@ class DictContains(AST):
     keys: AST
     key: AST
     position: str | None = None
+    # A direct flow guard emits its search before the body, so that body's
+    # key facts may reuse the position. Preserve this through HIR rewrites.
+    hoisted: bool = False
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class DictRemove(AST):
     """``d.pop(key)`` (proven key): remove the entry, shifting later entries
     down so insertion order is kept, and yield its value. ``d.clear`` is the
@@ -461,7 +464,7 @@ class DictRemove(AST):
     plain `pop(key)` yields the removed member."""
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class DictView(AST):
     """A fresh value of a container's entries: ``d.keys`` is a ``set<K>``,
     ``d.values`` an ``array<V>`` (insertion order), ``s.values`` an
@@ -472,7 +475,7 @@ class DictView(AST):
     name: str
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class SetAlgebra(AST):
     """A new set from two sets of the same element type: ``union`` (`|`/`or`),
     ``intersection`` (`&`/`and`), ``difference`` (`-`), or ``symmetric``
@@ -484,7 +487,7 @@ class SetAlgebra(AST):
     right: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class DictEntries(AST):
     """The `keys` or `values` entry array of a dictionary for iteration: the
     dictionary is compacted first when removals left dead entries, so the
@@ -494,7 +497,7 @@ class DictEntries(AST):
     name: str
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class DictMethod(AST):
     """A compiler-provided method bound to a dictionary value (``get``).
 
@@ -505,7 +508,7 @@ class DictMethod(AST):
     name: str
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ArrayMethod(AST):
     """A compiler-provided method bound to a named array binding.
 
@@ -518,7 +521,7 @@ class ArrayMethod(AST):
     name: str
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class IteratorExpression(AST):
     """A scoped `name in iterable` expression advanced by an enclosing loop."""
 
@@ -537,7 +540,7 @@ IteratorLogicalOp = Literal['and', 'or', 'xor', 'nand', 'nor', 'xnor']
 IteratorFormulaToken = int | IteratorLogicalOp
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class MultiIteratorExpression(AST):
     """Eager iterator leaves and a postfix logical formula over their indices."""
 
@@ -546,7 +549,7 @@ class MultiIteratorExpression(AST):
     repeats_when_exhausted: bool
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Index(AST):
     """A scalar array read validated by the semantic bounds pass."""
 
@@ -555,7 +558,7 @@ class Index(AST):
     constant_index: int | None
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class IndexAssign(AST):
     """Mutation of one statically proven array element."""
 
@@ -563,17 +566,17 @@ class IndexAssign(AST):
     value: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class String(AST):
     content: str
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TargetString(String):
     """The value of `$target` for the current compilation."""
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class InterpolatedString(AST):
     """A source string whose expression fields have been typechecked.
 
@@ -584,7 +587,7 @@ class InterpolatedString(AST):
     parts: list[AST]
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class BasedString(AST):
     prefix: t0.BasePrefix
     digits: str
@@ -594,57 +597,57 @@ class BasedString(AST):
     the target embeds the file instead of the spelled-out literal."""
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class StringLength(AST):
     string: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class StringIndex(AST):
     string: AST
     index: AST
     constant_index: int | None
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class StringSlice(AST):
     string: AST
     range: Range
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class StringEqual(AST):
     left: AST
     right: AST
     negated: bool = False
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class StringConcat(AST):
     left: AST
     right: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class ValueCast(AST):
     """Value cast: explicit `expr as Target`, or an implicit promotion. `type` is the target."""
     expr: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class RepresentationCast(AST):
     """A conversion that materializes a value in a different representation."""
 
     expr: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Transmute(AST):
     """Bit-preserving reinterpretation. `type` is the target type."""
     expr: AST
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Param:
     name: str  #TODO: list/dict/obj unpack might go here too? also multi-arg collections could go here
     type: ty.Type
@@ -661,15 +664,15 @@ class Param:
         return hir_to_dewy(self)
 
     def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
+        super(Param, cls).__init_subclass__(**kwargs)
         cls.__repr__ = Param.__repr__  # type: ignore[method-assign]
         cls.__str__ = Param.__str__  # type: ignore[method-assign]
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class BoundParam(Param):
     value: AST
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class FunctionLiteral(AST):
     pos_or_kw_args: list[Param|BoundParam]
     kw_only_args: list[Param|BoundParam]
@@ -687,7 +690,7 @@ class FunctionLiteral(AST):
 # supplied values are evaluated and saved immediately; signature defaults stay
 # as per-call fallbacks until a completed call needs them.
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class OverloadedFunction(AST):
     """A callable value formed by combining callable operands with `&`."""
     alternates: list[AST]
@@ -787,7 +790,7 @@ is conceptually equivalent to:
     }
 """
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class FunctionCall(AST):
     """A checked call to a function value or overload set.
 
@@ -806,22 +809,22 @@ class FunctionCall(AST):
     integer_operation: str | None = field(default=None, kw_only=True)
     #TODO: spread args
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Partial(AST):
     ... # TODO
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Block(AST):
     items: list[AST]
     scoped: bool
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TypeBlock(AST):
     items: list[AST]
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Range(AST):
     bounds: Literal['[]', '[)', '(]', '()'] | None  # None means the range hasn't been wrapped, so bounds are assumed []
     step_pair: tuple[AST, AST] | None
@@ -829,7 +832,7 @@ class Range(AST):
     right: AST | None
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class RangeMembership(AST):
     """A runtime membership test, optionally with a normalized static step."""
 

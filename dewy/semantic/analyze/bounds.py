@@ -15,7 +15,7 @@ from ..hir_display import type_to_dewy
 from . import predicate_effects
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class Interval:
     """An inclusive integer interval; ``None`` denotes an infinite endpoint."""
 

@@ -97,33 +97,33 @@ INFERRED_TYPE: InferredType = 'untyped'
 type Primitive = str   # has to be in the _named_types set
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TypeAnd:
     """type intersection: T1 & T2"""
     items: list[TypeExpr]
     def __post_init__(self):
         assert len(self.items) > 1, f'TypeAnd must have at least two items, got {len(self.items)}'
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TypeOr:
     """type union: T1 | T2"""
     items: list[TypeExpr]
     def __post_init__(self):
         assert len(self.items) > 1, f'TypeOr must have at least two items, got {len(self.items)}'
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TypeNot:
     """type negation: ~T"""
     type: TypeExpr
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class TypeParameterize:
     """type parameterization: T<A1 A2 ...>"""
     t: TypeExpr
     args: list[TypeExpr] #TODO: other stuff can be set here, though perhaps it doesn't affect the typing?
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class TypeVariable:
     """A symbolic type inside a generic type-alias body."""
 
@@ -131,7 +131,7 @@ class TypeVariable:
     bound: TypeExpr = TOP_TYPE
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class DimensionType:
     """A normalized physical dimension used only during type checking.
 
@@ -142,7 +142,7 @@ class DimensionType:
     powers: tuple[tuple[str, int], ...]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class QuantityType:
     """A numeric runtime representation tagged with a physical dimension."""
 
@@ -152,7 +152,7 @@ class QuantityType:
 
 # Building blocks for FunctionType / OverloadType (not HIR params, not standalone types)
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class PosOrKwArg:
     """One positional slot in a FunctionType, optionally addressable by name.
 
@@ -166,7 +166,7 @@ class PosOrKwArg:
     required: bool = True
     place: bool = False
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class KwOnlyArg:
     """One keyword-only slot in a FunctionType.
 
@@ -179,7 +179,7 @@ class KwOnlyArg:
     required: bool
     place: bool = False
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class GenericParam:
     """A generic type variable declared on a FunctionType (e.g. T in `<T of number>`).
 
@@ -191,14 +191,14 @@ class GenericParam:
     bound: TypeExpr = TOP_TYPE
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class GenericTypeAlias:
     """A compile-time type constructor expanded by ``Alias<args...>``."""
 
     params: list[GenericParam]
     body: TypeExpr
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class FunctionType:
     """Type of a single callable: signature shape + return type.
 
@@ -211,7 +211,7 @@ class FunctionType:
     ret: TypeExpr
     type_params: list[GenericParam] = field(default_factory=list)
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class OverloadType:
     """Type of an overloaded callable: an ordered set of FunctionType alternatives.
 
@@ -223,7 +223,7 @@ class OverloadType:
     #     assert len(self.methods) >= 1, 'OverloadType must have at least one method'
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class SequenceType:
     """Multiple values in a sequence: (T1 T2 ... Tn). Use the sequence() smart constructor to build these."""
     items: list[TypeExpr]
@@ -231,34 +231,34 @@ class SequenceType:
         assert len(self.items) > 1, f'SequenceType must have at least two items, got {len(self.items)}. 0/1-item sequences collapse to void/the item via sequence()'
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class IntegerLiteralType:
     """The singleton type inhabited by exactly one mathematical integer value."""
     value: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class StringLiteralType:
     """The singleton type inhabited by one exact Unicode scalar sequence."""
 
     value: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class BinaryLiteralType:
     """The singleton type inhabited by one exact byte sequence."""
 
     value: bytes
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class StringType:
     """An immutable grapheme sequence, optionally refined to an exact length."""
 
     length: int | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class ArrayType:
     """A homogeneous mutable array, optionally refined to an exact length."""
 
@@ -266,7 +266,7 @@ class ArrayType:
     length: int | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class ObjectField:
     """One named field in source order.
 
@@ -287,7 +287,7 @@ class ObjectField:
     """Opaque lexical environment of the default, separate from caller fields."""
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class MethodSpec:
     """A method declared in an object type (`name = (params) => body`).
 
@@ -304,7 +304,7 @@ class MethodSpec:
     static: bool = False       # reads no field, and calls no method that does: callable off the type, no receiver
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class ObjectType:
     """A structural object whose field order is part of the type.
 
@@ -366,12 +366,12 @@ class ObjectType:
         return None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class PathType(ObjectType):
     """A thin path object containing its lexical text."""
 
 
-@dataclass(frozen=True, eq=False, repr=False)
+@dataclass(frozen=True, eq=False, repr=False, slots=True, weakref_slot=True)
 class NamedType:
     """A by-name reference to a recursive type alias.
 
@@ -430,7 +430,7 @@ def mentions_named_type(type_: object) -> bool:
     return False
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True, init=False, slots=True, weakref_slot=True)
 class PathLiteralType(PathType):
     """The singleton type inhabited by one exact lexical path."""
 
@@ -446,12 +446,13 @@ class PathLiteralType(PathType):
         object.__setattr__(self, 'methods', methods)   # the prelude `Path`'s methods
         object.__setattr__(self, 'brand', None)
         object.__setattr__(self, 'constructors', [])
+        object.__setattr__(self, 'immutable', False)
 
 
 PATH_TYPE = PathType((ObjectField('path', StringType()),))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class ModuleField:
     """One compile-time member exported by a source module."""
 
@@ -461,7 +462,7 @@ class ModuleField:
     type_value: TypeAliasValue | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class ModuleType:
     """A compile-time namespace; it has no runtime representation."""
 
@@ -471,7 +472,7 @@ class ModuleType:
         return next((field for field in self.fields if field.name == name), None)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class MetaType:
     """`type<T>`: a type under the minted type `T` (T itself when it is not
     `$abstract`, and every type minted under it), as a *runtime* value — its
@@ -723,7 +724,7 @@ _default_system_types: list[Primitive|tuple[Primitive, Primitive]] = [
     'ID' # a generic thing representing some way to identify something. implementations may use specific data types like int, string, etc., but conceptually an ID is basically it's own separate thing
 ]
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class Proposition:
     """One liquid refinement condition, `<subject> <op> <value>`.
 
@@ -835,7 +836,7 @@ class Proposition:
         return None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class RefinedType:
     """A type together with liquid propositions its values must satisfy.
 
@@ -996,7 +997,7 @@ def _named_or_base(type_: 'RefinedType') -> TypeExpr:
     return RefinedType(type_.base, named) if named and type_.propositions != named else type_.base if not named else type_
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class RationalLiteralType:
     """The singleton type of one exact compile-time rational (normalized)."""
 
@@ -2701,7 +2702,7 @@ class DispatchError(ValueError):
     """No unique most-specific applicable method."""
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class DispatchResult:
     """Dispatch winner, its source-list index, and required argument promotions.
 

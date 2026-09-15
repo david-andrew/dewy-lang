@@ -28,3 +28,19 @@ def test_cached_prelude_compiles_identically() -> None:
 
     program = SrcFile(None, 'let main = ():>int64 => { let xs = [1 2 3] printl"{xs.length}" return xs[0] }')
     assert codegen(program) == codegen(program)
+
+
+def test_disk_parse_cache_restores_source_spans_without_reparsing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / 'span-cache.dewy'
+    source.write_text('let value = 42\n')
+    first, _ = check._parse_module(SrcFile.from_path(source))
+    monkeypatch.setattr(check, '_parsed_modules', {})
+
+    def unexpected_parse(*args, **kwargs):
+        raise AssertionError('an unchanged disk cache should restore the parsed syntax')
+
+    monkeypatch.setattr(check.p0, 'parse', unexpected_parse)
+    second, _ = check._parse_module(SrcFile.from_path(source))
+    assert second.inner[0] is not first.inner[0]
+    assert second.inner[0].loc == first.inner[0].loc

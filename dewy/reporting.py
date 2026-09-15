@@ -151,7 +151,7 @@ class ColorTheme:
 PointerPlacement = Literal["above", "below"]
 
 
-@dataclass
+@dataclass(slots=True, weakref_slot=True)
 class Span:
     """
     python range rules, i.e. [start,stop), indices are in between items, not the indices of actual items. 
