@@ -2970,3 +2970,21 @@ complete adapter fixture, and constant arrays used by ordinary calls and lazy
 defaults (including a local constant), through both compilers and x86-64/C.
 Artifact: `native-const-capture-gates.log`. The full frozen CLI refresh continues
 with its original seed; a later integration check must verify this follow-up.
+
+### Native cache codec foundation
+
+`semantic/cache_bytes.dewy` encodes little-endian words, signed integers,
+booleans, UTF-8 strings, byte arrays and canonical bigints. Invalid or partial
+input marks the reader failed; container counts are bounded by remaining
+bytes, and a snapshot is complete only at end of input without a failure.
+The primitive round-trip and malformed-input fixture returns 42 through the
+hosted compiler and the `49ad4c12` native C seed on both x86-64 and C output.
+Artifacts: `cache-bytes-gates.log`, `cache-bytes-native{,-c}.log`.
+
+This is the codec foundation only: native checked-prelude caching is not yet
+implemented. The schema probe finds that the session's syntax/HIR/type edges
+are already arena indices, which can be restored without changing identities.
+The eventual cache still needs complete typed snapshot encoding, validation,
+input/version/target invalidation, atomic installation, and cold/warm checks.
+The native pair integration bundle now includes the byte codec, immutable
+capture facts and labeled iterator cleanup for the next pair checkpoint.

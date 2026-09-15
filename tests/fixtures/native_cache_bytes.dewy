@@ -1,0 +1,58 @@
+import p"../../dewy/bootstrap/semantic/cache_bytes.dewy" as codec
+
+let main=():>int64=>{
+    let output=codec.Writer[]
+    codec.write_bool(true @output)
+    codec.write_bool(false @output)
+    codec.write_word(18446744073709551615 @output)
+    codec.write_integer(-9223372036854775808 @output)
+    codec.write_text("a\0é🙂" @output)
+    codec.write_bytes(0x"00 ff 80" @output)
+    codec.write_bigint(0 @output)
+    codec.write_bigint(123456789012345678901234567890 @output)
+    codec.write_bigint(-123456789012345678901234567890 @output)
+    let input=codec.Reader[output.bytes]
+    if not codec.read_bool(@input) return 1
+    if codec.read_bool(@input) return 2
+    if codec.read_word(@input) not=?18446744073709551615 return 3
+    if codec.read_integer(@input) not=?-9223372036854775808 return 4
+    if codec.read_text(@input) not=?"a\0é🙂" return 5
+    let bytes=codec.read_bytes(@input)
+    if bytes.length not=?3 return 6
+    if bytes[0] not=?0 or bytes[1] not=?255 or bytes[2] not=?128 return 7
+    if codec.read_bigint(@input) not=?0 return 8
+    if codec.read_bigint(@input) not=?123456789012345678901234567890 return 9
+    if codec.read_bigint(@input) not=?-123456789012345678901234567890 return 10
+    if not codec.complete(input) return 11
+
+    # Missing words, invalid flags, impossible lengths and invalid UTF-8
+    # discard a snapshot. They do not become successful neutral values.
+    let short=codec.Reader[0x"01 02"]
+    codec.read_word(@short);
+    if not short.failed or codec.complete(short) return 12
+    let flag=codec.Reader[0x"02"]
+    codec.read_bool(@flag);
+    if not flag.failed return 13
+    let length=codec.Reader[0x"ff ff ff ff ff ff ff ff"]
+    codec.read_count(@length);
+    if not length.failed return 14
+    let truncated=codec.Reader[0x"02 00 00 00 00 00 00 00 7f"]
+    codec.read_bytes(@truncated);
+    if not truncated.failed return 15
+    let invalid=codec.Reader[0x"01 00 00 00 00 00 00 00 ff"]
+    codec.read_text(@invalid);
+    if not invalid.failed return 16
+    let trailing=codec.Reader[0x"00 00"]
+    codec.read_bool(@trailing);
+    if codec.complete(trailing) return 17
+    let empty_bigint=codec.Reader[0x"01 00 00 00 00 00 00 00 00 00"]
+    codec.read_bigint(@empty_bigint);
+    if not empty_bigint.failed return 18
+    let zero_limb=codec.Reader[0x"01 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"]
+    codec.read_bigint(@zero_limb);
+    if not zero_limb.failed return 19
+    let wide_limb=codec.Reader[0x"01 00 01 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00"]
+    codec.read_bigint(@wide_limb);
+    if not wide_limb.failed return 20
+    return 42
+}

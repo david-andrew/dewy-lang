@@ -28,6 +28,10 @@ import p"native_string_lifetimes.dewy" as string_lifetimes
 import p"native_string_scratch.dewy" as string_scratch
 import p"native_string_materialization.dewy" as string_materialization
 
+import p"native_cache_bytes.dewy" as cache_bytes
+import p"native_const_capture_facts.dewy" as const_captures
+import p"native_labeled_exit_cleanup.dewy" as labeled_cleanup
+
 let main=():>int64=>{
     printl('Checking string value lifetimes')
     if string_lifetimes.main() not=?42 return 26
@@ -81,5 +85,11 @@ let main=():>int64=>{
     if string_scratch.main() not=?42 return 24
     printl('Checking Unicode string materialization')
     if string_materialization.main() not=?42 return 25
+    printl('Checking immutable capture facts')
+    if const_captures.main() not=?42 return 27
+    printl('Checking labeled iterator cleanup')
+    if labeled_cleanup.main() not=?42 return 28
+    printl('Checking cache byte encoding')
+    if cache_bytes.main() not=?42 return 29
     return 42
 }

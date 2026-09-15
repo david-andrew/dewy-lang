@@ -1,0 +1,110 @@
+import p"../targets.dewy" as targets
+
+doc"""
+Primitive binary values for the checked-prelude cache.
+
+This is an internal cache format, not a language serialization contract.
+Words are little-endian; strings carry their UTF-8 byte length. A reader
+records failure and returns a neutral value, so its caller can discard the
+entire decoded snapshot without installing a partially restored session.
+Every allocation length is bounded by the remaining file bytes first.
+"""
+
+Writer:type = [bytes:array<uint8>=[]]
+Reader:type = [bytes:array<uint8> position:addr=0 failed:bool=false]
+
+let write_byte = (value:uint8 @out:Writer):>void => {out.bytes.push(value)}
+let write_word = (value:uint64 @out:Writer):>void => {
+    let remaining=value
+    loop i in 0..7 {
+        write_byte(remaining transmute uint8 @out)
+        remaining >>= 8
+    }
+}
+let write_integer = (value:int64 @out:Writer):>void => write_word(value transmute uint64 @out)
+let write_bool = (value:bool @out:Writer):>void => write_byte(if value 1 else 0 @out)
+let write_bytes = (value:array<uint8> @out:Writer):>void => {
+    write_word(value.length as uint64 @out)
+    loop byte in value {write_byte(byte @out)}
+}
+let write_text = (value:string @out:Writer):>void => write_bytes(value as array<uint8> @out)
+let write_bigint = (value:bigint @out:Writer):>void => {
+    write_bool(value not=? 0 @out)
+    if value =? 0 return
+    write_bool(value.sign =? -1 @out)
+    write_word(value.limbs.length as uint64 @out)
+    loop limb in value.limbs {write_word(limb @out)}
+}
+
+let read_byte = (@input:Reader):>uint8 => {
+    if input.failed return 0
+    if input.position >=? input.bytes.length {input.failed=true return 0}
+    let value=input.bytes[input.position]
+    input.position+=1
+    return value
+}
+let read_word = (@input:Reader):>uint64 => {
+    let value:uint64=0
+    let shift:uint8=0
+    loop i in 0..7 {
+        let byte=read_byte(@input) as uint64
+        value |= byte << shift
+        shift+=8
+    }
+    return value
+}
+let read_integer = (@input:Reader):>int64 => read_word(@input) transmute int64
+let read_bool = (@input:Reader):>bool => {
+    let value=read_byte(@input)
+    if value >? 1 {input.failed=true return false}
+    return value =? 1
+}
+let read_address = (@input:Reader):>addr => {
+    let value=read_word(@input)
+    if value >? (targets.max_length($target) as uint64) {input.failed=true return 0}
+    return value as addr
+}
+# All schema values consume at least one byte. Containers use this bound
+# before reserving space, including when a corrupt count would otherwise
+# allocate far more than the cache file itself.
+let read_count = (@input:Reader):>addr => {
+    let count=read_address(@input)
+    if input.failed return 0
+    if input.position >? input.bytes.length or count >? input.bytes.length-input.position {input.failed=true return 0}
+    return count
+}
+let read_bytes = (@input:Reader):>array<uint8> => {
+    let count=read_count(@input)
+    let result:array<uint8>=[]
+    if input.failed return result
+    result.reserve(count)
+    loop i in 0.. and i <? count {result.push(read_byte(@input))}
+    return result
+}
+let read_text = (@input:Reader):>string => {
+    let bytes=read_bytes(@input)
+    if input.failed return ''
+    let value=bytes as string|none
+    if value is? none {input.failed=true return ''}
+    return value
+}
+let read_bigint = (@input:Reader):>bigint => {
+    if not read_bool(@input) return 0
+    let negative=read_bool(@input)
+    let count=read_count(@input)
+    if input.failed return 0
+    # A limb is a complete word, even though only its low 32 bits are used.
+    if count =? 0 or count >? (input.bytes.length-input.position)//8 {input.failed=true return 0}
+    let limbs:array<uint64>=[]
+    limbs.reserve(count)
+    loop i in 0.. and i <? count {
+        let limb=read_word(@input)
+        if limb >? 4294967295 {input.failed=true return 0}
+        limbs.push(limb)
+    }
+    if limbs.length =? 0 {input.failed=true return 0}
+    if limbs[end] =? 0 {input.failed=true return 0}
+    if negative return [sign=-1 limbs=limbs]
+    return [sign=1 limbs=limbs]
+}
+let complete = (input:Reader):>bool => not input.failed and input.position =? input.bytes.length
