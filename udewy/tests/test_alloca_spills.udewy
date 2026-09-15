@@ -1,0 +1,33 @@
+# A buffer lives until function return, even when allocated between call
+# arguments whose earlier values already occupy expression spill slots.
+let first:int = 0
+let second:int = 0
+let consume = (a:int b:int c:int d:int p:int q:int g:int h:int):>int => {
+    first = p
+    second = q
+    __store__(42 p)
+    __store__(43 q)
+    return a + b + c + d + __load__(p) + __load__(q) + g + h
+}
+let sum8 = (a:int b:int c:int d:int e:int f:int g:int h:int):>int => {
+    return a + b + c + d + e + f + g + h
+}
+let main = ():>int => {
+    let indirect:int = @consume
+    let size:int = 8
+    loop size <=? 160 {
+        if consume(1 2 3 4 __alloca__(size) __alloca__(size) 7 8) not=? 110 { return 1 }
+        # Popping the arguments must leave both allocations alive. A later
+        # allocation and call must not overwrite either buffer.
+        let later:int = __alloca__(160)
+        __store__(99 later)
+        if sum8(1 2 3 4 5 6 7 8) not=? 36 { return 2 }
+        if __load__(first) not=? 42 or __load__(second) not=? 43 { return 3 }
+        if (@indirect)(1 2 3 4 __alloca__(size) __alloca__(size) 7 8) not=? 110 { return 4 }
+        if __load__(first) not=? 42 or __load__(second) not=? 43 { return 5 }
+        size = size * 2
+    }
+    # Zero bytes still return an aligned pointer, with no spill movement.
+    if sum8(1 2 3 4 (__alloca__(0) and 7) 6 7 8) not=? 31 { return 6 }
+    return 0
+}

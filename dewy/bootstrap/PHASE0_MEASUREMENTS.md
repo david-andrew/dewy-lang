@@ -2343,3 +2343,19 @@ include paths. The bounds/refinements/result-facts/HIR group passes 28 tests;
 an additional inherited-node regression checks changing state and mutable-place
 invalidation. Artifacts: `measure-bounds-dispatch.log`,
 `bounds-dispatch-gates.log`, `bounds-dispatch-inheritance.log`.
+
+### Stack allocations with live x86 expression spills
+
+An isolated cross-backend test found a pre-existing µDewy x86 bug: an
+`__alloca__` used as a later call argument moved the stack pointer away from
+earlier spilled arguments, so later pops consumed the wrong words. Both x86
+implementations now relocate live spill words below the allocated buffer.
+Forward copying handles overlap for small buffers; popped arguments leave the
+buffer alive until function return. The eight-byte allocation granularity and
+µDewy's eager-expression/conditional-short-circuit rules remain unchanged.
+
+The new fixture covers direct and indirect eight-argument calls, repeated
+small/large/zero-size allocations, overlapping spill movement, and buffer
+contents after subsequent allocations and calls. It passes through hosted and
+native µDewy with x86 and C output; the full parity/ABI/extern group passes
+46 tests. Artifacts: `alloca-spill-repro.json`, `alloca-spill-gates.log`.

@@ -1476,10 +1476,22 @@ let x86_unsigned_cmp = (kind:int):>void => {
 }
 
 let x86_alloca = ():>void => {
+    # Spills belong below the buffer: their later pops must not discard the
+    # allocation or read its contents as operands. Copy forward because the
+    # old and new spill regions overlap for small allocations.
+    if x86_spilled_depth >? 0 { x86_emit_indented("movq %rsp, %r10") }
     x86_emit_indented("addq $7, %rax")
     x86_emit_indented("andq $-8, %rax")
     x86_emit_indented("subq %rax, %rsp")
-    x86_emit_indented("movq %rsp, %rax")
+    let offset:int = 0
+    loop offset <? x86_spilled_depth * 16 {
+        x86_emit_op_mem_r("movq" offset "%r10" "%rcx")
+        x86_emit_op_r_mem("movq" "%rcx" offset "%rsp")
+        offset = offset + 16
+    }
+    if x86_spilled_depth >? 0 {
+        x86_emit_op_mem_r("leaq" x86_spilled_depth * 16 "%rsp" "%rax")
+    } else { x86_emit_indented("movq %rsp, %rax") }
     return void
 }
 

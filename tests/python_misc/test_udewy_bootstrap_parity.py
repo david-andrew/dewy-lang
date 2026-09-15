@@ -429,8 +429,9 @@ def test_short_circuit_contexts_match_between_compilers(bootstrap_binary, tmp_pa
 
 
 @pytest.mark.parametrize('target', ['x86_64', 'c'])
-def test_cached_operand_execution_and_spills(bootstrap_binary, tmp_path, target):
-    source = (REPO_ROOT / 'udewy/tests/test_cached_operands.udewy').read_text()
+@pytest.mark.parametrize('fixture', ['test_cached_operands.udewy', 'test_alloca_spills.udewy'])
+def test_cached_operand_execution_and_spills(bootstrap_binary, tmp_path, target, fixture):
+    source = (REPO_ROOT / 'udewy/tests' / fixture).read_text()
     for name, compiler in [('hosted', ['python', '-m', 'udewy']), ('native', [str(bootstrap_binary)])]:
         work = tmp_path / name
         work.mkdir()

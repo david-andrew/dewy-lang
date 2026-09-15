@@ -957,11 +957,24 @@ class X86_64Backend(Backend):
         self._emit("negq %rax")
 
     def alloca(self) -> None:
-        """Allocate temporary stack storage and return its address."""
+        """Keep expression spills below storage that lives until return.
+
+        Merely subtracting from rsp puts the buffer between saved operands
+        and their eventual pops. Slide those words down with the stack top,
+        copying forward so even an eight-byte allocation can overlap safely.
+        """
+        if self._spilled_depth:
+            self._emit("movq %rsp, %r10")
         self._emit("addq $7, %rax")
         self._emit("andq $-8, %rax")
         self._emit("subq %rax, %rsp")
-        self._emit("movq %rsp, %rax")
+        for offset in range(0, self._spilled_depth * 16, 16):
+            self._emit(f"movq {offset}(%r10), %rcx")
+            self._emit(f"movq %rcx, {offset}(%rsp)")
+        if self._spilled_depth:
+            self._emit(f"leaq {self._spilled_depth * 16}(%rsp), %rax")
+        else:
+            self._emit("movq %rsp, %rax")
     
     # ========================================================================
     # Calls
