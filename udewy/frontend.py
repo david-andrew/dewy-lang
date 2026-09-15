@@ -2,6 +2,7 @@ from . import t0, t1, p0
 from .backend import BackendName, get_backend
 from .backend.common import RunOptions
 from .cache import cache_layout
+from .compilation import compiler_allocation_scope
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -12,6 +13,7 @@ class EntryPointOptions:
     split_wasm: bool = False
     serve_wasm: bool = False
 
+@compiler_allocation_scope()
 def entry_point(input_file: Path, script_args: list[str], options: EntryPointOptions|None=None) -> int:
     """
     Entry point for the udewy compiler.

@@ -1563,3 +1563,27 @@ snapshots, rollback, id reuse, direct interning, and the existing structural
 factory/query gates on direct and C backends. Full native self-build impact
 remains unmeasured. Artifacts: `primitive-lookup-measurement`,
 `primitive-lookup-gates.log`, `native-indexed-lowering-samples`.
+
+### Space out Python collection while constructing compiler graphs
+
+Collection callbacks measured **13.49 seconds** of cyclic GC in a 72.99 s
+hosted emission run using the existing prelude cache. Lowering alone triggered
+five full-heap collections taking 7.52 s while its graph was still live.
+This observation is not a cold-build acceptance measurement.
+
+The Python implementations now raise the allocation threshold to 50,000
+during code generation and µDewy compilation. Cyclic collection stays enabled;
+an embedding caller's disabled or higher-threshold policy is respected, and
+the original thresholds are restored on success or failure. Nested compiler
+calls retain the outer policy. This changes Python implementation scheduling,
+not Dewy or µDewy storage semantics.
+
+On the **same frozen `3c699a2f` source and library**, the isolated fresh full
+hosted direct build falls from **129.37 to 117.49 seconds**. Checking 51.17 s,
+lowering 24.06 s, emission 4.56 s, backend 32.29 s. Peak process RSS rises
+from 1,615,208 to **1,629,400 KiB** (about 14 MiB, under 1%). Generated µDewy
+is byte-identical after normalizing only build-directory include paths.
+Five policy tests cover nesting, failure restoration, caller overrides, and
+cycle reclamation. Artifacts: `hosted-gc-events.json`,
+`host-collection-threshold-full`, `collection-threshold-output-check.json`,
+and `compilation-gc-policy-gates.log`.

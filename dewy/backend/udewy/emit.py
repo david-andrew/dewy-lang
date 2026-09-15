@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from functools import cached_property
 from pathlib import Path
 from textwrap import indent
+from udewy.compilation import compiler_allocation_scope
 
 from ...reporting import SrcFile
 from ... import timing
@@ -197,6 +198,7 @@ def emit_statements(items: list[hir.AST], ctx: EmitContext) -> list[str]:
             ctx.local_names.add(item.name)
     return lines
 
+@compiler_allocation_scope()
 def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False, debug_locations: bool = True, debug_values: bool = False) -> str:
     """Type-check Dewy source and emit equivalent udewy source.
 
@@ -214,6 +216,7 @@ def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False, debu
     return codegen_inner(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main', debug_locations=debug_locations)
 
 @ty.runtime_query_scope()
+@compiler_allocation_scope()
 def codegen_inner(ast: hir.AST, srcfile: SrcFile | None = None, *, entry_name: str = 'main', debug_locations: bool = True) -> str:
     """Emit checked HIR after legalizing Dewy callable constructs.
 
