@@ -1,5 +1,6 @@
 from reporting import SrcFile, Error
 import p"../paths.dewy" as paths
+import p"../timing.dewy" as timing
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
 import p"context.dewy" as contexts
@@ -52,6 +53,8 @@ Engine:type = [
     prelude_validation:proofs.Prelude?=none
     test_mode:bool=false
     entry_name:string='main'
+    # Report parse/check sub-phases of the frontend when the invocation asks.
+    timings:bool=false
 ]
 module_at = (id:addr engine:Engine):>Module => {
     $runtime_assert id <? engine.modules.length
@@ -211,7 +214,9 @@ load = (path:string @engine:Engine):>addr|Error => {
     $runtime_assert engine.loading.length >? 0
     engine.loading.pop;
     if result isnt? Error and engine.loading.length =? 0 {
+        let patterns_started=timing.start(engine.timings)
         let error=patterns.validate(engine.session)
+        timing.finish('patterns' patterns_started)
         if error isnt? none return error
     }
     return result
@@ -233,7 +238,9 @@ ensure_prelude = (@engine:Engine):>Error? => {
         cached=cache.locate(config)
     }
     if cached isnt? none {
+        let restore_started=timing.start(engine.timings)
         let restored=cache.restore(cached)
+        timing.finish('prelude_restore' restore_started)
         if restored isnt? none {
             engine.session=restored.session
             engine.modules=restored.modules
@@ -262,13 +269,17 @@ ensure_prelude = (@engine:Engine):>Error? => {
     engine.prelude_loaded=true
     if cached isnt? none {
         let word=types.primitive('int64' @engine.session.types)
+        let analysis_started=timing.start(engine.timings)
         let decisions=analysis.analyze(word engine.modules engine.prelude_bindings engine.session)
+        timing.finish('prelude_analysis' analysis_started)
         if decisions is? Error return decisions
         let roots:array<addr>=[]
         loop module in engine.modules {roots.push(module.root)}
         let saved=proofs.Prelude[roots engine.session.hir.length engine.session.hir_edits.length decisions]
         engine.prelude_validation=saved
+        let store_started=timing.start(engine.timings)
         cache.store(cached state.PreludeSnapshot[engine.session engine.modules engine.by_path engine.prelude_bindings saved])
+        timing.finish('prelude_store' store_started)
     }
     return none
 }
@@ -276,9 +287,13 @@ load_source = (path:string @engine:Engine):>addr|Error => {
     let body = p(path).read_text
     if body isnt? string return Error[title='could not read module' message=path]
     let source = SrcFile[path body]
+    let parse_started=timing.start(engine.timings)
     let parsed = parser.parse(source)
+    timing.finish('parse' parse_started)
     if parsed is? Error return parsed
+    let prepare_started=timing.start(engine.timings)
     let prepared=tests.prepare(source parsed run_tests=engine.test_mode and engine.loading.length =? 1 and not engine.prelude_loading)
+    timing.finish('prepare' prepare_started)
     if prepared is? Error return prepared
     source=prepared.source
     let program = prepared.program
@@ -298,11 +313,15 @@ load_source = (path:string @engine:Engine):>addr|Error => {
     let context = contexts.begin(source program.nodes @engine.session)
     let inherited:dict<string addr>=if prelude or not directed.options.no_prelude engine.prelude_bindings else []
     let env = checking.begin(context @engine.session inherited=inherited)
+    let imports_started=timing.start(engine.timings)
     loop statement in statements {
         let error = prepare_imports(statement env @engine)
         if error isnt? none return error
     }
+    timing.finish('imports' imports_started)
+    let check_started=timing.start(engine.timings)
     let checked = checking.module(root_id env @engine.session)
+    timing.finish('check' check_started)
     if checked is? Error return checked
     let block = hir.node_at(engine.session.hir checked)
     $runtime_assert block is? hir.Block

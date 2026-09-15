@@ -51,7 +51,10 @@ def test_native_compiler_command(tmp_path):
     timed = invoke('--timings', '-c', program)
     assert timed.returncode == 0, timed.stdout + timed.stderr
     phases = [line.split()[2] for line in timed.stderr.splitlines() if line.startswith('dewy timing ')]
-    assert phases == ['frontend', 'validation', 'initialization_and_reachability', 'lowering', 'emission', 'backend']
+    # Sub-phases (parse, check, imports, ...) may interleave; the top-level
+    # phases must each appear once, in order.
+    top_level = ['frontend', 'validation', 'initialization_and_reachability', 'lowering', 'emission', 'backend']
+    assert [phase for phase in phases if phase in top_level] == top_level
     for body in [
         '$no_prelude=true\nlet main=():>int64=>42',
         'let main=():>int64=>{let values:array<int64>=[40 2] return values[0]+values[1]}',

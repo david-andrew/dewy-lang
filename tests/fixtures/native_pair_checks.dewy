@@ -32,6 +32,7 @@ import p"native_cache_bytes.dewy" as cache_bytes
 import p"native_none_forwarding.dewy" as none_forwarding
 import p"native_const_capture_facts.dewy" as const_captures
 import p"native_labeled_exit_cleanup.dewy" as labeled_cleanup
+import p"native_getter_field_views.dewy" as getter_views
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -94,5 +95,7 @@ let main=():>int64=>{
     if none_forwarding.main() not=?42 return 30
     printl('Checking cache byte encoding')
     if cache_bytes.main() not=?42 return 29
+    printl('Checking getter field views')
+    if getter_views.main() not=?42 return 31
     return 42
 }

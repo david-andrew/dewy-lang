@@ -1,0 +1,39 @@
+# A field or element read through a borrowed getter is a view of the arena
+# element: a local taking it must copy, never adopt and release the arena's
+# storage. The arena must survive the scopes, and copies stay independent.
+Node:type=[kind:int64 items:array<int64> name:string]
+node_at=(nodes:array<Node> id:addr):>Node=>{
+    $runtime_assert id <? nodes.length
+    return nodes[id]
+}
+total=(nodes:array<Node>):>int64=>{
+    let sum:int64=0
+    loop i in 0.. and i <? nodes.length {
+        let items=node_at(nodes i).items
+        loop v in items {sum+=v}
+        if node_at(nodes i).name.length not=? 4 return -1
+        let copy=node_at(nodes i).items
+        copy.push(1000)
+        if copy.length not=? node_at(nodes i).items.length+1 return -2
+    }
+    return sum
+}
+main=():>int64=>{
+    let nodes:array<Node>=[]
+    loop i in 0..9 {nodes.push(Node[kind=i items=[i i+1 i+2] name="n{i}!!"])}
+    let first=total(nodes)
+    # Reuse any storage a wrong release would have returned to the arena.
+    let scratch:array<array<int64>>=[]
+    loop i in 0..199 {scratch.push([i i i i i i])}
+    loop i in 10..19 {nodes.push(Node[kind=i items=[0 0 0] name="m{i}!"])}
+    let second=total(nodes)
+    if second not=? first return 1
+    if first not=? 165 return 2
+    if nodes.length not=? 20 or node_at(nodes 9).items.length not=? 3 return 3
+    if scratch.length not=? 200 return 4
+    let row=scratch[150]
+    let row_sum:int64=0
+    loop v in row {row_sum+=v}
+    if row_sum not=? 900 return 5
+    return 42
+}

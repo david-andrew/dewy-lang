@@ -9,6 +9,63 @@ The module measurements are bounded development gates; they do not establish
 the full-build target.
 See [ROADMAP.md](../ROADMAP.md#dedicated-performance-campaign).
 
+## Machine bound and the allocation diagnosis (2026-09-15)
+
+The self-build compiles 35,712 lines (1.84 MB) of compiler source plus 3,984
+lines (160 KB) of prelude into a 13.7 MB executable, via 38 MB of µDewy text.
+On the benchmark machine (i7-6700, 3.4 GHz, 4 cores, 8 MB L3) a tight
+single-threaded compiler of this shape has these approximate floors:
+tokenizing and parsing 2 MB of text, 10–40 ms; name resolution and type
+checking 36k lines, 100–300 ms; interval/refinement analysis, 100–500 ms;
+lowering and emitting 1–2 MB of machine code, 100–300 ms; assembling and
+linking with GNU `as`/`ld` at their measured 10–20 MB/s, about a second for
+output of the current size, tens of milliseconds if the output were
+proportional to the program (a 1–2 MB executable). Total: roughly 0.5–1.5 s
+cold on one core, well under a second with the prelude cached. The sub-5-second
+target is therefore 3–10× above the floor, not at it.
+
+The measured cold self-build (C-built compiler, direct x86-64 output,
+2026-09-15 baseline) is 40–47 s: frontend 19.6 s (parse 5.9, check 7.5,
+prelude proof analysis for the cache 3.7, prelude store 0.3), validation 4.8,
+initialization/reachability 2.3, lowering 8.2, emission 3.2, backend 7.1.
+That is 30–80× the floor overall and 200–500× on the parser alone.
+
+Where it goes is not spread thinly. The phase storage counters report 59 GB
+of arena allocation traffic for a build whose live data never exceeds 2.4 GB:
+31.7 GB in the frontend alone, or about 17,000 bytes allocated per byte of
+source. Stack sampling of the frontend (gdb, ~250 samples, symbols named)
+puts 60–65 % of self time in `_arena_alloc`, `_arena_release`, string
+descriptor drop, record/array copy and release helpers, and grapheme
+segmentation of freshly built strings; the compiler's own logic is the
+remainder. The callers are diffuse (the top attributed caller, `node_at`,
+holds under 10 % of allocator samples), which means the cost is the language
+implementation's default treatment of ordinary idioms rather than one bad
+loop:
+
+- `let node = nodes[id]` and `let node = node_at(nodes id)` copy the whole
+  record (and its strings and child arrays) although the local is never
+  written and the arena is never touched while it is alive. About 1,100 such
+  declarations exist in the compiler; 930 `node_at` calls survive into the
+  emitted program, of which 436 are already borrowed by the getter
+  projection and the rest copy.
+- `src[i]`, `src[i..]`, `text[0..last] =? prefix` and `c in? set` each
+  allocate a 48-byte heap descriptor, take and drop an owner reference, and
+  release it again. The tokenizer does this several dozen times per source
+  byte; `startswith` in the library does it on every call.
+- Every interpolated fragment (`"{a}:{b}"` keys, every `write(...)` in the
+  emitter) allocates bytes, segments them into a grapheme table, and copies a
+  descriptor into an array of parts; the final join segments 38 MB again.
+- The allocator itself pays a call, a size-class computation, a free-list
+  pop and three counters per operation.
+
+The order of work follows from that: first make the idioms free (borrowed
+route locals, frame-resident string views for comparisons and lookups,
+byte-buffer emission), then shrink the residual allocation cost, then cut
+generated-code volume so the µDewy and assembler stages shrink with it.
+Each step is measured on the full self-build with the phase counters and
+stack samples above; a step that does not move both the allocation bytes
+and the wall time is not kept.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted

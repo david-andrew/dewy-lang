@@ -56,6 +56,26 @@ let segment = (bytes:array<uint8> @result:array<int64> destination:int64):>int64
     loop offset <? bytes.length {
         $runtime_assert offset >=? 0
         let first=bytes[offset] as int64
+        # Printable ASCII after anything but a Prepend is always a boundary
+        # and carries no Indic, pictographic, regional or Hangul state. Take
+        # whole runs of it without the per-scalar classification below; the
+        # state left behind is exactly what one ASCII "other" scalar leaves.
+        if first >=? 0x20 and first <? 0x7f and previous not=? GCB.prepend {
+            loop offset <? bytes.length and bytes[offset] >=? 0x20 and bytes[offset] <? 0x7f {
+                if offset >? 0 {
+                    if destination =? 0 {result.push(offset)}
+                    else {__store_u32__(offset transmute uint32 destination+boundaries*4)}
+                    boundaries+=1
+                }
+                offset+=1
+            }
+            previous=GCB.other
+            regional_run=0
+            zwj_after_pictographic=false
+            pictographic_chain=false
+            indic_context=0
+            continue
+        }
         let scalar:int64=first
         let count:int64=1
         let minimum:int64=0

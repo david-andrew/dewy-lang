@@ -19,6 +19,7 @@ build = (request:options.Request cwd:string library:string executable:string?=no
     $runtime_assert request.source isnt? none
     let engine=modules.Engine[library_roots=[library] prelude_files=prelude.files(library request.target)]
     engine.session.target=request.target
+    engine.timings=request.timings
     if executable isnt? none {
         engine.prelude_cache=prelude_cache.Config[executable "{cwd}/__dewycache__/prelude" request.target engine.library_roots engine.prelude_files]
     }

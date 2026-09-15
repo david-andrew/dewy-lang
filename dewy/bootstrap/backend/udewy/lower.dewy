@@ -383,7 +383,8 @@ expression = (id:addr @state:State):>addr => {
             let call=hir.node_at(state.input.nodes node.expr)
             $runtime_assert call is? hir.FunctionCall
             value=ordinary_call(node.expr call runtime_type(call.value_type call @state) @state projection=projection)
-        } else {value=owned_value(node.expr @state)}
+        } else if borrowed_route_local(node @state) {value=expression(node.expr @state) borrowed=true}
+        else {value=owned_value(node.expr @state)}
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
         if node.binding_id isnt? none and node.binding_id in? state.boxed {
             value=box_value(value if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
@@ -544,6 +545,15 @@ place_address = (id:addr @state:State):>addr => {
 # This describes the storage produced by expression, not the source type's
 # mutability. Keep adoption and temporary reclamation on the same rule: a
 # borrowed binding/field cannot be released merely because it is aggregate.
+# True when read_operand would lower this call through its getter borrow
+# instead of the ordinary copying call.
+borrowed_getter_receiver = (id:addr @state:State):>bool => {
+    if not state.cleanup_enabled return false
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.RepresentationCast and binary_array_view(node state) return borrowed_getter_receiver(node.expr @state)
+    if node isnt? hir.FunctionCall return false
+    return getter_borrow_projection(id node @state) isnt? none
+}
 expression_owns = (id:addr @state:State):>bool => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.Suppress return expression_owns(node.item @state)
@@ -569,9 +579,11 @@ expression_owns = (id:addr @state:State):>bool => {
         if node is? hir.RepresentationCast and array_valued(source.value_type state) return true
     }
     if node is? hir.ObjectLiteral|hir.ArrayLiteral|hir.DictView|hir.SetAlgebra return true
-    if node is? hir.DictEntries and temporary_owner(node.dictionary @state) return true
-    if node is? hir.MemberAccess and temporary_owner(node.value @state) return true
-    if node is? hir.Index and (id in? state.array_snapshots or temporary_owner(node.array @state)) return true
+    # A receiver read through a getter borrow is a view of arena storage,
+    # so a field or element taken from it is not a fresh temporary either.
+    if node is? hir.DictEntries and temporary_owner(node.dictionary @state) and not borrowed_getter_receiver(node.dictionary @state) return true
+    if node is? hir.MemberAccess and temporary_owner(node.value @state) and not borrowed_getter_receiver(node.value @state) return true
+    if node is? hir.Index and (id in? state.array_snapshots or (temporary_owner(node.array @state) and not borrowed_getter_receiver(node.array @state))) return true
     if node is? hir.Block|hir.Flow and state.cleanup_enabled return true
     # Packing a non-cell value already creates an independent payload and
     # cell. Copying that result again abandons the first owned allocation.
@@ -616,6 +628,12 @@ read_operand = (id:addr @prefix:array<addr> @state:State):>ReadOperand => {
         # read needs only that view, not a mutable copy of the entire table.
         # Actual value conversions still materialize independent storage.
         return read_operand(original.expr @prefix @state)
+    }
+    # A transient read of a getter's record (field, test, index) borrows the
+    # arena element instead of copying it and releasing the copy afterwards.
+    if original is? hir.FunctionCall and state.cleanup_enabled {
+        let projection=getter_borrow_projection(id original @state)
+        if projection isnt? none return ReadOperand[snapshot(ordinary_call(id original runtime_type(original.value_type original @state) @state projection=projection) @prefix @state) none]
     }
     let owner:addr?=if temporary_owner(id @state) hir.node_at(state.input.nodes id).value_type else none
     let value=expression(id @state)
@@ -664,7 +682,13 @@ owned_value = (id:addr @state:State):>addr => {
         # A proven scope borrow returns the route's existing storage. Its
         # source is an explicitly supplied, borrowed, unrebound parameter;
         # caller and callee proofs keep it alive beyond this return cleanup.
-        if projection.borrowed return expression(id @state)
+        if projection.borrowed {
+            if node is? hir.FunctionCall {
+                let inner=getter_borrow_projection(id node @state)
+                if inner isnt? none return ordinary_call(id node runtime_type(node.value_type node @state) @state projection=inner)
+            }
+            return expression(id @state)
+        }
         # Keep the selected field while the route and all enclosing locals
         # are alive. Scalars pass through; aggregate handles acquire their
         # own lifetime before ordinary return cleanup releases the source.
@@ -711,7 +735,11 @@ ArrayMemory:type = [descriptor:addr data:addr prefix:array<addr>]
 array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory => {
     let prefix:array<addr>=[]
     let size=word_op('__mul__' length word(stride node @state) node @state)
-    let data=snapshot(allocation(size node @state) @prefix @state)
+    # An empty array owns no data block: growth allocates from a zero
+    # capacity and release ignores a null pointer, so `[]` costs only its
+    # descriptor instead of a second allocation for zero bytes.
+    let count=hir.node_at(state.nodes length)
+    let data=if count is? hir.Integer and count.value =? 0 snapshot(word(0 node @state) @prefix @state) else snapshot(allocation(size node @state) @prefix @state)
     let descriptor=snapshot(allocation(word(layouts.array_descriptor.size node @state) node @state) @prefix @state)
     let fields:array<addr>=[data length length word(stride node @state) word(layouts.array_flags.mutable + (if state.allocator is? none 0 else layouts.array_flags.arena_descriptor) node @state) word(if state.allocator is? none 0 else 1 node @state)]
     let offset:addr=0
@@ -1281,6 +1309,11 @@ test_refinements_implied = (actual:addr tested:addr @state:State):>bool => {
 }
 runtime_test = (node:hir.TypeTest @state:State):>addr => {
     let prefix:array<addr>=[]
+    let view=string_frame_view(node.value @prefix @state)
+    if view isnt? none {
+        prefix.push(runtime_test_value(view node @state))
+        return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+    }
     let receiver=read_operand(node.value @prefix @state)
     let value=runtime_test_value(receiver.value node @state)
     return finish_read(value receiver node @prefix @state)
@@ -1455,6 +1488,80 @@ string_view = (value:addr first:addr count:addr node:hir.AST @state:State):>addr
     prefix.push(string_memory(read_word(value layouts.string_descriptor.data node @state) word_op('__sub__' stop start node @state) boundaries count start node @state owner=string_runtime('_native_string_view_owner' [value] node @state)))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+# A string index or slice whose base stays alive for the enclosing statement
+# can be read through a frame-resident descriptor: no arena allocation and
+# no owner reference. The slot is reserved once per function (hoisted with
+# the loop prologue), so loops reuse it. Only consumers that neither retain
+# nor release the value (comparisons, tests, hashing) may request one; the
+# control word stays zero and the descriptor must never escape the statement.
+string_frame_view = (id:addr @prefix:array<addr> @state:State):>addr? => {
+    if state.allocator is? none or not state.cleanup_enabled return none
+    let node=hir.node_at(state.input.nodes id)
+    # Contextual typing wraps an index in representation-preserving casts
+    # and single-item blocks; the storage read underneath is the same.
+    loop true {
+        if node is? hir.Suppress {id=node.item node=hir.node_at(state.input.nodes id) continue}
+        if node is? hir.Block and not node.scoped and node.items.length =? 1 {id=node.items[0] node=hir.node_at(state.input.nodes id) continue}
+        if node is? hir.ValueCast|hir.RepresentationCast and owned_string(node.value_type state) and owned_string(hir.node_at(state.input.nodes node.expr).value_type state) {id=node.expr node=hir.node_at(state.input.nodes id) continue}
+        break
+    }
+    # A string literal, or a string read through a route whose owner stays
+    # read-only for the whole function, needs neither a retained handle nor
+    # a release around a comparison: the descriptor itself is the operand.
+    # Consumers read the operand several times, so bind it once.
+    if node is? hir.String return snapshot(expression(id @state) @prefix @state)
+    if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index {
+        if not owned_string(node.value_type state) or stored_type(id state) not=? node.value_type return none
+        if id in? state.array_snapshots return none
+        let source=borrowing.route(id state.input.nodes)
+        if source is? none or source.binding in? state.boxed return none
+        if not borrowing.stable_owner(source state.stable_bindings state.stable_parameters) return none
+        return snapshot(expression(id @state) @prefix @state)
+    }
+    if node isnt? hir.StringIndex|hir.StringSlice return none
+    let base=hir.node_at(state.input.nodes node.string)
+    if not owned_string(base.value_type state) return none
+    if base isnt? hir.String {
+        let route=borrowing.route(node.string state.input.nodes)
+        if route is? none or route.binding in? state.boxed return none
+        if not borrowing.stable_owner(route state.stable_bindings state.stable_parameters) return none
+    }
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let first:addr=0
+    let count:addr=0
+    let value=snapshot(expression(node.string @state) @prefix @state)
+    if node is? hir.StringIndex {
+        first=snapshot(expression(node.index @state) @prefix @state)
+        count=word(1 node @state)
+    } else {
+        let range=hir.node_at(state.input.nodes node.range)
+        if range isnt? hir.Range or range.step_pair isnt? none return none
+        let bounds=if range.bounds is? none '[]' else range.bounds
+        let start=if range.left is? none word(0 node @state) else expression(range.left @state)
+        if range.left isnt? none and bounds in? ['()' '(]'] {start=word_op('__add__' start word(1 node @state) node @state)}
+        first=snapshot(start @prefix @state)
+        let stop=if range.right is? none read_word(value layouts.string_descriptor.grapheme_length node @state) else expression(range.right @state)
+        if range.right isnt? none and bounds in? ['[]' '(]'] {stop=word_op('__add__' stop word(1 node @state) node @state)}
+        stop=snapshot(stop @prefix @state)
+        count=snapshot(word_op('__sub__' stop first node @state) @prefix @state)
+        let negative=intrinsic('__lt__' [count word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let zero=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) count '=' word(0 node @state)] @state)
+        prefix.push(conditional(negative zero node @state))
+    }
+    let hoisted:array<addr>=[]
+    let slot=snapshot(intrinsic('__alloca__' [word(layouts.string_descriptor.size node @state)] word_type node @state) @hoisted @state)
+    loop item in hoisted {state.loop_prologue.push(item)}
+    let boundaries=snapshot(word_op('__add__' read_word(value layouts.string_descriptor.boundaries node @state) word_op('__mul__' first word(4 node @state) node @state) node @state) @prefix @state)
+    let start=snapshot(intrinsic('__load_u32__' [boundaries] word_type node @state) @prefix @state)
+    let stop=snapshot(intrinsic('__load_u32__' [word_op('__add__' boundaries word_op('__mul__' count word(4 node @state) node @state) node @state)] word_type node @state) @prefix @state)
+    prefix.push(store_word(read_word(value layouts.string_descriptor.data node @state) slot layouts.string_descriptor.data node @state))
+    prefix.push(store_word(word_op('__sub__' stop start node @state) slot layouts.string_descriptor.byte_length node @state))
+    prefix.push(store_word(boundaries slot layouts.string_descriptor.boundaries node @state))
+    prefix.push(store_word(count slot layouts.string_descriptor.grapheme_length node @state))
+    prefix.push(store_word(start slot layouts.string_descriptor.start node @state))
+    prefix.push(store_word(word(0 node @state) slot layouts.string_descriptor.owner node @state))
+    return slot
+}
 string_index = (node:hir.StringIndex @state:State):>addr => {
     let prefix:array<addr>=[]
     let value=snapshot(owned_value(node.string @state) @prefix @state)
@@ -1487,11 +1594,13 @@ string_slice = (node:hir.StringSlice @state:State):>addr => {
 }
 string_equal = (node:hir.StringEqual @state:State):>addr => {
     let prefix:array<addr>=[]
-    let left=snapshot(owned_value(node.left @state) @prefix @state)
-    let right=snapshot(owned_value(node.right @state) @prefix @state)
+    let left_view=string_frame_view(node.left @prefix @state)
+    let right_view=string_frame_view(node.right @prefix @state)
+    let left=if left_view isnt? none left_view else snapshot(owned_value(node.left @state) @prefix @state)
+    let right=if right_view isnt? none right_view else snapshot(owned_value(node.right @state) @prefix @state)
     let result=snapshot(string_equal_values(left right node node.negated @state) @prefix @state)
-    prefix.push(string_runtime('_native_string_release' [left] node @state result_void=true))
-    prefix.push(string_runtime('_native_string_release' [right] node @state result_void=true))
+    if left_view is? none {prefix.push(string_runtime('_native_string_release' [left] node @state result_void=true))}
+    if right_view is? none {prefix.push(string_runtime('_native_string_release' [right] node @state result_void=true))}
     prefix.push(result)
     return put(hir.Block[node.loc types.primitive('bool' @state.type_nodes) prefix false] @state)
 }
@@ -1971,6 +2080,10 @@ array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @st
     let capacity=snapshot(read_word(descriptor layouts.array_descriptor.capacity node @state) @prefix @state)
     let body:array<addr>=[]
     let next=snapshot(word_op('__mul__' capacity word(2 node @state) node @state) @body @state)
+    # Grow from a small floor: arrays built by pushes otherwise reallocate
+    # at one, two and four elements before reaching a useful size.
+    let tiny=intrinsic('__lt__' [next word(8 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    body.push(conditional(tiny put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) next '=' word(8 node @state)] @state) node @state))
     let insufficient=intrinsic('__lt__' [next required] types.primitive('bool' @state.type_nodes) node @state)
     let choose=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) next '=' required] @state)
     body.push(conditional(insufficient choose node @state))
@@ -2306,7 +2419,10 @@ getter_read = (body:addr nodes:array<hir.AST>):>addr? => {
         terminal=node.item
         node=hir.node_at(nodes terminal)
     }
-    if node isnt? hir.Index|hir.MemberAccess|hir.ExpressedIdentifier return none
+    # A wrapper returning another getter's call is itself a getter when the
+    # inner call's route argument is a route of this function's parameter;
+    # getter_route resolves that below. Ordinary getters return a route.
+    if node isnt? hir.Index|hir.MemberAccess|hir.ExpressedIdentifier|hir.FunctionCall return none
     # HIR is an arena and may share nodes. The result override must not also
     # change a use of this record read in the unchanged prefix.
     if terminal in? prefix_nodes return none
@@ -2345,20 +2461,64 @@ scalar_getter_projection = (node:hir.MemberAccess @state:State):>ScalarProjectio
     return projection
 }
 
-# Keep a getter's returned record as a local view only when both the view
-# binding and its owner remain read-only for their whole lexical function.
-# Ordinary calls/returns still establish value boundaries and copy as needed.
-# The source is a supplied identifier or field route. Parameter effects may
-# prove a field stable even when unrelated fields are written. Temporaries,
-# defaults, captured storage and converted argument layouts keep the fallback.
-borrowed_getter_local = (node:hir.Declare @state:State):>ScalarProjection? => {
-    if node.binding_id is? none or node.binding_id not in? state.stable_bindings or node.binding_id in? state.boxed return none
-    $runtime_assert node.expr <? state.input.nodes.length
-    if state.input.nodes[node.expr] isnt? hir.FunctionCall return none
-    let call=hir.node_at(state.input.nodes node.expr)
-    $runtime_assert call is? hir.FunctionCall
+# A local initialized from a field or element route of storage that stays
+# read-only for the whole function is itself a view of that storage: no copy
+# on declaration and no release at scope exit. Both the local and the route's
+# owner must be stable (never written, rebound, captured or exposed as a
+# place), and the read must keep the stored representation. Escapes through
+# returns, stores and ordinary arguments still copy from the view as usual.
+borrowed_route_local = (node:hir.Declare @state:State):>bool => {
+    if state.allocator is? none return false
+    let expr=hir.node_at(state.input.nodes node.expr)
+    if expr isnt? hir.Index|hir.MemberAccess return false
+    if not releasable(expr.value_type @state) return false
+    if node.binding_id is? none return false
+    if node.binding_id in? state.boxed return false
+    if node.binding_id not in? state.stable_bindings return false
+    if node.annotation isnt? none and node.annotation not=? expr.value_type return false
+    if stored_type(node.expr state) not=? expr.value_type return false
+    if node.expr in? state.array_snapshots return false
+    let route=borrowing.route(node.expr state.input.nodes)
+    if route is? none or route.binding in? state.boxed return false
+    return borrowing.stable_owner(route state.stable_bindings state.stable_parameters)
+}
+# The storage route a getter's result refers to, in terms of the getter's
+# own parameters. A terminal call to another getter contributes the route of
+# the argument bound to that getter's route parameter, provided the call
+# borrows it. Depth is bounded so recursive wrappers stay finite.
+getter_route = (read:addr depth:addr @state:State):>borrowing.Route? => {
+    let node=hir.node_at(state.input.nodes read)
+    if node isnt? hir.FunctionCall return borrowing.route(read state.input.nodes)
+    if depth >? 4 or not object_valued(node.value_type state) return none
+    let direct=captures.resolve(node.func node.selected_method_index state.capture_plan state.input.nodes)
+    if direct is? none return none
+    let literal=hir.node_at(state.input.nodes direct)
+    if literal isnt? hir.FunctionLiteral or literal.object_receiver or literal.rettype not=? node.value_type return none
+    let capture=state.capture_plan.functions.get(direct)
+    if capture is? none or capture.captures.length >? 0 return none
+    if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
+    let inner=state.getter_reads.get(direct default=none)
+    if inner is? none or inner in? state.array_snapshots return none
+    let inner_route=getter_route(inner depth+1 @state)
+    if inner_route is? none return none
+    let parameter:hir.Param?=none
+    loop candidate in parameters(literal) {if candidate.binding_id isnt? none and candidate.binding_id =? inner_route.binding {parameter=candidate}}
+    if parameter is? none or parameter.place or parameter is? hir.BoundParam return none
+    let pairs=effects.pair_arguments(node literal)
+    if pairs is? none return none
+    let source:addr?=none
+    loop pair in pairs {if pair.parameter isnt? none and pair.parameter =? inner_route.binding {source=pair.argument}}
+    if source is? none or source not in? state.borrowed_arguments.get(read set[]) return none
+    let argument=hir.node_at(state.input.nodes source)
+    if argument isnt? hir.ExpressedIdentifier|hir.MemberAccess return none
+    if argument.value_type not=? parameter.value_type return none
+    return borrowing.route(source state.input.nodes)
+}
+# The callee/argument half of a getter borrow: a direct, capture-free getter
+# returning a record route of one read-only parameter, called with a route
+# argument whose owner stays stable for the whole calling function.
+getter_borrow_projection = (id:addr call:hir.FunctionCall @state:State):>ScalarProjection? => {
     if not object_valued(call.value_type state) return none
-    if node.annotation isnt? none and node.annotation not=? call.value_type return none
     let direct=captures.resolve(call.func call.selected_method_index state.capture_plan state.input.nodes)
     if direct is? none return none
     let literal=hir.node_at(state.input.nodes direct)
@@ -2368,7 +2528,7 @@ borrowed_getter_local = (node:hir.Declare @state:State):>ScalarProjection? => {
     if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
     let read=state.getter_reads.get(direct default=none)
     if read is? none or read in? state.array_snapshots return none
-    let route=borrowing.route(read state.input.nodes)
+    let route=getter_route(read 0 @state)
     if route is? none or route.binding not in? state.stable_bindings return none
     let parameter:hir.Param?=none
     loop candidate in parameters(literal) {if candidate.binding_id isnt? none and candidate.binding_id =? route.binding {parameter=candidate}}
@@ -2377,7 +2537,7 @@ borrowed_getter_local = (node:hir.Declare @state:State):>ScalarProjection? => {
     if pairs is? none return none
     let source:addr?=none
     loop pair in pairs {if pair.parameter isnt? none and pair.parameter =? route.binding {source=pair.argument}}
-    if source is? none or source not in? state.borrowed_arguments.get(node.expr set[]) return none
+    if source is? none or source not in? state.borrowed_arguments.get(id set[]) return none
     let argument=hir.node_at(state.input.nodes source)
     if argument isnt? hir.ExpressedIdentifier|hir.MemberAccess return none
     let owner=borrowing.route(source state.input.nodes)
@@ -2390,6 +2550,18 @@ borrowed_getter_local = (node:hir.Declare @state:State):>ScalarProjection? => {
     state.scalar_projections[key]=projection
     state.pending_projections.push(projection)
     return projection
+}
+# Keep a getter's returned record as a local view only when both the view
+# binding and its owner remain read-only for their whole lexical function.
+# Ordinary calls/returns still establish value boundaries and copy as needed.
+borrowed_getter_local = (node:hir.Declare @state:State):>ScalarProjection? => {
+    if node.binding_id is? none or node.binding_id not in? state.stable_bindings or node.binding_id in? state.boxed return none
+    $runtime_assert node.expr <? state.input.nodes.length
+    if state.input.nodes[node.expr] isnt? hir.FunctionCall return none
+    let call=hir.node_at(state.input.nodes node.expr)
+    $runtime_assert call is? hir.FunctionCall
+    if node.annotation isnt? none and node.annotation not=? call.value_type return none
+    return getter_borrow_projection(node.expr call @state)
 }
 # Exact field operations and dynamic-family dispatch have different sharing
 # boundaries. A family's copy/release calls one field helper for its selected
@@ -2905,6 +3077,12 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let units=state.capture_plan.functions
     let named=state.capture_plan.named
     loop [id capture] in units {state.code_symbols[id]="__dewy_function_{id}"}
+    # Carry the source name of a named function into its symbol so stack
+    # traces, profiles and emitted text identify it. Unique ids stay in front.
+    loop [binding id] in named {
+        let source_name=state.capture_plan.names.get(binding)
+        if source_name isnt? none {state.code_symbols[id]="__dewy_function_{id}_{source_name}"}
+    }
     loop [binding id] in named {
         let name=state.code_symbols.get(id)
         $runtime_assert name isnt? none
@@ -3740,10 +3918,11 @@ dict_probe_body = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @st
 dict_contains = (node:hir.DictContains @state:State):>addr => {
     let prefix:array<addr>=[]
     let parts=dict_from_keys(node.keys @prefix @state)
-    let key=snapshot(owned_value(node.key @state) @prefix @state)
+    let key_view=string_frame_view(node.key @prefix @state)
+    let key=if key_view isnt? none key_view else snapshot(owned_value(node.key @state) @prefix @state)
     prefix.push(dict_ensure(parts node @state))
     let probe=dict_probe(parts key node @prefix @state)
-    prefix.push(release_value(key parts.key node @state))
+    if key_view is? none {prefix.push(release_value(key parts.key node @state))}
     if node.position isnt? none {prefix.push(put(hir.Declare[node.loc types.primitive('void' @state.type_nodes) 'let' node.position types.primitive('int64' @state.type_nodes) probe.position] @state))}
     return finish_dictionary(probe.found parts node @prefix @state)
 }
@@ -3751,7 +3930,8 @@ dict_lookup = (node:hir.DictLookup @state:State):>addr => {
     let prefix:array<addr>=[]
     let parts=dict_from_keys(node.keys @prefix @state)
     $runtime_assert parts.value isnt? none
-    let key=snapshot(owned_value(node.key @state) @prefix @state)
+    let key_view=string_frame_view(node.key @prefix @state)
+    let key=if key_view isnt? none key_view else snapshot(owned_value(node.key @state) @prefix @state)
     let fallback:addr?=none
     if node.default isnt? none {fallback=snapshot(owned_value(node.default @state) @prefix @state)}
     let position:addr?=none
@@ -3763,7 +3943,7 @@ dict_lookup = (node:hir.DictLookup @state:State):>addr => {
         let probe=dict_probe(parts key node @prefix @state)
         position=probe.position found=probe.found
     }
-    prefix.push(release_value(key parts.key node @state))
+    if key_view is? none {prefix.push(release_value(key parts.key node @state))}
     $runtime_assert position isnt? none
     let value=dict_element(dict_field(parts 'values' node @state) position parts.value node @state)
     if node.proven {value=read_value(value parts.value node.value_type node @state)}

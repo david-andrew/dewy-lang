@@ -107,6 +107,108 @@ shares_storage = (call:hir.FunctionCall target:addr plan:captures.Plan nodes:arr
     loop argument in arguments(call) {if hir.node_at(nodes argument) is? hir.Place return true}
     return false
 }
+# Storage whose address may reach a raw memory operation, a system call, an
+# aggregate transmute, an unknown callee or a keyed sort inside its own
+# function. Only such roots can be changed behind a scope borrow: every
+# other callee receives the value by copy, or borrows it only when it is
+# transitively free of raw operations (see `arguments` below). Binding ids
+# are program-unique, so one set covers every function.
+exposed_roots = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table):>set<addr> => {
+    let exposed:set<addr>=set[]
+    let expose = (id:addr @exposed:set<addr>):>void => {
+        if word_value(hir.node_at(nodes id).value_type type_nodes) return void
+        let source=route(id nodes)
+        if source isnt? none {exposed.add(source.binding)}
+    }
+    loop [id function] in plan.functions {
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let pending:array<addr>=[literal.body]
+        loop parameter in effects.literal_params(literal) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
+        let seen:set<addr>=set[]
+        loop pending.length >? 0 {
+            let child=pending.pop
+            if child in? seen continue
+            seen.add(child)
+            let node=hir.node_at(nodes child)
+            if node is? hir.FunctionLiteral|hir.GenericFunction continue
+            if node is? hir.RuntimeFailure {
+                if node.message isnt? none {pending.push(node.message)}
+                continue
+            }
+            if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) {expose(node.expr @exposed)}
+            if node is? hir.FunctionCall {
+                let callee=hir.node_at(nodes node.func)
+                let direct=captures.resolve(node.func node.selected_method_index plan nodes)
+                let raw=false
+                if direct is? none and callee is? hir.ExpressedIdentifier {
+                    let memory=callee.name.startswith('__load_') or callee.name.startswith('__store_')
+                    let unknown=(callee.binding_id isnt? none and callee.binding_id in? plan.source_bindings) or (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix)
+                    raw=memory or unknown or callee.name.startswith('__syscall')
+                } else if direct is? none and callee is? hir.ArrayMethod {
+                    raw=callee.name =? 'sort' and 'key' in? node.kw_args
+                } else if direct is? none and callee isnt? hir.FunctionLiteral {raw=true}
+                if raw {
+                    loop argument in arguments(node) {
+                        let value=hir.node_at(nodes argument)
+                        expose((if value is? hir.Place value.target else argument) @exposed)
+                    }
+                    if callee is? hir.ArrayMethod {expose(callee.array @exposed)}
+                }
+            }
+            loop next in hir.children(node) {pending.push(next)}
+        }
+    }
+    return exposed
+}
+# Functions whose place parameter may name a global's storage: some caller
+# passes a global route as the place, forwards its own such place, or the
+# function is reachable through a callback whose call sites are unknown.
+# Only then can a global write elsewhere change what the place refers to.
+global_placed = (plan:captures.Plan nodes:array<hir.AST> indirect:dict<addr array<addr>>):>set<addr> => {
+    let marked:set<addr>=set[]
+    let forwards:dict<addr array<addr>>=[]
+    loop [callee targets] in indirect {loop target in targets {marked.add(target)}}
+    loop [id function] in plan.functions {
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let own_places:set<addr>=set[]
+        loop parameter in effects.literal_params(literal) {
+            if parameter.place and parameter.binding_id isnt? none {own_places.add(parameter.binding_id)}
+        }
+        let pending:array<addr>=[literal.body]
+        loop parameter in effects.literal_params(literal) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
+        let seen:set<addr>=set[]
+        loop pending.length >? 0 {
+            let child=pending.pop
+            if child in? seen continue
+            seen.add(child)
+            let node=hir.node_at(nodes child)
+            if node is? hir.FunctionLiteral|hir.GenericFunction continue
+            if node is? hir.FunctionCall {
+                let direct=captures.resolve(node.func node.selected_method_index plan nodes)
+                loop argument in arguments(node) {
+                    let value=hir.node_at(nodes argument)
+                    if value isnt? hir.Place continue
+                    let source=route(value.target nodes)
+                    if direct is? none {
+                        # An unresolved callee with a place: mark every possible target.
+                        loop target in indirect.get(node.func []) {marked.add(target)}
+                        continue
+                    }
+                    if source is? none or source.binding in? plan.globals {marked.add(direct) continue}
+                    if source.binding in? own_places {
+                        let users=forwards.get(id [])
+                        users.push(direct)
+                        forwards[id]=users
+                    }
+                }
+            }
+            loop next in hir.children(node) {pending.push(next)}
+        }
+    }
+    return propagate_ambient(marked forwards)
+}
 # These three summaries differ in their initial facts and propagation edges,
 # not in which syntax they inspect. Collect the function graph once and keep
 # the ownership boundary explicit on a separate reverse edge map.
@@ -250,6 +352,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # without a declared place. They always require the ordinary value copy;
     # writes to unrelated globals only matter for an aliasing place source.
     let opaque=propagate_ambient(ambient.opaque ambient.callers)
+    let aliased=global_placed(plan nodes indirect)
     # Borrowing must also exclude indirect raw writes that could alias caller
     # storage. Releasing an already independent snapshot only requires proving
     # that this snapshot was not itself exposed beyond the call.
@@ -274,10 +377,14 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     }
     let stable:set<addr>=set[]
     let stable_parameters:dict<addr effects.ParameterEffects>=[]
+    # Raw operations elsewhere in a function's call graph cannot reach a
+    # local that is never written, exposed, captured or passed as a place:
+    # callees with raw operations receive their arguments by copy. Only the
+    # function's own raw exposures of that storage disqualify it.
+    let exposed=exposed_roots(plan nodes type_nodes)
     loop [id function] in plan.functions {
-        if id in? opaque continue
         loop binding in function.locals {
-            if binding not in? function.writes and binding not in? places and binding not in? plan.globals and binding not in? captured {stable.add(binding)}
+            if binding not in? function.writes and binding not in? places and binding not in? plan.globals and binding not in? captured and binding not in? exposed {stable.add(binding)}
         }
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
@@ -286,10 +393,10 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         loop parameter in parameters {if parameter.place {place_count+=1}}
         loop parameter in parameters {
             let binding=parameter.binding_id
-            if binding is? none or binding in? captured or binding in? plan.globals continue
+            if binding is? none or binding in? captured or binding in? plan.globals or binding in? exposed continue
             # A place owner can also be named by a global. Exclude ambient
             # writes and, conservatively, functions with multiple places.
-            if parameter.place and (place_count not=? 1 or id in? dirty) continue
+            if parameter.place and (place_count not=? 1 or (id in? dirty and id in? aliased)) continue
             let summary=summaries.by_param_binding.get(binding)
             if summary isnt? none {stable_parameters[binding]=summary}
         }

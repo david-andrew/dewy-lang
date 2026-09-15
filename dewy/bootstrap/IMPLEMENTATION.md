@@ -93,6 +93,28 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Native lowering borrows more and allocates less (2026-09-15, performance
+  campaign). Scope borrows no longer depend on a function-wide "opaque"
+  bit: a local or parameter is stable when it is never written, captured,
+  exposed as a place, or handed to a raw operation, an aggregate transmute,
+  an unknown callee or a keyed sort within its own function; raw operations
+  elsewhere in the call graph receive their arguments by copy. Argument
+  borrowing likewise requires the receiving parameter and the argument's
+  root to be unexposed was tried and reverted: sharing a borrowed array
+  through the callee's value copies made the caller detach on every later
+  write, so argument borrowing keeps the call-graph rule. A place parameter that no caller ever binds to a global route
+  is stable regardless of global writes below it. `let x = route` of a
+  stable root is a view, as is a getter call read transiently (field, test,
+  index), and wrapper getters whose body returns another getter's call are
+  getters too. String comparisons, type tests and dictionary keys use the
+  operand descriptor directly for literals and stable routes, and a
+  frame-resident descriptor (hoisted alloca slot) for index/slice
+  operands. Empty array literals own no data block and growth starts at
+  eight elements. Named functions carry their source name in their symbol.
+  `tests/fixtures/native_getter_field_views.dewy` pins that a field read
+  through a getter view is copied, not adopted. `--timings` also reports
+  parse/check sub-phases.
+
 - Hosted array pops now convert removed record elements from arena roots to
   the usual caller/frame result storage, then release the original tree.
   Locals, direct returns, retained fields and discarded pops consequently
