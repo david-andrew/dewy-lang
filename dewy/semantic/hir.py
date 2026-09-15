@@ -845,7 +845,7 @@ class RangeMembership(AST):
 
 
 @cache
-def child_fields(cls: type) -> tuple[str, ...]:
+def _child_schema(cls: type) -> tuple[tuple[str, int], ...]:
     """Fields containing HIR syntax, excluding types and source metadata.
 
     Resolve annotations once per class, after the module is initialized.
@@ -860,8 +860,35 @@ def child_fields(cls: type) -> tuple[str, ...]:
             return any(contains_syntax(item) for item in get_args(annotation))
         return False
 
+    def direct_ast(annotation: object, *, optional: bool = False) -> bool:
+        if isinstance(annotation, type):
+            return (optional and annotation is type(None)) or issubclass(annotation, AST)
+        return get_origin(annotation) in (Union, UnionType) and all(
+            direct_ast(item, optional=optional) for item in get_args(annotation))
+
     hints = get_type_hints(cls)
-    return tuple(item.name for item in fields(cls) if contains_syntax(hints[item.name]))
+    schema = []
+    for item in fields(cls):
+        annotation = hints[item.name]
+        if not contains_syntax(annotation):
+            continue
+        if direct_ast(annotation, optional=True):
+            kind = 0  # one node, possibly absent
+        elif get_origin(annotation) in (list, tuple) and all(
+                direct_ast(arg) for arg in get_args(annotation) if arg is not Ellipsis):
+            kind = 1  # a flat sequence of nodes
+        elif get_origin(annotation) is dict and direct_ast(get_args(annotation)[1]):
+            kind = 2  # node-valued keyword arguments
+        else:
+            kind = 3  # defaults, object fields, or mixed/nested containers
+        schema.append((item.name, kind))
+    return tuple(schema)
+
+
+@cache
+def child_fields(cls: type) -> tuple[str, ...]:
+    """Names of syntax fields, in dataclass declaration order."""
+    return tuple(name for name, _kind in _child_schema(cls))
 
 
 def children(node: AST | ObjectField | Param) -> Iterator[AST]:
@@ -870,8 +897,17 @@ def children(node: AST | ObjectField | Param) -> Iterator[AST]:
     This is a structural traversal, not an evaluation-order or effects rule.
     Analyses with runtime ordering requirements still select their own edges.
     """
-    for name in child_fields(type(node)):
-        yield from _child_values(getattr(node, name))
+    for name, kind in _child_schema(type(node)):
+        value = getattr(node, name)
+        if kind == 0:
+            if value is not None:
+                yield value
+        elif kind == 1:
+            yield from value
+        elif kind == 2:
+            yield from value.values()
+        else:
+            yield from _child_values(value)
 
 
 def _child_values(value: object) -> Iterator[AST]:
@@ -886,9 +922,11 @@ def _child_values(value: object) -> Iterator[AST]:
 
 def walk(root: AST) -> Iterator[AST]:
     """Preorder structural walk, visiting shared subtrees at each occurrence."""
-    yield root
-    for child in children(root):
-        yield from walk(child)
+    pending = [root]
+    while pending:
+        node = pending.pop()
+        yield node
+        pending.extend(reversed(tuple(children(node))))
 
 
 

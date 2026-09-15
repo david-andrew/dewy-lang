@@ -40,6 +40,29 @@ def test_nested_syntax_sequences_preserve_order_and_metadata_stays_opaque():
     assert list(hir.children(root)) == [first, second]
 
 
+def test_walk_preserves_shared_occurrences_and_handles_deep_syntax():
+    shared = integer(1)
+    root = hir.Block(LOC, 'void', [shared, shared], False)
+    assert [id(node) for node in hir.walk(root)] == [id(root), id(shared), id(shared)]
+    for _ in range(2000):
+        root = hir.Suppress(LOC, 'void', root)
+    nodes = list(hir.walk(root))
+    assert len(nodes) == 2003
+    assert nodes[-1] is nodes[-2] is shared
+
+
+def test_planned_children_match_generic_fields_on_checked_syntax():
+    root = check.typecheck_and_resolve(SrcFile(None, '''
+Box:type=[value:int64]
+let choose=(x:int64=3):>Box=>[value=if x >? 0 x else -x]
+let main=()=>{let xs=[1 2]\nloop x in xs {let box=choose(x=x)\n"{box.value}";}}
+'''))
+    for node in hir.walk(root):
+        reference = [child for name in hir.child_fields(type(node))
+                     for child in hir._child_values(getattr(node, name))]
+        assert [id(child) for child in hir.children(node)] == [id(child) for child in reference]
+
+
 def test_assignment_discovery_reaches_fields_and_keyword_arguments():
     target = hir.ExpressedIdentifier(LOC, 'int64', 'changed', binding_id=17)
     assignment = hir.Assign(LOC, 'void', target, '=', integer(-1))

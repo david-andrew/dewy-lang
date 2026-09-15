@@ -24,10 +24,10 @@ def test_nested_compilations_restore_policy_after_failure(collection_policy):
     with pytest.raises(ValueError):
         with compiler_allocation_scope():
             assert gc.isenabled()
-            assert gc.get_threshold() == (50_000, 12, 15)
+            assert gc.get_threshold() == (500_000, 12, 15)
             with compiler_allocation_scope():
-                assert gc.get_threshold() == (50_000, 12, 15)
-            assert gc.get_threshold() == (50_000, 12, 15)
+                assert gc.get_threshold() == (500_000, 12, 15)
+            assert gc.get_threshold() == (500_000, 12, 15)
             raise ValueError('compile failed')
     assert gc.get_threshold() == (700, 12, 15)
 

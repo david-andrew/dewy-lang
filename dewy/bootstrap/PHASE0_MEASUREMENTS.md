@@ -2571,3 +2571,23 @@ unmeasured. Artifacts: `token-membership-fixed-gates.log`,
 An exploratory conservative count of lowered function references found only
 one unreferenced function (357 bytes) in this self-build, so moving function
 reachability earlier was not pursued as a performance optimization.
+
+### HIR child plans and Python collection batches
+
+Structural HIR walks derive flat node, node-list and keyword-map access from
+the existing annotation inventory once per class. Mixed containers still
+use the general traversal. Preorder walking uses an explicit stack, retaining
+field order and repeated shared occurrences without recursive generator
+forwarding. The native traversal already selects fields from its node kinds.
+The 14 child-plan, native traversal, bounds-dispatch and lowering-index checks
+pass, including a depth-2000 walk and comparison to the generic field walker.
+
+The Python compilation scope also increases its ordinary allocation interval
+from 50,000 to 500,000, keeping automatic cycle collection enabled and
+restoring the embedding caller's policy. Existing deliberately large caller
+thresholds remain untouched. All five policy checks pass. The module sample
+changes 9.133 to **8.381 seconds**, with checking 5.848 to 5.732 and lowering
+0.703 to 0.758; collection work moves between phases rather than disappearing.
+This small workload does not establish a full-build benefit or memory cost.
+Artifacts: `hir-child-plan-gates.log`, `collection-batch-gates.log`,
+`measure-hir-plan.log`.
