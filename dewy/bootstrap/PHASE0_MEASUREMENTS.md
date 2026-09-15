@@ -1546,3 +1546,20 @@ was 134.53 s with 34.27 s lowering, on the slightly earlier `091eab3b` source;
 that source difference limits the before/after comparison. Neither reaches
 the target. Artifacts: `hosted-current-lowering.prof`, `host-signatures-t0-*`,
 `host-shared-signatures-full`, and `hosted-signature-gates.log`.
+
+### Avoid serialized keys for native primitive-type hits
+
+The refreshed native lowering profile found primitive creation in 42 of 159
+stacks, with quoting and string construction inside the supposedly cheap hit
+path. A type table now remembers primitive ids by their original names. The
+cache forks with the table and clears on suffix truncation, before ids can be
+reused. A miss still uses the canonical storage-key interner, including
+descriptions installed directly through `intern`.
+
+An isolated native kernel making 20,000 repeated queries falls from **0.233
+to 0.00481 seconds**; payload allocation falls from **86,080,000 to 320,000
+bytes**. Three targeted tests pass, covering primitive allocation, table
+snapshots, rollback, id reuse, direct interning, and the existing structural
+factory/query gates on direct and C backends. Full native self-build impact
+remains unmeasured. Artifacts: `primitive-lookup-measurement`,
+`primitive-lookup-gates.log`, `native-indexed-lowering-samples`.

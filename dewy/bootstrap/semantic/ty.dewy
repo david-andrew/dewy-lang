@@ -125,6 +125,9 @@ Table:type = [
     # Forking a table forks this index with it; keys are not portable between
     # independent tables. Its lifetime is one compilation's type arena.
     shape_positions:dict<string addr>=[]
+    # Primitive names already identify their descriptions. Avoid quoting and
+    # assembling a storage key on the many scalar lookups during lowering.
+    primitives:dict<string addr>=[]
 ]
 
 
@@ -208,13 +211,17 @@ truncate = (@nodes:Table count:addr):>void => {
     nodes.normal_forms=[]
     nodes.combinations=[]
     nodes.positional_functions=[]
+    nodes.primitives=[]
 }
 
 primitive = (name:string @nodes:Table):>addr => {
+    let cached=nodes.primitives.get(name)
+    if cached isnt? none return cached
     let key="P{_quoted(name)}"
     let known=nodes.positions.get(key)
-    if known isnt? none return known
-    return intern(@nodes Primitive[key=key name=name])
+    let result=if known isnt? none known else intern(@nodes Primitive[key=key name=name])
+    nodes.primitives[name]=result
+    return result
 }
 integer_literal = (value:bigint @nodes:Table):>addr => {
     let key="I{_bigint_as_string(value)}"

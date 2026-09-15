@@ -1,0 +1,30 @@
+# Primitive factory hits need no serialized type key. Tables and their query
+# caches remain value snapshots, including rollback and reused arena ids.
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+main=():>int64=>{
+    let nodes=types.Table[]
+    let word=types.primitive('int64' @nodes)
+    let flag=types.primitive('bool' @nodes)
+    let before:int64=_arena_allocated_bytes
+    loop i in 0..9999 {
+        if types.primitive('int64' @nodes) not=? word return 1
+        if types.primitive('bool' @nodes) not=? flag return 2
+    }
+    printl(_arena_allocated_bytes-before)
+    let saved=nodes
+    types.truncate(@nodes 1)
+    let replacement=types.primitive('uint8' @nodes)
+    if replacement not=? flag return 3
+    let restored=types.primitive('bool' @nodes)
+    if restored =? replacement return 4
+    if types.primitive('bool' @saved) not=? flag return 5
+    if types.primitive('int64' @nodes) not=? word return 6
+    types.truncate(@nodes 0)
+    if types.primitive('bool' @nodes) not=? 0 return 7
+    let independent=types.Table[]
+    if types.primitive('int64' @independent) not=? 0 return 8
+    # A factory must also find a description installed directly via intern.
+    let manual=types.intern(@independent types.Primitive[key='P"bool"' name='bool'])
+    if types.primitive('bool' @independent) not=? manual return 9
+    return 42
+}
