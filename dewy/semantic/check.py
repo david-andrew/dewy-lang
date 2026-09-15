@@ -6291,7 +6291,10 @@ def _tcr_unpack(targets: p0.Block, right: p0.AST, loc: Span, *, keyword: str | N
 def _block_declaration_parts(item: p0.AST, seen: set[str], *, ctx: Context) -> tuple[str, p0.AST] | None:
     """A block item's declaration: `let`/`const`, or the block's first bare `name = value`
     (``seen`` holds the names the block has declared so far, either way)."""
-    declaration = _declaration_parts(item)
+    # `Name:type = ...` also declares a name before a following bare
+    # `Name = ...`. Otherwise that assignment acquires a second declaration
+    # identity before aliases are prebound, bypassing assignment checks.
+    declaration = _declaration_parts(item) or _annotated_type_alias_rhs(item)
     if declaration is not None:
         seen.add(declaration[0])
         return declaration
@@ -12188,8 +12191,14 @@ def tcr_assignment_target(
 
     if isinstance(target, p0.Atom) and isinstance(target.item, t1.Identifier):
         resolved = tcr_identifier(target.item, ctx=ctx, refined=refined)
-        assert isinstance(resolved, hir.ExpressedIdentifier)
-        binding = ctx.binding_registry.by_id.get(resolved.binding_id) if resolved.binding_id is not None else None
+        # Static aliases resolve to TypeValue, not a runtime identifier. Keep
+        # their lexical binding so foreign-assignment diagnostics still name
+        # the module and explain explicit shadowing before checking storage.
+        binding = (
+            ctx.binding_registry.by_id.get(resolved.binding_id)
+            if isinstance(resolved, hir.ExpressedIdentifier) and resolved.binding_id is not None
+            else ctx.binding_scopes.get(target.item.name)
+        )
         if binding is not None and binding.read_only_reason is not None:
             user_error(
                 ctx.srcfile,
@@ -12206,6 +12215,12 @@ def tcr_assignment_target(
                 f'cannot assign to `{binding.name}`: it belongs to {origin}',
                 Pointer(span=target.loc, message=f'`{binding.name}` is {what} declared by {origin}; only its own module assigns it'),
                 hint=f'to declare your own `{binding.name}`, write `let {binding.name} = …` — it shadows that one within this module',
+            )
+        if not isinstance(resolved, hir.ExpressedIdentifier):
+            user_error(
+                ctx.srcfile,
+                'assignment requires runtime storage',
+                Pointer(span=target.loc, message=f'`{target.item.name}` does not name a runtime variable'),
             )
         if not refined and binding is not None:
             contract = binding.store_type

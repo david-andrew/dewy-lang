@@ -826,18 +826,23 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
 # Value/function declarations are reserved by the expression checker.
 predeclare_alias = (id:addr context:contexts.Context @session:contexts.Session):>addr?|Error => {
     let node = contexts.node_at(id context session)
+    let explicit=false
     if node is? parser.KeywordExpr and node.parts.length =? 2 {
         let keyword = contexts.node_at(node.parts[0] context session)
-        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] { node = contexts.node_at(node.parts[1] context session) }
+        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] { node = contexts.node_at(node.parts[1] context session) explicit=true }
     }
     if node isnt? parser.BinOp or source_views.symbol(node.op context session) not in? ['=' '::' ':='] return none
     let target = contexts.node_at(node.left context session)
     let name:string? = none
     if target is? parser.BinOp and source_views.is_operator(target.op ':' context session) and source_views.identifier(target.right context session) =? 'type' {
+        explicit=true
         name = source_views.identifier(target.left context session)
     } else if source_views.is_mint(node.right context session) { name = source_views.identifier(node.left context session) }
     else return none
     if name is? none return contexts.problem(id 'type alias needs a name' 'use `Name:type = ...`' context session)
+    # A bare assignment to an outer name does not declare a shadow, even when
+    # its right side is a mint. Let ordinary assignment checking diagnose it.
+    if not explicit and lookup(name context session) isnt? none return none
     let scope = bindings.scope_at(session.scopes context.scope)
     if name in? scope.names return contexts.problem(id "duplicate declaration `{name}`" 'this scope already declares the name' context session)
     let reference = contexts.syntax_ref(id context @session)

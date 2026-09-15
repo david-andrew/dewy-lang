@@ -23,6 +23,15 @@ def test_let_shadows_a_prelude_name() -> None:
     _check('let ms = type of any & [x:int64]\nlet a = ms(x=1)')
 
 
+def test_type_alias_assignment_reports_storage_or_origin() -> None:
+    with pytest.raises(UserError, match='cannot assign to `Child`: it belongs to the prelude') as caught:
+        _check('Child = type of [x:int64]')
+    assert 'write `let Child = …`' in str(caught.value)
+    with pytest.raises(UserError, match='assignment requires runtime storage'):
+        _check('Node:type=[x:int64]\nNode = type of [y:int64]')
+    _check('let Child=type of [x:int64]\nlet value=Child[42]')
+
+
 def test_an_imported_binding_is_not_assignable_here(tmp_path) -> None:
     (tmp_path / 'lib.dewy').write_text('let counter:int64 = 0\nlet bump = ():>int64 => { counter += 1  return counter }\n')
     (tmp_path / 'main.dewy').write_text('from p"lib.dewy" import counter, bump\nmain = () => { counter = 5  exit(bump()) }\n')
