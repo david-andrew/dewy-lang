@@ -33,6 +33,10 @@ class _DirectEmitter:
             debug_locations=False,
         )
         self.program = program
+        self.expression_handlers = dict(self._expression_handlers)
+        # Intrinsic support/arity is fixed for this backend instance. Keep
+        # target-specific answers here, never across compiler invocations.
+        self.intrinsic_metadata = {}
 
     def fragment(self, text, parser):
         previous = self.state.src
@@ -188,33 +192,56 @@ class _DirectEmitter:
         backend.push_fn_ref(entry.label_id)
 
     def expression(self, node):
-        backend = self.backend
-        if isinstance(node, hir.Integer):
-            backend.push_const_i64(node.value)
-        elif isinstance(node, hir.Bool):
-            backend.push_const_i64(t1.TRUE_VALUE if node.value else t1.FALSE_VALUE)
-        elif isinstance(node, hir.Void):
-            backend.push_void()
-        elif isinstance(node, hir.String):
-            backend.push_string_ref(backend.intern_string(node.content.encode('utf-8')))
-        elif isinstance(node, hir.BasedString):
-            backend.push_string_ref(backend.intern_string(node.content))
-        elif isinstance(node, hir.ExpressedIdentifier):
-            self.identifier(node.name)
-        elif isinstance(node, (hir.ValueCast, hir.Transmute)):
-            self.expression(node.expr)
-        elif isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+        cls = type(node)
+        handler = self.expression_handlers.get(cls)
+        if handler is None:
+            handler = next((handler for base, handler in self._expression_handlers.items()
+                            if issubclass(cls, base)), _DirectEmitter.expression_fragment)
+            self.expression_handlers[cls] = handler
+        handler(self, node)
+
+    def _integer(self, node):
+        self.backend.push_const_i64(node.value)
+
+    def _bool(self, node):
+        self.backend.push_const_i64(t1.TRUE_VALUE if node.value else t1.FALSE_VALUE)
+
+    def _void(self, node):
+        self.backend.push_void()
+
+    def _string(self, node):
+        self.backend.push_string_ref(self.backend.intern_string(node.content.encode('utf-8')))
+
+    def _bytes(self, node):
+        self.backend.push_string_ref(self.backend.intern_string(node.content))
+
+    def _identifier(self, node):
+        self.identifier(node.name)
+
+    def _cast(self, node):
+        self.expression(node.expr)
+
+    def _block(self, node):
+        if not node.scoped and len(node.items) == 1:
             self.expression(node.items[0])
-        elif isinstance(node, hir.FunctionCall):
-            self.call(node)
         else:
             self.expression_fragment(node)
+
+    def _intrinsic_metadata(self, name):
+        found = self.intrinsic_metadata.get(name)
+        if found is None:
+            supported = self.backend.is_intrinsic(name)
+            found = (supported, self.backend.intrinsic_arity(name) if supported else None,
+                     self.backend.intrinsic_static_arg_indices(name) if supported else ())
+            self.intrinsic_metadata[name] = found
+        return found
 
     def call(self, node):
         if node.kw_args:
             raise ValueError('keyword arguments survived lowering')
         backend, state = self.backend, self.state
         name = node.func.name if isinstance(node.func, hir.ExpressedIdentifier) else None
+        count = len(node.pos_args)
         operand_type = emit._selected_first_parameter(node) if name in _TYPED_OPERATIONS else None
         intrinsic = None
         if name in emit.UNSIGNED_DUNDER_INTRINSICS and operand_type in emit.UNSIGNED_FIXED_INTS:
@@ -227,13 +254,14 @@ class _DirectEmitter:
                 # width rather than guessing a signedness.
                 self.expression_fragment(node)
                 return
-        if intrinsic is not None and len(node.pos_args) == 2:
+        if intrinsic is not None and count == 2:
             self.intrinsic(intrinsic, node.pos_args)
             return
-        binary = emit._binop_call(node)
+        binary = emit.UDEWY_BINOP_DUNDERS.get(name) if count == 2 else None
         raw = emit.LOWERED_RAW_SHIFT_DUNDERS.get(name)
         if binary is not None or raw is not None:
-            symbol, left, right = binary if binary is not None else (raw, *node.pos_args)
+            symbol = binary if binary is not None else raw
+            left, right = node.pos_args
             symbol = emit.DERIVED_BITWISE_DUNDERS.get(name, symbol)
             self.expression(left)
             backend.save_value()
@@ -244,9 +272,9 @@ class _DirectEmitter:
             if name in emit.NARROW_WRAPPING_DUNDERS:
                 self.wrap_integer(operand_type)
             return
-        prefix = emit._prefix_call(node)
+        prefix = emit.UDEWY_PREFIX_DUNDERS.get(name) if count == 1 else None
         if prefix is not None:
-            symbol, value = prefix
+            symbol, value = prefix, node.pos_args[0]
             if symbol == '-' and isinstance(value, hir.Integer):
                 backend.push_const_i64(-value.value)
             else:
@@ -256,8 +284,9 @@ class _DirectEmitter:
             return
         direct = name is not None and name not in self.ctx.local_names and (
             name in self.ctx.direct_function_names or name in emit.UDEWY_INTRINSICS)
+        supported, arity, static_indices = self._intrinsic_metadata(name) if direct else (False, None, ())
         if direct and (name in ('__static_alloca__', '__static_words__')
-                       or backend.is_intrinsic(name) and backend.intrinsic_static_arg_indices(name)):
+                       or static_indices):
             self.expression_fragment(node)
             return
         if not direct:
@@ -266,9 +295,9 @@ class _DirectEmitter:
         for argument in node.pos_args:
             self.expression(argument)
             backend.save_value()
-        count = len(node.pos_args)
-        if direct and backend.is_intrinsic(name):
-            p0.validate_intrinsic_arity(backend, name, count, 0, '')
+        if direct and supported:
+            if arity is None or count != arity:
+                p0.validate_intrinsic_arity(backend, name, count, 0, '')
             if count:
                 backend.restore_value()
             backend.emit_intrinsic(name, count, None)
@@ -280,6 +309,21 @@ class _DirectEmitter:
         else:
             p0.validate_call_arity(backend, count, 0, '')
             backend.call_indirect(count)
+
+    # Preserve the reference chain's order for any inherited HIR classes.
+    # Only classification is reused; every occurrence still emits/evaluates.
+    _expression_handlers = {
+        hir.Integer: _integer,
+        hir.Bool: _bool,
+        hir.Void: _void,
+        hir.String: _string,
+        hir.BasedString: _bytes,
+        hir.ExpressedIdentifier: _identifier,
+        hir.ValueCast: _cast,
+        hir.Transmute: _cast,
+        hir.Block: _block,
+        hir.FunctionCall: call,
+    }
 
     def intrinsic(self, name, arguments):
         for argument in arguments:

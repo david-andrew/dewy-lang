@@ -225,3 +225,48 @@ def test_static_globals_match_source_data_relocations_and_fallback(target):
             assert fragments[0].startswith('const callback:')
             assert fragments[1].startswith('const snapshot:')
     assert outputs[0] == outputs[1]
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_dispatch_preserves_inherited_nodes_and_repeated_evaluations(tmp_path, target):
+    from dewy.semantic import hir, ty
+    from dewy.reporting import Span
+
+    class ExtendedInteger(hir.Integer):
+        pass
+
+    class ExtendedCall(hir.FunctionCall):
+        pass
+
+    loc = Span(0, 0)
+    signature = ty.FunctionType([], [], None, 'int64')
+    def integer(value):
+        return ExtendedInteger(loc, 'int64', '0d', value)
+    def identifier(name, type_='int64'):
+        return hir.ExpressedIdentifier(loc, type_, name)
+    def call(name, *args):
+        return ExtendedCall(loc, 'int64', identifier(name, signature), list(args), {})
+    def function(body):
+        return hir.FunctionLiteral(loc, signature, [], [], None, 'int64', body)
+
+    counter = identifier('counter')
+    increment = function(hir.Block(loc, 'int64', [
+        hir.Assign(loc, 'void', counter, '=', call('__add__', counter, integer(1))),
+        hir.Return(loc, 'never', counter),
+    ], True))
+    # One shared syntax object still denotes two separate evaluations.
+    shared = call('increment')
+    main = function(call('__add__', call('__mul__', shared, integer(10)), shared))
+    program = lower.LoweredProgram([
+        lower.LoweredFunction('increment', increment), lower.LoweredFunction('main', main),
+    ], [hir.Declare(loc, 'void', 'let', 'counter', 'int64', integer(0))], [],
+        'main', None, False)
+    root = hir.Block(loc, 'void', [], True)
+    source = tmp_path / 'dispatch.udewy'
+    source.write_text(emit._emit_program(program, root, debug_locations=False))
+    for generated in (False, True):
+        producer = (lambda backend: direct.compile_program(program, root, backend)) if generated else None
+        assert entry_point(source, [], EntryPointOptions(compile_only=True, target=target, debug_info=False),
+                           generate=producer) == 0
+        result = subprocess.run([cache_artifact(source).resolve()], capture_output=True, timeout=30)
+        assert result.returncode == 12, result.stderr

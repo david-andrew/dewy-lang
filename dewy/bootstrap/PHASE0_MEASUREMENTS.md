@@ -2618,3 +2618,25 @@ the lowering/emission part changes **9.333 to 8.229 seconds**; lowering changes
 The checker extension's full-build effect remains unmeasured. Artifacts:
 `reconstruction-gates.log`, `compilation-reconstruction-reference-gates.log`,
 `checker-reconstruction-corrected-gates.log`, `measure-reconstruction.log`.
+
+### Direct bridge dispatch
+
+The fresh module profile finds only 304 source-parser fallbacks, totaling
+about 0.005 seconds without profiling. The larger remaining bridge cost is
+its per-expression and per-call dispatch. Expressions now select a handler
+once per concrete HIR class (including inherited classes). Calls classify
+operator names once and reuse backend-local intrinsic arity/static-argument
+metadata. Every occurrence still emits in evaluation order.
+
+All 11 existing bridge cases pass on direct/C output. Two additional cases
+exercise inherited node classes and two evaluations of one shared call node,
+with explicit result 12 through both the source and HIR routes. Three paired
+module code-generation samples have identical assembly/C hashes throughout.
+Median generation time changes **0.330 to 0.290 seconds** for x86-64 and
+**0.384 to 0.348 seconds** for C. These timings exclude checking, lowering and
+external toolchain work; they are not whole-build results. The measurement
+driver now records source loading, code generation and toolchain time within
+the existing aggregate backend phase to locate the remaining complete-build
+cost. Artifacts: `host-backend-current-module/backend.prof`,
+`profile-bridge-fragments.log`, `bridge-dispatch-gates.log`,
+`bridge-dispatch-occurrence-gates.log`, `bridge-dispatch-module/results.json`.

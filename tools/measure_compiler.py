@@ -27,8 +27,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def hosted_worker(argv: list[str]) -> int:
     sys.path.insert(0, os.environ.get('DEWY_BENCH_HOSTED_ROOT', str(ROOT)))
     from dewy import __main__ as cli
-    from dewy.backend.udewy import emit, lower
+    from dewy.backend.udewy import direct, emit, lower
     from dewy.semantic import check
+    from udewy import frontend, t0
 
     phases: dict[str, float] = {}
     active_phases: list[str] = []
@@ -72,6 +73,18 @@ def hosted_worker(argv: list[str]) -> int:
     observe(lower, 'lower_for_udewy', 'lowering_seconds')
     observe(emit, '_emit_program', 'emission_seconds')
     observe(cli, 'entry_point', 'backend_seconds')
+    # Nested backend phases explain where the complete backend time goes.
+    # Keep the aggregate for comparisons with earlier campaign samples.
+    observe(t0, 'load_program', 'source_loading_seconds')
+    observe(direct, 'compile_program', 'code_generation_seconds')
+    original_backend = frontend.get_backend
+
+    def measured_backend(name):
+        backend = original_backend(name)
+        observe(backend, 'compile_and_link', 'toolchain_seconds')
+        return backend
+
+    frontend.get_backend = measured_backend
     profiler = cProfile.Profile() if os.environ.get('DEWY_BENCH_PROFILE') else None
     gc.callbacks.append(observe_collection)
     try:
