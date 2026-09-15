@@ -16,7 +16,7 @@ let leaf=(state:facts.State condition:addr truth:bool context:paths.Context @dat
 let visit=(state:facts.State condition:addr context:paths.Context @data:Data):>bool=>{
     let invalidated:set<addr>=set[]
     let result=paths.refine(state condition true invalidated context @data @leaf)
-    return result isnt? none and result.length =? state.length
+    return result isnt? none and result.values.length =? state.values.length
 }
 let exercise=():>bool=>{
     let nodes:array<hir.AST>=[]
