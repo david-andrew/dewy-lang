@@ -47,6 +47,7 @@ State:type = [
     # The driver identifies the prelude allocator by binding, not spelling.
     allocator:addr?=none
     runtime_helpers:dict<string addr>=[]
+    shared_string_descriptors:bool=false
     layout_context:layouts.Context=layouts.Context[]
     record_layouts:dict<addr layouts.Record>=[]
     links:subtyping.Graph=subtyping.default_links
@@ -1410,7 +1411,7 @@ string_memory = (data:addr byte_length:addr boundaries:addr length:addr start:ad
         boundaries=snapshot(boundaries @prefix @state) length=snapshot(length @prefix @state)
     }
     let size=word(layouts.string_descriptor.size node @state)
-    let storage=if static_storage intrinsic('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else allocation(size node @state)
+    let storage=if static_storage intrinsic('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else if state.shared_string_descriptors string_runtime('_native_string_descriptor' [] node @state) else allocation(size node @state)
     let descriptor=snapshot(storage @prefix @state)
     let control=if static_storage word(0 node @state) else if owner isnt? none owner else string_runtime('_native_string_owner' [data byte_length boundaries word_op('__mul__' word_op('__add__' length word(1 node @state) node @state) word(4 node @state) node @state)] node @state)
     let fields:array<addr>=[data byte_length boundaries length start control]
@@ -2822,6 +2823,17 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
 
 lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links):>Result|Error => {
     let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links]
+    # Older seeds and prelude-free kernels retain the six-word allocation
+    # ABI. Install retain/drop together with prefix allocation, once per
+    # lowering, so every value boundary agrees about descriptor ownership.
+    let descriptor=runtime_helpers.get('_native_string_descriptor')
+    let retain=runtime_helpers.get('_native_string_retain')
+    let drop=runtime_helpers.get('_native_string_drop')
+    if allocator isnt? none and descriptor isnt? none and retain isnt? none and drop isnt? none {
+        state.shared_string_descriptors=true
+        state.runtime_helpers['_native_string_copy']=retain
+        state.runtime_helpers['_native_string_release']=drop
+    }
     loop brand in brands.numbered(layout_context.brands) {state.brand_numbers[brand.name]=brand}
     let block=hir.node_at(input.nodes root)
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']

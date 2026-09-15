@@ -1,0 +1,35 @@
+# Immutable string handles share their descriptor as well as their bytes.
+# A returned copy still survives rebinding the original, and slices retain
+# their distinct offsets. Repeated value boundaries must not allocate.
+let identity=(text:string):>string=>text
+let make=(left:string right:string):>string=>left+right
+let allocated=():>int64=>_arena_allocated_bytes
+let live=():>int64=>_arena_live_bytes
+let repeat=(text:string):>bool=>{
+    let before=allocated()
+    loop i in 0.. and i <? 10000 {
+        let copy=identity(text)
+        let again=identity(copy)
+        if again not=? text return false
+    }
+    return allocated()-before =? 0
+}
+let exercise=():>bool=>{
+    let original=make('abc' 'def')
+    let copy=identity(original)
+    if original.length <? 4 return false
+    let slice=original[1..4)
+    let slice_copy=identity(slice)
+    original=make('xyz' 'uvw')
+    if copy not=? 'abcdef' or slice_copy not=? 'bcd' return false
+    if not repeat(copy) or not repeat(slice_copy) return false
+    return true
+}
+let main=():>int64=>{
+    let before=live()
+    if not exercise() return 1
+    if live() not=? before return 2
+    if not exercise() return 3
+    if live() not=? before return 4
+    return 42
+}

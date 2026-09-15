@@ -11,7 +11,8 @@ from test_bootstrap_lowering import ARENA
 
 
 @pytest.mark.parametrize('target', ['x86_64', 'c'])
-def test_native_string_owners(tmp_path, target):
+@pytest.mark.parametrize('shared', [False, True])
+def test_native_string_owners(tmp_path, target, shared):
     source = ARENA + '''
 let main=():>int64=>{
     let before=_arena_live_bytes
@@ -53,6 +54,25 @@ let main=():>int64=>{
     return 42
 }
 '''
+    if shared:
+        # Substitute only the workload: leave the legacy runtime helpers
+        # available so this also checks staged-seed compatibility.
+        workload = source[len(ARENA):]
+        workload = workload.replace('_arena_alloc(48)', '_native_string_descriptor()')
+        workload = workload.replace('_native_string_copy(', '_native_string_retain(')
+        workload = workload.replace('_native_string_release(', '_native_string_drop(')
+        workload = workload.replace('let copy=_native_string_retain(value)', '''
+        let allocated=_arena_allocated_bytes
+        let copy=_native_string_retain(value)
+        if copy not=? value return 8
+        loop retain_index in 0.. and retain_index <? 1024 {
+            let other=_native_string_retain(copy)
+            if other not=? copy return 9
+            _native_string_drop(other)
+        }
+        if _arena_allocated_bytes not=? allocated return 10
+        ''')
+        source = ARENA + workload
     input_file = tmp_path / 'owners.dewy'
     input_file.write_text(source)
     output = tmp_path / 'owners.udewy'

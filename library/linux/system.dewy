@@ -163,6 +163,46 @@ let _native_string_pin = (value:int64):>int64 => {
     return value
 }
 
+# Shared descriptor ABI: the six visible words remain unchanged, with one
+# private reference count immediately before an arena descriptor. Copying an
+# immutable string retains that descriptor instead of allocating another.
+# Backing refs count distinct descriptors (including slices), while the
+# prefix counts handles to one descriptor. Static strings have no prefix.
+# Keep the old copy/release helpers above for existing bootstrap seeds; a
+# lowerer must select this complete helper family when constructing prefixes.
+let _native_string_descriptor = ():>int64 => {
+    let storage=_arena_alloc(56)
+    __store_i64__(1 storage)
+    return storage+8
+}
+let _native_string_retain = (value:int64):>int64 => {
+    let owner=__load_i64__(value+40)
+    if owner =? 0 return value
+    if __load_i64__(owner) <? 0 return value
+    __store_i64__(__load_i64__(value-8)+1 value-8)
+    return value
+}
+let _native_string_drop = (value:int64):>void => {
+    if value =? 0 return void
+    let owner=__load_i64__(value+40)
+    if owner =? 0 return void
+    let refs=__load_i64__(owner)
+    # Exposure pins all views of this backing, as in the earlier ABI.
+    if refs <? 0 return void
+    let handles=__load_i64__(value-8)-1
+    __store_i64__(handles value-8)
+    if handles >? 0 return void
+    refs-=1
+    __store_i64__(refs owner)
+    if refs =? 0 {
+        _arena_release(__load_i64__(owner+8) __load_i64__(owner+16))
+        _arena_release(__load_i64__(owner+24) __load_i64__(owner+32))
+        _arena_release(owner 40)
+    }
+    _arena_release(value-8 56)
+    return void
+}
+
 # Regions — the scoped-arena tier. A region is a bump allocator over 64 KB
 # chunks (an oversized allocation gets a chunk of its own) that is released
 # as a whole: its chunks go back to a free list for the next region. The

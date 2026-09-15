@@ -141,3 +141,26 @@ let main = ():>int64 => {
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_local_string_copy_survives_owner_rebinding(tmp_path):
+    """A callee-owned descriptor must not dangle in another local or view."""
+    source = '''
+let identity=(s:string):>string=>s
+let saved=():>string=>{
+    let source=identity('ab'+'cd')
+    let old=source
+    let again=old
+    source='x'
+    old='y'
+    return again
+}
+let main=():>int64=>{
+    let source=identity('abcd')
+    if source.length <? 3 return 1
+    let slice=source[1..3)
+    source='z'
+    return if saved()=?'abcd' and slice=?'bc' and source=?'z' 42 else 0
+}
+'''
+    execute(tmp_path, 'local-string-owners', _compile(source))

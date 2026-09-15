@@ -593,3 +593,48 @@ are seed preparation costs, separate from the measured compiler invocation.
 This is an optional C accelerator; performance of a complete bootstrap
 without C acceleration remains a separate goal. Details and verification
 limits are in `PHASE0_MEASUREMENTS.md`.
+
+## Allocation work under the revised performance target
+
+The 2026-09-15 target is a complete native compiler build below 30 seconds,
+with below 10 seconds as the stretch goal. The dependency-free Python compiler
+remains measured and maintained, but may lag behind. The latest full native
+checkpoint is still 57.883 seconds, before the changes described here.
+
+A fresh sample of that C-built seed compiling frozen `3bd41743` recorded 398
+stops: 62 in the parent waiting for the backend, 82 in the arena allocator,
+26 in arena release, 22 in string descriptor copying, 16 in size-class lookup,
+and 31 in Unicode segmentation. Sampling includes debugger overhead and is
+not an acceptance timing. In particular, parent wait samples do not profile
+the child backend. Artifacts: `native-sub30-samples/` and its adjacent log in
+the Phase 0 artifact directory.
+
+The compiler and library sources total about 1.97 MB, and the preceding build
+emits 53.1 MB of µDewy. At a nominal 3.4 GHz, 57.883 seconds corresponds to about
+197 billion single-core clock periods, or 3,700 per emitted byte. This is an
+order-of-magnitude work budget, not a measurement of instructions or a promised
+compiler lower bound: frequency varies, memory accesses stall, and the backend
+runs in a child process. The sample identifies allocation and representation
+work to remove before treating arithmetic throughput as the limiting factor.
+
+Native immutable string handles now share their descriptor as well as their
+backing bytes. Dynamic descriptors carry a private reference count immediately
+before their unchanged six-word visible layout. Copies retain that descriptor;
+slices still create distinct descriptors and retain the backing owner. The
+last handle releases its descriptor, and the last distinct descriptor releases
+the bytes and boundaries. Static and raw-pinned strings retain their previous
+rules. No source-level alias or new ownership feature is introduced.
+
+The new allocation/retain/drop helper family is selected together. Older
+bootstrap seeds continue to use the previous helpers and descriptor allocation,
+so adding the new runtime does not reinterpret old generated storage. The
+hosted backend keeps its separate region policy. A newly exposed hosted local
+string alias bug was also fixed: a saved copy/view now survives replacement of
+its source owner and is reclaimed at its own binding's exits.
+
+The native gate makes 10,000 pairs of returned string copies with **zero
+additional arena allocation**, for both a complete string and a slice. Copies
+survive rebinding, and repeated scopes retain zero storage. The broader lifetime,
+UTF-8 materialization, scratch, and static-string cases pass on direct and C
+output routes. These are bounded results; the combined full-build speedup has
+not yet been measured.

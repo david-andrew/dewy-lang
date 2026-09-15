@@ -4121,7 +4121,18 @@ class _Lowerer(
             if node.binding_id is not None and node.binding_id in self.owning_string_bindings and not self.lowering_module_startup:
                 self.owned_strings.add(node.name)   # a call's result: released by its owner word at scope exit
             if self._is_string_valued(declared_type) and self._has_arena():
-                prelude, expr = self._kept_string_value(node.expr)   # the binding keeps a call's result
+                if any(kind == 'owning' for kind, _ in self._string_sources(node.expr)):
+                    # A local copy/view must survive replacement or scope exit
+                    # of its source binding, just like a container element.
+                    # Keep an independent descriptor and release it at this
+                    # binding's own exits; a bare pointer aliases freed storage.
+                    prelude, expr = self._escaping_string_value(node.expr)
+                    if not self.lowering_module_startup:
+                        self.owned_strings.add(node.name)
+                        if node.binding_id is not None:
+                            self.owning_string_bindings.add(node.binding_id)
+                else:
+                    prelude, expr = self._kept_string_value(node.expr)
             else:
                 prelude, expr = self._extract_expression(node.expr)
             annotation = (
