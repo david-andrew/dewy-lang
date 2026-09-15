@@ -1,0 +1,34 @@
+from reporting import Error
+import p"../../dewy/bootstrap/semantic/modules.dewy" as modules
+import p"../../dewy/bootstrap/semantic/prelude_cache.dewy" as cache
+import p"../../dewy/bootstrap/backend/udewy/graph.dewy" as graph
+import p"../../dewy/bootstrap/backend/udewy/program.dewy" as program
+import p"../../dewy/bootstrap/targets.dewy" as targets
+
+# A small source prelude keeps cache invalidation tests independent from the
+# compiler's executable-build timing. The emitted program still passes the
+# complete validation/lowering path and executes through the real backend.
+main=(argv:array<string>):>int64=>{
+    $runtime_assert argv.length >=? 3
+    let directory=argv[1]
+    let target=argv[2]
+    if target isnt? targets.Target return 1
+    let files:array<string>=["{directory}/prelude.dewy"]
+    let engine=modules.Engine[library_roots=[directory] prelude_files=files]
+    engine.session.target=target
+    engine.prelude_cache=cache.Config["{directory}/compiler.identity" "{directory}/cache" target [directory] files]
+    if argv.length >? 3 {
+        let first=modules.load(argv[3] @engine)
+        if first is? Error {first.fail}
+    }
+    let entry=modules.load("{directory}/main.dewy" @engine)
+    if entry is? Error {entry.fail}
+    printl(if engine.prelude_cache_restored 'hit' else 'miss')
+    let compilation=graph.compile(entry @engine)
+    if compilation is? Error {compilation.fail}
+    let emitted=program.render(compilation.lowered.program compilation.lowered.input)
+    if emitted is? Error {emitted.fail}
+    let output=p"{directory}/program.udewy".write_text(emitted)
+    if output isnt? int64 return 2
+    return 0
+}

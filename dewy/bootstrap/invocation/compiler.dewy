@@ -6,6 +6,7 @@ import p"../paths.dewy" as paths
 import p"../timing.dewy" as timing
 import p"../semantic/modules.dewy" as modules
 import p"../semantic/prelude.dewy" as prelude
+import p"../semantic/prelude_cache.dewy" as prelude_cache
 import p"../semantic/test_syntax.dewy" as tests
 import p"../backend/udewy/graph.dewy" as graph
 import p"../backend/udewy/program.dewy" as program
@@ -14,10 +15,13 @@ import p"../../../tools/dewy_test.dewy" as directory_tests
 # The command's compilation boundary is the same validated graph used by
 # native backend tests. Keep warnings/analysis alongside the result; running
 # validation twice would analyze HIR whose proof witnesses were discharged.
-build = (request:options.Request cwd:string library:string):>graph.Compilation|Error => {
+build = (request:options.Request cwd:string library:string executable:string?=none):>graph.Compilation|Error => {
     $runtime_assert request.source isnt? none
     let engine=modules.Engine[library_roots=[library] prelude_files=prelude.files(library request.target)]
     engine.session.target=request.target
+    if executable isnt? none {
+        engine.prelude_cache=prelude_cache.Config[executable "{cwd}/__dewycache__/prelude" request.target engine.library_roots engine.prelude_files]
+    }
     engine.test_mode=request.command =? 'test'
     if engine.test_mode {engine.entry_name=tests.entry_name}
     let started=timing.start(request.timings)
@@ -36,7 +40,7 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
     }
     let library=platform.library_root(executable cwd)
     if library is? Error return library
-    let compiled=build(request cwd library)
+    let compiled=build(request cwd library executable)
     if compiled is? Error return compiled
     if request.command =? 'analyze' {
         # Representation notes currently retain source spans. Add ownership

@@ -1,0 +1,113 @@
+import p"module_state.dewy" as state
+import p"cache_values.dewy" as codec
+import p"cache_bytes.dewy" as bytes
+import p"../targets.dewy" as targets
+import p"../invocation/platform.dewy" as platform
+
+# This is an optional compiler artifact. A failed read, stale input, incomplete
+# write, or incompatible snapshot simply returns control to ordinary checking.
+# The loader installs a restored snapshot only after every check succeeds.
+const FORMAT='dewy-native-prelude-1'
+Config:type = const [
+    compiler:string directory:string target:targets.Target
+    library_roots:array<string> prelude_files:array<string>
+]
+Entry:type = const [path:string identity:string target:targets.Target]
+
+# FNV-1a is also used by the compiler's artifact path mapping. Here retain
+# all 64 bits, both for the compiler identity and the payload checksum.
+fingerprint = (value:array<uint8>):>uint64 => {
+    let result:uint64=0xcbf29ce484222325
+    loop byte in value {result=(result xor (byte as uint64))*0x100000001b3}
+    return result
+}
+hex = (value:uint64):>string => {
+    let alphabet='0123456789abcdef'
+    let result:array<string>=[]
+    let shift:uint8=60
+    loop true {
+        let digit=(value >> shift) and 15
+        $runtime_assert digit <? alphabet.length
+        result.push(alphabet[digit])
+        if shift =? 0 break
+        shift-=4
+    }
+    return result.join
+}
+locate = (config:Config):>Entry? => {
+    let disabled=environment('DEWY_NO_PRELUDE_CACHE')
+    if disabled isnt? none and disabled not=? '' return none
+    let compiler=p(config.compiler).read_bytes
+    if compiler isnt? array<uint8> return none
+    let identity=bytes.Writer[]
+    bytes.write_text(FORMAT @identity)
+    bytes.write_word(fingerprint(compiler) @identity)
+    bytes.write_text(config.compiler @identity)
+    bytes.write_text(config.target @identity)
+    bytes.write_word(config.library_roots.length as uint64 @identity)
+    loop root in config.library_roots {bytes.write_text(root @identity)}
+    bytes.write_word(config.prelude_files.length as uint64 @identity)
+    loop path in config.prelude_files {bytes.write_text(path @identity)}
+    let key=hex(fingerprint(identity.bytes))
+    return Entry["{config.directory}/native-{config.target}-{key}.bin" key config.target]
+}
+
+inputs_match = (snapshot:state.PreludeSnapshot entry:Entry):>bool => {
+    if snapshot.session.target not=? entry.target return false
+    let sources=snapshot.session.sources
+    let modules=snapshot.modules
+    if modules.length =? 0 or snapshot.by_path.length not=? modules.length return false
+    loop index in 0.. and index <? modules.length {
+        let module=modules[index]
+        if not module.prelude or module.context.source >=? sources.length return false
+        if module.context.scope >=? snapshot.session.scopes.length return false
+        if module.root >=? snapshot.session.hir.length return false
+        let position=snapshot.by_path.get(module.path)
+        if position is? none or position not=? index return false
+        let source=sources[module.context.source].srcfile
+        if module.path not=? source.path return false
+        # Check every transitive module, including imports which are absent
+        # from the initial prelude file list. Timestamps are not sufficient.
+        let current=p(module.path).read_text
+        if current isnt? string or current not=? source.body return false
+        loop binding in module.exports.values {
+            if binding not in? snapshot.session.registry.by_id return false
+        }
+    }
+    loop binding in snapshot.prelude_bindings.values {
+        if binding not in? snapshot.session.registry.by_id return false
+    }
+    return true
+}
+restore = (entry:Entry):>state.PreludeSnapshot? => {
+    let contents=p(entry.path).read_bytes
+    if contents isnt? array<uint8> return none
+    let input=bytes.Reader[contents]
+    if bytes.read_text(@input) not=? FORMAT return none
+    if bytes.read_text(@input) not=? entry.identity return none
+    let checksum=bytes.read_word(@input)
+    let payload=bytes.read_bytes(@input)
+    if not bytes.complete(input) or fingerprint(payload) not=? checksum return none
+    let snapshot=codec.decode(payload)
+    if snapshot is? codec.CacheMiss return none
+    if not inputs_match(snapshot entry) return none
+    return snapshot
+}
+store = (entry:Entry snapshot:state.PreludeSnapshot):>void => {
+    let payload=codec.encode(snapshot)
+    if payload is? codec.CacheMiss return
+    let output=bytes.Writer[]
+    bytes.write_text(FORMAT @output)
+    bytes.write_text(entry.identity @output)
+    bytes.write_word(fingerprint(payload) @output)
+    bytes.write_bytes(payload @output)
+    if platform.directories(p(entry.path).parent.path) isnt? none return
+    let temporary="{entry.path}.tmp-{__syscall0__(39)}"
+    let written=p(temporary).write_bytes(output.bytes)
+    if written isnt? int64 or written not=? output.bytes.length {p(temporary).unlink; return}
+    let source_path=_c_path(temporary)
+    let destination_path=_c_path(entry.path)
+    # Rename within the cache directory: readers see either the previous
+    # complete entry or this complete entry, never a partial file.
+    if __syscall2__(82 __load_i64__(source_path) __load_i64__(destination_path)) not=? 0 {p(temporary).unlink;}
+}

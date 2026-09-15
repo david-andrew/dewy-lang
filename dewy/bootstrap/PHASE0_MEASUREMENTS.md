@@ -3006,8 +3006,32 @@ most of this is the C test build, not cache operation time. Native evidence
 is in `cache-schema/snapshot-native{,-c}.log`; generated output verification
 is in `cache-schema/generated-check.log`.
 
-This remains the codec foundation: filesystem cache loading, input/version/
-target invalidation, atomic installation and cold/warm invocation comparisons
-are not yet implemented. No startup performance improvement is claimed.
 The native pair integration bundle now includes the byte codec, immutable
 capture facts and labeled iterator cleanup for the next pair checkpoint.
+
+### Native checked-prelude cache integration
+
+Ordinary native CLI builds now opt into a checked-prelude cache under
+`__dewycache__/prelude`. Its identity includes the compiler's binary contents,
+format version, target, library roots and initial prelude paths. Restoring
+checks the complete contents of every transitive prelude source, not just
+timestamps or the initial file list. The envelope checksum and typed decoder
+reject damaged entries; writes use a temporary file and same-directory rename.
+`DEWY_NO_PRELUDE_CACHE` disables the cache when nonempty, matching the hosted
+compiler. Cache errors fall back to ordinary checking.
+
+Restoration installs the Session and module/export indices together, before
+checking the entry source. A session already populated by a `$no_prelude`
+module neither restores nor overwrites a reusable snapshot. Graph validation
+still runs for each compilation; this does not cache discharged proofs.
+
+The invalidation matrix passes with hosted-built and native-built drivers:
+cold/warm/disabled output agrees byte for byte, emitted programs execute with
+the expected result, damaged files are repaired, same-size/same-timestamp
+dependency edits invalidate, and compiler/target changes select distinct
+entries. Loading a `$no_prelude` module first preserves the reusable entry.
+The final hosted-built gate, including empty environment-variable handling,
+passes in 69.04 seconds (mostly building the driver). Artifacts:
+`cache-schema/invalidation-final.log`, `cache-schema/invalidation-native.log`.
+Normal CLI cold/warm measurements follow at the next compiler build checkpoint;
+no startup performance improvement is claimed yet.

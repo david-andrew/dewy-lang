@@ -15,6 +15,7 @@ import p"target_values.dewy" as target_values
 import p"module_directives.dewy" as directives
 import p"test_syntax.dewy" as tests
 import p"module_state.dewy" as state
+import p"prelude_cache.dewy" as cache
 
 doc"""
 File-relative source modules, corresponding to semantic/modules.py.
@@ -43,6 +44,9 @@ Engine:type = [
     prelude_bindings:dict<string addr>=[]
     prelude_loaded:bool=false
     prelude_loading:bool=false
+    prelude_cache:cache.Config?=none
+    # Tooling can verify a real restore without inferring it from timings.
+    prelude_cache_restored:bool=false
     test_mode:bool=false
     entry_name:string='main'
 ]
@@ -209,8 +213,34 @@ load = (path:string @engine:Engine):>addr|Error => {
     }
     return result
 }
+fresh_prelude_session = (engine:Engine):>bool => {
+    if engine.modules.length not=? 0 return false
+    if engine.session.sources.length not=? 0 or engine.session.scopes.length not=? 0 return false
+    if engine.session.hir.length not=? 0 or engine.session.syntax_refs.length not=? 0 return false
+    if engine.session.types.entries.length not=? 0 return false
+    return engine.session.registry.by_id.length =? 0
+}
 ensure_prelude = (@engine:Engine):>Error? => {
     if engine.prelude_loaded or engine.prelude_loading return none
+    let config=engine.prelude_cache
+    let cached:cache.Entry?=none
+    # A prior $no_prelude import may already own identities in this session.
+    # Neither replace it nor save it as an invocation-independent prelude.
+    if config isnt? none and fresh_prelude_session(engine) {
+        cached=cache.locate(config)
+    }
+    if cached isnt? none {
+        let restored=cache.restore(cached)
+        if restored isnt? none {
+            engine.session=restored.session
+            engine.modules=restored.modules
+            engine.by_path=restored.by_path
+            engine.prelude_bindings=restored.prelude_bindings
+            engine.prelude_loaded=true
+            engine.prelude_cache_restored=true
+            return none
+        }
+    }
     engine.prelude_loading=true
     loop path in engine.prelude_files {
         let checked=load(path @engine)
@@ -226,6 +256,9 @@ ensure_prelude = (@engine:Engine):>Error? => {
     }
     engine.prelude_loading=false
     engine.prelude_loaded=true
+    if cached isnt? none {
+        cache.store(cached state.PreludeSnapshot[engine.session engine.modules engine.by_path engine.prelude_bindings])
+    }
     return none
 }
 load_source = (path:string @engine:Engine):>addr|Error => {
