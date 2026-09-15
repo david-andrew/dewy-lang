@@ -1,0 +1,38 @@
+# The symbol table is a lazy key view. Read-only traversal must not rebuild
+# a private copy of its index for every identifier in every function body.
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/backend/udewy/captures.dewy" as captures
+main=():>int64=>{
+    let nodes:array<hir.AST>=[]
+    let ts=types.Table[]
+    let loc=Span[0 0]
+    let word=types.primitive('int64' @ts)
+    let empty=types.primitive('void' @ts)
+    let signature=types.function_type([] [] none empty [] @ts)
+    let symbols:dict<addr addr>=[]
+    loop binding in 0..8191 {symbols[binding]=binding}
+    let declarations:array<addr>=[]
+    loop f in 0..63 {
+        let body:array<addr>=[]
+        loop i in 0..63 {
+            body.push(hir.append_node(@nodes hir.ExpressedIdentifier[loc word 'outer' 1000+i]))
+        }
+        let block=hir.append_node(@nodes hir.Block[loc empty body true])
+        let literal=hir.append_node(@nodes hir.FunctionLiteral[loc signature [] [] none empty block])
+        declarations.push(hir.append_node(@nodes hir.Declare[loc empty 'let' "f{f}" signature literal f]))
+    }
+    let root=hir.append_node(@nodes hir.Block[loc empty declarations true])
+    let before:int64=_arena_allocated_bytes
+    let plan=captures.analyze(root nodes symbols.keys)
+    let allocated:int64=_arena_allocated_bytes-before
+    printl(allocated)
+    if allocated >=? 20000000 return 4
+    if plan.functions.length not=? 64 return 1
+    loop function in plan.functions.values {
+        if function.captures.length not=? 64 return 2
+        loop binding in 1000..1063 {if binding not in? function.captures return 3}
+    }
+    return 42
+}

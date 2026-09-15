@@ -1382,3 +1382,28 @@ This is a fresh full executable build with no C backend or preexisting build
 cache; it remains above the sub-minute target. Its overall time is not a
 like-for-like comparison with the earlier C-backend invocation. Artifacts:
 `host-full-queries-direct`; frozen source and manifest: `source-hosted-queries`.
+
+### Keep HIR traversal failure reporting out of reader effects
+
+Sampling the native-built compiler's full lowering phase found dictionary
+rebuilding in 230 of 450 stacks, chiefly during capture analysis. The HIR
+traversal fallback used ordinary printing and `exit`, making its callers
+transitively opaque to the borrowing analysis. Recursive readers consequently
+copied their otherwise read-only inputs; a lazy symbol-key view repeatedly
+rebuilt its index on those temporary copies.
+
+The final traversal case now uses the existing runtime-assertion mechanism.
+Unknown variants still report an internal error and exit 101, while failure
+reporting no longer disables borrowing throughout callers. The assertion's
+message expression remains part of the source effect analysis.
+
+A native-compiled kernel with 64 functions, 4,096 identifier references, and
+8,192 symbols takes **4.12 seconds before and 0.03 seconds after**. Cumulative
+arena payload allocation falls from **1,094,064,136 to 11,599,240 bytes**, with
+identical capture results. A repeated allocation check agrees; its timings
+overlapped regression tests and are not an isolated benchmark. Seven selected
+checks pass: capture allocation, valid/failing traversal, borrowing boundaries,
+callback effects, worklists, index snapshots, and hosted/native effect agreement.
+Two initial fixture issues (an inferred global-counter singleton annotation
+and counting argv without the executable) were corrected before landing.
+Artifacts: `capture-reader-gates`; full self-build impact remains to be measured.

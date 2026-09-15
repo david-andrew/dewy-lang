@@ -885,14 +885,13 @@ children = (node:AST):>array<addr> => {
         if node.right isnt? none { result.push(node.right) }
         return result
     }
-    if node is? RangeMembership {
-        result.push(node.value)
-        result.push(node.range)
-        return result
-    }
     # A newly added HIR variant must make its traversal policy explicit.
-    printl("internal compiler error: no HIR traversal for {node.typename}")
-    exit(101)
+    # Keep this an assertion: ordinary printing/exit would give every arena
+    # reader transitive I/O effects and prevent read-only argument borrowing.
+    $runtime_assert node is? RangeMembership, "internal compiler error: no HIR traversal for {node.typename}"
+    result.push(node.value)
+    result.push(node.range)
+    return result
 }
 
 # Source identities remain stable while HIR is copied, normalized, and lowered.
