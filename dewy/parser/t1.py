@@ -10,7 +10,9 @@ Additionally symbols are separated into operators and identifiers. And identifie
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import cache
 from itertools import groupby
+from typing import ClassVar
 from ..reporting import Span, SrcFile, Error, Pointer, ReportException
 from . import t0
 from ..utils import JumpableIterator
@@ -61,6 +63,9 @@ class Context:
 @dataclass
 class Token(ABC):
     loc: Span
+    # An optional first-token filter, not a replacement for eat's full match.
+    # Undeclared filters stay exhaustive so new token kinds cannot disappear.
+    starts_with: ClassVar[tuple[type[t0.Token], ...] | None] = None
 
     @staticmethod
     @abstractmethod
@@ -82,6 +87,7 @@ class Exponent:
 
 @dataclass
 class Real(Token):
+    starts_with = (t0.Number,)
     whole: t0.Number
     fraction: t0.Number|None
     exponent: Exponent|None
@@ -183,6 +189,11 @@ class Real(Token):
 
 @dataclass
 class String(Token):
+    starts_with = (
+        t0.StringQuoteOpener, t0.RawStringQuoteOpener, t0.TemplateStringQuoteOpener,
+        t0.HeredocStringOpener, t0.RawHeredocStringOpener, t0.TemplateHeredocStringOpener,
+        t0.RestOfFileStringQuote, t0.RawRestOfFileStringQuote, t0.TemplateRestOfFileStringQuote,
+    )
     content: str
 
     """
@@ -295,6 +306,7 @@ class IString(InedibleToken):
 
 @dataclass
 class Block(Token):
+    starts_with = (t0.LeftCurlyBrace, t0.LeftParenthesis, t0.LeftSquareBracket, t0.LeftAngleBracket, t0.BasedBlockOpener)
     inner: list[Token]
     kind: Literal['{}', '[]', '()', '[)', '(]', '<>']
     base: t0.BasePrefix | None
@@ -319,6 +331,7 @@ class Block(Token):
 
 @dataclass
 class BasedString(Token):
+    starts_with = (t0.BasedStringQuoteOpener,)
     digits: list[t0.BasedStringChars]
     base: t0.BasePrefix
     @staticmethod
@@ -336,6 +349,7 @@ class BasedString(Token):
 
 @dataclass
 class Identifier(Token):
+    starts_with = (t0.Identifier, t0.Symbol)
     name: str
 
     @staticmethod
@@ -350,6 +364,7 @@ class Identifier(Token):
 
 @dataclass
 class Semicolon(Token):
+    starts_with = (t0.Symbol,)
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Semicolon]|None:
         token = tokens[start]
@@ -359,6 +374,7 @@ class Semicolon(Token):
 
 @dataclass
 class Operator(Token):
+    starts_with = (t0.Identifier, t0.Symbol, t0.ShiftSymbol)
     symbol: str
 
     @staticmethod
@@ -379,6 +395,7 @@ class Operator(Token):
 
 @dataclass
 class Keyword(Token): # e.g. if, loop, import, let, etc. any keyword that behaves differently syntactically e.g. `<keyword> <expr>`. Ignore keywords that can go in identifiers, e.g. `void`, `intrinsic`/`extern`, etc.
+    starts_with = (t0.Identifier,)
     name: str
 
     @staticmethod
@@ -390,6 +407,7 @@ class Keyword(Token): # e.g. if, loop, import, let, etc. any keyword that behave
 
 @dataclass
 class Metatag(Token):
+    starts_with = (t0.Metatag,)
     name: str
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Metatag]|None:
@@ -400,6 +418,7 @@ class Metatag(Token):
 
 @dataclass
 class Bool(Token):
+    starts_with = (t0.Identifier,)
     value: bool
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Bool]|None:
@@ -410,6 +429,7 @@ class Bool(Token):
 
 @dataclass
 class Integer(Token):
+    starts_with = (t0.Number,)
     value: t0.Number
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Integer]|None:
@@ -420,6 +440,7 @@ class Integer(Token):
 
 @dataclass
 class Whitespace(Token): # so we can invert later for juxtapose
+    starts_with = (t0.Whitespace, t0.LineComment, t0.BlockComment)
     @staticmethod
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Whitespace]|None:
         i = 0
@@ -451,11 +472,23 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
     ctx = Context(srcfile)
     return list(tokenize_gen(tokens, ctx))
 
+
+@cache
+def candidates(first: type[t0.Token]) -> tuple[type[Token], ...]:
+    """Cache grammar candidates by first-token class, preserving match order.
+
+    Like t0's context dispatch, this assumes the grammar is registered before
+    tokenization. Inheritance is honored; a subclass is not an unknown token.
+    Longest-match and ambiguity resolution still run over every possible eat.
+    """
+    return tuple(token for token in top_level_tokens
+                 if token.starts_with is None or issubclass(first, token.starts_with))
+
 def tokenize_gen(tokens:list[t0.Token], ctx:Context, start:int=0, stop:int=None) -> Generator[Token]:
     if stop is None: stop = len(tokens)
     if stop > len(tokens): raise ValueError(f"INTERNAL ERROR: stop index out of range: {stop} > {len(tokens)}")
     while start < stop:
-        matches = [token_cls.eat(tokens, ctx, start) for token_cls in top_level_tokens]
+        matches = [token_cls.eat(tokens, ctx, start) for token_cls in candidates(type(tokens[start]))]
         matches = list(filter(None, matches))
         if len(matches) == 0:
             # TODO: more specific error reporting based on the case

@@ -142,6 +142,10 @@ symbols = sorted([
     # ⁂ ‰ ‱
 ], key=len, reverse=True)
 LEN_LONGEST_SYMBOL = len(symbols[0])
+# Preserve longest-first order while excluding spellings with another first
+# character. This only narrows probes; token precedence still selects winners.
+symbols_by_start = {first: tuple(op for op in symbols if op[0] == first)
+                    for first in {op[0] for op in symbols}}
 
 # shift operators are not allowed in type groups, so deal with them separately
 shift_operators = sorted(['<<', '>>', '<<<', '>>>', '<<!', '!>>'], key=len, reverse=True)
@@ -440,9 +444,10 @@ class Symbol(Token[GeneralBodyContexts]):
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
         """symbolic operators are any sequence of characters in the symbolic_operators set"""
-        chunk = src[:LEN_LONGEST_SYMBOL]
-        for op in symbols:
-            if chunk.startswith(op):
+        if not src:
+            return None
+        for op in symbols_by_start.get(src[0], ()):
+            if src.startswith(op):
                 return len(op)
         return None
 

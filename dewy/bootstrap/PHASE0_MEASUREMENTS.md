@@ -1272,3 +1272,29 @@ An updated checking-only hosted profile is retained in
 profiled seconds, and bounds validation 34.1. These include instrumentation
 overhead (and brief overlapping small regressions); they identify candidates,
 not new baseline timings. The next batch should address those measured costs.
+
+### Hosted token candidate indexes
+
+Hosted t1 now declares each compound token's possible starting t0 classes and
+caches candidates by the actual first-token class. Inheritance is honored;
+an extension without a filter remains an exhaustive candidate. Matching order,
+longest-match selection, and ambiguous-match diagnostics are unchanged.
+Hosted t0's symbol probe uses a first-character index while preserving the
+original longest-first spelling order. No accepted spelling changed.
+
+Tokenizing 112 frozen compiler/test sources through t2 takes **13.10 → 10.00
+seconds**, excluding source reads and serialization. Serialized token hashes
+match for all 112 files. These runs were isolated and uncached at the parser
+level. The 246 selected parser checks pass, including comparison against t1's
+exhaustive candidate list, inherited/unknown token cases, compound literal
+boundaries, and hosted/native parser comparisons. Artifacts:
+`hosted-probes-{before,after}.{json,log}` and `hosted-probes-gates.log`.
+
+Separately, native µDewy builds the `13b1ee96` native-emitted compiler through
+GCC in **132.58 seconds**, peak process RSS 3,680,396 KiB (backend only).
+Its executable builds pinned t0 in **24.27 seconds**, peak RSS 519,792 KiB,
+with identical µDewy bytes to the hosted-built seed. Frontend 7.31 s,
+validation 10.73 s, preparation 0.12 s, lowering 3.73 s, emission 0.85 s,
+backend 1.22 s. Lowering improved from the preceding native-built executable's
+4.49 s, but total runtime did not improve; the native-built code needs its
+own profile. Artifacts: `native-structural-ids-c`, `native-built-structural-ids-t0`.
