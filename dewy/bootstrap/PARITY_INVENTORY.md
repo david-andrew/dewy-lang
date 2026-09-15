@@ -54,6 +54,14 @@ These are outside the original corpus counts:
   empty member list for a non-cell type; an actual cell always has members.
   This internal encoding does not close the general optional-array container
   gap.
+- Native compound shifts give a literal count the destination's signed type:
+  `let value:int64=84; value >>= 1` is rejected as an `int64, int64` call,
+  while `value = value >> 1` works. The hosted compound form executes with
+  result 42. This arose while simplifying allocator class calculations;
+  the library currently uses ordinary assignment. Preserve the unsigned-count
+  rule when fixing operand contextualization. Reproducer and diagnostics:
+  `phase0-performance/compound-shift-gap.dewy` and
+  `compound-shift-{hosted,native}.log`.
 
 ## Execution and output differences
 

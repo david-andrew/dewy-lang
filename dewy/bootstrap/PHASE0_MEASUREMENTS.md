@@ -1564,6 +1564,17 @@ factory/query gates on direct and C backends. Full native self-build impact
 remains unmeasured. Artifacts: `primitive-lookup-measurement`,
 `primitive-lookup-gates.log`, `native-indexed-lowering-samples`.
 
+Rebuilding these native changes together (`74df3542`) brings the isolated
+fresh direct-backend self-build to **79.46 seconds**, versus 91.00 s at the
+preceding checkpoint. Frontend **20.61 s**, validation 10.30 s, preparation
+4.84 s, lowering **18.87 s**, emission 5.62 s, backend 16.80 s; peak process
+RSS 5,930,452 KiB. Emitted µDewy is 49,208,780 bytes. The refreshed compiler
+also compiles and executes the primitive lookup fixture with expected result
+42 and 320,000-byte allocation. Source and library are frozen together in
+`source-precedence-primitives`; artifacts are `native-precedence-primitives-c`
+and `native-precedence-primitives-full`. This remains above the target and
+does not replace matching-target fixed-point and corpus certification.
+
 ### Space out Python collection while constructing compiler graphs
 
 Collection callbacks measured **13.49 seconds** of cyclic GC in a 72.99 s
@@ -1587,3 +1598,20 @@ Five policy tests cover nesting, failure restoration, caller overrides, and
 cycle reclamation. Artifacts: `hosted-gc-events.json`,
 `host-collection-threshold-full`, `collection-threshold-output-check.json`,
 and `compilation-gc-policy-gates.log`.
+
+### Bound allocator size-class calculations
+
+Allocator class lookup now handles common descriptor sizes directly and uses
+a bounded bit-length calculation for larger blocks. Computing a class's width
+uses a shift instead of a second doubling loop. Free-list layout, counters,
+block reuse, and zeroing remain unchanged. The unsigned shift count is explicit;
+the native compound-shift contextualization gap found here is retained in the
+parity inventory, with ordinary assignments used in the library for now.
+
+The isolated native kernel makes 1.2 million class/width pairs across descriptor
+and array sizes: **0.0477 seconds before, 0.0244 seconds after**, with identical
+checksum 107486081600000. Seven targeted checks pass, covering power-of-two
+boundaries, zero/small requests, width wrapping, reused-block clearing, live-byte
+accounting, and string/loop regions; the boundary test runs on both backends.
+Full native build impact is not yet measured. Artifacts:
+`arena-class-measurement`, `arena-class-storage-gates.log`.

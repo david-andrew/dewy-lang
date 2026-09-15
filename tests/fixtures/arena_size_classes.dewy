@@ -1,0 +1,14 @@
+# Exercise both common descriptors and large array backing blocks. These
+# queries do not allocate the requested blocks themselves.
+main=():>int64=>{
+    let sizes:array<int64>=[8 16 32 48 64 72 128 256 4096 65536 1048576 1073741824]
+    let sum:int64=0
+    loop repeat in 0..99999 {
+        loop size in sizes {
+            let class=_arena_class(size)
+            sum+=class+_arena_width(class)
+        }
+    }
+    printl(sum)
+    return 42
+}
