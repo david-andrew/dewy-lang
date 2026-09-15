@@ -1641,7 +1641,8 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         and ast.left.op.symbol == ':'
         and isinstance(ast.left.left, p0.Atom)
         and isinstance(ast.left.left.item, t1.Identifier)
-        and ast.left.left.item.name not in ctx.declarations
+        and (ast.left.left.item.name not in ctx.declarations
+             or id(ast) in ctx.binding_registry.by_syntax)
     ):
         # `score:Positive = 42` declares like `let score:Positive = 42`
         return _tcr_annotated_declaration(
@@ -6078,7 +6079,7 @@ def _declaration_parts(
 
 
 def _implicit_declaration_parts(item: p0.AST, seen: set[str], *, ctx: Context) -> tuple[str, p0.AST] | None:
-    """`name = value` at block level declares `name` when nothing outer has it
+    """`name = value` or `name:T = value` declares `name` when nothing outer has it
     and it is the block's first `name` (later ones assign): the same
     declaration `let name = value` would make, so it is collected and
     deferred like one — a function body may call a function written after it."""
@@ -6099,11 +6100,14 @@ def _implicit_declaration_parts(item: p0.AST, seen: set[str], *, ctx: Context) -
         isinstance(item, p0.BinOp)
         and isinstance(item.op, t1.Operator)
         and item.op.symbol == '='
-        and isinstance(item.left, p0.Atom)
-        and isinstance(item.left.item, t1.Identifier)
     ):
         return None
-    name = item.left.item.name
+    target = item.left
+    if isinstance(target, p0.BinOp) and isinstance(target.op, t1.Operator) and target.op.symbol == ':':
+        target = target.left
+    if not isinstance(target, p0.Atom) or not isinstance(target.item, t1.Identifier):
+        return None
+    name = target.item.name
     if name in ctx.declarations or name in seen:
         return None
     seen.add(name)
