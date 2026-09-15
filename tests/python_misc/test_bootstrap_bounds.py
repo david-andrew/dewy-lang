@@ -15,6 +15,11 @@ from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
 
 ROOT = Path(__file__).resolve().parents[2]
+LOOP_FUNCTION_CASES = {
+    'let f=():>int64=>{loop i in 0..1 {let inner=(value:int64):>int64=>{$assert value >? 0\nreturn value}\ninner(i);}\nreturn 0}': 'cannot prove assertion',
+    'let f=():>int64=>{loop i in 0..1 {let inner=(value:int64):>int64=>{if value >? 0 {$assert value >? 0\nreturn value}\nreturn 0}\ninner(i);}\nreturn 0}': 'ok',
+}
+
 CASES = [
     'Store:type=const[key:addr]\nRemove:type=const[key:addr?]\nlet read=(node:Store|Remove):>addr=>{let key=node.key\nif key is? none return 0\nreturn key}',
     'Store:type=const[key:int64]\nRemove:type=const[key:addr?]\nlet read=(node:Store|Remove):>addr=>{let key=node.key\nif key is? none return 0\nreturn key}',
@@ -77,6 +82,8 @@ CASES = [
 
 
 FIELD_EXPECTATIONS = dict(zip(CASES[:4], ['ok', 'cannot prove refinement', 'ok', 'cannot prove refinement']))
+CASES.extend(LOOP_FUNCTION_CASES)
+FIELD_EXPECTATIONS.update(LOOP_FUNCTION_CASES)
 
 
 def test_native_bounds_visitor_matches_hosted(tmp_path):

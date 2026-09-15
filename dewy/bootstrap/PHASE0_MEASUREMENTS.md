@@ -2113,3 +2113,14 @@ executables: 6,108,840 bytes, SHA-256
 This confirms that Dewy checkpoint's binary fixed point; it does not replace
 the complete paired corpus/release gates. Artifact:
 `atomic-seed-binary-comparison.json`.
+
+### Nested-function validation parity
+
+The hosted bounds validator no longer records a function as checked during
+an exploratory loop pass that suppresses diagnostics. The later validating
+pass must inspect that body. The native validator already enforced this rule.
+The frozen `cb6db449` hosted compiler accepted an inner function with an
+unprovable `$assert` inside a loop; the corrected hosted and native visitors
+both reject it and accept its explicitly guarded counterpart. These cases
+and nominal/conditional-bound regressions pass (22 tests). Artifact:
+`nominal-rejections-loop-functions-gates.log`.

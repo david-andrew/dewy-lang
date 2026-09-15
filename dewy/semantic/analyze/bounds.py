@@ -1626,7 +1626,10 @@ class _BoundsValidator:
         function_id = id(function)
         if function_id in self.checked_functions:
             return
-        self.checked_functions.add(function_id)
+        # Loop fixed-point exploration suppresses diagnostics. Only the
+        # later validating pass can certify a nested function's body.
+        if validate:
+            self.checked_functions.add(function_id)
         state: State = {
             key: interval
             for key, interval in (enclosing or {}).items()
