@@ -2910,3 +2910,23 @@ Dewy seed and intrinsic-operand C µDewy stage 2; C compilation uses LTO with
 now accepts the current `--no-debug-info` argument as well as older seeds'
 four-argument invocation; ten focused build-tool gates pass. This refreshes
 the C-accelerated fixed point, not the full corpus or a bootstrap without C.
+
+### Scope labels and outward loop exits
+
+Native checking now collects labels throughout their lexical scope, rejects
+active shadowing and cross-function exits, and resolves the nearest loop
+whose parent scope declares the label. Branch contexts retain that control
+information; function contexts reset it. Native lowering uses private
+per-function (or module-initializer) exit signals for µDewy's nearest-loop
+control flow. Cleanup proceeds one boundary at a time, including temporary
+iterator owners. Intermediate loops that break to a signal checkpoint no
+longer carry the source sequence's `never` type past that checkpoint.
+
+All 44 focused tests pass. The new gate compares six accepted cases through
+both compilers and both x86-64/C backends, checks seven rejection cases, and
+checks unchanged native live bytes over repeated three-level iterator exits.
+The original control-flow suite also had an assertion tied to a generated
+temporary's ordinal; it now checks the result temporary's consistent identity
+without depending on how many temporaries the prelude generated. Artifacts:
+`native-labels-final-gates.log`. These are isolated checker/lowering gates;
+full native CLI and refreshed corpus verification follow separately.

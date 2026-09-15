@@ -91,7 +91,7 @@ These are outside the original corpus counts:
 
 | Fixture | First reported obstacle |
 | --- | --- |
-| [labeled_loop_exits.dewy](../tests/labeled_loop_exits.dewy) | Metatag value |
+| [labeled_loop_exits.dewy](../tests/labeled_loop_exits.dewy) | Baseline: Metatag value. Native scope resolution and exit legalization now pass isolated x86-64/C execution, rejection, and cleanup gates; full CLI follow-up pending. |
 | [rationals.dewy](../tests/rationals.dewy) | runtime rational materialization |
 | [powers.dewy](../tests/powers.dewy) | no declaration of this name is in scope |
 | [units_algebra.dewy](../tests/units_algebra.dewy) | no declaration of this name is in scope |

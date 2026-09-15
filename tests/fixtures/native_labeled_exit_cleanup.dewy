@@ -1,0 +1,30 @@
+# The lowering test supplies the arena implementation and checks live bytes.
+# Each source is a temporary iterator owner. Exiting two loop levels must
+# release the three loop bodies and the three iterator owners exactly once.
+make=():>array<int64>=>[1 2]
+exercise=():>int64=>{
+    let result:int64=0
+    $outer
+    loop i in make() {
+        let kept:array<int64>=[i]
+        loop j in make() {
+            let scratch:array<int64>=[j]
+            loop k in make() {
+                let deepest:array<int64>=[k]
+                result+=kept[0]+scratch[0]+deepest[0]
+                if i=?1 continue $outer
+                break $outer
+            }
+            return 1
+        }
+        return 2
+    }
+    return result+35
+}
+main=():>int64=>{
+    if exercise() not=?42 return 3
+    let before=_arena_live_bytes
+    loop i in 0..49 {if exercise() not=?42 return 4}
+    if _arena_live_bytes not=?before return 5
+    return 42
+}

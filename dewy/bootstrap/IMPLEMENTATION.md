@@ -48,7 +48,9 @@ strings, and conversions). Ten stopped at their first unsupported construct,
 with the same diagnostic on both backends. Cases after those diagnostics
 were not exercised. In particular, the native implementation still needs:
 
-- Labeled loop exits using `$outer` (`labeled_loop_exits.dewy`).
+- Labeled loop exits using `$outer` stopped the original bundle. Scope resolution
+  and legalization now pass isolated native x86-64/C gates, including outward
+  continue and iterator cleanup; the full CLI corpus still needs a refresh.
 - Runtime type values such as `type<Tok>` (`place_slots.dewy`).
 - Implicit declarations in unpacking (`addr_types.dewy`, `unpacking.dewy`).
 - Structural and union string conversions used by generic I/O.
@@ -962,7 +964,9 @@ the native fixed point is not grounds for retiring them yet.
   iteration can invalidate and keeps borrowed record elements read-only.
   Comparison checks include iterator bounds, target types, and exit levels,
   rather than only the module's result type. Advanced iterator formulas,
-  unpacking, runtime range ends, and scope-metatag exits remain to be added.
+  unpacking and runtime range ends remain to be added. Scope-metatag exits
+  now resolve scope-wide declarations and lower through enclosing loops,
+  releasing each exited body and iterator owner once.
   Shared binding/flow shapes sink parser ambiguity to the competing values.
   Each candidate checks in an isolated compilation snapshot; exactly one
   successful candidate commits its bindings, types, HIR, and facts. Computed

@@ -77,6 +77,10 @@ State:type = [
     cleanup_enabled:bool=false
     cleanup_frames:array<array<OwnedLocal>>=[]
     cleanup_loops:array<addr>=[]
+    loop_depth:addr=0
+    loop_levels:addr?=none
+    loop_kind:addr?=none
+    loop_prologue:array<addr>=[]
     # Program-wide capture/place exclusions are computed once. Rebuilding
     # this set in every function revisited the entire function graph N times.
     cleanup_excluded:set<addr>=set[]
@@ -473,16 +477,8 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.IfArm return put(hir.IfArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
     if node is? hir.LoopArm return put(hir.LoopArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
     if node is? hir.Flow return lower_flow(node 0 @state)
-    if state.cleanup_enabled and node is? hir.Break|hir.Continue and node.loop_levels <? state.cleanup_loops.length {
-        let index=state.cleanup_loops.length-1-node.loop_levels
-        $runtime_assert index >=? 0 and index <? state.cleanup_loops.length
-        let first=state.cleanup_loops[index]
-        let prefix=cleanup_since(first node @state)
-        prefix.push(put(if node is? hir.Break hir.Break[node.loc type node.label node.loop_levels] else hir.Continue[node.loc type node.label node.loop_levels] @state))
-        return put(hir.Block[node.loc type prefix false] @state)
-    }
-    if node is? hir.Break return put(hir.Break[node.loc type node.label node.loop_levels] @state)
-    if node is? hir.Continue return put(hir.Continue[node.loc type node.label node.loop_levels] @state)
+    if node is? hir.ScopeMetatag return put(hir.Void[node.loc type] @state)
+    if node is? hir.Break|hir.Continue return loop_exit(node @state)
     return reject(node "{node.typename} legalization" @state)
 }
 # Scalar arrays use the hosted six-word descriptors. Without a runtime
@@ -2702,6 +2698,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         loop item in hir.children(current) {pending.push(item)}
     }
     state.cleanup_enabled=enabled state.cleanup_owned=set[]
+    state.loop_depth=0 state.loop_levels=none state.loop_kind=none state.loop_prologue=[]
     let frame_start=state.cleanup_frames.length
     state.cleanup_frames.push([])
     loop argument in parameters(node) {
@@ -2760,6 +2757,11 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.result_projection=projection
     let body=owned_value(node.body @state)
     state.result_projection=none
+    if state.loop_prologue.length >? 0 {
+        let initialized=state.loop_prologue
+        loop item in prologue {initialized.push(item)}
+        prologue=initialized
+    }
     let result_type=runtime_type(if projection is? none node.rettype else projection.result node @state)
     let cleanup=cleanup_since(frame_start node @state)
     $runtime_assert state.cleanup_frames.length >? frame_start and state.cleanup_frames.length >? 0
@@ -2833,6 +2835,14 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             let target=put(hir.ExpressedIdentifier[node.loc type name node.binding_id] @state)
             startup.push(put(hir.Assign[node.loc void_type target '=' declaration.expr] @state))
         } else {startup.push(expression(id @state))}
+    }
+    # Module statements run in the generated initializer. Its nonlocal
+    # exits need their own initialized signals before function lowering resets
+    # the control state for each independently emitted body.
+    if state.loop_prologue.length >? 0 {
+        let initialized=state.loop_prologue
+        loop item in startup {initialized.push(item)}
+        startup=initialized
     }
     loop [id capture] in units {
         let node=hir.node_at(input.nodes id)
@@ -3034,6 +3044,67 @@ flow_value = (id:addr expected:addr @state:State):>addr => {
     if cell_members(expected @state) isnt? none return cell_pack(value source.value_type expected source @state owned=state.cleanup_enabled)
     return read_value(value source.value_type expected source @state)
 }
+# µDewy has only nearest-loop exits. A nonlocal exit breaks the innermost
+# loop with a remaining distance and kind. The checkpoint after that loop
+# either handles the target or propagates another break. Generated helper
+# loops never affect this source-loop distance.
+loop_assignment = (target:addr value:addr node:hir.AST @state:State):>addr => put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) target '=' value] @state)
+loop_cleanup = (node:hir.AST @state:State):>array<addr> => {
+    if not state.cleanup_enabled or state.cleanup_loops.length =? 0 return []
+    let last=state.cleanup_loops.length-1
+    $runtime_assert last <? state.cleanup_loops.length
+    return cleanup_since(state.cleanup_loops[last] node @state)
+}
+loop_exit = (node:hir.Break|hir.Continue @state:State):>addr => {
+    let prefix=loop_cleanup(node @state)
+    let bottom=types.primitive('never' @state.type_nodes)
+    if node.loop_levels =? 0 {
+        prefix.push(put(if node is? hir.Break hir.Break[node.loc bottom] else hir.Continue[node.loc bottom] @state))
+    } else {
+        if state.loop_levels is? none {
+            let declarations:array<addr>=[]
+            state.loop_levels=snapshot(word(0 node @state) @declarations @state)
+            state.loop_kind=snapshot(word(0 node @state) @declarations @state)
+            state.loop_prologue=declarations
+        }
+        $runtime_assert state.loop_levels isnt? none and state.loop_kind isnt? none
+        let levels=state.loop_levels
+        let kind=state.loop_kind
+        prefix.push(loop_assignment(levels word(node.loop_levels node @state) node @state))
+        prefix.push(loop_assignment(kind word(if node is? hir.Break 1 else 2 node @state) node @state))
+        prefix.push(put(hir.Break[node.loc bottom] @state))
+    }
+    return put(hir.Block[node.loc bottom prefix false] @state)
+}
+loop_checkpoint = (node:hir.AST @state:State):>addr => {
+    $runtime_assert state.loop_levels isnt? none and state.loop_kind isnt? none
+    let levels=state.loop_levels
+    let kind=state.loop_kind
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let bottom=types.primitive('never' @state.type_nodes)
+    let stop=put(hir.Break[node.loc bottom] @state)
+    let next=put(hir.Continue[node.loc bottom] @state)
+    let stopping=intrinsic('__eq__' [kind word(1 node @state)] boolean node @state)
+    let stopped=sequence([loop_assignment(kind word(0 node @state) node @state) stop] node @state)
+    let continued=sequence([loop_assignment(kind word(0 node @state) node @state) next] node @state)
+    let arm=put(hir.IfArm[node.loc bottom stopping stopped] @state)
+    let dispatch=put(hir.Flow[node.loc bottom [arm] continued] @state)
+    # At the exit site only the innermost body is cleaned. Its iterator
+    # storage is released after the loop. Clean this enclosing body now;
+    # releasing every target frame at the original site would double-release
+    # iterator storage while unwinding through these checkpoints.
+    let cleanup=loop_cleanup(node @state)
+    let target=cleanup
+    target.push(loop_assignment(levels word(0 node @state) node @state))
+    target.push(dispatch)
+    let propagate=cleanup
+    propagate.push(loop_assignment(levels word_op('__sub__' levels word(1 node @state) node @state) node @state))
+    propagate.push(stop)
+    return sequence([
+        conditional(intrinsic('__eq__' [levels word(1 node @state)] boolean node @state) sequence(target node @state) node @state)
+        conditional(intrinsic('__gt__' [levels word(1 node @state)] boolean node @state) sequence(propagate node @state) node @state)
+    ] node @state)
+}
 lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     let type=runtime_type(node.value_type node @state)
     if position >=? node.arms.length return if node.default is? none put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state) else flow_value(node.default node.value_type @state)
@@ -3050,8 +3121,12 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
         let step=iterator_condition(test @state)
         prefix=step.prefix condition=step.condition
     } else {condition=expression(arm.condition @state)}
-    if state.cleanup_enabled and arm is? hir.LoopArm {state.cleanup_loops.push(state.cleanup_frames.length)}
+    if arm is? hir.LoopArm {
+        state.loop_depth+=1
+        if state.cleanup_enabled {state.cleanup_loops.push(state.cleanup_frames.length)}
+    }
     let body=flow_value(arm.body node.value_type @state)
+    if arm is? hir.LoopArm {state.loop_depth-=1}
     if state.cleanup_enabled and arm is? hir.LoopArm {
         $runtime_assert state.cleanup_loops.length >? 0
         state.cleanup_loops.pop;
@@ -3061,8 +3136,16 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     let fallback:addr?=none
     if position+1 <? node.arms.length or node.default isnt? none {fallback=lower_flow(node position+1 @state)}
     let arm_type=runtime_type(arm.value_type arm @state)
+    let physical_type=type
+    # A source-level diverging loop may now break to its signal checkpoint.
+    # Keep `never` on the whole legalized sequence, not this intermediate
+    # loop, or statement normalization inserts a return before the checkpoint.
+    if arm is? hir.LoopArm and state.loop_depth >? 0 and state.loop_levels isnt? none and types.is_primitive(types.node_at(state.type_nodes type) 'never') {
+        physical_type=types.primitive('void' @state.type_nodes)
+        arm_type=physical_type
+    }
     let lowered=put(if arm is? hir.IfArm hir.IfArm[arm.loc arm_type condition body] else hir.LoopArm[arm.loc arm_type condition body] @state)
-    let flow=put(hir.Flow[node.loc type [lowered] fallback] @state)
+    let flow=put(hir.Flow[node.loc physical_type [lowered] fallback] @state)
     if scoped {
         let result:addr?=none
         if types.is_primitive(types.node_at(state.type_nodes type) 'void') or types.is_primitive(types.node_at(state.type_nodes type) 'never') {prefix.push(flow)}
@@ -3072,8 +3155,17 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
         state.cleanup_frames.pop;
         if result isnt? none {prefix.push(result)}
     } else {
-        if prefix.length =? 0 return flow
+        if prefix.length =? 0 and (arm isnt? hir.LoopArm or state.loop_depth =? 0 or state.loop_levels is? none) return flow
         prefix.push(flow)
+    }
+    if arm is? hir.LoopArm and state.loop_depth >? 0 and state.loop_levels isnt? none {
+        let result:addr?=none
+        if not types.is_primitive(types.node_at(state.type_nodes type) 'void') and not types.is_primitive(types.node_at(state.type_nodes type) 'never') {
+            let value=put(hir.Block[node.loc type prefix false] @state)
+            prefix=[] result=snapshot(value @prefix @state)
+        }
+        prefix.push(loop_checkpoint(node @state))
+        if result isnt? none {prefix.push(result)}
     }
     return put(hir.Block[node.loc type prefix false] @state)
 }

@@ -1,3 +1,4 @@
+import re
 from typing import cast
 
 import pytest
@@ -191,9 +192,14 @@ def test_conditional_values_lower_to_typed_temporaries() -> None:
         'let main = ():>int64 => { return (if true 40 else 0) + 2 }',
     ))
 
-    assert 'let __dewy_flow_1:int64 = 0' in emitted
-    assert '__dewy_flow_1 = 40' in emitted
-    assert 'return (__dewy_flow_1) + 2' in emitted
+    # Prelude lowering may allocate temporaries before this function. Check
+    # the selected result's identity, not its compilation-wide ordinal.
+    result = re.search(r'return \((__dewy_flow_\d+)\) \+ 2', emitted)
+    assert result is not None
+    name = result.group(1)
+    assert f'let {name}:int64 = 0' in emitted
+    assert f'{name} = 40' in emitted
+    assert f'{name} = 0' in emitted
 
 
 def test_parser_keeps_metatags_generic_while_hir_extracts_labels() -> None:
