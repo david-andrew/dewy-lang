@@ -2779,3 +2779,21 @@ HIR, retain identical emitted source. Median lowering changes **0.739 to
 a small local improvement with a collection outlier, not a major performance
 claim. Artifacts: `identifier-extraction-gates.log`,
 `identifier-extraction-module/results.json`.
+
+### Immutable interval evidence
+
+Hosted interval arithmetic reuses unchanged ordinary operands when both bounds
+and the address-cap evidence agree. The identity sentinel for vacuous facts
+is never returned by arithmetic. Fixed word ranges and address-space bounds
+are shared by their numeric width, signedness and target limit; no flow-state
+or type-dependent analysis result is cached.
+
+The initial arithmetic batch passes 32 evidence and bounds checks. A fresh
+module comparison changes total compilation from **6.178 to 5.952 seconds**,
+with checking **5.293 to 4.978 seconds**. Generated source agrees after
+normalizing three build-directory include paths, and every included file has
+identical bytes. This is one bounded sample, not a full-build measurement.
+The subsequent numeric-range helpers pass 21 targeted checks, including native
+comparisons and changing target limits; they are not included in those timings.
+Artifacts: `interval-reuse-gates.log`, `measure-interval-reuse.log`,
+`interval-output-equivalence.json`, `immutable-range-gates.log`.

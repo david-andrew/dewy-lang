@@ -41,9 +41,11 @@ class Interval:
     def intersect(self, other: Interval) -> Interval:
         lower = _maximum_lower(self.lower, other.lower)
         upper = _minimum_upper(self.upper, other.upper)
-        return Interval(lower, upper, capped=self.capped or other.capped)
+        return self._result(other, lower, upper)
 
     def union(self, other: Interval) -> Interval:
+        if self is other and type(self) is Interval and self is not _ANY_FACT:
+            return self
         lower = (
             None
             if self.lower is None or other.lower is None
@@ -54,7 +56,7 @@ class Interval:
             if self.upper is None or other.upper is None
             else max(self.upper, other.upper)
         )
-        return Interval(lower, upper, capped=self.capped or other.capped)
+        return self._result(other, lower, upper)
 
     def widen(self, other: Interval) -> Interval:
         lower = (
@@ -71,7 +73,23 @@ class Interval:
             and other.upper <= self.upper
             else None
         )
-        return Interval(lower, upper, capped=self.capped or other.capped)
+        return self._result(other, lower, upper)
+
+    def _result(self, other: Interval, lower: int | None, upper: int | None) -> Interval:
+        """Reuse an immutable operand only when both bounds and evidence agree.
+
+        Ordinary interval arithmetic must never produce the identity sentinel
+        used for vacuous facts. Extended classes also retain a plain Interval
+        result, as the constructors here have always supplied.
+        """
+        capped = self.capped or other.capped
+        if (type(self) is Interval and self is not _ANY_FACT
+                and lower == self.lower and upper == self.upper and capped == self.capped):
+            return self
+        if (type(other) is Interval and other is not _ANY_FACT
+                and lower == other.lower and upper == other.upper and capped == other.capped):
+            return other
+        return Interval(lower, upper, capped=capped)
 
 
 UNKNOWN_INTERVAL = Interval(None, None)
@@ -91,6 +109,19 @@ _FACT_SHIFT = 20
 # A runtime-length array's length is a nonnegative int64, which keeps
 # `i <? xs.length` bounded above so `i + 1` cannot roll over.
 _MAX_LENGTH = max_length('x86_64')  # the default cap; the validator carries its target's (`targets.max_length`)
+
+
+@cache
+def _length_range(cap: int) -> Interval:
+    """An immutable address-space axiom, keyed by its actual target limit."""
+    return Interval(0, cap, capped=True)
+
+
+@cache
+def _word_range(width: int, signed: bool) -> Interval:
+    """A storage width's bounds depend only on width and signedness."""
+    return (Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1)
+            if signed else Interval(0, (1 << width) - 1))
 
 
 @dataclass(frozen=True)
@@ -287,7 +318,7 @@ def _is_length_key(key: int) -> bool:
 
 def _known_interval(state: State, key: int, cap: int = _MAX_LENGTH) -> Interval:
     """The interval a key currently has; lengths default to `[0, cap]` (a capped interval)."""
-    default = Interval(0, cap, capped=True) if _is_length_key(key) else UNKNOWN_INTERVAL
+    default = _length_range(cap) if _is_length_key(key) else UNKNOWN_INTERVAL
     return state.get(key, default)
 
 
@@ -1408,7 +1439,7 @@ class _BoundsValidator:
         lower, upper = proposition.lower_bound(), proposition.upper_bound()
         bounds = Interval(lower, upper) if lower is not None or upper is not None else None
         if proposition.axiom == 'addr':
-            bounds = Interval(0, self.max_length, capped=True)   # `.start:addr`: a position
+            bounds = _length_range(self.max_length)   # `.start:addr`: a position
         if bounds is not None:
             current_interval = state.get(route_id, UNKNOWN_INTERVAL)
             state[route_id] = current_interval.intersect(bounds)
@@ -1446,7 +1477,7 @@ class _BoundsValidator:
         axiom included: an `addr` lies in `[0, cap)` (a capped interval)."""
         interval = _propositions_interval(propositions)
         if any(p.axiom == 'addr' for p in propositions):
-            positions = Interval(0, self.max_length, capped=True)
+            positions = _length_range(self.max_length)
             interval = positions if interval is None else interval.intersect(positions)
         return interval
 
@@ -1943,7 +1974,7 @@ class _BoundsValidator:
         if layout is None:
             return None
         width, signed = layout
-        return Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+        return _word_range(width, signed)
 
     def _proof_failure(self, node: hir.AST, kind: str, report: Error) -> None:
         """An unproven obligation: a compile error, or in `$prototype` a
@@ -1955,7 +1986,7 @@ class _BoundsValidator:
 
     def _length_default(self) -> Interval:
         """An unknown length: `[0, cap]` by the address-space axiom (a capped interval)."""
-        return Interval(0, self.max_length, capped=True)
+        return _length_range(self.max_length)
 
     def _cap_note(self, node: hir.AST, what: str) -> None:
         bits = ADDRESS_BITS[self.target]   # type: ignore[index]
@@ -1980,11 +2011,7 @@ class _BoundsValidator:
             if layout is None:
                 return UNKNOWN_INTERVAL
             width, signed = layout
-            type_range = (
-                Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1)
-                if signed
-                else Interval(0, (1 << width) - 1)
-            )
+            type_range = _word_range(width, signed)
             elements = self._iterable_element_interval(iterator.iterable)
             return type_range if elements is None else type_range.intersect(elements)
         if iterator.count is None:
@@ -2275,7 +2302,7 @@ class _BoundsValidator:
             # A call may erase flow facts while preserving the storage
             # contract (`@position:addr` still cannot contain -1).
             width, signed = layout
-            width_range = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+            width_range = _word_range(width, signed)
             return width_range if declared is None else width_range.intersect(declared)
         return declared
 
@@ -2311,7 +2338,7 @@ class _BoundsValidator:
             source_layout = ty.fixed_integer_layout(ty.strip_refinement(node.expr.type))
             if source_layout is not None:
                 width, signed = source_layout
-                inner = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
+                inner = _word_range(width, signed)
         fitted = self._fit_type(inner, node.type)
         if validate and fitted is not None and inner is not None and inner.capped and self._fit_type(Interval(inner.lower, None), node.type) is None:
             self._cap_note(node, f'fits `{type_to_dewy(node.type)}`')
