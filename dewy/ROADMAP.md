@@ -63,7 +63,7 @@ the native compiler, which makes it:
 - a convenient development loop for prototyping and inspecting analyses in
   Python before porting them. The 2026-09-15 complete direct-output build
   checkpoints for the larger, cache-enabled compiler are about 76 seconds
-  hosted and 44 seconds native, the latter using a C-built seed pair and
+  hosted and 40 seconds native, the latter using a C-built seed pair and
   direct x86-64 output. Both remain above the revised native target; the
   fully direct bootstrap remains open. These are single-generation measurements, not a new
   fixed-point certification.

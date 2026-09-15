@@ -3750,3 +3750,43 @@ Artifacts: `paged-bindings-measurement/{results.json,active-results.json}`
 `paged-bindings-schema-and-analysis-gates.log`,
 `paged-bindings-integration-gates.log` (initial failures),
 `paged-bindings-active-integration-gates.log` (10 passes), and codec build logs.
+
+### Complete build with paged binding metadata
+
+Frozen `1da2c5ba` builds in **40.094 seconds** using the staged paged-registry
+C seed, down from the compact-literal checkpoint's 43.704 seconds. Frontend
+work takes 16.710 s, validation 3.935 s, initialization/reachability 1.766 s,
+lowering 6.758 s, emission 2.559 s, and backend 6.881 s. Maximum process RSS
+is 3,521,004 KiB. Generated µDewy is 38,189,273 bytes, SHA-256
+`725209522ba9f8d77576b6e47682ff1c9251ca504addd3081bee0788d3ce3fb3`,
+byte-identical to this source's preceding generation. This confirms Dewy
+output stabilization, not a refreshed two-compiler or fully direct fixed point.
+
+The first full phase-storage report reveals the scale of temporary work:
+
+| Phase | Cumulative arena allocation | Explicit copied payload | Live arena payload at end |
+| --- | ---: | ---: | ---: |
+| Frontend | 31.681 GB | 0.680 GB | 0.887 GB |
+| Validation | 7.434 GB | 0.232 GB | 1.021 GB |
+| Initialization/reachability | 5.025 GB | 0.701 GB | 1.063 GB |
+| Lowering | 12.800 GB | 0.065 GB | 2.425 GB |
+| Emission | 2.108 GB | 0.142 GB | 2.375 GB |
+
+GB here is decimal; cumulative allocation counts reused size-class payloads,
+not distinct resident memory or measured physical memory traffic. Most of the
+compiler's 59 GB allocation traffic does not become retained results. On this
+3.4 GHz machine, 40 seconds represents roughly 136 billion nominal single-core
+cycles, before accounting for frequency changes, waiting and child processes.
+That is a scale check, not a measured cycle count or a theoretical compiler
+lower bound. The useful optimization target is unnecessary traversal,
+construction and disposal, rather than only faster copying of that traffic.
+The current result remains above the under-30-second native target and the
+under-10-second stretch goal.
+
+Dewy seed SHA-256:
+`4dad29f46a97cf539c7a1cc1a1f62bb796697707eed7c5b8c1ece7b9777b250c`.
+µDewy remains the verified `2b541de3` seed. Artifacts: `source-paged-bindings`,
+`native-paged-bindings-stage1`, `native-paged-bindings-stage1-c`, and
+`native-paged-bindings-full`. C seed preparation is separate from the measured
+direct-output invocation. These are isolated single samples with OS page cache
+uncontrolled; no new hosted timing was taken for this native representation.
