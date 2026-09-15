@@ -13,6 +13,11 @@ and `--udewy-executable PATH` to measure the native pair. Each run uses a fresh
 process and empty artifact directory. OS page caches are uncontrolled.
 `--profile` adds hosted cProfile data; its elapsed times include profiling
 overhead and must not be compared to unprofiled acceptance measurements.
+`--cache-state warm` performs a separately recorded priming build, removes
+the executable, and times a fresh process rebuilding it with analysis caches
+retained. This measures a warm rebuild, not the CLI's up-to-date-binary
+shortcut. Priming observations remain under `run-XX/priming/` with separate
+logs; a failed priming build is not reported as a warm sample.
 JSON records retain source/revision identity, options, wall time, maximum
 process RSS, generated-source sizes/hashes, and hosted phase timings. Maximum
 process RSS is not the sum of simultaneously resident child processes.
@@ -2930,3 +2935,23 @@ temporary's ordinal; it now checks the result temporary's consistent identity
 without depending on how many temporaries the prelude generated. Artifacts:
 `native-labels-final-gates.log`. These are isolated checker/lowering gates;
 full native CLI and refreshed corpus verification follow separately.
+
+
+The frozen `49ad4c12` compiler builds successfully through the verified
+`4c785f86` C seed (without PGO) with direct x86-64 output in **53.774 seconds**:
+frontend 18.199, validation 8.046, initialization/reachability 1.639,
+lowering 10.583, emission 4.856, and backend 8.216. Peak process RSS is
+5,544,516 KiB; emitted µDewy is 49,029,734 bytes. This meets the native target
+on another C-seed route; hosted remains at its earlier 66.696-second checkpoint.
+Artifacts: `source-native-labels`, `native-labels-full`.
+
+The resulting direct-built native CLI passes `labeled_loop_exits.dewy` and
+`iterator_labeled_exits.dewy`. Both other labeled fixtures reach the distinct
+non-conjunctive iterator-formula gap. This direct-built compiler takes about
+26 seconds to compile the first small fixture with its prelude; the fully
+direct route still needs performance work. For the broader corpus refresh,
+the same emitted µDewy was compiled to C with LTO8 and PRE/code hoisting off.
+That single-generation C seed has SHA-256
+`8d2929388f969ad20cbef62108ed1e0aa46f19163521af21310a0a9b97e59d72`;
+it is not a newly certified two-generation pair. Artifacts:
+`parity-native-labels`, `build-native-labels-c-seed.sh`, `native-labels-c-seed`.

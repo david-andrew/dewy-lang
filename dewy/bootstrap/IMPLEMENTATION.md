@@ -50,7 +50,9 @@ were not exercised. In particular, the native implementation still needs:
 
 - Labeled loop exits using `$outer` stopped the original bundle. Scope resolution
   and legalization now pass isolated native x86-64/C gates, including outward
-  continue and iterator cleanup; the full CLI corpus still needs a refresh.
+  continue and iterator cleanup. The full CLI passes this fixture and
+  `iterator_labeled_exits.dewy` at `49ad4c12`; two other labeled fixtures
+  remain blocked by non-conjunctive iterator formulas.
 - Runtime type values such as `type<Tok>` (`place_slots.dewy`).
 - Implicit declarations in unpacking (`addr_types.dewy`, `unpacking.dewy`).
 - Structural and union string conversions used by generic I/O.

@@ -1,6 +1,7 @@
 """Measure complete compiler invocations in isolated artifact directories.
 
-Each sample starts a fresh compiler process and rebuilds the executable. OS
+Each sample starts a fresh compiler process and rebuilds the executable. Warm
+samples first prime the analysis caches, then remove the executable. OS
 page caches are not flushed. Hosted phase timings are observational wrappers;
 the timed path is the ordinary CLI, with that revision's default build options.
 This tool uses Python for measurement, not as part of the native build path.
@@ -100,6 +101,50 @@ def hosted_worker(argv: list[str]) -> int:
         Path('phases.json').write_text(json.dumps(phases, indent=2) + '\n')
 
 
+def invocation(command, work: Path, env: dict[str, str], timeout: float, *, profile: bool, prefix: str = '') -> dict:
+    """Run one fresh process; a priming run uses the same timeout policy."""
+    started = time.perf_counter()
+    with (work / f'{prefix}stdout.log').open('w') as stdout, (work / f'{prefix}stderr.log').open('w') as stderr:
+        process = subprocess.Popen(command, cwd=work, env=env, stdout=stdout, stderr=stderr, start_new_session=True)
+        try:
+            status = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # A profiled worker can save partial data. It remains a timeout,
+            # even if interruption unwinds successfully.
+            os.killpg(process.pid, signal.SIGINT if profile else signal.SIGKILL)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            status = 'timeout'
+    return {'status': status, 'wall_seconds': time.perf_counter() - started}
+
+
+def prepare_warm_rebuild(source: Path, work: Path) -> None:
+    """Retain analysis caches, but require another executable build.
+
+    Both compiler commands use the shared artifact layout. Removing the
+    executable prevents the hosted CLI's mtime shortcut; source, parse and
+    checked-prelude caches stay intact. The work directory belongs to this
+    measurement, never to the user's source checkout.
+    """
+    sys.path.insert(0, str(ROOT))
+    from udewy.cache import cache_artifact
+    binary = work / cache_artifact(source, cwd=work)
+    if not binary.is_file():
+        raise RuntimeError(f'priming succeeded without the expected executable: {binary}')
+    binary.unlink()
+    # Preserve priming observations separately. None may leak into the
+    # measured run (notably append-only phase events).
+    prime = work / 'priming'
+    prime.mkdir()
+    for name in ('rss-kib.txt', 'phases.json', 'garbage-collection.json', 'phase-events.jsonl', 'hosted.prof'):
+        observation = work / name
+        if observation.exists():
+            observation.rename(prime / name)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', type=Path)
@@ -112,6 +157,8 @@ def main() -> int:
     parser.add_argument('--target', choices=('x86_64', 'c'), default='x86_64')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--runs', type=int, default=1)
+    parser.add_argument('--cache-state', choices=('cold', 'warm'), default='cold',
+                        help='warm primes the analysis caches, then removes the executable before timing a full rebuild')
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--profile', action='store_true', help='hosted cProfile; timings include profiling overhead')
     parser.add_argument('--phase-timings', action='store_true', help='request --timings from a compiler that supports it')
@@ -147,7 +194,9 @@ def main() -> int:
         'cpu': next((line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')), None),
         'python': sys.version, 'compiler': compiler, 'target': args.target,
         'source': str(source), 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
-        'cache_state': 'fresh process and empty build directory; OS page caches uncontrolled',
+        'cache_state': ('fresh process and empty build directory' if args.cache_state == 'cold' else
+                        'fresh process after a priming build; analysis caches retained, executable removed') + '; OS page caches uncontrolled',
+        'cache_mode': args.cache_state,
         'profiled': args.profile, 'phase_timings': args.phase_timings,
         'toolchain': {name: subprocess.check_output([name, '--version'], text=True).splitlines()[0]
                       for name in ('cc', 'as', 'ld') if shutil.which(name)},
@@ -184,23 +233,21 @@ def main() -> int:
         work.mkdir()
         command = ['/usr/bin/time', '-f', '%M', '-o', 'rss-kib.txt', *compiler,
                    *(['--timings'] if args.phase_timings else []), '--target', args.target, '-c', str(source)]
-        started = time.perf_counter()
-        with (work / 'stdout.log').open('w') as stdout, (work / 'stderr.log').open('w') as stderr:
-            process = subprocess.Popen(command, cwd=work, env=env, stdout=stdout, stderr=stderr, start_new_session=True)
-            try:
-                status = process.wait(timeout=args.timeout)
-            except subprocess.TimeoutExpired:
-                # Give a profiled Python worker's finally block a bounded
-                # chance to save its call data. The sample is still a timeout,
-                # regardless of whether interruption unwinds successfully.
-                os.killpg(process.pid, signal.SIGINT if args.profile else signal.SIGKILL)
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-                status = 'timeout'
-        record = {'run': run, 'status': status, 'wall_seconds': time.perf_counter() - started}
+        priming = None
+        if args.cache_state == 'warm':
+            priming = invocation(command, work, env, args.timeout, profile=args.profile, prefix='priming-')
+            if priming['status'] != 0:
+                record = {'run': run, 'status': 'priming_failed', 'priming': priming}
+                with (output / 'results.jsonl').open('a') as results:
+                    results.write(json.dumps(record) + '\n')
+                print(json.dumps(record), flush=True)
+                failed = True
+                continue
+            prepare_warm_rebuild(source, work)
+        record = {'run': run, **invocation(command, work, env, args.timeout, profile=args.profile)}
+        status = record['status']
+        if priming is not None:
+            record['priming'] = priming
         rss = work / 'rss-kib.txt'
         if rss.exists() and rss.read_text().splitlines():
             last = rss.read_text().splitlines()[-1]

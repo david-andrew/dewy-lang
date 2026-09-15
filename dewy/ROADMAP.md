@@ -63,7 +63,8 @@ the native compiler, which makes it:
 - a convenient development loop for prototyping and inspecting analyses in
   Python before porting them. The 2026-09-15 complete direct-output build
   checkpoints are about 67 seconds hosted and 44 seconds native with a
-  profile-guided C seed and direct output. The native time target is met on
+  profile-guided C seed and direct output. A refreshed native build also
+  completes in about 54 seconds with a C seed without profile guidance. The native time target is met on
   that route; the hosted target and the fully direct bootstrap remain open.
   Recorded inputs, seeds and phase timings live in
   [`bootstrap/PHASE0_MEASUREMENTS.md`](bootstrap/PHASE0_MEASUREMENTS.md);
