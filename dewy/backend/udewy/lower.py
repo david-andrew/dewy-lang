@@ -269,9 +269,15 @@ class _Lowerer(
         """Initialize per-program identity maps and deterministic counters."""
         _erase_dimensions(root)
         self.root = root
+        # Checking has completed the nominal graph. Lowering's representation
+        # queries share one default system instead of rebuilding that graph at
+        # every union/enum read. No promotion rules or graph edges are changed
+        # through this private system during lowering.
+        self.runtime_type_system = ty.TypeSystem()
         # Lowering only reads these generated signatures. Their primitive
         # types have no registry dependencies, and keeping them on this lowerer
         # prevents mutable FunctionType objects from crossing compilations.
+        self.primitive_equality_types: dict[str, ty.FunctionType] = {}
         self.primitive_intrinsic_types: dict[tuple[str, ...], ty.FunctionType] = {}
         self.word_binary_type = ty.FunctionType(
             [ty.PosOrKwArg('left', 'int64'), ty.PosOrKwArg('right', 'int64')],
@@ -1288,7 +1294,7 @@ class _Lowerer(
         retag the exception alternative into the result union."""
         loc = node.loc
         statements, members = self._hold_union_value(node.value, node.name, node.binding_id, loc)
-        system = ty.TypeSystem()
+        system = self.runtime_type_system
         result_members = ty.runtime_union_members(node.type)
         result = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('forwarded'))
         if result_members is not None:
@@ -4505,7 +4511,7 @@ class _Lowerer(
     ) -> tuple[list[hir.AST], hir.AST]:
         """Decode a literal enum's tag before a numeric value conversion."""
         loc = value.loc
-        system = ty.TypeSystem()
+        system = self.runtime_type_system
         choices = [
             (index, member) for index, member in enumerate(members)
             if isinstance(member, ty.IntegerLiteralType)
@@ -4583,7 +4589,7 @@ class _Lowerer(
         members = self._enum_of(node.value)
         if members is None:
             return None
-        system = ty.TypeSystem()
+        system = self.runtime_type_system
         matching = [index for index, member in enumerate(members) if system.is_subtype(member, node.test_type) != node.negated]
         if len(matching) == len(members):
             return [], hir.Bool(node.loc, 'bool', True)
@@ -4668,7 +4674,7 @@ class _Lowerer(
                     # a parent alternative requires a borrowed child view.
                     return self._union_family_view(cell, members, self._field_union_members(node.type), node)
                 # Fully narrowed: load the payload as the matching member.
-                system = ty.TypeSystem()
+                system = self.runtime_type_system
                 member = next(
                     (m for m in members if system.is_subtype(node.type, m)),
                     None,
@@ -4778,7 +4784,7 @@ class _Lowerer(
             tested_brand = self._brand_under_test(node.test_type)
             if members is not None:
                 union_prelude, union_value = self._extract_expression(node.value)
-                system = ty.TypeSystem()
+                system = self.runtime_type_system
                 # a minted member the test descends from (`Token | none` tested
                 # `is? Name`): its tag, and then the brand word of the payload
                 branded = [
@@ -4862,7 +4868,7 @@ class _Lowerer(
             payload = ty.optional_payload(node.value.type)
             if payload is None and isinstance(node.value, hir.ExpressedIdentifier):
                 payload = self.optional_payloads.get(node.value.binding_id)
-            system = ty.TypeSystem()
+            system = self.runtime_type_system
             if payload is None:
                 result = system.is_subtype(node.value.type, node.test_type)
                 if node.negated:

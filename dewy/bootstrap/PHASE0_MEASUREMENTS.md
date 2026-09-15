@@ -1752,3 +1752,36 @@ Fifteen hosted/native effect tests passed, including value versus place calls,
 indirect calls, recursive propagation, routes and dependency-worklist budgets.
 Artifacts: `phase0-performance/value-call-effect-measurement`,
 `value-call-effects-{before,after}.json`, and `value-call-effect-gates.log`.
+
+### Lowering state reuse and integration checkpoint
+
+Hosted lowering now shares one private nominal type graph across its runtime
+representation queries. Checking has already settled that graph; lowering
+only asks subtype questions and does not add links or promotion rules. Primitive
+equality signatures also share lowerer-local instances. Each compilation gets
+fresh state. Fifty-eight targeted query-cache, family-union, brand, container
+and enum checks pass, including an assertion that lowering constructs its
+nominal graph once.
+
+The next fresh hosted full executable build, with the same frozen `3c699a2f`
+source and library, took **106.375 seconds**, versus 109.877 at the prior
+checkpoint. Checking took 50.232 seconds, lowering 22.103, emission 4.512 and
+the backend 24.175; peak process RSS was 1,376,292 KiB. This includes the string
+query and lazy effect-pairing batches above, not just nominal-graph reuse.
+Generated µDewy remains 34,759,644 bytes and is byte-identical after normalizing
+build directories. Artifacts: `phase0-performance/host-lowering-state-full`,
+`lowering-state-output-check.json`, `lowering-type-system-short-gates.log` and
+`lowering-type-system-cache-gates-fixed.log`. The latter rerun corrects a test
+fixture's accidental collision with the prelude's `Child` type.
+
+The native integration checkpoint uses the C-built `910f4ea3` seed, frozen
+source/library at that revision, and the µDewy seed supporting debug-metadata
+omission. It took **73.017 seconds**, effectively flat against the preceding
+72.661-second sample. Frontend, validation, preparation, lowering, emission and
+backend took 19.647, 9.470, 4.564, 17.528, 5.802 and 13.669 seconds respectively;
+peak process RSS was 5,896,268 KiB. The output was 49,038,939 µDewy bytes. This
+is a direct executable build driven by a C-built compiler, not a new
+matching-target fixed-point verification. Artifact: `native-effect-queries-full`.
+The latest bounded GDB lowering sample still finds allocation/copy/release
+inside effect traversal prominent; smaller effect-query kernels alone have
+not established an end-to-end gain. Both full-build targets remain unmet.

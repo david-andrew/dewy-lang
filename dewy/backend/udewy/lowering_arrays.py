@@ -649,7 +649,7 @@ class _ArrayLowering(_ArraySharing):
                 binding is not None
                 and binding.kind == 'function'
                 and isinstance(node.type, ty.FunctionType)
-                and ty.TypeSystem().is_subtype(node.type, element_type)
+                and self.runtime_type_system.is_subtype(node.type, element_type)
             )
         if isinstance(node, hir.Integer):
             return (

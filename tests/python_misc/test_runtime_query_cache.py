@@ -92,3 +92,30 @@ def test_brand_numbering_preserves_preorder_ranges_and_postorder_entries(monkeyp
         ('Grand', (3, 4)), ('Left', (2, 4)), ('Right', (4, 5)),
         ('Root', (1, 5)), ('Other', (5, 6)),
     ]
+
+
+def test_lowering_reuses_its_nominal_graph(monkeypatch):
+    source = SrcFile(None, '''
+        Base=type of [value:int64]
+        CacheChild=type of Base & [label:string]
+        Choice:type=Base|none
+        read_choice=(choice:Choice):>int64=>{
+            if choice is? CacheChild return choice.value
+            if choice is? Base return choice.value
+            return 0
+        }
+        main=():>int64=>read_choice(CacheChild[42 'ok'])
+    ''')
+    checked = check.typecheck_and_resolve(source, include_prelude=True)
+    constructed = 0
+    original = ty.TypeSystem.__init__
+
+    def counted(self, *args, **kwargs):
+        nonlocal constructed
+        constructed += 1
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(ty.TypeSystem, '__init__', counted)
+    emitted = emit.codegen_inner(checked, source, debug_locations=False)
+    assert emitted
+    assert constructed == 1

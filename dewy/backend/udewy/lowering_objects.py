@@ -136,14 +136,13 @@ class _ObjectLowering:
         statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
         return statements, cell
 
-    @staticmethod
     def _union_family_conversions(
-        stored: tuple[ty.TypeExpr, ...], members: tuple[ty.TypeExpr, ...],
+        self, stored: tuple[ty.TypeExpr, ...], members: tuple[ty.TypeExpr, ...],
     ) -> list[tuple[ty.ObjectType, tuple[ty.ObjectType, ...]]]:
         """Parent alternatives whose checked read uses child tags."""
         if stored == members:
             return []
-        system = ty.TypeSystem()
+        system = self.runtime_type_system
         conversions = []
         for parent in stored:
             if not isinstance(parent, ty.ObjectType) or parent in members:
@@ -985,7 +984,7 @@ class _ObjectLowering:
         the payload of the member the checker narrowed the route to."""
         if ty.runtime_union_members(static_type) is not None or ty.optional_payload(static_type) is not None:
             return replace(cell, type='int64')
-        system = ty.TypeSystem()
+        system = self.runtime_type_system
         member = next((m for m in members if system.is_subtype(static_type, m)), None)
         if member is None:
             self._target_error(node, 'a union field read of this type')

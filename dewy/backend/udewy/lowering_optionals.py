@@ -250,7 +250,7 @@ class _OptionalLowering:
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         if (isinstance(value, (hir.RepresentationCast, hir.ValueCast))
                 and ty.optional_payload(value.type) == payload
-                and ty.TypeSystem().is_subtype(value.expr.type, value.type)):
+                and self.runtime_type_system.is_subtype(value.expr.type, value.type)):
             return self._materialize_optional(value.expr, payload, temporary=temporary)
         if ty.optional_payload(value.type) is not None:
             prelude, cell = self._extract_expression(value)
@@ -840,7 +840,7 @@ class _OptionalLowering:
         value_type: ty.TypeExpr,
         node: hir.AST,
     ) -> int:
-        system = ty.TypeSystem()
+        system = self.runtime_type_system
         if isinstance(node, hir.Integer) and isinstance(value_type, ty.TypeOr):
             # a constant typed as the whole union (`0` as `0 | [...]`) is its own literal member
             for index, member in enumerate(members):
@@ -1051,7 +1051,7 @@ class _OptionalLowering:
         # keeps its dynamic brand, but the enclosing union uses the ancestor
         # tag. Other representation conversions keep their existing rules.
         if isinstance(source, ty.ObjectType):
-            system = ty.TypeSystem()
+            system = self.runtime_type_system
             candidates = [index for index, target in enumerate(targets)
                           if isinstance(target, ty.ObjectType) and system.is_subtype(source, target)]
             if len(candidates) == 1:

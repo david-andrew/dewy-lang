@@ -325,23 +325,26 @@ class _FlowLowering:
             {},
         )
 
-    @staticmethod
     def _typed_equality(
-        left: hir.AST,
+        self, left: hir.AST,
         right: hir.AST,
         operand_type: ty.TypeExpr,
         loc: Span,
     ) -> hir.FunctionCall:
-        function_type = ty.FunctionType(
-            [
-                ty.PosOrKwArg('left', operand_type),
-                ty.PosOrKwArg('right', operand_type),
-            ],
-            [],
-            None,
-            'bool',
-            [],
-        )
+        function_type = self.primitive_equality_types.get(operand_type) if isinstance(operand_type, str) else None
+        if function_type is None:
+            function_type = ty.FunctionType(
+                [
+                    ty.PosOrKwArg('left', operand_type),
+                    ty.PosOrKwArg('right', operand_type),
+                ],
+                [],
+                None,
+                'bool',
+                [],
+            )
+            if isinstance(operand_type, str):
+                self.primitive_equality_types[operand_type] = function_type
         return hir.FunctionCall(
             loc,
             'bool',
