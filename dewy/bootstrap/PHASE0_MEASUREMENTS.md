@@ -3203,3 +3203,21 @@ The default remains a cold, isolated cache per case. Metadata records the
 choice and cache-disable environment settings; these corpus runs are semantic
 checks, not cold performance measurements. The capture, array-call and brand
 regressions pass through the shared-cache route (`parity-shared-prelude-probe`).
+
+### Hosted configured-library parity
+
+A full hosted build of the frozen cache-enabled compiler exposed that hosted
+prelude selection ignored `DEWY_LIBRARY_ROOT`. An explicit import from the
+frozen library then minted different nominal types from the checkout's
+implicitly loaded library. The failed attempt stops during checking
+(`host-input-ledger-full`); it is not a complete-build measurement.
+
+Hosted selection now honors the same configured root as native invocation,
+resolving relative roots against the working directory. Named imports and
+implicit prelude paths use that one root. Two cold/warm execution regressions
+cover absolute and relative configuration, a library-only exported value, and
+passing a prelude nominal type to a function using an explicit library import.
+Both pass (`hosted-library-root-final-gates.log`). Prior hosted measurements
+using only `--library-root` did not pin the implicit prelude; `--hosted-root`
+did pin it through the package location. Keep that provenance limitation with
+the historical numbers; the next full checkpoint uses the corrected selection.

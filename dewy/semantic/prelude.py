@@ -8,10 +8,14 @@ so only services that also use portable types (for example `sleep` taking a
 see earlier ones' bindings.
 """
 
+import os
 from pathlib import Path
 
 project_root = Path(__file__).parents[2]
-library = project_root / 'library'
+# Match the native invocation's configured library. Resolve it once before
+# constructing the ordered prelude paths, so named and explicit imports of
+# the same file share module and nominal-type identities.
+library = Path(os.environ.get('DEWY_LIBRARY_ROOT', project_root / 'library')).resolve()
 
 PORTABLE_LIBRARIES = (
     library / 'strings.dewy',
