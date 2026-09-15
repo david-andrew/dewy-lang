@@ -1,0 +1,35 @@
+# Intrinsic arguments evaluate once, left to right, with the final runtime
+# argument still current. Exercise this with both cached and spilled operands.
+let trace:int = 0
+let value:int = 42
+let pointer:int = __static_alloca__(8)
+let touch = (n:int):>int => {
+    trace = trace * 10 + n
+    return n
+}
+let address = ():>int => {
+    value = 99
+    return pointer
+}
+let sum8 = (a:int b:int c:int d:int e:int f:int g:int h:int):>int => {
+    return a + b + c + d + e + f + g + h
+}
+let main = ():>int => {
+    # Save a global value before evaluating the address that changes it.
+    __store__(value address())
+    if __load__(pointer) not=? 42 or value not=? 99 { return 1 }
+    let indirect:int = @touch
+    if __unsigned_idiv__(touch(8) (@indirect)(2)) not=? 4 { return 2 }
+    if trace not=? 82 { return 3 }
+    trace = 0
+    let total:int = sum8(1 2 3 4 5 6 7 __unsigned_mod__(touch(9) touch(4)))
+    if total not=? 29 or trace not=? 94 { return 4 }
+    trace = 0
+    total = touch(1) + (touch(2) + (touch(3) + (touch(4) + __signed_shr__(touch(8) touch(2)))))
+    if total not=? 12 or trace not=? 123482 { return 5 }
+    # A final alloca under spilled operands must leave its buffer alive.
+    total = sum8(1 2 3 4 5 6 7 __store__(17 __alloca__(24)))
+    if total not=? 28 { return 6 }
+    if sum8(1 2 3 4 5 6 7 __load__(pointer)) not=? 70 { return 7 }
+    return 0
+}

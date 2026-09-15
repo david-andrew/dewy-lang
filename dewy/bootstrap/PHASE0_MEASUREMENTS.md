@@ -2797,3 +2797,20 @@ The subsequent numeric-range helpers pass 21 targeted checks, including native
 comparisons and changing target limits; they are not included in those timings.
 Artifacts: `interval-reuse-gates.log`, `measure-interval-reuse.log`,
 `interval-output-equivalence.json`, `immutable-range-gates.log`.
+
+### Final intrinsic operands
+
+Both µDewy parsers and the hosted direct HIR bridge leave an intrinsic's last
+runtime argument in the current-value position. They save each preceding
+argument before evaluating the next one. Static arguments still emit no runtime
+code. This removes one redundant save/restore pair per intrinsic, including
+loads and stores, without changing ordinary call argument handling.
+
+All 83 targeted backend, native comparison, bridge, ABI and evaluation checks
+pass. A new fixture checks mutation between arguments, indirect and nested
+calls, and allocations under spilled operands. Three paired tokenizer-module
+samples change median code generation **0.316 to 0.264 seconds** and toolchain
+time **0.369 to 0.317 seconds**. Assembly shrinks **4,678,466 to 4,080,748 bytes**
+and the executable **955,688 to 865,576 bytes**. These are bounded backend
+samples, not complete compiler builds. Artifacts: `intrinsic-operands-gates.log`,
+`intrinsic-operands-module/results.json`.

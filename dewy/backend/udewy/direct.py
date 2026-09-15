@@ -292,19 +292,18 @@ class _DirectEmitter:
                        or static_indices):
             self.expression_fragment(node)
             return
+        if direct and supported:
+            if arity is None or count != arity:
+                p0.validate_intrinsic_arity(backend, name, count, 0, '')
+            self.intrinsic(name, node.pos_args)
+            return
         if not direct:
             self.expression(node.func)
             backend.save_value()
         for argument in node.pos_args:
             self.expression(argument)
             backend.save_value()
-        if direct and supported:
-            if arity is None or count != arity:
-                p0.validate_intrinsic_arity(backend, name, count, 0, '')
-            if count:
-                backend.restore_value()
-            backend.emit_intrinsic(name, count, None)
-        elif direct:
+        if direct:
             p0.validate_call_arity(backend, count, 0, '')
             entry = p0.note_function_reference(backend, state.fn_table, name, count, 0, '')
             p0.note_fn_use(state, entry.label_id)
@@ -329,11 +328,12 @@ class _DirectEmitter:
     }
 
     def intrinsic(self, name, arguments):
-        for argument in arguments:
+        # The intrinsic backend contract consumes earlier arguments from
+        # saved values and the final argument directly from the current value.
+        for index, argument in enumerate(arguments):
+            if index:
+                self.backend.save_value()
             self.expression(argument)
-            self.backend.save_value()
-        if arguments:
-            self.backend.restore_value()
         self.backend.emit_intrinsic(name, len(arguments), None)
 
     def wrap_integer(self, operand_type):

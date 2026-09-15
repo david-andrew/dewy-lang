@@ -913,8 +913,11 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
                     idx, static_value = parse_static_intrinsic_int_arg(name, toks, idx, state, arg_count, call_loc)
                     static_args[arg_count] = static_value
                 else:
+                    # Intrinsics consume the last runtime argument as the
+                    # current value; only earlier arguments need saving.
+                    if runtime_arg_count:
+                        backend.save_value()
                     idx = parse_expr(toks, idx, state, 0)
-                    backend.save_value()
                     runtime_arg_count = runtime_arg_count + 1
                 arg_count = arg_count + 1
 
@@ -925,8 +928,6 @@ def parse_atom( toks: list[t1.Token], idx: int, state: ParseState) -> int:
                 intrinsic_data = None
 
             validate_intrinsic_arity(backend, name, arg_count, call_loc, state.src)
-            if runtime_arg_count > 0:
-                backend.restore_value()
             backend.emit_intrinsic(name, arg_count, intrinsic_data)
         else:
             arg_count = 0

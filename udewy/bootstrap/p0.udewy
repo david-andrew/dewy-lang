@@ -1383,17 +1383,16 @@ let parse_atom = (state:int idx:int):>int => {
                     idx = parse_static_intrinsic_int_arg(state name idx arg_count call_loc size_out)
                     intmap_put(static_args arg_count __load__(size_out))
                 } else {
+                    # Keep the final runtime argument current. Static
+                    # arguments emit no code and do not change this value.
+                    if runtime_arg_count >? 0 { (@be_save_value)() }
                     idx = parse_expr(state idx 0)
-                    (@be_save_value)()
                     runtime_arg_count = runtime_arg_count + 1
                 }
                 arg_count = arg_count + 1
             }
             idx = expect(state idx TK_RIGHT_PAREN)
             validate_intrinsic_arity(state name arg_count call_loc)
-            if runtime_arg_count >? 0 {
-                (@be_restore_value)()
-            }
             (@be_emit_intrinsic)(name arg_count static_args)
             return idx
         }
