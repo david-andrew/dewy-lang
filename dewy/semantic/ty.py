@@ -2498,31 +2498,55 @@ def negate(t: TypeExpr) -> TypeExpr:
 
 
 def to_nnf(t: TypeExpr) -> TypeExpr:
-    # Revisit children on every query: unions and unresolved type structures
-    # can still change during checking. Preserve unchanged subtrees instead
-    # of rebuilding whole record families just to normalize their leaves.
+    if isinstance(t, str):
+        return t
+    # Checking can mutate descriptions between queries, but this pure walk
+    # cannot. Keep its DAG memo local unless stable lowering already owns a
+    # query scope. Pass the memo directly through recursion to avoid creating
+    # context-manager scopes for every ordinary checker query.
+    scope = _runtime_query_cache.get()
+    memo = {} if scope is None else scope.setdefault(to_nnf, {})
+    return _to_nnf(t, memo)
+
+
+def _to_nnf(t: TypeExpr, memo: dict) -> TypeExpr:
+    if isinstance(t, str) or not isinstance(t, (TypeNot, TypeOr, TypeAnd, TypeParameterize, SequenceType, ArrayType, QuantityType, ObjectType)):
+        return t
+    found = memo.get(id(t))
+    if found is not None:
+        return found[1]
+    result = _to_nnf_inner(t, memo)
+    # Retain the input alongside the output so an identity cannot be reused
+    # while this memo lives. Structurally equal declaration metadata stays
+    # distinct; only revisits to the same input share a normalized result.
+    memo[id(t)] = (t, result)
+    return result
+
+
+def _to_nnf_inner(t: TypeExpr, memo: dict) -> TypeExpr:
+    # Preserve unchanged subtrees and all declaration metadata.
     if isinstance(t, TypeNot):
         return negate(t.type)
     if isinstance(t, TypeOr):
-        result = union(*(to_nnf(x) for x in t.items))
+        result = union(*(_to_nnf(x, memo) for x in t.items))
         return t if isinstance(result, TypeOr) and len(result.items) == len(t.items) and all(a is b for a, b in zip(result.items, t.items)) else result
     if isinstance(t, TypeAnd):
-        result = intersect(*(to_nnf(x) for x in t.items))
+        result = intersect(*(_to_nnf(x, memo) for x in t.items))
         return t if isinstance(result, TypeAnd) and len(result.items) == len(t.items) and all(a is b for a, b in zip(result.items, t.items)) else result
     if isinstance(t, TypeParameterize):
-        base = to_nnf(t.t)
-        args = [to_nnf(a) for a in t.args]
+        base = _to_nnf(t.t, memo)
+        args = [_to_nnf(a, memo) for a in t.args]
         return t if base is t.t and all(a is b for a, b in zip(args, t.args)) else TypeParameterize(base, args)
     if isinstance(t, TypeVariable):
         return t
     if isinstance(t, SequenceType):
-        items = [to_nnf(x) for x in t.items]
+        items = [_to_nnf(x, memo) for x in t.items]
         return t if all(a is b for a, b in zip(items, t.items)) else SequenceType(items)
     if isinstance(t, ArrayType):
-        element = to_nnf(t.element)
+        element = _to_nnf(t.element, memo)
         return t if element is t.element else ArrayType(element, t.length)
     if isinstance(t, QuantityType):
-        number = to_nnf(t.number)
+        number = _to_nnf(t.number, memo)
         return t if number is t.number else QuantityType(number, t.dimension)
     if isinstance(t, DimensionType):
         return t
@@ -2535,7 +2559,7 @@ def to_nnf(t: TypeExpr) -> TypeExpr:
         fields = []
         changed = False
         for field in t.fields:
-            normalized = to_nnf(field.type)
+            normalized = _to_nnf(field.type, memo)
             if normalized is field.type:
                 fields.append(field)
             else:

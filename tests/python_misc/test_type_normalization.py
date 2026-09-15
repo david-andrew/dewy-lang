@@ -46,3 +46,37 @@ def test_smart_constructor_reductions_still_apply_inside_records():
     assert ty.to_nnf(original).fields[0].type == 'int64'
     negated = ty.to_nnf(ty.TypeNot(ty.TypeOr(['int64', 'bool'])))
     assert negated == ty.TypeAnd([ty.TypeNot('int64'), ty.TypeNot('bool')])
+
+
+def test_normalization_preserves_shared_child_graphs_and_expires_between_queries():
+    choice = ty.TypeOr(['int64', ty.TypeNot(ty.TypeNot('bool'))])
+    value = choice
+    for _ in range(12):
+        value = ty.ObjectType((ty.ObjectField('left', value), ty.ObjectField('right', value)))
+    normalized = ty.to_nnf(value)
+    assert ty._runtime_query_cache.get() is None
+    current = normalized
+    for _ in range(12):
+        left, right = current.fields
+        assert left.type is right.type
+        current = left.type
+    assert current == ty.TypeOr(['int64', 'bool'])
+
+    choice.items[:] = ['none']
+    current = ty.to_nnf(value)
+    assert current is not normalized
+    for _ in range(12):
+        current = current.fields[0].type
+    assert current == 'none'
+
+
+def test_normalization_reuses_only_the_current_stable_lowering_scope():
+    value = ty.ArrayType(ty.TypeNot(ty.TypeNot('int64')))
+    with ty.runtime_query_scope():
+        first = ty.to_nnf(value)
+        assert ty.to_nnf(value) is first
+        with ty.runtime_query_scope():
+            assert ty.to_nnf(value) is first
+    with ty.runtime_query_scope():
+        next_ = ty.to_nnf(value)
+        assert next_ == first and next_ is not first

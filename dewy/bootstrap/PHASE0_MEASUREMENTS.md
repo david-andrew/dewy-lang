@@ -1313,3 +1313,43 @@ Twenty-eight diagnostic/ambiguity/assertion checks pass. A bounded kernel of
 when merely carried; this demonstrates the removed work, not a full-checking
 speedup. Artifacts: `lazy-report-{kernel.json,gates.log}`. Full checking with
 the parser and diagnostic batches remains an integration measurement.
+
+### Refresh the native µDewy benchmark seed
+
+Sampling the native-built compiler found a benchmark setup issue: the retained
+`native-pair-cow-eighteen/udewy` seed predates the committed fixed-size `memcpy`
+C memory helpers. It still emitted byte-by-byte word loads. The older native
+C measurements above accurately describe that pinned executable, but do not
+measure the current µDewy C emitter and cannot establish a native-lowering
+regression independently of that backend difference.
+
+Rebuilding current µDewy natively takes 3.25 s. Using it to compile the exact
+same native-emitted compiler µDewy reduces the C-backend build from
+**132.58 to 84.73 seconds**, peak process RSS 3,617,112 KiB. That compiler's
+pinned t0 build takes **12.24 seconds** (previously 24.27 s), peak RSS
+519,372 KiB, with identical emitted µDewy. Frontend 3.40 s, validation 5.19 s,
+preparation 0.065 s, lowering 1.71 s, emission 0.37 s, backend 1.25 s.
+Both backend-build and t0 measurements are isolated; the source, GCC flags,
+and cache policy are unchanged. The native rebuilt µDewy passes the expected
+word-memory and core-runtime programs on both direct and C backends.
+Artifacts: `udewy-memory-refresh`, `native-current-micro-c`,
+`native-built-current-micro-t0`, and `refreshed-micro-gates`.
+
+### Hosted normalization shares child graphs
+
+Hosted normal-form construction now memoizes repeated child identities within
+one query. Checking gets a fresh memo for each query, so later mutations of
+unions and unresolved descriptions remain visible. Existing stable lowering
+scopes can reuse results between queries. Memo entries retain their input
+objects; metadata-distinct descriptions do not become one stored description.
+A changed shared child is normalized once and remains shared in its parents.
+
+Twenty normalizations of a twelve-level shared graph take **0.79–0.84 seconds
+before and 0.0025 seconds after**. Cold checking of the pinned tokenizer takes
+7.25–7.35 s before and 7.17 s after; this is near the baseline, not evidence
+of a substantial whole-checker speedup. An initial context-manager-per-query
+implementation took 7.72–7.76 s and was replaced with an explicitly passed
+memo before landing. Eleven selected checks pass, including the native/hosted
+4,356-pair type-algebra matrix, deep shapes, mutation between queries, shared
+normalized children, metadata retention, and nested lowering-scope lifetime.
+Artifacts: `measure-nnf.py`, `nnf-*`, and `nnf-gates-final.log`.
