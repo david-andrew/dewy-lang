@@ -3104,3 +3104,48 @@ executable 904,320 to 896,128 bytes. One build pair shows generation
 runtime improvement, not an established compiler-generation speedup.
 Artifact: `local-register-execution/results.json`. Larger direct-compiler
 measurements and µDewy fixed-point checks follow separately.
+
+The native µDewy follow-up is byte-identical across its second and third
+direct x86-64 generations (the first generation uses the earlier backend):
+SHA-256 `0647163a21b8c31addff35e97ce5daef3d358475d6485f478a74d1dda340de20`.
+The separate C accelerator has SHA-256
+`09b4669cf10a9eec99cc947c0c60d7435ba645ab3a816df6ade548524b9c24e2`.
+This verifies µDewy, not a refreshed pair of both compilers. Artifacts:
+`source-local-registers`, `udewy-local-registers`, `build-udewy-local-registers.sh`.
+
+Recompiling the unchanged `f1345e78` Dewy µDewy output with the new backend
+gives a bounded direct-compiler comparison. The old compiler takes
+34.836/34.535 seconds to build the frozen tokenizer module; the promoted
+compiler takes 29.573/30.175 seconds, about **14% faster**. Samples alternate
+before/after/after/before, with the same C-built µDewy backend for all four.
+All produce the same 3,491,668-byte emitted source and hash. Peak process
+RSS remains about 602,000 KiB. This is a direct-built Dewy compiler with a
+C-built downstream compiler, not a full bootstrap without C. Artifacts:
+`native-local-registers-direct-seed`, `direct-local-reg-{before,after}-{0,1}`.
+
+### Reusable prelude proof decisions
+
+The native loader now analyzes the closed prelude graph before caching it,
+retaining decisions alongside the original HIR and its proof witnesses.
+`validation_analysis.dewy` reads the graph and returns decisions;
+`validation.dewy` still owns representation selection, witness discharge,
+and runtime-report legalization after entry checking. Data types live in
+`validation_state.dewy` to avoid a loader/analysis import cycle.
+
+Reuse checks the saved module roots and the checking edit log. Any rewrite
+within the saved HIR invalidates its decisions, so ordinary analysis can
+still read the original obligations. Appended user code and newly instantiated
+generic bodies always receive fresh validation. Initialization and runtime
+report processing still run for the assembled invocation. Cache format 2
+retains the decisions with the existing compiler/input identity checks.
+
+Three generated-code/snapshot/cache gates pass in 100.70 seconds (two test
+workers; this includes a C fixture build, not an operation benchmark).
+Additional matrices using both hosted-built and native-built drivers pass
+source/compiler/target invalidation, damaged input fallback, old-HIR rewrite
+rejection, new entry assertion rejection, and a generic instantiated only
+after restoring the prelude. The expanded snapshot also preserves saved
+warnings, constants, and arbitrary-precision interval bounds through both
+hosted output targets and native direct output. Artifacts:
+`cache-schema/validation-final-gates.log`, `cache-schema/proof-{hosted,native}-matrix.log`,
+`cache-schema/proof-native-snapshot.log`. Normal CLI measurements follow.

@@ -1,6 +1,10 @@
 from reporting import Error
 import p"../../dewy/bootstrap/semantic/modules.dewy" as modules
 import p"../../dewy/bootstrap/semantic/prelude_cache.dewy" as cache
+import p"../../dewy/bootstrap/semantic/validation_analysis.dewy" as analysis
+import p"../../dewy/bootstrap/semantic/context.dewy" as contexts
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
 import p"../../dewy/bootstrap/backend/udewy/graph.dewy" as graph
 import p"../../dewy/bootstrap/backend/udewy/program.dewy" as program
 import p"../../dewy/bootstrap/targets.dewy" as targets
@@ -17,13 +21,25 @@ main=(argv:array<string>):>int64=>{
     let engine=modules.Engine[library_roots=[directory] prelude_files=files]
     engine.session.target=target
     engine.prelude_cache=cache.Config["{directory}/compiler.identity" "{directory}/cache" target [directory] files]
-    if argv.length >? 3 {
+    if argv.length >? 3 and argv[3] not=? '-' {
         let first=modules.load(argv[3] @engine)
         if first is? Error {first.fail}
     }
     let entry=modules.load("{directory}/main.dewy" @engine)
     if entry is? Error {entry.fail}
     printl(if engine.prelude_cache_restored 'hit' else 'miss')
+    if engine.prelude_cache_restored and engine.prelude_validation is? none return 3
+    if engine.prelude_validation isnt? none and not analysis.reusable(engine.prelude_validation engine.modules engine.session) return 4
+    if argv.length >? 4 and argv[4] =? 'rewrite' {
+        # An old-node rewrite must invalidate a restored decision. Retaining
+        # the assertion witness lets the normal validator reject it.
+        let module=modules.module_at(0 engine)
+        let root=hir.node_at(engine.session.hir module.root)
+        $runtime_assert root is? hir.Block
+        let condition=hir.append_node(@engine.session.hir hir.Bool[root.loc types.primitive('bool' @engine.session.types) false])
+        let assertion=hir.append_node(@engine.session.hir hir.Assert[root.loc root.value_type condition 'false'])
+        contexts.replace_hir(module.root hir.Block[root.loc root.value_type [assertion] root.scoped] @engine.session)
+    }
     let compilation=graph.compile(entry @engine)
     if compilation is? Error {compilation.fail}
     let emitted=program.render(compilation.lowered.program compilation.lowered.input)

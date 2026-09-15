@@ -3,11 +3,12 @@ import p"cache_values.dewy" as codec
 import p"cache_bytes.dewy" as bytes
 import p"../targets.dewy" as targets
 import p"../invocation/platform.dewy" as platform
+import p"validation_analysis.dewy" as analysis
 
 # This is an optional compiler artifact. A failed read, stale input, incomplete
 # write, or incompatible snapshot simply returns control to ordinary checking.
 # The loader installs a restored snapshot only after every check succeeds.
-const FORMAT='dewy-native-prelude-1'
+const FORMAT='dewy-native-prelude-2'
 Config:type = const [
     compiler:string directory:string target:targets.Target
     library_roots:array<string> prelude_files:array<string>
@@ -56,6 +57,7 @@ inputs_match = (snapshot:state.PreludeSnapshot entry:Entry):>bool => {
     if snapshot.session.target not=? entry.target return false
     let sources=snapshot.session.sources
     let modules=snapshot.modules
+    if snapshot.validation isnt? none and not analysis.reusable(snapshot.validation modules snapshot.session) return false
     if modules.length =? 0 or snapshot.by_path.length not=? modules.length return false
     loop index in 0.. and index <? modules.length {
         let module=modules[index]

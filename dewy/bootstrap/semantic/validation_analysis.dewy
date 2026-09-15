@@ -1,0 +1,75 @@
+from reporting import SrcFile, Error, Pointer
+import p"module_state.dewy" as modules
+import p"context.dewy" as contexts
+import p"source_views.dewy" as sources
+import p"hir.dewy" as hir
+import p"../targets.dewy" as targets
+import p"validation_state.dewy" as proofs
+import p"analyze/bounds.dewy" as bounds
+import p"analyze/value_bounds.dewy" as values
+import p"analyze/predicate_facts.dewy" as predicates
+import p"analyze/relations.dewy" as relations
+import p"analyze/fact_state.dewy" as facts
+import p"analyze/expression_intervals.dewy" as intervals
+import p"analyze/representation.dewy" as representation
+
+# This boundary reads a frozen graph and returns decisions. It neither loads
+# modules nor discharges witnesses, so the prelude loader can use it before
+# entry checking without creating a loader/validation import cycle.
+validate_module = (module:modules.Module source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr prelude:dict<string addr> session:contexts.Session):>proofs.Decision|Error => {
+    let source=sources.srcfile(module.context session)
+    let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry]
+    let checker=bounds.Checker[data source word source_files=source_files]
+    bounds.configure(@checker prepared)
+    checker.data.links=session.links
+    bounds.validate(module.root @checker)
+    if checker.problem isnt? none return checker.problem
+    let strict=module.prelude or module.no_prelude or 'BigInt' not in? prelude
+    let unfit:dict<addr proofs.Unfit>=[]
+    loop [id flag] in checker.unfit {
+        if strict {
+            let node=hir.node_at(env.nodes id)
+            return Error[srcfile=source title="cannot prove this integer fits `{flag.word}`" pointers=[Pointer[span=node.loc message=representation.describe(flag.interval)]] hint='annotate a fixed width or establish its range with a comparison']
+        }
+        unfit[id]=proofs.Unfit[flag.interval flag.word]
+    }
+    return proofs.Decision[unfit checker.constant_indices checker.warnings]
+}
+
+reusable = (saved:proofs.Prelude loaded:array<modules.Module> session:contexts.Session):>bool => {
+    if saved.roots.length =? 0 or saved.roots.length not=? saved.decisions.length return false
+    if saved.roots.length >? loaded.length return false
+    if saved.nodes >? session.hir.length or saved.edits >? session.hir_edits.length return false
+    loop index in 0.. and index <? saved.roots.length {
+        $runtime_assert index <? loaded.length
+        if not loaded[index].prelude or loaded[index].root not=? saved.roots[index] return false
+    }
+    # Appended user functions/generic instances are checked independently.
+    # Any checking rewrite within the saved graph invalidates all saved
+    # decisions. Speculative rollback restores both HIR and this edit log.
+    let index=saved.edits
+    loop index <? session.hir_edits.length {
+        if session.hir_edits[index].id <? saved.nodes return false
+        index+=1
+    }
+    return true
+}
+
+analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> session:contexts.Session saved:proofs.Prelude?=none):>array<proofs.Decision>|Error => {
+    let cached=saved
+    if cached isnt? none and not reusable(cached loaded session) {cached=none}
+    let source_files=sources.files(session)
+    let env=values.Environment[session.hir session.types session.registry targets.max_length(session.target)]
+    let prepared=bounds.prepare(env)
+    let decisions:array<proofs.Decision>=[]
+    loop index in 0.. and index <? loaded.length {
+        if cached isnt? none and index <? cached.decisions.length {
+            decisions.push(cached.decisions[index])
+            continue
+        }
+        let checked=validate_module(loaded[index] source_files env prepared word prelude session)
+        if checked is? Error return checked
+        decisions.push(checked)
+    }
+    return decisions
+}

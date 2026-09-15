@@ -1,0 +1,18 @@
+from reporting import Warning
+import p"analyze/intervals.dewy" as ranges
+
+# Decisions contain the evidence needed by later rewriting, without keeping
+# a bounds checker or its temporary branch states alive.
+Unfit:type = const [interval:ranges.Interval? word:string]
+Decision:type = const [
+    unfit:dict<addr Unfit>
+    constants:dict<addr bigint>
+    warnings:array<Warning>
+]
+
+# A prelude is a closed dependency graph before entry checking starts. Keep
+# its decisions against the original HIR with its proof witnesses: checking may
+# still rewrite an old node, in which case ordinary analysis must run again.
+Prelude:type = const [
+    roots:array<addr> nodes:addr edits:addr decisions:array<Decision>
+]

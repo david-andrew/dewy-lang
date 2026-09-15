@@ -5,6 +5,7 @@ import p"../parser/p0.dewy" as parser_p0
 import p"../parser/t0.dewy" as parser_t0
 import p"../parser/t1.dewy" as parser_t1
 import p"../parser/t2.dewy" as parser_t2
+import p"analyze/intervals.dewy" as analyze_intervals
 import p"bindings.dewy" as semantic_bindings
 import p"brands.dewy" as semantic_brands
 import p"context.dewy" as semantic_context
@@ -15,6 +16,7 @@ import p"module_state.dewy" as semantic_module_state
 import p"propositions.dewy" as semantic_propositions
 import p"subtyping.dewy" as semantic_subtyping
 import p"ty.dewy" as semantic_ty
+import p"validation_state.dewy" as semantic_validation_state
 import p"../targets.dewy" as bootstrap_targets
 import p"../../../library/bigint.dewy" as library_bigint
 import p"../../../library/reporting.dewy" as library_reporting
@@ -350,6 +352,15 @@ Value324:type=semantic_context.HirEdit
 Value325:type=array<Value326>
 Value326:type=semantic_module_state.Module
 Value327:type=semantic_module_directives.Options
+Value328:type=Value329 | Value19
+Value329:type=semantic_validation_state.Prelude
+Value330:type=array<Value331>
+Value331:type=semantic_validation_state.Decision
+Value332:type=dict<Value13 Value333>
+Value333:type=semantic_validation_state.Unfit
+Value334:type=Value335 | Value19
+Value335:type=analyze_intervals.Interval
+Value336:type=dict<Value13 Value167>
 
 encode_Value0=(value:Value0 @out:bytes.Writer):>void=>{
     bytes.write_byte(0 @out)
@@ -357,6 +368,7 @@ encode_Value0=(value:Value0 @out:bytes.Writer):>void=>{
     encode_Value325(value.modules @out)
     encode_Value76(value.by_path @out)
     encode_Value76(value.prelude_bindings @out)
+    encode_Value328(value.validation @out)
 }
 decode_Value0=(@input:bytes.Reader):>Value0|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -368,7 +380,9 @@ decode_Value0=(@input:bytes.Reader):>Value0|CacheMiss=>{
     if field_2 is? CacheMiss return field_2
     let field_3=decode_Value76(@input)
     if field_3 is? CacheMiss return field_3
-    return Value0[session=field_0 modules=field_1 by_path=field_2 prelude_bindings=field_3]
+    let field_4=decode_Value328(@input)
+    if field_4 is? CacheMiss return field_4
+    return Value0[session=field_0 modules=field_1 by_path=field_2 prelude_bindings=field_3 validation=field_4]
 }
 
 encode_Value1=(value:Value1 @out:bytes.Writer):>void=>{
@@ -6379,6 +6393,155 @@ decode_Value327=(@input:bytes.Reader):>Value327|CacheMiss=>{
     let field_2=decode_Value32(@input)
     if field_2 is? CacheMiss return field_2
     return Value327[no_prelude=field_0 prototype=field_1 prototype_warnings=field_2]
+}
+
+encode_Value328=(value:Value328 @out:bytes.Writer):>void=>{
+    if value is? Value329 {bytes.write_word(0 @out) encode_Value329(value @out) return}
+    if value is? Value19 {bytes.write_word(1 @out) encode_Value19(value @out) return}
+    out.failed=true
+}
+decode_Value328=(@input:bytes.Reader):>Value328|CacheMiss=>{
+    let tag=bytes.read_word(@input)
+    if input.failed return miss(@input)
+    if tag =? 0 return decode_Value329(@input)
+    if tag =? 1 return decode_Value19(@input)
+    return miss(@input)
+}
+
+encode_Value329=(value:Value329 @out:bytes.Writer):>void=>{
+    bytes.write_byte(0 @out)
+    encode_Value54(value.roots @out)
+    encode_Value13(value.nodes @out)
+    encode_Value13(value.edits @out)
+    encode_Value330(value.decisions @out)
+}
+decode_Value329=(@input:bytes.Reader):>Value329|CacheMiss=>{
+    if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
+    let field_0=decode_Value54(@input)
+    if field_0 is? CacheMiss return field_0
+    let field_1=decode_Value13(@input)
+    if field_1 is? CacheMiss return field_1
+    let field_2=decode_Value13(@input)
+    if field_2 is? CacheMiss return field_2
+    let field_3=decode_Value330(@input)
+    if field_3 is? CacheMiss return field_3
+    return Value329[roots=field_0 nodes=field_1 edits=field_2 decisions=field_3]
+}
+
+encode_Value330=(value:Value330 @out:bytes.Writer):>void=>{
+    bytes.write_word(value.length as uint64 @out)
+    loop item in value {encode_Value331(item @out)}
+}
+decode_Value330=(@input:bytes.Reader):>Value330|CacheMiss=>{
+    let count=bytes.read_count(@input)
+    if input.failed return miss(@input)
+    let result:Value330=[]
+    result.reserve(count)
+    loop index in 0.. and index <? count {
+        let item=decode_Value331(@input)
+        if item is? CacheMiss return item
+        result.push(item)
+    }
+    return result
+}
+
+encode_Value331=(value:Value331 @out:bytes.Writer):>void=>{
+    bytes.write_byte(0 @out)
+    encode_Value332(value.unfit @out)
+    encode_Value336(value.constants @out)
+    encode_Value2(value.warnings @out)
+}
+decode_Value331=(@input:bytes.Reader):>Value331|CacheMiss=>{
+    if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
+    let field_0=decode_Value332(@input)
+    if field_0 is? CacheMiss return field_0
+    let field_1=decode_Value336(@input)
+    if field_1 is? CacheMiss return field_1
+    let field_2=decode_Value2(@input)
+    if field_2 is? CacheMiss return field_2
+    return Value331[unfit=field_0 constants=field_1 warnings=field_2]
+}
+
+encode_Value332=(value:Value332 @out:bytes.Writer):>void=>{
+    bytes.write_word(value.length as uint64 @out)
+    loop [key item] in value {encode_Value13(key @out) encode_Value333(item @out)}
+}
+decode_Value332=(@input:bytes.Reader):>Value332|CacheMiss=>{
+    let count=bytes.read_count(@input)
+    if input.failed return miss(@input)
+    let result:Value332=[]
+    loop index in 0.. and index <? count {
+        let key=decode_Value13(@input)
+        if key is? CacheMiss return key
+        let item=decode_Value333(@input)
+        if item is? CacheMiss return item
+        if key in? result return miss(@input)
+        result[key]=item
+    }
+    return result
+}
+
+encode_Value333=(value:Value333 @out:bytes.Writer):>void=>{
+    bytes.write_byte(0 @out)
+    encode_Value334(value.interval @out)
+    encode_Value9(value.word @out)
+}
+decode_Value333=(@input:bytes.Reader):>Value333|CacheMiss=>{
+    if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
+    let field_0=decode_Value334(@input)
+    if field_0 is? CacheMiss return field_0
+    let field_1=decode_Value9(@input)
+    if field_1 is? CacheMiss return field_1
+    return Value333[interval=field_0 word=field_1]
+}
+
+encode_Value334=(value:Value334 @out:bytes.Writer):>void=>{
+    if value is? Value335 {bytes.write_word(0 @out) encode_Value335(value @out) return}
+    if value is? Value19 {bytes.write_word(1 @out) encode_Value19(value @out) return}
+    out.failed=true
+}
+decode_Value334=(@input:bytes.Reader):>Value334|CacheMiss=>{
+    let tag=bytes.read_word(@input)
+    if input.failed return miss(@input)
+    if tag =? 0 return decode_Value335(@input)
+    if tag =? 1 return decode_Value19(@input)
+    return miss(@input)
+}
+
+encode_Value335=(value:Value335 @out:bytes.Writer):>void=>{
+    bytes.write_byte(0 @out)
+    encode_Value262(value.lower @out)
+    encode_Value262(value.upper @out)
+    encode_Value32(value.capped @out)
+}
+decode_Value335=(@input:bytes.Reader):>Value335|CacheMiss=>{
+    if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
+    let field_0=decode_Value262(@input)
+    if field_0 is? CacheMiss return field_0
+    let field_1=decode_Value262(@input)
+    if field_1 is? CacheMiss return field_1
+    let field_2=decode_Value32(@input)
+    if field_2 is? CacheMiss return field_2
+    return Value335[lower=field_0 upper=field_1 capped=field_2]
+}
+
+encode_Value336=(value:Value336 @out:bytes.Writer):>void=>{
+    bytes.write_word(value.length as uint64 @out)
+    loop [key item] in value {encode_Value13(key @out) encode_Value167(item @out)}
+}
+decode_Value336=(@input:bytes.Reader):>Value336|CacheMiss=>{
+    let count=bytes.read_count(@input)
+    if input.failed return miss(@input)
+    let result:Value336=[]
+    loop index in 0.. and index <? count {
+        let key=decode_Value13(@input)
+        if key is? CacheMiss return key
+        let item=decode_Value167(@input)
+        if item is? CacheMiss return item
+        if key in? result return miss(@input)
+        result[key]=item
+    }
+    return result
 }
 
 encode=(value:Value0):>array<uint8>|CacheMiss=>{

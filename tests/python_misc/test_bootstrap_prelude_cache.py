@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def check_prelude_cache(binary, work):
     work.mkdir()
+    enabled_env = os.environ.copy()
+    enabled_env.pop('DEWY_NO_PRELUDE_CACHE', None)
     (work / 'compiler.identity').write_bytes(b'compiler version one')
     dependency = work / 'dependency.dewy'
     dependency.write_text('const answer:int64=42\n')
@@ -65,6 +67,30 @@ def check_prelude_cache(binary, work):
     bare.write_text('$no_prelude\nconst retained:int64=7\n')
     run(False, 43, first=bare)
     run(True, 43)
+    rewritten = subprocess.run([binary, work, 'x86_64', '-', 'rewrite'], cwd=ROOT,
+                               env=enabled_env, capture_output=True, text=True, timeout=60)
+    assert rewritten.returncode == 1, rewritten.stdout + rewritten.stderr
+    assert 'assertion refuted' in rewritten.stderr + rewritten.stdout
+    # Neither this failed compilation nor a changed entry can poison the
+    # shared prelude. Newly appended obligations remain independently checked.
+    main = work / 'main.dewy'
+    main.write_text('main=():>int64=>{$assert false return answer}\n')
+    rejected = subprocess.run([binary, work, 'x86_64'], cwd=ROOT,
+                              env=enabled_env, capture_output=True, text=True, timeout=60)
+    assert rejected.returncode == 1, rejected.stdout + rejected.stderr
+    assert 'assertion refuted' in rejected.stderr + rejected.stdout
+    main.write_text('main=():>int64=>answer\n')
+    assert run(True, 43) == changed
+    # The generic declaration can be cached without checking its body; a
+    # later entry instantiates that body and must still prove its assertions.
+    prelude = work / 'prelude.dewy'
+    prelude.write_text(prelude.read_text() + 'let guarded=<T>(value:T):>T=>{$assert false return value}\n')
+    run(False, 43)
+    main.write_text('main=():>int64=>guarded(answer)\n')
+    generic = subprocess.run([binary, work, 'x86_64'], cwd=ROOT,
+                             env=enabled_env, capture_output=True, text=True, timeout=60)
+    assert generic.returncode == 1, generic.stdout + generic.stderr
+    assert 'assertion refuted' in generic.stderr + generic.stdout
     assert not list((work / 'cache').glob('*.tmp-*'))
 
 

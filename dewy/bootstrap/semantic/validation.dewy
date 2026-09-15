@@ -5,14 +5,12 @@ import p"source_views.dewy" as sources
 import p"hir.dewy" as hir
 import p"ty.dewy" as types
 import p"../targets.dewy" as targets
-import p"analyze/bounds.dewy" as bounds
 import p"analyze/value_bounds.dewy" as values
-import p"analyze/predicate_facts.dewy" as predicates
-import p"analyze/relations.dewy" as relations
 import p"analyze/fact_state.dewy" as facts
-import p"analyze/expression_intervals.dewy" as intervals
 import p"analyze/representation.dewy" as representation
 import p"runtime_reports.dewy" as runtime_reports
+import p"validation_state.dewy" as proofs
+import p"validation_analysis.dewy" as analysis
 
 # Bounds validation precedes representation selection. Library foundations
 # cannot fall back to the BigInt helpers they are themselves defining.
@@ -52,44 +50,15 @@ discharge = (root:addr constants:dict<addr bigint> @session:contexts.Session):>v
 }
 # A validation result retains only decisions that must survive into rewriting.
 # Checker contexts, predicate snapshots, and branch facts die with the module.
-Decision:type = const [
-    unfit:dict<addr representation.Unfit>
-    constants:dict<addr bigint>
-    warnings:array<Warning>
-]
+Decision:type = proofs.Decision
 validate_module = (module:modules.Module source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr engine:modules.Engine):>Decision|Error => {
-    let source=sources.srcfile(module.context engine.session)
-    let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry]
-    let checker=bounds.Checker[data source word source_files=source_files]
-    bounds.configure(@checker prepared)
-    checker.data.links=engine.session.links
-    bounds.validate(module.root @checker)
-    if checker.problem isnt? none return checker.problem
-    let strict=module.prelude or module.no_prelude or 'BigInt' not in? engine.prelude_bindings
-    let unfit:dict<addr representation.Unfit>=[]
-    loop [id flag] in checker.unfit {
-        if strict {
-            let node=hir.node_at(env.nodes id)
-            return Error[srcfile=source title="cannot prove this integer fits `{flag.word}`" pointers=[Pointer[span=node.loc message=representation.describe(flag.interval)]] hint='annotate a fixed width or establish its range with a comparison']
-        }
-        unfit[id]=representation.Unfit[flag.interval flag.word]
-    }
-    return Decision[unfit checker.constant_indices checker.warnings]
+    return analysis.validate_module(module source_files env prepared word engine.prelude_bindings engine.session)
 }
 # All modules read the same immutable graph. Representation selection and
 # proof discharge happen after this scope returns, so no analysis can observe
 # a partly rewritten graph and no old snapshot survives the first write.
 analyze_modules = (word:addr engine:modules.Engine):>array<Decision>|Error => {
-    let source_files=sources.files(engine.session)
-    let env=values.Environment[engine.session.hir engine.session.types engine.session.registry targets.max_length(engine.session.target)]
-    let prepared=bounds.prepare(env)
-    let decisions:array<Decision>=[]
-    loop module in engine.modules {
-        let checked=validate_module(module source_files env prepared word engine)
-        if checked is? Error return checked
-        decisions.push(checked)
-    }
-    return decisions
+    return analysis.analyze(word engine.modules engine.prelude_bindings engine.session saved=engine.prelude_validation)
 }
 validate = (@engine:modules.Engine):>Result|Error => {
     let word=types.primitive('int64' @engine.session.types)

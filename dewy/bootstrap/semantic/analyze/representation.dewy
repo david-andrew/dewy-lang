@@ -7,6 +7,7 @@ import p"../type_queries.dewy" as views
 import p"../numeric_values.dewy" as numeric
 import p"../check.dewy" as checking
 import p"intervals.dewy" as ranges
+import p"../validation_state.dewy" as decisions
 
 # Bounds analysis supplies the operations and conversions it could not fit
 # into a word. Representation selection consumes those decisions; absence of
@@ -14,7 +15,7 @@ import p"intervals.dewy" as ranges
 # Parameters/results retain their declared ABI. Only abstract local integer
 # storage can change to BigInt, and that decision propagates to a fixed point
 # because an accumulator may receive its own result on a later iteration.
-Unfit:type = const [interval:ranges.Interval? word:string]
+Unfit:type = decisions.Unfit
 Note:type = const [loc:Span message:string]
 State:type = [
     srcfile:SrcFile

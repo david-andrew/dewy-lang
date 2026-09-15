@@ -1,5 +1,6 @@
 import p"context.dewy" as contexts
 import p"module_directives.dewy" as directives
+import p"validation_state.dewy" as proofs
 
 # A loaded module's identities live in the shared Session. Keep this data
 # separate from the loader so snapshots can describe it without importing
@@ -18,4 +19,5 @@ PreludeSnapshot:type = const [
     modules:array<Module>
     by_path:dict<string addr>
     prelude_bindings:dict<string addr>
+    validation:proofs.Prelude?=none
 ]

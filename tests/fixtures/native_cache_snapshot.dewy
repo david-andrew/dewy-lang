@@ -5,6 +5,8 @@ import p"../../dewy/bootstrap/semantic/context.dewy" as contexts
 import p"../../dewy/bootstrap/semantic/bindings.dewy" as bindings
 import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
 import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/semantic/validation_state.dewy" as proofs
+import p"../../dewy/bootstrap/semantic/analyze/intervals.dewy" as ranges
 import p"../../dewy/bootstrap/parser/p0.dewy" as parser
 
 # Include polymorphic syntax/HIR/type nodes, optional values, a large integer,
@@ -37,7 +39,9 @@ main=():>int64=>{
     session.retained_read_states.add(0)
     session.warnings.push(Warning[message='preserve this note'])
     let module=state.Module[source.path context 0 ['answer'->binding] prelude=true]
-    let original=state.PreludeSnapshot[session [module] [source.path->0] ['answer'->binding]]
+    let decision=proofs.Decision[[0->proofs.Unfit[ranges.Interval[-123456789012345678901234567890 none] 'int64']] [1->7] [Warning[message='saved proof note']]]
+    let saved=proofs.Prelude[[0] session.hir.length session.hir_edits.length [decision]]
+    let original=state.PreludeSnapshot[session [module] [source.path->0] ['answer'->binding] saved]
     let encoded=codec.encode(original)
     if encoded is? codec.CacheMiss return 2
     let restored=codec.decode(encoded)
@@ -51,6 +55,12 @@ main=():>int64=>{
     if first isnt? hir.Integer or first.value not=? integer.value return 8
     if copy.hir[1] isnt? hir.TargetString return 9
     if copy.methods.length not=? 1 or 'retained' not in? copy.methods return 10
+    let proof=restored.validation
+    if proof is? none or proof.decisions.length not=? 1 return 17
+    let unfit=proof.decisions[0].unfit.get(0)
+    if unfit is? none or unfit.interval is? none return 18
+    let lower=unfit.interval.lower
+    if lower is? none or lower not=? -123456789012345678901234567890 or unfit.interval.upper isnt? none return 19
     let again=codec.encode(restored)
     if again is? codec.CacheMiss or again.length not=? encoded.length return 11
     loop i in 0.. and i <? encoded.length {

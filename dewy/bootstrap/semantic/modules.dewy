@@ -16,6 +16,8 @@ import p"module_directives.dewy" as directives
 import p"test_syntax.dewy" as tests
 import p"module_state.dewy" as state
 import p"prelude_cache.dewy" as cache
+import p"validation_state.dewy" as proofs
+import p"validation_analysis.dewy" as analysis
 
 doc"""
 File-relative source modules, corresponding to semantic/modules.py.
@@ -47,6 +49,7 @@ Engine:type = [
     prelude_cache:cache.Config?=none
     # Tooling can verify a real restore without inferring it from timings.
     prelude_cache_restored:bool=false
+    prelude_validation:proofs.Prelude?=none
     test_mode:bool=false
     entry_name:string='main'
 ]
@@ -236,6 +239,7 @@ ensure_prelude = (@engine:Engine):>Error? => {
             engine.modules=restored.modules
             engine.by_path=restored.by_path
             engine.prelude_bindings=restored.prelude_bindings
+            engine.prelude_validation=restored.validation
             engine.prelude_loaded=true
             engine.prelude_cache_restored=true
             return none
@@ -257,7 +261,14 @@ ensure_prelude = (@engine:Engine):>Error? => {
     engine.prelude_loading=false
     engine.prelude_loaded=true
     if cached isnt? none {
-        cache.store(cached state.PreludeSnapshot[engine.session engine.modules engine.by_path engine.prelude_bindings])
+        let word=types.primitive('int64' @engine.session.types)
+        let decisions=analysis.analyze(word engine.modules engine.prelude_bindings engine.session)
+        if decisions is? Error return decisions
+        let roots:array<addr>=[]
+        loop module in engine.modules {roots.push(module.root)}
+        let saved=proofs.Prelude[roots engine.session.hir.length engine.session.hir_edits.length decisions]
+        engine.prelude_validation=saved
+        cache.store(cached state.PreludeSnapshot[engine.session engine.modules engine.by_path engine.prelude_bindings saved])
     }
     return none
 }
