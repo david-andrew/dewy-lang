@@ -3892,7 +3892,7 @@ release_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
 
 # Cleanup entries refer only to declarations already evaluated on this path.
 # The outer frames survive loop exits; returns unwind every active frame.
-cleanup_since = (first:addr node:hir.AST @state:State):>array<addr> => {
+cleanup_since = (first:addr node:hir.AST @state:State transferred:addr?=none):>array<addr> => {
     let prefix:array<addr>=[]
     let cursor=state.cleanup_frames.length
     loop cursor >? first {
@@ -3904,6 +3904,7 @@ cleanup_since = (first:addr node:hir.AST @state:State):>array<addr> => {
             index-=1
             $runtime_assert index <? frame.length
             let owned=frame[index]
+            if transferred isnt? none and owned.value =? transferred continue
             let release=release_value(owned.value owned.value_type node @state)
             if owned.condition isnt? none {release=conditional(owned.condition release node @state)}
             prefix.push(release)
@@ -3943,16 +3944,46 @@ cleanup_block = (node:hir.Block @state:State):>addr => {
     if result isnt? none {prefix.push(result)}
     return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix node.scoped] @state)
 }
+# A return ends every local lifetime on this path. An unboxed, unconditionally
+# owned local can transfer its allocation to the caller instead of copying it
+# and immediately releasing the original. Find an active cleanup entry, not
+# just a binding ever declared in this function. Borrowed views, caller-owned
+# parameters, defaults with conditional ownership, captures, and conversions
+# retain their ordinary value boundary. Array length facts describe the same
+# descriptor; only its element representation determines storage/cleanup.
+# Other return paths keep their cleanup.
+return_owner = (id:addr state:State):>OwnedLocal? => {
+    if state.result_projection isnt? none return none
+    let node=hir.node_at(state.input.nodes id)
+    if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return none
+    if node.binding_id not in? state.cleanup_owned or node.binding_id in? state.boxed return none
+    loop index in 0.. and index <? state.cleanup_frames.length {
+        let frame=state.cleanup_frames[index]
+        loop owned in frame {
+            if owned.box isnt? none or owned.condition isnt? none continue
+            let value=hir.node_at(state.nodes owned.value)
+            if value isnt? hir.ExpressedIdentifier or value.binding_id not=? node.binding_id continue
+            if owned.value_type =? node.value_type return owned
+            let stored=array_type(owned.value_type state)
+            let returned=array_type(node.value_type state)
+            if stored isnt? none and returned isnt? none and stored.element =? returned.element return owned
+        }
+    }
+    return none
+}
 cleanup_return = (node:hir.Return @state:State):>addr => {
     let prefix:array<addr>=[]
     let result:addr?=none
+    let transferred:addr?=none
     if node.item isnt? none {
-        let value=owned_value(node.item @state)
+        let owner=return_owner(node.item state)
+        if owner isnt? none {transferred=owner.value}
+        let value=if owner is? none owned_value(node.item @state) else expression(node.item @state)
         let type=types.node_at(state.type_nodes hir.node_at(state.nodes value).value_type)
         if types.is_primitive(type 'void') or types.is_primitive(type 'never') {prefix.push(value)}
         else {result=snapshot(value @prefix @state)}
     }
-    loop released in cleanup_since(0 node @state) {prefix.push(released)}
+    loop released in cleanup_since(0 node @state transferred=transferred) {prefix.push(released)}
     prefix.push(put(hir.Return[node.loc runtime_type(node.value_type node @state) result] @state))
     return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
 }

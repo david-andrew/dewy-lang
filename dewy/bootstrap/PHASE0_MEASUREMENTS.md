@@ -1951,3 +1951,30 @@ duplicate insertions. They pass on direct and C output, alongside the native
 initialization comparisons. Artifacts: `dense-initialization-measurement` and
 `dense-initialization-unsigned-gates.log` (the final run uses an explicitly
 unsigned shift count). No full native rebuild includes this batch yet.
+
+The hosted full output comparison has the same 466,764 lines. After include
+paths are accounted for, differences are 21 nominal-discriminator strings
+and 3,071 lines containing checker-generated binding names or mangled nominal
+ids. Eliminating speculative call readings changes those allocation counters.
+There are no other differing lines; this structural comparison is not a
+byte-identical result or a fixed-point certificate. Included bytes agree.
+Artifact: `stable-pass-output-check.json`.
+
+### Native owned returns
+
+An explicit return of an unboxed, unconditionally owned local now transfers
+its storage to the caller. The active cleanup entry proves ownership; that
+entry is skipped only on the returning path. Borrowed views, caller-owned
+arguments, conditionally owned defaults, captures and conversions retain the
+copy fallback. Array length facts may differ when the element representation
+is identical. No source ownership syntax or value semantics changed.
+
+The return gate records allocation immediately after construction and requires
+**zero additional allocation on return** for records, arrays, strings and union
+values. It checks both return branches, independent caller-owned inputs,
+rebound parameters and defaults, and stable live allocation across 100 complete
+calls. Both direct and C outputs pass, along with the preceding getter-local,
+projection, guard and temporary-lifetime checks. Artifact:
+`return-move-storage-gates.log`. Lowering test drivers now omit debugger
+metadata, which these execution checks do not consume. Full measurement of
+the native initialization and return batches is pending.

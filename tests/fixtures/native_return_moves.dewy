@@ -1,0 +1,77 @@
+# The lowering driver supplies the real arena and string runtime. The marker
+# observes allocation after construction, so each zero-byte return budget is
+# independent of the constructor's chosen record/array representation.
+Parcel:type=[number:int64 text:string values:array<int64>]
+Choice:type=Parcel|none
+let constructed:int64=0
+make=(number:int64):>Parcel=>{
+    let value=Parcel[number 'payload' [20 22]]
+    constructed=_arena_allocated_bytes
+    return value
+}
+make_array=():>array<int64>=>{
+    let value:array<int64>=[20]
+    value.push(22)
+    constructed=_arena_allocated_bytes
+    return value
+}
+make_text=():>string=>{
+    let value:string='payload'
+    constructed=_arena_allocated_bytes
+    return value
+}
+make_choice=(flag:bool):>Choice=>{
+    let value:Choice=if flag Parcel[42 'choice' []] else none
+    constructed=_arena_allocated_bytes
+    return value
+}
+select=(flag:bool):>Parcel=>{
+    let left=Parcel[20 'left' []]
+    let right=Parcel[22 'right' []]
+    if flag return left
+    return right
+}
+borrowed=(value:Parcel):>Parcel=>{return value}
+defaulted=(value:Parcel=Parcel[42 'default' []]):>Parcel=>{return value}
+rebound=(value:Parcel):>Parcel=>{
+    value=Parcel[99 'changed' []]
+    return value
+}
+exercise=():>int64=>{
+    let first=make(20)
+    if _arena_allocated_bytes not=? constructed return 1
+    let second=make(22)
+    if _arena_allocated_bytes not=? constructed return 2
+    if first.number+second.number not=? 42 or first.text not=? 'payload' return 3
+    let values=make_array()
+    if _arena_allocated_bytes not=? constructed return 4
+    if values.length not=? 2 or values[0]+values[1] not=? 42 return 5
+    let text=make_text()
+    if _arena_allocated_bytes not=? constructed or text not=? 'payload' return 6
+    let choice=make_choice(true)
+    if _arena_allocated_bytes not=? constructed return 7
+    if choice is? none or choice.number not=? 42 return 8
+    let absent=make_choice(false)
+    if _arena_allocated_bytes not=? constructed or absent isnt? none return 9
+    let left=select(true)
+    let right=select(false)
+    if left.number+right.number not=? 42 return 10
+    let copied=borrowed(first)
+    copied.number=99
+    if first.number not=? 20 return 11
+    let replaced=rebound(first)
+    if replaced.number not=? 99 or first.number not=? 20 return 12
+    let fallback=defaulted()
+    let supplied=defaulted(first)
+    supplied.number=77
+    if fallback.number not=? 42 or first.number not=? 20 return 13
+    return 42
+}
+main=():>int64=>{
+    let initial=exercise()
+    if initial not=? 42 return initial
+    let before:int64=_arena_live_bytes
+    loop i in 0..99 {if exercise() not=? 42 return 14}
+    if _arena_live_bytes not=? before return 15
+    return 42
+}

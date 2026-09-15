@@ -583,8 +583,11 @@ main = (argv:array<string>):>int64 => {{
 }}
 ''')
     seed = source.with_suffix('.udewy')
-    seed.write_text(codegen(SrcFile.from_path(source)))
-    assert entry_point(seed, [], EntryPointOptions(compile_only=True)) == 0
+    # These drivers check execution, not debugger metadata. Use the ordinary
+    # compiler path so every lowering regression does not rebuild DWARF and
+    # variable descriptions for the bootstrap compiler itself.
+    seed.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    assert entry_point(seed, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
     return cache_artifact(seed).resolve()
 
 
