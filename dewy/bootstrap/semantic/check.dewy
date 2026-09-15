@@ -2731,7 +2731,11 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     # `x += 1` need not prove `1 >= 5`; only the computed store must satisfy
     # the contract. Retain the representation hint while shedding its facts.
     let operand_type=types.strip_refinement(read.value_type session.types)
-    let right = expression(node.right env @session expected=operand_type)
+    # A shift count has its own unsigned operand type. Passing the value's
+    # signed representation as its hint would reject even `value >>= 1`.
+    # Leave that operand to the same overload selection as an ordinary shift.
+    let right_type:addr?=if name in? ['__lshift__' '__rshift__'] none else operand_type
+    let right = expression(node.right env @session expected=right_type)
     if right is? Error return right
     let func = identifier(name id env @session)
     if func is? Error return func

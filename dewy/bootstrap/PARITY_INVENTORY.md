@@ -54,14 +54,21 @@ These are outside the original corpus counts:
   empty member list for a non-cell type; an actual cell always has members.
   This internal encoding does not close the general optional-array container
   gap.
-- Native compound shifts give a literal count the destination's signed type:
-  `let value:int64=84; value >>= 1` is rejected as an `int64, int64` call,
-  while `value = value >> 1` works. The hosted compound form executes with
-  result 42. This arose while simplifying allocator class calculations;
-  the library currently uses ordinary assignment. Preserve the unsigned-count
-  rule when fixing operand contextualization. Reproducer and diagnostics:
+- Native compound shifts now let overload selection determine a literal
+  count's unsigned type, matching ordinary shifts. The original reproducer
+  `let value:int64=84; value >>= 1` is accepted; an explicitly signed count
+  still fails. `test_bootstrap_compound_refinements.py` compares nine accepted
+  cases (including both shifts, a record field, int8 and existing refinement
+  cases) and two signed-count rejections with the hosted checker. The library
+  retains ordinary assignment. Original evidence remains in
   `phase0-performance/compound-shift-gap.dewy` and
-  `compound-shift-{hosted,native}.log`.
+  `compound-shift-{hosted,native}.log`; the passing gate is
+  `compound-shift-gates.log`.
+- Hosted dictionary/set flow results now use the ordinary record temporary
+  representation. Both branches, literal and binding results, and independent
+  mutation after selection execute on direct x86-64 and C in
+  `test_container_flow_values.py`. This closes the lowering restriction found
+  while sharing the native borrowing analysis graph.
 
 ## Execution and output differences
 
@@ -135,9 +142,3 @@ These are outside the original corpus counts:
 | [runtime_grapheme_strings.dewy](../tests/runtime_grapheme_strings.dewy) | No implemented token starts here |
 | [keyword_default_calls.dewy](../tests/keyword_default_calls.dewy) | BinOp expression |
 | [position_only_calls.dewy](../tests/position_only_calls.dewy) | write this parameter as name:type |
-
-- Hosted dictionary/set flow results now use the ordinary record temporary
-  representation. Both branches, literal and binding results, and independent
-  mutation after selection execute on direct x86-64 and C in
-  `test_container_flow_values.py`. This closes the lowering restriction found
-  while sharing the native borrowing analysis graph.

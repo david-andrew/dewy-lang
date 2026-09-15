@@ -1692,7 +1692,7 @@ borrowing, and actual storage retention. Standalone ambient queries remain
 available. Installed failure-support code remains separate from source-message
 effects, as before.
 
-A 256-function/16,640-node synthetic graph queried eight times took a median
+A 256-function/17,408-node synthetic graph queried eight times took a median
 **1.190 seconds before and 0.406 seconds after** (three runs each, native C seed
 `3c89ce12`, direct x86-64 kernel). Cumulative payload allocation fell from
 **496,219,552 to 168,786,208 bytes**; both returned checksum 4104 and exit 42.
