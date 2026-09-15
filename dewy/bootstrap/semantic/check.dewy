@@ -1288,6 +1288,11 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     let scope = bindings.scope_at(session.scopes env.lexical.scope)
     let existing = if explicit or annotation isnt? none scope.names.get(name) else declarations.lookup(name env.lexical session)
     if existing isnt? none and existing in? session.pending_aliases {
+        let pending=session.pending_aliases[existing].expression
+        # Only the alias's original statement completes its declaration.
+        # Other assignments must not silently re-emit that alias and discard
+        # their right-hand side (including assignments to imported aliases).
+        if pending.source not=? env.lexical.source or pending.scope not=? env.lexical.scope or pending.node not=? node.right return problem(id 'assignment requires runtime storage' "`{name}` is a type alias; use `let` to declare a local shadow" env session)
         let value = declarations.resolve_alias(existing @session)
         if value is? Error return value
         if value is? addr {
@@ -1305,6 +1310,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     if existing isnt? none and not reserved {
         let prior = bindings.binding_at(session.registry existing)
         if explicit return problem(id "duplicate declaration `{name}`" 'this scope already declares the name' env session)
+        if prior.type_value isnt? none return problem(id 'assignment requires runtime storage' "`{name}` is a type alias; use `let` to declare a local shadow" env session)
         if prior.replacement isnt? none {
             let member=node_at(prior.replacement session)
             if member isnt? hir.MemberAccess return problem(id 'cannot assign to a method' name env session)
