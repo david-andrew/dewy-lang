@@ -96,6 +96,33 @@ CASES.extend(LITERAL_RESULT_CASES)
 FIELD_EXPECTATIONS.update(LITERAL_RESULT_CASES)
 
 
+# Global writes cross call boundaries even without a place argument.
+GLOBAL_CALL_CASES = {
+    'let xs:array<int64>=[]\nlet clear=():>bool=>{xs.clear return true}\nlet main=():>int64=>{xs.push(42) if xs.length >? 0 and clear() return xs[0] return 0}': 'array index is not proven in bounds',
+
+    # read
+    'let xs:array<int64>=[]\nlet read=():>int64=>xs.length\nlet main=():>int64=>{xs.push(42) read(); return xs[0]}': 'ok',
+    # write
+    'let xs:array<int64>=[]\nlet clear=():>void=>{xs.clear}\nlet main=():>int64=>{xs.push(42) clear() return xs[0]}': 'array index is not proven in bounds',
+    # transitive
+    'let xs:array<int64>=[]\nlet clear=():>void=>{xs.clear}\nlet call=():>void=>{clear()}\nlet main=():>int64=>{xs.push(42) call() return xs[0]}': 'array index is not proven in bounds',
+    # entry
+    'let xs:array<int64>=[42]\nlet clear=():>void=>{xs.clear}\nlet main=():>int64=>xs[0]': 'array index is not proven in bounds',
+    # default
+    'let xs:array<int64>=[]\nlet clear=():>int64=>{xs.clear return 0}\nlet call=(x:int64=clear()):>void=>{}\nlet main=():>int64=>{xs.push(42) call() return xs[0]}': 'array index is not proven in bounds',
+    # callback
+    'let xs:array<int64>=[]\nlet invoke=(f:<():>void>):>int64=>{xs.push(42) f() return xs[0]}': 'array index is not proven in bounds',
+    # nested
+    'let xs:array<int64>=[]\nlet read=():>int64=>{let unused=():>void=>{xs.clear} return 0}\nlet main=():>int64=>{xs.push(42) read(); return xs[0]}': 'ok',
+    # sibling
+    'let xs:array<int64>=[]\nlet ys:array<int64>=[]\nlet clear=():>void=>{ys.clear}\nlet main=():>int64=>{xs.push(42) clear() return xs[0]}': 'ok',
+    # recursive
+    'let xs:array<int64>=[]\nlet clear=(again:bool):>void=>{if again clear(false) else xs.clear}\nlet main=():>int64=>{xs.push(42) clear(true) return xs[0]}': 'array index is not proven in bounds',
+}
+CASES.extend(GLOBAL_CALL_CASES)
+FIELD_EXPECTATIONS.update(GLOBAL_CALL_CASES)
+
+
 def test_native_bounds_visitor_matches_hosted(tmp_path):
     functions, expected = [], []
     for index, body in enumerate(CASES):

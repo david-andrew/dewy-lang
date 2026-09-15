@@ -10,11 +10,11 @@ import p"predicate_effects.dewy" as effects
 # Pass the existing path context to a leaf that recursively refines a
 # predicate, so negation need not construct another source-arena snapshot.
 # `none` means an impossible path; an empty state means no established facts.
-Context:type = const [nodes:array<hir.AST> facts:facts.Context]
+Context:type = const [nodes:array<hir.AST> facts:facts.Context call_writes:dict<addr set<addr>>=[]]
 
-merged_writes = (existing:set<addr> expression:addr nodes:array<hir.AST>):>set<addr> => {
+merged_writes = (existing:set<addr> expression:addr context:Context):>set<addr> => {
     let result=existing
-    loop id in effects.mutated_bindings(expression nodes) {result.add(id)}
+    loop id in effects.mutated_bindings(expression context.nodes context.call_writes) {result.add(id)}
     return result
 }
 join = (left:facts.State? right:facts.State? context:facts.Context):>facts.State? => {
@@ -27,7 +27,7 @@ join = (left:facts.State? right:facts.State? context:facts.Context):>facts.State
 # the chain. A write in the right operand makes the left predicate historical
 # even though it ran first. Forget its evidence before using either proof.
 let after = <Data>(state:facts.State left:addr right:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
-    let first=refine(state left not truth merged_writes(invalidated right context.nodes) context @data @leaf)
+    let first=refine(state left not truth merged_writes(invalidated right context) context @data @leaf)
     if first is? none return none
     return refine(first right truth invalidated context @data @leaf)
 }
@@ -51,7 +51,7 @@ let conjunction = <Data>(state:facts.State left:addr right:addr invalidated:set<
         remaining-=1
         $runtime_assert remaining <? parts.length
         later.push(writes)
-        writes=merged_writes(writes parts[remaining] context.nodes)
+        writes=merged_writes(writes parts[remaining] context)
     }
     let current:facts.State?=state
     # A later conjunct can sharpen a bound used by an earlier one, e.g.
@@ -81,7 +81,7 @@ let refine = <Data>(state:facts.State condition:addr truth:bool invalidated:set<
         if node.op =? 'or' or node.op =? 'nor' {
             let effective=if node.op =? 'or' truth else not truth
             if not effective {
-                let first=refine(state node.left false merged_writes(invalidated node.right context.nodes) context @data @leaf)
+                let first=refine(state node.left false merged_writes(invalidated node.right context) context @data @leaf)
                 if first is? none return none
                 return refine(first node.right false invalidated context @data @leaf)
             }

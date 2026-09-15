@@ -27,6 +27,27 @@ those cases. All other stderr remains byte-exact. Applying that policy to the
 saved assertion-failure result removes its semantic parity failure; the raw
 baseline counts and missing native value notes above remain recorded.
 
+## Refreshed corpus at `49ad4c12`
+
+The next complete, isolated run passes **152/211 cases**: 142/201 accepted
+programs and all ten rejection fixtures. The frozen hosted compiler passes
+all expected results. All 59 remaining native failures are compile-time
+rejections; every accepted native program matches its expected execution.
+
+The native executable is a C accelerator built from native-emitted µDewy,
+SHA-256 `8d2929388f969ad20cbef62108ed1e0aa46f19163521af21310a0a9b97e59d72`.
+It uses the verified `4c785f86` µDewy compiler. This is a single-generation
+corpus checkpoint, not a new fixed-point certification. The hosted source is
+frozen at `49ad4c12`; per-invocation records are in
+`phase0-performance/parity-refreshed-labels/results.jsonl`.
+
+Six earlier failures now pass: labeled loop exits, iterator labeled exits,
+sets, integer widths, local captures, and the assertion-report expectation.
+Two formerly passing fixtures regress: `array_call_adapters.dewy` and
+`brand_words.dewy`. Their follow-up fixes are tracked below. These counts
+include the changed diagnostic-report expectation described above; they
+should not be read as six newly implemented language features.
+
 ## Additional observations from optimization regressions
 
 These are outside the original corpus counts:
@@ -87,7 +108,20 @@ bindings retain their initialization-derived read type, while their written
 store contract remains separate. The complete fixture, constant/default/local
 capture cases, and the earlier mutable capture regressions pass isolated
 hosted/native x86-64/C gates. Public CLI follow-up is still pending; the
-running frozen refresh intentionally records the older rejection.
+completed frozen refresh intentionally records the older rejection.
+
+`brand_words.dewy` loses its stack-length evidence across the read-only
+`describe` call. Both bounds checkers now use transitive global-write
+summaries instead of blanket invalidation. Function entry still discards
+mutable-global flow facts; a possibly mutating call clears scalar, length,
+and member-route evidence. The hosted checker previously cleared only scalar
+facts, leaving stale array bounds. Predicate paths now also account for
+callee writes in later short-circuit operands. Ten explicit acceptance and
+rejection cases cover reads, direct/transitive/recursive writes, defaults,
+unknown callbacks, unrelated globals, nested literals, and predicate history.
+The native/hosted bounds comparison, predicate-effect comparison, and existing
+parameter-effect suite pass (16 gates, `global-effects-bounds.log`). The full
+public CLI regression remains pending until the next integration build.
 
 ## Execution and output differences
 

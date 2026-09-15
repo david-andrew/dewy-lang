@@ -1,6 +1,7 @@
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
 import p"../bindings.dewy" as bindings
+import p"predicate_effects.dewy" as local_effects
 
 doc"""
 Transitive effects on aggregate parameters, corresponding to analyze/effects.py.
@@ -438,4 +439,97 @@ analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:types.Table callbac
         }
     }
     return ProgramEffects[analysis.effects by_param]
+}
+
+
+# Implicit global writes have no argument route. Share callable resolution
+# with parameter effects, but solve this finite root set independently so
+# bounds validation need not compute aggregate read/escape summaries.
+analyze_global_writes = (root:addr nodes:array<hir.AST> globals:set<addr>):>dict<addr set<addr>> => {
+    let result:dict<addr set<addr>>=[]
+    if globals.length =? 0 return result
+    let analysis=collect(root nodes)
+    let targets:dict<addr array<addr>>=[]
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(nodes id)
+        if node is? hir.FunctionCall {
+            let function=hir.node_at(nodes node.func)
+            # Checked intrinsics have no lexical binding. An integer meaning
+            # tag alone does not promise purity for a library implementation.
+            let intrinsic=function is? hir.ExpressedIdentifier and function.binding_id is? none
+            let resolved:array<addr>|none=if intrinsic or function is? hir.ArrayMethod [] else direct_targets(node analysis nodes)
+            if resolved isnt? none {targets[id]=resolved}
+            else {result[id]=globals}
+        }
+        loop child in hir.children(node) {pending.push(child)}
+    }
+    let summaries:dict<addr set<addr>>=[]
+    let callers:dict<addr set<addr>>=[]
+    loop id in analysis.literals {
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let expressions:array<addr>=[literal.body]
+        loop parameter in literal_params(literal) {
+            if parameter is? hir.BoundParam {expressions.push(parameter.value)}
+        }
+        let writes:set<addr>=set[]
+        loop expression in expressions {
+            loop binding in local_effects.mutated_bindings(expression nodes) {
+                if binding in? globals {writes.add(binding)}
+            }
+            pending=[expression]
+            loop pending.length >? 0 {
+                let child=pending.pop
+                let node=hir.node_at(nodes child)
+                # A literal's body is summarized under its own call boundary.
+                if node is? hir.FunctionLiteral continue
+                if node is? hir.FunctionCall {
+                    if child not in? targets {writes=globals}
+                    else {
+                        loop callee in targets[child] {
+                            let parents=callers.get(callee set[])
+                            parents.add(id)
+                            callers[callee]=parents
+                        }
+                    }
+                }
+                loop child in hir.children(node) {pending.push(child)}
+            }
+        }
+        summaries[id]=writes
+    }
+    pending=analysis.literals
+    let queued:set<addr>=set[]
+    loop id in pending {queued.add(id)}
+    loop pending.length >? 0 {
+        let callee=pending.pop
+        queued.pop(callee default=callee);
+        if callee not in? summaries continue
+        let incoming=summaries[callee]
+        loop caller in callers.get(callee set[]) {
+            if caller not in? summaries continue
+            let writes=summaries[caller]
+            let changed=false
+            loop binding in incoming {
+                if binding not in? writes {writes.add(binding) changed=true}
+            }
+            if not changed continue
+            summaries[caller]=writes
+            if caller not in? queued {queued.add(caller) pending.push(caller)}
+        }
+    }
+    loop [call resolved] in targets {
+        let writes:set<addr>=set[]
+        loop callee in resolved {
+            if callee not in? summaries {writes=globals break}
+            loop binding in summaries[callee] {writes.add(binding)}
+        }
+        result[call]=writes
+    }
+    return result
 }

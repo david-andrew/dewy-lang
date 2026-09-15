@@ -21,6 +21,7 @@ import p"intervals.dewy" as ranges
 import p"obligations.dewy" as obligations
 import p"index_checks.dewy" as indices
 import p"slice_checks.dewy" as slices
+import p"effects.dewy" as effects
 
 # The visitor owns evaluation order; the smaller modules own individual
 # transfer and proof rules. Loop iterations compute evidence without issuing
@@ -39,7 +40,7 @@ Checker:type = [
     path_context:paths.Context=paths.Context[data.env.nodes data.relations.facts]
     proof_context:proofs.Context=proofs.Context[data.env data.relations]
     declared:refinements.Declared=[] assigned:set<addr>=set[]
-    mutable_globals:set<addr>=set[] checked:set<addr>=set[]
+    mutable_globals:set<addr>=set[] call_writes:dict<addr set<addr>>=[] checked:set<addr>=set[]
     root_items:set<addr>=set[] deferred:array<addr>=[]
     element_intervals:values.ElementIntervals=[]
     unfit:dict<addr Unfit>=[] constant_indices:dict<addr bigint>=[] problem:Error?=none
@@ -422,9 +423,8 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         evaluate(node.func @state @checker validate)
         loop argument in node.pos_args {evaluate(argument @state @checker validate)}
         loop argument in node.kw_args.values {evaluate(argument @state @checker validate)}
-        if function is? hir.ExpressedIdentifier and function.binding_id isnt? none {
-            let globals=checker.mutable_globals
-            loop global in globals {stores.forget(@state global @checker.data)}
+        loop global in checker.call_writes.get(id checker.mutable_globals) {
+            stores.forget(@state global @checker.data)
         }
         let applied=predicates.apply_call(state id none @checker.data)
         if applied isnt? none {state=applied}
@@ -734,6 +734,8 @@ collect = (root:addr @checker:Checker):>void => {
 }
 validate = (root:addr @checker:Checker):>void => {
     collect(root @checker)
+    checker.call_writes=effects.analyze_global_writes(root checker.data.env.nodes checker.mutable_globals)
+    checker.path_context=paths.Context[checker.data.env.nodes checker.data.relations.facts checker.call_writes]
     let node=node_at(root checker)
     $runtime_assert node is? hir.Block
     let state:facts.State=facts.State[]

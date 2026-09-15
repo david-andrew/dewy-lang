@@ -633,3 +633,65 @@ def analyze_effects(root: hir.AST) -> ProgramEffects:
     analysis: absence of an effect is a guarantee, presence is not.
     """
     return _EffectAnalyzer(root).solve()
+
+
+def analyze_global_writes(root: hir.AST, globals: set[int]) -> dict[int, set[int]]:
+    """May-write roots for each call, including transitive/default effects.
+
+    Reuse direct-call resolution from parameter effects. Scan each body once,
+    then propagate finite sets through the call graph. Unknown calls may write
+    every tracked global; creating a nested function does not execute its body.
+    Place arguments remain conservative in the ordinary expression transfer.
+    """
+    if not globals:
+        return {}
+    from .predicate_effects import mutated_bindings
+
+    analysis = _EffectAnalyzer(root)
+    calls = {id(node): node for node in hir.walk(root) if isinstance(node, hir.FunctionCall)}
+    targets = {
+        # A checked intrinsic has no lexical binding. integer_operation is
+        # numeric meaning, not a purity promise for a library implementation.
+        key: [] if isinstance(call.func, hir.ArrayMethod) or (
+            isinstance(call.func, hir.ExpressedIdentifier) and call.func.binding_id is None
+        ) else analysis._direct_targets(call)
+        for key, call in calls.items()
+    }
+    summaries: dict[int, set[int]] = {}
+    callers: dict[int, set[int]] = {}
+    for literal in analysis.literals:
+        key = id(literal)
+        expressions = [literal.body, *(p.value for p in _literal_params(literal) if isinstance(p, hir.BoundParam))]
+        writes: set[int] = set()
+        for expression in expressions:
+            writes.update(mutated_bindings(expression) & globals)
+            pending = [expression]
+            while pending:
+                node = pending.pop()
+                if isinstance(node, hir.FunctionLiteral):
+                    continue
+                if isinstance(node, hir.FunctionCall):
+                    resolved = targets[id(node)]
+                    if resolved is None:
+                        writes.update(globals)
+                    else:
+                        for callee in resolved:
+                            callers.setdefault(id(callee), set()).add(key)
+                pending.extend(hir.children(node))
+        summaries[key] = writes
+    pending = deque(summaries)
+    queued = set(pending)
+    while pending:
+        callee = pending.popleft()
+        queued.remove(callee)
+        for caller in callers.get(callee, ()):
+            incoming = summaries[callee] - summaries[caller]
+            if incoming:
+                summaries[caller].update(incoming)
+                if caller not in queued:
+                    queued.add(caller)
+                    pending.append(caller)
+    return {
+        key: set(globals) if resolved is None else set().union(*(summaries[id(callee)] for callee in resolved))
+        for key, resolved in targets.items()
+    }

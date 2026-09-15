@@ -12,7 +12,7 @@ from .. import bindings as sb
 from .. import hir, ty
 from ..errors import UserError, user_error, user_warning
 from ..hir_display import type_to_dewy
-from . import predicate_effects
+from . import predicate_effects, effects
 
 
 @dataclass(frozen=True, slots=True, weakref_slot=True)
@@ -791,6 +791,8 @@ class _BoundsValidator:
         }
 
     def validate(self, root: hir.Block) -> None:
+        self.call_writes = effects.analyze_global_writes(root, self.mutable_globals)
+        self.predicate_bindings = predicate_effects.BindingQueries(self.call_writes)
         # module-level function bodies are analyzed after the module's own
         # statements, in the module's final state: a method (a hidden function
         # hoisted to the front of the module) then knows what the bindings it
@@ -1657,6 +1659,8 @@ class _BoundsValidator:
             for key, interval in (enclosing or {}).items()
             if key not in self.mutable_globals
         }
+        for binding_id in self.mutable_globals:
+            self._forget_global(binding_id, state)
         for param in [
             *function.pos_or_kw_args,
             *function.kw_only_args,
@@ -2729,12 +2733,8 @@ class _BoundsValidator:
             if isinstance(node.func, hir.ExpressedIdentifier)
             else None
         )
-        if (
-            isinstance(node.func, hir.ExpressedIdentifier)
-            and node.func.binding_id is not None
-        ):
-            for binding_id in self.mutable_globals:
-                state.pop(binding_id, None)
+        for binding_id in self.call_writes.get(id(node), self.mutable_globals):
+            self._forget_global(binding_id, state)
         called = _call_function_type(node)
         if called is not None and isinstance(called.ret, ty.RefinedType):
             self._apply_call_facts(state, node, None)   # what a single result promises of the arguments unconditionally
@@ -3009,6 +3009,15 @@ class _BoundsValidator:
                 if interval is not None and interval != UNKNOWN_INTERVAL:
                     route_id = self.registry.route_id(root_id, field_path, field.type, field_value.loc)
                     state[route_id] = interval
+
+    def _forget_global(self, binding_id: int, state: State) -> None:
+        state.pop(binding_id, None)
+        self._invalidate_length(binding_id, state)
+        _drop_index_facts(state, index_id=binding_id)
+        self._drop_route_facts(state, binding_id)
+        self.member_facts.pop(binding_id, None)
+        for route_id in self.registry.routes_under(binding_id):
+            self.member_facts.pop(route_id, None)
 
     def _forget_container_value(self, node: hir.AST, state: State) -> None:
         """A component write invalidates a containing value's numeric meaning.

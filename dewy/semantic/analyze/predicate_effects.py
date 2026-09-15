@@ -10,7 +10,7 @@ from .. import bindings as sb
 from .. import hir
 
 
-def _binding_effects(root: hir.AST, *, reads: bool, writes: bool) -> tuple[set[int], set[int]]:
+def _binding_effects(root: hir.AST, *, reads: bool, writes: bool, call_writes: dict[int, set[int]] | None = None) -> tuple[set[int], set[int]]:
     read: set[int] = set()
     written: set[int] = set()
     pending = [root]
@@ -27,6 +27,8 @@ def _binding_effects(root: hir.AST, *, reads: bool, writes: bool) -> tuple[set[i
             elif isinstance(node, (hir.DictStore, hir.DictRemove)):
                 target = node.keys
             elif isinstance(node, hir.FunctionCall):
+                if call_writes is not None:
+                    written.update(call_writes.get(id(node), ()))
                 if isinstance(node.func, hir.ArrayMethod) and node.func.name != 'join':
                     target = node.func.array
                 elif isinstance(node.func, hir.DictMethod) and node.func.name in {'add', 'clear', 'remove'}:
@@ -56,13 +58,14 @@ class BindingQueries:
     It must not survive a structural rewrite or binding-identity remapping.
     """
 
-    def __init__(self):
+    def __init__(self, call_writes: dict[int, set[int]] | None = None):
+        self.call_writes = call_writes
         self.entries: dict[int, tuple[hir.AST, frozenset[int], frozenset[int]]] = {}
 
     def _query(self, root: hir.AST) -> tuple[hir.AST, frozenset[int], frozenset[int]]:
         entry = self.entries.get(id(root))
         if entry is None:
-            reads, writes = _binding_effects(root, reads=True, writes=True)
+            reads, writes = _binding_effects(root, reads=True, writes=True, call_writes=self.call_writes)
             entry = (root, frozenset(reads), frozenset(writes))
             self.entries[id(root)] = entry   # retain the node against identity reuse
         return entry

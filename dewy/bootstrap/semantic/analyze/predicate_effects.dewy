@@ -23,16 +23,18 @@ read_bindings = (root:addr nodes:array<hir.AST>):>set<addr> => {
     }
     return result
 }
-mutated_bindings = (root:addr nodes:array<hir.AST>):>set<addr> => {
+mutated_bindings = (root:addr nodes:array<hir.AST> call_writes:dict<addr set<addr>>=[]):>set<addr> => {
     let result:set<addr> = set[]
     let pending:array<addr> = [root]
     loop pending.length >? 0 {
-        let node = hir.node_at(nodes pending.pop)
+        let id=pending.pop
+        let node = hir.node_at(nodes id)
         if node is? hir.FunctionLiteral continue
         let target:addr? = none
         if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place { target = node.target }
         else if node is? hir.DictStore|hir.DictRemove { target = node.keys }
         else if node is? hir.FunctionCall {
+            loop binding in call_writes.get(id set[]) {result.add(binding)}
             let func = hir.node_at(nodes node.func)
             if func is? hir.ArrayMethod and func.name not=? 'join' { target = func.array }
             else if func is? hir.DictMethod and func.name in? ['add' 'clear' 'remove'] { target = func.dictionary }
