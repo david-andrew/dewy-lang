@@ -772,6 +772,9 @@ class _BoundsValidator:
         self.checked_functions: set[int] = set()
         self.predicate_bindings = predicate_effects.BindingQueries()
         self.declared_intervals: dict[int, tuple[ty.Type, Interval | None]] = {}
+        self.member_invariants: dict[int, tuple[hir.AST, tuple[ty.Proposition, ...]]] = {}
+        self.binding_routes: dict[int, tuple[hir.AST, int | None]] = {}
+        self.array_routes: dict[int, tuple[hir.AST, int | None]] = {}
         assigned = _assigned_binding_ids(root)
         self.assigned = assigned
         # Element intervals of arrays and dictionaries initialized from a
@@ -939,7 +942,7 @@ class _BoundsValidator:
             self._forget_container_value(node.target.array, current)
             target = _strip_casts(node.target)
             if isinstance(target, hir.Index):
-                stored_into = _runtime_array_id(target.array, self.registry)
+                stored_into = self._array_id(target.array)
                 if stored_into is not None:
                     self._store_element(current, stored_into, node.value, node.loc)
             return current
@@ -970,7 +973,7 @@ class _BoundsValidator:
         binding = self._binding_id(node)
         if binding is not None and _nonzero_key(binding) in state:
             return True
-        if _excludes_zero(_member_invariant(node)):
+        if _excludes_zero(self._member_invariant(node)):
             return True
         refined_result = _call_result_refinement(node)
         if refined_result is not None and _excludes_zero(refined_result.propositions):
@@ -1023,7 +1026,7 @@ class _BoundsValidator:
                     # their predicates is conservative. Do not assume that
                     # merely selecting the array tag selected a fact arm.
                     declared = ty.RefinedType(node.func.array.type, predicates)
-        member = _member_invariant(node.func.array) if isinstance(node.func, hir.ArrayMethod) else ()
+        member = self._member_invariant(node.func.array) if isinstance(node.func, hir.ArrayMethod) else ()
         propositions = (*(() if declared is None else declared.propositions), *member)
         required = _length_propositions_interval(propositions)
         dependent = [p for p in propositions if p.subject == 'length' and p.term is not None]
@@ -1146,8 +1149,8 @@ class _BoundsValidator:
             return self._slice_length_interval(_strip_casts(node), state)
         # `limbs:array<uint64 length >? 0>`, `text:nonemptystring`: the field's declared
         # length bound is a fact on every read, tracked route or not (`ctx.ending.text`)
-        declared = _length_propositions_interval(_member_invariant(node))
-        sequence_id = _runtime_array_id(node, self.registry)
+        declared = _length_propositions_interval(self._member_invariant(node))
+        sequence_id = self._array_id(node)
         if sequence_id is None:
             return None if declared is None else self._length_default().intersect(declared)
         interval = state.get(_length_key(sequence_id), self._length_default())
@@ -1159,7 +1162,7 @@ class _BoundsValidator:
         never negative (the slice's own validation proved its endpoints)."""
         loc = node.loc
         bounds = node.range.bounds or '[]'
-        string_id = _runtime_array_id(node.string, self.registry)
+        string_id = self._array_id(node.string)
         start_node: hir.AST = node.range.left if node.range.left is not None else hir.Integer(loc, ty.IntegerLiteralType(0), '0d', 0)
         start_delta = 1 if bounds[0] == '(' else 0
         length_node = hir.StringLength(loc, 'int64', node.string)
@@ -1248,14 +1251,14 @@ class _BoundsValidator:
                 if proposition.term_of == 'length' and proposition.subject == 'length' and proposition.field is None:
                     # the result's *length* against a parameter's (`:>string<v => v.length =? text.length>`):
                     # the same sequence, a length fact, or a slice of the term's sequence
-                    sequence_id = _runtime_array_id(_strip_casts(subject_node), self.registry)
+                    sequence_id = self._array_id(_strip_casts(subject_node))
                     if sequence_id is not None:
                         smaller, larger = (_length_key(sequence_id), _length_key(proposition.term_id)) if direction == 'upper' else (_length_key(proposition.term_id), _length_key(sequence_id))
                         held = self._ordered(smaller, larger, gap, state)
                     else:
                         # a slice of the term's own sequence is never longer than it
                         sliced = _strip_casts(subject_node)
-                        source_id = _runtime_array_id(sliced.string, self.registry) if isinstance(sliced, hir.StringSlice) else None
+                        source_id = self._array_id(sliced.string) if isinstance(sliced, hir.StringSlice) else None
                         window = self._slice_bounds_of(subject_node)
                         held = direction == 'upper' and gap <= 0 and (
                             source_id == proposition.term_id
@@ -1842,7 +1845,7 @@ class _BoundsValidator:
             return dict(state)
         target_ids = {iterator.target.binding_id} - {None}
 
-        iterated = _runtime_array_id(iterator.iterable, self.registry) if isinstance(iterator.iterable.type, ty.ArrayType) else None
+        iterated = self._array_id(iterator.iterable) if isinstance(iterator.iterable.type, ty.ArrayType) else None
 
         element = iterator.iterable.type.element if isinstance(iterator.iterable.type, ty.ArrayType) else None
 
@@ -2315,7 +2318,7 @@ class _BoundsValidator:
         route_id = sb.array_route_id(node, self.registry)
         self._seed_sibling_relations(node, state)
         interval = state.get(route_id) if route_id is not None else None
-        declared = self._bounds_of(_member_invariant(node))
+        declared = self._bounds_of(self._member_invariant(node))
         if declared is not None:
             interval = declared if interval is None else interval.intersect(declared)
         width = self._field_declared_interval(node, state)   # the field's width, and its sibling relations
@@ -2416,7 +2419,7 @@ class _BoundsValidator:
         if node.default is not None:
             self._eval(node.default, state, validate=validate)
         for array in (node.keys, *([node.values] if node.values is not None else [])):
-            array_id = _runtime_array_id(array, self.registry)
+            array_id = self._array_id(array)
             if array_id is not None:
                 key = _length_key(array_id)
                 if node.key is None:
@@ -2447,7 +2450,7 @@ class _BoundsValidator:
             self._eval(node.value, state, validate=validate)
         # A store may append to both hidden arrays.
         for array in (node.keys, *([node.values] if node.values is not None else [])):
-            array_id = _runtime_array_id(array, self.registry)
+            array_id = self._array_id(array)
             if array_id is not None:
                 state.pop(_length_key(array_id), None)
                 _drop_index_facts(state, array_id=array_id)
@@ -2611,7 +2614,7 @@ class _BoundsValidator:
     def _eval_forwarding_access(self, node: hir.ForwardingAccess, state: State, *, validate: bool) -> Interval | None:
         # `remaining[0].length` on a union of objects: the field's invariant, when every member declares it
         self._eval(node.value, state, validate=validate)
-        interval = self._bounds_of(_member_invariant(node))
+        interval = self._bounds_of(self._member_invariant(node))
         if node.exception_type == ty.BOTTOM_TYPE:
             declared = self._declared_field_interval(node.value.type, node.field)
             if declared is not None:
@@ -2646,7 +2649,7 @@ class _BoundsValidator:
             keyword_arguments = {
                 name: self._eval(arg, state, validate=validate) for name, arg in node.kw_args.items()
             }
-            array_id = _runtime_array_id(node.func.array, self.registry)
+            array_id = self._array_id(node.func.array)
             name = node.func.name
             if name == 'pop':
                 index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('idx')
@@ -2714,7 +2717,7 @@ class _BoundsValidator:
             # `[loop … value]`: the capture's push — the element's facts join the array's
             self._eval(node.pos_args[1], state, validate=validate)
             target = _strip_casts(node.pos_args[0].target)
-            capture_id = _runtime_array_id(target, self.registry)
+            capture_id = self._array_id(target)
             if capture_id is not None:
                 self._store_element(state, capture_id, node.pos_args[1], node.loc)
                 length = state.get(_length_key(capture_id), self._length_default())
@@ -3243,7 +3246,7 @@ class _BoundsValidator:
             interval = self._eval(node, state, validate=False)
             if interval is not None and interval.lower is not None and interval.lower - known.upper >= gap:
                 return True
-        if _sequence_of(node) is not None and _runtime_array_id(_sequence_of(node), self.registry) == sequence_id:   # type: ignore[arg-type]
+        if _sequence_of(node) is not None and self._array_id(_sequence_of(node)) == sequence_id:   # type: ignore[arg-type]
             return gap <= 0
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name in ('__add__', '__sub__') and len(node.pos_args) == 2:
             left, right = node.pos_args
@@ -3312,11 +3315,11 @@ class _BoundsValidator:
                         continue
                     # a length passed as the value (`min(k src.length)`): the term is the length key
                     sequence = _sequence_of(argument)
-                    sequence_id = _runtime_array_id(sequence, self.registry) if sequence is not None else None
+                    sequence_id = self._array_id(sequence) if sequence is not None else None
                     if sequence_id is not None:
                         facts.extend((_length_key(sequence_id), None, gap, direction) for direction, gap in directions)
                     continue
-                sequence_id = _runtime_array_id(argument, self.registry)
+                sequence_id = self._array_id(argument)
                 if sequence_id is not None:
                     facts.extend((_length_key(sequence_id), None, gap, direction) for direction, gap in directions)
                     continue
@@ -3345,7 +3348,7 @@ class _BoundsValidator:
         bounds = node.range.bounds or '[]'
         if bounds[0] != '[':
             return None
-        sequence_id = _runtime_array_id(node.string, self.registry)
+        sequence_id = self._array_id(node.string)
         offset_id = self._binding_id(node.range.left)
         if sequence_id is None or offset_id is None or offset_id < 0:
             return None
@@ -3353,7 +3356,7 @@ class _BoundsValidator:
         if (
             right is None
             or (bounds[1] == ']' and self._length_offset_index(right, sequence_id) == 1)
-            or (bounds[1] == ')' and _sequence_of(right) is not None and _runtime_array_id(_sequence_of(right), self.registry) == sequence_id)   # type: ignore[arg-type]
+            or (bounds[1] == ')' and _sequence_of(right) is not None and self._array_id(_sequence_of(right)) == sequence_id)   # type: ignore[arg-type]
         ):
             return (_length_key(sequence_id), offset_id, 0)
         end_id = self._binding_id(right) if right is not None else None
@@ -3406,7 +3409,7 @@ class _BoundsValidator:
         if isinstance(stripped, hir.StringSlice):
             # `let chunk = src[..n)`: the slice is never longer than its source,
             # and a head slice's length is its end (`n`, or `n + 1` for `..n]`)
-            source_id = _runtime_array_id(stripped.string, self.registry)
+            source_id = self._array_id(stripped.string)
             if source_id is not None:
                 state[_order_key(_length_key(subject), _length_key(source_id))] = Interval(0, None)
             bounds = stripped.range.bounds or '[]'
@@ -3419,7 +3422,7 @@ class _BoundsValidator:
         measured = _sequence_of(stripped)
         if measured is not None:
             # `let n = src.length`: `n` is the length, in both directions
-            sequence_id = _runtime_array_id(measured, self.registry)
+            sequence_id = self._array_id(measured)
             if sequence_id is not None:
                 state[_order_key(subject, _length_key(sequence_id))] = Interval(0, None)
                 state[_order_key(_length_key(sequence_id), subject)] = Interval(0, None)
@@ -3442,12 +3445,12 @@ class _BoundsValidator:
         if element is not None:
             self._copy_relational_facts(state, element, subject)
             if isinstance(stripped, hir.Index):
-                read_from = _runtime_array_id(stripped.array, self.registry)
+                read_from = self._array_id(stripped.array)
                 if read_from is not None:
                     self._read_element(state, read_from, subject, loc)
             return
         if isinstance(stripped, hir.Index):
-            read_from = _runtime_array_id(stripped.array, self.registry)
+            read_from = self._array_id(stripped.array)
             if read_from is not None:
                 self._read_element(state, read_from, subject, loc)
 
@@ -3477,7 +3480,7 @@ class _BoundsValidator:
                         state.update(refined)
                     continue
                 if proposition.of == 'length':
-                    subject_id = _runtime_array_id(subject_argument, self.registry)
+                    subject_id = self._array_id(subject_argument)
                     subject_term = _length_key(subject_id) if subject_id is not None else None
                     subject_interval = self._length_interval(subject_argument, state)
                 else:
@@ -3500,7 +3503,7 @@ class _BoundsValidator:
                 bound_argument = _strip_casts(bound_argument)
                 window: tuple[int, int, int] | None = None
                 if proposition.term_of == 'length':
-                    bound_id = _runtime_array_id(bound_argument, self.registry)
+                    bound_id = self._array_id(bound_argument)
                     bound_term = _length_key(bound_id) if bound_id is not None else None
                     window = self._slice_bounds_of(bound_argument) if bound_term is None else None
                     bound_interval = self._length_interval(bound_argument, state)
@@ -3604,7 +3607,7 @@ class _BoundsValidator:
             # `let start = text.length - suffix.length` under `suffix.length <= text.length`
             # and `suffix.length >= k`: `start <= text.length - k`
             measured = _sequence_of(value.pos_args[0])
-            sequence_id = _runtime_array_id(measured, self.registry) if measured is not None else None
+            sequence_id = self._array_id(measured) if measured is not None else None
             taken = self._binding_id(value.pos_args[1])
             if sequence_id is not None and taken is not None:
                 bounded = self._id_bounded_by_length(taken, sequence_id, 0, state)   # no wrap: the subtrahend is within the length
@@ -3664,7 +3667,7 @@ class _BoundsValidator:
             return None
         element = path.steps[index]
         assert isinstance(element, hir.Index)
-        array_id = _runtime_array_id(element.array, self.registry)
+        array_id = self._array_id(element.array)
         if array_id is None:
             return None
         fields = tuple(step.name for step in path.steps[index + 1:])
@@ -3824,7 +3827,7 @@ class _BoundsValidator:
             return None
         measured = _sequence_of(left)
         if measured is not None:
-            if _runtime_array_id(measured, self.registry) != array_id:
+            if self._array_id(measured) != array_id:
                 return None
             inner = 0
         else:
@@ -3913,7 +3916,7 @@ class _BoundsValidator:
             # Runtime-length array or string: prove `0 <= index` from the
             # interval and `index < length` from either a proven minimum
             # length or an `index <? xs.length` fact about this index binding.
-            array_id = _runtime_array_id(sequence, self.registry)
+            array_id = self._array_id(sequence)
             nonnegative = interval is not None and interval.lower is not None and interval.lower >= 0
             if array_id is not None and nonnegative:
                 # the proven minimum: the length fact, tightened by a field's declared length bound
@@ -3977,7 +3980,7 @@ class _BoundsValidator:
             return
         bounds = node.range.bounds or '[]'
         if length is None and state is not None:
-            string_id = _runtime_array_id(node.string, self.registry)
+            string_id = self._array_id(node.string)
             if string_id is not None:
                 minimum = state.get(_length_key(string_id), self._length_default()).lower or 0
 
@@ -4182,13 +4185,13 @@ class _BoundsValidator:
             if settled == '__lt__':
                 index_id = self._binding_id(left)
                 measured = _sequence_of(right)
-                array_id = _runtime_array_id(measured, self.registry) if measured is not None else None
+                array_id = self._array_id(measured) if measured is not None else None
                 if index_id is not None and array_id is not None:
                     fact = (index_id, array_id)
             else:
                 index_id = self._binding_id(right)
                 measured = _sequence_of(left)
-                array_id = _runtime_array_id(measured, self.registry) if measured is not None else None
+                array_id = self._array_id(measured) if measured is not None else None
                 if index_id is not None and array_id is not None:
                     fact = (index_id, array_id)
             if fact is not None:
@@ -4276,14 +4279,42 @@ class _BoundsValidator:
                 refined[right_binding] = excluded
         return refined
 
+    def _member_invariant(self, node: hir.AST) -> tuple[ty.Proposition, ...]:
+        # Repeated loop visits share the declared syntax and types, but not
+        # their flow facts. Cache only the invariant written on that syntax.
+        entry = self.member_invariants.get(id(node))
+        if entry is None:
+            entry = (node, _member_invariant(node))
+            self.member_invariants[id(node)] = entry
+        return entry[1]
+
+    def _array_id(self, node: hir.AST) -> int | None:
+        entry = self.array_routes.get(id(node))
+        if entry is None:
+            entry = (node, _runtime_array_id(node, self.registry))
+            self.array_routes[id(node)] = entry
+        return entry[1]
+
     def _binding_id(self, node: hir.AST) -> int | None:
+        if isinstance(node, hir.ExpressedIdentifier):
+            return node.binding_id
+        # A route is allocated on its first visit and is stable thereafter.
+        # Retain each input: temporary projections can otherwise reuse ids.
+        # Bounds/state and route contents are deliberately never cached.
+        entry = self.binding_routes.get(id(node))
+        if entry is None:
+            entry = (node, self._compute_binding_id(node))
+            self.binding_routes[id(node)] = entry
+        return entry[1]
+
+    def _compute_binding_id(self, node: hir.AST) -> int | None:
         if isinstance(node, hir.FunctionCall) and node.integer_operation in ('identity', 'narrow') and len(node.pos_args) == 1:
             return self._binding_id(node.pos_args[0])
         while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
             node = node.expr
         measured = _sequence_of(node)
         if measured is not None:
-            array_id = _runtime_array_id(measured, self.registry)
+            array_id = self._array_id(measured)
             return None if array_id is None else _length_key(array_id)
         if isinstance(node, hir.ExpressedIdentifier):
             return node.binding_id

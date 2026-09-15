@@ -3390,3 +3390,24 @@ about 260 MiB (245,132–245,292 versus 265,388–265,776 KiB). No production
 GC policy changes are adopted: this does not establish a useful total-build
 improvement. Artifacts: `measure-frozen-lowering.py`,
 `frozen-lowering-experiment.log`, `host-frozen-lowering-{plain,freeze}-{a,b}`.
+
+### Stable proof queries within one validation pass
+
+Hosted bounds validation now shares declared member invariants and syntax's
+binding/sequence routes across repeated loop visits. Each cache retains its
+input nodes, expires with the validator, and allocates projected binding ids
+on first use. Flow intervals, side effects, and changing route contents are
+not cached. Sixty-one bounds, refinement, string, loop-assignment, order and
+container-fact tests pass (`proof-query-gates.log`).
+
+Four fresh alternating samples compile the frozen `53cdf9e7` cache-codec
+module against its matching library. Disabling just these query caches gives
+checking 13.618/13.865 seconds; enabling them gives 13.211/12.711 seconds.
+Complete checking/lowering/emission takes 16.519/16.856 versus 16.051/16.049
+seconds. Peak RSS is 245,112–245,128 versus 242,696–242,732 KiB. All four
+normalized outputs are identical. The second enabled sample's lowering time
+rises to 2.949 seconds despite this batch changing only validation; retain
+that variation rather than attributing all wall-time differences to the
+cache. No new full-build result is claimed. Artifacts:
+`measure-proof-queries.py`, `proof-query-experiment.log`,
+`host-proof-queries-{before,after}-{a,b}`.
