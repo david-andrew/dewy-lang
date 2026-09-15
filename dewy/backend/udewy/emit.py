@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from ...utils import dataclass_replace as replace
-from functools import cached_property
+from functools import cache, cached_property
 from pathlib import Path
 from textwrap import indent
 from udewy.compilation import compiler_allocation_scope
@@ -502,32 +502,31 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -
     return ''.join(code)
 
 def emit_ast(ast: hir.AST, ctx: EmitContext) -> str:
-    match ast:
-        case hir.Block(): return emit_block(ast, ctx)
-        case hir.Return(): return emit_return(ast, ctx)
-        case hir.Flow(): return emit_flow(ast, ctx)
-        case hir.ScopeMetatag():
-            raise ValueError('INTERNAL ERROR: scope metatag reached udewy emission')
-        case hir.Break(): return emit_loop_exit(ast, 'break')
-        case hir.Continue(): return emit_loop_exit(ast, 'continue')
-        case hir.ShortCircuit(): return emit_short_circuit(ast, ctx)
-        case hir.Integer(): return emit_integer(ast)
-        case hir.String(): return emit_string(ast)
-        case hir.BasedString(): return emit_based_string(ast, ctx)
-        case hir.Bool(): return 'true' if ast.value else 'false'
-        case hir.Void(): return 'void'
-        case hir.Declare(): return emit_declare(ast, ctx)
-        case hir.Assign(): return emit_assign(ast, ctx)
-        case hir.ValueCast(): return emit_ast(ast.expr, ctx)
-        case hir.Transmute(): return emit_transmute(ast, ctx)
-        case hir.ExpressedIdentifier():
-            # a function used as a value: `@name` reads the same under udewy and Dewy
-            if isinstance(ast.type, (ty.FunctionType, ty.OverloadType)):
-                return f'@{ast.name}'
-            return ast.name
-        case hir.FunctionCall(): return emit_function_call(ast, ctx)
-        case _:
-            raise NotImplementedError(f'emit_ast not implemented for AST type: {type(ast).__name__}')
+    handler = _EMITTERS.get(type(ast))
+    if handler is None:
+        handler = _inherited_emitter(type(ast))
+    return handler(ast, ctx)
+
+
+@cache
+def _inherited_emitter(cls: type):
+    # Preserve the original ordered pattern matching for extended HIR nodes.
+    # This caches the class rule, never text or mutable expression contents.
+    for base, handler in _EMITTERS.items():
+        if issubclass(cls, base):
+            return handler
+    raise NotImplementedError(f'emit_ast not implemented for AST type: {cls.__name__}')
+
+
+def emit_identifier(ast: hir.ExpressedIdentifier, ctx: EmitContext) -> str:
+    # A function value uses the decorative @ spelling in both languages.
+    if isinstance(ast.type, (ty.FunctionType, ty.OverloadType)):
+        return f'@{ast.name}'
+    return ast.name
+
+
+def _unlowered_scope_metatag(ast: hir.ScopeMetatag, ctx: EmitContext) -> str:
+    raise ValueError('INTERNAL ERROR: scope metatag reached udewy emission')
 
 
 def emit_loop_exit(ast: hir.Break | hir.Continue, keyword: str) -> str:
@@ -655,17 +654,6 @@ def _selected_first_parameter(call: hir.FunctionCall) -> ty.TypeExpr | None:
     return {'int': 'int64', 'uint': 'uint64'}.get(operand_type, operand_type) if isinstance(operand_type, str) else operand_type
 
 
-def _check_supported_integer_operation(call: hir.FunctionCall) -> None:
-    if not isinstance(call.func, hir.ExpressedIdentifier):
-        return
-    name = call.func.name
-    if name not in UDEWY_BINOP_DUNDERS and name not in UDEWY_PREFIX_DUNDERS:
-        return
-    # Abstract `int`/`uint` operations reach here only after the bounds
-    # analysis proved their values fit a 64-bit word, so they emit as int64.
-    return
-
-
 def _wrap_fixed_integer(expression: str, operand_type: ty.TypeExpr | None) -> str:
     """Reduce a word expression to the source integer width and signedness."""
 
@@ -679,75 +667,48 @@ def _wrap_fixed_integer(expression: str, operand_type: ty.TypeExpr | None) -> st
 
 
 def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
-    _check_supported_integer_operation(call)
-    if (
-        isinstance(call.func, hir.ExpressedIdentifier)
-        and call.func.name in LOWERED_RAW_SHIFT_DUNDERS
-        and len(call.pos_args) == 2
-        and not call.kw_args
-    ):
-        symbol = LOWERED_RAW_SHIFT_DUNDERS[call.func.name]
-        left, right = call.pos_args
-        return f'({emit_operand(left, ctx)} {symbol} {emit_operand(right, ctx)})'
-    if (
-        isinstance(call.func, hir.ExpressedIdentifier)
-        and call.func.name in UNSIGNED_DUNDER_INTRINSICS
-        and len(call.pos_args) == 2
-        and not call.kw_args
-        and _selected_first_parameter(call) in UNSIGNED_FIXED_INTS
-    ):
-        intrinsic = UNSIGNED_DUNDER_INTRINSICS[call.func.name]
-        left, right = call.pos_args
-        return f'{intrinsic}({emit_ast(left, ctx)} {emit_ast(right, ctx)})'
-    if (
-        isinstance(call.func, hir.ExpressedIdentifier)
-        and call.func.name == '__rshift__'
-        and len(call.pos_args) == 2
-        and not call.kw_args
-    ):
-        left, right = call.pos_args
-        operand_type = _selected_first_parameter(call)
-        if operand_type in SIGNED_FIXED_INTS:
-            return f'__signed_shr__({emit_ast(left, ctx)} {emit_ast(right, ctx)})'
-        if operand_type not in UNSIGNED_FIXED_INTS:
-            assert operand_type is not None
-            raise NotImplementedError(
-                f'udewy codegen for right shift of `{type_to_dewy(operand_type)}`'
-            )
-    if (binop := _binop_call(call)) is not None:
-        sym, left, right = binop
-        left_text = emit_operand(left, ctx)
-        right_text = emit_operand(right, ctx)
-        if (
-            isinstance(call.func, hir.ExpressedIdentifier)
-            and call.func.name in DERIVED_BITWISE_DUNDERS
-        ):
-            base = DERIVED_BITWISE_DUNDERS[call.func.name]
-            expression = f'not ({left_text} {base} {right_text})'
-        else:
-            expression = f'{left_text} {sym} {right_text}'
-        if (
-            isinstance(call.func, hir.ExpressedIdentifier)
-            and call.func.name in NARROW_WRAPPING_DUNDERS
-        ):
-            return _wrap_fixed_integer(expression, _selected_first_parameter(call))
-        return expression
-    if (prefix := _prefix_call(call)) is not None:
-        sym, item = prefix
-        separator = ' ' if sym.isalpha() else ''
-        expression = f'{sym}{separator}{emit_operand(item, ctx)}'
-        return _wrap_fixed_integer(expression, _selected_first_parameter(call))
     if call.kw_args:
         raise ValueError('INTERNAL ERROR: keyword argument reached udewy emission')
+    name = call.func.name if isinstance(call.func, hir.ExpressedIdentifier) else None
+    count = len(call.pos_args)
+    if count == 2:
+        left, right = call.pos_args
+        raw = LOWERED_RAW_SHIFT_DUNDERS.get(name)
+        if raw is not None:
+            return f'({emit_operand(left, ctx)} {raw} {emit_operand(right, ctx)})'
+        intrinsic = UNSIGNED_DUNDER_INTRINSICS.get(name)
+        if intrinsic is not None and _selected_first_parameter(call) in UNSIGNED_FIXED_INTS:
+            return f'{intrinsic}({emit_ast(left, ctx)} {emit_ast(right, ctx)})'
+        if name == '__rshift__':
+            operand_type = _selected_first_parameter(call)
+            if operand_type in SIGNED_FIXED_INTS:
+                return f'__signed_shr__({emit_ast(left, ctx)} {emit_ast(right, ctx)})'
+            if operand_type not in UNSIGNED_FIXED_INTS:
+                assert operand_type is not None
+                raise NotImplementedError(
+                    f'udewy codegen for right shift of `{type_to_dewy(operand_type)}`'
+                )
+        symbol = UDEWY_BINOP_DUNDERS.get(name)
+        if symbol is not None:
+            left_text, right_text = emit_operand(left, ctx), emit_operand(right, ctx)
+            base = DERIVED_BITWISE_DUNDERS.get(name)
+            expression = (f'not ({left_text} {base} {right_text})' if base is not None
+                          else f'{left_text} {symbol} {right_text}')
+            if name in NARROW_WRAPPING_DUNDERS:
+                return _wrap_fixed_integer(expression, _selected_first_parameter(call))
+            return expression
+    elif count == 1:
+        symbol = UDEWY_PREFIX_DUNDERS.get(name)
+        if symbol is not None:
+            separator = ' ' if symbol.isalpha() else ''
+            expression = f'{symbol}{separator}{emit_operand(call.pos_args[0], ctx)}'
+            return _wrap_fixed_integer(expression, _selected_first_parameter(call))
     args = ' '.join(_emit_call_arg(arg, ctx) for arg in call.pos_args)
-    if isinstance(call.func, hir.ExpressedIdentifier):
-        if (
-            call.func.name in ctx.direct_function_names
-            or call.func.name in UDEWY_INTRINSICS
-        ) and call.func.name not in ctx.local_names:
-            return f'{call.func.name}({args})'
+    if name is not None:
+        if (name in ctx.direct_function_names or name in UDEWY_INTRINSICS) and name not in ctx.local_names:
+            return f'{name}({args})'
         # an indirect call through a name: udewy requires the `@` spelling
-        return f'(@{call.func.name})({args})'
+        return f'(@{name})({args})'
     callee = emit_ast(call.func, ctx)
     if isinstance(call.func, hir.Block) and not call.func.scoped:
         return f'{callee}({args})'
@@ -802,3 +763,25 @@ def emit_return(expr: hir.Return, ctx: EmitContext) -> str:
     if expr.item is None:
         return 'return void'  # udewy requires an explicit value
     return f'return {emit_ast(expr.item, ctx)}'
+
+
+_EMITTERS = {
+    hir.Block: emit_block,
+    hir.Return: emit_return,
+    hir.Flow: emit_flow,
+    hir.ScopeMetatag: _unlowered_scope_metatag,
+    hir.Break: lambda ast, ctx: emit_loop_exit(ast, 'break'),
+    hir.Continue: lambda ast, ctx: emit_loop_exit(ast, 'continue'),
+    hir.ShortCircuit: emit_short_circuit,
+    hir.Integer: lambda ast, ctx: emit_integer(ast),
+    hir.String: lambda ast, ctx: emit_string(ast),
+    hir.BasedString: emit_based_string,
+    hir.Bool: lambda ast, ctx: 'true' if ast.value else 'false',
+    hir.Void: lambda ast, ctx: 'void',
+    hir.Declare: emit_declare,
+    hir.Assign: emit_assign,
+    hir.ValueCast: lambda ast, ctx: emit_ast(ast.expr, ctx),
+    hir.Transmute: emit_transmute,
+    hir.ExpressedIdentifier: emit_identifier,
+    hir.FunctionCall: emit_function_call,
+}

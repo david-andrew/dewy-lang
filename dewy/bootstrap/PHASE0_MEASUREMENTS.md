@@ -2677,3 +2677,27 @@ this establishes smaller output, not a substantial hosted compile-time win.
 The first version's higher dispatch cost was reduced before this measurement.
 Full-build and native-seed effects remain to be measured. Artifacts:
 `immediate-operands-module/results.json`, `immediate-dispatch-module/results.json`.
+
+The updated µDewy sources also reach two-generation fixed points without
+Python: C generations take 6.45/6.30 seconds with identical SHA-256
+`de2ad6d5129a19283f79b4904c5af28fb7345719cf57fbd89102feeb3aef4387`;
+direct x86-64 generations take 0.33/0.44 seconds with identical SHA-256
+`2156e48ed9d705b1e8782d743aaba2edce5053bfad4491f1129d7492bac8b3ab`.
+This verifies the µDewy pair, not a fresh full Dewy fixed point. Artifact:
+`build-immediate-micro.log`, `udewy-immediate-{c,x86_64}-stage{1,2}`.
+
+### Source-emission dispatch
+
+A fresh full profile finds 1.94 million AST emission dispatches and 717,000
+call dispatches, including a no-op integer-support check. Source emission
+now selects handlers by concrete node class and resolves inherited classes
+using the original ordered cases. Call emission classifies name and arity
+once. No expression contents or rendered text are cached; scoped names,
+evaluation order, diagnostics and debug locations keep their existing rules.
+
+All 26 bridge, intrinsic and debug-location cases pass. Three paired frozen
+tokenizer-module samples produce identical source hashes with and without
+debug locations. The timing comparison is recorded in
+`source-dispatch-module/results.json`; the full profile preceding this batch
+is `host-immediate-stage-profiles`, and the execution gate is
+`source-dispatch-gates.log`.
