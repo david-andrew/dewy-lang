@@ -2697,7 +2697,23 @@ evaluation order, diagnostics and debug locations keep their existing rules.
 
 All 26 bridge, intrinsic and debug-location cases pass. Three paired frozen
 tokenizer-module samples produce identical source hashes with and without
-debug locations. The timing comparison is recorded in
+debug locations. Median emission time changes **0.259 to 0.160 seconds**
+without locations and **0.291 to 0.190 seconds** with them. The comparison is in
 `source-dispatch-module/results.json`; the full profile preceding this batch
 is `host-immediate-stage-profiles`, and the execution gate is
 `source-dispatch-gates.log`.
+
+### Completed parser reductions
+
+The hosted reduction loop stops once every alternative has one item, keeping
+the existing final AST validation. Already complete alternatives do not enter
+another shunting pass while their peers reduce, and an initial single AST
+returns directly. This removes a pass that cannot find adjacent operators;
+precedence, quantum alternatives and ambiguity diagnostics are unchanged.
+The native Pratt parser does not perform this redundant reduction pass.
+
+All 191 grammar, precedence, partial-operator, literal-boundary and bootstrap
+parser cases pass. All 125 frozen compiler/library files retain identical
+serialized parse-tree hashes; parsing changes **7.145 to 6.455 seconds**.
+Artifacts: `parser-terminal-gates.log`, `measure-parser-terminal.log`,
+`parser-terminal-{before,after}.json`.

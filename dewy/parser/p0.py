@@ -568,12 +568,18 @@ def reduce_loop(chain: ProtoAST, ctx: Context) -> AST:
     If multiple chains are present at the end, an Ambiguous node is returned containing all the candidates
     Otherwise the parsed AST is returned
     """
+    if len(chain.items) == 1 and isinstance(chain.items[0], AST):
+        return chain.items[0]
     _chain_items = chain.items.copy()  # used for reporting
 
     chains: list[ProtoAST] = [chain]
 
     while True:
         initial_lengths = [len(chain.items) for chain in chains]
+        # A single item has no adjacent operator to reduce. Keep final AST
+        # validation below, including the diagnostic for a lone operator.
+        if all(length == 1 for length in initial_lengths):
+            break
         initial_num_chains = len(chains)
         shunt_pass(chains, ctx)
 
@@ -646,6 +652,8 @@ def shunt_pass(chains: list[ProtoAST], ctx: Context) -> None:
     """apply a shunting reduction. modifies `chains` in place (potentially adding new lists in the case of ambiguities)"""
     new_chains: list[ProtoAST] = []
     for chain_idx, chain in enumerate(chains):
+        if len(chain.items) == 1:
+            continue  # an ambiguity alternative can finish before its peers
         raw_shift_dirs, raw_candidate_operator_idxs, reverse_ast_idxs_map = identify_shifts(chain, ctx)
 
         if all(isinstance(shift_dir, int) for shift_dir in raw_shift_dirs):
