@@ -1,0 +1,16 @@
+# Declaration-derived facts of constants survive a function boundary. Caller
+# flow facts do not: the existing native_capture_facts fixture tests mutable
+# bindings and a default observed before and after the binding changes.
+const values:array<int64>=[20 22]
+const bytes:array<uint8>=0x"1416"
+read=(items:array<int64 length=2>):>int64=>items[0]+items[1]
+defaulted=(items:array<int64 length=2>=values):>int64=>items[0]+items[1]
+byte_default=(items:array<uint8 length=2>=bytes):>int64=>(items[0] as int64)+(items[1] as int64)
+main=():>int64=>{
+    const local:array<int64>=[20 22]
+    let nested=(items:array<int64 length=2>=local):>int64=>read(items)
+    if defaulted() not=?42 return 1
+    if byte_default() not=?42 return 2
+    if read(values) not=?42 return 3
+    return nested()
+}

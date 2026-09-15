@@ -2955,3 +2955,18 @@ That single-generation C seed has SHA-256
 `8d2929388f969ad20cbef62108ed1e0aa46f19163521af21310a0a9b97e59d72`;
 it is not a newly certified two-generation pair. Artifacts:
 `parity-native-labels`, `build-native-labels-c-seed.sh`, `native-labels-c-seed`.
+
+### Immutable capture facts
+
+The refreshed frozen CLI exposed a regression in `array_call_adapters.dewy`:
+resetting caller flow state for a deferred function also forgot an annotated
+constant array's initializer length. Native immutable bindings now retain the
+initialization-derived read type separately from the written store contract.
+Mutable bindings still retain only their contract across the function boundary;
+no caller branch state is copied into the callee.
+
+The capture regression gate passes the original mutable capture cases, the
+complete adapter fixture, and constant arrays used by ordinary calls and lazy
+defaults (including a local constant), through both compilers and x86-64/C.
+Artifact: `native-const-capture-gates.log`. The full frozen CLI refresh continues
+with its original seed; a later integration check must verify this follow-up.

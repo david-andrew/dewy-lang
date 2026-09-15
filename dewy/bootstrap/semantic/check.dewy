@@ -1355,7 +1355,15 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         }
     }
     set_read_type(binding_id read env @session)
-    if constant { binding.read_only_reason = 'const binding' }
+    if constant {
+        binding.read_only_reason = 'const binding'
+        # This evidence comes from initialization, not a caller's branch.
+        # Immutable values keep it for later function/default checking even
+        # when the written store contract (e.g. array<T>) omits the length.
+        # Mutable bindings retain their contract here; their current read
+        # alternatives live only in the flow state above.
+        binding.value_type = read
+    }
     session.registry.by_id[binding_id] = binding
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
     container_state.seed(binding_id value env.state @session)

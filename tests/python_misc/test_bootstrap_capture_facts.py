@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def check_capture_facts(binary, tmp_path):
     for name, fixture in [('capture-facts', 'tests/fixtures/native_capture_facts.dewy'),
-                          ('local-captures', 'dewy/tests/local_captures.dewy')]:
+                          ('local-captures', 'dewy/tests/local_captures.dewy'),
+                          ('constant-array-captures', 'dewy/tests/array_call_adapters.dewy'),
+                          ('constant-default-captures', 'tests/fixtures/native_const_capture_facts.dewy')]:
         source = tmp_path / f'{name}.dewy'
         source.write_text(ARENA + (ROOT / fixture).read_text())
         native = subprocess.run([binary, source], capture_output=True, text=True, timeout=45)

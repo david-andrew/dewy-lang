@@ -78,6 +78,17 @@ These are outside the original corpus counts:
   The native full `type_facts.dewy` fixture still has the earlier type-test
   predicate gap listed below.
 
+## Regressions found by the refresh
+
+The `49ad4c12` refresh rejects `array_call_adapters.dewy`, which passed in
+the original baseline: a function body loses an annotated constant array's
+initializer length. The capture-boundary fix is now refined so immutable
+bindings retain their initialization-derived read type, while their written
+store contract remains separate. The complete fixture, constant/default/local
+capture cases, and the earlier mutable capture regressions pass isolated
+hosted/native x86-64/C gates. Public CLI follow-up is still pending; the
+running frozen refresh intentionally records the older rejection.
+
 ## Execution and output differences
 
 | Fixture | Baseline result | Follow-up |
