@@ -204,7 +204,24 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
     if not opaque_only {loop id in graph.globals {initial.add(id)}}
     return propagate_ambient(initial (if value_boundaries graph.shared_callers else graph.callers))
 }
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[]]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[]]
+
+# A write to state.output cannot invalidate a view into state.input. Prefix
+# routes deliberately treat indices as possibly overlapping; a shortened
+# summary route covers every deeper field. Rebinding/escaping the root covers
+# the entire owner. Whole-binding proofs remain the cheapest common case.
+stable_owner = (source:Route stable:set<addr> parameters:dict<addr effects.ParameterEffects>):>bool => {
+    if source.binding in? stable return true
+    let summary=parameters.get(source.binding)
+    if summary is? none return false
+    let changes=summary.mutates
+    loop route in summary.rebinds {changes.push(route)}
+    loop route in summary.escapes {changes.push(route)}
+    loop route in changes {
+        if overlap(source Route[source.binding route.steps]) return false
+    }
+    return true
+}
 analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
 details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links):>Plan => {
     let indirect=callbacks.analyze(root nodes type_nodes plan links)
@@ -243,10 +260,25 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         loop binding in function.captures {captured.add(binding)}
     }
     let stable:set<addr>=set[]
+    let stable_parameters:dict<addr effects.ParameterEffects>=[]
     loop [id function] in plan.functions {
         if id in? opaque continue
         loop binding in function.locals {
             if binding not in? function.writes and binding not in? places and binding not in? plan.globals and binding not in? captured {stable.add(binding)}
+        }
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let parameters=effects.literal_params(literal)
+        let place_count:addr=0
+        loop parameter in parameters {if parameter.place {place_count+=1}}
+        loop parameter in parameters {
+            let binding=parameter.binding_id
+            if binding is? none or binding in? captured or binding in? plan.globals continue
+            # A place owner can also be named by a global. Exclude ambient
+            # writes and, conservatively, functions with multiple places.
+            if parameter.place and (place_count not=? 1 or id in? dirty) continue
+            let summary=summaries.by_param_binding.get(binding)
+            if summary isnt? none {stable_parameters[binding]=summary}
         }
     }
     let array_snapshots:set<addr>=set[]
@@ -325,5 +357,5 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             if source isnt? none {escaping.add(source.binding)}
         }
     }
-    return Plan[result escaping disposable array_snapshots stable]
+    return Plan[result escaping disposable array_snapshots stable stable_parameters]
 }

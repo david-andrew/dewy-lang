@@ -1845,3 +1845,17 @@ and matching delimiter links. Eighty-four hosted token, diagnostic and parser
 regressions pass. These lexer results do not establish a new full hosted build
 time. Artifacts: `offset-token-{before,after}.json`, the corresponding logs,
 and `offset-token-probe-fixed-gates.log`.
+
+The scope proof now also accepts stable parameter field routes. Existing
+parameter summaries distinguish mutations, rebinding and escapes on prefixes,
+so writing `state.output` need not copy a local read from `state.input`.
+A place owner additionally requires no ambient writes and, conservatively,
+only one place parameter in its function. Captured and global owners remain
+excluded. No index-disjointness assumption is introduced.
+The extended gate performs another 1,000 getter reads through a place-owned
+field while incrementing an unrelated field, again with zero payload allocation.
+Writes into the owner field and writes through a global alias preserve the
+original local value by taking the copy fallback. Both output targets and
+all preceding getter/projection lifetime cases pass. Artifact:
+`getter-field-locals-gates.log`. This extension is not yet in a native seed or
+full-build timing; the 67.754-second result above covers whole-binding proofs.

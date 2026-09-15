@@ -60,6 +60,7 @@ State:type = [
     capture_plan:captures.Plan=captures.Plan[]
     borrowed_arguments:dict<addr set<addr>>=[]
     stable_bindings:set<addr>=set[]
+    stable_parameters:dict<addr effects.ParameterEffects>=[]
     array_snapshots:set<addr>=set[]
     disposable_arguments:dict<addr set<addr>>=[]
     code_symbols:dict<addr string>=[]
@@ -2283,7 +2284,8 @@ scalar_getter_projection = (node:hir.MemberAccess @state:State):>ScalarProjectio
 # Keep a getter's returned record as a local view only when both the view
 # binding and its owner remain read-only for their whole lexical function.
 # Ordinary calls/returns still establish value boundaries and copy as needed.
-# The first slice accepts a direct, supplied identifier argument: temporaries,
+# The source is a supplied identifier or field route. Parameter effects may
+# prove a field stable even when unrelated fields are written. Temporaries,
 # defaults, captured storage and converted argument layouts keep the fallback.
 borrowed_getter_local = (node:hir.Declare @state:State):>ScalarProjection? => {
     if node.binding_id is? none or node.binding_id not in? state.stable_bindings or node.binding_id in? state.boxed return none
@@ -2313,7 +2315,9 @@ borrowed_getter_local = (node:hir.Declare @state:State):>ScalarProjection? => {
     loop pair in pairs {if pair.parameter isnt? none and pair.parameter =? route.binding {source=pair.argument}}
     if source is? none or source not in? state.borrowed_arguments.get(node.expr set[]) return none
     let argument=hir.node_at(state.input.nodes source)
-    if argument isnt? hir.ExpressedIdentifier or argument.binding_id is? none or argument.binding_id not in? state.stable_bindings return none
+    if argument isnt? hir.ExpressedIdentifier|hir.MemberAccess return none
+    let owner=borrowing.route(source state.input.nodes)
+    if owner is? none or not borrowing.stable_owner(owner state.stable_bindings state.stable_parameters) return none
     if argument.value_type not=? parameter.value_type return none
     let key="borrow:{direct}"
     let existing=state.scalar_projections.get(key)
@@ -2783,6 +2787,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links)
     state.borrowed_arguments=borrowed.arguments
     state.stable_bindings=borrowed.stable_bindings
+    state.stable_parameters=borrowed.stable_parameters
     state.array_snapshots=borrowed.array_snapshots
     state.disposable_arguments=borrowed.disposable_arguments
     state.cleanup_excluded=borrowed.escaping_places

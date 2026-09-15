@@ -66,6 +66,28 @@ default_read=():>int64=>{
     let node=default_at()
     return node.value
 }
+State:type=[nodes:array<Node> count:int64]
+field_reads=(@state:State):>int64=>{
+    let sum:int64=0
+    loop i in 0.. and i <? 1000 {
+        let node=node_at(state.nodes 0)
+        state.count+=1
+        if node is? Leaf {sum+=node.value+node.extra}
+    }
+    return sum
+}
+field_changed=(@state:State):>int64=>{
+    let node=node_at(state.nodes 0)
+    state.nodes[0].value=99
+    return node.value
+}
+let global_state=State[[Leaf[20 'global' 22]] 0]
+change_global=():>void=>{global_state.nodes[0].value=99}
+global_alias=(@state:State):>int64=>{
+    let node=node_at(state.nodes 0)
+    change_global()
+    return node.value
+}
 main=():>int64=>{
     let nodes:array<Node>=[Leaf[20 'payload' 22]]
     # Snapshot as int64; do not infer a refined type from allocator counters.
@@ -81,5 +103,11 @@ main=():>int64=>{
     if guarded_read(nodes) not=? 20 or visits not=? 1 return 6
     if mutating_read(nodes) not=? 99 or nodes[0].value not=? 20 return 7
     if default_read() not=? 20 return 8
+    let state=State[nodes 0]
+    let field_before:int64=_arena_allocated_bytes
+    if field_reads(@state) not=? 42000 or state.count not=? 1000 return 9
+    if _arena_allocated_bytes-field_before not=? 0 return 10
+    if field_changed(@state) not=? 20 or state.nodes[0].value not=? 99 return 11
+    if global_alias(@global_state) not=? 20 or global_state.nodes[0].value not=? 99 return 12
     return 42
 }
