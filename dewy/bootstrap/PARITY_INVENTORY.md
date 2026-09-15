@@ -284,3 +284,33 @@ rejected by both. The compound-refinement kernel also passes. Artifacts:
 `integer-set-integration-gates.log` (2 tests, 166.43 seconds) and
 `integer-set-hosted-final-gates.log` (56 hosted regressions). This is an isolated
 integration gate, not a refreshed whole-corpus count or native fixed point.
+
+## Rational values and interpolated output
+
+Native value boundaries now materialize normalized rational constants into
+prelude-owned `Rational` or `BigRational` layouts. The word form checks that
+both parts fit int64; the abstract form retains arbitrary-precision parts and
+its separate zero alternative. Runtime arithmetic and comparisons call the
+existing numeric library, preserving its overflow alternatives and divisor
+proofs. Integer and word-rational arithmetic promotions do not become new
+implicit assignment conversions. Powers, runtime quantity arithmetic and
+other numeric gaps remain separate work.
+
+Native `print`/`printl` calls with a literal interpolated argument now match
+the hosted representation choice: each part is passed to the ordinary generic
+`print` in source order. This lets numeric values use their existing printing
+protocol without requiring a materialized string conversion. Nongeneric
+functions named `printl` retain ordinary call behavior. The independent
+materialized-string conversion gaps are unchanged.
+
+Fifteen rational programs pass through both compilers and direct/C backends
+(60 executions), including the complete `rationals.dewy` fixture, expected
+printed text, word overflow-result handling, mixed word/abstract arithmetic,
+normalization and effectful interpolation. Eight invalid programs are rejected
+by both. The compound-refinement kernel passes too. Records:
+`rational-final-gates.log` (11 programs plus the compound kernel) and
+`rational-word-gates.log` (four additional programs using that driver).
+`rational-print-regressions.log` checks the output-path change against another
+21 existing container/integer-set programs on both compilers/backends and ten
+rejections. These isolated gates do not replace a new whole-corpus inventory
+or native fixed point.

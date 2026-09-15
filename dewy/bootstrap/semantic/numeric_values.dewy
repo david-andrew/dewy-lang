@@ -64,3 +64,18 @@ bigint_literal = (value:bigint declared:addr loc:Span @session:contexts.Session)
     let array=hir.append_node(@session.hir hir.ArrayLiteral[loc types.array_type(word limbs.length @session.types) limbs])
     return hir.append_node(@session.hir hir.ObjectLiteral[loc object_member(declared session.types) [hir.ObjectField[loc 'sign' sign_node] hir.ObjectField[loc 'limbs' array]] value])
 }
+
+# A normalized literal needs no runtime gcd. Its parts are constructed using
+# the same prelude-owned layouts as ordinary calls. Keeping the nonzero record
+# alternative explicit also preserves the proof needed by a later divisor.
+rational_literal = (numerator:bigint denominator:bigint declared:addr big:addr? loc:Span @session:contexts.Session):>addr => {
+    $runtime_assert denominator >? 0
+    if big isnt? none and numerator =? 0 return hir.append_node(@session.hir hir.Integer[loc types.integer_literal(0 @session.types) '0d' 0])
+    let top=if big is? none hir.append_node(@session.hir hir.Integer[loc types.integer_literal(numerator @session.types) '0d' numerator]) else bigint_literal(numerator big loc @session)
+    let bottom=if big is? none hir.append_node(@session.hir hir.Integer[loc types.integer_literal(denominator @session.types) '0d' denominator]) else bigint_literal(denominator big loc @session)
+    return hir.append_node(@session.hir hir.ObjectLiteral[loc object_member(declared session.types) [hir.ObjectField[loc 'numerator' top] hir.ObjectField[loc 'denominator' bottom]]])
+}
+const rational_binary:dict<string string>=[
+    '__add__'->'add' '__sub__'->'sub' '__mul__'->'mul' '__truediv__'->'div'
+    '__eq__'->'eq' '__ne__'->'ne' '__lt__'->'lt' '__le__'->'le' '__gt__'->'gt' '__ge__'->'ge'
+]

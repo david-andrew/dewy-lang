@@ -188,6 +188,19 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     let inhabitant=unit_inhabitant(value expected id env @session)
     if inhabitant is? Error return inhabitant
     if inhabitant isnt? none return against(inhabitant expected id env @session)
+    let word_rational=target is? types.ObjectType and numeric_values.is_family(expected 'Rational' env.lexical session)
+    let big_rational=target is? types.ObjectType|types.TypeOr and numeric_values.is_family(expected 'BigRational' env.lexical session)
+    if (word_rational or big_rational) and types.node_at(session.types node.value_type) is? types.IntegerLiteralType|types.RationalLiteralType {
+        # Zero already inhabits the abstract rational's singleton alternative.
+        # Let normal union materialization pack it rather than converting it
+        # recursively through the same expectation.
+        let constant=constant_integer(value session)
+        if word_rational or constant isnt? 0 {
+            let converted=to_rational(value word_rational id env @session)
+            if converted is? Error return converted
+            return against(converted expected id env @session)
+        }
+    }
     let materialized=union_bigint_materialization(value expected id env @session)
     if materialized is? Error return materialized
     if materialized isnt? none return materialized
@@ -370,7 +383,11 @@ widen = (value:addr id:addr env:Environment @session:contexts.Session strings:bo
         return against(value types.primitive('int64' @session.types) id env @session)
     }
     if strings and type is? types.StringLiteralType return against(value types.primitive('string' @session.types) id env @session)
-    if type is? types.RationalLiteralType return pending(id 'runtime rational materialization' env session)
+    if type is? types.RationalLiteralType {
+        let family=numeric_values.family('BigRational' env.lexical session)
+        if family is? none return problem(id 'rational values need the numeric prelude' 'no BigRational declaration is in scope' env session)
+        return against(value family id env @session)
+    }
     if type is? types.TypeAnd {
         # A negative branch fact is not a new mutable variable's store
         # contract. A copy keeps the family's structure and may later hold
@@ -471,6 +488,83 @@ call_hint = (expected:addr? function:addr arguments:array<addr> env:Environment 
     return expected
 }
 
+# Numeric conversions belong to the common value boundary. Runtime arithmetic
+# uses the source library, including its overflow alternatives and nonzero
+# parameter contracts; the compiler does not duplicate those algorithms.
+to_rational = (value:addr word:bool id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let node=node_at(value session)
+    let name=if word 'Rational' else 'BigRational'
+    let family=numeric_values.family(name env.lexical session)
+    if family is? none return problem(id 'rational values need the numeric prelude' name env session)
+    if numeric_values.is_family(node.value_type name env.lexical session) return value
+    let constant=numeric_constants.value(value session)
+    if constant isnt? none {
+        if word and (constant.numerator <? -9223372036854775808 or constant.numerator >? 9223372036854775807 or constant.denominator >? 9223372036854775807) return problem(id 'rational constant does not fit rational<int64>' 'use the abstract rational with big-integer parts' env session)
+        let big:addr?=none
+        if not word {
+            big=numeric_values.family('BigInt' env.lexical session)
+            if big is? none return problem(id 'rational values need the numeric prelude' 'no BigInt declaration is in scope' env session)
+        }
+        return numeric_values.rational_literal(constant.numerator constant.denominator family big node.loc @session)
+    }
+    if numeric_values.is_family(node.value_type 'BigRational' env.lexical session) return problem(id 'an abstract rational cannot implicitly narrow to rational<int64>' 'keep both operands abstract or convert explicitly' env session)
+    if not word and numeric_values.is_family(node.value_type 'Rational' env.lexical session) return library_call('_bigrational_from_rational' [value] id env @session)
+    if not word and numeric_values.is_family(node.value_type 'BigInt' env.lexical session) return library_call('_bigrational_from_bigint' [value] id env @session)
+    if not views.integer_valued(node.value_type session.types) return problem(id 'no rational conversion for this operand' display.type_to_dewy(node.value_type session.types) env session)
+    let integer=against(value types.primitive('int64' @session.types) id env @session)
+    if integer is? Error return integer
+    return library_call(if word '_rational_from_int' else '_bigrational_from_int' [integer] id env @session)
+}
+rational_operation = (name:string arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    let word=false
+    let big=false
+    let literal=false
+    loop argument in arguments {
+        let type=node_at(argument session).value_type
+        let shape=types.node_at(session.types types.strip_refinement(type session.types))
+        if shape is? types.RationalLiteralType {literal=true}
+        if shape is? types.ObjectType|types.TypeOr {
+            if numeric_values.is_family(type 'Rational' env.lexical session) {word=true}
+            if numeric_values.is_family(type 'BigRational' env.lexical session) {big=true}
+        }
+    }
+    let division=name =? '__truediv__' and arguments.length =? 2
+    if not word and not big and not literal and not division return none
+    let operation=numeric_values.rational_binary.get(name)
+    if name =? '__unary_sub__' and arguments.length =? 1 {operation='neg'}
+    else if arguments.length not=? 2 {operation=none}
+    if operation is? none return problem(id 'operator is not defined for rationals' name env session)
+    if big {word=false}
+    if division and not word and not big and not literal {
+        let integers=false
+        loop argument in arguments {if numeric_values.is_family(node_at(argument session).value_type 'BigInt' env.lexical session) {integers=true}}
+        if integers return library_call('_bigrational_make' arguments id env @session)
+        let operands:array<addr>=[]
+        loop argument in arguments {
+            let converted=against(argument types.primitive('int64' @session.types) id env @session)
+            if converted is? Error return converted
+            operands.push(converted)
+        }
+        let made=library_call('_rational_make' operands id env @session)
+        if made is? Error return made
+        return library_call('_bigrational_from_rational' [made] id env @session)
+    }
+    if name =? '__truediv__' and arguments.length =? 2 and not word {
+        let divisor=arguments[1]
+        let constant=numeric_constants.value(divisor session)
+        if constant isnt? none and constant.numerator =? 0 return problem(id 'division by zero' 'the rational divisor is zero' env session)
+        let type=stored_read_type(divisor @session)
+        if constant is? none and numeric_values.is_family(type 'BigRational' env.lexical session) and not numeric_values.nonzero_form(type 'BigRational' env.lexical session) return problem(id 'cannot prove the divisor is nonzero' 'guard the division or take a nonzero divisor' env session)
+    }
+    let operands:array<addr>=[]
+    loop argument in arguments {
+        let converted=to_rational(argument word id env @session)
+        if converted is? Error return converted
+        operands.push(converted)
+    }
+    return library_call("{if word '_rational_' else '_bigrational_'}{operation}" operands id env @session)
+}
+
 # Explicit bigint operands already have their representation. Route their
 # operators to the same prelude helpers used by late representation selection,
 # widening word operands at the ordinary argument conversion boundary.
@@ -495,7 +589,7 @@ bigint_operation = (name:string arguments:array<addr> expected:addr? id:addr env
             return numeric_values.bigint_literal(negated family loc @session)
         }
     }
-    if name =? '__truediv__' return pending(id 'runtime rational arithmetic materialization' env session)
+    if name =? '__truediv__' return none  # exact division is handled by rational_operation
     let helper=numeric_values.bigint_binary.get(name)
     if name =? '__unary_sub__' and arguments.length =? 1 {helper='_bigint_neg'}
     else if arguments.length not=? 2 {helper=none}
@@ -679,6 +773,9 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         if specialized is? Error return specialized
         if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
         if func is? hir.ExpressedIdentifier and func.binding_id isnt? none and bindings.binding_at(session.registry func.binding_id).builtin and (func.name in? builtins.binary_operators.values or func.name in? builtins.prefix_operators.values or func.name in? builtins.inverted_comparisons.values) {
+            let rational=rational_operation(func.name positional id env @session)
+            if rational is? Error return rational
+            if rational isnt? none return if expected is? none rational else against(rational expected id env @session)
             let numeric=bigint_operation(func.name positional expected id env @session)
             if numeric is? Error return numeric
             if numeric isnt? none return if expected is? none numeric else against(numeric expected id env @session)
@@ -1161,7 +1258,9 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             if operator =? '__truediv__' and declarations.lookup(operator env.lexical session) is? none {
                 let value=folded_number(operator [left right] id env @session)
                 if value is? Error return value
-                if value is? none return pending(id 'runtime exact division materialization' env session)
+                if value is? none {value=rational_operation(operator [left right] id env @session)}
+                if value is? Error return value
+                if value is? none return problem(id 'exact division requires numeric operands' 'no rational operation accepts these values' env session)
                 return if expected is? none value else against(value expected id env @session)
             }
             let func = identifier(operator id env @session)
@@ -2071,6 +2170,29 @@ source_arguments = (id:addr? env:Environment session:contexts.Session):>array<ad
 call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let items=source_arguments(arguments_id env session)
     let signature = types.node_at(session.types node_at(function session).value_type)
+    let callee=node_at(function session)
+    # Match the hosted output path: the ordinary generic print receives each
+    # interpolation part in source order. Numeric families keep their print
+    # protocols; a materialized string still requires a string conversion.
+    if callee is? hir.ExpressedIdentifier and callee.name in? ['print' 'printl'] and signature is? types.FunctionType and signature.type_params.length >? 0 and items.length =? 1 {
+        let source=contexts.node_at(items[0] env.lexical session)
+        if source is? parser.IString {
+            let value=interpolated_string(items[0] source env @session for_output=true)
+            if value is? Error return value
+            let interpolation=node_at(value session)
+            $runtime_assert interpolation is? hir.InterpolatedString
+            let parts=interpolation.parts
+            if callee.name =? 'printl' {parts.push(put(hir.String[source.loc types.string_literal('\n' @session.types) '\n'] @session))}
+            let statements:array<addr>=[]
+            loop part in parts {
+                let printed=library_call('print' [part] id env @session)
+                if printed is? Error return printed
+                statements.push(printed)
+            }
+            let result=put(hir.Block[contexts.node_at(id env.lexical session).loc types.primitive('void' @session.types) statements false] @session)
+            return if expected is? none result else against(result expected id env @session)
+        }
+    }
     let positional:array<addr> = []
     let keyword:dict<string addr> = []
     let order:array<string?>=[]
@@ -4590,7 +4712,7 @@ object_text_function = (owner:addr id:addr env:Environment @session:contexts.Ses
     session.hoisted.push(declaration)
     return helper
 }
-interpolated_string = (id:addr node:parser.IString env:Environment @session:contexts.Session):>addr|Error => {
+interpolated_string = (id:addr node:parser.IString env:Environment @session:contexts.Session for_output:bool=false):>addr|Error => {
     let parts:array<addr>=[]
     let string=types.primitive('string' @session.types)
     loop part_id in node.content {
@@ -4603,7 +4725,12 @@ interpolated_string = (id:addr node:parser.IString env:Environment @session:cont
         if part isnt? parser.Block or part.inner.length not=? 1 return problem(part_id 'string interpolation requires one expression' 'place exactly one expression between these braces' env session)
         let value=expression(part.inner[0] env @session)
         if value is? Error return value
-        let prepared=text_part(value part_id env @session)
+        let prepared:addr|Error=value
+        if for_output {
+            let type=types.node_at(session.types node_at(value session).value_type)
+            if type is? types.RationalLiteralType {prepared=widen(value part_id env @session)}
+            else if type is? types.Primitive and type.name in? ['int' 'uint'] {prepared=against(value types.primitive(if type.name =? 'uint' 'uint64' else 'int64' @session.types) part_id env @session)}
+        } else {prepared=text_part(value part_id env @session)}
         if prepared is? Error return prepared
         parts.push(prepared)
     }

@@ -38,7 +38,7 @@ def build_program_driver(tmp_path):
     return cache_artifact(output).resolve()
 
 
-def check_structural_text(binary, tmp_path, *, cases=None, errors=None):
+def check_structural_text(binary, tmp_path, *, cases=None, errors=None, outputs=None):
     cases = CASES if cases is None else cases
     errors = ERRORS if errors is None else errors
     def compile_native(source):
@@ -57,6 +57,8 @@ def check_structural_text(binary, tmp_path, *, cases=None, errors=None):
                 assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
                 result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, timeout=10)
                 assert result.returncode == 42, (implementation, target, text, result)
+                if outputs is not None:
+                    assert result.stdout.decode() == outputs[index], (implementation, target, text, result.stdout)
     for index, text in enumerate(errors):
         source = tmp_path / f'error-{index}.dewy'
         source.write_text(text)
