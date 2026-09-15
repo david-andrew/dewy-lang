@@ -3663,3 +3663,26 @@ Artifacts: `source-compact-literals`, `native-compact-literals-stage1`,
 `native-compact-literals-stage2-c`, and `native-compact-literals-full`.
 The last two µDewy outputs stabilize this Dewy generation. This is not a
 new two-compiler fixed-point certification or a full no-C bootstrap.
+
+### Observe arena traffic at phase boundaries
+
+Native `--timings` also reports allocated/copied interval totals and live/peak
+process gauges. The measurement tool records them as
+`reported_phase_arena_bytes`, retaining compatibility with older timing-only
+compilers. Counters observe the Dewy process's arena payloads, including small
+observation overhead. They do not measure child backend memory, mmap pages,
+or every machine copy; descriptor copies are not payload-copy traffic. Reports
+capture counters before formatting their own text, and disabled timing emits
+nothing.
+
+The clock/counter kernel passes on hosted direct/C output and on output from
+the staged native compiler. The latter reports 1,088 allocated bytes and 257
+copied bytes for the explicit 1,000-byte allocation/257-byte copy observation.
+Five measurement cache/parser checks also pass. This exposed a hosted inferred
+singleton-local storage bug: the old emitter could receive `let value:0`.
+Local annotations now use the existing runtime-type conversion uniformly;
+expected changing-global reads and 22 representation regressions pass.
+Artifacts: `phase-storage-observation-gates.log` (initial storage-annotation
+failure plus five passes), `phase-storage-inferred-locals-gates.log`,
+`inferred-storage-representation-gates.log`, and
+`native-phase-storage-observation`.

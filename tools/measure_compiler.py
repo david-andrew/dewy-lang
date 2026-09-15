@@ -25,6 +25,37 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def native_observations(stderr: str) -> dict:
+    """Read optional native phase counters without treating diagnostics as data."""
+    timings: dict[str, int] = {}
+    storage: dict[str, dict[str, int]] = {}
+    for line in stderr.splitlines():
+        fields = line.split()
+        if (len(fields) == 5 and fields[:2] == ['dewy', 'timing']
+                and fields[4] == 'ns' and fields[3].isdigit()):
+            timings[fields[2]] = timings.get(fields[2], 0) + int(fields[3])
+        elif len(fields) == 7 and fields[:2] == ['dewy', 'storage']:
+            try:
+                counters = dict(field.split('=') for field in fields[3:])
+                if set(counters) != {'allocated', 'copied', 'live', 'peak'}:
+                    continue
+                values = {key: int(value) for key, value in counters.items()}
+            except ValueError:
+                continue
+            if any(value < 0 for value in values.values()):
+                continue
+            previous = storage.get(fields[2])
+            if previous is not None:
+                values['allocated'] += previous['allocated']
+                values['copied'] += previous['copied']
+                values['peak'] = max(values['peak'], previous['peak'])
+            storage[fields[2]] = values
+    result = {'reported_phase_nanoseconds': timings}
+    if storage:
+        result['reported_phase_arena_bytes'] = storage
+    return result
+
+
 def hosted_worker(argv: list[str]) -> int:
     sys.path.insert(0, os.environ.get('DEWY_BENCH_HOSTED_ROOT', str(ROOT)))
     from dewy import __main__ as cli
@@ -267,12 +298,7 @@ def main() -> int:
         if collection_report.is_file():
             record['garbage_collection'] = json.loads(collection_report.read_text())
         if args.phase_timings:
-            reported = {}
-            for line in (work / 'stderr.log').read_text().splitlines():
-                fields = line.split()
-                if len(fields) == 5 and fields[:2] == ['dewy', 'timing'] and fields[4] == 'ns' and fields[3].isdigit():
-                    reported[fields[2]] = reported.get(fields[2], 0) + int(fields[3])
-            record['reported_phase_nanoseconds'] = reported
+            record.update(native_observations((work / 'stderr.log').read_text()))
         record['udewy_artifacts'] = [
             {'path': str(path.relative_to(work)), 'bytes': path.stat().st_size,
              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}

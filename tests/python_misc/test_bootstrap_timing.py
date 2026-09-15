@@ -15,10 +15,13 @@ def test_native_phase_clock(tmp_path):
     source.write_text(f'''import p"{ROOT / 'dewy/bootstrap/timing.dewy'}" as timing
 main=():>int64=>{{
     let disabled=timing.start(false)
-    if disabled not=? -1 return 1
+    if disabled isnt? none return 1
     timing.finish('disabled' disabled)
     let started=timing.start(true)
-    if started <? 0 return 2
+    if started is? none return 2
+    let storage=_arena_alloc(1000)
+    _arena_note_copy(257)
+    _arena_release(storage 1000)
     timing.finish('kernel' started)
     printl('ordinary output')
     return 42
@@ -32,6 +35,15 @@ main=():>int64=>{{
                              text=True, timeout=10, check=False)
         assert run.returncode == 42, (target, run.returncode, run.stderr)
         assert run.stdout == 'ordinary output\n'
-        fields = run.stderr.split()
+        timing, storage = run.stderr.splitlines()
+        fields = timing.split()
         assert len(fields) == 5 and fields[:3] == ['dewy', 'timing', 'kernel']
         assert fields[3].isdigit() and fields[4] == 'ns'
+        fields = storage.split()
+        assert fields[:3] == ['dewy', 'storage', 'kernel']
+        counters = dict(field.split('=') for field in fields[3:])
+        assert set(counters) == {'allocated', 'copied', 'live', 'peak'}
+        counters = {key: int(value) for key, value in counters.items()}
+        assert counters['allocated'] >= 1024
+        assert counters['copied'] >= 257
+        assert 0 <= counters['live'] <= counters['peak']

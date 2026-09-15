@@ -2,17 +2,32 @@
 # target. CLOCK_MONOTONIC avoids wall-clock adjustments. Failed clock reads
 # disable an observation rather than failing an otherwise valid build.
 from p"../../library/linux/io.dewy" import _write_stderr
+from p"../../library/linux/system.dewy" import _arena_allocated_bytes, _arena_copied_bytes, _arena_live_bytes, _arena_peak_bytes
 
-start = (enabled:bool):>int64 => {
-    if not enabled return -1
+Stamp:type = const [clock:int64 allocated:int64 copied:int64]
+read_clock = ():>int64 => {
     let buffer:int64=__alloca__(16)
     if __syscall2__(228 1 buffer) not=? 0 return -1
     return __load_i64__(buffer)*1000000000+__load_i64__(buffer+8)
 }
-finish = (stage:string started:int64):>void => {
-    if started <? 0 return
-    let ended=start(true)
-    if ended <? started return
-    let line="dewy timing {stage} {ended-started} ns\n"
+start = (enabled:bool):>Stamp? => {
+    if not enabled return none
+    let clock=read_clock()
+    if clock <? 0 return none
+    return Stamp[clock _arena_allocated_bytes _arena_copied_bytes]
+}
+finish = (stage:string started:Stamp?):>void => {
+    if started is? none return
+    let ended=read_clock()
+    if ended <? started.clock return
+    # Capture counters before formatting the report. Allocated/copied are
+    # interval totals; live/peak are process gauges. They count this Dewy
+    # process's arena payloads, not child backend memory, mmap pages or every
+    # machine copy. In particular, descriptor copies are not payload copies.
+    let allocated=_arena_allocated_bytes-started.allocated
+    let copied=_arena_copied_bytes-started.copied
+    let live=_arena_live_bytes
+    let peak=_arena_peak_bytes
+    let line="dewy timing {stage} {ended-started.clock} ns\ndewy storage {stage} allocated={allocated} copied={copied} live={live} peak={peak}\n"
     _write_stderr(line as array<uint8>);
 }
