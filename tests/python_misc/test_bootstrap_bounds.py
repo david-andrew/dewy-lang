@@ -84,6 +84,9 @@ CASES = [
 FIELD_EXPECTATIONS = dict(zip(CASES[:4], ['ok', 'cannot prove refinement', 'ok', 'cannot prove refinement']))
 CASES.extend(LOOP_FUNCTION_CASES)
 FIELD_EXPECTATIONS.update(LOOP_FUNCTION_CASES)
+OBJECT_MUTATION_CASE = 'let n:int64=1\nchange=()=>{let box=[value={n=-1\n0}]}\npositive=()=>{$assert n >? 0}'
+CASES.append(OBJECT_MUTATION_CASE)
+FIELD_EXPECTATIONS[OBJECT_MUTATION_CASE] = 'cannot prove assertion'
 
 
 def test_native_bounds_visitor_matches_hosted(tmp_path):

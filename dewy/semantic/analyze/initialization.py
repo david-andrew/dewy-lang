@@ -85,23 +85,12 @@ class _InitializationChecker:
             if assumed:
                 frame.assumed_calls.update(assumed - {frame.function_id})
 
-    def _collect_functions(self, node: object) -> None:
+    def _collect_functions(self, node: hir.AST) -> None:
         """Every function literal in the program: the candidates for a call
         through a value whose origin is not tracked (an element of a
         container, a field read after reassignment)."""
-        if isinstance(node, hir.FunctionLiteral):
-            self.all_functions.append(node)
-        if isinstance(node, hir.AST):
-            for name in node.__dataclass_fields__:
-                self._collect_functions(getattr(node, name))
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                self._collect_functions(item)
-        elif isinstance(node, dict):
-            for item in node.values():
-                self._collect_functions(item)
-        elif isinstance(node, hir.ObjectField):
-            self._collect_functions(node.value)
+        self.all_functions.extend(child for child in hir.walk(node)
+                                  if isinstance(child, hir.FunctionLiteral))
 
     def _compatible_functions(self, type_: ty.TypeExpr) -> list[hir.FunctionLiteral] | None:
         """The function literals a value of this function type may hold: those

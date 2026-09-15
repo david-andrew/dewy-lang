@@ -16,7 +16,7 @@ from ..parser import p0, t2, t1, t0
 from . import bindings as sb
 from . import builtins, hir, ty
 from .analyze import predicate_effects
-from .analyze.effects import _iter_children as hir_children
+from .hir import children as hir_children
 from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, user_warning, not_implemented, require_valued
 from .hir_display import type_to_dewy
 from ..reporting import SrcFile, ReportException, Pointer, Span, Error

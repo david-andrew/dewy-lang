@@ -141,7 +141,7 @@ class _RepresentationPass:
             # instances carry no state, so they are declared first, like the checker's own
             root.items[0:0] = self.added_declarations
 
-    def _mark_bindings(self, node: object) -> None:
+    def _mark_bindings(self, node: hir.AST) -> None:
         if isinstance(node, hir.Declare) and node.binding_id is not None and self._is_big(node.expr) and node.binding_id not in self.big_bindings:
             binding = self.registry.by_id[node.binding_id]
             if binding.kind == 'value' and (binding.type in ('int', 'uint') or isinstance(binding.type, ty.IntegerLiteralType)):
@@ -164,14 +164,8 @@ class _RepresentationPass:
                     if binding.declaration is not None:
                         binding.declaration.annotation = self.big_type
                     self._note(node.loc, f'`{target.name}` is a big integer: this assignment stores one')
-        if isinstance(node, hir.AST):
-            for field in fields(node):
-                self._mark_bindings(getattr(node, field.name))
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                self._mark_bindings(item)
-        elif isinstance(node, hir.ObjectField):
-            self._mark_bindings(node.value)
+        for child in hir.children(node):
+            self._mark_bindings(child)
 
     def _rewrite(self, node: object) -> object:
         """Rewrite a subtree in place; returns the (possibly replaced) node."""
@@ -181,20 +175,19 @@ class _RepresentationPass:
                 node[:] = items
                 return node
             return tuple(items)
-        if isinstance(node, hir.ObjectField):
-            node.value = self._rewrite(node.value)
+        if isinstance(node, dict):
+            for key, value in node.items():
+                node[key] = self._rewrite(value)
             return node
-        if not isinstance(node, hir.AST):
+        if not isinstance(node, (hir.AST, hir.ObjectField, hir.Param)):
             return node
         # children first
-        for field in fields(node):
-            if field.name in ('type', 'annotation'):
-                continue
-            value = getattr(node, field.name)
+        for name in hir.child_fields(type(node)):
+            value = getattr(node, name)
             rewritten = self._rewrite(value)
             if rewritten is not value:
-                setattr(node, field.name, rewritten)
-        return self._rewrite_node(node)
+                setattr(node, name, rewritten)
+        return self._rewrite_node(node) if isinstance(node, hir.AST) else node
 
     def _rewrite_node(self, node: hir.AST) -> hir.AST:
         if isinstance(node, hir.Integer) and (isinstance(node.type, ty.IntegerLiteralType) or node.type in ('int', 'uint')):

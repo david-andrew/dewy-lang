@@ -2190,3 +2190,37 @@ candidate-filter group passes 254 tests. Artifacts: `compare-parser-batch.log`,
 `parser-grammar-before.json`, `parser-grammar-after.json`,
 `parser-grammar-gates.log`. These are parser measurements, not another full
 compiler build.
+
+### Shared HIR syntax traversal
+
+Hosted structural analyses now share child-field descriptions resolved once
+from the HIR declarations. They visit checked syntax, including object fields,
+bound parameters and keyword arguments, without repeatedly walking spans,
+type descriptions or scalar metadata. Bounds assignment discovery,
+initialization function discovery, bigint representation, module renaming,
+effect/predicate scans and local renaming use this helper. Runtime evaluation
+and effect ordering remain the responsibility of each analysis.
+
+This also fixes a hosted bounds gap: mutation inside an object-field
+initializer was omitted from the global-assignment inventory. A global could
+then retain its initial constant bounds inside a function. The frozen hosted
+compiler accepted the isolated bad assertion; the corrected hosted and native
+validators both reject it. Artifacts: `hir-children-native-mutation.log` and
+`tests/python_misc/test_hir_children.py`.
+
+Before the final effect/local-renaming adoption, the representative t0 module
+build changed from 10.284 to 9.232 seconds, with checking 6.349 to 6.170 and
+peak process RSS 172,840 to 151,408 KiB. This is a modest checking improvement;
+do not attribute the whole invocation difference to the traversal. The main
+bounds/initialization/modules/representation group passes 47 tests, the added
+native mutation comparison passes, and the final shared-traversal/effects/
+borrowing/backend group passes 36 tests. Artifacts: `measure-hir-children.log`,
+`hir-children-gates.log`, `hir-children-shared-gates.log`.
+
+The compiler built through the hosted backend bridge passed the x86-64
+integration bundle, then the larger native-pair script stopped at the known
+optional-array narrowing case in `native_predicate_path_scaling.dewy`.
+The preceding `host-direct-atoms-full` executable rejects the same case with
+the same diagnostic. The complete pair gate remains open; this is not a
+bridge regression. Artifacts: `check-host-backend-bridge-pair.log` and the two
+`host-*-full-predicate-check/result.json` records.

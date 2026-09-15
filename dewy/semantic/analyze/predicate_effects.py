@@ -8,7 +8,6 @@ ordinary refinement rules remain responsible for extracting the actual facts.
 
 from .. import bindings as sb
 from .. import hir
-from .effects import _iter_children
 
 
 def _binding_effects(root: hir.AST, *, reads: bool, writes: bool) -> tuple[set[int], set[int]]:
@@ -36,7 +35,7 @@ def _binding_effects(root: hir.AST, *, reads: bool, writes: bool) -> tuple[set[i
                 access = sb.access_path(target, unwrap=sb._unwrap_fact_route)
                 if isinstance(access.root, hir.ExpressedIdentifier) and access.root.binding_id is not None:
                     written.add(access.root.binding_id)
-        pending.extend(_iter_children(node))
+        pending.extend(hir.children(node))
     return read, written
 
 

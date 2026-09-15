@@ -23,11 +23,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections import deque
-from functools import cache
 
 from .. import bindings as sb
 from .. import hir, ty
-from ...utils import dataclass_fields
 
 INDEX_STEP = '[]'
 """Route step standing for any element of an array; field steps use the name."""
@@ -168,32 +166,6 @@ def _unwrap(node: hir.AST) -> hir.AST:
     return node
 
 
-def _iter_values(value: object):
-    if isinstance(value, hir.AST):
-        yield value
-    elif isinstance(value, hir.ObjectField):
-        yield value.value
-    elif isinstance(value, hir.BoundParam):
-        yield value.value
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            yield from _iter_values(item)
-    elif isinstance(value, dict):
-        for item in value.values():
-            yield from _iter_values(item)
-
-
-@cache
-def _child_fields(cls: type[hir.AST]) -> tuple[str, ...]:
-    # Source positions and type descriptions cannot contain executable HIR.
-    return tuple(f.name for f in dataclass_fields(cls) if f.name not in ('loc', 'type'))
-
-
-def _iter_children(node: hir.AST):
-    for name in _child_fields(type(node)):
-        yield from _iter_values(getattr(node, name))
-
-
 def _literal_params(literal: hir.FunctionLiteral) -> list[hir.Param]:
     params = [*literal.pos_or_kw_args, *literal.kw_only_args]
     if literal.rest_args is not None:
@@ -243,7 +215,7 @@ class _EffectAnalyzer:
             if node.target.binding_id is not None:
                 self.reassigned.add(node.target.binding_id)
         if isinstance(node, hir.AST):
-            for child in _iter_children(node):
+            for child in hir.children(node):
                 self._collect(child)
 
     # ------------------------------------------------------------------
@@ -466,7 +438,7 @@ class _EffectAnalyzer:
                 for expr in inner:
                     self._visit(expr, params)
                 return
-            for child in _iter_children(node):
+            for child in hir.children(node):
                 self._visit(child, params)
             return
         if isinstance(node, hir.ArrayLength):
@@ -547,7 +519,7 @@ class _EffectAnalyzer:
                 for expr in inner:
                     self._visit(expr, params)
             return
-        for child in _iter_children(node):
+        for child in hir.children(node):
             self._visit(child, params)
 
     def _visit_call(
@@ -612,7 +584,7 @@ class _EffectAnalyzer:
         if resolved is None:
             # The place roots at a non-parameter binding; nothing to record
             # for this function's parameters beyond embedded index uses.
-            for child in _iter_children(place.target):
+            for child in hir.children(place.target):
                 self._visit(child, params)
             return
         binding_id, route, inner = resolved

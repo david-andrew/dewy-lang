@@ -21,8 +21,11 @@ Features (i.e. each should probably get an AST node)
 perhaps after this phase theres a second typechecking phase making use of all the rich type information built at this phase?
 """
 
-from dataclasses import dataclass, field
-from typing import Literal
+from dataclasses import dataclass, field, fields
+from functools import cache
+from types import UnionType
+from typing import Literal, Union, get_args, get_origin, get_type_hints
+from collections.abc import Iterator
 from ..parser import t0
 from ..reporting import Span, SrcFile
 from . import ty
@@ -836,6 +839,53 @@ class RangeMembership(AST):
     step: int | None = None
     last: int | None = None
     count: int | None = None
+
+
+@cache
+def child_fields(cls: type) -> tuple[str, ...]:
+    """Fields containing HIR syntax, excluding types and source metadata.
+
+    Resolve annotations once per class, after the module is initialized.
+    Object fields and bound/default parameters are syntax containers too.
+    GenericSource intentionally stays opaque: its unchecked AST and defining
+    checker context are not part of this checked tree.
+    """
+    def contains_syntax(annotation: object) -> bool:
+        if isinstance(annotation, type):
+            return issubclass(annotation, (AST, ObjectField, Param))
+        if get_origin(annotation) in (Union, UnionType, list, tuple, dict):
+            return any(contains_syntax(item) for item in get_args(annotation))
+        return False
+
+    hints = get_type_hints(cls)
+    return tuple(item.name for item in fields(cls) if contains_syntax(hints[item.name]))
+
+
+def children(node: AST | ObjectField | Param) -> Iterator[AST]:
+    """Immediate syntax children in field order; flatten container records.
+
+    This is a structural traversal, not an evaluation-order or effects rule.
+    Analyses with runtime ordering requirements still select their own edges.
+    """
+    for name in child_fields(type(node)):
+        yield from _child_values(getattr(node, name))
+
+
+def _child_values(value: object) -> Iterator[AST]:
+    if isinstance(value, AST):
+        yield value
+    elif isinstance(value, (ObjectField, Param)):
+        yield from children(value)
+    elif isinstance(value, (list, tuple, dict)):
+        for item in value.values() if isinstance(value, dict) else value:
+            yield from _child_values(item)
+
+
+def walk(root: AST) -> Iterator[AST]:
+    """Preorder structural walk, visiting shared subtrees at each occurrence."""
+    yield root
+    for child in children(root):
+        yield from walk(child)
 
 
 

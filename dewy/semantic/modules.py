@@ -486,9 +486,8 @@ class ModuleCompiler:
             or isinstance(value, (hir.ObjectField, hir.Param))
         ):
             updates = {
-                field.name: self._rename(getattr(value, field.name), names)
-                for field in fields(value)
-                if field.name not in {'loc', 'type', 'binding_id', 'name'}
+                name: self._rename(getattr(value, name), names)
+                for name in hir.child_fields(type(value))
             }
             return replace(value, **updates) if any(new is not getattr(value, name) for name, new in updates.items()) else value
         return value
@@ -514,10 +513,8 @@ class ModuleCompiler:
             isinstance(value, hir.AST)
             or isinstance(value, (hir.ObjectField, hir.Param))
         ):
-            for field in fields(value):
-                if field.name in {'loc', 'type', 'binding_id', 'name'}:
-                    continue
-                self._collect_referenced_binding_ids(getattr(value, field.name), found)
+            for name in hir.child_fields(type(value)):
+                self._collect_referenced_binding_ids(getattr(value, name), found)
 
     # Prelude declarations the backend may call without a source reference.
     BACKEND_RUNTIME_HELPERS = frozenset({'_arena_alloc', '_arena_release', '_arena_note_copy', '_region_new', '_region_alloc', '_region_reset', '_region_release', '_union_tree'})

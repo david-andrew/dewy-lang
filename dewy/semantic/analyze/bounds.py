@@ -665,13 +665,7 @@ def _assigned_binding_ids(root: hir.AST) -> set[int]:
             node = node.value if isinstance(node, hir.MemberAccess) else node.array
         return node.binding_id if isinstance(node, hir.ExpressedIdentifier) else None
 
-    def walk(value: object) -> None:
-        if isinstance(value, (list, tuple)):
-            for item in value:
-                walk(item)
-            return
-        if not isinstance(value, hir.AST):
-            return
+    for value in hir.walk(root):
         if isinstance(value, hir.Assign):
             binding_id = root_binding(value.target)
             if binding_id is not None:
@@ -696,10 +690,6 @@ def _assigned_binding_ids(root: hir.AST) -> set[int]:
             binding_id = root_binding(value.func.dictionary)
             if binding_id is not None:
                 found.add(binding_id)
-        for field_name in getattr(value, '__dataclass_fields__', {}):
-            walk(getattr(value, field_name))
-
-    walk(root)
     return found
 
 

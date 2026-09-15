@@ -332,7 +332,6 @@ class _ArrayLowering(_ArraySharing):
         call in an earlier argument has already finished; only direct place
         arguments remain exposed during the enclosing call.
         """
-        from ...semantic.analyze.effects import _iter_children
 
         routes: set[tuple[int, tuple[str, ...]]] = set()
         arguments = [*enumerate(call.pos_args), *call.kw_args.items()]
@@ -353,7 +352,7 @@ class _ArrayLowering(_ArraySharing):
             if id(argument) in seen or isinstance(argument, (hir.FunctionLiteral, hir.GenericFunction)):
                 continue
             seen.add(id(argument))
-            pending.extend(_iter_children(argument))
+            pending.extend(hir.children(argument))
             if not isinstance(argument, hir.Place):
                 continue
             route = cls._storage_field_route(argument.target)

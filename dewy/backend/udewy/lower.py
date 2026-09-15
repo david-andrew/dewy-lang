@@ -133,9 +133,9 @@ def _hir_child_fields(cls: type) -> tuple[str, ...] | None:
     type descriptions, and binding/name metadata cannot contain local uses.
     None distinguishes a non-HIR value from a leaf with no child fields.
     """
-    if cls.__module__ != hir.__name__ or not is_dataclass(cls):
+    if not issubclass(cls, (hir.AST, hir.ObjectField, hir.Param)):
         return None
-    return tuple(f.name for f in fields(cls) if f.name not in ('loc', 'type', 'binding_id', 'name'))
+    return hir.child_fields(cls)
 
 
 def _uniquify_local_names(literal: hir.FunctionLiteral) -> hir.FunctionLiteral:
