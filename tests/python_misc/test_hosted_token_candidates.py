@@ -34,6 +34,7 @@ def test_candidates_honor_subclasses_and_unfiltered_extensions(monkeypatch):
         assert Extension in t1.candidates(t0.StringChars)
     finally:
         t1.candidates.cache_clear()
+        Identifier.valid_contexts.clear()
 
 
 def test_symbol_prefix_index_preserves_longest_match():
@@ -87,6 +88,9 @@ def test_character_candidates_preserve_extension_matchers(monkeypatch):
         first_chars = frozenset('~')
 
     classes = [Inherited, Changed, Declared, t0.Number]
+    assert Inherited.eat_at is t0.Identifier.eat_at
+    assert Changed.eat_at is None
+    assert Declared.eat_at is None
     monkeypatch.setattr(t0, 'descendants', lambda parent: classes)
     t0.get_allowed_tokens.cache_clear()
     try:
@@ -95,4 +99,29 @@ def test_character_candidates_preserve_extension_matchers(monkeypatch):
         assert t0.get_allowed_tokens(t0.Root, 'x') == [Inherited, Changed, t0.Number]
         assert t0.get_allowed_tokens(t0.StringBody, '~') == []
     finally:
+        for extension in (Inherited, Changed, Declared):
+            extension.valid_contexts.clear()
         t0.get_allowed_tokens.cache_clear()
+
+
+def test_ordinary_tokens_do_not_copy_the_remaining_source():
+    suffixes = []
+
+    class Source(str):
+        def __getitem__(self, key):
+            if isinstance(key, slice) and key.stop is None:
+                suffixes.append(key.start)
+            return super().__getitem__(key)
+
+    source = Source('name = 123 + other\n' * 100)
+    tokens = t0.tokenize(SrcFile(None, source))
+    assert ''.join(token.src for token in tokens) == source
+    assert suffixes == []
+
+
+def test_carriage_return_warning_uses_the_file_offset(monkeypatch):
+    positions = []
+    monkeypatch.setattr(t0.Whitespace, 'warning_lone_carriage_return',
+                        lambda src, position, ctx: positions.append(position))
+    t0.tokenize(SrcFile(None, 'first\nsecond\rthird'))
+    assert positions == [12]

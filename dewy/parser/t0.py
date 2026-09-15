@@ -12,7 +12,7 @@ Instead, we dynamically (with caching) determine which tokens are allowed in a g
 - look up all subclasses of `Token` via `descendants(Token)`,
 - filter them by whether the current context type appears in their `valid_contexts`,
 - filter tokens with a declared first-character set against the current character,
-- then call `eat(src[i:], ctx)` on each allowed token class remaining.
+- then call a position-aware probe (or the compatible `eat(src[i:], ctx)` fallback) on each remaining token class.
 
 Any token whose `eat` method returns a non-`None` length is considered a match.
 We keep only the longest matches, then resolve any remaining ambiguities via `token_precedence`.
@@ -27,7 +27,7 @@ level) in a purely declarative way.
 
 from ..reporting import Span, Info, Warning, Error, SrcFile, Pointer, ReportException
 from ..utils import truncate, descendants, ordinalize, first_line
-from typing import NoReturn, TypeAlias, ClassVar, get_origin, get_args, Union, Protocol, Literal
+from typing import NoReturn, TypeAlias, ClassVar, Callable, get_origin, get_args, Union, Protocol, Literal
 from types import UnionType
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
@@ -287,6 +287,11 @@ class Token[T:Context](ABC):
             int | None: The number of characters eaten if successful, or `None` if no match.
         """
 
+    # Position-aware probes avoid copying the whole remaining source for
+    # each ordinary token. An extension may continue to implement only eat;
+    # tokenize shares one lazily created suffix among those legacy probes.
+    eat_at: ClassVar[Callable[[str, T, int], int | None] | None] = None
+
     def action_on_eat(self, ctx:T) -> ContextAction:
         """
         If overridden, indicates actions to perform on the context stack when a token is eaten.
@@ -303,6 +308,8 @@ class Token[T:Context](ABC):
         """verify that subclasses parameterize Token with a context argument and set the valid_contexts class variable"""
         super().__init_subclass__(**kwargs)
         cls.valid_contexts = set(cls._get_ctx_params())
+        if 'eat' in cls.__dict__ and 'eat_at' not in cls.__dict__:
+            cls.eat_at = None
         # Changing the matcher invalidates an inherited prefix promise unless
         # the subclass explicitly supplies its own. Merely inheriting eat is safe.
         if 'eat' in cls.__dict__ and 'first_chars' not in cls.__dict__:
@@ -337,13 +344,17 @@ class Whitespace(Token[WhitespaceOrCommentContexts]):
     first_chars = frozenset(whitespace)
     @staticmethod
     def eat(src:str, ctx:WhitespaceOrCommentContexts) -> int|None:
+        return Whitespace.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:WhitespaceOrCommentContexts, offset:int) -> int|None:
         """white space is any sequence of whitespace characters"""
-        i = 0
+        i = offset
         while i < len(src) and src[i] in whitespace:
             if src[i] == '\r' and not src.startswith('\n', i+1):
-                Whitespace.warning_lone_carriage_return(src, i, ctx)
+                Whitespace.warning_lone_carriage_return(src, i - offset + ctx.current_tokenization_position(), ctx)
             i += 1
-        return i or None
+        return (i - offset) or None
     
     @staticmethod
     def warning_lone_carriage_return(src: str, i: int, ctx: WhitespaceOrCommentContexts):
@@ -360,19 +371,15 @@ class LineComment(Token[WhitespaceOrCommentContexts]):
     first_chars = frozenset('#')
     @staticmethod
     def eat(src:str, ctx:WhitespaceOrCommentContexts) -> int|None:
-        """line comments are any sequence of characters after a # until the end of the line"""
-        if not src.startswith(line_comment_start):
+        return LineComment.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:WhitespaceOrCommentContexts, offset:int) -> int|None:
+        # Include the newline when present; a nested comment has its own probe.
+        if not src.startswith(line_comment_start, offset) or src.startswith(block_comment_start, offset):
             return None
-        if src.startswith(block_comment_start):
-            return None # don't start a line comment if it is actually a block comment
-        
-        # consume until the end of the line
-        i = 1
-        while i < len(src) and src[i] != '\n':
-            i += 1
-        if i < len(src): # include the newline in the comment (if we're not EOF)
-            i += 1
-        return i
+        end = src.find('\n', offset + 1)
+        return (len(src) if end < 0 else end + 1) - offset
 
 
 class BlockComment(Token[WhitespaceOrCommentContexts]):
@@ -426,13 +433,17 @@ class Identifier(Token[GeneralBodyContexts]):
     first_chars = frozenset(start_characters | decoration_characters)
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        return Identifier.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:GeneralBodyContexts, offset:int) -> int|None:
         """
         Identifiers:
         - may not start with a number
         - may not be an operator (handled by longest match + token precedence)
         - may contain decorator characters (superscripts/subscripts) anywhere (but must include at least one start character)
         """
-        i = 0
+        i = offset
         
         # Skip leading decorator characters
         while i < len(src) and src[i] in decoration_characters:
@@ -449,18 +460,22 @@ class Identifier(Token[GeneralBodyContexts]):
         while i < len(src) and (src[i] in continue_characters or src[i] in decoration_characters):
             i += 1
         
-        return i
+        return i - offset
 
 
 class Symbol(Token[GeneralBodyContexts]):
     first_chars = frozenset(symbols_by_start)
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        return Symbol.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:GeneralBodyContexts, offset:int) -> int|None:
         """symbolic operators are any sequence of characters in the symbolic_operators set"""
-        if not src:
+        if offset >= len(src):
             return None
-        for op in symbols_by_start.get(src[0], ()):
-            if src.startswith(op):
+        for op in symbols_by_start.get(src[offset], ()):
+            if src.startswith(op, offset):
                 return len(op)
         return None
 
@@ -469,9 +484,13 @@ class ShiftSymbol(Token[BodyWithoutTypeContexts]):
     first_chars = frozenset(op[0] for op in shift_operators)
     @staticmethod
     def eat(src:str, ctx:BodyWithoutTypeContexts) -> int|None:
+        return ShiftSymbol.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:BodyWithoutTypeContexts, offset:int) -> int|None:
         """shift operators are any sequence of characters in the shift_operators set"""
         for op in shift_operators:
-            if src.startswith(op):
+            if src.startswith(op, offset):
                 return len(op)
         return None
 
@@ -480,9 +499,13 @@ class Metatag(Token[GeneralBodyContexts]):
     first_chars = frozenset('$')
     @staticmethod
     def eat(src: str, ctx:GeneralBodyContexts) -> int | None:
+        return Metatag.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src: str, ctx:GeneralBodyContexts, offset:int) -> int | None:
         """metatags are just special identifiers that start with $"""
-        if src.startswith('$'):
-            i = Identifier.eat(src[1:], ctx)
+        if src.startswith('$', offset):
+            i = Identifier.eat_at(src, ctx, offset + 1)
             if i is not None:
                 return i + 1
 
@@ -501,7 +524,11 @@ class LeftSquareBracket(Token[GeneralBodyContexts]):
     
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        if src.startswith('['):
+        return LeftSquareBracket.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:GeneralBodyContexts, offset:int) -> int|None:
+        if src.startswith('[', offset):
             return 1
         return None
     
@@ -514,7 +541,11 @@ class RightSquareBracket(Token[BlockBody]):
     
     @staticmethod
     def eat(src:str, ctx:BlockBody) -> int|None:
-        if src.startswith(']'):
+        return RightSquareBracket.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:BlockBody, offset:int) -> int|None:
+        if src.startswith(']', offset):
             return 1
         return None
     
@@ -546,7 +577,11 @@ class LeftParenthesis(Token[GeneralBodyContexts]):
     
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        if src.startswith('('):
+        return LeftParenthesis.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:GeneralBodyContexts, offset:int) -> int|None:
+        if src.startswith('(', offset):
             return 1
         return None
     
@@ -559,7 +594,11 @@ class RightParenthesis(Token[BlockBody]):
     
     @staticmethod
     def eat(src:str, ctx:BlockBody) -> int|None:
-        if src.startswith(')'):
+        return RightParenthesis.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:BlockBody, offset:int) -> int|None:
+        if src.startswith(')', offset):
             return 1
         return None
     
@@ -591,7 +630,11 @@ class LeftCurlyBrace(Token[Root|BlockBody|TypeBody|StringBody]):
     
     @staticmethod
     def eat(src:str, ctx:Root|BlockBody|TypeBody|StringBody) -> int|None:
-        if src.startswith('{'):
+        return LeftCurlyBrace.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:Root|BlockBody|TypeBody|StringBody, offset:int) -> int|None:
+        if src.startswith('{', offset):
             return 1
         return None
     
@@ -604,7 +647,11 @@ class TemplateLeftCurlyBrace(Token[TemplateStringBody]):
 
     @staticmethod
     def eat(src:str, ctx:TemplateStringBody) -> int|None:
-        if src.startswith('${'):
+        return TemplateLeftCurlyBrace.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:TemplateStringBody, offset:int) -> int|None:
+        if src.startswith('${', offset):
             return 2
         return None
     
@@ -617,7 +664,11 @@ class RightCurlyBrace(Token[BlockBody]):
     
     @staticmethod
     def eat(src:str, ctx:BlockBody) -> int|None:
-        if src.startswith('}'):
+        return RightCurlyBrace.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:BlockBody, offset:int) -> int|None:
+        if src.startswith('}', offset):
             return 1
         return None
     
@@ -649,7 +700,11 @@ class LeftAngleBracket(Token[GeneralBodyContexts]):
     
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
-        if src.startswith('<'):
+        return LeftAngleBracket.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:GeneralBodyContexts, offset:int) -> int|None:
+        if src.startswith('<', offset):
             return 1
         return None
     
@@ -662,7 +717,11 @@ class RightAngleBracket(Token[TypeBody]):
     
     @staticmethod
     def eat(src:str, ctx:TypeBody) -> int|None:
-        if src.startswith('>'):
+        return RightAngleBracket.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:TypeBody, offset:int) -> int|None:
+        if src.startswith('>', offset):
             return 1
         return None
     
@@ -1190,15 +1249,19 @@ class Number(Token[GeneralBodyContexts]):
     
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        return Number.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:GeneralBodyContexts, offset:int) -> int|None:
         """a based number is a sequence of 1 or more digits, optionally preceded by a (lowercase) base prefix (up to base-16)"""
         
         # try a number with a base prefix
-        if src[:2] in base_prefixes:
-            base = src[:2]
+        if src[offset:offset+2] in base_prefixes:
+            base = src[offset:offset+2]
             digits = base_digits[base]
-            if base_radixes[base] > MAX_NUMBER_BASE and len(src) > 2 and src[2] in digits: # skip if not a based number literal (e.g. based string)
-                Number.error_too_high_number_base(src, ctx, base)
-            i = 2
+            if base_radixes[base] > MAX_NUMBER_BASE and len(src) > offset+2 and src[offset+2] in digits: # skip if not a based number literal (e.g. based string)
+                Number.error_too_high_number_base(src[offset:], ctx, base)
+            i = offset + 2
             # Require at least one digit
             if not (i < len(src) and src[i] in digits):
                 # TODO: have error here if not a based string literal or based array literal
@@ -1206,19 +1269,19 @@ class Number(Token[GeneralBodyContexts]):
             # consume digits or underscores
             while i < len(src) and (src[i] in digits or src[i] == '_'):
                 i += 1
-            return i
+            return i - offset
         
         # try number with no prefix
         base = ctx.default_base if isinstance(ctx, BlockBody) else base10
         digits = base_digits[base]
-        i = 0
+        i = offset
         if not (i < len(src) and src[i] in digits):
             return None
         # consume digits or underscores
         while i < len(src) and (src[i] in digits or src[i] == '_'):
             i += 1
         
-        return i or None
+        return (i - offset) or None
     
     def action_on_eat(self, ctx:GeneralBodyContexts):
         if self.src[:2] in base_digits:
@@ -1253,6 +1316,10 @@ class ExponentMarker(Token[GeneralBodyContexts]):
 
     @staticmethod
     def eat(src:str, ctx:GeneralBodyContexts) -> int|None:
+        return ExponentMarker.eat_at(src, ctx, 0)
+
+    @staticmethod
+    def eat_at(src:str, ctx:GeneralBodyContexts, offset:int) -> int|None:
         """
         an exponent marker is a single character `eE` or `pP` with a number before and a number after
         This is specifically to disambiguate for floats where the exponent part is read as an identifier
@@ -1260,12 +1327,12 @@ class ExponentMarker(Token[GeneralBodyContexts]):
         """
         if len(ctx.tokens_so_far) == 0 or not isinstance(ctx.tokens_so_far[-1], Number):
             return None
-        if len(src) < 2:
+        if len(src) - offset < 2:
             return None
-        if src[0] not in 'eEpP':
+        if src[offset] not in 'eEpP':
             return None
         # don't check for +/- because it's not part of what we're trying to disambiguate
-        if (i:=Number.eat(src[1:], ctx)) is None:
+        if (i:=Number.eat_at(src, ctx, offset + 1)) is None:
             return None
         return i + 1
     def action_on_eat(self, ctx:GeneralBodyContexts):
@@ -1440,13 +1507,18 @@ def tokenize(srcfile: SrcFile) -> list[Token]:
         # try to eat all allowed tokens at the current position
         ctx = ctx_stack[-1]
         allowed_tokens = get_allowed_tokens(type(ctx), src[i])
-        # All probes see the same suffix. Copying it once per token class
-        # dominated large-module parsing, especially for Unicode source.
-        remaining = src[i:]
+        # Most probes read the original buffer by position. Preserve the
+        # suffix-based extension API without paying its copy on every token.
+        remaining: str | None = None
         matches: list[tuple[int, type[Token]]] = []
         longest_match_length = 0
         for token_cls in allowed_tokens:
-            length = token_cls.eat(remaining, ctx)
+            if token_cls.eat_at is not None:
+                length = token_cls.eat_at(src, ctx, i)
+            else:
+                if remaining is None:
+                    remaining = src[i:]
+                length = token_cls.eat(remaining, ctx)
             if length is None or length < longest_match_length:
                 continue
             if length > longest_match_length:

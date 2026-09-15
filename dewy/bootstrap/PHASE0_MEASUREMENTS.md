@@ -1811,3 +1811,37 @@ All pass on direct x86-64 and C output. The existing scalar/aggregate projection
 return-cleanup and temporary-element checks also pass using the same freshly
 built lowering driver. Artifacts: `phase0-performance/getter-locals-gates.log`
 and `getter-locals-boundaries.log`. A full native measurement remains pending.
+
+The getter-local integration checkpoint rebuilt the frozen `b342b2dc` compiler
+twice through C. The first generation contains the lowering rule; the second
+applies it to the compiler itself (four getter variants, 201 call sites).
+Those builds took 146.590 and 141.134 seconds including C compilation.
+The resulting second-generation compiler built the same source into a direct
+executable in **67.754 seconds**, versus 73.017 at the prior checkpoint.
+Frontend, validation, preparation, lowering, emission and backend took 17.653,
+8.577, 4.555, 16.112, 5.338 and 13.147 seconds; peak process RSS was 5,910,864
+KiB. This crosses neither the one-minute target nor a matching-target fixed
+point. Artifacts: `native-getter-locals-c{1,2}`, `source-getter-locals.json` and
+`native-getter-locals-full`.
+
+### Hosted position-aware token probes
+
+Common `t0` probes now scan the original source at an offset. Existing token
+extensions can still provide the suffix-based `eat` method; unmatched legacy
+probes share one lazily copied suffix at that position. Overriding `eat` clears
+an inherited position-aware probe, just as it clears an inherited first-character
+promise. Identifier, number, exponent, operator, delimiter and layout matching
+retain their previous precedence and context behavior. The lone-carriage-return
+warning now reports the file offset rather than the current suffix's offset.
+
+Tokenizing the frozen 298,500-character native checker module took a median
+**0.682 seconds before and 0.259 after**, across three samples each. An untimed
+instrumented scan counted 77,305 whole-suffix copies totaling 11,386,251,761
+characters before, versus 7,882 copies/1,168,144,429 characters after. The
+remaining suffix probes primarily handle strings and comments; ordinary token
+sequences have a zero-suffix-copy regression budget. All 113 frozen bootstrap
+module token graphs are byte-identical when pickled, including source locations
+and matching delimiter links. Eighty-four hosted token, diagnostic and parser
+regressions pass. These lexer results do not establish a new full hosted build
+time. Artifacts: `offset-token-{before,after}.json`, the corresponding logs,
+and `offset-token-probe-fixed-gates.log`.
