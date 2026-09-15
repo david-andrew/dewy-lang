@@ -2463,3 +2463,36 @@ to 5.928 and backend 1.013 to 0.870. Peak process RSS changes 140,020 to
 `direct-condition-width-gates.log`, `direct-condition-new-gates.log`,
 `measure-direct-fragments-fixed.log`; baseline packages are frozen from
 `1a83d30a` in `source-direct-fragments-before`.
+
+### Reuse unchanged storage cleanup and emit literal globals directly
+
+The final storage passes retain unchanged blocks and flow arms, comparing
+child identity rather than structural equality. Distinct occurrences remain
+distinct; changed parents are still rebuilt without modifying their input.
+The storage/array-sharing group passes 13 tests. Region/release checks pass
+12 initially, with three older object-release expectations also failing when
+unconditional reconstruction is restored. Those checks now follow the shared
+release helpers and distinguish initial string materialization from the
+subsequent move of array elements; all six object-release cases pass.
+Artifacts: `storage-cleanup-gates.log`, `storage-region-release-gates.log`,
+`storage-region-release-baseline.log`, `object-release-updated-gates.log`.
+
+The quiet full checkpoint at `06657fe4`, including direct condition/integer
+emission, takes **77.970 seconds**: checking 36.687, lowering 17.235, emission
+4.427 and backend 14.183; peak process RSS 1,347,376 KiB. This is an improvement
+from 85.881 seconds, but remains above the hosted target. The separate native
+checkpoint remains 45.809 seconds on the recorded PGO C-seed route.
+Artifact: `host-direct-cleanup-full`.
+
+The next bridge batch emits literal global bytes and stable word tables
+through µDewy's existing static values/relocations. Unsupported initializers
+fall back before allocating any partial static word table. Forward callable
+references and mutable-global initializers keep the parser's handling. Nine
+bridge execution cases pass both direct and C output; two additional checks
+compare the complete generated assembly/C text against source-parsed static
+declarations, including a retained callable reference and dynamic fallback.
+The quiet module comparison changes 9.533 to **8.380 seconds**, with backend
+0.837 to 0.758; variation in checking and startup also contributes to the
+whole-invocation difference. Full-build impact of this last batch is not yet
+measured. Artifacts: `direct-static-data-gates.log`,
+`direct-static-relocation-gates.log`, `measure-static-data.log`.

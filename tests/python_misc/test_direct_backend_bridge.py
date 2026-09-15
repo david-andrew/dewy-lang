@@ -169,3 +169,59 @@ main=(args:array<string>):>int64=>{
                                  str(target_source), 'argument'], capture_output=True,
                                 timeout=30, check=False)
         assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_static_globals_match_source_data_relocations_and_fallback(target):
+    from dewy.semantic import hir, ty
+    from dewy.reporting import Span
+    from udewy import p0
+
+    loc = Span(0, 0)
+    def integer(n):
+        return hir.Integer(loc, 'int64', '0d', n)
+    def identifier(name, type_='int64'):
+        return hir.ExpressedIdentifier(loc, type_, name)
+    def call(name, *args):
+        return hir.FunctionCall(loc, 'int64', identifier(name), list(args), {})
+    def constant(name, expr):
+        return hir.Declare(loc, 'void', 'const', name, 'int64', expr)
+
+    signature = ty.FunctionType([], [], None, 'int64')
+    literal = hir.FunctionLiteral(loc, signature, [], [], None, 'int64', integer(42))
+    globals_ = [
+        constant('size', integer(16)),
+        constant('text', hir.String(loc, 'int64', 'é🌱')),
+        constant('bytes', hir.BasedString(loc, 'int64', '0x', '00ff', b'\x00\xff')),
+        constant('scratch', call('__static_alloca__', identifier('size'))),
+        constant('callback', identifier('later', signature)),
+        constant('words', call('__static_words__', integer(-1), identifier('text'),
+                               identifier('bytes'), identifier('scratch'), identifier('callback'))),
+        hir.Declare(loc, 'void', 'let', 'mutable', 'int64', integer(7)),
+        constant('snapshot', identifier('mutable')),
+    ]
+    program = lower.LoweredProgram([lower.LoweredFunction('later', literal)], globals_, [],
+                                    None, '__startup', False)
+    root = hir.Block(loc, 'void', [], True)
+    outputs = []
+    for use_source in (False, True):
+        backend = get_backend(target)
+        backend.debug_info = False
+        driver = direct._DirectEmitter(program, root, backend)
+        fragments = []
+        original = driver.fragment
+        def fragment(text, parser):
+            fragments.append(text)
+            return original(text, parser)
+        driver.fragment = fragment
+        if use_source:
+            driver.global_declaration = lambda decl: driver.fragment(
+                emit.emit_declare(decl, driver.ctx), p0.parse_program)
+        outputs.append(driver.compile())
+        if not use_source:
+            # An unresolved function and a mutable global retain source
+            # handling; inspecting those values must not emit partial data.
+            assert len(fragments) == 2
+            assert fragments[0].startswith('const callback:')
+            assert fragments[1].startswith('const snapshot:')
+    assert outputs[0] == outputs[1]

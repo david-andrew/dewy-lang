@@ -1,7 +1,7 @@
 """Compile legalized HIR through the existing µDewy backend protocol.
 
 This internal bridge avoids the whole-program source/token round trip. The
-µDewy parser still handles static data and uncommon expression forms.
+µDewy parser still handles uncommon expression and static initializer forms.
 Conditions and integer operations use the same backend primitives as its
 parser, without printing and tokenizing expressions already checked by Dewy.
 Debugger builds continue to use the source route.
@@ -343,11 +343,67 @@ class _DirectEmitter:
         p0.pop_parse_scope(state)
         self.ctx = previous
 
-    def compile(self):
-        # Static declarations retain the µDewy parser's relocation and stable
-        # value machinery. Includes are already decoded in the lowered HIR.
-        for declaration in self.program.globals:
+    def stable_word(self, node):
+        """Inspect a lowered word without allocating data or recording uses.
+
+        Leave unfamiliar forms to the source parser. In particular, probing
+        one static initializer must not emit half its data before falling
+        back to that parser for an unsupported operand.
+        """
+        while isinstance(node, hir.ValueCast):
+            node = node.expr
+        if isinstance(node, hir.Integer):
+            return p0.StableValue('int', node.value)
+        if isinstance(node, hir.Bool):
+            return p0.StableValue('int', t1.TRUE_VALUE if node.value else t1.FALSE_VALUE)
+        if isinstance(node, hir.ExpressedIdentifier):
+            return p0.lookup_stable_value(self.state.scope_stack, self.state.global_table,
+                                          node.name, self.state.ctx.builtin_consts)
+        return None
+
+    def global_declaration(self, declaration):
+        """Emit the literal data produced by lowering, sharing µDewy relocations."""
+        backend, state = self.backend, self.state
+        p0.check_top_level_value_name(state, declaration.name, 0)
+        value = declaration.expr
+        while isinstance(value, hir.ValueCast):
+            value = value.expr
+        stable = self.stable_word(value)
+        if isinstance(value, (hir.String, hir.BasedString)):
+            data = value.content.encode('utf-8') if isinstance(value, hir.String) else value.content
+            stable = p0.StableValue('string', backend.intern_string(data))
+        elif (isinstance(value, hir.FunctionCall)
+              and isinstance(value.func, hir.ExpressedIdentifier)
+              and not value.kw_args):
+            name = value.func.name
+            if name in ('__static_words__', '__static_alloca__') and name not in self.ctx.local_names:
+                words = [self.stable_word(argument) for argument in value.pos_args]
+                if (name == '__static_words__' and words
+                        and all(word is not None and not p0.is_extern_function_value(state, word)
+                                for word in words)):
+                    for word in words:
+                        p0.note_stable_value_use(state, word)
+                        if word.kind == 'function':
+                            state.static_word_fn_locs.setdefault(word.value, 0)
+                    stable = p0.StableValue('static', backend.intern_words([
+                        p0.stable_value_to_directive(backend, word) for word in words]))
+                elif (name == '__static_alloca__' and len(words) == 1
+                      and words[0] is not None and words[0].kind == 'int' and words[0].value >= 0):
+                    stable = p0.StableValue('static', backend.intern_static(words[0].value))
+        if stable is None:
             self.fragment(emit.emit_declare(declaration, self.ctx), p0.parse_program)
+            return
+        p0.note_stable_value_use(state, stable)
+        label = backend.define_global(None, p0.stable_value_to_directive(backend, stable))
+        is_const = declaration.decltype == 'const'
+        p0.global_declare(state.global_table, declaration.name,
+                          p0.GlobalEntry(label, is_const, stable if is_const else None), '', 0)
+
+    def compile(self):
+        # Includes have already been decoded in the lowered HIR. Definitions
+        # still follow source order, including references in static words.
+        for declaration in self.program.globals:
+            self.global_declaration(declaration)
         for name, function in self.functions.items():
             self.function(name, function)
         return p0.finish_parse(self.state)
