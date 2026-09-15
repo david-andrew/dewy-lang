@@ -32,8 +32,8 @@ forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<str
         intervals.forget(@data.snapshot subject)
         if subject in? data.member_calls {data.member_calls.pop(subject); }
     }
-    loop route in data.registry.routes {
-        if route.root =? subject and bindings.path_starts_with(route.path prefix) {
+    loop route in data.registry.routes_by_root.get(subject []) {
+        if bindings.path_starts_with(route.path prefix) {
             facts.forget(@state facts.Term[route.id])
             facts.forget(@state facts.Term[route.id 'length'])
             intervals.forget(@data.snapshot route.id)
@@ -98,9 +98,9 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
         if node is? hir.ExpressedIdentifier {
             elements.copy(@state saved.term.binding_id subject word_type loc @data.registry)
             # Snapshot the routes before allocating copies of them.
-            let routes=data.registry.routes
+            let routes=data.registry.routes_by_root.get(saved.term.binding_id [])
             loop route in routes {
-                if route.root =? saved.term.binding_id and route.path.length >? 0 and route.path[0] not=? '*' {
+                if route.path.length >? 0 and route.path[0] not=? '*' {
                     let copied=bindings.route_id(@data.registry subject route.path word_type loc)
                     relations.copy_relational(@state facts.Term[route.id] facts.Term[copied])
                     relations.copy_relational(@state facts.Term[route.id 'length'] facts.Term[copied 'length'])

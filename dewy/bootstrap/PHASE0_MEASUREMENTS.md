@@ -1457,3 +1457,23 @@ lowering without duplicate helper construction. The geometry test compares
 array entries explicitly; aggregate comparison remains the separately recorded
 design/parity question. Artifacts: `source-lines-gates`,
 `native-reader-validation-samples`, and `source-lines-*-gate*.log`.
+
+### Group binding routes by their owning root
+
+The same validation profile found whole-registry route scans in binding
+invalidation. The native registry now stores route groups keyed by root;
+route allocation, subtree queries, element promises, projected replacement,
+and field initialization read just the relevant group. A binding's existing
+`route_root` metadata locates its group for reverse lookup. This is the
+primary representation, so rollback needs no separately synchronized index.
+Route allocation order and per-root insertion order remain unchanged.
+
+The isolated native kernel with 512 roots, 1,024 routes, and 10,000 paired
+identity/subtree queries takes **0.169 seconds before and 0.028 seconds after**.
+Its cumulative temporary allocation increases from **3.20 to 5.92 MB** due
+to retrieving the small group views; the speedup comes from avoiding unrelated
+roots, not from eliminating all temporary owners. Seven targeted tests pass,
+covering scope/route identities, lookup cost, transaction rollback and ID
+reuse, element promises, nested length terms, bounds validation, and container
+membership snapshots. The kernel also passes through the native CLI.
+Artifacts: `root-route-measurement`, `root-route-*-gate*.log`.

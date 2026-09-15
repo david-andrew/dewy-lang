@@ -29,15 +29,17 @@ route = (array:addr path:array<string> word_type:addr loc:Span @registry:binding
 }
 routes = (array:addr registry:bindings.Registry):>array<bindings.Route> => {
     let result:array<bindings.Route> = []
-    loop item in registry.routes {
-        if item.root =? array and item.path.length >? 0 and item.path[0] =? '*' { result.push(item) }
+    loop item in registry.routes_by_root.get(array []) {
+        if item.path.length >? 0 and item.path[0] =? '*' { result.push(item) }
     }
     return result
 }
 roots = (registry:bindings.Registry):>dict<addr addr> => {
     let result:dict<addr addr> = []
-    loop item in registry.routes {
-        if item.path.length >? 0 and item.path[0] =? '*' { result[item.id] = item.root }
+    loop [root group] in registry.routes_by_root {
+        loop item in group {
+            if item.path.length >? 0 and item.path[0] =? '*' { result[item.id] = root }
+        }
     }
     return result
 }
@@ -64,8 +66,8 @@ route_of = (id:addr env:values.Environment @registry:bindings.Registry):>addr? =
         fields.push(field.name)
         cursor += 1
     }
-    loop item in registry.routes {
-        if item.root =? array and item.path.length =? fields.length and bindings.path_starts_with(item.path fields) return item.id
+    loop item in registry.routes_by_root.get(array []) {
+        if item.path.length =? fields.length and bindings.path_starts_with(item.path fields) return item.id
     }
     return none
 }
@@ -80,12 +82,10 @@ sources = (id:addr env:values.Environment @registry:bindings.Registry):>array<So
             let value = terms.binding_term(field.value env @registry)
             if value is? none or value.projection not=? 'value' continue
             result.push(Source[[field.name] value.binding_id])
-            loop item in registry.routes {
-                if item.root =? value.binding_id {
-                    let path:array<string> = [field.name]
-                    loop name in item.path { path.push(name) }
-                    result.push(Source[path item.id])
-                }
+            loop item in registry.routes_by_root.get(value.binding_id []) {
+                let path:array<string> = [field.name]
+                loop name in item.path { path.push(name) }
+                result.push(Source[path item.id])
             }
         }
         return result
@@ -99,9 +99,7 @@ sources = (id:addr env:values.Environment @registry:bindings.Registry):>array<So
     if source is? none return []
     result.push(Source[[] source])
     if node is? hir.ExpressedIdentifier {
-        loop item in registry.routes {
-            if item.root =? source { result.push(Source[item.path item.id]) }
-        }
+        loop item in registry.routes_by_root.get(source []) { result.push(Source[item.path item.id]) }
     }
     return result
 }

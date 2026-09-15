@@ -40,6 +40,21 @@ main = ():>int64 => {
     if sibling =? route return 9
     if bindings.routes_under(registry first ['bag']).length not=? 1 return 10
     if bindings.routes_under(registry second []).length not=? 0 return 11
+    let found=bindings.route_at(registry route)
+    if found is? none or found.root not=? first or found.path.join('.') not=? 'bag.items' return 18
+    if bindings.route_at(registry first) isnt? none or bindings.route_at(registry 999999) isnt? none return 19
+    # A speculative registry is a value snapshot. Groups, metadata, and the
+    # route-id cursor roll back together; later allocation may reuse that id.
+    let saved=registry
+    let extra=bindings.route_id(@registry second ['temporary'] 0 loc)
+    if bindings.routes_under(saved second []).length not=? 0 return 20
+    if bindings.route_at(saved extra) isnt? none return 21
+    registry=saved
+    let reused=bindings.route_id(@registry first ['replacement'] 0 loc)
+    if reused not=? extra return 22
+    if bindings.route_id(@registry first ['bag' 'items'] 0 loc) not=? route return 23
+    if bindings.routes_under(registry second []).length not=? 0 return 24
+    if bindings.routes_under(saved first []).length not=? 2 return 25
 
     let nodes:array<hir.AST> = []
     let root = hir.append_node(@nodes hir.ExpressedIdentifier[loc=loc value_type=0 name='x' binding_id=first])
@@ -66,3 +81,14 @@ main = ():>int64 => {
     assert entry_point(lowered, [], EntryPointOptions(compile_only=True)) == 0
     result = subprocess.run([cache_artifact(lowered).resolve()], check=False, capture_output=True, timeout=30)
     assert result.returncode == 42, result.stderr.decode()
+
+
+def test_route_queries_do_not_copy_unrelated_roots(tmp_path):
+    source = ROOT / 'tests/fixtures/native_root_routes.dewy'
+    output = tmp_path / 'root-routes.udewy'
+    output.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], check=False,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 42, result.stderr
+    assert 0 <= int(result.stdout) < 25_000_000

@@ -136,9 +136,12 @@ main = ():>int64 => {{
     let contract = elements.declared_refinement({refined.binding_id} type_nodes registry)
     $runtime_assert contract isnt? none and contract.propositions.length =? 1
     let roots = elements.roots(registry)
-    loop route in registry.routes {{
-        if route.path.length >? 0 and route.path[0] =? '*' {{
-            $runtime_assert route.id in? roots and roots[route.id] =? route.root
+    loop [root group] in registry.routes_by_root {{
+        loop route in group {{
+            $runtime_assert route.root =? root
+            if route.path.length >? 0 and route.path[0] =? '*' {{
+                $runtime_assert route.id in? roots and roots[route.id] =? route.root
+            }}
         }}
     }}
     return 0

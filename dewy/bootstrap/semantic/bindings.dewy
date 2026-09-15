@@ -49,7 +49,10 @@ Registry:type = [
     next_route_id:addr=524288
     by_id:dict<addr Binding>=[]
     by_syntax:dict<addr addr>=[]
-    routes:array<Route>=[]
+    # A route belongs to one root binding. Keep that grouping as the primary
+    # representation: queries and invalidation need only that root's fields.
+    # Registry value snapshots carry the groups together with their bindings.
+    routes_by_root:dict<addr array<Route>>=[]
     generic_instances:dict<addr GenericInstance>=[]
 ]
 
@@ -82,21 +85,32 @@ path_starts_with = (path:array<string> prefix:array<string>):>bool => {
 }
 
 route_id = (@registry:Registry root:addr path:array<string> value_type:addr loc:Span):>addr => {
-    loop route in registry.routes {
-        if route.root =? root and route.path.length =? path.length and path_starts_with(route.path path) return route.id
+    let routes=registry.routes_by_root.get(root [])
+    loop route in routes {
+        if route.path.length =? path.length and path_starts_with(route.path path) return route.id
     }
     let owner = binding_at(registry root)
     let id = registry.next_route_id
     registry.next_route_id += 1
     registry.by_id[id] = Binding[id=id name="{owner.name}.{path.join('.')}" kind='value' loc=loc value_type=value_type route_root=root]
-    registry.routes.push(Route[id=id root=root path=path])
+    routes.push(Route[id=id root=root path=path])
+    registry.routes_by_root[root]=routes
     return id
+}
+
+route_at = (registry:Registry id:addr):>Route? => {
+    let binding=registry.by_id.get(id)
+    if binding is? none or binding.route_root is? none return none
+    loop route in registry.routes_by_root.get(binding.route_root []) {
+        if route.id =? id return route
+    }
+    return none
 }
 
 routes_under = (registry:Registry root:addr prefix:array<string>):>array<addr> => {
     let output:array<addr> = []
-    loop route in registry.routes {
-        if route.root =? root and path_starts_with(route.path prefix) { output.push(route.id) }
+    loop route in registry.routes_by_root.get(root []) {
+        if path_starts_with(route.path prefix) { output.push(route.id) }
     }
     return output
 }
@@ -186,7 +200,8 @@ extend_route = (id:addr fields:array<string> type_nodes:types.Table @registry:Re
     let path:array<string>=[]
     if binding.route_root isnt? none {
         root=binding.route_root
-        loop prior in registry.routes {if prior.id =? id {path=prior.path break}}
+        let prior=route_at(registry id)
+        if prior isnt? none {path=prior.path}
     }
     loop name in fields {path.push(name)}
     return route_id(@registry root path type binding.loc)

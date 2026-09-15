@@ -25,9 +25,8 @@ changed = (binding:addr state:addr @session:contexts.Session):>void => {
     let current = keys.forget(facts(state session) changed=binding)
     let owner = binding
     let prefix:array<string> = []
-    loop item in session.registry.routes {
-        if item.id =? binding { owner = item.root prefix = item.path break }
-    }
+    let item=bindings.route_at(session.registry binding)
+    if item isnt? none {owner=item.root prefix=item.path}
     # Replacement invalidates facts about the whole projected subtree,
     # including narrowed member types, while unrelated sibling routes stay.
     $runtime_assert state <? session.read_states.length
@@ -176,7 +175,8 @@ seed_fields = (binding:addr value:addr state:addr @session:contexts.Session):>vo
     if node isnt? hir.ObjectLiteral return void
     let owner = binding
     let path:array<string> = []
-    loop route in session.registry.routes { if route.id =? binding { owner = route.root path = route.path break } }
+    let route=bindings.route_at(session.registry binding)
+    if route isnt? none {owner=route.root path=route.path}
     let shape = types.node_at(session.types types.strip_refinement(node.value_type session.types))
     if shape isnt? types.ObjectType return void
     loop field in node.fields {
