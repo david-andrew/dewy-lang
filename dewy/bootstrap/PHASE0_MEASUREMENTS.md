@@ -1084,3 +1084,31 @@ collision handling, and the complete native bounds test. Artifacts are
 `fact-identity-before`, `fact-identity-after`, `fact-identity-native-before`,
 `fact-identity-native-after`, and the `fact-identity-*gates.log` files.
 Whole-compiler timing for the latest proof-query batches remains pending.
+
+
+### Proof-query integration and self-build acceptance repair
+
+Frozen `661c5b88` (`source-proof-identities`, archive and manifest retained)
+builds the complete compiler through the hosted C route in **204.33 seconds**:
+checking 64.83 s, lowering 33.14 s, emission 4.55 s, backend 95.97 s. Peak
+process RSS is 2,232,304 KiB. Toolchain, flags, cache controls, and isolated
+execution match the preceding C checkpoint. Emitted µDewy is 33,865,993 bytes,
+SHA-256 `6acbfd708cc1f6810a8c49dede7d3e6fd5083bf7811aa01e4af928a9e098070d`.
+
+The resulting native seed builds pinned t0 in **12.49 seconds**, peak RSS
+1,671,108 KiB. Frontend is 3.77 s, validation 3.93 s, initialization/reachability
+0.04 s, lowering 2.23 s, emission 0.91 s, backend 1.24 s. Generated µDewy is
+byte-identical to the preceding pinned t0 checkpoints. Artifacts:
+`host-full-proof-identities` and `native-proof-identities-t0`.
+
+The subsequent full native invocation **failed during frontend checking**
+after 39.45 s (`native-proof-identities-full`); it is not a successful build
+timing. Dictionary helper cache keys introduced an interpolation of the entire
+offsets dictionary, exposing native's still-missing structural conversion.
+Both probe/rebuild keys now encode their five accessed offsets in a fixed
+order. Missing fields remain distinct, and irrelevant map insertion order
+no longer affects reuse. A focused test verifies reordered maps, each changed
+offset, a missing values field, and retained snapshots; it passes through
+hosted direct/C code and the full native CLI. Existing dictionary growth,
+compaction, sharing, and helper-count gates pass too. Artifacts:
+`dictionary-layout-key-*`. The full native build is retried separately.

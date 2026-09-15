@@ -3291,7 +3291,7 @@ dict_rebuild = (parts:DictParts room:addr node:hir.AST @state:State):>addr => {
     # Rebuilding compacts/reclaims entries and initializes an entire table.
     # A lookup needs only a call to that code, not another expanded copy.
     # Offsets distinguish container views with different physical layouts.
-    let key="dict_rebuild:{parts.key}:{parts.value}:{parts.layout.offsets}:{room}"
+    let key="dict_rebuild:{parts.key}:{parts.value}:{layouts.dictionary_key(parts.layout)}:{room}"
     let name=state.copy_helpers.get(key)
     let empty=types.primitive('void' @state.type_nodes)
     if name is? none {
@@ -3381,7 +3381,7 @@ dict_ensure = (parts:DictParts node:hir.AST @state:State room:addr=0 compact:boo
 }
 dict_probe = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @state:State):>DictProbe => {
     if state.allocator is? none return dict_probe_body(parts key node @prefix @state)
-    let shape="dict_probe:{parts.key}:{parts.layout.offsets}"
+    let shape="dict_probe:{parts.key}:{layouts.dictionary_key(parts.layout)}"
     let name=state.copy_helpers.get(shape)
     let word_type=types.primitive('int64' @state.type_nodes)
     if name is? none {

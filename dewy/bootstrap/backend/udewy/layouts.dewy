@@ -19,6 +19,19 @@ Storage:type = const [size:addr alignment:uint8 & ~0 signed:bool=false]
 Record:type = const [size:addr alignment:uint8 & ~0 offsets:dict<string addr>]
 Pending:type = const [detail:string]
 Context:type = const [brands:brands.Registry=brands.Registry[] nominals:set<addr>=set[]]
+
+# Dictionary helpers access only these fields. Key their physical layout in
+# a fixed order, independently of the offsets map's insertion order or its
+# display conversion. An absent values field distinguishes a set view.
+dictionary_key = (layout:Record):>string => {
+    let keys=layout.offsets.get('keys')
+    let values=layout.offsets.get('values')
+    let hashes=layout.offsets.get('hashes')
+    let indices=layout.offsets.get('indices')
+    let live=layout.offsets.get('live')
+    return "{keys}:{values}:{hashes}:{indices}:{live}"
+}
+
 align = (offset:addr alignment:uint8 & ~0):>addr => {
     let width:addr & ~0=alignment as int64
     let remainder=offset % width
