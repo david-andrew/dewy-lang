@@ -4,6 +4,7 @@ import p"cache_bytes.dewy" as bytes
 import p"../targets.dewy" as targets
 import p"../invocation/platform.dewy" as platform
 import p"validation_analysis.dewy" as analysis
+import p"hir.dewy" as hir
 
 # This is an optional compiler artifact. A failed read, stale input, incomplete
 # write, or incompatible snapshot simply returns control to ordinary checking.
@@ -78,6 +79,18 @@ inputs_match = (snapshot:state.PreludeSnapshot entry:Entry):>bool => {
     }
     loop binding in snapshot.prelude_bindings.values {
         if binding not in? snapshot.session.registry.by_id return false
+    }
+    # Included binary files are inputs too. Their length participates in
+    # checking, and lowering may embed their bytes directly from disk.
+    # HIR already retains both the resolved path and the checked contents.
+    loop node in snapshot.session.hir {
+        if node isnt? hir.BasedString or node.include_path is? none continue
+        let current=p(node.include_path).read_bytes
+        if current isnt? array<uint8> or current.length not=? node.content.length return false
+        loop index in 0.. and index <? current.length {
+            $runtime_assert index <? node.content.length
+            if current[index] not=? node.content[index] return false
+        }
     }
     return true
 }

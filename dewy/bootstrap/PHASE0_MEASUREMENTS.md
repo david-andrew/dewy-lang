@@ -3149,3 +3149,36 @@ warnings, constants, and arbitrary-precision interval bounds through both
 hosted output targets and native direct output. Artifacts:
 `cache-schema/validation-final-gates.log`, `cache-schema/proof-{hosted,native}-matrix.log`,
 `cache-schema/proof-native-snapshot.log`. Normal CLI measurements follow.
+
+The `a8619dab` C-built accelerator reduces the small input's warm rebuild
+from 4.072 to **0.816 seconds**, and the tokenizer's from 6.827 to
+**3.322 seconds**. Cold builds measure 5.926 and 7.780 seconds, respectively.
+Both use frozen `f1345e78` sources and library, with the `d32f29e3` C-built
+µDewy backend and direct x86-64 output. Cold/warm emitted sources have identical
+hashes and sizes to the preceding measurements. Artifacts:
+`prelude-proofs-{small,module}-{cold,warm}`.
+
+Building the frozen `a8619dab` full compiler through the preceding `f1345e78`
+C accelerator takes 57.682 seconds, with 5,991,212 KiB maximum process RSS
+and 52,891,805 emitted bytes. This measures construction of the new compiler,
+not its own full-build performance. The new C accelerator is a single
+integration generation, not a refreshed fixed-point pair. Artifacts:
+`source-prelude-proofs`, `native-prelude-proofs-{full,c-seed}`.
+
+### Binary inputs are prelude dependencies
+
+Both prelude caches now check files read by `$include_bytes`, including
+unchanged-size/timestamp edits and missing files. The native snapshot retains
+all HIR arena nodes, including binary contents and paths. The hosted loader
+records the reads explicitly, keeping dependencies independent of later HIR
+transformations. It also records path resolutions so redirecting an import
+or binary-file symlink invalidates a snapshot while the old target survives.
+Resident rollback restores the prelude's original input ledger before checking
+the next entry module. Hosted cache format 3 includes that ledger.
+
+Fifteen hosted cache/measurement checks pass. The native invalidation matrix
+passes through both hosted-built and native-built drivers, including an
+include used only for its constant length, as well as the earlier proof,
+source, target and compiler identity cases. Artifacts:
+`cache-schema/input-ledger-final-gates.log`,
+`cache-schema/binary-final-matrices.log`.

@@ -15479,12 +15479,16 @@ def _tcr_include_bytes(loc: Span, right: p0.AST, *, ctx: Context) -> hir.AST:
             hint='a path literal such as `p"data/table.bin"` (relative to this source file)',
         )
     included = Path(path_text)
+    requested = included
     if not included.is_absolute():
         base = Path(str(ctx.srcfile.path)).resolve().parent if ctx.srcfile.path is not None else Path.cwd()
-        included = (base / included).resolve()
+        requested = base / included
+        included = requested.resolve()
     if not included.is_file():
         user_error(ctx.srcfile, 'included file not found', Pointer(span=pos_args[0].loc, message=f'no such file: {included}'))
     content = included.read_bytes()
+    if ctx.module_loader is not None:
+        ctx.module_loader.record_binary_input(requested, included, content)
     return hir.BasedString(loc, ty.BinaryLiteralType(content), t0.base16, content.hex(), content, include_path=str(included))
 
 

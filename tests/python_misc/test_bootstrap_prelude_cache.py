@@ -91,6 +91,38 @@ def check_prelude_cache(binary, work):
                              env=enabled_env, capture_output=True, text=True, timeout=60)
     assert generic.returncode == 1, generic.stdout + generic.stderr
     assert 'assertion refuted' in generic.stderr + generic.stdout
+    main.write_text('main=():>int64=>answer\n')
+    blob = work / 'table.bin'
+    blob.write_bytes(bytes([40, 0]))
+    prelude.write_text(prelude.read_text() +
+                       "let make_path=(text:string):>[path:string]=>[path=text]\n"
+                       "$include_bytes(make_path('table.bin')) as table\n")
+    run(False, 43)
+    run(True, 43)
+    stamp = blob.stat()
+    blob.write_bytes(bytes([41, 0]))
+    os.utime(blob, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    run(False, 43)
+    run(True, 43)
+    blob.write_bytes(bytes([41, 0, 0]))
+    run(False, 43)
+    run(True, 43)
+    blob.unlink()
+    missing = subprocess.run([binary, work, 'x86_64'], cwd=ROOT,
+                             env=enabled_env, capture_output=True, text=True, timeout=60)
+    assert missing.returncode == 1, missing.stdout + missing.stderr
+    assert 'included file not found' in missing.stdout + missing.stderr
+    # Folding away an include expression must not discard its dependency.
+    blob.write_bytes(bytes([1, 2, 3]))
+    prelude.write_text(prelude.read_text().replace(
+        "$include_bytes(make_path('table.bin')) as table",
+        "const table_size=$include_bytes(make_path('table.bin')).length"))
+    main.write_text('main=():>int64=>table_size\n')
+    run(False, 3)
+    run(True, 3)
+    blob.write_bytes(bytes([1, 2]))
+    run(False, 2)
+    run(True, 2)
     assert not list((work / 'cache').glob('*.tmp-*'))
 
 

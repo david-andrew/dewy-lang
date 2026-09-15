@@ -136,3 +136,85 @@ def test_transitive_prelude_input_invalidates_checked_state(tmp_path, monkeypatc
     monkeypatch.setenv('DEWY_NO_PRELUDE_CACHE', '1')
     assert codegen(source) == changed
     assert dependency in validated and prelude in validated
+
+
+@pytest.mark.parametrize('resident', [False, True])
+@pytest.mark.parametrize('folded', [False, True])
+def test_included_binary_invalidates_checked_prelude(tmp_path, monkeypatch, resident, folded):
+    from dewy.semantic import modules, hir
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv('DEWY_NO_PRELUDE_CACHE', raising=False)
+    if resident:
+        monkeypatch.delenv('DEWY_NO_RESIDENT_PRELUDE', raising=False)
+    else:
+        monkeypatch.setenv('DEWY_NO_RESIDENT_PRELUDE', '1')
+    prelude = tmp_path / 'prelude.dewy'
+    prelude.write_text("const size=$include_bytes([path='table.bin']).length\n" if folded
+                       else "$include_bytes([path='table.bin']) as table\n")
+    monkeypatch.setattr(modules, 'prelude_files', lambda target: (prelude,))
+    blob = tmp_path / 'table.bin'
+    blob.write_bytes(bytes([40, 0]))
+
+    def compiler():
+        return ModuleCompiler(SrcFile(None, 'void'), 'x86_64')
+
+    cold = compiler()
+    cold._ensure_prelude()
+    assert compiler()._restore_checked_prelude()
+    stamp = blob.stat()
+    for content in (bytes([41, 0]), bytes([41, 0, 0])):
+        blob.write_bytes(content)
+        os.utime(blob, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        changed = compiler()
+        assert not changed._restore_checked_prelude()
+        changed._ensure_prelude()
+        included = [node for record in changed.order for node in hir.walk(record.root)
+                    if isinstance(node, hir.BasedString) and node.include_path is not None]
+        assert all(node.content == content for node in included)
+        assert changed.included_files[blob] == content
+        assert compiler()._restore_checked_prelude()
+    # A new target must invalidate even when the old resolved file survives.
+    original = tmp_path / 'original.bin'
+    blob.rename(original)
+    blob.symlink_to(original)
+    changed = compiler()
+    assert not changed._restore_checked_prelude()
+    changed._ensure_prelude()
+    assert compiler()._restore_checked_prelude()
+    replacement = tmp_path / 'replacement.bin'
+    replacement.write_bytes(bytes([42]))
+    blob.unlink()
+    blob.symlink_to(replacement)
+    assert not compiler()._restore_checked_prelude()
+    compiler()._ensure_prelude()
+    assert compiler()._restore_checked_prelude()
+    blob.unlink()
+    assert not compiler()._restore_checked_prelude()
+
+
+def test_redirected_prelude_import_invalidates_cached_resolution(tmp_path, monkeypatch):
+    from dewy.semantic import modules, prelude as prelude_config
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv('DEWY_NO_PRELUDE_CACHE', raising=False)
+    first = tmp_path / 'first.dewy'
+    second = tmp_path / 'second.dewy'
+    first.write_text('const answer:int64=42\n')
+    second.write_text('const answer:int64=43\n')
+    dependency = tmp_path / 'dependency.dewy'
+    dependency.symlink_to(first)
+    prelude = tmp_path / 'prelude.dewy'
+    prelude.write_text('import dependency as dependency\nconst answer:int64=dependency.answer\n')
+    monkeypatch.setattr(prelude_config, 'library', tmp_path)
+    monkeypatch.setattr(modules, 'prelude_files', lambda target: (prelude,))
+    source = SrcFile(None, 'main=():>int64=>answer\n')
+    cold = codegen(source)
+    assert codegen(source) == cold
+    dependency.unlink()
+    dependency.symlink_to(second)
+    changed = codegen(source)
+    assert changed != cold
+    assert codegen(source) == changed
+    monkeypatch.setenv('DEWY_NO_PRELUDE_CACHE', '1')
+    assert codegen(source) == changed

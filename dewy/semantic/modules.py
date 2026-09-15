@@ -32,7 +32,7 @@ class ModuleRecord:
     prelude: bool = False
 
 
-_PRELUDE_CACHE_VERSION = 2
+_PRELUDE_CACHE_VERSION = 3
 
 
 class _ResidentPrelude:
@@ -58,6 +58,8 @@ class _ResidentPrelude:
         self.next_id = registry.next_id
         self.next_route_id = registry.next_route_id
         self.records = dict(state['records'])
+        self.included_files = dict(state['included_files'])
+        self.input_resolutions = dict(state['input_resolutions'])
         self.order = list(state['order'])
         self.notes = list(state['representation_notes'])
         system = state['type_system']
@@ -98,6 +100,10 @@ class _ResidentPrelude:
             registry.next_route_id = self.next_route_id
         state['records'].clear()
         state['records'].update(self.records)
+        state['included_files'].clear()
+        state['included_files'].update(self.included_files)
+        state['input_resolutions'].clear()
+        state['input_resolutions'].update(self.input_resolutions)
         state['order'][:] = self.order
         state['representation_notes'][:] = self.notes
         state['finished_roots'].clear()
@@ -158,6 +164,8 @@ class ModuleCompiler:
         builtins.apply_builtin_promote_rules(self.type_system)
         self.registry = sb.BindingRegistry()
         self.records: dict[Path, ModuleRecord] = {}
+        self.included_files: dict[Path, bytes] = {}
+        self.input_resolutions: dict[Path, Path] = {}
         self.prototype: check.ModuleDirectives | None = None
         self.order: list[ModuleRecord] = []
         self.stack: list[Path] = []
@@ -200,6 +208,7 @@ class ModuleCompiler:
     _PRELUDE_STATE_FIELDS = (
         'type_system', 'registry', 'records', 'order', 'prelude_bindings',
         'prelude_loaded', 'prelude_paths', 'representation_notes', 'finished_roots',
+        'included_files', 'input_resolutions',
     )
 
     def _checked_prelude_path(self) -> Path | None:
@@ -221,15 +230,22 @@ class ModuleCompiler:
         return Path('__dewycache__') / 'prelude' / f'{self.target}-{digest.hexdigest()[:24]}.pickle'
 
     @staticmethod
-    def _prelude_inputs_match(records: dict[Path, ModuleRecord]) -> bool:
+    def _prelude_inputs_match(records: dict[Path, ModuleRecord], included: dict[Path, bytes], resolutions: dict[Path, Path]) -> bool:
         # Include imports of the prelude, not only the initial file list used
         # in the cache key. Equal sizes and timestamps do not prove equality.
         try:
-            return bool(records) and all(
+            if not records or not all(
                 record.prelude and path == record.path
                 and path.read_text() == record.srcfile.body
                 for path, record in records.items()
-            )
+            ):
+                return False
+            # Record reads when checking performs them, including inputs
+            # whose HIR later disappears through constant folding. Retain
+            # path resolution too: a redirected source symlink can change
+            # file-relative imports even when its own contents are identical.
+            return (all(path.resolve() == target for path, target in resolutions.items())
+                    and all(path.read_bytes() == content for path, content in included.items()))
         except (OSError, UnicodeError):
             return False
 
@@ -249,7 +265,7 @@ class ModuleCompiler:
             del _resident_preludes[cache_path]
             resident = None
         if resident is not None:
-            if not self._prelude_inputs_match(resident.records):
+            if not self._prelude_inputs_match(resident.records, resident.included_files, resident.input_resolutions):
                 del _resident_preludes[cache_path]
                 return False
             # the state a compile in this process already loaded: what that
@@ -259,7 +275,7 @@ class ModuleCompiler:
         else:
             try:
                 version, state, nominal_types = pickle.loads(cache_path.read_bytes())
-                if version != _PRELUDE_CACHE_VERSION or not self._prelude_inputs_match(state['records']):
+                if version != _PRELUDE_CACHE_VERSION or not self._prelude_inputs_match(state['records'], state['included_files'], state['input_resolutions']):
                     return False
             except Exception:
                 return False   # a stale or corrupt entry: check the prelude and rewrite it
@@ -299,6 +315,10 @@ class ModuleCompiler:
         except (OSError, pickle.PicklingError, TypeError, AttributeError):
             pass   # the cache is an optimization; a state that cannot be pickled is checked every time
 
+    def record_binary_input(self, requested: Path, path: Path, content: bytes) -> None:
+        self.input_resolutions[requested.absolute()] = path.resolve()
+        self.included_files[path] = content
+
     def load(
         self,
         path: PathLike[str],
@@ -308,7 +328,10 @@ class ModuleCompiler:
         entry: bool = False,
         prelude: bool = False,
     ) -> ModuleRecord:
-        path = Path(path).resolve()
+        requested = Path(path).absolute()
+        path = requested.resolve()
+        if prelude:
+            self.input_resolutions[requested] = path
         cached = self.records.get(path)
         if cached is not None:
             return cached
