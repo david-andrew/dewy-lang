@@ -1,0 +1,15 @@
+# Every container length is a position in the address space, including after
+# deletion leaves tombstones or clearing removes all live entries.
+dictionary_count=(value:dict<string int64>):>addr=>value.length
+set_count=(value:set<int64>):>addr=>value.length
+main=():>int64=>{
+    let dictionary:dict<string int64>=['a'->20 'b'->22]
+    let members:set<int64>=set[20 22]
+    if dictionary_count(dictionary) not=? 2 or set_count(members) not=? 2 return 1
+    dictionary.pop('a' default=0);
+    members.pop(20 default=0);
+    if dictionary_count(dictionary) not=? 1 or set_count(members) not=? 1 return 2
+    dictionary.clear(); members.clear();
+    if dictionary_count(dictionary) not=? 0 or set_count(members) not=? 0 return 3
+    return 42
+}

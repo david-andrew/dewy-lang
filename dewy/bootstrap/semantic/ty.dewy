@@ -17,7 +17,10 @@ union construction preserves order, while a semantic join may absorb members.
 # `shape` overrides that key for structural equality. Defaults, method bodies,
 # and resolved proof bindings must survive interning even though the hosted
 # language deliberately excludes them from type equality.
-Type = $abstract type of [key:string shape:string?=none]
+# Both keys are local to a table: child shapes refer to canonical structural
+# ids, so a shared child graph is not serialized again into every parent.
+# Only intern assigns shape_id; it is not a stored-description index.
+Type = $abstract type of [key:string shape:string?=none shape_id:addr=0]
 Primitive = type of Type & [name:string]
 TypeAnd = type of Type & [items:array<addr>]
 TypeOr = type of Type & [items:array<addr>]
@@ -116,6 +119,12 @@ Table:type = [
     # or the inheritance graph. Drop their ids on speculative truncation.
     combinations:dict<string addr>=[]
     positional_functions:dict<string addr>=[]
+    # Exact compact structural keys, never hash-only equality. Keep these ids
+    # across truncation: retained keys can name discarded child descriptions,
+    # and an id must never acquire a different meaning when entries are reused.
+    # Forking a table forks this index with it; keys are not portable between
+    # independent tables. Its lifetime is one compilation's type arena.
+    shape_positions:dict<string addr>=[]
 ]
 
 
@@ -131,30 +140,24 @@ shape_of = (id:addr nodes:Table):>string => {
     let shape=nodes.entries[id].shape
     return if shape is? none nodes.entries[id].key else shape
 }
-# Equality consumes the identity while its owners remain alive. Returning
-# both identity strings from shape_of would first copy and resegment them;
-# nested record keys can be large even when they differ in the first byte.
-same_shape = (left:Type right:Type):>bool => {
-    if left.shape isnt? none {
-        if right.shape isnt? none return left.shape =? right.shape
-        return left.shape =? right.key
-    }
-    if right.shape isnt? none return left.key =? right.shape
-    return left.key =? right.key
-}
+# Canonical ids compare exact structure within this arena. Stored ids alone
+# differ when defaults/method bodies/proof provenance need separate entries.
 same_type = (a:addr b:addr nodes:Table):>bool => {
     if a =? b return true
     $runtime_assert a <? nodes.entries.length and b <? nodes.entries.length
-    return same_shape(nodes.entries[a] nodes.entries[b])
+    return nodes.entries[a].shape_id =? nodes.entries[b].shape_id
 }
-# Shape components are length-prefixed, not recursively quoted. Quoting an
-# already encoded child doubles its escapes at every enclosing type layer;
-# nested compiler types then spend most of checking copying those escapes.
-# Prefixing the component length preserves exact, collision-free identity.
+# A parent encodes each child once as an interned structural reference. Two
+# fields pointing at the same child must not double a recursively serialized
+# description at every level. Delimiters remain unambiguous for literal data.
 component = (value:string):>string => "{value.length}:{value}"
+shape_reference = (id:addr nodes:Table):>string => {
+    $runtime_assert id <? nodes.entries.length
+    return "{nodes.entries[id].shape_id}"
+}
 shapes_key = (items:array<addr> nodes:Table):>string => {
     let parts:array<string> = []
-    loop id in items { parts.push(component(shape_of(id nodes))) }
+    loop id in items { parts.push(component(shape_reference(id nodes))) }
     return parts.join(',')
 }
 contains_type = (items:array<addr> id:addr nodes:Table):>bool => {
@@ -164,8 +167,8 @@ contains_type = (items:array<addr> id:addr nodes:Table):>bool => {
 
 
 # Factories probe the storage key before constructing a shape or description.
-# A shape recursively includes child identities and can dwarf its small key;
-# producing it again on an intern hit turns cheap type queries into copies.
+# Even a compact shape needs field/parameter walks; producing it again on an
+# intern hit turns cheap type queries into allocations and repeated work.
 # The arena owns this index, so forks and truncation also govern factory hits.
 # Keep declaration metadata in the key: structural equality alone cannot
 # authorize reusing defaults, methods, or resolved proof bindings.
@@ -177,6 +180,11 @@ intern = (@nodes:Table value:Type):>addr<i => i <? nodes.entries.length> => {
         $runtime_assert known <? nodes.entries.length
         return known
     }
+    let shape=if value.shape is? none value.key else value.shape
+    let found=nodes.shape_positions.get(shape)
+    let structural=if found is? none nodes.shape_positions.length else found
+    if found is? none {nodes.shape_positions[shape]=structural}
+    value.shape_id=structural
     let id=nodes.entries.length
     nodes.entries.push(value)
     nodes.positions[value.key]=id
@@ -551,7 +559,7 @@ path_type = (value:string? methods:array<MethodSpec> @nodes:Table):>addr => {
     let key = "K{description.key}"
     let known=nodes.positions.get(key)
     if known isnt? none return known
-    let shape = "K{shape_of(base nodes)}"
+    let shape = "K{component(shape_reference(base nodes))}"
     if value is? none return intern(@nodes PathType[key=key shape=shape fields=description.fields methods=methods])
     return intern(@nodes PathLiteralType[key=key shape=shape fields=description.fields methods=methods value=value])
 }
@@ -567,7 +575,7 @@ resolve_alias = (id:addr target:addr @nodes:Table):>void => {
     let node = nodes.entries[id]
     $runtime_assert node is? NamedType
     # Resolution changes the target, not the recursive reference's identity.
-    nodes.entries[id] = NamedType[key=node.key name=node.name alias_id=node.alias_id target=target]
+    nodes.entries[id] = NamedType[key=node.key shape_id=node.shape_id name=node.name alias_id=node.alias_id target=target]
 }
 unfold = (id:addr nodes:Table):>addr => {
     let node = node_at(nodes id)
@@ -582,13 +590,13 @@ meta_type = (family:addr @nodes:Table):>addr => {
     return intern(@nodes MetaType[key=key shape="H{shapes_key([family] nodes)}" family=family])
 }
 alias_key = (value:TypeAliasValue nodes:Table structural:bool):>string => {
-    if value is? addr return if structural shape_of(value nodes) else "{value}"
+    if value is? addr return if structural shape_reference(value nodes) else "{value}"
     let params:array<string> = []
     loop param in value.params {
-        let bound = if structural shape_of(param.bound nodes) else "{param.bound}"
+        let bound = if structural shape_reference(param.bound nodes) else "{param.bound}"
         params.push("{_quoted(param.name)}:{component(bound)}")
     }
-    let body = if structural shape_of(value.body nodes) else "{value.body}"
+    let body = if structural shape_reference(value.body nodes) else "{value.body}"
     return "alias[{params.join(';')}]:{component(body)}"
 }
 module_type = (fields:array<ModuleField> @nodes:Table):>addr => {

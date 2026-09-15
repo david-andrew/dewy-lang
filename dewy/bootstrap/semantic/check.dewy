@@ -3154,7 +3154,7 @@ container_member = (receiver:addr entry:views.EntryTypes name:string id:addr env
     let loc = contexts.node_at(id env.lexical session).loc
     let is_set = entry.value is? none
     if name =? 'length' {
-        return put(hir.MemberAccess[loc types.primitive('int64' @session.types) receiver 'live' false] @session)
+        return put(hir.MemberAccess[loc views.addr_type(@session.types) receiver 'live' false] @session)
     }
     if name in? ['keys' 'values'] {
         if is_set and name =? 'keys' return problem(id 'sets have no keys' 'use `.values` for the members as an array' env session)

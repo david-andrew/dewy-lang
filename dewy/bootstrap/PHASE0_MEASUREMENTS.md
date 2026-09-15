@@ -1198,3 +1198,34 @@ The sources exclude bootstrap test fixtures containing intentionally reserved
 or invalid syntax. Thirty-one focused loop/iterator and debugger metadata
 checks pass. Artifacts: `syntax-scans-{before,after}.{json,log}`,
 `measure-syntax-scans.py`, and `syntax-traversal-gates.log`.
+
+
+### Compact structural type identities
+
+Native structural keys now refer to exact, interned child shapes within their
+type arena. Metadata-distinct stored entries can share a structural id;
+semantic equality compares those ids without copying complete type records.
+The structural index compares complete compact keys, not hashes alone. It
+survives truncation so a reused stored-description slot cannot change the
+meaning of an existing child reference, and table snapshots retain their own
+index. Keys and ids are arena-local, not a cross-arena serialization format.
+Alias resolution explicitly preserves the reference's structural identity.
+Numeric union tag order remains internal and is canonical within the program.
+
+For two metadata-distinct but structurally equal binary DAGs twelve layers
+deep, construction allocates **79,391,936 → 139,328 bytes** in hosted-generated
+direct code. The root key shrinks from **299,511 to 39 characters**. The test
+also checks distinct field names, separate aliases sharing a target, retained
+forks, and stored-id reuse after full truncation. Ten focused type/container
+checks pass, including the subtype/normalization/dispatch matrix and direct/C
+execution. Artifacts: `structural-ids-*` and `container-length-final-gates.log`.
+Native-built kernel and full compiler timing remain integration gates.
+
+Constructing the structural index exposed a missing language fact: dictionary
+and set lengths used unrestricted `int64` in both checkers. Their stored live
+count and source `.length` now carry the existing `addr` contract, as array
+and string lengths already do. This preserves the invariant even on hosted
+writes through the exposed live field; a negative count is rejected. A real
+container fixture checks counts after removal and clearing. Existing native
+seeds lack this length fact, so the updated hosted compiler provides the next
+seed before native compilation of this new source is verified.

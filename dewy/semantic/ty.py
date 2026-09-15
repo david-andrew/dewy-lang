@@ -867,7 +867,7 @@ def dict_type(key: TypeExpr, value: TypeExpr) -> ObjectType:
             # an entry index), and the live entry count
             ObjectField('hashes', ArrayType('int64', None)),
             ObjectField('indices', ArrayType('int64', None)),
-            ObjectField('live', 'int64'),
+            ObjectField('live', addr_type()),
         ),
         'dict',
     )
@@ -884,7 +884,7 @@ def set_type(element: TypeExpr) -> ObjectType:
             ObjectField('keys', ArrayType(canonical(element), None)),
             ObjectField('hashes', ArrayType('int64', None)),
             ObjectField('indices', ArrayType('int64', None)),
-            ObjectField('live', 'int64'),
+            ObjectField('live', addr_type()),
         ),
         'set',
     )

@@ -51,7 +51,7 @@ container_type = (key:addr value:addr? @nodes:types.Table):>addr => {
     if value isnt? none { fields.push(types.ObjectField['values' types.array_type(canonical_entry(value @nodes) none @nodes)]) }
     fields.push(types.ObjectField['hashes' words])
     fields.push(types.ObjectField['indices' words])
-    fields.push(types.ObjectField['live' word])
+    fields.push(types.ObjectField['live' addr_type(@nodes)])
     return types.object_type(fields (if value is? none 'set' else 'dict') false [] [] @nodes)
 }
 dict_type = (key:addr value:addr @nodes:types.Table):>addr => container_type(key value @nodes)
@@ -167,8 +167,9 @@ optional_payload = (id:addr @nodes:types.Table):>addr? => {
     return none
 }
 
-# Tags use structural keys, not arena ids or Python repr. Their exact numeric
-# order is internal; every spelling of the same alternatives must agree.
+# Tags use canonical structural keys rather than stored-description ids or
+# Python repr. Child references in those keys belong to this type arena.
+# Numeric order is internal; the same alternatives must agree within a program.
 # None stays tag zero, aligning general unions with optional cells.
 MemberKey:type = const [id:addr key:string]
 canonical_members = (members:array<addr> nodes:types.Table):>array<addr> => {

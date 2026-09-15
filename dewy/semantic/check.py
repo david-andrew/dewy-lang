@@ -8722,7 +8722,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         found_dict = _dict_value(value)
         if found_dict is not None:
             # the live entry count (removed entries stay as tombstones)
-            return hir.MemberAccess(binop.loc, 'int64', found_dict[0], 'live')
+            return hir.MemberAccess(binop.loc, ty.addr_type(), found_dict[0], 'live')
         if isinstance(value.type, ty.BinaryLiteralType):
             value = hir.RepresentationCast(
                 value.loc,
