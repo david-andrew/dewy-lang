@@ -1707,3 +1707,28 @@ explicit global-write/value-call/place-call/capture-call distinction in
 unknown callbacks, failure messages and indexed borrowing. Four additional
 hosted container-flow execution checks passed on direct x86-64 and C. This
 batch has not yet received a full native self-build performance measurement.
+
+### Hosted string-body queries and debug-variable collection
+
+String lowering now retains each literal's initializer candidates and return
+expressions within one lowerer, instead of rescanning that body for individual
+variable queries. Rewritten function literals have independent entries; cache
+entries retain their literal so object-id reuse cannot cross bodies. String
+walkers also reuse the existing dataclass-field metadata cache. Ordinary
+emission explicitly skips the checker's debug-variable collection; typechecking
+API defaults and debug emission retain their previous metadata behavior.
+
+A 256-local body queried 1,000 times took 1.817 seconds before and 0.001813
+seconds after, returning the same 256,000-entry checksum. A fresh hosted `t0`
+module executable build took 11.335 seconds before and 10.436 after; lowering
+fell from 1.346 to 1.205 seconds and peak RSS from 161,304 to 140,824 KiB.
+Both emitted the same µDewy after normalizing the build directory and the
+physical path of an identical casefold data file. The latter path follows the
+hosted package location; both files' bytes were checked, rather than assuming
+the library-root option pinned this include. These are bounded measurements,
+not a new full-build result. Nineteen string storage/ownership, rewritten-body,
+and ordinary/debug CLI checks passed.
+
+Artifacts: `phase0-performance/string-candidate-{before,after}.json`,
+`hosted-string-queries-{before,after}`, `hosted-string-query-output-check.json`,
+and `hosted-string-query-gates.log`.

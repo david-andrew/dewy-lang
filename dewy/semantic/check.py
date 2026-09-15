@@ -168,6 +168,7 @@ def typecheck_and_resolve(
     target: str = 'x86_64',
     test: bool = False,
     debug: bool = False,
+    debug_variables: bool = True,
 ) -> hir.AST:
     """Check a program; with ``test``, the entry module's `$test` functions get
     a generated runner as its entry; with ``debug``, each user module gets the
@@ -184,6 +185,7 @@ def typecheck_and_resolve(
         target=target,
         test=test,
         debug=debug,
+        debug_variables=debug_variables,
     )
 
 
@@ -356,6 +358,7 @@ def _typecheck_module(
     target: str = 'x86_64',
     test: bool = False,
     debug_formatters: bool = False,
+    debug_variables: bool = True,
     prelude_module: bool = False,
 ) -> tuple[hir.Block, Context]:
 
@@ -417,8 +420,8 @@ def _typecheck_module(
             if isinstance(binding.type, ty.ArrayType) and binding.type.length is not None:
                 binding.type = replace(binding.type, length=None)
     _declare_pending_methods(ctx=ctx.module if ctx.module is not None else ctx)  # methods never called still get checked
-    if not prelude_module:
-        # the debugger's view of the module's variables: their types always,
+    if not prelude_module and (debug_variables or debug_formatters):
+        # The debugger's view of the module's variables: their type spellings,
         # and in a debug build a formatter per type (the root block's scope holds the module's names)
         checked = replace(checked, items=[*checked.items, *_debug_formatter_declarations(checked, formatters=debug_formatters, ctx=ctx.module if ctx.module is not None else ctx)])
     if ctx.generic_instances:

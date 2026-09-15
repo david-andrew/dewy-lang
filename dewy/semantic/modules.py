@@ -148,10 +148,11 @@ _resident_preludes: dict[Path, _ResidentPrelude] = {}
 class ModuleCompiler:
     """Load and check one reachable module graph."""
 
-    def __init__(self, entry: SrcFile, target: str = 'x86_64', *, test: bool = False, debug: bool = False):
+    def __init__(self, entry: SrcFile, target: str = 'x86_64', *, test: bool = False, debug: bool = False, debug_variables: bool = True):
         self.entry = entry
         self.target = target
         self.test = test   # the entry module's `$test` functions get the generated runner as the program's entry
+        self.debug_variables = debug_variables
         self.debug = debug   # user modules get the debugger's formatters
         self.type_system = ty.TypeSystem()
         builtins.apply_builtin_promote_rules(self.type_system)
@@ -338,6 +339,7 @@ class ModuleCompiler:
             registry=self.registry,
             module_loader=self,
             target=self.target,
+            debug_variables=self.debug_variables,
             debug_formatters=self.debug and not prelude and not no_prelude,   # the prelude is cached and never debugged
             prelude_module=prelude,
             prelude_bindings=(
@@ -680,6 +682,7 @@ def typecheck_program(
     target: str = 'x86_64',
     test: bool = False,
     debug: bool = False,
+    debug_variables: bool = True,
 ) -> hir.Block:
     from . import check
 
@@ -691,7 +694,7 @@ def typecheck_program(
     check.reset_synthesized_names()
     bounds.last_cap_notes.clear()
     ty.reset_program_brands()   # the program's minted brands: a closed world per compile
-    compiler = ModuleCompiler(srcfile, target, test=test, debug=debug)
+    compiler = ModuleCompiler(srcfile, target, test=test, debug=debug, debug_variables=debug_variables)
     if srcfile.path is not None:
         entry = compiler.load(srcfile.path, entry=True)
         merged = compiler.finish(entry)
@@ -716,6 +719,7 @@ def typecheck_program(
         target=target,
         prelude_bindings=compiler.prelude_bindings if not no_prelude else None,
         test=test,
+        debug_variables=debug_variables,
     )
     compiler._validate_and_select(root, ctx.srcfile, prelude_module=False, no_prelude=no_prelude, ctx=ctx)
     exports = {

@@ -5,10 +5,10 @@ Split from ``lower.py``; methods run as part of ``_Lowerer``.
 
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import replace
 from typing import Literal
 
+from ...utils import dataclass_fields
 from ...parser import t0
 from ...reporting import Span
 from ...semantic import hir, ty
@@ -1103,6 +1103,9 @@ class _StringLowering:
         return bound
 
     def _returned_string_expressions(self, literal: hir.FunctionLiteral) -> list[hir.AST]:
+        cached = self.string_return_queries.get(id(literal))
+        if cached is not None:
+            return cached[1]
         results: list[hir.AST] = []
 
         def note(expr: hir.AST) -> None:
@@ -1131,7 +1134,7 @@ class _StringLowering:
             if isinstance(node, hir.Return) and node.item is not None:
                 note(node.item)
             if isinstance(node, hir.AST):
-                for field_ in dataclasses.fields(node):
+                for field_ in dataclass_fields(node):
                     value = getattr(node, field_.name)
                     for child in (
                         value if isinstance(value, (list, tuple)) else [value]
@@ -1146,12 +1149,16 @@ class _StringLowering:
 
         walk(literal.body)
         trailing(literal.body)
+        self.string_return_queries[id(literal)] = (literal, results)
         return results
 
     def _string_local_candidates(
         self,
         literal: hir.FunctionLiteral,
     ) -> dict[int, list[hir.AST]]:
+        cached = self.string_candidate_queries.get(id(literal))
+        if cached is not None:
+            return cached[1]
         candidates: dict[int, list[hir.AST]] = {}
 
         def walk(node: object) -> None:
@@ -1170,7 +1177,7 @@ class _StringLowering:
             ):
                 candidates.setdefault(node.target.binding_id, []).append(node.value)
             if isinstance(node, hir.AST):
-                for field_ in dataclasses.fields(node):
+                for field_ in dataclass_fields(node):
                     value = getattr(node, field_.name)
                     for child in (
                         value if isinstance(value, (list, tuple)) else [value]
@@ -1184,6 +1191,7 @@ class _StringLowering:
                                 walk(item)
 
         walk(literal.body)
+        self.string_candidate_queries[id(literal)] = (literal, candidates)
         return candidates
 
     def _string_value_bound(
@@ -1326,7 +1334,7 @@ class _StringLowering:
                 func = self._unwrap_transparent(node.func)
                 call_positions.add(id(func))
             if isinstance(node, hir.AST):
-                for field_ in dataclasses.fields(node):
+                for field_ in dataclass_fields(node):
                     value = getattr(node, field_.name)
                     for child in (
                         value if isinstance(value, (list, tuple)) else [value]
@@ -1367,7 +1375,7 @@ class _StringLowering:
                         'a function literal returning a materialized string used as a value',
                     )
             if isinstance(node, hir.AST):
-                for field_ in dataclasses.fields(node):
+                for field_ in dataclass_fields(node):
                     value = getattr(node, field_.name)
                     for child in (
                         value if isinstance(value, (list, tuple)) else [value]
@@ -2701,7 +2709,7 @@ class _StringLowering:
                     mark(part)
             else:
                 # a payload read of a `match` temporary, a member access, …: whatever it reads may be handed out
-                for field_ in dataclasses.fields(expr):
+                for field_ in dataclass_fields(expr):
                     value = getattr(expr, field_.name)
                     for child in (value if isinstance(value, (list, tuple)) else [value]):
                         if isinstance(child, hir.AST) and not isinstance(child, hir.FunctionLiteral):
@@ -2722,7 +2730,7 @@ class _StringLowering:
         escapes: dict[int, set[int]] = {}
 
         def children(node: hir.AST):
-            for field_ in dataclasses.fields(node):
+            for field_ in dataclass_fields(node):
                 value = getattr(node, field_.name)
                 for child in (value if isinstance(value, (list, tuple)) else [value]):
                     if isinstance(child, hir.AST):
@@ -2833,7 +2841,7 @@ class _StringLowering:
             if isinstance(node, hir.Assign) and self._is_string_valued(node.target.type):
                 assigned.append(node)
             if isinstance(node, hir.AST):
-                for field_ in dataclasses.fields(node):
+                for field_ in dataclass_fields(node):
                     value = getattr(node, field_.name)
                     for child in (value if isinstance(value, (list, tuple)) else [value]):
                         if isinstance(child, hir.AST):
@@ -3066,7 +3074,7 @@ class _StringLowering:
             if isinstance(node, hir.Assign) and node.target.binding_id is not None:
                 found.setdefault(node.target.binding_id, []).append(node.value)
             if isinstance(node, hir.AST):
-                for field_ in dataclasses.fields(node):
+                for field_ in dataclass_fields(node):
                     value = getattr(node, field_.name)
                     for child in (value if isinstance(value, (list, tuple)) else [value]):
                         if isinstance(child, hir.AST):
@@ -3090,7 +3098,7 @@ class _StringLowering:
             if isinstance(node, hir.IteratorExpression) and isinstance(node.iterable.type, ty.ArrayType) and node.target.binding_id is not None:
                 targets.add(node.target.binding_id)
             if isinstance(node, hir.AST):
-                for field_ in dataclasses.fields(node):
+                for field_ in dataclass_fields(node):
                     value = getattr(node, field_.name)
                     for child in (value if isinstance(value, (list, tuple)) else [value]):
                         if isinstance(child, hir.AST):

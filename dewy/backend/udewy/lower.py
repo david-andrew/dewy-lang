@@ -403,6 +403,11 @@ class _Lowerer(
         self.current_string_result: hir.ExpressedIdentifier | None = None
         self.current_union_result: hir.ExpressedIdentifier | None = None
         self.current_dynamic_array_result: ty.ArrayType | None = None
+        # Queries over a function body are immutable during lowering. Keep the
+        # literal alive with its result; a rewritten body gets a new literal
+        # identity and cannot reuse the old body's initializer/return facts.
+        self.string_candidate_queries: dict[int, tuple[hir.FunctionLiteral, dict[int, list[hir.AST]]]] = {}
+        self.string_return_queries: dict[int, tuple[hir.FunctionLiteral, list[hir.AST]]] = {}
         self.string_result_bounds: dict[int, StringResultBound | None] = {}
         self.string_result_needs_dest: set[int] = set()
         # functions whose string result has no compile-time size bound: the caller

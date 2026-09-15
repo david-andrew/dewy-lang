@@ -119,3 +119,17 @@ def test_update_help_does_not_download() -> None:
     result = _dewy('update', '--help')
     assert result.returncode == 0
     assert 'latest published version' in result.stdout
+
+
+def test_ordinary_codegen_skips_debug_variable_collection(monkeypatch):
+    from dewy.backend.udewy import codegen
+    from dewy.reporting import SrcFile
+    from dewy.semantic import check
+
+    def unexpected_collection(*args, **kwargs):
+        raise AssertionError('debug variables collected for a non-debug emission')
+
+    monkeypatch.setattr(check, '_debug_formatter_declarations', unexpected_collection)
+    emitted = codegen(SrcFile(None, 'main=():>int64=>42'), debug_locations=False)
+    assert '# @var ' not in emitted
+    assert not check.debug_variable_types

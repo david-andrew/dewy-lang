@@ -212,7 +212,7 @@ def codegen(srcfile:SrcFile, *, target: str = 'x86_64', test: bool = False, debu
     values; they cost compile time and size, so an ordinary build has none.
     """
     with timing.phase('checking'):
-        ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test, debug=debug_locations and debug_values)
+        ast = check.typecheck_and_resolve(srcfile, include_prelude=True, target=target, test=test, debug=debug_locations and debug_values, debug_variables=debug_locations)
     return codegen_inner(ast, srcfile, entry_name=check.TEST_ENTRY_NAME if test else 'main', debug_locations=debug_locations)
 
 @ty.runtime_query_scope()
