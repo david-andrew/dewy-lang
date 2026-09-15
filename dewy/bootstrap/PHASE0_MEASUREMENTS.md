@@ -2763,3 +2763,19 @@ that native-built executable returns 42. Its build overlaps an isolated
 regression check, so its phase timings are not a performance sample.
 Artifacts: `native-effect-transfers-gates.log`, `native-effect-graph-place-gate.log`,
 `native-effect-transfer-kernel/results.json`, `native-effect-transfer-seed-check`.
+
+### Identifier extraction
+
+Hosted lowering now finishes identifier reads in a dedicated storage-view
+handler instead of continuing through the full expression dispatch. It asks
+for runtime union members only on storage paths that use that information.
+Plain integer, boolean and void leaves return directly. The existing object
+field, enum, optional, narrowed-family and union payload rules remain intact.
+
+All 51 targeted storage, narrowing, identity and literal checks pass. Three
+paired module lowerings, each using an independent copy of the same checked
+HIR, retain identical emitted source. Median lowering changes **0.739 to
+0.717 seconds**; the old-path third sample takes 1.775 seconds, so this is
+a small local improvement with a collection outlier, not a major performance
+claim. Artifacts: `identifier-extraction-gates.log`,
+`identifier-extraction-module/results.json`.

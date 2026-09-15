@@ -4618,89 +4618,93 @@ class _Lowerer(
             prelude = [*prelude, *extra]
         return prelude, value
 
-    def _extract_expression_inner(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
-        if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
-            for base, object_type, field_names in reversed(self.object_literal_contexts):
-                if node.binding_id in field_names:
-                    return self._extract_literal_field_identifier(
-                        node,
-                        base,
-                        object_type,
-                        field_names[node.binding_id],
-                    )
-        if (
-            isinstance(node, hir.ExpressedIdentifier)
-            and node.binding_id is not None
-            and node.binding_id in self.current_object_field_ids
-        ):
-            return self._extract_object_field_identifier(node)
-        if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
-            stored_object = self.object_storage.get(node.binding_id)
-            narrowed_members = ty.runtime_union_members(node.type)
-            if stored_object is not None and narrowed_members is not None:
-                # A family narrowed to several children still lives as one
-                # object pointer. Make a borrowed union view for consumers
-                # that dispatch through a cell; never read the object as one.
-                pointer = replace(node, type='int64', binding_id=None)
-                return self._family_union_view(pointer, stored_object, narrowed_members, node)
-            enum = self.enum_words.get(node.binding_id)
-            if enum is not None:
-                word = replace(node, type='int64')
-                literal = self._enum_literal_of(node.type, enum)
-                if literal is not None:
-                    # narrowed to one member: the value is that literal
-                    return self._extract_expression(literal)
-                return [], word
-            payload = self.optional_payloads.get(node.binding_id)
-            if payload is not None:
-                # This identifier is now a physical cell address. Retaining
-                # the semantic binding id would make a later lowering walk
-                # interpret it as another narrowed read of that same cell.
-                cell = replace(node, type='int64', binding_id=None)
-                if ty.optional_payload(node.type) is not None:
-                    return [], cell
-                loaded = self._optional_load_payload(cell, payload, node.loc)
-                if narrowed_members is not None and isinstance(ty.unfold(payload), ty.ObjectType):
-                    return self._family_union_view(loaded, ty.unfold(payload), narrowed_members, node)
-                if isinstance(ty.unfold(payload), (ty.ObjectType, ty.ArrayType)):
-                    # an aggregate payload: bind the handle to a temporary so the
-                    # copies that re-walk their source (an array field clone) see
-                    # a plain word, not the cell again (as the union path does)
-                    pointer = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('payload'))
-                    return [hir.Declare(node.loc, ty.VOID_TYPE, 'let', pointer.name, 'int64', replace(loaded, type='int64'))], replace(pointer, type=node.type)
-                return [], loaded
-            members = self.union_cells.get(node.binding_id)
-            if members is not None:
-                cell = replace(node, type='int64', binding_id=None)
-                if ty.runtime_union_members(node.type) is not None or ty.optional_payload(node.type) is not None:
-                    # Ordinary subsets retain their physical tags. Splitting
-                    # a parent alternative requires a borrowed child view.
-                    return self._union_family_view(cell, members, self._field_union_members(node.type), node)
-                # Fully narrowed: load the payload as the matching member.
-                system = self.runtime_type_system
-                member = next(
-                    (m for m in members if system.is_subtype(node.type, m)),
-                    None,
+    def _extract_identifier(self, node: hir.ExpressedIdentifier) -> tuple[list[hir.AST], hir.AST]:
+        """Select a binding's current storage view, then finish the leaf read."""
+        if node.binding_id is None:
+            return [], node
+        for base, object_type, field_names in reversed(self.object_literal_contexts):
+            if node.binding_id in field_names:
+                return self._extract_literal_field_identifier(
+                    node, base, object_type, field_names[node.binding_id],
                 )
-                if member is None and self._is_string_valued(node.type):
-                    # Several string-literal alternatives share one payload
-                    # representation. A narrowed string union reads that same
-                    # descriptor even though no single literal covers the view.
-                    member = 'string'
-                if member is None and node.type == 'int64':
-                    # not a member: the lowering's own retyping (`replace(node,
-                    # type='int64')`) of a `0 | [...]` cell — the cell address
-                    return [], cell
-                if member is None or member == 'none':
-                    self._target_error(node, 'a union payload read of this type')
-                loaded = self._optional_load_payload(cell, member, node.loc)
-                if self._union_member_kind(member) == 'word':
-                    return [], loaded
-                # An aggregate member's pointer is bound to a temporary so the
-                # copies that re-walk their source expression (an array field
-                # clone) see a plain word, not the cell again.
-                pointer = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('member'))
-                return [hir.Declare(node.loc, ty.VOID_TYPE, 'let', pointer.name, 'int64', loaded)], pointer
+        if node.binding_id in self.current_object_field_ids:
+            return self._extract_object_field_identifier(node)
+        stored_object = self.object_storage.get(node.binding_id)
+        narrowed_members = ty.runtime_union_members(node.type) if stored_object is not None else None
+        if stored_object is not None and narrowed_members is not None:
+            # A family narrowed to several children still lives as one
+            # object pointer. Make a borrowed union view for consumers
+            # that dispatch through a cell; never read the object as one.
+            pointer = replace(node, type='int64', binding_id=None)
+            return self._family_union_view(pointer, stored_object, narrowed_members, node)
+        enum = self.enum_words.get(node.binding_id)
+        if enum is not None:
+            word = replace(node, type='int64')
+            literal = self._enum_literal_of(node.type, enum)
+            if literal is not None:
+                # narrowed to one member: the value is that literal
+                return self._extract_expression(literal)
+            return [], word
+        payload = self.optional_payloads.get(node.binding_id)
+        if payload is not None:
+            # This identifier is now a physical cell address. Retaining
+            # the semantic binding id would make a later lowering walk
+            # interpret it as another narrowed read of that same cell.
+            cell = replace(node, type='int64', binding_id=None)
+            if ty.optional_payload(node.type) is not None:
+                return [], cell
+            loaded = self._optional_load_payload(cell, payload, node.loc)
+            narrowed_members = ty.runtime_union_members(node.type)
+            if narrowed_members is not None and isinstance(ty.unfold(payload), ty.ObjectType):
+                return self._family_union_view(loaded, ty.unfold(payload), narrowed_members, node)
+            if isinstance(ty.unfold(payload), (ty.ObjectType, ty.ArrayType)):
+                # an aggregate payload: bind the handle to a temporary so the
+                # copies that re-walk their source (an array field clone) see
+                # a plain word, not the cell again (as the union path does)
+                pointer = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('payload'))
+                return [hir.Declare(node.loc, ty.VOID_TYPE, 'let', pointer.name, 'int64', replace(loaded, type='int64'))], replace(pointer, type=node.type)
+            return [], loaded
+        members = self.union_cells.get(node.binding_id)
+        if members is not None:
+            cell = replace(node, type='int64', binding_id=None)
+            if ty.runtime_union_members(node.type) is not None or ty.optional_payload(node.type) is not None:
+                # Ordinary subsets retain their physical tags. Splitting
+                # a parent alternative requires a borrowed child view.
+                return self._union_family_view(cell, members, self._field_union_members(node.type), node)
+            # Fully narrowed: load the payload as the matching member.
+            system = self.runtime_type_system
+            member = next(
+                (m for m in members if system.is_subtype(node.type, m)),
+                None,
+            )
+            if member is None and self._is_string_valued(node.type):
+                # Several string-literal alternatives share one payload
+                # representation. A narrowed string union reads that same
+                # descriptor even though no single literal covers the view.
+                member = 'string'
+            if member is None and node.type == 'int64':
+                # not a member: the lowering's own retyping (`replace(node,
+                # type='int64')`) of a `0 | [...]` cell — the cell address
+                return [], cell
+            if member is None or member == 'none':
+                self._target_error(node, 'a union payload read of this type')
+            loaded = self._optional_load_payload(cell, member, node.loc)
+            if self._union_member_kind(member) == 'word':
+                return [], loaded
+            # An aggregate member's pointer is bound to a temporary so the
+            # copies that re-walk their source expression (an array field
+            # clone) see a plain word, not the cell again.
+            pointer = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('member'))
+            return [hir.Declare(node.loc, ty.VOID_TYPE, 'let', pointer.name, 'int64', loaded)], pointer
+        return [], node
+
+    def _extract_expression_inner(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
+        if isinstance(node, hir.ExpressedIdentifier):
+            return self._extract_identifier(node)
+        # These literal leaves already have a word representation and no
+        # evaluation steps. Extended classes retain the general dispatch.
+        if type(node) in (hir.Integer, hir.Bool, hir.Void):
+            return [], node
         if isinstance(node, hir.ObjectLiteral):
             return self._extract_object_literal(node)
         if isinstance(node, hir.MemberAccess):
