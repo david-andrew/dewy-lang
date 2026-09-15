@@ -27,6 +27,7 @@ def expressions():
         ty.TypeNot(ty.TypeOr([a, ty.TypeAnd([b, c])])),
         ty.ArrayType(ty.TypeNot(ty.TypeNot(a)), 3),
         ty.TypeNot(ty.ArrayType(a)),
+        ty.TypeNot(ty.ArrayType(ty.TypeAnd([a, 'any']))),
         ty.TypeParameterize(a, [ty.TypeNot(ty.TypeNot(b))]),
         ty.sequence(a, ty.sequence(b, c)),
         ty.StringType(), ty.StringType(0), ty.StringLiteralType('hello'),
@@ -51,6 +52,8 @@ def subtype_expressions():
         ty.StringType(), ty.StringType(1), ty.StringLiteralType('hi'),
         ty.IntegerLiteralType(-129), ty.IntegerLiteralType(0), ty.IntegerLiteralType(255),
         ty.ArrayType('int64'), ty.ArrayType('int64', 2), ty.ArrayType('int8'),
+        ty.ArrayType(ty.TypeAnd(['int64', 'any'])),
+        ty.ObjectType((ty.ObjectField('x', ty.TypeAnd(['int64', 'any'])),)),
         ty.union('int64', 'string'), ty.negate('int'),
         ty.TypeParameterize('generator', ['int64']),
         ty.sequence('int64', 'string'),
@@ -384,6 +387,15 @@ main = ():>int64 => {
     printl(subtyping.is_subtype(child parent subtyping.default_links @nodes))
     printl(subtyping.is_subtype(child plain subtyping.default_links @nodes))
     printl(subtyping.is_subtype(types.meta_type(child @nodes) types.meta_type(parent @nodes) subtyping.default_links @nodes))
+    # Proven widening queries must not grow the type arena with temporary
+    # complements/differences. These exact lengths have not been queried.
+    let general=types.array_type(int none @nodes)
+    loop size in 100.. and size <? 164 {
+        let exact=types.array_type(int size @nodes)
+        let count=nodes.entries.length
+        $runtime_assert subtyping.is_subtype(exact general subtyping.default_links @nodes)
+        $runtime_assert nodes.entries.length =? count
+    }
     return 0
 }'''])
     source = work / 'algebra.dewy'

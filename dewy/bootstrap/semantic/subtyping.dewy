@@ -371,6 +371,14 @@ is_subtype = (source:addr target:addr links:Graph @nodes:types.Table):>bool => {
         if left.name =? 'any' or right.name =? 'never' return left.name =? right.name
         return nominal_subtype(left.name right.name links)
     }
+    # A positive atom implication is already sufficient evidence. Avoid
+    # interning a complement, a difference, and its normal form for the
+    # common successful record/array/literal/callable relationships. Failed
+    # probes still use emptiness, including normalization and empty sources.
+    if left is? types.ObjectType|types.ArrayType|types.StringType|types.StringLiteralType|types.IntegerLiteralType|types.FunctionType|types.OverloadType and
+       right is? types.Primitive|types.ObjectType|types.ArrayType|types.StringType|types.StringLiteralType|types.IntegerLiteralType|types.FunctionType|types.OverloadType {
+        if atom_implies(source target links @nodes) return true
+    }
     let excluded = types.negate(target @nodes)
     let difference = types.intersect([source excluded] @nodes)
     return is_empty(difference links @nodes)

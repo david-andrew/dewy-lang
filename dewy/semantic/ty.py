@@ -1392,6 +1392,18 @@ class TypeSystem:
             if s == TOP_TYPE or t == BOTTOM_TYPE:
                 return s == t
             return self._is_nom_subtype(s, t)
+        # A successful atom implication is already a proof. Common record,
+        # array, literal and callable queries need not first normalize every
+        # nested field to build their Boolean difference. A failed shortcut
+        # still takes the general route: normalization or an empty source can
+        # establish relationships that are invisible in the unnormalized atoms.
+        if (isinstance(s, (ObjectType, ArrayType, StringType, StringLiteralType,
+                           IntegerLiteralType, FunctionType, OverloadType))
+                and isinstance(t, (str, ObjectType, ArrayType, StringType,
+                                   StringLiteralType, IntegerLiteralType,
+                                   FunctionType, OverloadType))
+                and self._atom_implies_atom(s, t)):
+            return True
         return self.is_empty(intersect(s, negate(t)))
 
     def join(self, *types: TypeExpr) -> TypeExpr:

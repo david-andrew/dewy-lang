@@ -2036,3 +2036,15 @@ not complement the element type. Hosted normalization and dispatch checks,
 and native identity/rollback checks on direct and C output, pass (13 tests).
 Artifact: `signed-normalization-gates.log`. This is a correctness fix needed
 before comparing faster atom proofs against the general Boolean relation.
+
+### Sufficient atom proofs before Boolean normalization
+
+Both subtype entry points now accept an already successful atom implication
+for records, arrays, strings, integer literals and callable types. A failed
+probe still uses the complete emptiness relation; it does not become a
+rejection. Hosted all-pairs comparisons against Boolean differences include
+unnormalized nested types. The native algebra/dispatch/metadata comparison
+and a zero-extra-type-entry gate for 64 fresh array widenings pass, alongside
+hosted normalization and immutable-record checks (35 tests). No mutable
+checker query is cached across calls. Measurement is pending. Artifact:
+`atomic-subtype-pair-gates.log`.
