@@ -1,0 +1,35 @@
+# String alternatives share one union tag. Literal spelling and grapheme
+# length live in the payload, which must only be read after checking the tag.
+Bounds:type='[]'|'[)'|'(]'|'()'
+Slot:type=[bounds:Bounds|none]
+encode=(bounds:Bounds|none):>int64=>{
+    if bounds is? '[]' return 0
+    if bounds is? '[)' return 1
+    if bounds is? '(]' return 2
+    if bounds is? '()' return 3
+    return 4
+}
+literal=(value:string|int64|none):>bool=>value is? 'aa'|'bb'
+outside=(value:string|int64|none):>bool=>value isnt? 'aa'|'bb'
+mixed=(value:string|int64|none):>bool=>value is? 'aa'|none
+one=(value:string|int64|none):>bool=>value is? grapheme
+length_or_literal=(value:string|int64|none):>bool=>value is? grapheme|'aa'
+plain_one=(value:string):>bool=>value is? grapheme
+let calls:int64=0
+next=():>string|none=>{calls+=1 return if calls=?1 'aa' else none}
+main=():>int64=>{
+    let values:array<Slot>=[Slot['[]'] Slot['[)'] Slot['(]'] Slot['()'] Slot[none]]
+    loop index in 0.. and index <? values.length {
+        if encode(values[index].bounds) not=? index return 1
+    }
+    if not literal('aa') or not literal('bb') or literal('cc') or literal(7) or literal(none) return 2
+    if outside('aa') or outside('bb') or not outside('cc') or not outside(7) or not outside(none) return 3
+    if not mixed('aa') or not mixed(none) or mixed('bb') or mixed(7) return 4
+    if not one('é') or one('aa') or one('') or one(7) or one(none) return 5
+    if not length_or_literal('z') or not length_or_literal('aa') or length_or_literal('bb') or length_or_literal(none) return 6
+    if not plain_one('é') or plain_one('xy') return 7
+    let first=next() is? 'aa'
+    let second=next() isnt? 'aa'
+    if not first or not second or calls not=? 2 return 8
+    return 42
+}

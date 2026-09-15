@@ -3307,3 +3307,30 @@ exception mismatch; the corrected rejection pass reuses the unchanged driver.
 These tests use real library modules and checked-prelude caching through
 `tests/fixtures/bootstrap_program.dewy`. Record formatting is the next gap;
 no refreshed full-corpus count is claimed for this batch.
+
+### Static alias assignment and string-payload tests
+
+Static alias declarations now participate in hosted binding collection, so
+a later bare assignment does not acquire a second declaration identity.
+Assignments to a prelude type report its origin and explicit `let` shadowing,
+instead of reaching an internal assertion. Native alias predeclaration also
+respects outer names, and only the original source statement can complete a
+pending alias. Four hosted foreign-assignment tests and four native alias,
+method, conversion and source-type groups pass. Artifacts:
+`type-alias-assignment-{hosted,native}-gates.log`.
+
+A formatter cache comparison exposed a separate hosted lowering defect:
+testing `('[]'|'[)'|'(]'|'()')|none` against successive string literals
+selected `()` for every present value. Strings share one union tag, so
+partial membership needs a guarded payload comparison. The hosted backend
+now handles literal and grapheme-length tests on string payloads, including
+negation, mixed union targets, and single evaluation of effectful sources.
+The native backend already implements these payload tests.
+
+Nine hosted union/formatting gates pass, and the new expected-result fixture
+passes through both compiler implementations on x86-64 and C. Artifacts:
+`union-string-{payload,native}-gates.log`. The native comparison used the
+existing test driver with a fresh cold prelude. The bug affects codecs built
+by the hosted compiler: the earlier hosted self-build timings do not certify
+their cached range-bound behavior. Verification of a freshly hosted-built
+driver's cold/warm output follows with the record formatter integration.

@@ -4576,10 +4576,9 @@ class _Lowerer(
         return None
 
     def _extract_string_membership_test(self, node: hir.TypeTest) -> tuple[list[hir.AST], hir.AST] | None:
-        """`s is? '0b' | '0x'` on a runtime string: equality with each member, the value read once."""
-        test = node.test_type
-        members = list(test.items) if isinstance(test, ty.TypeOr) else [test]
-        if not members or not all(isinstance(member, ty.StringLiteralType) for member in members):
+        """String literal/length membership, with the receiver evaluated once."""
+        members = self._string_test_members(node.test_type)
+        if not members:
             return None
         value_type = node.value.type
         if isinstance(value_type, ty.StringLiteralType) or not self._is_string_valued(value_type):
@@ -4589,14 +4588,28 @@ class _Lowerer(
         name = self._new_string_temp(loc, 'int64', 'tested').name
         prelude.append(hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', replace(word, type='int64') if isinstance(word, hir.ExpressedIdentifier) else word))
         subject = hir.ExpressedIdentifier(loc, ty.StringType(), name)
-        chain: hir.AST | None = None
-        for member in members:
-            assert isinstance(member, ty.StringLiteralType)
-            comparison = hir.StringEqual(loc, 'bool', subject, hir.String(loc, member, member.value), node.negated)
-            chain = comparison if chain is None else hir.ShortCircuit(loc, 'bool', 'and' if node.negated else 'or', chain, comparison)
-        assert chain is not None
+        chain = self._string_test_predicate(subject, members, node.negated, loc)
         chain_prelude, expression = self._extract_expression(chain)
         return [*prelude, *chain_prelude], expression
+
+    @staticmethod
+    def _string_test_members(test: ty.TypeExpr) -> list[ty.TypeExpr]:
+        members = test.items if isinstance(test, ty.TypeOr) else [test]
+        return [member for member in members if isinstance(member, (ty.StringLiteralType, ty.StringType))
+                or isinstance(member, str) and member in {'string', 'char', 'grapheme', 'any'}]
+
+    def _string_test_predicate(self, subject: hir.AST, members: list[ty.TypeExpr], negated: bool, loc: Span) -> hir.AST:
+        chain: hir.AST | None = None
+        for member in members:
+            if isinstance(member, ty.StringLiteralType):
+                comparison = hir.StringEqual(loc, 'bool', subject, hir.String(loc, member, member.value), negated)
+            else:
+                length = member.length if isinstance(member, ty.StringType) else 1 if member in {'char', 'grapheme'} else None
+                comparison = hir.Bool(loc, 'bool', not negated) if length is None else self._int64_comparison(
+                    '__ne__' if negated else '__eq__', hir.StringLength(loc, 'int64', subject), self._int64_literal(loc, length), loc)
+            chain = comparison if chain is None else hir.ShortCircuit(loc, 'bool', 'and' if negated else 'or', chain, comparison)
+        assert chain is not None
+        return chain
 
     def _extract_enum_type_test(self, node: hir.TypeTest) -> tuple[list[hir.AST], hir.AST] | None:
         """`c is? 'A'` on an enum word: a comparison of the word with the member's tag."""
@@ -4808,6 +4821,10 @@ class _Lowerer(
             if members is not None:
                 union_prelude, union_value = self._extract_expression(node.value)
                 system = self.runtime_type_system
+                string_tests = self._string_test_members(node.test_type)
+                string_members = [index for index, member in enumerate(members)
+                                  if string_tests and self._is_string_valued(member)
+                                  and not system.is_subtype(member, node.test_type)]
                 # a minted member the test descends from (`Token | none` tested
                 # `is? Name`): its tag, and then the brand word of the payload
                 branded = [
@@ -4822,17 +4839,22 @@ class _Lowerer(
                 matching = [
                     index
                     for index, member in enumerate(members)
-                    if index not in branded and system.is_subtype(member, node.test_type) != node.negated
+                    if index not in branded and index not in string_members
+                    and system.is_subtype(member, node.test_type) != node.negated
                 ]
                 if len(matching) == len(members):
                     return union_prelude, hir.Bool(node.loc, 'bool', True)
-                if not matching and not branded:
+                if not matching and not branded and not string_members:
                     return union_prelude, hir.Bool(node.loc, 'bool', False)
                 cell = (
                     replace(union_value, type='int64')
                     if isinstance(union_value, hir.ExpressedIdentifier)
                     else union_value
                 )
+                if not isinstance(cell, hir.ExpressedIdentifier):
+                    held = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('tested'))
+                    union_prelude.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', held.name, 'int64', cell))
+                    cell = held
                 tag = self._optional_tag(cell, node.loc)
                 optional = len(members) == 2 and 'none' in members
 
@@ -4862,6 +4884,16 @@ class _Lowerer(
                     if node.negated:
                         in_brand = hir.FunctionCall(node.loc, 'bool', hir.ExpressedIdentifier(node.loc, ty.FunctionType([ty.PosOrKwArg('item', 'bool')], [], None, 'bool', []), '__not__'), [in_brand], {})
                     comparison = hir.ShortCircuit(node.loc, 'bool', 'and', member_test(members[index]), in_brand)
+                    test = comparison if test is None else hir.ShortCircuit(node.loc, 'bool', 'or', test, comparison)
+                if string_members:
+                    # Every string alternative shares one tag and descriptor
+                    # layout. A literal test therefore guards that tag, then
+                    # compares the payload; subtyping the entire string group
+                    # against one literal would incorrectly fold it false.
+                    # Keep payload reads inside the guard, including negation.
+                    subject = replace(self._union_source_pointer(cell, node.loc), type=ty.StringType())
+                    in_strings = self._string_test_predicate(subject, string_tests, node.negated, node.loc)
+                    comparison = hir.ShortCircuit(node.loc, 'bool', 'and', member_test(members[string_members[0]]), in_strings)
                     test = comparison if test is None else hir.ShortCircuit(node.loc, 'bool', 'or', test, comparison)
                 assert test is not None
                 return union_prelude, test
