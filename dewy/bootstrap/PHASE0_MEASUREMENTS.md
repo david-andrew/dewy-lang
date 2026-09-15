@@ -1503,3 +1503,22 @@ case. Seventy-two targeted checks pass, including exhaustive/indexed token
 and diagnostic comparisons, subclass extensions, and incomplete-source
 reporting. Artifacts: `hosted-t0-probes-{before,after}.json` and
 `hosted-t0-candidate-gates.log`. Full hosted build impact is not yet measured.
+
+### Precompute native operator binding powers
+
+Frontend sampling found precedence lookup in 51 of 185 stacks. Each lookup
+scanned every precedence row and repeatedly acquired the row's operator set.
+The native parser now derives a symbol-to-powers dictionary once from the
+existing table. Multiple fixities and ambiguous juxtaposition still merge all
+possible powers; absent sides are assigned only after merging alternatives.
+Reserved operators without precedence remain unresolved as before.
+
+An isolated native kernel making 3,000 lookups falls from **0.211 to 0.0167
+seconds**, and cumulative payload allocation from **84,856,008 to 4,728,008
+bytes**. The allocation gate and 145 parser/table checks pass, including all
+hosted precedence entries, repeated/unknown alternatives, parser fixture
+trees, diagnostics, Unicode spans, and invocation behavior. An initial test
+incorrectly shortened the hosted `CombinedAssignmentOp` label; correcting the
+test's spelling made it exercise the intended entry. Full self-build impact
+is not yet measured. Artifacts: `native-indexed-frontend-samples`,
+`binding-power-measurement`, `binding-power-*-gates.log`.

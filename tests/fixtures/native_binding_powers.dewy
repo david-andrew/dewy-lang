@@ -1,0 +1,23 @@
+# A precedence lookup should not reconstruct the table's unrelated rows.
+from reporting import Span
+import p"../../dewy/bootstrap/parser/p0.dewy" as parser
+import p"../../dewy/bootstrap/parser/t1.dewy" as tokens
+import p"../../dewy/bootstrap/parser/t2.dewy" as post
+main=():>int64=>{
+    let loc=Span[0 0]
+    let nodes:array<tokens.Token>=[]
+    let plus=tokens.Operator[loc=loc symbol='+']
+    let exponent=tokens.Operator[loc=loc symbol='^']
+    let juxtapose=post.Juxtapose[loc=loc options=['CallJuxtapose' 'MultiplyJuxtapose']]
+    let before:int64=_arena_allocated_bytes
+    loop i in 0..999 {
+        let a=parser.powers(plus nodes)
+        let b=parser.powers(exponent nodes)
+        let c=parser.powers(juxtapose nodes)
+        if a.left.length not=? 1 or a.right.length not=? 2 or a.assocs.length not=? 2 return 1
+        if b.left.length not=? 1 or b.right.length not=? 1 or b.assocs.length not=? 1 return 2
+        if c.left.length not=? 2 or c.right.length not=? 2 or c.assocs.length not=? 1 return 3
+    }
+    printl(_arena_allocated_bytes-before)
+    return 42
+}

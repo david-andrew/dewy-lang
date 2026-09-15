@@ -75,6 +75,33 @@ Rank:type = [op:addr side:int8 power:int64]
 Shift:type = [direction:int8 left:addr?=none right:addr?=none]
 Work:type = [items:array<addr> shifts:array<int8>]
 
+# The precedence rows remain the single source of truth. A symbol may occur
+# more than once (prefix and infix +/-, or prefix and postfix backtick), so
+# collect all of its powers in row order once, before parsing any source.
+build_precedence_powers = ():>dict<string Power> => {
+    let result:dict<string Power>=[]
+    loop i in 0.. and i <? precedence_rows.length {
+        let row=precedence_rows[i]
+        let power:int64=1+2*(precedence_rows.length-i-1)
+        let l=power
+        let r=power
+        if row.assoc =? 'left' {r += 1}
+        else if row.assoc =? 'prefix' {l = -1}
+        else if row.assoc =? 'postfix' {r = -1}
+        else {l += 1}
+        loop label in row.operators {
+            let entry=result.get(label)
+            if entry is? none {entry=Power[[] [] []]}
+            if l >=? 0 and l not in? entry.left {entry.left.push(l)}
+            if r >=? 0 and r not in? entry.right {entry.right.push(r)}
+            if row.assoc not in? entry.assocs {entry.assocs.push(row.assoc)}
+            result[label]=entry
+        }
+    }
+    return result
+}
+const precedence_powers:dict<string Power> = build_precedence_powers()
+
 operator_label = (node:compound.Token nodes:array<compound.Token>):>string => {
     if node is? compound.Operator | post.InvertedComparison return node.symbol
     if node is? post.CombinedAssignment return 'CombinedAssignmentOp'
@@ -96,21 +123,15 @@ powers = (op:compound.Token nodes:array<compound.Token>):>Power => {
     let right:array<int64> = []
     let assocs:array<Associativity> = []
     loop label in labels {
-        loop i in 0.. and i <? precedence_rows.length {
-            let row = precedence_rows[i]
-            if label not in? row.operators continue
-            let power:int64 = 1+2*(precedence_rows.length-i-1)
-            let l:int64 = power
-            let r:int64 = power
-            if row.assoc =? 'left' { r += 1 }
-            else if row.assoc =? 'prefix' { l = -1 }
-            else if row.assoc =? 'postfix' { r = -1 }
-            else { l += 1 }
-            if l >=? 0 and l not in? left { left.push(l) }
-            if r >=? 0 and r not in? right { right.push(r) }
-            if row.assoc not in? assocs { assocs.push(row.assoc) }
-        }
+        let entry=precedence_powers.get(label)
+        if entry is? none continue
+        loop l in entry.left {if l not in? left {left.push(l)}}
+        loop r in entry.right {if r not in? right {right.push(r)}}
+        loop assoc in entry.assocs {if assoc not in? assocs {assocs.push(assoc)}}
     }
+    # An absent binding side belongs to the combined alternatives, not to an
+    # individual prefix/postfix alternative. Unknown/reserved operators retain
+    # the same empty associativity and nonbinding powers as the row scan.
     if left.length =? 0 { left.push(-1) }
     if right.length =? 0 { right.push(-1) }
     return Power[left right assocs]
