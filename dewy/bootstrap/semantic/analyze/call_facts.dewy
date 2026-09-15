@@ -94,7 +94,10 @@ apply = (state:facts.State call:addr truth:bool? env:values.Environment relation
                     if subject.term isnt? none {
                         facts.put(@current facts.remainder(subject.term window.upper window.offset) ranges.Interval[gap none])
                     }
-                    else if subject.interval isnt? none and subject.interval.lower isnt? none {
+                    # A named prefix has both a symbolic length and a lower
+                    # bound. Retain both consequences, so advancing by that
+                    # known bound keeps the offset inside the source.
+                    if subject.interval isnt? none and subject.interval.lower isnt? none {
                         let key=facts.order(facts.Term[window.offset] window.upper)
                         let previous=facts.lookup(current key)
                         let needed=subject.interval.lower+gap

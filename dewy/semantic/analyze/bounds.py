@@ -3490,8 +3490,12 @@ class _BoundsValidator:
                         upper, offset_id, adjust = window
                         if subject_term is not None:
                             state[_remainder_key(subject_term, upper, offset_id)] = Interval(gap - adjust, None)
-                        elif subject_interval is not None and subject_interval.lower is not None:
+                        if subject_interval is not None and subject_interval.lower is not None:
                             # `"[[".length <=? (src[i..]).length`: `src.length - i >= 2`
+                            # Keep this consequence for a named prefix too.
+                            # Its symbolic length relation and its known
+                            # lower bound are independent useful facts; a
+                            # later constant offset update can use the latter.
                             key = _order_key(offset_id, upper)
                             previous = state.get(key)
                             needed = subject_interval.lower + gap - adjust

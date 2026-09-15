@@ -2535,3 +2535,15 @@ A quiet module comparison changes **9.182 to 8.230 seconds**, with checking
 5.918 to 5.634; startup/checking variation contributes to the whole-invocation
 difference. Artifacts: `subtype-decision-gates.log`, `subtype-flow-gates.log`,
 `type-facts-prior-cache-baseline.log`, `measure-subtype-decision.log`.
+
+### Named-prefix slice facts
+
+The shared call-result transfer now retains both a named prefix's symbolic
+remainder relation and the numeric consequence of its known minimum length.
+Previously the symbolic case suppressed the numeric one, so advancing a
+scanner by a known delimiter width lost its bound. The complete hosted
+`type_facts.dewy` fixture now passes. The 26-case gate includes rejection of
+excessive advancement and source mutation, and a compiled native transfer
+check for both facts and invalidation. Artifact: `named-prefix-fact-gates.log`.
+This closes the proof regression noted above; it does not close the native
+fixture's earlier type-predicate acceptance gap.

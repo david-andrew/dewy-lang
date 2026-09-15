@@ -56,6 +56,24 @@ def test_the_prelude_predicates_carry_their_facts() -> None:
         _check(program.replace('if s.startswith("ab") { i += 2  return i }', 'if s.startswith("ab") { i += 3  return i }'))
 
 
+def test_named_prefix_retains_its_minimum_remaining_length() -> None:
+    program = '''let prefix = "[["
+let scan = (src:string):>uint64<n => n <=? src.length> => {
+    let i:uint64 = 0
+    loop i <? src.length {
+        if src[i..].startswith(prefix) { i += 2 }
+        else { i += 1 }
+    }
+    return i
+}
+'''
+    _check(program)
+    with pytest.raises(UserError, match='cannot prove refinement'):
+        _check(program.replace('i += 2', 'i += 3'))
+    with pytest.raises(UserError, match='cannot prove refinement'):
+        _check(program.replace('i += 2', 'src = ""\n i += 2'))
+
+
 def test_a_promised_fact_is_proven_at_every_return() -> None:
     with pytest.raises(UserError, match='cannot prove fact'):   # `return true` with nothing establishing the fact
         _check('let has = (src:string prefix:string):> true & <prefix.length <=? src.length> | false => { return true }\n')

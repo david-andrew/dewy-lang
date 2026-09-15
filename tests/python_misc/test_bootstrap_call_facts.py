@@ -26,6 +26,7 @@ def test_native_call_argument_promises(tmp_path):
         return hir.ExpressedIdentifier(LOC, type_, name, binding_id=binding.id)
 
     text = ref('text', 'string')
+    prefix = ref('prefix', 'string')
     i = ref('i', 'int64')
     flag = ref('flag', 'bool')
     literal = hir.String(LOC, ty.StringLiteralType('abc'), 'abc')
@@ -42,6 +43,7 @@ def test_native_call_argument_promises(tmp_path):
         call([('value', i), ('src', text)], ty.Proposition('@value', '<?', 0, term='src', when=True)),
         call([('prefix', literal), ('src', window)], ty.Proposition('@prefix', '<=?', 0, of='length', term='src', when=True)),
         call([('ok', flag)], ty.Proposition('@ok', '=?', 1, when=True)),
+        call([('prefix', prefix), ('src', window)], ty.Proposition('@prefix', '<=?', 0, of='length', term='src', when=True)),
     ]
     root = hir.Block(LOC, 'void', calls, False)
     type_lines = []
@@ -71,6 +73,8 @@ main=():>int64=>{{
     snapshot.lengths[{names[id(text)]}]=ranges.Interval[10 20]
     snapshot.lengths[{names[id(window)]}]=ranges.Interval[2 20]
     snapshot.lengths[{names[id(literal)]}]=ranges.exact(3)
+    snapshot.lengths[{names[id(prefix)]}]=ranges.Interval[3 5]
+    snapshot.sequences[{names[id(prefix)]}]={prefix.binding_id}
     snapshot.terms[{names[id(i)]}]=terms.Offset[flow.Term[{i.binding_id}] 0]
     snapshot.terms[{names[id(text)]}]=terms.Offset[flow.Term[{text.binding_id}] 0]
     snapshot.terms[{names[id(flag)]}]=terms.Offset[flow.Term[{flag.binding_id}] 0]
@@ -92,6 +96,14 @@ main=():>int64=>{{
     $runtime_assert result.state isnt? none
     let gap=flow.lookup(result.state flow.order(flow.Term[{i.binding_id}] flow.Term[{text.binding_id} 'length']))
     $runtime_assert gap isnt? none and gap.lower =? 3
+    # A named prefix supplies both a symbolic remainder and its numeric
+    # minimum. Neither fact subsumes the other for subsequent updates.
+    result=calls.apply(initial {names[id(calls[4])]} true env relation snapshot @registry)
+    $runtime_assert result.state isnt? none
+    gap=flow.lookup(result.state flow.order(flow.Term[{i.binding_id}] flow.Term[{text.binding_id} 'length']))
+    $runtime_assert gap isnt? none and gap.lower =? 3
+    let remainder=flow.lookup(result.state flow.remainder(flow.Term[{prefix.binding_id} 'length'] flow.Term[{text.binding_id} 'length'] {i.binding_id}))
+    $runtime_assert remainder isnt? none and remainder.lower =? 0
     result=calls.apply(initial {names[id(calls[3])]} true env relation snapshot @registry)
     $runtime_assert result.conditions.length =? 1
     $runtime_assert result.conditions[0].expression =? {names[id(flag)]} and result.conditions[0].truth
@@ -107,6 +119,10 @@ main=():>int64=>{{
     result=calls.apply(initial {names[id(calls[2])]} true env relation snapshot @registry)
     $runtime_assert result.state isnt? none
     $runtime_assert not flow.contains(result.state flow.order(flow.Term[{i.binding_id}] flow.Term[{text.binding_id} 'length']))
+    result=calls.apply(initial {names[id(calls[4])]} true env relation snapshot @registry)
+    $runtime_assert result.state isnt? none
+    $runtime_assert not flow.contains(result.state flow.order(flow.Term[{i.binding_id}] flow.Term[{text.binding_id} 'length']))
+    $runtime_assert not flow.contains(result.state flow.remainder(flow.Term[{prefix.binding_id} 'length'] flow.Term[{text.binding_id} 'length'] {i.binding_id}))
     result=calls.apply(initial {names[id(calls[3])]} true env relation snapshot @registry)
     $runtime_assert result.conditions.length =? 0
     flow.set_value(@initial flow.Term[{i.binding_id}] ranges.exact(1))

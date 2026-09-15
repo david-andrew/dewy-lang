@@ -70,6 +70,14 @@ These are outside the original corpus counts:
   `test_container_flow_values.py`. This closes the lowering restriction found
   while sharing the native borrowing analysis graph.
 
+- Both proof implementations now retain a named prefix's numeric minimum
+  alongside its symbolic remainder when applying a predicate to a string
+  slice. Constant delimiter advancement can therefore preserve the source
+  bound. Hosted scanner acceptance and rejection checks plus a compiled
+  native call-fact test cover the change (`named-prefix-fact-gates.log`).
+  The native full `type_facts.dewy` fixture still has the earlier type-test
+  predicate gap listed below.
+
 ## Execution and output differences
 
 | Fixture | Baseline result | Follow-up |
