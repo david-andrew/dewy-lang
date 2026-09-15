@@ -2258,3 +2258,29 @@ Artifacts: `pgo-seed-experiment/steps.json`, `metadata.json`, counter files,
 `full-measurement/results.jsonl`, and `pgo-script-gates.log`. The pair execution
 script passes both output backends (`check-pgo-native-pair.log`). The
 unaccelerated bootstrap goal, full corpus/parity and release gates remain open.
+
+The quiet repeat took **46.560 seconds**, with the same byte-identical µDewy:
+frontend 11.454, validation 4.990, preparation 0.957, lowering 10.694, emission
+3.772, backend 12.745; peak process RSS 5,820,448 KiB. No other tests ran
+during this invocation. The native time target is met on this recorded route.
+Artifact: `native-pgo-quiet-full`.
+
+The corresponding quiet hosted checkpoint at `60260b89` took **87.749
+seconds**: checking 37.440, lowering 20.064, emission 4.568, backend 19.466;
+peak process RSS 1,517,688 KiB. It includes shared HIR traversal and parser
+grammar lookups, and remains above the hosted target. Artifacts:
+`host-shared-hir-full`, `source-shared-hir.json`.
+
+### Literal-result effects in hosted bounds validation
+
+A literal return type does not make a call pure. The hosted validator
+previously returned the known interval before visiting a literal-typed
+expression, losing mutations from its arguments/callee. For example,
+`change=(@n:int64):>1=>{n=-1 return 1}` could leave an old positive fact about
+`n` after `change(@n)`. The hosted visitor now evaluates the expression first
+and then applies its literal result fact, matching the native validator.
+The paired regression rejects the stale assertion while retaining the proof
+that the result equals 1. Common member/call dispatch was also moved ahead
+of unrelated expression kinds; call transfer rules and argument order are
+unchanged. The bounds/conditional-result/bigint group passes 27 tests.
+Artifact: `literal-result-effects-gates.log`.

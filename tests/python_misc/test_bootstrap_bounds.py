@@ -87,6 +87,13 @@ FIELD_EXPECTATIONS.update(LOOP_FUNCTION_CASES)
 OBJECT_MUTATION_CASE = 'let n:int64=1\nchange=()=>{let box=[value={n=-1\n0}]}\npositive=()=>{$assert n >? 0}'
 CASES.append(OBJECT_MUTATION_CASE)
 FIELD_EXPECTATIONS[OBJECT_MUTATION_CASE] = 'cannot prove assertion'
+LITERAL_RESULT_CASES = {
+    'change=(@n:int64):>1=>{n=-1 return 1}\nmain=()=>{let n:int64=1\nchange(@n)\n$assert n >? 0}': 'cannot prove assertion',
+    'change=(@n:int64):>1=>{n=-1 return 1}\nmain=()=>{let n:int64=1\nlet result=change(@n)\n$assert result =? 1\n$assert n >? 0}': 'cannot prove assertion',
+    'change=(@n:int64):>1=>{n=-1 return 1}\nmain=()=>{let n:int64=1\nlet result=change(@n)\n$assert result =? 1}': 'ok',
+}
+CASES.extend(LITERAL_RESULT_CASES)
+FIELD_EXPECTATIONS.update(LITERAL_RESULT_CASES)
 
 
 def test_native_bounds_visitor_matches_hosted(tmp_path):

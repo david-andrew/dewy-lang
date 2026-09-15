@@ -2218,6 +2218,12 @@ class _BoundsValidator:
         *,
         validate: bool,
     ) -> Interval | None:
+        # A known result is a value fact, not evidence that evaluation is
+        # pure. Calls, indexing and casts can still mutate the proof state.
+        interval = self._eval_inner(node, state, validate=validate)
+        return Interval.exact(node.type.value) if isinstance(node.type, ty.IntegerLiteralType) else interval
+
+    def _eval_inner(self, node: hir.AST, state: State, *, validate: bool) -> Interval | None:
         if isinstance(node, hir.Block):
             return self._eval_value_body(node, state, validate=validate)
         if isinstance(node, hir.Flow):
@@ -2231,13 +2237,11 @@ class _BoundsValidator:
             self._eval(node.item, state, validate=validate)
             return None
         if isinstance(node, hir.Obligation):
-            # before the literal shortcuts: a constant owes a fact about another binding too (`30 <=? src.length`)
+            # A constant owes facts about other bindings too (`30 <=? src.length`).
             interval = self._eval(node.value, state, validate=validate)
             if validate:
                 self._validate_obligation(node, interval, state)
             return interval
-        if isinstance(node.type, ty.IntegerLiteralType):
-            return Interval.exact(node.type.value)
         if isinstance(node, hir.Integer):
             return Interval.exact(node.value)
         if isinstance(node, hir.ObjectLiteral) and node.integer_value is not None:
@@ -2271,6 +2275,20 @@ class _BoundsValidator:
                 width_range = Interval(-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else Interval(0, (1 << width) - 1)
                 return width_range if declared is None else width_range.intersect(declared)
             return declared
+        if isinstance(node, hir.MemberAccess):
+            self._eval(node.value, state, validate=validate)
+            route_id = sb.array_route_id(node, self.registry)
+            self._seed_sibling_relations(node, state)
+            interval = state.get(route_id) if route_id is not None else None
+            declared = self._bounds_of(_member_invariant(node))
+            if declared is not None:
+                interval = declared if interval is None else interval.intersect(declared)
+            width = self._field_declared_interval(node, state)   # the field's width, and its sibling relations
+            if width is not None:
+                interval = width if interval is None else interval.intersect(width)
+            return interval
+        if isinstance(node, hir.FunctionCall):
+            return self._eval_call(node, state, validate=validate)
         if isinstance(node, hir.Place):
             self._eval(node.target, state, validate=validate)
             root = node.target
@@ -2453,169 +2471,6 @@ class _BoundsValidator:
         if isinstance(node, hir.Spread):
             self._eval(node.value, state, validate=validate)
             return None
-        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod):
-            arguments = [self._eval(arg, state, validate=validate) for arg in node.pos_args]
-            keyword_arguments = {
-                name: self._eval(arg, state, validate=validate) for name, arg in node.kw_args.items()
-            }
-            array_id = _runtime_array_id(node.func.array, self.registry)
-            name = node.func.name
-            if name == 'pop':
-                index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('idx')
-                index_interval = arguments[0] if arguments else keyword_arguments.get('idx')
-            elif name == 'insert':
-                index_arg = node.pos_args[1] if len(node.pos_args) > 1 else node.kw_args.get('idx')
-                index_interval = arguments[1] if len(arguments) > 1 else keyword_arguments.get('idx')
-            elif name == 'truncate':
-                index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('count')
-                index_interval = arguments[0] if arguments else keyword_arguments.get('count')
-            else:
-                index_arg = None
-                index_interval = None
-            if array_id is not None:
-                key = _length_key(array_id)
-                current = state.get(key, self._length_default())
-                if validate and index_arg is not None and name in {'pop', 'insert'}:
-                    self._validate_method_index(
-                        node, index_arg, index_interval, state, array_id, current,
-                        allow_end=name == 'insert',
-                    )
-                if validate and name == 'truncate' and (index_interval is None or index_interval.lower is None or index_interval.lower < 0):
-                    assert index_arg is not None
-                    self._proof_failure(node, 'obligation', Error(
-                        srcfile=self.srcfile,
-                        title='truncate length is not proven nonnegative',
-                        pointer_messages=[Pointer(span=index_arg.loc, message='the count may be negative')],
-                        hint='prove the count with a guard such as `if count >=? 0 { xs.truncate(count) }`',
-                    ))
-                if name in {'push', 'insert'}:
-                    stored = node.pos_args[0] if node.pos_args else node.kw_args.get('value')
-                    if stored is not None:
-                        self._store_element(state, array_id, stored, node.loc)
-                    state[key] = Interval(
-                        _add(current.lower, 1),
-                        _minimum_upper(_add(current.upper, 1), self.max_length),
-                    )
-                    _change_length_facts(state, array_id, Interval.exact(1))
-                elif name == 'pop':
-                    state[key] = Interval(
-                        max(0, (current.lower or 0) - 1),
-                        _subtract(current.upper, 1),
-                    )
-                    _change_length_facts(state, array_id, Interval.exact(-1))
-                elif name == 'truncate':
-                    cap_lower = 0 if index_interval is None or index_interval.lower is None else max(index_interval.lower, 0)
-                    cap_upper = None if index_interval is None else index_interval.upper
-                    state[key] = Interval(
-                        min(current.lower or 0, cap_lower),
-                        _minimum_upper(current.upper, cap_upper),
-                    )
-                    _change_length_facts(state, array_id, Interval(None, 0))
-                elif name == 'clear':
-                    state[key] = Interval.exact(0)
-                    _change_length_facts(state, array_id, Interval(
-                        None if current.upper is None else -current.upper,
-                        0 if current.lower is None else -current.lower,
-                    ))
-                if validate and name in {'push', 'insert', 'pop', 'truncate', 'clear'}:
-                    self._validate_length_invariant(node, array_id, state[key], state)
-            if name in {'push', 'insert', 'pop', 'truncate', 'clear', 'sort', 'reverse'}:
-                self._forget_container_value(node.func.array, state)
-            return None
-        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and node.func.name.startswith(('_capture_push', '_capture_add')) and len(node.pos_args) == 2 and isinstance(node.pos_args[0], hir.Place):
-            # `[loop … value]`: the capture's push — the element's facts join the array's
-            self._eval(node.pos_args[1], state, validate=validate)
-            target = _strip_casts(node.pos_args[0].target)
-            capture_id = _runtime_array_id(target, self.registry)
-            if capture_id is not None:
-                self._store_element(state, capture_id, node.pos_args[1], node.loc)
-                length = state.get(_length_key(capture_id), self._length_default())
-                state[_length_key(capture_id)] = Interval(_add(length.lower, 1), _minimum_upper(_add(length.upper, 1), self.max_length))
-                _change_length_facts(state, capture_id, Interval.exact(1))
-            return None
-        if isinstance(node, hir.FunctionCall):
-            self._eval(node.func, state, validate=validate)
-            arguments = [
-                self._eval(arg, state, validate=validate)
-                for arg in node.pos_args
-            ]
-            for arg in node.kw_args.values():
-                self._eval(arg, state, validate=validate)
-            name = node.integer_operation or (
-                node.func.name
-                if isinstance(node.func, hir.ExpressedIdentifier)
-                else None
-            )
-            if (
-                isinstance(node.func, hir.ExpressedIdentifier)
-                and node.func.binding_id is not None
-            ):
-                for binding_id in self.mutable_globals:
-                    state.pop(binding_id, None)
-            called = _call_function_type(node)
-            if called is not None and isinstance(called.ret, ty.RefinedType):
-                self._apply_call_facts(state, node, None)   # what a single result promises of the arguments unconditionally
-            result: Interval | None = None
-            arithmetic = False
-            if node.integer_operation in ('identity', 'narrow') and len(arguments) == 1:
-                result = arguments[0]
-                if name == 'narrow':
-                    result = self._fit_type(result, node.type)
-                    if validate and result is None:
-                        assert isinstance(node.type, str)
-                        self._report_unfit(node, arguments[0], node.type)
-            elif name == '__unary_sub__' and len(arguments) == 1:
-                arithmetic = True
-                value = arguments[0]
-                if value is not None:
-                    result = self._fit_type(
-                        Interval(
-                            None if value.upper is None else -value.upper,
-                            None if value.lower is None else -value.lower,
-                        ),
-                        node.type,
-                    )
-            elif len(arguments) == 2 and name in _WORD_ARITHMETIC:
-                arithmetic = True
-                if validate and name in ('__floordiv__', '__mod__') and node.integer_operation is None:
-                    # Library numeric calls already check their nonzero
-                    # divisor parameter. A nonzero tagged BigInt is not a
-                    # fixed-width interval and must not be reproved as one.
-                    self._validate_divisor(node.pos_args[1], arguments[1], state)
-                result = self._binary_interval(
-                    name,
-                    arguments[0],
-                    arguments[1],
-                    node.type,
-                    bound=self._difference_bound(node, state) if name == '__sub__' else None,
-                    floor=node.integer_operation is not None,
-                )
-            # A user call's fixed-width result has the whole representation
-            # range even when its contract specifies only one endpoint. A
-            # partial promise must refine that range, not replace its other
-            # endpoint with infinity. Arithmetic transfers above retain their
-            # separate overflow/representation checks.
-            if not arithmetic and node.integer_operation is None:
-                layout = ty.fixed_integer_layout(ty.strip_refinement(node.type))
-                if layout is not None:
-                    width, signed = layout
-                    representation = Interval(
-                        -(1 << (width - 1)) if signed else 0,
-                        (1 << (width - (1 if signed else 0))) - 1,
-                    )
-                    result = representation if result is None else result.intersect(representation)
-            refined_result = _call_result_refinement(node)
-            if refined_result is not None:
-                declared = self._bounds_of(refined_result.propositions)   # `:>addr`: a capped `[0, 2^bits)`
-                if declared is not None:
-                    result = declared if result is None else result.intersect(declared)
-            if validate and arithmetic and node.type in ('int', 'uint'):
-                # Abstract integer arithmetic lowers to 64-bit words, so its
-                # result must be proven to fit one.
-                word = 'int64' if node.type == 'int' else 'uint64'
-                if self._fit_type(result, word) is None:
-                    self._report_unfit(node, result, word)
-            return result
         if isinstance(node, hir.ShortCircuit):
             self._eval(node.left, state, validate=validate)
             # The right runs only on the continuing path. Join its effects
@@ -2689,18 +2544,6 @@ class _BoundsValidator:
                 if declared is not None and declared.refinement:
                     self._seed_binding_refinement(field.binding_id, ty.RefinedType(declared.type, tuple(declared.refinement)), state, field.loc)
             return None
-        if isinstance(node, hir.MemberAccess):
-            self._eval(node.value, state, validate=validate)
-            route_id = sb.array_route_id(node, self.registry)
-            self._seed_sibling_relations(node, state)
-            interval = state.get(route_id) if route_id is not None else None
-            declared = self._bounds_of(_member_invariant(node))
-            if declared is not None:
-                interval = declared if interval is None else interval.intersect(declared)
-            width = self._field_declared_interval(node, state)   # the field's width, and its sibling relations
-            if width is not None:
-                interval = width if interval is None else interval.intersect(width)
-            return interval
         if isinstance(node, hir.ForwardingAccess):
             # `remaining[0].length` on a union of objects: the field's invariant, when every member declares it
             self._eval(node.value, state, validate=validate)
@@ -2725,6 +2568,175 @@ class _BoundsValidator:
         if isinstance(node, hir.TypeValue):
             return None
         return None
+
+    def _eval_call(self, node: hir.FunctionCall, state: State, *, validate: bool) -> Interval | None:
+        """Call transfers share one dispatch, before unrelated expression kinds.
+
+        Argument evaluation and its mutations still happen once, in the same
+        order as the specialized array/capture and ordinary call rules.
+        """
+        if isinstance(node.func, hir.ArrayMethod):
+            arguments = [self._eval(arg, state, validate=validate) for arg in node.pos_args]
+            keyword_arguments = {
+                name: self._eval(arg, state, validate=validate) for name, arg in node.kw_args.items()
+            }
+            array_id = _runtime_array_id(node.func.array, self.registry)
+            name = node.func.name
+            if name == 'pop':
+                index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('idx')
+                index_interval = arguments[0] if arguments else keyword_arguments.get('idx')
+            elif name == 'insert':
+                index_arg = node.pos_args[1] if len(node.pos_args) > 1 else node.kw_args.get('idx')
+                index_interval = arguments[1] if len(arguments) > 1 else keyword_arguments.get('idx')
+            elif name == 'truncate':
+                index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('count')
+                index_interval = arguments[0] if arguments else keyword_arguments.get('count')
+            else:
+                index_arg = None
+                index_interval = None
+            if array_id is not None:
+                key = _length_key(array_id)
+                current = state.get(key, self._length_default())
+                if validate and index_arg is not None and name in {'pop', 'insert'}:
+                    self._validate_method_index(
+                        node, index_arg, index_interval, state, array_id, current,
+                        allow_end=name == 'insert',
+                    )
+                if validate and name == 'truncate' and (index_interval is None or index_interval.lower is None or index_interval.lower < 0):
+                    assert index_arg is not None
+                    self._proof_failure(node, 'obligation', Error(
+                        srcfile=self.srcfile,
+                        title='truncate length is not proven nonnegative',
+                        pointer_messages=[Pointer(span=index_arg.loc, message='the count may be negative')],
+                        hint='prove the count with a guard such as `if count >=? 0 { xs.truncate(count) }`',
+                    ))
+                if name in {'push', 'insert'}:
+                    stored = node.pos_args[0] if node.pos_args else node.kw_args.get('value')
+                    if stored is not None:
+                        self._store_element(state, array_id, stored, node.loc)
+                    state[key] = Interval(
+                        _add(current.lower, 1),
+                        _minimum_upper(_add(current.upper, 1), self.max_length),
+                    )
+                    _change_length_facts(state, array_id, Interval.exact(1))
+                elif name == 'pop':
+                    state[key] = Interval(
+                        max(0, (current.lower or 0) - 1),
+                        _subtract(current.upper, 1),
+                    )
+                    _change_length_facts(state, array_id, Interval.exact(-1))
+                elif name == 'truncate':
+                    cap_lower = 0 if index_interval is None or index_interval.lower is None else max(index_interval.lower, 0)
+                    cap_upper = None if index_interval is None else index_interval.upper
+                    state[key] = Interval(
+                        min(current.lower or 0, cap_lower),
+                        _minimum_upper(current.upper, cap_upper),
+                    )
+                    _change_length_facts(state, array_id, Interval(None, 0))
+                elif name == 'clear':
+                    state[key] = Interval.exact(0)
+                    _change_length_facts(state, array_id, Interval(
+                        None if current.upper is None else -current.upper,
+                        0 if current.lower is None else -current.lower,
+                    ))
+                if validate and name in {'push', 'insert', 'pop', 'truncate', 'clear'}:
+                    self._validate_length_invariant(node, array_id, state[key], state)
+            if name in {'push', 'insert', 'pop', 'truncate', 'clear', 'sort', 'reverse'}:
+                self._forget_container_value(node.func.array, state)
+            return None
+        if isinstance(node.func, hir.ExpressedIdentifier) and node.func.name.startswith(('_capture_push', '_capture_add')) and len(node.pos_args) == 2 and isinstance(node.pos_args[0], hir.Place):
+            # `[loop … value]`: the capture's push — the element's facts join the array's
+            self._eval(node.pos_args[1], state, validate=validate)
+            target = _strip_casts(node.pos_args[0].target)
+            capture_id = _runtime_array_id(target, self.registry)
+            if capture_id is not None:
+                self._store_element(state, capture_id, node.pos_args[1], node.loc)
+                length = state.get(_length_key(capture_id), self._length_default())
+                state[_length_key(capture_id)] = Interval(_add(length.lower, 1), _minimum_upper(_add(length.upper, 1), self.max_length))
+                _change_length_facts(state, capture_id, Interval.exact(1))
+            return None
+        self._eval(node.func, state, validate=validate)
+        arguments = [
+            self._eval(arg, state, validate=validate)
+            for arg in node.pos_args
+        ]
+        for arg in node.kw_args.values():
+            self._eval(arg, state, validate=validate)
+        name = node.integer_operation or (
+            node.func.name
+            if isinstance(node.func, hir.ExpressedIdentifier)
+            else None
+        )
+        if (
+            isinstance(node.func, hir.ExpressedIdentifier)
+            and node.func.binding_id is not None
+        ):
+            for binding_id in self.mutable_globals:
+                state.pop(binding_id, None)
+        called = _call_function_type(node)
+        if called is not None and isinstance(called.ret, ty.RefinedType):
+            self._apply_call_facts(state, node, None)   # what a single result promises of the arguments unconditionally
+        result: Interval | None = None
+        arithmetic = False
+        if node.integer_operation in ('identity', 'narrow') and len(arguments) == 1:
+            result = arguments[0]
+            if name == 'narrow':
+                result = self._fit_type(result, node.type)
+                if validate and result is None:
+                    assert isinstance(node.type, str)
+                    self._report_unfit(node, arguments[0], node.type)
+        elif name == '__unary_sub__' and len(arguments) == 1:
+            arithmetic = True
+            value = arguments[0]
+            if value is not None:
+                result = self._fit_type(
+                    Interval(
+                        None if value.upper is None else -value.upper,
+                        None if value.lower is None else -value.lower,
+                    ),
+                    node.type,
+                )
+        elif len(arguments) == 2 and name in _WORD_ARITHMETIC:
+            arithmetic = True
+            if validate and name in ('__floordiv__', '__mod__') and node.integer_operation is None:
+                # Library numeric calls already check their nonzero
+                # divisor parameter. A nonzero tagged BigInt is not a
+                # fixed-width interval and must not be reproved as one.
+                self._validate_divisor(node.pos_args[1], arguments[1], state)
+            result = self._binary_interval(
+                name,
+                arguments[0],
+                arguments[1],
+                node.type,
+                bound=self._difference_bound(node, state) if name == '__sub__' else None,
+                floor=node.integer_operation is not None,
+            )
+        # A user call's fixed-width result has the whole representation
+        # range even when its contract specifies only one endpoint. A
+        # partial promise must refine that range, not replace its other
+        # endpoint with infinity. Arithmetic transfers above retain their
+        # separate overflow/representation checks.
+        if not arithmetic and node.integer_operation is None:
+            layout = ty.fixed_integer_layout(ty.strip_refinement(node.type))
+            if layout is not None:
+                width, signed = layout
+                representation = Interval(
+                    -(1 << (width - 1)) if signed else 0,
+                    (1 << (width - (1 if signed else 0))) - 1,
+                )
+                result = representation if result is None else result.intersect(representation)
+        refined_result = _call_result_refinement(node)
+        if refined_result is not None:
+            declared = self._bounds_of(refined_result.propositions)   # `:>addr`: a capped `[0, 2^bits)`
+            if declared is not None:
+                result = declared if result is None else result.intersect(declared)
+        if validate and arithmetic and node.type in ('int', 'uint'):
+            # Abstract integer arithmetic lowers to 64-bit words, so its
+            # result must be proven to fit one.
+            word = 'int64' if node.type == 'int' else 'uint64'
+            if self._fit_type(result, word) is None:
+                self._report_unfit(node, result, word)
+        return result
 
     def _constant_binding(
         self,
