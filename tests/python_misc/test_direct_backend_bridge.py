@@ -89,11 +89,41 @@ main=():>int64=>{
     return __load_i64__(scratch)
 }
 ''',
+    '''
+let visited:int64=0
+visit=(value:bool):>bool=>{visited+=1 return value}
+main=():>int64=>{
+    if not (false and visit(true)) {
+        if visited not=? 0 return 1
+    }
+    if (true or visit(false)) and (false or visit(true)) {
+        if visited not=? 1 return 2
+    } else return 3
+    loop visited <? 3 and visit(true) {}
+    if visited not=? 3 return 4
+    return 42
+}
+''',
+    '''
+main=():>int64=>{
+    let a:uint16=65535
+    let b:int16=32767
+    let c:uint32=4294967295
+    let d:int32=2147483647
+    if a + 1 not=? 0 or c + 1 not=? 0 return 1
+    if b + 1 not=? -32768 or d + 1 not=? -2147483648 return 2
+    if not a not=? 0 or not c not=? 0 return 3
+    if not b not=? -32768 or not d not=? -2147483648 return 4
+    if (-b) not=? -32767 or (-d) not=? -2147483647 return 5
+    return 42
+}
+''',
 ]
 
 
 @pytest.mark.parametrize('source', SOURCES, ids=(
-    'aggregates', 'conditions', 'indirect-order', 'unicode-data', 'word-widths', 'static-data'))
+    'aggregates', 'conditions', 'indirect-order', 'unicode-data', 'word-widths', 'static-data',
+    'nested-conditions', 'narrow-integer-words'))
 def test_bridge_matches_source_route_and_expected_result(tmp_path, source):
     for target in ('x86_64', 'c'):
         file = SrcFile(None, source)

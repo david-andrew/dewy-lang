@@ -2425,7 +2425,41 @@ The core/cache/type/recursive group passes 85 cases, followed by 109 storage,
 units, effects, ownership, strings and container checks (including the corrected
 new storage fixture). A quiet t0 module comparison changed 9.282 to **8.780
 seconds**, checking 6.221 to 5.866, with peak process RSS 141,768 to 134,396 KiB.
-Generated µDewy differs only in four include paths. A full-build result remains
-to be measured. Artifacts: `slotted-records-core-fixed-gates.log`,
+Generated µDewy differs only in four include paths. The subsequent quiet full
+build at `1a83d30a` took **85.881 seconds**: checking 38.956, lowering 18.033,
+emission 4.515 and backend 18.960; peak process RSS 1,347,288 KiB. Memory falls,
+but this full invocation does not establish a speed improvement over the
+82.525-second prior checkpoint. Artifacts: `host-compact-records-full`,
+`slotted-records-core-fixed-gates.log`,
 `slotted-records-execution-gates.log`, `measure-record-storage-module.log`,
 `slotted-records.diff`.
+
+The checker context now has a bounded diagnostic representation rather than
+recursively printing shared module contexts and syntax. The regression checks
+that it does not visit either module backreferences or synthesized syntax.
+Artifact: `context-display-gates.log` (one passing test).
+
+### Direct condition/integer emission and demand-driven string lengths
+
+The fresh hosted profile separates checking, lowering, and backend generation
+(`host-compact-stage-profiles`). Checking consumed 78.713 profiled seconds,
+excluding parsing; lowering consumed 55.990. Backend generation consumed
+42.236, with 88,310 generated fragments accounting for 18.299 seconds of
+printing/tokenizing/parsing. These are profiled costs, not invocation times.
+
+The HIR bridge now emits lazy `and`/`or` conditions and signed/unsigned narrow
+integer operations with the existing µDewy backend primitives. Value
+expressions remain eager at that layer; Dewy's value-position lazy operations
+have already become control flow during lowering. Static data and uncommon
+fragments retain the source parser. The string-literal type relation computes
+byte, scalar or grapheme length only when the target demands that unit.
+
+The bridge's seven existing execution checks pass both direct x86-64 and C;
+seven added length/condition/width checks pass, including nested negation,
+loop conditions, 16/32-bit wrapping, combining characters, CRLF and emoji.
+A quiet module comparison changes **8.932 to 8.732 seconds**, checking 6.077
+to 5.928 and backend 1.013 to 0.870. Peak process RSS changes 140,020 to
+133,884 KiB. Full-build impact remains unmeasured. Artifacts:
+`direct-condition-width-gates.log`, `direct-condition-new-gates.log`,
+`measure-direct-fragments-fixed.log`; baseline packages are frozen from
+`1a83d30a` in `source-direct-fragments-before`.

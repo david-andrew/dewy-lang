@@ -1836,26 +1836,32 @@ class TypeSystem:
     ) -> bool:
         """Whether an exact string can materialize in the requested domain."""
 
-        byte_count, scalar_count, grapheme_count = string_literal_lengths(literal.value)
+        # Most checks ask only whether a literal is a string. Computing all
+        # three Unicode lengths there rescans the same text for every use.
+        # Inspect a length only when the target actually constrains it.
         if isinstance(target, StringLiteralType):
             return literal == target
         if isinstance(target, StringType):
-            return target.length is None or target.length == grapheme_count
+            if target.length is None:
+                return True
+            from .unicode.graphemes import grapheme_count
+            return target.length == grapheme_count(literal.value)
         if isinstance(target, ArrayType):
-            lengths = {
-                'uint8': byte_count,
-                'uint32': scalar_count,
-                'grapheme': grapheme_count,
-                'char': grapheme_count,
-                'string': grapheme_count,
-            }
-            length = lengths.get(target.element) if isinstance(target.element, str) else None
-            return length is not None and (
-                target.length is None or target.length == length
-            )
+            element = target.element
+            if not isinstance(element, str) or element not in ('uint8', 'uint32', 'grapheme', 'char', 'string'):
+                return False
+            if target.length is None:
+                return True
+            if element == 'uint8':
+                return target.length == len(literal.value.encode('utf-8'))
+            if element == 'uint32':
+                return target.length == len(literal.value)
+            from .unicode.graphemes import grapheme_count
+            return target.length == grapheme_count(literal.value)
         if isinstance(target, str):
             if target in {'char', 'grapheme'}:
-                return grapheme_count == 1
+                from .unicode.graphemes import grapheme_count
+                return grapheme_count(literal.value) == 1
             return self._is_nom_subtype('string', target)
         return False
 

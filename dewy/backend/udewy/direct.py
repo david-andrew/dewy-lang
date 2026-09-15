@@ -1,8 +1,9 @@
 """Compile legalized HIR through the existing µDewy backend protocol.
 
 This internal bridge avoids the whole-program source/token round trip. The
-µDewy parser still handles conditions, static data and uncommon expression
-forms, sharing their established rules with ordinary µDewy compilation.
+µDewy parser still handles static data and uncommon expression forms.
+Conditions and integer operations use the same backend primitives as its
+parser, without printing and tokenizing expressions already checked by Dewy.
 Debugger builds continue to use the source route.
 """
 from udewy import p0, t1
@@ -16,7 +17,6 @@ from . import emit, lower
 _KINDS = dict(t1.SYMBOL_TOKENS)
 _KINDS.update({name: kind for name, (_value, kind) in t1.KEYWORD_TOKENS.items()})
 _KINDS['not=?'] = t1.Kind.TK_NOT_EQ
-_NARROW_OPERATIONS = emit.NARROW_WRAPPING_DUNDERS | set(emit.UDEWY_PREFIX_DUNDERS)
 _TYPED_OPERATIONS = set(emit.UDEWY_BINOP_DUNDERS) | set(emit.UDEWY_PREFIX_DUNDERS)
 
 
@@ -53,6 +53,24 @@ class _DirectEmitter:
         parser = p0.parse_condition_expr if condition else p0.parse_expr
         self.fragment(emit.emit_ast(node, self.ctx),
                       lambda tokens, state: parser(tokens, 0, state, 0))
+
+    def condition(self, node):
+        # Lowering has already moved value-position lazy operations into
+        # control flow. Only an explicit condition retains ShortCircuit;
+        # ordinary expressions and call arguments stay in eager value mode.
+        if isinstance(node, hir.ShortCircuit):
+            if node.op not in ('and', 'or'):
+                self.expression_fragment(node, condition=True)
+                return
+            self.condition(node.left)
+            backend = self.backend
+            split = backend.cond_and_split if node.op == 'and' else backend.cond_or_split
+            join = backend.cond_and_join if node.op == 'and' else backend.cond_or_join
+            label = split()
+            self.condition(node.right)
+            join(label)
+        else:
+            self.expression(node)
 
     def body(self, node):
         p0.push_parse_scope(self.state)
@@ -123,7 +141,7 @@ class _DirectEmitter:
                 for index, arm in enumerate(node.arms):
                     if index:
                         backend.begin_else()
-                    self.expression_fragment(arm.condition, condition=True)
+                    self.condition(arm.condition)
                     backend.begin_if()
                     self.body(arm.body)
                 if node.default is not None:
@@ -134,7 +152,7 @@ class _DirectEmitter:
             elif len(node.arms) == 1 and isinstance(node.arms[0], hir.LoopArm) and node.default is None:
                 arm = node.arms[0]
                 backend.begin_loop()
-                self.expression_fragment(arm.condition, condition=True)
+                self.condition(arm.condition)
                 backend.begin_loop_body()
                 self.state.ctx.loop_depth += 1
                 self.body(arm.body)
@@ -198,14 +216,19 @@ class _DirectEmitter:
         backend, state = self.backend, self.state
         name = node.func.name if isinstance(node.func, hir.ExpressedIdentifier) else None
         operand_type = emit._selected_first_parameter(node) if name in _TYPED_OPERATIONS else None
-        # Share the source emitter's uncommon width/sign rules until they are
-        # represented directly by the legalized HIR as well.
-        special = (name in emit.UNSIGNED_DUNDER_INTRINSICS and operand_type in emit.UNSIGNED_FIXED_INTS
-                   or name == '__rshift__'
-                   or name in _NARROW_OPERATIONS
-                   and isinstance(operand_type, str) and operand_type in emit.NARROW_FIXED_INTS)
-        if special:
-            self.expression_fragment(node)
+        intrinsic = None
+        if name in emit.UNSIGNED_DUNDER_INTRINSICS and operand_type in emit.UNSIGNED_FIXED_INTS:
+            intrinsic = emit.UNSIGNED_DUNDER_INTRINSICS[name]
+        elif name == '__rshift__':
+            if operand_type in emit.SIGNED_FIXED_INTS:
+                intrinsic = '__signed_shr__'
+            elif operand_type not in emit.UNSIGNED_FIXED_INTS:
+                # Retain the source emitter's diagnostic for an unsupported
+                # width rather than guessing a signedness.
+                self.expression_fragment(node)
+                return
+        if intrinsic is not None and len(node.pos_args) == 2:
+            self.intrinsic(intrinsic, node.pos_args)
             return
         binary = emit._binop_call(node)
         raw = emit.LOWERED_RAW_SHIFT_DUNDERS.get(name)
@@ -218,6 +241,8 @@ class _DirectEmitter:
             backend.binary_op(_KINDS[symbol])
             if name in emit.DERIVED_BITWISE_DUNDERS:
                 backend.unary_op(t1.Kind.TK_NOT)
+            if name in emit.NARROW_WRAPPING_DUNDERS:
+                self.wrap_integer(operand_type)
             return
         prefix = emit._prefix_call(node)
         if prefix is not None:
@@ -227,6 +252,7 @@ class _DirectEmitter:
             else:
                 self.expression(value)
                 backend.unary_op(_KINDS[symbol])
+            self.wrap_integer(operand_type)
             return
         direct = name is not None and name not in self.ctx.local_names and (
             name in self.ctx.direct_function_names or name in emit.UDEWY_INTRINSICS)
@@ -254,6 +280,32 @@ class _DirectEmitter:
         else:
             p0.validate_call_arity(backend, count, 0, '')
             backend.call_indirect(count)
+
+    def intrinsic(self, name, arguments):
+        for argument in arguments:
+            self.expression(argument)
+            self.backend.save_value()
+        if arguments:
+            self.backend.restore_value()
+        self.backend.emit_intrinsic(name, len(arguments), None)
+
+    def wrap_integer(self, operand_type):
+        """The word reduction used by emit._wrap_fixed_integer, without text."""
+        if not isinstance(operand_type, str) or operand_type not in emit.NARROW_FIXED_INTS:
+            return
+        backend = self.backend
+        width = emit.FIXED_INTEGER_WIDTHS[operand_type]
+        backend.save_value()
+        if operand_type in emit.UNSIGNED_FIXED_INTS:
+            backend.push_const_i64((1 << width) - 1)
+            backend.binary_op(t1.Kind.TK_AND)
+        else:
+            shift = 64 - width
+            backend.push_const_i64(shift)
+            backend.binary_op(t1.Kind.TK_LEFT_SHIFT)
+            backend.save_value()
+            backend.push_const_i64(shift)
+            backend.signed_shr()
 
     def function(self, name, literal):
         backend, state = self.backend, self.state
