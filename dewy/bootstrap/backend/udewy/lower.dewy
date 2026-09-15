@@ -3174,12 +3174,15 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
         let step=iterator_condition(test @state)
         prefix=step.prefix condition=step.condition
     } else {condition=expression(arm.condition @state)}
+    let previous_depth=state.loop_depth
     if arm is? hir.LoopArm {
         state.loop_depth+=1
         if state.cleanup_enabled {state.cleanup_loops.push(state.cleanup_frames.length)}
     }
     let body=flow_value(arm.body node.value_type @state)
-    if arm is? hir.LoopArm {state.loop_depth-=1}
+    # Restore the lexical depth after recursive lowering; a recursive place
+    # call cannot promise the caller that subtraction is still nonnegative.
+    state.loop_depth=previous_depth
     if state.cleanup_enabled and arm is? hir.LoopArm {
         $runtime_assert state.cleanup_loops.length >? 0
         state.cleanup_loops.pop;
