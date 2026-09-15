@@ -2165,3 +2165,28 @@ integer widths, and static data. CLI checks cover binary includes, arguments,
 timings, cached builds, and separate debugger metadata. The static/reference
 group passes 51 tests; the initial CLI/cache/include group passes 31 tests.
 Artifacts: `direct-bridge-static-gates.log`, `direct-bridge-cli-gates.log`.
+
+The complete cold hosted build at `b4aef021` took **93.142 seconds** with
+the same frozen compiler/library workload. Checking: 41.220; lowering: 21.456;
+emission: 4.463; backend: 19.080 seconds. Backend GC fell to 0.028 seconds,
+but retaining HIR through backend generation increased peak process RSS to
+1,556,788 KiB. The emitted µDewy differs from the preceding build only in
+four artifact/snapshot include paths. Artifact: `host-backend-bridge-full`.
+
+### Hosted parser grammar queries
+
+A fresh profile over 125 compiler/library modules found 18.3 million ABC
+instance checks and repeated construction of numeric precedence alternatives.
+Operator-union membership is now cached per concrete token class, preserving
+subclass support. Combined precedence/binding-power descriptions are shared
+by their numeric choices; token positions and ambiguity alternatives remain
+per parse. This applies only to the fixed parser grammar, not mutable
+semantic type descriptions.
+
+Parsing the same 125 frozen modules, without profiling, took 12.194 seconds
+before and 10.700 after. All 125 serialized parse trees were byte-identical.
+The parser/reference, native differential, precedence, literal-boundary and
+candidate-filter group passes 254 tests. Artifacts: `compare-parser-batch.log`,
+`parser-grammar-before.json`, `parser-grammar-after.json`,
+`parser-grammar-gates.log`. These are parser measurements, not another full
+compiler build.

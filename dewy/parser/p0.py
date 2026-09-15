@@ -202,10 +202,7 @@ def get_precedence(op: t2.Operator) -> int | qint:
     if isinstance(op, t2.BroadcastOp):
         return get_precedence(op.op)
     if isinstance(op, t2.QJuxtapose):
-        precedences = {get_precedence(o) for o in op.options}
-        if len(precedences) == 1:
-            return precedences.pop()
-        return qint(precedences)
+        return _combined_precedence(tuple(get_precedence(o) for o in op.options))
 
     # simple operators, just look up in the table
     precedence = precedence_table.get(type(op))
@@ -214,11 +211,24 @@ def get_precedence(op: t2.Operator) -> int | qint:
     
     raise ValueError(f'INTERNAL ERROR: unexpected operator type for determining precedence. got {op=}')
 
+@cache
+def _combined_precedence(options: tuple[int, ...]) -> int | qint:
+    precedences = set(options)
+    return precedences.pop() if len(precedences) == 1 else qint(precedences)
+
+
 def get_bind_power(op: t2.Operator) -> tuple[int, int] | tuple[qint, qint]:
     precedence = get_precedence(op)
     if isinstance(precedence, int):
         return bind_power_table[precedence] 
-    left_bps, right_bps = zip(*[bind_power_table[p] for p in precedence.values])
+    return _combined_bind_power(tuple(precedence.values))
+
+
+@cache
+def _combined_bind_power(precedences: tuple[int, ...]) -> tuple[int | qint, int | qint]:
+    # Grammar binding powers are stable; these shared numeric descriptions
+    # are read-only. Token locations and ambiguity alternatives stay local.
+    left_bps, right_bps = zip(*[bind_power_table[p] for p in precedences])
     left_bps = list(filter(lambda bp: bp != NO_BIND, left_bps))
     right_bps = list(filter(lambda bp: bp != NO_BIND, right_bps))
     left_bps = qint(set(left_bps)) if len(left_bps) > 1 else left_bps[0]
@@ -471,7 +481,7 @@ def parse_chain(chain: t2.Chain, ctx: Context) -> AST:
     items: list[t2.Operator|AST] = []
     for t in chain.items:
         # operators are added as is, to be used by the reduction loop
-        if isinstance(t, t2.Operator):
+        if t2.is_operator(t):
             try:
                 get_precedence(t)
             except KeyError as missing:
@@ -728,9 +738,9 @@ def identify_shifts(chain: ProtoAST, ctx: Context) -> tuple[list[ShiftDir|qint[l
         
         # get binding power of left and right (if they are operators)
         left_bp, right_bp = NO_BIND, NO_BIND
-        if isinstance(left_op, t2.Operator):
+        if t2.is_operator(left_op):
             _, left_bp = get_bind_power(left_op)
-        if isinstance(right_op, t2.Operator):
+        if t2.is_operator(right_op):
             right_bp, _ = get_bind_power(right_op)
         
         if left_bp == NO_BIND and right_bp == NO_BIND:
@@ -816,7 +826,7 @@ def identify_reductions(chain: ProtoAST, shift_dirs: list[ShiftDir], candidate_o
         right_ast_shift_dir = shift_dirs[right_ast_shift_dir_idx] if right_ast_shift_dir_idx is not None else 0
 
         op = chain.items[candidate_operator_idx]
-        assert isinstance(op, t2.Operator), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
+        assert t2.is_operator(op), f'INTERNAL ERROR: candidate operator is not an operator. got {op=}'
         associativity = get_associativity(op)
         if not isinstance(associativity, list):
             associativity = [associativity]
@@ -913,7 +923,7 @@ def could_be_binop(op_idx: int, chain: ProtoAST) -> bool:
     """
     # early return if definitely not a binop
     op = chain.items[op_idx]
-    assert isinstance(op, t2.Operator), f'INTERNAL ERROR: operator is not an operator. got {op=}'
+    assert t2.is_operator(op), f'INTERNAL ERROR: operator is not an operator. got {op=}'
     if not t2.is_binary_op(op):
         return False
 
@@ -952,7 +962,7 @@ def could_be_postfix(op_idx: int, chain: ProtoAST) -> bool:
     """same idea as could_be_binop, but for postfix operators"""
     # early return if definitely not a postfix
     op = chain.items[op_idx]
-    assert isinstance(op, t2.Operator), f'INTERNAL ERROR: operator is not an operator. got {op=}'
+    assert t2.is_operator(op), f'INTERNAL ERROR: operator is not an operator. got {op=}'
     if not t2.is_postfix_op(op):
         return False
 
@@ -992,7 +1002,7 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator
 
     # verify to the left
     j = left_ast_idx - 1
-    while j > 0 and isinstance(chain.items[j], t2.Operator) and t2.op_equals(chain.items[j], op):
+    while j > 0 and t2.is_operator(chain.items[j]) and t2.op_equals(chain.items[j], op):
         prev_ast_idx = j - 1
         if prev_ast_idx < 0:
             # shouldn't be possible to get here because we insert void into comma expressions that are missing operands
@@ -1011,7 +1021,7 @@ def collect_flat_operands(left_ast_idx: int, right_ast_idx: int, op: t2.Operator
         j -= 2
 
     # verify to the right
-    while i < len(chain.items) and isinstance(chain.items[i], t2.Operator) and t2.op_equals(chain.items[i], op):
+    while i < len(chain.items) and t2.is_operator(chain.items[i]) and t2.op_equals(chain.items[i], op):
         next_ast_idx = i + 1
         if next_ast_idx >= len(chain.items):
             # shouldn't be possible to get here because we insert void into comma expressions that are missing operands
@@ -1091,7 +1101,7 @@ def ast_to_tree_str(ast: AST, level: int = 0) -> str:
     def item_label(item: TreeItem) -> str:
         if isinstance(item, AST): return ast_label(item)
         if isinstance(item, t1.Token): return token_label(item)
-        if isinstance(item, t2.Operator): return f"Operator({_op_label(item)})"
+        if t2.is_operator(item): return f"Operator({_op_label(item)})"
         if isinstance(item, str): return text_label(item)
         raise ValueError(f'INTERNAL ERROR: reached unreachable state. {item=}, {type(item)=}')
 

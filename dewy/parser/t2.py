@@ -2,9 +2,9 @@
 Post processing steps on tokens to prepare them for expression parsing
 """
 from textwrap import dedent
-from typing import Callable, Literal, cast, get_args, TypeAlias
+from typing import Callable, Literal, cast, get_args, TypeAlias, TypeGuard
 from dataclasses import dataclass, field
-from functools import partial, singledispatch
+from functools import cache, partial, singledispatch
 from ..reporting import SrcFile, ReportException, Span, Error, Pointer, Warning
 from . import t1
 
@@ -108,6 +108,18 @@ Operator: TypeAlias = (
     | CombinedAssignmentOp
     | BroadcastOp
 )
+
+
+@cache
+def _operator_class(cls: type) -> bool:
+    # The parser grammar is fixed before parsing. Cache this classification
+    # by class, retaining subclass support without testing every union member
+    # beside every operand on every shunting pass.
+    return issubclass(cls, Operator)
+
+
+def is_operator(token: object) -> TypeGuard[Operator]:
+    return _operator_class(type(token))
 
 
 def op_equals(left: Operator, right: Operator) -> bool:
