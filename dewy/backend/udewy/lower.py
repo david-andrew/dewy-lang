@@ -107,19 +107,19 @@ def _erase_dimensions(root: object) -> None:
             for item in value.values():
                 walk(item)
             return
-        if not is_dataclass(value) or isinstance(value, type) or id(value) in seen:
+        child_names = _hir_child_fields(type(value))
+        if child_names is None or id(value) in seen:
             return
-        if type(value).__module__ == ty.__name__:
-            return  # types are immutable; only node fields get rewritten
         seen.add(id(value))
-        for field_info in fields(value):
-            current = getattr(value, field_info.name)
-            if field_info.name in {'type', 'annotation'}:
-                erased = erase(current)
-                if erased is not current:
-                    setattr(value, field_info.name, erased)
-                continue
-            walk(current)
+        # HIR node/parameter types and declaration annotations are rewritten;
+        # type descriptions, spans and other metadata are never traversed.
+        for name in ('type', 'annotation'):
+            current = getattr(value, name, None)
+            erased = erase(current)
+            if erased is not current:
+                setattr(value, name, erased)
+        for name in child_names:
+            walk(getattr(value, name))
 
     walk(root)
 
@@ -2369,13 +2369,6 @@ class _Lowerer(
         def walk(value: object) -> None:
             if isinstance(value, hir.FunctionLiteral):
                 return  # nested functions plan their own captures
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    walk(item)
-                return
-            if isinstance(value, hir.ObjectField):
-                walk(value.value)
-                return
             if not isinstance(value, hir.AST):
                 return
             target = written(value)
@@ -2393,10 +2386,8 @@ class _Lowerer(
                         f'writing to `{binding.name}`, which belongs to an enclosing function',
                         'a local function reads enclosing locals but cannot change them; keep shared mutable state in an object and pass it, or return the new value',
                     )
-            for field_info in fields(value):
-                if field_info.name in ('type', 'annotation'):
-                    continue
-                walk(getattr(value, field_info.name))
+            for child in hir.children(value):
+                walk(child)
 
         for parameter in [*function.literal.pos_or_kw_args, *function.literal.kw_only_args,
                           *([function.literal.rest_args] if function.literal.rest_args is not None else [])]:

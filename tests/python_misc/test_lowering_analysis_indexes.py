@@ -53,3 +53,20 @@ def test_string_ownership_analyses_share_the_transformed_body_index(tmp_path, mo
     emitted = codegen(source, debug_locations=False)
     assert visits and all(count == 1 for _, count in visits.values())
     check_generated(emitted, tmp_path / 'ownership-indexes.udewy')
+
+
+def test_captured_write_inside_keyword_argument_is_rejected():
+    import pytest
+    from dewy.semantic.errors import NotImplementedYet
+
+    source = SrcFile(None, '''
+        let consume=(value:int64):>int64=>value
+        let main=():>int64=>{
+            let n:int64=0
+            let inner=():>int64=>consume(value={n=7\n0})
+            inner();
+            return n
+        }
+    ''')
+    with pytest.raises(NotImplementedYet, match='writing to `n`'):
+        codegen(source, debug_locations=False)

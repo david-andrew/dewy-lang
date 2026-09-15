@@ -14,7 +14,6 @@ import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import ReportException, SrcFile
 from dewy.semantic import check, hir, ty
-from dewy.semantic.analyze.effects import _iter_children
 from dewy.semantic.hir_display import type_to_dewy
 from dewy.semantic.modules import ModuleCompiler
 from udewy.cache import cache_artifact
@@ -69,7 +68,7 @@ def obligations(node):
         result.append(f'{node.source}:{str(node.runtime).lower()}:{str(node.expect).lower()};')
     if isinstance(node, hir.DictLookup):
         result.append(f'lookup:{str(node.proven).lower()}:{str(node.position is not None).lower()};')
-    for child in _iter_children(node):
+    for child in hir.children(node):
         result.extend(obligations(child))
     return result
 

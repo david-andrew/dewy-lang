@@ -4,7 +4,6 @@ import pytest
 
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir
-from dewy.semantic.analyze.effects import _iter_children
 from dewy.semantic.errors import UserError
 
 
@@ -28,7 +27,7 @@ def test_removal_keeps_distinct_constant_keys_at_their_slots():
 
     def walk(node):
         yield node
-        for child in _iter_children(node):
+        for child in hir.children(node):
             yield from walk(child)
 
     lookup, = [node for node in walk(root) if isinstance(node, hir.DictLookup)]

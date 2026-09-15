@@ -8,7 +8,6 @@ import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 from dewy.semantic import check, hir, ty
-from dewy.semantic.analyze.effects import _iter_children
 from dewy.semantic.hir_display import type_to_dewy
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
@@ -309,7 +308,7 @@ def loop_summary(node, *, function_types=False):
         parts.append(f'iter:{type_to_dewy(node.target.type)}:{node.first}:{node.step}:{last}:{count}:{str(node.guarded).lower()};')
     if isinstance(node, (hir.Break, hir.Continue)):
         parts.append(f'{type(node).__name__.lower()}:{node.loop_levels};')
-    for child in _iter_children(node):
+    for child in hir.children(node):
         parts.append(loop_summary(child, function_types=function_types))
     return ''.join(parts)
 

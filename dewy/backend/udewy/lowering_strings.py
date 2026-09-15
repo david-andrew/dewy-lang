@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Literal
 
-from ...utils import dataclass_fields
 from ...parser import t0
 from ...reporting import Span
 from ...semantic import hir, ty
@@ -2671,11 +2670,9 @@ class _StringLowering:
                     mark(part)
             else:
                 # a payload read of a `match` temporary, a member access, …: whatever it reads may be handed out
-                for field_ in dataclass_fields(expr):
-                    value = getattr(expr, field_.name)
-                    for child in (value if isinstance(value, (list, tuple)) else [value]):
-                        if isinstance(child, hir.AST) and not isinstance(child, hir.FunctionLiteral):
-                            mark(child)
+                for child in hir.children(expr):
+                    if not isinstance(child, hir.FunctionLiteral):
+                        mark(child)
 
         for expr in roots:
             mark(expr)
@@ -2691,16 +2688,7 @@ class _StringLowering:
         params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
         escapes: dict[int, set[int]] = {}
 
-        def children(node: hir.AST):
-            for field_ in dataclass_fields(node):
-                value = getattr(node, field_.name)
-                for child in (value if isinstance(value, (list, tuple)) else [value]):
-                    if isinstance(child, hir.AST):
-                        yield child
-                    elif isinstance(child, hir.ObjectField):
-                        yield child.value
-                    elif isinstance(child, dict):
-                        yield from (item for item in child.values() if isinstance(item, hir.AST))
+        children = hir.children
 
         def collect(node: hir.AST, declared: set[int], assigns: list[hir.Assign]) -> None:
             if isinstance(node, hir.FunctionLiteral):
@@ -2803,16 +2791,8 @@ class _StringLowering:
             if isinstance(node, hir.Assign) and self._is_string_valued(node.target.type):
                 assigned.append(node)
             if isinstance(node, hir.AST):
-                for field_ in dataclass_fields(node):
-                    value = getattr(node, field_.name)
-                    for child in (value if isinstance(value, (list, tuple)) else [value]):
-                        if isinstance(child, hir.AST):
-                            walk(child, nested)
-                        elif isinstance(child, hir.ObjectField):
-                            walk(child.value, nested)
-                        elif isinstance(child, dict):
-                            for item in child.values():
-                                walk(item, nested)
+                for child in hir.children(node):
+                    walk(child, nested)
 
         walk(literal.body, False)
         owning = {

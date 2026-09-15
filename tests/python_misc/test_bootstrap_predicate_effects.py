@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
-from dewy.semantic.analyze.effects import _iter_children
+from dewy.semantic import hir
 from dewy.semantic.analyze.predicate_effects import mutated_bindings, read_bindings
 from tests.python_misc.test_bootstrap_effects import effect_program, emit_hir
 from udewy.cache import cache_artifact
@@ -28,7 +28,7 @@ def test_native_predicate_dependencies_match_hosted(tmp_path):
         reads = ' '.join(map(str, sorted(read_bindings(node))))
         writes = ' '.join(map(str, sorted(mutated_bindings(node))))
         rows.append(f'[{names[id(node)]} set[{reads}] set[{writes}]]')
-        pending.extend(_iter_children(node))
+        pending.extend(hir.children(node))
     source = tmp_path / 'predicate_effects.dewy'
     source.write_text(f'''from reporting import Span
 import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types

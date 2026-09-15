@@ -44,7 +44,14 @@ def _covered(routes: set[Route], route: Route) -> bool:
     A stored route means "at or below this point", so any stored prefix of
     ``route`` (including ``route`` itself) covers it.
     """
-    return any(route[: len(stored)] == stored for stored in routes)
+    if not routes:
+        return False
+    # Route depth is bounded, whereas a parameter may have many sibling
+    # fields. Probe its prefixes instead of scanning every stored sibling.
+    for length in range(len(route) + 1):
+        if route[:length] in routes:
+            return True
+    return False
 
 
 def _add_route(routes: set[Route], route: Route) -> bool:

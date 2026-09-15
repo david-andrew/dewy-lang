@@ -2359,3 +2359,25 @@ small/large/zero-size allocations, overlapping spill movement, and buffer
 contents after subsequent allocations and calls. It passes through hosted and
 native µDewy with x86 and C output; the full parity/ABI/extern group passes
 46 tests. Artifacts: `alloca-spill-repro.json`, `alloca-spill-gates.log`.
+
+### Lowering walks syntax and probes effect-route prefixes
+
+The refreshed hosted lowering profile still spent time walking spans and type
+metadata in dimension erasure, captured-write checks and string lifetime
+queries. These passes now use the shared HIR child declarations, retaining
+parameter/default traversal where required. Effect coverage probes the bounded
+prefixes of a queried route instead of scanning every stored sibling route.
+A full-build measurement of this batch is pending.
+
+The capture scan now reaches keyword argument expressions: a nested function
+writing `n` inside `consume(value={n=7; 0})` previously passed hosted lowering.
+The corrected hosted and native compilers both reject the unsupported capture
+write. The isolated comparison is `captured-keyword-write-comparison.json`.
+
+The ownership/string/effects group passes 86 tests; units, predicate effects
+and container-removal facts pass 26, and lowering-query/capture regressions
+pass three. Four test helpers still imported the old effects traversal; they
+now use `hir.children`, and all 2,478 Python tests collect. Collection success
+is not a full-suite execution result. Artifacts: `lowering-syntax-gates.log`,
+`lowering-syntax-units-gates.log`, `lowering-syntax-capture-gates.log`,
+`lowering-syntax-collection.log`, and `host-lowering-after-dispatch/lowering.prof`.
