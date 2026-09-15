@@ -34,6 +34,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import is_dataclass, replace
+from functools import cache
 from ...utils import dataclass_fields as fields
 from typing import Literal, NoReturn
 
@@ -124,11 +125,17 @@ def _erase_dimensions(root: object) -> None:
 
 
 
-def _is_hir_node(value: object) -> bool:
-    """A checked-tree dataclass: an `AST`, or a part of one that is not (an
-    `ObjectField`, a `Param`, a match arm) — every one is walked."""
-    from dataclasses import is_dataclass
-    return is_dataclass(value) and not isinstance(value, type) and type(value).__module__ == hir.__name__
+@cache
+def _hir_child_fields(cls: type) -> tuple[str, ...] | None:
+    """Static traversal metadata for ASTs and their HIR dataclass parts.
+
+    Object fields, parameters, and match arms participate too. Source spans,
+    type descriptions, and binding/name metadata cannot contain local uses.
+    None distinguishes a non-HIR value from a leaf with no child fields.
+    """
+    if cls.__module__ != hir.__name__ or not is_dataclass(cls):
+        return None
+    return tuple(f.name for f in fields(cls) if f.name not in ('loc', 'type', 'binding_id', 'name'))
 
 
 def _uniquify_local_names(literal: hir.FunctionLiteral) -> hir.FunctionLiteral:
@@ -145,10 +152,17 @@ def _uniquify_local_names(literal: hir.FunctionLiteral) -> hir.FunctionLiteral:
     for param in [*literal.pos_or_kw_args, *literal.kw_only_args]:
         if param.binding_id is not None:
             owners.setdefault(param.name, []).append(param.binding_id)
+    seen: set[int] = set()
 
     def collect(value: object) -> None:
         if isinstance(value, hir.FunctionLiteral):
             return   # a nested literal is lowered on its own
+        child_fields = _hir_child_fields(type(value))
+        if child_fields is None and not isinstance(value, (list, tuple, dict)):
+            return
+        if id(value) in seen:
+            return
+        seen.add(id(value))
         if isinstance(value, hir.Declare) and value.binding_id is not None and not isinstance(value.expr, (hir.FunctionLiteral, hir.OverloadedFunction, hir.GenericFunction)):
             # (a nested function is hoisted under its binding's own name: not a local of this frame)
             ids = owners.setdefault(value.name, [])
@@ -158,9 +172,9 @@ def _uniquify_local_names(literal: hir.FunctionLiteral) -> hir.FunctionLiteral:
             ids = owners.setdefault(value.target.name, [])
             if value.target.binding_id not in ids:
                 ids.append(value.target.binding_id)
-        if _is_hir_node(value):
-            for field_ in fields(value):
-                collect(getattr(value, field_.name))
+        if child_fields is not None:
+            for name in child_fields:
+                collect(getattr(value, name))
         elif isinstance(value, (list, tuple)):
             for item in value:
                 collect(item)
@@ -173,14 +187,24 @@ def _uniquify_local_names(literal: hir.FunctionLiteral) -> hir.FunctionLiteral:
     if not renamed:
         return literal
 
+    renamed_nodes: dict[int, object] = {}
+
     def rename(value: object) -> object:
         if isinstance(value, hir.FunctionLiteral):
             return value
+        child_fields = _hir_child_fields(type(value))
+        if child_fields is None and not isinstance(value, (list, tuple, dict)):
+            return value
+        if id(value) not in renamed_nodes:
+            renamed_nodes[id(value)] = rename_inner(value, child_fields)
+        return renamed_nodes[id(value)]
+
+    def rename_inner(value: object, child_fields: tuple[str, ...] | None) -> object:
         if isinstance(value, (hir.Declare, hir.ExpressedIdentifier)) and value.binding_id in renamed:
             value = replace(value, name=renamed[value.binding_id])
-        if _is_hir_node(value):
-            updates = {field_.name: rename(getattr(value, field_.name)) for field_ in fields(value) if field_.name not in ('loc', 'type', 'binding_id', 'name')}
-            return replace(value, **updates)
+        if child_fields is not None:
+            updates = {name: rename(getattr(value, name)) for name in child_fields}
+            return replace(value, **updates) if any(updates[name] is not getattr(value, name) for name in updates) else value
         if isinstance(value, list):
             return [rename(item) for item in value]
         if isinstance(value, tuple):
@@ -196,9 +220,22 @@ def _uniquify_module_locals(root: hir.Block) -> hir.Block:
     """`_uniquify_local_names` for every function literal of a module, inner
     literals first — before the lowering keys anything by a node's identity."""
 
+    # The checked input is a DAG (defaults and shared expressions can recur).
+    # Rebuild a shared subtree once, preserving that sharing. Local renaming
+    # still runs separately for each function and never mutates the input.
+    memo: dict[int, object] = {}
+
     def rebuild(value: object) -> object:
-        if _is_hir_node(value):
-            updates = {field_.name: rebuild(getattr(value, field_.name)) for field_ in fields(value) if field_.name not in ('loc', 'type', 'binding_id', 'name')}
+        child_fields = _hir_child_fields(type(value))
+        if child_fields is None and not isinstance(value, (list, tuple, dict)):
+            return value
+        if id(value) not in memo:
+            memo[id(value)] = rebuild_inner(value, child_fields)
+        return memo[id(value)]
+
+    def rebuild_inner(value: object, child_fields: tuple[str, ...] | None) -> object:
+        if child_fields is not None:
+            updates = {name: rebuild(getattr(value, name)) for name in child_fields}
             rebuilt = replace(value, **updates) if any(updates[name] is not getattr(value, name) for name in updates) else value
             return _uniquify_local_names(rebuilt) if isinstance(rebuilt, hir.FunctionLiteral) else rebuilt
         if isinstance(value, list):
@@ -232,6 +269,14 @@ class _Lowerer(
         """Initialize per-program identity maps and deterministic counters."""
         _erase_dimensions(root)
         self.root = root
+        # Lowering only reads these generated signatures. Their primitive
+        # types have no registry dependencies, and keeping them on this lowerer
+        # prevents mutable FunctionType objects from crossing compilations.
+        self.primitive_intrinsic_types: dict[tuple[str, ...], ty.FunctionType] = {}
+        self.word_binary_type = ty.FunctionType(
+            [ty.PosOrKwArg('left', 'int64'), ty.PosOrKwArg('right', 'int64')],
+            [], None, 'int64',
+        )
         # Checking has finished minting the program's brands. Number the
         # complete forest once, as the native lowerer does, rather than
         # rebuilding it for every constructor, type test and copy arm.
@@ -5383,19 +5428,25 @@ class _Lowerer(
 
 
 
-    @staticmethod
     def _intrinsic_call(
+        self,
         name: str,
         args: list[hir.AST],
         rettype: ty.Type,
         loc: Span,
     ) -> hir.FunctionCall:
-        function_type = ty.FunctionType(
-            [ty.PosOrKwArg(None, arg.type) for arg in args],
-            [],
-            None,
-            rettype,
-        )
+        argument_types = tuple(arg.type for arg in args)
+        # Composite types can contain mutable metadata: do not use their
+        # identities or representations as a long-lived signature cache key.
+        primitive = isinstance(rettype, str) and all(isinstance(type_, str) for type_ in argument_types)
+        key = (rettype, *argument_types) if primitive else None
+        function_type = self.primitive_intrinsic_types.get(key) if primitive else None
+        if function_type is None:
+            function_type = ty.FunctionType(
+                [ty.PosOrKwArg(None, type_) for type_ in argument_types], [], None, rettype,
+            )
+            if primitive:
+                self.primitive_intrinsic_types[key] = function_type
         return hir.FunctionCall(
             loc,
             rettype,
@@ -5404,9 +5455,8 @@ class _Lowerer(
             {},
         )
 
-    @classmethod
     def _int64_binary(
-        cls,
+        self,
         name: Literal[
             '__add__',
             '__sub__',
@@ -5422,19 +5472,10 @@ class _Lowerer(
         right: hir.AST,
         loc: Span,
     ) -> hir.FunctionCall:
-        function_type = ty.FunctionType(
-            [
-                ty.PosOrKwArg('left', 'int64'),
-                ty.PosOrKwArg('right', 'int64'),
-            ],
-            [],
-            None,
-            'int64',
-        )
         return hir.FunctionCall(
             loc,
             'int64',
-            hir.ExpressedIdentifier(loc, function_type, name),
+            hir.ExpressedIdentifier(loc, self.word_binary_type, name),
             [left, right],
             {},
         )

@@ -1522,3 +1522,27 @@ incorrectly shortened the hosted `CombinedAssignmentOp` label; correcting the
 test's spelling made it exercise the intended entry. Full self-build impact
 is not yet measured. Artifacts: `native-indexed-frontend-samples`,
 `binding-power-measurement`, `binding-power-*-gates.log`.
+
+### Share hosted generated signatures and preserve HIR graph sharing
+
+The updated hosted lowering profile records 282,281 constructions of the same
+word-binary signature, and substantial work rediscovering locals and rebuilding
+shared HIR. Generated primitive-only intrinsic signatures now belong to one
+lowerer; composite metadata and signatures from other compilations cannot enter
+that cache. Local-name preparation caches class traversal metadata and visits
+shared subtrees once, preserving sharing through per-function renaming.
+
+Sixty-two focused checks pass, including a 24-level shared expression graph
+whose shadowed binding must be renamed without altering the original, signature
+width/lifetime distinctions, ownership identities, and static-array execution.
+The frozen t0 module emits identical µDewy apart from output-directory paths.
+Its fresh full build regresses from **11.79 to 12.39 seconds** (lowering 1.58
+to 2.01 s); this batch is not a demonstrated small-module win.
+
+The full frozen `3c699a2f` compiler builds through the hosted direct route in
+**129.37 seconds**: checking 54.49 s, lowering **29.00 s**, emission 4.53 s,
+backend 35.98 s; peak process RSS 1,615,208 KiB. The earlier full hosted result
+was 134.53 s with 34.27 s lowering, on the slightly earlier `091eab3b` source;
+that source difference limits the before/after comparison. Neither reaches
+the target. Artifacts: `hosted-current-lowering.prof`, `host-signatures-t0-*`,
+`host-shared-signatures-full`, and `hosted-signature-gates.log`.
