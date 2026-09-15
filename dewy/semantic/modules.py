@@ -32,7 +32,7 @@ class ModuleRecord:
     prelude: bool = False
 
 
-_validated_prelude_modules: set[tuple[Path, int, str]] = set()
+_PRELUDE_CACHE_VERSION = 2
 
 
 class _ResidentPrelude:
@@ -49,10 +49,9 @@ class _ResidentPrelude:
     reloads the pickle for every compile, the old way.
     """
 
-    def __init__(self, state: dict, registries: dict, validated: set, cache_path: Path) -> None:
+    def __init__(self, state: dict, registries: dict, cache_path: Path) -> None:
         self.state = state
         self.registries = registries
-        self.validated = validated
         stat = cache_path.stat()
         self.stamp = (stat.st_size, stat.st_mtime_ns)   # the entry as loaded: a rewritten (or corrupted) file is loaded again
         registry = state['registry']
@@ -206,16 +205,33 @@ class ModuleCompiler:
     def _checked_prelude_path(self) -> Path | None:
         import hashlib
         import os
+        from .prelude import library
         if os.environ.get('DEWY_NO_PRELUDE_CACHE'):
             return None
         digest = hashlib.sha256()
+        digest.update(f'checked-prelude-{_PRELUDE_CACHE_VERSION}:{self.target}\0'.encode())
+        digest.update(str(library.resolve()).encode() + b'\0')
         for path in prelude_files(self.target):
+            digest.update(str(path.resolve()).encode() + b'\0')
             digest.update(path.read_bytes())
         root = Path(__file__).resolve().parents[1]
         for path in sorted(root.rglob('*.py')):
             if '__pycache__' not in path.parts:
                 digest.update(path.read_bytes())
         return Path('__dewycache__') / 'prelude' / f'{self.target}-{digest.hexdigest()[:24]}.pickle'
+
+    @staticmethod
+    def _prelude_inputs_match(records: dict[Path, ModuleRecord]) -> bool:
+        # Include imports of the prelude, not only the initial file list used
+        # in the cache key. Equal sizes and timestamps do not prove equality.
+        try:
+            return bool(records) and all(
+                record.prelude and path == record.path
+                and path.read_text() == record.srcfile.body
+                for path, record in records.items()
+            )
+        except (OSError, UnicodeError):
+            return False
 
     def _restore_checked_prelude(self) -> bool:
         import os
@@ -233,20 +249,25 @@ class ModuleCompiler:
             del _resident_preludes[cache_path]
             resident = None
         if resident is not None:
+            if not self._prelude_inputs_match(resident.records):
+                del _resident_preludes[cache_path]
+                return False
             # the state a compile in this process already loaded: what that
             # compile added is rolled back, and the same objects serve again
             resident.rollback()
-            state, nominal_types, validated = resident.state, resident.registries, resident.validated
+            state, nominal_types = resident.state, resident.registries
         else:
             try:
-                state, nominal_types, validated = pickle.loads(cache_path.read_bytes())
+                version, state, nominal_types = pickle.loads(cache_path.read_bytes())
+                if version != _PRELUDE_CACHE_VERSION or not self._prelude_inputs_match(state['records']):
+                    return False
             except Exception:
                 return False   # a stale or corrupt entry: check the prelude and rewrite it
             if not (isinstance(nominal_types, dict) and 'nominal' in nominal_types and 'brands' in nominal_types):
                 return False   # an entry from before the registries were stored: check the prelude and rewrite it
             if not os.environ.get('DEWY_NO_RESIDENT_PRELUDE'):
                 _resident_preludes.clear()   # one prelude per process (a different target or a changed library replaces it)
-                _resident_preludes[cache_path] = _ResidentPrelude(state, nominal_types, validated, cache_path)
+                _resident_preludes[cache_path] = _ResidentPrelude(state, nominal_types, cache_path)
         for name in self._PRELUDE_STATE_FIELDS:
             setattr(self, name, state[name])
         # the brand registries a minted type lives in (`let Warning = type of Report & […]` in the prelude)
@@ -255,7 +276,6 @@ class ModuleCompiler:
         ty.USER_BRAND_PARENTS.update(nominal_types['parents'])
         ty.USER_BRAND_TYPES.update(nominal_types['types'])
         ty.USER_ABSTRACT_BRANDS.update(nominal_types['abstract'])
-        _validated_prelude_modules.update(validated)
         return True
 
     def _store_checked_prelude(self) -> None:
@@ -267,7 +287,6 @@ class ModuleCompiler:
         if cache_path is None:
             return
         state = {name: getattr(self, name) for name in self._PRELUDE_STATE_FIELDS}
-        validated = {key for key in _validated_prelude_modules if key[2] == self.target}
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = cache_path.with_name(f'{cache_path.name}.{os.getpid()}.{id(self)}.tmp')   # per process: parallel test workers store the same entry at once
@@ -275,7 +294,7 @@ class ModuleCompiler:
                 'nominal': dict(ty.USER_NOMINAL_TYPES), 'brands': set(ty.USER_BRANDS), 'parents': dict(ty.USER_BRAND_PARENTS),
                 'types': dict(ty.USER_BRAND_TYPES), 'abstract': set(ty.USER_ABSTRACT_BRANDS),
             }
-            tmp.write_bytes(pickle.dumps((state, registries, validated), protocol=pickle.HIGHEST_PROTOCOL))
+            tmp.write_bytes(pickle.dumps((_PRELUDE_CACHE_VERSION, state, registries), protocol=pickle.HIGHEST_PROTOCOL))
             tmp.replace(cache_path)
         except (OSError, pickle.PicklingError, TypeError, AttributeError):
             pass   # the cache is an optimization; a state that cannot be pickled is checked every time
@@ -350,15 +369,12 @@ class ModuleCompiler:
             ),
             test=self.test and entry,
         )
-        # Bounds are validated per module so diagnostics point into the right
-        # file (the merged program mixes prelude and user nodes). Prelude files
-        # are validated once per process: their checked form never changes.
-        validation_key = (path, path.stat().st_mtime_ns, self.target) if prelude else None
-        if validation_key is None or validation_key not in _validated_prelude_modules:
-            # `ctx.srcfile`: in test mode the entry's source has the generated runner appended
-            self._validate_and_select(root, ctx.srcfile, prelude_module=prelude, no_prelude=no_prelude, ctx=ctx)
-            if validation_key is not None:
-                _validated_prelude_modules.add(validation_key)
+        # A restored prelude already retains its validated HIR. Any module
+        # actually checked here needs validation too: unchanged source can
+        # acquire different facts from a changed dependency. A separate cache
+        # keyed only by this file's timestamp would reuse stale proofs.
+        # `ctx.srcfile` includes the generated runner in entry test mode.
+        self._validate_and_select(root, ctx.srcfile, prelude_module=prelude, no_prelude=no_prelude, ctx=ctx)
         exports: dict[str, sb.Binding] = {}
         for item in root.items:
             if not isinstance(item, hir.Declare) or item.binding_id is None:

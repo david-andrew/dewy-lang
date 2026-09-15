@@ -3035,3 +3035,17 @@ passes in 69.04 seconds (mostly building the driver). Artifacts:
 `cache-schema/invalidation-final.log`, `cache-schema/invalidation-native.log`.
 Normal CLI cold/warm measurements follow at the next compiler build checkpoint;
 no startup performance improvement is claimed yet.
+
+The matching hosted review found two stale-input paths. Its cache identity
+now includes the library root and initial source paths, and restoration
+checks every saved module's source contents, including transitive imports.
+Resident restoration checks the prelude's baseline records before rolling
+back the previous compilation. A separate per-file timestamp validation set
+has been removed: restored HIR already retains its validated state, while
+a module checked again must also be validated again against its dependencies.
+The existing cache/measurement checks pass eight gates, and two new disk/
+resident cases verify same-size/same-timestamp dependency changes, warm reuse,
+and disabled-cache agreement. Artifacts: `host-prelude-inputs.log` (the initial
+run also contains two fixture setup failures),
+`host-prelude-inputs-transitive-final.log` (both corrected cases pass).
+The measurement metadata now records the cache-disabling environment options.

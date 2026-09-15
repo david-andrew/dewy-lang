@@ -202,6 +202,9 @@ def main() -> int:
                       for name in ('cc', 'as', 'ld') if shutil.which(name)},
         'backend_environment': {key: value for key, value in env.items()
                                 if key.startswith(('UDEWY_', 'DEWY_BOOTSTRAP_'))},
+        'analysis_environment': {key: env[key] for key in
+                                 ('DEWY_NO_PRELUDE_CACHE', 'DEWY_NO_RESIDENT_PRELUDE')
+                                 if key in env},
     }
     if args.native_executable:
         metadata['compiler_sha256'] = hashlib.sha256(args.native_executable.read_bytes()).hexdigest()

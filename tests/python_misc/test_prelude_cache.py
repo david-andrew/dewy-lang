@@ -89,3 +89,50 @@ def test_cached_binding_registry_rebuilds_syntax_identity() -> None:
     fresh = restored.allocate(unrelated, 'fresh', 'value', Span(1, 2))
     assert fresh.id != saved.id
     assert restored.by_syntax[id(saved.syntax)] is saved
+
+
+@pytest.mark.parametrize('resident', [False, True])
+def test_transitive_prelude_input_invalidates_checked_state(tmp_path, monkeypatch, resident):
+    from dewy.semantic import modules, prelude as prelude_config
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv('DEWY_NO_PRELUDE_CACHE', raising=False)
+    if resident:
+        monkeypatch.delenv('DEWY_NO_RESIDENT_PRELUDE', raising=False)
+    else:
+        monkeypatch.setenv('DEWY_NO_RESIDENT_PRELUDE', '1')
+    dependency = tmp_path / 'dependency.dewy'
+    dependency.write_text('const answer:int64=42\n')
+    prelude = tmp_path / 'prelude.dewy'
+    prelude.write_text('import dependency as dependency\nconst answer:int64=dependency.answer\n')
+    monkeypatch.setattr(prelude_config, 'library', tmp_path)
+    monkeypatch.setattr(modules, 'prelude_files', lambda target: (prelude,))
+    validated = []
+    original = ModuleCompiler._validate_and_select
+
+    def observe(self, root, srcfile, **kwargs):
+        validated.append(srcfile.path)
+        return original(self, root, srcfile, **kwargs)
+
+    monkeypatch.setattr(ModuleCompiler, '_validate_and_select', observe)
+    source = SrcFile(None, 'main=():>int64=>answer\n')
+    cold = codegen(source)
+    validated.clear()
+    assert codegen(source) == cold
+    assert dependency not in validated and prelude not in validated
+    # The resident state now also contains the entry compilation's additions.
+    # Input checking must use the prelude's original records before rollback.
+    assert codegen(source) == cold
+    stamp = dependency.stat()
+    dependency.write_text('const answer:int64=43\n')
+    os.utime(dependency, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    validated.clear()
+    changed = codegen(source)
+    assert changed != cold
+    assert dependency in validated and prelude in validated
+    validated.clear()
+    assert codegen(source) == changed
+    assert dependency not in validated and prelude not in validated
+    monkeypatch.setenv('DEWY_NO_PRELUDE_CACHE', '1')
+    assert codegen(source) == changed
+    assert dependency in validated and prelude in validated
