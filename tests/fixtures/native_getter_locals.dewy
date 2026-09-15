@@ -1,0 +1,85 @@
+# A getter's read-only local result can stay a view into its supplied owner.
+# Returning or mutating that local must still preserve independent values.
+Node=type of [value:int64 text:string]
+Leaf=type of Node & [extra:int64]
+node_at=(nodes:array<Node> id:int64):>Node=>{
+    loop id >=? nodes.length {}
+    return nodes[id]
+}
+read_many=(nodes:array<Node>):>int64=>{
+    let sum:int64=0
+    loop i in 0.. and i <? 1000 {
+        let node=node_at(nodes 0)
+        if node is? Leaf {sum+=node.value+node.extra}
+    }
+    return sum
+}
+returned=(nodes:array<Node>):>Node=>{
+    let node=node_at(nodes 0)
+    return node
+}
+mutated=(nodes:array<Node>):>int64=>{
+    let node=node_at(nodes 0)
+    node.value=99
+    return nodes[0].value
+}
+rebound=(nodes:array<Node>):>int64=>{
+    let node=node_at(nodes 0)
+    nodes=[Leaf[99 'later' 0]]
+    return node.value
+}
+changed_place=(@nodes:array<Node>):>void=>{nodes[0].value=99}
+exposed=(nodes:array<Node>):>int64=>{
+    let node=node_at(nodes 0)
+    changed_place(@nodes)
+    return node.value
+}
+# Reading a newly returned owner must keep it alive until the getter's result
+# has an independent lifetime. A scope borrow cannot point into this temporary.
+make_nodes=():>array<Node>=>[Leaf[20 'payload' 22]]
+temporary=():>int64=>{
+    let node=node_at(make_nodes() 0)
+    return node.value
+}
+let visits:int64=0
+guarded_at=(nodes:array<Node> id:int64):>Node=>{
+    visits+=1
+    loop id >=? nodes.length {}
+    return nodes[id]
+}
+guarded_read=(nodes:array<Node>):>int64=>{
+    let node=guarded_at(nodes 0)
+    return node.value
+}
+mutating_getter=(nodes:array<Node>):>Node=>{
+    nodes[0].value=99
+    return nodes[0]
+}
+mutating_read=(nodes:array<Node>):>int64=>{
+    let node=mutating_getter(nodes)
+    return node.value
+}
+default_at=(nodes:array<Node>=[Leaf[20 'default' 22]]):>Node=>{
+    return nodes[0]
+}
+default_read=():>int64=>{
+    let node=default_at()
+    return node.value
+}
+main=():>int64=>{
+    let nodes:array<Node>=[Leaf[20 'payload' 22]]
+    # Snapshot as int64; do not infer a refined type from allocator counters.
+    let before:int64=_arena_allocated_bytes
+    if read_many(nodes) not=? 42000 return 1
+    let allocated:int64=_arena_allocated_bytes-before
+    if allocated not=? 0 return 2
+    if mutated(nodes) not=? 20 or rebound(nodes) not=? 20 or exposed(nodes) not=? 20 return 3
+    let result=returned(nodes)
+    result.value=99
+    if nodes[0].value not=? 20 return 4
+    if temporary() not=? 20 return 5
+    if guarded_read(nodes) not=? 20 or visits not=? 1 return 6
+    if mutating_read(nodes) not=? 99 or nodes[0].value not=? 20 return 7
+    if default_read() not=? 20 return 8
+    return 42
+}

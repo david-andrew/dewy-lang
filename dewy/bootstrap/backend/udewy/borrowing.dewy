@@ -204,7 +204,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
     if not opaque_only {loop id in graph.globals {initial.add(id)}}
     return propagate_ambient(initial (if value_boundaries graph.shared_callers else graph.callers))
 }
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr>]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[]]
 analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
 details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links):>Plan => {
     let indirect=callbacks.analyze(root nodes type_nodes plan links)
@@ -230,6 +230,23 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         $runtime_assert literal is? hir.FunctionLiteral
         loop parameter in effects.literal_params(literal) {
             if parameter.place and parameter.binding_id isnt? none {places.add(parameter.binding_id)}
+        }
+    }
+    # A scope borrow needs a longer guarantee than a call-argument borrow.
+    # Start conservatively: storage never written/exposed anywhere in its
+    # function, with no opaque operation in that function's call graph.
+    # Binding ids are program-unique. Captures, globals and place parameters
+    # may have another name outside this scope, so exclude them altogether.
+    # This reuses the existing graph instead of rescanning a body per local.
+    let captured:set<addr>=set[]
+    loop function in plan.functions.values {
+        loop binding in function.captures {captured.add(binding)}
+    }
+    let stable:set<addr>=set[]
+    loop [id function] in plan.functions {
+        if id in? opaque continue
+        loop binding in function.locals {
+            if binding not in? function.writes and binding not in? places and binding not in? plan.globals and binding not in? captured {stable.add(binding)}
         }
     }
     let array_snapshots:set<addr>=set[]
@@ -308,5 +325,5 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             if source isnt? none {escaping.add(source.binding)}
         }
     }
-    return Plan[result escaping disposable array_snapshots]
+    return Plan[result escaping disposable array_snapshots stable]
 }

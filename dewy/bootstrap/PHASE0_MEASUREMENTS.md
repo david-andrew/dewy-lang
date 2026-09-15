@@ -1785,3 +1785,29 @@ matching-target fixed-point verification. Artifact: `native-effect-queries-full`
 The latest bounded GDB lowering sample still finds allocation/copy/release
 inside effect traversal prominent; smaller effect-query kernels alone have
 not established an end-to-end gain. Both full-build targets remain unmet.
+
+### Read-only getter locals
+
+Native lowering can now retain a getter's record result as a local view when
+both the local binding and the source owner remain unwritten for the entire
+function. The scope proof reuses capture/write summaries and the transitive
+opaque-operation graph. Globals, captures, places, written bindings and
+functions with opaque operations are excluded. A specialized getter preserves
+its guards and side effects while returning the existing record storage.
+
+This initial slice requires a direct getter with one terminal route read from
+an explicitly supplied, non-default value parameter. The corresponding caller
+argument must be an identifier already proven safe to borrow at that call.
+Ordinary value boundaries still copy when required: returning the local,
+passing it to a mutating callee, and storing it into another owned value retain
+independent values. No new source spelling or ownership semantics is introduced.
+
+The `native_getter_locals.dewy` gate reads a branded record with a string field
+1,000 times, checks the sum, and requires **zero cumulative payload allocation**
+for those reads. Expected-result checks cover local mutation, source rebinding,
+place exposure, returned-value independence, temporary input owners, an omitted
+default owner, a mutating getter, and a guard with an observable side effect.
+All pass on direct x86-64 and C output. The existing scalar/aggregate projection,
+return-cleanup and temporary-element checks also pass using the same freshly
+built lowering driver. Artifacts: `phase0-performance/getter-locals-gates.log`
+and `getter-locals-boundaries.log`. A full native measurement remains pending.

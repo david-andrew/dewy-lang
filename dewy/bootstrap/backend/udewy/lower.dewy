@@ -5,6 +5,7 @@ import p"statements.dewy" as statements
 import p"layouts.dewy" as layouts
 import p"captures.dewy" as captures
 import p"borrowing.dewy" as borrowing
+import p"../../semantic/analyze/effects.dewy" as effects
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/type_queries.dewy" as views
@@ -34,7 +35,7 @@ Escaping closures remain a subsequent step. An unsupported representation report
 pending-implementation diagnostic before program emission.
 """
 OwnedLocal:type = const [value:addr value_type:addr box:addr?=none condition:addr?=none]
-ScalarProjection:type = const [function:addr read:addr field:string result:addr symbol:string]
+ScalarProjection:type = const [function:addr read:addr field:string result:addr symbol:string borrowed:bool=false]
 State:type = [
     input:emit.Input
     source:SrcFile
@@ -58,6 +59,7 @@ State:type = [
     storage_types:dict<addr addr>=[]
     capture_plan:captures.Plan=captures.Plan[]
     borrowed_arguments:dict<addr set<addr>>=[]
+    stable_bindings:set<addr>=set[]
     array_snapshots:set<addr>=set[]
     disposable_arguments:dict<addr set<addr>>=[]
     code_symbols:dict<addr string>=[]
@@ -368,13 +370,20 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Declare {
         if compile_time_binding(node state) return put(hir.Void[node.loc type] @state)
         if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral|hir.OverloadedFunction return put(hir.Void[node.loc type] @state)
-        let value=owned_value(node.expr @state)
+        let projection=borrowed_getter_local(node @state)
+        let borrowed=projection isnt? none
+        let value:addr=0
+        if projection isnt? none {
+            let call=hir.node_at(state.input.nodes node.expr)
+            $runtime_assert call is? hir.FunctionCall
+            value=ordinary_call(node.expr call runtime_type(call.value_type call @state) @state projection=projection)
+        } else {value=owned_value(node.expr @state)}
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
         if node.binding_id isnt? none and node.binding_id in? state.boxed {
             value=box_value(value if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
             annotation=types.primitive('int64' @state.type_nodes)
         }
-        if state.cleanup_enabled and node.binding_id isnt? none and node.binding_id not in? state.cleanup_excluded and state.cleanup_frames.length >? 0 {
+        if not borrowed and state.cleanup_enabled and node.binding_id isnt? none and node.binding_id not in? state.cleanup_excluded and state.cleanup_frames.length >? 0 {
             let stored=if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation
             if releasable(stored @state) {
                 let read=put(hir.ExpressedIdentifier[node.loc annotation symbol(node.name node.binding_id @state) node.binding_id] @state)
@@ -654,6 +663,10 @@ owned_value = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if state.result_projection isnt? none and state.result_projection.read =? id {
         let projection=state.result_projection
+        # A proven scope borrow returns the route's existing storage. Its
+        # source is an explicitly supplied, borrowed, unrebound parameter;
+        # caller and callee proofs keep it alive beyond this return cleanup.
+        if projection.borrowed return expression(id @state)
         # Keep the selected field while the route and all enclosing locals
         # are alive. Scalars pass through; aggregate handles acquire their
         # own lifetime before ordinary return cleanup releases the source.
@@ -2266,6 +2279,50 @@ scalar_getter_projection = (node:hir.MemberAccess @state:State):>ScalarProjectio
     state.pending_projections.push(projection)
     return projection
 }
+
+# Keep a getter's returned record as a local view only when both the view
+# binding and its owner remain read-only for their whole lexical function.
+# Ordinary calls/returns still establish value boundaries and copy as needed.
+# The first slice accepts a direct, supplied identifier argument: temporaries,
+# defaults, captured storage and converted argument layouts keep the fallback.
+borrowed_getter_local = (node:hir.Declare @state:State):>ScalarProjection? => {
+    if node.binding_id is? none or node.binding_id not in? state.stable_bindings or node.binding_id in? state.boxed return none
+    $runtime_assert node.expr <? state.input.nodes.length
+    if state.input.nodes[node.expr] isnt? hir.FunctionCall return none
+    let call=hir.node_at(state.input.nodes node.expr)
+    $runtime_assert call is? hir.FunctionCall
+    if not object_valued(call.value_type state) return none
+    if node.annotation isnt? none and node.annotation not=? call.value_type return none
+    let direct=captures.resolve(call.func call.selected_method_index state.capture_plan state.input.nodes)
+    if direct is? none return none
+    let literal=hir.node_at(state.input.nodes direct)
+    if literal isnt? hir.FunctionLiteral or literal.object_receiver or literal.rettype not=? call.value_type return none
+    let capture=state.capture_plan.functions.get(direct)
+    if capture is? none or capture.captures.length >? 0 return none
+    if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
+    let read=state.getter_reads.get(direct default=none)
+    if read is? none or read in? state.array_snapshots return none
+    let route=borrowing.route(read state.input.nodes)
+    if route is? none or route.binding not in? state.stable_bindings return none
+    let parameter:hir.Param?=none
+    loop candidate in parameters(literal) {if candidate.binding_id isnt? none and candidate.binding_id =? route.binding {parameter=candidate}}
+    if parameter is? none or parameter.place or parameter is? hir.BoundParam return none
+    let pairs=effects.pair_arguments(call literal)
+    if pairs is? none return none
+    let source:addr?=none
+    loop pair in pairs {if pair.parameter isnt? none and pair.parameter =? route.binding {source=pair.argument}}
+    if source is? none or source not in? state.borrowed_arguments.get(node.expr set[]) return none
+    let argument=hir.node_at(state.input.nodes source)
+    if argument isnt? hir.ExpressedIdentifier or argument.binding_id is? none or argument.binding_id not in? state.stable_bindings return none
+    if argument.value_type not=? parameter.value_type return none
+    let key="borrow:{direct}"
+    let existing=state.scalar_projections.get(key)
+    if existing isnt? none return existing
+    let projection=ScalarProjection[direct read '' literal.rettype fresh('borrow' @state) true]
+    state.scalar_projections[key]=projection
+    state.pending_projections.push(projection)
+    return projection
+}
 # Exact field operations and dynamic-family dispatch have different sharing
 # boundaries. A family's copy/release calls one field helper for its selected
 # brand; embedding every child's fields at every parent view expands the same
@@ -2725,6 +2782,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.capture_plan=captures.analyze(root input.nodes state.symbols.keys)
     let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links)
     state.borrowed_arguments=borrowed.arguments
+    state.stable_bindings=borrowed.stable_bindings
     state.array_snapshots=borrowed.array_snapshots
     state.disposable_arguments=borrowed.disposable_arguments
     state.cleanup_excluded=borrowed.escaping_places
