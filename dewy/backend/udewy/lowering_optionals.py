@@ -725,11 +725,15 @@ class _OptionalLowering:
             )
             if not frame_storage:
                 key = (members, prepared, move)
-                symbol = next((entry[3] for entry in self.cell_copy_symbols if entry[:3] == key), None)
+                identity = (tuple(map(id, members)), prepared, move)
+                cached = self.cell_copy_names.get(identity)
+                symbol = cached[1] if cached is not None else next((entry[3] for entry in self.cell_copy_symbols if entry[:3] == key), None)
                 if symbol is None:
                     symbol = self._internal_symbol(f'__dewy_copy_cell_{len(self.cell_copy_symbols)}')
                     self.cell_copy_symbols.append((*key, symbol))
                     self.pending_cell_copies.append((*key, symbol))
+                if cached is None:
+                    self.cell_copy_names[identity] = (members, symbol)
                 signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
                 return [hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, signature, symbol),
                     [replace(dest, type='int64'), replace(source, type='int64')], {})]

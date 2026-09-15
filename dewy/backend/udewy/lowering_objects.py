@@ -195,12 +195,16 @@ class _ObjectLowering:
         if prepared and move is False and not borrowed and not self._object_uses_prepared_storage(object_type):
             prepared = False
         key = (object_type, prepared, move, frozenset(borrowed), exact)
-        symbol = next((entry[5] for entry in self.object_copy_symbols if entry[:5] == key), None)
+        identity = (id(object_type), *key[1:])
+        cached = self.object_copy_names.get(identity)
+        symbol = cached[1] if cached is not None else next((entry[5] for entry in self.object_copy_symbols if entry[:5] == key), None)
         if symbol is None:
             symbol = self._internal_symbol(f'__dewy_copy_object_{len(self.object_copy_symbols)}')
             entry = (*key, symbol)
             self.object_copy_symbols.append(entry)
             self.pending_object_copies.append(entry)
+        if cached is None:
+            self.object_copy_names[identity] = (object_type, symbol)
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, symbol),
                                 [replace(dest, type='int64'), replace(src, type='int64')], {})
@@ -260,12 +264,16 @@ class _ObjectLowering:
 
     def _object_release_call(self, base: hir.AST, object_type: ty.ObjectType, loc: Span,
                              *, exact: bool = False) -> hir.FunctionCall:
-        symbol = next((symbol for existing, mode, symbol in self.object_release_symbols
+        identity = (id(object_type), exact)
+        cached = self.object_release_names.get(identity)
+        symbol = cached[1] if cached is not None else next((symbol for existing, mode, symbol in self.object_release_symbols
                        if mode == exact and existing == object_type), None)
         if symbol is None:
             symbol = self._internal_symbol(f'__dewy_release_object_{len(self.object_release_symbols)}')
             self.object_release_symbols.append((object_type, exact, symbol))
             self.pending_object_releases.append((object_type, exact, symbol))
+        if cached is None:
+            self.object_release_names[identity] = (object_type, symbol)
         function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
         return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, symbol), [replace(base, type='int64')], {})
 

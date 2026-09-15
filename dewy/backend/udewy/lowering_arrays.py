@@ -1330,11 +1330,15 @@ class _ArrayLowering(_ArraySharing):
                        for member in members):
                 return []
             key = (members, prepared, strings)
-            symbol = next((entry[3] for entry in self.cell_release_symbols if entry[:3] == key), None)
+            identity = (tuple(map(id, members)), prepared, strings)
+            cached = self.cell_release_names.get(identity)
+            symbol = cached[1] if cached is not None else next((entry[3] for entry in self.cell_release_symbols if entry[:3] == key), None)
             if symbol is None:
                 symbol = self._internal_symbol(f'__dewy_release_cell_{len(self.cell_release_symbols)}')
                 self.cell_release_symbols.append((*key, symbol))
                 self.pending_cell_releases.append((*key, symbol))
+            if cached is None:
+                self.cell_release_names[identity] = (members, symbol)
             return [self._release_value_call(symbol, cell, loc)]
         tag = self._new_string_temp(loc, 'int64', 'cell_tag')
         payload = self._new_string_temp(loc, 'int64', 'cell_payload')

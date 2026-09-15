@@ -3237,3 +3237,37 @@ outcomes, including every hosted case and all ten rejection fixtures on both
 implementations. Every accepted native program matches its expected behavior;
 the 57 remaining failures are native compilation rejections. See
 [PARITY_INVENTORY.md](PARITY_INVENTORY.md) for provenance and feature gaps.
+
+### Native position-only integration and hosted helper indexes
+
+The native build of frozen `2b541de3` compiler sources completes in
+**58.612 seconds** through the `a8619dab` C-built Dewy seed and `d32f29e3`
+C-built µDewy. It emits a direct x86-64 executable and 52,882,521 bytes of
+µDewy, with 5,991,320 KiB maximum process RSS. Phases: frontend 24.522,
+validation 5.049, initialization/reachability 1.673, lowering 10.840,
+emission 5.069, and backend 9.046 seconds. The refreshed C accelerator
+also passes the position-only corpus fixture through its public command.
+Artifacts: `source-position-only`, `native-position-only-{full,c-seed}`,
+`parity-position-only`. Two-generation verification follows separately.
+
+A fresh hosted profile of the frozen cache-enabled compiler is retained in
+`host-cache-compiler-stage-profiles`. Profiling perturbs elapsed time (and
+focused tests overlapped part of checking); use its call counts and hotspots,
+not those elapsed times as acceptance measurements.
+
+Hosted lowering now remembers the structural copy/release helper chosen for
+each retained input type and ownership mode. New identities still use the
+original structural matching, preserving helper sharing and numbering. The
+indexes expire with the lowerer. Capture discovery also lets functions with
+no direct captures omit the separate captured-write scan; default expressions
+and write targets participate in that discovery.
+
+Twenty capture, ownership and record-family gates pass, plus an additional
+comparison with helper indexes disabled producing identical emitted source.
+Four alternating tokenizer samples give lowering **0.750/0.740 seconds before**
+and **0.709/0.710 after**. Complete checking/lowering/emission samples span
+5.80–5.99 seconds with no established total improvement. Normalizing each
+work-directory path gives identical emitted source in all four samples.
+Artifacts: `helper-selection-{final-gates,identity-gate,comparison}.log`,
+`helper-selection-{before,after}-{0,1}`. This bounded batch does not establish
+a new full-build time.

@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from dewy.backend.udewy import codegen
+from dewy.backend.udewy import codegen, lower
 from dewy.reporting import SrcFile
 from udewy.cache import cache_artifact
 from udewy.frontend import EntryPointOptions, entry_point
@@ -39,6 +39,29 @@ main=():>int64=>{
     return fixed.pair.values[0]+fixed.pair.values[1]
 }
 '''
+
+
+def test_helper_indexes_preserve_structural_deduplication(monkeypatch):
+    source = SrcFile(None, PREPARED)
+    indexed = codegen(source, debug_locations=False)
+
+    class NoCache(dict):
+        def get(self, key, default=None):
+            return default
+
+        def __setitem__(self, key, value):
+            pass
+
+    original = lower._Lowerer.__init__
+
+    def without_indexes(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        for name in ('object_copy_names', 'object_release_names',
+                     'cell_copy_names', 'cell_release_names'):
+            setattr(self, name, NoCache())
+
+    monkeypatch.setattr(lower._Lowerer, '__init__', without_indexes)
+    assert codegen(source, debug_locations=False) == indexed
 
 
 @pytest.mark.parametrize('family', [True, False], ids=['family-growth', 'prepared-storage'])

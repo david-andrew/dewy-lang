@@ -339,10 +339,12 @@ class _Lowerer(
         self.string_release_symbol: str | None = None
         self.pending_string_release = False
         self.cell_release_symbols: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
+        self.cell_release_names = {}
         self.pending_cell_releases: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
         self.array_release_symbols: list[tuple[ty.TypeExpr | None, str]] = []
         self.pending_array_releases: list[tuple[ty.TypeExpr | None, str]] = []
         self.cell_copy_symbols: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
+        self.cell_copy_names = {}
         self.pending_cell_copies: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
         # bindings whose value is an enum (a union of singletons): a word
         # holding the member index (`ty.enum_members`), no cell
@@ -350,6 +352,11 @@ class _Lowerer(
         self.named_copy_symbols: dict[int, str] = {}  # recursive alias id -> deep-copy function symbol
         self.pending_named_copies: list[ty.NamedType] = []
         self.object_copy_symbols: list[tuple[ty.ObjectType, bool, bool | str, frozenset[str], bool, str]] = []
+        # Structural matching still chooses each helper once for a new input
+        # type. Retain that type and its answer so later uses avoid rescanning
+        # every helper. These indexes belong to this stable lowering only.
+        self.object_copy_names = {}
+        self.object_release_names = {}
         self.object_layouts: dict[int, tuple[ty.ObjectType, tuple[int, dict[str, int]]]] = {}
         self.object_frame_copies: dict[int, tuple[ty.ObjectType, bool]] = {}
         self.object_prepared_storage: dict[int, tuple[ty.ObjectType, bool]] = {}
@@ -2285,7 +2292,11 @@ class _Lowerer(
                     bindings.append(binding)
                 self.lifted_types.setdefault(id(binding), self._lifted_param_type(binding, use))
         for function in self.functions:
-            self._reject_captured_writes(function)
+            # Discovery records identifier uses in write targets and defaults
+            # too. Without any direct capture there is no outer storage here
+            # to write; a nested function checks its own body separately.
+            if self.captures.get(id(function.literal)):
+                self._reject_captured_writes(function)
         # callers must be able to pass what their callees need
         changed = True
         while changed:
