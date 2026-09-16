@@ -90,6 +90,26 @@ it borrowed arrays into callees that then took value copies (shares) of
 them, so the caller detached its own array on every later write, and one
 fixture crashed outright. Argument borrowing keeps the call-graph rule.
 
+### Size-class arena entries and the shared none cell (2026-09-15)
+
+Same protocol as the paired measurement above (quiet machine, alternating
+cold runs, C-built compilers, direct x86-64 output):
+
+| Compiler source | Wall | Frontend | Validation | Lowering | Emission | Backend |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline `7834ca7a` | 41.45 / 40.28 s | 16.47 / 16.22 | 3.96 / 3.99 | 6.86 / 7.04 | 2.55 / 2.52 | 8.09 / 6.89 |
+| with `0eaa88fb` | 30.71 / 30.43 s | 11.33 / 11.25 | 2.95 / 2.86 | 5.24 / 5.17 | 1.43 / 1.44 | 6.76 / 6.74 |
+
+Cumulative 25 % on the cold self-build. Most of the step from 36 s came from
+`_arena_alloc_16/64` and friends: the general `_arena_alloc` is one large
+function called from tens of thousands of sites, so the C compiler does not
+inline it and every allocation paid a call plus a size-class computation.
+The specialized entries make the free-list pop the whole hot path. The
+immortal `none` cell removed about a tenth of the frontend's allocation
+bytes on top of that. The billion-allocation structure is otherwise
+unchanged; the next steps remain placement (frame cells and descriptors for
+non-escaping values) and null handles for optional aggregates.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted
