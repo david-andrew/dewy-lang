@@ -334,6 +334,42 @@ their descriptive names for profiles and debugging. Emitted text 32.8 MB to
 byte-bound, so the remaining backend cost is parsing, encoding and the
 concurrent assembly. Wall 19.67 / 19.66 s to 19.45 / 19.69 s.
 
+### Shared record blocks (2026-09-16)
+
+Records were copied field by field on every value boundary: `node_at`
+alone accounted for 5.2 % of samples through `copy_fields`, `write_record`
+and the arena. Whole record blocks are now shared by reference count like
+array descriptors (see PERFORMANCE.md): one header word holds the sharing
+count and the block's size; a copy from an element slot, an owned local or a
+private parameter bumps the count when the block's size is the copy's own
+layout size, and a mutation through a shared handle detaches a private block
+of the same recorded size and stores it back through its route. Copies from
+inline field records, borrowed parameters and addressed locals stay deep.
+Dictionary lookups (which only rebuild an index) take the route without
+detaching; only genuine writes (field, element and dictionary stores,
+container methods, place passing) make a record parameter private, and only
+a binding that owns its block detaches it (a borrowed parameter may address
+an inline field with no header). Cold quiet self-build, C-built compilers:
+
+| | previous | shared records |
+| --- | --- | --- |
+| frontend | 7.48 / 7.69 s | 6.33 / 6.34 s |
+| validation | 2.06 / 2.07 s | 1.91 / 1.96 s |
+| lowering | 3.80 / 3.88 s | 3.93 / 4.01 s |
+| emission | 1.28 / 1.30 s | 1.46 / 1.45 s |
+| backend | 3.08 / 3.14 s | 3.26 / 3.23 s |
+| wall | 19.46 / 19.89 s | 18.89 / 19.04 s |
+| peak RSS | 2.83 GB | 3.25 GB |
+
+`node_at`'s runtime attribution fell to 2.1 %; the share helpers themselves
+are 2.6 % of samples. Memory grew because the 8-byte header pushes records
+whose layout is exactly a size class (719 allocation sites of 16-byte
+records, 432 of 32, 78 of 64, 110 of 128) into the next power-of-two class;
+that also costs the lowering, emission and backend phases their small
+regressions. Intermediate size classes are the next step. Fixture
+`native_shared_records` (pair check 35) covers copies through locals,
+element slots, optional payloads, place arguments and nested fields.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted

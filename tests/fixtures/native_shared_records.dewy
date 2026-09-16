@@ -1,0 +1,68 @@
+# Whole record blocks are shared by reference count. A copy and its source
+# stay independent under mutation of either side: through locals, element
+# slots, optional payloads, place parameters and nested inline fields.
+Point:type = [x:int64 y:int64 tags:array<int64>]
+Node:type = [id:int64 origin:Point names:dict<string int64>]
+Store:type = [nodes:array<Node>]
+node_at = (store:Store id:int64):>Node => {
+    if id <? 0 or id >=? store.nodes.length return Node[0 Point[0 0 []] []]
+    return store.nodes[id]
+}
+bump = (@p:Point amount:int64):>void => {
+    p.x += amount
+    p.tags.push(amount)
+}
+main=():>int64=>{
+    let store = Store[[]]
+    loop i in 0.. and i <? 4 {
+        let node = Node[i Point[i i*2 []] []]
+        node.names['n'] = i
+        store.nodes.push(node)
+    }
+    # A copy of an element mutated: the element keeps its value.
+    let copy = node_at(store 2)
+    copy.origin.x = 100
+    copy.names['extra'] = 7
+    if node_at(store 2).origin.x not=? 2 or copy.origin.x not=? 100 return 1
+    if node_at(store 2).names.length not=? 1 or copy.names.length not=? 2 return 2
+    # The element mutated through its slot: an earlier copy keeps its value.
+    if store.nodes.length <? 4 return 90
+    store.nodes[1].origin.y = 55
+    let other = node_at(store 1)
+    if other.origin.y not=? 55 return 3
+    store.nodes[1].origin.y = 66
+    if other.origin.y not=? 55 or node_at(store 1).origin.y not=? 66 return 4
+    # One block shared three ways, each side mutated separately.
+    let a = Node[9 Point[1 1 [1]] []]
+    let b = a
+    let c = b
+    b.id = 10
+    c.origin.tags.push(2)
+    if a.id not=? 9 or b.id not=? 10 or c.id not=? 9 return 5
+    if a.origin.tags.length not=? 1 or c.origin.tags.length not=? 2 return 6
+    # A place argument rooted at a local that was assigned a shared handle.
+    let target = a
+    bump(@target.origin 5)
+    if target.origin.x not=? 6 or a.origin.x not=? 1 or target.origin.tags.length not=? 2 return 7
+    # A record read out of an optional cell.
+    let maybe:Node? = a
+    if maybe isnt? none {
+        let taken = maybe
+        taken.id = 77
+        if a.id not=? 9 or taken.id not=? 77 return 8
+    }
+    # An array of records copied, then an element of one copy mutated.
+    let rows = store.nodes
+    if rows.length <? 4 return 91
+    rows[0].id = 500
+    if node_at(store 0).id not=? 0 or rows[0].id not=? 500 return 9
+    # A nested inline field copied out and mutated.
+    let origin = node_at(store 3).origin
+    origin.x = 1000
+    if node_at(store 3).origin.x not=? 3 or origin.x not=? 1000 return 10
+    # Reassigning a shared local releases only its own reference.
+    let d = a
+    d = Node[1 Point[0 0 []] []]
+    if a.id not=? 9 or d.id not=? 1 return 11
+    return 42
+}

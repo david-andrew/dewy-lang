@@ -50,7 +50,20 @@ pinned storage (-1). Native-generated descriptors are instead shared by
 reference count: the owner word holds the number of handles (>= 1) sharing
 the descriptor and its data, a copy increments it, and a mutation detaches a
 shared descriptor into a private one that the mutating route stores back into
-its place. In both protocols, exposing raw aggregate storage first detaches
+its place.
+
+Native-generated record blocks are shared the same way: one header word
+before the fields holds the count of handles sharing the block (low half)
+and the block's allocated size (high half). A copy from a handle known to
+address a whole block (an element slot, an owned local, a private parameter)
+bumps the count when the block's size is the copy's own layout size; copies
+from inline field records, borrowed parameters and addressed locals stay
+deep. A mutation through a shared handle first detaches a private block of
+the same recorded size and stores it back through the mutating route (a
+local, a box, an element slot or an optional payload); only bindings that
+own their block detach. Hosted-generated records remain private copies.
+
+In both protocols, exposing raw aggregate storage first detaches
 existing snapshots and prevents subsequent sharing of the exposed tree.
 Without a tracked raw-pointer lifetime, that tree is retained conservatively.
 This is an implementation fallback, not a new ownership feature or a change

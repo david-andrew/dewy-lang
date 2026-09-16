@@ -93,6 +93,14 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Shared record blocks (2026-09-16). Native record blocks carry a header
+  word (sharing count, allocated size) and are shared by reference count;
+  copies from whole-block handles bump the count, mutations through shared
+  handles detach a same-size private block and store it back through the
+  route, dictionary lookups do not detach, and only owning bindings detach.
+  Self-build 19.5-19.9 s to 18.9-19.0 s (frontend 7.5 to 6.3 s); peak RSS
+  up 0.4 GB from size-class rounding of the header, to be recovered with
+  intermediate size classes.
 - Short temporary names (2026-09-16). Snapshot temporaries are spelled
   `_aN` and statement steps `_sN` instead of `__dewy_argument_N` and
   `__dewy_step_N`; helper, function and user-binding symbols keep their
