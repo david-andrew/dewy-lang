@@ -2978,8 +2978,12 @@ object_test = (operand:addr node:hir.TypeTest @state:State):>addr => {
 # Function defaults are callee expressions. The ABI passes an ordinary value
 # plus a presence flag; only the absent branch evaluates the default. Keyword
 # spelling disappears here, after preserving the source evaluation order.
+# Snapshot temporaries are the bulk of the emitted identifiers; their short
+# spelling cannot collide with user bindings (`__dewy_binding_...`),
+# generated helpers (`__dewy_..._N`) or lifted functions.
 fresh = (hint:string @state:State):>string => {
     state.serial+=1
+    if hint =? 'argument' return "_a{state.serial}"
     return "__dewy_{hint}_{state.serial}"
 }
 snapshot = (value:addr @prefix:array<addr> @state:State):>addr => {

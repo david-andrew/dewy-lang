@@ -93,6 +93,12 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Short temporary names (2026-09-16). Snapshot temporaries are spelled
+  `_aN` and statement steps `_sN` instead of `__dewy_argument_N` and
+  `__dewy_step_N`; helper, function and user-binding symbols keep their
+  descriptive prefixes. Emitted text 32.8 MB to 26.1 MB, emission 1.40 s to
+  1.27 s, peak RSS down 50 MB; backend time unchanged.
+
 - µDewy tool buffers (2026-09-16). `copy_bytes` copies words, and byte
   buffers carry their string length-prefix slot and NUL in their own
   storage so `bb_finalize_as_string` no longer copies. Identical output;

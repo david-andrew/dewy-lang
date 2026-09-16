@@ -15,7 +15,7 @@ node_at = (id:addr state:State):>hir.AST => hir.node_at(state.nodes id)
 void_type = (@state:State):>addr => types.primitive('void' @state.types)
 boolean = (@state:State):>addr => types.primitive('bool' @state.types)
 append = (@target:array<addr> items:array<addr>):>void => {loop item in items {target.push(item)}}
-fresh = (@state:State):>string => {state.serial+=1 return "__dewy_step_{state.serial}"}
+fresh = (@state:State):>string => {state.serial+=1 return "_s{state.serial}"}
 # Binding discovery already gave each lexical local a unique symbol. µDewy
 # has braces on control-flow bodies, but no standalone lexical block statement.
 # Flatten statement scopes while keeping every conditional body's boundary.

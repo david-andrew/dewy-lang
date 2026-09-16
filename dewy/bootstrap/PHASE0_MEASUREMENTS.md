@@ -322,6 +322,18 @@ the µDewy tests pass.
 The cold self-build is under 20 seconds. The backend is now roughly 1.1 s
 of tool time, 1.1 s of concurrent assembly and 0.5 s of linking.
 
+### Short temporary names (2026-09-16)
+
+Identifiers were 55 % of the emitted µDewy bytes, and snapshot temporaries
+(`__dewy_argument_N`, 557,000 of them) 12 MB of that. They are now `_aN`
+and statement steps `_sN`; the spelling cannot collide with user bindings
+(`__dewy_binding_...`), generated helpers or lifted functions, which keep
+their descriptive names for profiles and debugging. Emitted text 32.8 MB to
+26.1 MB, emission 1.40 / 1.40 s to 1.27 / 1.27 s, peak RSS 2.86 GB to
+2.81 GB. The µDewy tool's time did not change: its tokenizer is not
+byte-bound, so the remaining backend cost is parsing, encoding and the
+concurrent assembly. Wall 19.67 / 19.66 s to 19.45 / 19.69 s.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted
