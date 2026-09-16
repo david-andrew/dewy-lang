@@ -93,6 +93,21 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Stored range bindings iterate (2026-09-16). `loop i in window` where
+  `window = [0..10)` resolves the binding back to its range literal, as
+  membership already did, with no runtime range representation
+  (`range_values.dewy`).
+- Iterator formulas (2026-09-16). Loop conditions combine iterator leaves
+  with `or`, `xor`, `nand`, `nor` and `xnor` as well as `and`, as in the
+  hosted checker: the condition becomes a postfix formula over leaf
+  indices, the stopping point follows from the leaves' static counts, a
+  leaf the formula lets run past its end binds an optional target, and a
+  formula that stays true after every counted leaf ends repeats until the
+  body exits. The lowering keeps such a target in a frame cell per loop
+  site, written with the element on each step and `none` after the leaf's
+  end. Dynamic-length arrays are still limited to pure `and` formulas.
+  All seven multi-iterator fixtures pass parity; fixture
+  `native_iterator_formulas` (pair check 38).
 - Indirect calls under `transmute` (2026-09-16). The emitter spells a call
   through a function value `(@f)(x)`; the µDewy tool does not read a
   postfix `transmute` after that form, so a global initializer whose
