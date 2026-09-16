@@ -1,0 +1,15 @@
+# A bare `Name = ...` rooted at a type name declares a type alias, as
+# `Name:type = ...` does: refined strings and integers, and intersections.
+Short = string<length <=? 3>
+Positive = int64<i => i >? 0>
+Pair:type = [a:int64 b:int64]
+Named = Pair & [name:string]
+fit = (s:Short):>int64 => s.length
+main=():>int64=>{
+    let total:int64 = fit("ab")
+    let p:Positive = 40
+    total += p
+    let n:Named = [a=1 b=2 name="x"]
+    total += n.a - n.b + n.name.length
+    return total
+}

@@ -1437,6 +1437,100 @@ ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Ses
     return expression(winner env @session expected=expected call_target=call_target allow_place=allow_place)
 }
 
+# `[a b] = value` / `let [a b] = value`: the value is bound once (a hidden
+# local unless it is already a binding), then each target takes a field by
+# name from an object or an element by position from an array of proven
+# length, declaring a new name or assigning an existing one exactly as
+# `a = ...` would (`let` always declares). `_` discards an element.
+unpack = (targets_id:addr right:addr id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {
+    let targets=contexts.node_at(targets_id env.lexical session)
+    $runtime_assert targets is? parser.Block
+    let loc=contexts.node_at(id env.lexical session).loc
+    let void_type=types.primitive('void' @session.types)
+    let statements:array<addr>=[]
+    let source_name=source_views.identifier(right env.lexical session)
+    let source:addr=0
+    if source_name isnt? none and declarations.lookup(source_name env.lexical session) isnt? none {
+        let read=expression(right env @session)
+        if read is? Error return read
+        source=read
+    } else {
+        let value=expression(right env @session)
+        if value is? Error return value
+        let hidden="__dewy_unpack_{session.registry.next_id}"
+        let binding_id=bindings.allocate(@session.registry none hidden 'value' loc)
+        let binding=bindings.binding_at(session.registry binding_id)
+        let type=node_at(value session).value_type
+        binding.value_type=type binding.store_type=type
+        let declaration=put(hir.Declare[loc void_type 'let' hidden type value binding_id] @session)
+        binding.declaration=declaration
+        bindings.store_binding(@session.registry binding_id binding)
+        set_read_type(binding_id stored_read_type(value @session) env @session)
+        statements.push(declaration)
+        source=put(hir.ExpressedIdentifier[loc type hidden binding_id] @session)
+    }
+    let source_type=stored_read_type(source @session)
+    let shape=types.node_at(session.types types.unfold(types.strip_refinement(source_type session.types) session.types))
+    let entries=views.container_entry_types(source_type session.types)
+    if entries isnt? none return pending(id 'unpacking dictionary or set entries' env session)
+    let names:array<string>=[]
+    let values:array<addr>=[]
+    if shape is? types.ObjectType {
+        loop item in targets.inner {
+            let target_name=source_views.identifier(item env.lexical session)
+            if target_name is? none or target_name =? '_' return problem(item 'objects unpack by field name' 'each target names the field it takes' env session)
+            let field=types.object_field(shape target_name)
+            if field is? none return problem(item "no field `{target_name}` to unpack" 'the value has no field of this name' env session)
+            names.push(target_name)
+            values.push(put(hir.MemberAccess[contexts.node_at(item env.lexical session).loc field.value_type source target_name field.mutable and not shape.immutable] @session))
+        }
+    } else if shape is? types.ArrayType {
+        if shape.length is? none return problem(right 'cannot prove how many elements this array has' 'unpacking needs an exact length: index the elements you need under a length guard instead' env session)
+        if targets.inner.length not=? shape.length return problem(targets_id 'unpacking must name every element' "{targets.inner.length} targets for {shape.length} elements; use `_` for a value you do not need" env session)
+        loop index in 0.. and index <? targets.inner.length {
+            let item=targets.inner[index]
+            let target_name=source_views.identifier(item env.lexical session)
+            if target_name is? none return pending(id 'nested unpacking targets' env session)
+            if target_name =? '_' continue
+            let item_loc=contexts.node_at(item env.lexical session).loc
+            let position=put(hir.Integer[item_loc types.integer_literal(index @session.types) '0d' index] @session)
+            names.push(target_name)
+            values.push(put(hir.Index[item_loc shape.element source position index] @session))
+        }
+    } else return problem(right 'this value cannot be unpacked' 'unpacking takes an object or an array' env session)
+    loop i in 0.. and i <? names.length and i <? values.length {
+        let target_name=names[i]
+        let value=values[i]
+        let scope=bindings.scope_at(session.scopes env.lexical.scope)
+        let existing=if explicit scope.names.get(target_name) else declarations.lookup(target_name env.lexical session)
+        if existing isnt? none and not explicit {
+            let prior=bindings.binding_at(session.registry existing)
+            if prior.read_only_reason isnt? none return problem(id 'cannot assign to a constant' target_name env session)
+            let assigned=put(hir.ExpressedIdentifier[loc (if prior.store_type is? none node_at(value session).value_type else prior.store_type) target_name existing] @session)
+            let converted=against(value (if prior.store_type is? none node_at(value session).value_type else prior.store_type) id env @session)
+            if converted is? Error return converted
+            container_state.changed(existing env.state @session)
+            set_read_type(existing stored_read_type(converted @session) env @session)
+            statements.push(put(hir.Assign[loc void_type assigned '=' converted] @session))
+            continue
+        }
+        if existing isnt? none return problem(id "duplicate declaration `{target_name}`" 'this scope already declares the name' env session)
+        let widened=if constant value else widen(value id env @session strings=false)
+        if widened is? Error return widened
+        let type=node_at(widened session).value_type
+        let binding_id=bindings.allocate(@session.registry none target_name 'value' loc)
+        let binding=bindings.binding_at(session.registry binding_id)
+        binding.value_type=type binding.store_type=type
+        if constant {binding.read_only_reason='const binding'}
+        let declaration=put(hir.Declare[loc void_type (if constant 'const' else 'let') target_name type widened binding_id] @session)
+        binding.declaration=declaration
+        bindings.store_binding(@session.registry binding_id binding)
+        bindings.bind(@session.scopes env.lexical.scope target_name binding_id)
+        set_read_type(binding_id stored_read_type(widened @session) env @session)
+        statements.push(declaration)
+    }
+    return put(hir.Block[loc void_type statements false] @session)
+}
 declaration = (id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {
     let node = contexts.node_at(id env.lexical session)
     if node isnt? parser.BinOp return problem(id 'declaration needs a value' 'expected a named assignment' env session)
@@ -1455,6 +1549,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     }
     let name = source_views.identifier(target_id env.lexical session)
     if name is? none {
+        if annotation is? none and target is? parser.Block and target.delims =? '[]' return unpack(target_id node.right id env @session constant=constant explicit=explicit)
         if explicit or annotation isnt? none return pending(id 'destructuring declaration' env session)
         if target is? parser.BinOp {
             let adjacency = contexts.node_at(target.op env.lexical session)
@@ -1542,6 +1637,9 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     binding.value_type = if annotation is? none checked.value_type else annotation
     binding.store_type = binding.value_type
     let read=if annotation isnt? none and numeric_values.is_family(annotation 'BigInt' env.lexical session) annotation else checked.value_type
+    # A declared function type is the binding's contract: a call through it
+    # yields the declared (possibly wider) result, not the initializer's.
+    if annotation isnt? none and types.node_at(session.types types.strip_refinement(annotation session.types)) is? types.FunctionType|types.OverloadType {read=annotation}
     if annotation isnt? none {
         let payload=views.optional_payload(annotation @session.types)
         let actual=stored_read_type(value @session)

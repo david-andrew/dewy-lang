@@ -40,6 +40,11 @@ import p"native_shared_records.dewy" as shared_records
 import p"native_literal_union_joins.dewy" as literal_union_joins
 import p"native_power_operator.dewy" as power_operator
 import p"native_iterator_formulas.dewy" as iterator_formulas
+import p"native_unpacking_targets.dewy" as unpacking_targets
+import p"native_error_family.dewy" as error_family
+import p"native_declared_callables.dewy" as declared_callables
+import p"native_bare_aliases.dewy" as bare_aliases
+import p"native_abstract_union_tests.dewy" as abstract_union_tests
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -118,5 +123,15 @@ let main=():>int64=>{
     if power_operator.main() not=?42 return 37
     printl('Checking iterator formulas')
     if iterator_formulas.main() not=?42 return 38
+    printl('Checking unpacking targets')
+    if unpacking_targets.main() not=?42 return 39
+    printl('Checking the error family')
+    if error_family.main() not=?42 return 40
+    printl('Checking declared callables')
+    if declared_callables.main() not=?42 return 41
+    printl('Checking bare aliases')
+    if bare_aliases.main() not=?42 return 43
+    printl('Checking abstract union tests')
+    if abstract_union_tests.main() not=?42 return 44
     return 42
 }

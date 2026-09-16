@@ -1,0 +1,12 @@
+# A binding declared with a function type keeps that declared signature as
+# its contract: a call through it yields the declared (wider) result even
+# when the initializer's own result type is narrower.
+Bad = type of error & [code:int64]
+widen = (n:int64):>int64? => if n >? 0 n else none
+main=():>int64=>{
+    let total:int64 = 0
+    let wider:<(n:int64):>int64 | none | Bad> = @widen
+    match wider(4) { v:int64 => { total += v }  <none> => { total += 100 }  <Bad> => { total += 1000 } }
+    match wider(0) { v:int64 => { total += 100 }  <none> => { total += 38 }  b:Bad => { total += b.code } }
+    return total
+}

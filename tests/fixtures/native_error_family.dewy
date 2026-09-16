@@ -1,0 +1,19 @@
+# A record error (`type of error & [...]`) is an `error`: `is? error` holds
+# for it, and an `e:error` match arm covers it after a unit error's arm.
+NotFound = type of error
+Detail = type of error & [code:int64]
+check = (n:int64):>int64 | Detail | NotFound => {
+    if n <? 0 return Detail(code=n)
+    if n >? 100 return NotFound
+    return n
+}
+main=():>int64=>{
+    let total:int64 = 0
+    match check(200) { <NotFound> => { total += 20 }  e:error => { total += 1000 }  v:int64 => { total += 2000 } }
+    match check(-3) { v:int64 => { total += 3000 }  e:error => { total += 10 } }
+    let v = check(7)
+    if v is? error { total += 4000 } else { total += v }
+    let d = Detail(code=5)
+    if d is? error { total += 5 }
+    return total
+}

@@ -236,6 +236,12 @@ atom_implies = (a_id:addr b_id:addr links:Graph @nodes:types.Table):>bool => {
         return true
     }
     if a is? types.CallableType and b is? types.CallableType return callable_subtype(a b links @nodes)
+    # A record error (`type of error & [...]`) is a minted object whose brand
+    # links to the primitive `error` family, as a unit error's name does.
+    if a is? types.ObjectType and a.minted and b is? types.Primitive {
+        let brand=a.brand
+        if brand isnt? none and nominal_subtype(brand b.name links) return true
+    }
     let a_nominal = umbrella(a)
     let b_nominal = umbrella(b)
     if a_nominal isnt? none and b is? types.Primitive return nominal_subtype(a_nominal b.name links)

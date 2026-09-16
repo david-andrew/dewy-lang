@@ -453,12 +453,15 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
         return current
     }
     if node is? hir.ObjectLiteral {
+        # A field's binding is initialized once the literal is built; a
+        # method of the literal reads sibling fields through that binding
+        # when it is called later (`sum = ():>int64 => a + b`).
         let current = initialized
         loop field in node.fields {
             current = check_eager(field.value current parameters stack @checker)
             if field.binding_id isnt? none { dense.add(@current field.binding_id) }
         }
-        return initialized
+        return current
     }
     let children = hir.children(node)
     if node is? hir.Range {

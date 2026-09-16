@@ -1,0 +1,18 @@
+# `[a b] = value` unpacks an object by field name or an array of proven
+# length by position, declaring each new name and assigning existing ones;
+# `_` discards an element.
+origin = [ox=0 oy=0]
+[ox oy] = origin
+main=():>int64=>{
+    let total:int64 = ox + oy
+    let pair:array<int64 length=2> = [40 2]
+    [first back] = pair
+    total += first + back
+    let point = [x=7 y=9]
+    [y x] = point
+    total += x - y
+    let existing:int64 = 1
+    [existing _ third] = [5 6 7]
+    total += existing + third
+    return total - 10
+}

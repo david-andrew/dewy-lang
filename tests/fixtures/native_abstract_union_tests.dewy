@@ -1,0 +1,12 @@
+# An abstract `int` alternative in a container union occupies the 64-bit
+# word; testing a present value with `is? int64` is that alternative's
+# presence.
+Info:type = [name:string extra:dict<string int|none>]
+main=():>int64=>{
+    let info:Info = [name="y" extra=['T'->(-1) '='->none 'k'->30]]
+    let total:int64 = 0
+    loop [k v] in info.extra {
+        if v is? int64 { total += v + 10 } else { total += 3 }
+    }
+    return total - 10
+}

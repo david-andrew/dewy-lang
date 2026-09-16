@@ -1691,6 +1691,12 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
             let matches=object_matches(cell_payload(source member node @state) member node.test_type node @state)
             let selected=put(hir.ShortCircuit[node.loc boolean 'and' active matches] @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result selected] @state)
+        } else if views.integer_valued(member state.type_nodes) and views.fixed_integer_layout(views.structural_base(node.test_type state.type_nodes) state.type_nodes) isnt? none {
+            # An abstract `int`/`uint` alternative occupies the 64-bit word
+            # (`dict<string int|none>`); every present value fits the word,
+            # so a fixed-width test is the presence of that alternative.
+            let active=intrinsic('__eq__' [tag word(tag_number node @state)] boolean node @state)
+            result=put(hir.ShortCircuit[node.loc boolean 'or' result active] @state)
         } else if not type_tests.disjoint(member node.test_type state.links @state.type_nodes) {
             return reject(node 'a runtime test within one union payload alternative' @state)
         }

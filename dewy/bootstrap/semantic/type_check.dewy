@@ -828,6 +828,29 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
 # A block first reserves its alias names, then resolves their bodies lazily.
 # This permits forward references and gives a cycle a stable binding identity.
 # Value/function declarations are reserved by the expression checker.
+# The identifier a would-be type expression is rooted at: `int` in
+# `int<...>`, an alias name, the left of `Context & [...]`.
+type_expression_root = (id:addr context:contexts.Context session:contexts.Session):>string? => {
+    let node=contexts.node_at(source_views.unparen(id context session) context session)
+    if node is? parser.Atom return source_views.identifier(id context session)
+    if node is? parser.BinOp {
+        let op=source_views.symbol(node.op context session)
+        if op in? ['TypeParamJuxtapose' '&' '|'] return type_expression_root(node.left context session)
+    }
+    return none
+}
+# Whether a name denotes a type here: a declared alias, a builtin type, a
+# nominal family; value keywords that also name types stay values.
+names_type = (name:string context:contexts.Context session:contexts.Session):>bool => {
+    if name in? ['none' 'void' 'end' 'new' 'ellipsis'] return false
+    let binding_id=lookup(name context session)
+    if binding_id isnt? none {
+        let binding=bindings.binding_at(session.registry binding_id)
+        return binding.type_value isnt? none or binding_id in? session.pending_aliases
+    }
+    if name in? session.builtin_aliases or name in? views.nat_bases or name in? session.links.ancestors return true
+    return name in? ['any' 'untyped' 'noreturn' 'addr' 'bigint' 'fixed' 'rational']
+}
 predeclare_alias = (id:addr context:contexts.Context @session:contexts.Session):>addr?|Error => {
     let node = contexts.node_at(id context session)
     let explicit=false
@@ -842,6 +865,15 @@ predeclare_alias = (id:addr context:contexts.Context @session:contexts.Session):
         explicit=true
         name = source_views.identifier(target.left context session)
     } else if source_views.is_mint(node.right context session) { name = source_views.identifier(node.left context session) }
+    else if not explicit {
+        # `Positive = int<i => i >? 0>` / `Short = string<length <=? 3>` /
+        # `Both = A & B`: a bare assignment rooted at a type name is an alias,
+        # as in the hosted checker.
+        let root=type_expression_root(node.right context session)
+        if root is? none or not names_type(root context session) return none
+        name = source_views.identifier(node.left context session)
+        if name is? none return none
+    }
     else return none
     if name is? none return contexts.problem(id 'type alias needs a name' 'use `Name:type = ...`' context session)
     # A bare assignment to an outer name does not declare a shadow, even when
