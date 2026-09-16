@@ -93,6 +93,18 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- `or_throw`, type-fact results, nested unpacking (2026-09-16).
+  `value or_throw` is checked as in the hosted compiler and spelled as a
+  hidden binding, a test with an early return of the exception alternatives
+  (`error` subtypes and `none`, converted to the enclosing result type) and
+  a narrowed read of the ordinary ones (`error_fields`). A result contract
+  `:> x is? T` and its false-case `isnt?` counterpart are discharged by a
+  function that returns that very test on the parameter (`type_facts`).
+  Unpacking targets nest (`[[a0 a1] [b0 b1]] = grid`) through a hidden
+  element binding; a module-level unpacking's declarations are globals
+  (the globals scan and the module emitter flatten desugared statement
+  groups). Fixtures `native_or_throw`, `native_type_facts` (pair checks
+  45-46) and the extended `native_unpacking_targets`.
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &
