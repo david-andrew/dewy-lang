@@ -516,13 +516,13 @@ address = (base:addr offset:addr node:hir.AST @state:State):>addr => if offset =
 # later argument is evaluated, so callee mutation cannot affect the caller.
 # Frame storage remains available for small compiler-kernel tests without a
 # prelude; values using it are forbidden from escaping that frame.
-# Sizes up to 64 bytes cover cells, descriptors and small records; the
-# arena offers class-specialized entries for them (see `_arena_alloc_16`).
+# Sizes up to 256 bytes cover cells, descriptors and records; the arena
+# offers class-specialized entries for them (see `_arena_alloc_16`).
 arena_class_helper = (size:addr prefix:string @state:State):>string? => {
     if state.allocator is? none return none
     let constant=hir.node_at(state.nodes size)
-    if constant isnt? hir.Integer or constant.value <=? 0 or constant.value >? 64 return none
-    let width=if constant.value <=? 8 8 else if constant.value <=? 16 16 else if constant.value <=? 32 32 else 64
+    if constant isnt? hir.Integer or constant.value <=? 0 or constant.value >? 256 return none
+    let width=if constant.value <=? 8 8 else if constant.value <=? 16 16 else if constant.value <=? 32 32 else if constant.value <=? 64 64 else if constant.value <=? 128 128 else 256
     let binding=state.runtime_helpers.get("{prefix}{width}")
     if binding is? none return none
     return state.symbols.get(binding)

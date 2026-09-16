@@ -1183,6 +1183,11 @@ class _ArrayLowering(_ArraySharing):
 
     def _arena_release_call(self, block: hir.AST, size: hir.AST, loc) -> hir.FunctionCall:
         """Give ``size`` bytes at ``block`` back to the prelude's arena (`_arena_release`)."""
+        width = self._arena_class_width(size)
+        specialized = self._runtime_helper(f'_arena_release_{width}') if width is not None else None
+        if specialized is not None:
+            function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
+            return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, specialized.symbol), [block], {})
         function = self._runtime_helper('_arena_release')
         if function is None:
             self._target_error(hir.Void(loc, ty.VOID_TYPE), 'arena release without the prelude arena')
@@ -1515,8 +1520,23 @@ class _ArrayLowering(_ArraySharing):
         loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, self._int64_comparison('__lt__', index, length, loc), body)], None)
         return [index_declare, length_declare, data_declare, loop]
 
+    @staticmethod
+    def _arena_class_width(size: hir.AST) -> int | None:
+        """The specialized arena entry width for a constant size up to 64 bytes."""
+        if not isinstance(size, hir.Integer) or not (0 < size.value <= 256):
+            return None
+        for width in (8, 16, 32, 64, 128, 256):
+            if size.value <= width:
+                return width
+        return None
+
     def _arena_allocation(self, size: hir.AST, loc) -> hir.FunctionCall:
         """Allocate ``size`` bytes from the prelude's process arena."""
+        width = self._arena_class_width(size)
+        specialized = self._runtime_helper(f'_arena_alloc_{width}') if width is not None else None
+        if specialized is not None:
+            function_type = ty.FunctionType([], [], None, 'int64')
+            return hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, function_type, specialized.symbol), [], {})
         function = self._runtime_helper('_arena_alloc')
         if function is None:
             self._target_error(
