@@ -515,6 +515,91 @@ to_rational = (value:addr word:bool id:addr env:Environment @session:contexts.Se
     if integer is? Error return integer
     return library_call(if word '_rational_from_int' else '_bigrational_from_int' [integer] id env @session)
 }
+# `base ^ exponent` over integers, rationals and dimensioned quantities, as
+# in the hosted checker. Constant bases fold exactly (a negative exponent
+# makes an integer base rational); runtime integer bases with a provably
+# non-negative exponent call `_int_pow`; rational bases take any constant or
+# runtime integer exponent through the rational prelude helpers.
+pow_operation = (arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    if arguments.length not=? 2 return none
+    let base=arguments[0]
+    let exponent=arguments[1]
+    let loc=contexts.node_at(id env.lexical session).loc
+    let exponent_type=node_at(exponent session).value_type
+    if not views.integer_valued(exponent_type session.types) return problem(id 'exponent must be an integer' "this has type `{display.type_to_dewy(exponent_type session.types)}`" env session)
+    let exponent_value=constant_integer(exponent session)
+    let base_type=node_at(base session).value_type
+    let number=numeric_constants.number_type(base session)
+    let quantity=types.node_at(session.types base_type)
+    let dimension:addr?=if quantity is? types.QuantityType quantity.dimension else none
+    let dimensioned=dimension isnt? none and types.dimension_at(dimension session.types).powers.length >? 0
+    if dimensioned and exponent_value is? none return problem(id 'a dimensioned quantity needs a constant exponent' 'the result dimension must be known at compile time' env session)
+    if numeric_values.is_family(number 'Fixed' env.lexical session) return pending(id '`^` on fixed-point bases' env session)
+    let unsigned_exponent=subtyping.is_subtype(exponent_type types.primitive('uint' @session.types) session.links @session.types)
+    if numeric_values.is_family(number 'BigInt' env.lexical session) {
+        if exponent_value isnt? none and exponent_value <? 0 return pending(id 'negative powers of big integers (rationals over big integers)' env session)
+        if exponent_value is? none and not unsigned_exponent return problem(id 'integer exponent must be known to be non-negative' 'a negative exponent would make the result a rational' env session)
+        let exponent64=against(exponent types.primitive('int64' @session.types) id env @session)
+        if exponent64 is? Error return exponent64
+        return library_call('_bigint_pow' [base exponent64] id env @session)
+    }
+    let shape=types.node_at(session.types types.strip_refinement(number session.types))
+    let base_rational=shape is? types.RationalLiteralType or numeric_values.is_family(number 'Rational' env.lexical session) or numeric_values.is_family(number 'BigRational' env.lexical session)
+    if not base_rational and not views.integer_valued(number session.types) return problem(id 'no matching overload for operator `^`' "this has type `{display.type_to_dewy(base_type session.types)}`; `^` raises integers and rationals to integer powers" env session)
+    let base_value=numeric_constants.value(base session)
+    if base_value isnt? none and exponent_value isnt? none {
+        if base_value.numerator =? 0 and exponent_value <? 0 return problem(id 'division by zero' 'zero raised to a negative power' env session)
+        let result_dimension:addr?=if dimension is? none none else types.power_dimension(dimension exponent_value @session.types)
+        let magnitude=if exponent_value <? 0 (-exponent_value) else exponent_value
+        let top:bigint=1
+        let bottom:bigint=1
+        let count:bigint=0
+        loop count <? magnitude {
+            top=top*base_value.numerator
+            bottom=bottom*base_value.denominator
+            count+=1
+        }
+        if exponent_value <? 0 {
+            let swapped=top
+            top=bottom
+            bottom=swapped
+            if bottom <? 0 {top=-top bottom=-bottom}
+        }
+        if not base_rational and exponent_value >=? 0 {
+            let integer_type=types.integer_literal(top @session.types)
+            if dimensioned {
+                $runtime_assert result_dimension isnt? none
+                integer_type=types.quantity_type(integer_type result_dimension @session.types)
+            }
+            return put(hir.Integer[loc integer_type '0d' top] @session)
+        }
+        let folded=numeric_constants.fraction(top bottom)
+        let type=types.rational_literal(folded.numerator folded.denominator @session.types)
+        let normalized=types.node_at(session.types type)
+        $runtime_assert normalized is? types.RationalLiteralType
+        let result_type=type
+        if dimensioned {
+            $runtime_assert result_dimension isnt? none
+            result_type=types.quantity_type(type result_dimension @session.types)
+        }
+        return put(hir.RationalConstant[loc result_type normalized.numerator normalized.denominator] @session)
+    }
+    if dimensioned return pending(id 'runtime quantity arithmetic materialization' env session)
+    let exponent64=against(exponent types.primitive('int64' @session.types) id env @session)
+    if exponent64 is? Error return exponent64
+    if base_rational or (exponent_value isnt? none and exponent_value <? 0) {
+        let word=numeric_values.is_family(number 'Rational' env.lexical session)
+        let prefix=if word '_rational' else '_bigrational'
+        let helper=if exponent_value isnt? none and exponent_value <? 0 "{prefix}_pow_negative" else "{prefix}_pow"
+        let operand=to_rational(base word id env @session)
+        if operand is? Error return operand
+        return library_call(helper [operand exponent64] id env @session)
+    }
+    if exponent_value is? none and not unsigned_exponent return problem(id 'integer exponent must be known to be non-negative' 'a negative exponent would make the result a rational; use an unsigned exponent, or make the base a rational' env session)
+    let integer=against(base types.primitive('int64' @session.types) id env @session)
+    if integer is? Error return integer
+    return library_call('_int_pow' [integer exponent64] id env @session)
+}
 rational_operation = (name:string arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
     let word=false
     let big=false
@@ -773,6 +858,11 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         if specialized is? Error return specialized
         if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
         if func is? hir.ExpressedIdentifier and func.binding_id isnt? none and bindings.binding_at(session.registry func.binding_id).builtin and (func.name in? builtins.binary_operators.values or func.name in? builtins.prefix_operators.values or func.name in? builtins.inverted_comparisons.values) {
+            if func.name =? '__pow__' {
+                let powered=pow_operation(positional id env @session)
+                if powered is? Error return powered
+                if powered isnt? none return if expected is? none powered else against(powered expected id env @session)
+            }
             let rational=rational_operation(func.name positional id env @session)
             if rational is? Error return rational
             if rational isnt? none return if expected is? none rational else against(rational expected id env @session)

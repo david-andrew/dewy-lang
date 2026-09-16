@@ -1,0 +1,20 @@
+# `^` raises integers and rationals to integer powers: constant bases fold
+# (a negative exponent makes an integer base rational), runtime integer
+# bases take a provably non-negative exponent, rational bases any integer.
+main=():>int64=>{
+    let n:int64 = 3
+    let cube = n^3
+    let folded:int64 = 2^10
+    let eighth = 2^(-3)
+    let ratio = (2/3)^2
+    let inverted = (2/3)^(-2)
+    let e:uint8 = 4
+    let dynamic = n^e
+    let total:int64 = cube + folded // 100 + dynamic // 10
+    if eighth not=? 0 and ratio not=? 0 and inverted not=? 0 {
+        if eighth.denominator =? 8 and ratio.numerator =? 4 and inverted.numerator =? 9 { total += 21 }
+    }
+    let one = n^0
+    if one =? 1 { total += 1 }
+    return total - 25
+}

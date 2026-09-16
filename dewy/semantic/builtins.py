@@ -324,6 +324,7 @@ builtin_types: dict[str, ty.TypeExpr] = {
     '__mul__': _binary_generic('number'),
     '__floordiv__': _binary_generic('int'),
     '__mod__': _binary_generic('int'),
+    '__pow__': _binary_generic('number'),
     '__lshift__': _shift_generic(),
     '__rshift__': _shift_generic(),
     '__eq__': _binary_generic(ty.TOP_TYPE, 'bool'),

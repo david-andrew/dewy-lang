@@ -188,6 +188,7 @@ definitions = (@nodes:types.Table):>dict<string addr> => {
     result['__add__'] = types.overload_type([binary_generic(number @nodes) binary_concrete(string string @nodes)] @nodes)
     loop name in ['__sub__' '__mul__'] { result[name] = binary_generic(number @nodes) }
     loop name in ['__floordiv__' '__mod__'] { result[name] = binary_generic(integer @nodes) }
+    result['__pow__'] = binary_generic(number @nodes)
     let shift = types.function_type([types.PosOrKwArg['left' variable] types.PosOrKwArg['right' natural]] [] none variable [types.GenericParam['T' integer]] @nodes)
     loop name in ['__lshift__' '__rshift__'] { result[name] = shift }
     loop name in ['__eq__' '__ne__'] { result[name] = binary_generic(any @nodes ret=boolean) }
