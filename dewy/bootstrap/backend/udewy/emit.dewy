@@ -209,6 +209,13 @@ write_argument = (id:addr @scope:Scope input:Input @state:State @out:Writer):>vo
     write_ast(id @scope input @state @out)
     if parens {write(')' @out)}
 }
+# A call spelled by name: a declared function or an intrinsic that no local
+# shadows. Anything else calls through a function value.
+direct_call = (call:hir.FunctionCall @scope:Scope input:Input):>bool => {
+    let function=hir.node_at(input.nodes call.func)
+    if function isnt? hir.ExpressedIdentifier return false
+    return (function.name in? scope.direct_functions or function.name in? intrinsics) and function.name not in? scope.locals
+}
 write_call = (call:hir.FunctionCall @scope:Scope input:Input @state:State @out:Writer):>void => {
     if call.kw_args.length >? 0 {reject(call 'keyword arguments require positional legalization' scope @state) return}
     let function=hir.node_at(input.nodes call.func)
@@ -251,7 +258,7 @@ write_call = (call:hir.FunctionCall @scope:Scope input:Input @state:State @out:W
         }
     }
     if function is? hir.ExpressedIdentifier {
-        let direct=(function.name in? scope.direct_functions or function.name in? intrinsics) and function.name not in? scope.locals
+        let direct=direct_call(call @scope input)
         if not direct {write('(@' @out)}
         write(function.name @out)
         if not direct {write(')' @out)}
@@ -386,7 +393,11 @@ write_ast = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void =>
     if node is? hir.FunctionCall {write_call(node @scope input @state @out) return}
     if node is? hir.ValueCast {write_ast(node.expr @scope input @state @out) return}
     if node is? hir.Transmute {
-        let parens=hir.node_at(input.nodes node.expr) is? hir.Transmute
+        # µDewy reads `(@f)(x) transmute T` as a call followed by a stray
+        # token; an indirect call operand needs its own parentheses.
+        let inner=hir.node_at(input.nodes node.expr)
+        let indirect=inner is? hir.FunctionCall and not direct_call(inner @scope input)
+        let parens=inner is? hir.Transmute or indirect
         if parens {write('(' @out)} write_ast(node.expr @scope input @state @out)
         if parens {write(')' @out)}
         write(' transmute ' @out) write(annotation(node.value_type input) @out) return
