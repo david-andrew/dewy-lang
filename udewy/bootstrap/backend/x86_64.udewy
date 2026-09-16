@@ -59,6 +59,11 @@ let x86_if_else_labels:int = 0
 let x86_if_end_labels:int = 0
 let x86_if_else_emitted:int = 0
 let x86_loop_start_labels:int = 0
+# Parallel assembly: byte offsets into the finished text where independent
+# chunks begin (empty when the module is assembled as one file), and the
+# directives every chunk repeats (source files, externs).
+let x86_chunk_offsets:int = 0
+let x86_chunk_header:int = 0
 let x86_loop_end_labels:int = 0
 
 # label_id -> string ptr (length-prefixed) mappings via IntMap.
@@ -170,7 +175,17 @@ let x86_emit_data_str = (s:int):>void => {
     return void
 }
 
+# Data and function labels are global symbols so that chunks assembled
+# separately can refer to each other; control-flow labels stay local.
+let x86_globl_line = (label:int):>int => {
+    let bb:int = bb_new(str_len(label) + 8)
+    bb_push_str(bb ".globl ")
+    bb_push_str(bb label)
+    return bb_finalize_as_string(bb)
+}
+
 let x86_emit_data_label = (label:int):>void => {
+    vec_push(x86_data x86_globl_line(label))
     let bb:int = bb_new(str_len(label) + 1)
     bb_push_str(bb label)
     bb_push_byte(bb 58)
@@ -803,8 +818,17 @@ let x86_set_reachable_functions = (label_ids:int):>void => {
     return void
 }
 
+# Assembler processes to run concurrently (UDEWY_JOBS; 1 assembles one file).
+let x86_jobs = ():>int => {
+    let jobs:int = proc_getenv_int("UDEWY_JOBS" 8)
+    if jobs <? 1 { return 1 }
+    if jobs >? 64 { return 64 }
+    return jobs
+}
+
 let x86_finish_module = ():>int => {
     let out:int = bb_new(4096)
+    x86_chunk_offsets = vec_new(8)
     let pf:int = 0
     loop pf <? vec_len(x86_source_file_paths) {
         bb_push_str(out ".file ")
@@ -822,8 +846,6 @@ let x86_finish_module = ():>int => {
         bb_push_str(out "\"\n")
         pf = pf + 1
     }
-    bb_push_str(out ".text\n")
-    bb_push_str(out ".globl _start\n")
     let externs:int = x86_extern_symbols
     let cap:int = map_cap(externs)
     let slots:int = map_slots(externs)
@@ -861,6 +883,12 @@ let x86_finish_module = ():>int => {
         bb_push_byte(out 10)
         k = k + 1
     }
+    # Everything so far (source files, externs) is repeated in every chunk.
+    let header:int = bb_new(bb_len(out) + 1)
+    bb_push_bytes(header bb_data(out) bb_len(out))
+    x86_chunk_header = bb_finalize_as_string(header)
+    bb_push_str(out ".text\n")
+    bb_push_str(out ".globl _start\n")
     bb_push_byte(out 10)
     bb_push_str(out "_start:\n")
     bb_push_str(out "    xorq %rbp, %rbp\n")
@@ -878,16 +906,47 @@ let x86_finish_module = ():>int => {
     bb_push_str(out "    syscall\n")
     bb_push_byte(out 10)
     let nf:int = vec_len(x86_function_ids)
+    # Split a large debug-free module into roughly equal chunks at function
+    # boundaries so the assembler can run on them concurrently. DWARF
+    # sections refer to labels across the whole module, so they stay whole.
+    let jobs:int = x86_jobs()
+    let target:int = 0
+    if jobs >? 1 and not be_debug_info {
+        let total:int = 0
+        let ti:int = 0
+        loop ti <? nf {
+            let tlid:int = vec_get(x86_function_ids ti)
+            if (not x86_have_reachable) or intset_has(x86_reachable_fn_label_ids tlid) {
+                let tlines:int = vec_get(x86_function_codes ti)
+                let tl:int = vec_len(tlines)
+                let tj:int = 0
+                loop tj <? tl {
+                    total = total + str_len(vec_get(tlines tj)) + 1
+                    tj = tj + 1
+                }
+            }
+            ti = ti + 1
+        }
+        if total >? 4194304 { target = total // jobs }
+    }
+    let emitted:int = 0
+    let last_split:int = 0
     let fi:int = 0
     loop fi <? nf {
         let lid:int = vec_get(x86_function_ids fi)
         if (not x86_have_reachable) or intset_has(x86_reachable_fn_label_ids lid) {
+            if target >? 0 and emitted - last_split >=? target and vec_len(x86_chunk_offsets) + 1 <? jobs {
+                vec_push(x86_chunk_offsets bb_len(out))
+                last_split = emitted
+            }
             let lines:int = vec_get(x86_function_codes fi)
             let ll:int = vec_len(lines)
             let li:int = 0
             loop li <? ll {
-                bb_push_str(out vec_get(lines li))
+                let line:int = vec_get(lines li)
+                bb_push_str(out line)
                 bb_push_byte(out 10)
+                emitted = emitted + str_len(line) + 1
                 li = li + 1
             }
         }
@@ -1156,8 +1215,10 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
     bb_push_str(bb ",\"ax\",@progbits")
     vec_push(x86_current_fn_code bb_finalize_as_string(bb))
     if is_main {
+        vec_push(x86_current_fn_code x86_globl_line("__main__"))
         x86_emit_label_str("__main__")
     }
+    vec_push(x86_current_fn_code x86_globl_line(label))
     x86_emit_label_str(label)
     if be_debug_info {
         let endbb:int = bb_new(str_len(label) + 8)
@@ -2081,14 +2142,68 @@ let x86_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
     bb_push_str(exe_bb input_name)
     let exe_path:int = bb_finalize_as_string(exe_bb)
 
-    fs_write_file(path_to_cstr(asm_path) code str_len(code))
-
-    let argv1:int = vec_new(8)
-    vec_push(argv1 x86_str("as"))
-    vec_push(argv1 asm_path)
-    vec_push(argv1 x86_str("-o"))
-    vec_push(argv1 obj_path)
-    proc_run_or_die(argv1 "assembler failed")
+    # Assemble the chunks recorded by x86_finish_module concurrently; each
+    # chunk repeats the module header and the GNU-stack note.
+    let objects:int = vec_new(8)
+    let splits:int = 0
+    if x86_chunk_offsets not=? 0 { splits = vec_len(x86_chunk_offsets) }
+    if splits =? 0 {
+        fs_write_file(path_to_cstr(asm_path) code str_len(code))
+        let argv1:int = vec_new(8)
+        vec_push(argv1 x86_str("as"))
+        vec_push(argv1 asm_path)
+        vec_push(argv1 x86_str("-o"))
+        vec_push(argv1 obj_path)
+        proc_run_or_die(argv1 "assembler failed")
+        vec_push(objects obj_path)
+    } else {
+        let pids:int = vec_new(splits + 1)
+        let ci:int = 0
+        loop ci <=? splits {
+            let start:int = 0
+            if ci >? 0 { start = vec_get(x86_chunk_offsets ci - 1) }
+            let stop:int = str_len(code)
+            if ci <? splits { stop = vec_get(x86_chunk_offsets ci) }
+            let chunk:int = bb_new(stop - start + str_len(x86_chunk_header) + 64)
+            if ci >? 0 { bb_push_str(chunk x86_chunk_header) }
+            bb_push_bytes(chunk code + start stop - start)
+            if ci <? splits { bb_push_str(chunk "\n.section .note.GNU-stack,\"\",@progbits\n") }
+            let chunk_asm:int = bb_new(str_len(cache_dir) + str_len(input_name) + 16)
+            bb_push_str(chunk_asm cache_dir)
+            bb_push_byte(chunk_asm 47)
+            bb_push_str(chunk_asm input_name)
+            bb_push_byte(chunk_asm 46)
+            bb_push_int(chunk_asm ci)
+            bb_push_str(chunk_asm ".s")
+            let chunk_asm_path:int = bb_finalize_as_string(chunk_asm)
+            let chunk_obj:int = bb_new(str_len(cache_dir) + str_len(input_name) + 16)
+            bb_push_str(chunk_obj cache_dir)
+            bb_push_byte(chunk_obj 47)
+            bb_push_str(chunk_obj input_name)
+            bb_push_byte(chunk_obj 46)
+            bb_push_int(chunk_obj ci)
+            bb_push_str(chunk_obj ".o")
+            let chunk_obj_path:int = bb_finalize_as_string(chunk_obj)
+            fs_write_file(path_to_cstr(chunk_asm_path) bb_data(chunk) bb_len(chunk))
+            let argv1:int = vec_new(8)
+            vec_push(argv1 x86_str("as"))
+            vec_push(argv1 chunk_asm_path)
+            vec_push(argv1 x86_str("-o"))
+            vec_push(argv1 chunk_obj_path)
+            let pid:int = proc_spawn(argv1)
+            if pid <? 0 { eprintl("error: could not start the assembler") host_exit(1) }
+            vec_push(pids pid)
+            vec_push(objects chunk_obj_path)
+            ci = ci + 1
+        }
+        let failed:int = 0
+        let wi:int = 0
+        loop wi <? vec_len(pids) {
+            if proc_wait(vec_get(pids wi)) not=? 0 { failed = 1 }
+            wi = wi + 1
+        }
+        if failed { eprintl("error: assembler failed") host_exit(1) }
+    }
 
     # Partition link artifacts into static (.a/.o) vs shared (.so*).
     let artifacts:int = be_opt_link_artifacts(options)
@@ -2114,7 +2229,8 @@ let x86_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
         vec_push(argv2 x86_str("--gc-sections"))
         vec_push(argv2 x86_str("--dynamic-linker"))
         vec_push(argv2 dyn_linker)
-        vec_push(argv2 obj_path)
+        let oi:int = 0
+        loop oi <? vec_len(objects) { vec_push(argv2 vec_get(objects oi)) oi = oi + 1 }
         if vec_len(static_arts) >? 0 {
             vec_push(argv2 x86_str("--start-group"))
             let si:int = 0
@@ -2134,7 +2250,8 @@ let x86_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
         vec_push(argv2 x86_str("-e"))
         vec_push(argv2 x86_str("_start"))
         vec_push(argv2 x86_str("--gc-sections"))
-        vec_push(argv2 obj_path)
+        let oj:int = 0
+        loop oj <? vec_len(objects) { vec_push(argv2 vec_get(objects oj)) oj = oj + 1 }
         if vec_len(static_arts) >? 0 {
             vec_push(argv2 x86_str("--start-group"))
             let si:int = 0

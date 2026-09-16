@@ -204,6 +204,27 @@ and `as` takes 5.9 s. The assembler is therefore the largest single backend
 cost, and the remaining levers there are emitting less text, assembling
 chunks in parallel, or encoding machine code directly.
 
+### Parallel assembly in the µDewy tool (2026-09-16)
+
+The x86-64 backend of the µDewy tool (`udewy/bootstrap/backend/x86_64.udewy`)
+now splits a large debug-free module into up to `UDEWY_JOBS` (default 8)
+chunks at function boundaries, writes them as separate `.s` files, runs one
+`as` per chunk concurrently (`proc_spawn`/`proc_wait` in the process
+runtime), and links the objects together. Function and data labels are
+emitted as `.globl` symbols in both the native tool and its hosted twin so
+the chunks can refer to each other; control-flow labels stay assembler-local
+and DWARF-carrying modules stay whole. The compiler binary is byte-for-byte
+the same size and passes the fixture bundle on both routes.
+
+| µDewy tool | Backend | Wall |
+| --- | ---: | ---: |
+| serial `as` | 6.53 / 6.48 s | 23.33 / 24.29 s |
+| eight concurrent `as` | 4.00 / 4.02 s | 20.86 / 20.82 s |
+
+On the emitted compiler text alone: 6.1 s to 3.8 s. The remaining backend
+time is the tool's own parsing and encoding (about 2.1 s), one chunk's
+assembly (about 1.1 s) and `ld` (0.5 s).
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted

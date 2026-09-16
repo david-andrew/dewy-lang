@@ -111,9 +111,9 @@ let proc_build_cstr_argv = (argv:int):>int => {
     return table
 }
 
-# Run a subprocess and wait for it. Returns the exit status (positive integer)
-# or a negative error code on fork/exec failure. argv[0] is also the program.
-let proc_run = (argv:int):>int => {
+# Start a subprocess without waiting for it. Returns its pid, or a negative
+# error code on fork failure. argv[0] is also the program.
+let proc_spawn = (argv:int):>int => {
     if vec_len(argv) =? 0 { return -1 }
     let prog:int = vec_get(argv 0)
     let prog_cstr:int = path_to_cstr(prog)
@@ -141,6 +141,12 @@ let proc_run = (argv:int):>int => {
         }
         host_exit(127)
     }
+    return pid
+}
+
+# Wait for a spawned subprocess. Returns its exit status (positive integer),
+# 128 + signal when it was killed, or a negative error code.
+let proc_wait = (pid:int):>int => {
     let status:int = __static_alloca__(8)
     __store__(0 status)
     let rc:int = host_waitpid(pid status 0)
@@ -152,6 +158,54 @@ let proc_run = (argv:int):>int => {
     }
     # signaled or other: return 128 + signal
     return 128 + (st and 0x7f)
+}
+
+# Run a subprocess and wait for it. Returns the exit status (positive integer)
+# or a negative error code on fork/exec failure. argv[0] is also the program.
+let proc_run = (argv:int):>int => {
+    let pid:int = proc_spawn(argv)
+    if pid <? 0 { return pid }
+    return proc_wait(pid)
+}
+
+# The value of an environment variable as a udewy string, or 0 when absent.
+let proc_getenv = (name:int):>int => {
+    if g_envp =? 0 { return 0 }
+    let n:int = str_len(name)
+    let i:int = 0
+    loop true {
+        let entry:int = __load__(g_envp + (i << 3))
+        if entry =? 0 { return 0 }
+        let k:int = 0
+        loop (k <? n) and (__load_u8__(entry + k) =? __load_u8__(name + k)) { k = k + 1 }
+        if k =? n and __load_u8__(entry + n) =? 61 {
+            let start:int = entry + n + 1
+            let len:int = 0
+            loop __load_u8__(start + len) not=? 0 { len = len + 1 }
+            let bb:int = bb_new(len + 1)
+            bb_push_bytes(bb start len)
+            return bb_finalize_as_string(bb)
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+# A small non-negative integer from an environment variable, or the default.
+let proc_getenv_int = (name:int default:int):>int => {
+    let text:int = proc_getenv(name)
+    if text =? 0 { return default }
+    let n:int = str_len(text)
+    if n =? 0 { return default }
+    let value:int = 0
+    let i:int = 0
+    loop i <? n {
+        let c:int = __load_u8__(text + i)
+        if c <? 48 or c >? 57 { return default }
+        value = value * 10 + (c - 48)
+        i = i + 1
+    }
+    return value
 }
 
 # Convenience that runs and exits the caller on non-zero exit.

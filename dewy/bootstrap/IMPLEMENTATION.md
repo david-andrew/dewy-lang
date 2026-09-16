@@ -93,6 +93,12 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Parallel assembly in the µDewy tool (2026-09-16). The x86-64 route
+  assembles a large debug-free module as up to `UDEWY_JOBS` chunks
+  concurrently and links the objects; function and data labels are global
+  symbols (native tool and hosted twin). Backend 6.5 s to 4.0 s; wall 23.3 s
+  to 20.8 s.
+
 - Word copies and in-place element updates (2026-09-16). Native
   `array_copy_storage` copies whole words for word-multiple element widths.
   Compiler sources mutate container elements through indexed place arguments

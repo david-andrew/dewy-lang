@@ -121,7 +121,13 @@ class X86_64Backend(Backend):
         self._data.append(directive)
     
     def _emit_data_label(self, label: str) -> None:
-        """Emit label to data section."""
+        """Emit label to data section.
+
+        Data and function labels are global symbols so that the native tool
+        can assemble a module as several chunks that refer to each other;
+        control-flow labels stay assembler-local.
+        """
+        self._data.append(".globl " + label)
         self._data.append(label + ":")
     
     _SYMBOL_LABEL_PREFIXES = frozenset({"str", "global", "static", "fn"})
@@ -442,7 +448,9 @@ class X86_64Backend(Backend):
         
         self._current_fn_code.append(f".section .text.{label},\"ax\",@progbits")
         if is_main:
+            self._current_fn_code.append(".globl __main__")
             self._emit_label("__main__")
+        self._current_fn_code.append(".globl " + label)
         self._emit_label(label)
         if self.debug_info:
             end_label = f".L{label}_end"
