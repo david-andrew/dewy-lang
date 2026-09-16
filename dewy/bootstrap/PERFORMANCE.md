@@ -43,17 +43,23 @@ are backend diagnostics: source analysis does not model implicit allocator
 calls as language-visible effects. Read counters across an explicit function
 boundary in fixtures; don't use their values as source-level proof facts.
 
-Array descriptors remain private. The owner word currently distinguishes
-frame/static storage (0), unique arena storage (1), a shared count pointer
-(>1, explicitly marked by the shared flag), and raw-exposed pinned storage (-1). Exposing raw aggregate storage
-first detaches existing snapshots and prevents subsequent sharing of the
-exposed tree. Without a tracked raw-pointer lifetime, that tree is retained
-conservatively. This is an implementation fallback, not a new ownership
-feature or a change to value semantics.
+Hosted-generated array descriptors remain private. Their owner word
+distinguishes frame/static storage (0), unique arena storage (1), a shared
+count pointer (>1, explicitly marked by the shared flag), and raw-exposed
+pinned storage (-1). Native-generated descriptors are instead shared by
+reference count: the owner word holds the number of handles (>= 1) sharing
+the descriptor and its data, a copy increments it, and a mutation detaches a
+shared descriptor into a private one that the mutating route stores back into
+its place. In both protocols, exposing raw aggregate storage first detaches
+existing snapshots and prevents subsequent sharing of the exposed tree.
+Without a tracked raw-pointer lifetime, that tree is retained conservatively.
+This is an implementation fallback, not a new ownership feature or a change
+to value semantics.
 
-Borrowed byte/grapheme arrays can retain a string descriptor in their owner
-slot. The explicit shared flag distinguishes that pointer from a reference
-count; raw exposure first gives such a view independent array storage.
+Hosted borrowed byte/grapheme arrays can retain a string descriptor in their
+owner slot. The explicit shared flag distinguishes that pointer from a
+reference count; raw exposure first gives such a view independent array
+storage. Native byte views use owner 0 instead.
 
 That conservative lifetime also applies to source-level raw I/O buffers.
 Ownership tests collect live-byte samples into reserved storage and print

@@ -110,6 +110,44 @@ bytes on top of that. The billion-allocation structure is otherwise
 unchanged; the next steps remain placement (frame cells and descriptors for
 non-escaping values) and null handles for optional aggregates.
 
+### Shared array descriptors by reference count (2026-09-15)
+
+The native lowering no longer gives every copy of an array its own 48-byte
+descriptor plus an 8-byte share counter. One arena descriptor is shared by
+reference count in its owner word (`0` borrowed/static view, `>= 1` the number
+of handles sharing descriptor and data, `-1` raw-exposed and pinned). A copy
+increments the count and returns the same pointer; a release decrements it
+and frees only at zero. A mutation detaches a shared descriptor into a
+fresh private one (`unique_array` returns the descriptor to use) and the
+mutating route stores that replacement back into its place: a local (or its
+box), a record field, an array element slot, or the payload word of an
+optional/union cell. Dictionary internals detach their key/hash/index/value
+arrays through the dictionary record's fields before every store.
+
+Because a detach consumes the reference held by the route's root binding,
+that binding must own it. Parameters that are the root of any write route
+(index/member assignment, growth methods, dictionary operations, place
+arguments, raw exposure) are now private (copied on entry, released on exit)
+even when never rebound, and a local that is such a root is never a borrowed
+view. The first self-built compiler without that rule crashed in the
+checker: a callee mutating its `pos` parameter in place gave up the caller's
+reference. `tests/fixtures/native_shared_descriptors.dewy` pins both cases.
+
+Same protocol as above (quiet machine, alternating cold runs, C-built
+compilers, direct x86-64 output):
+
+| Compiler source | Wall | Frontend | Validation | Lowering | Emission | Backend |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| with `5476f311` | 30.13 / 30.01 s | 10.69 / 10.73 | 2.85 / 2.86 | 5.43 / 5.26 | 1.44 / 1.43 | 6.72 / 6.71 |
+| shared descriptors | 25.05 / 24.89 s | 8.50 / 8.40 | 2.21 / 2.24 | 4.06 / 4.04 | 1.33 / 1.33 | 6.64 / 6.64 |
+
+Frontend arena traffic fell from 29.1 GB to 21.6 GB and lowering traffic from
+12.9 GB to 8.9 GB; the explicit copied-payload counter is unchanged (704 MB),
+so no new data copies were introduced. Peak process RSS fell from 3.61 GB to
+3.24 GB. The hosted lowering keeps the earlier private-descriptor protocol
+for now; the two protocols never meet inside one program, so semantics stay
+in parity while the generated-code strategies differ.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted

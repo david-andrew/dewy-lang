@@ -86,6 +86,9 @@ State:type = [
     # this set in every function revisited the entire function graph N times.
     cleanup_excluded:set<addr>=set[]
     cleanup_owned:set<addr>=set[]
+    # Bindings that are the root of a write route (mutation, dictionary
+    # operation, place argument or raw exposure) in the current function.
+    mutated_roots:set<addr>=set[]
     generated:array<program.Function>=[]
     getter_reads:dict<addr addr?>=[]
     scalar_projections:dict<string ScalarProjection>=[]
@@ -343,10 +346,10 @@ expression = (id:addr @state:State):>addr => {
         let target=hir.node_at(state.input.nodes node.target)
         if target isnt? hir.Index return reject(node 'a non-array index assignment' @state)
         let prefix:array<addr>=[]
-        let descriptor=snapshot(write_route(target.array @state) @prefix @state)
+        let route=array_route(target.array @prefix @state)
         let index=snapshot(expression(target.index @state) @prefix @state)
         let stored=stored_type(node.target state)
-        prefix.push(array_unique(descriptor stored node @state))
+        let descriptor=detach_array(route stored node @prefix @state)
         let pointer=snapshot(array_element_address(descriptor index target @state) @prefix @state)
         let replacement=snapshot(owned_value(node.value @state) @prefix @state)
         # Raw exposure pins the entire container tree. An untracked pointer
@@ -369,8 +372,7 @@ expression = (id:addr @state:State):>addr => {
     }
     if node is? hir.Transmute {
         let source=hir.node_at(state.input.nodes node.expr)
-        let value=expression(node.expr @state)
-        if aggregate(source.value_type state) and not aggregate(node.value_type state) {value=pin_value(value source.value_type node @state)}
+        let value=if aggregate(source.value_type state) and not aggregate(node.value_type state) exposed_value(node.expr node @state) else expression(node.expr @state)
         return put(hir.Transmute[node.loc type value] @state)
     }
     if node is? hir.Return and state.cleanup_enabled return cleanup_return(node @state)
@@ -469,8 +471,7 @@ expression = (id:addr @state:State):>addr => {
             let raw=callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') or callee.name in? ['__load__' '__store__']
             loop argument in node.pos_args {
                 let source=hir.node_at(state.input.nodes argument)
-                let value=expression(argument @state)
-                if raw and aggregate(source.value_type state) {value=pin_value(value source.value_type node @state)}
+                let value=if raw and aggregate(source.value_type state) exposed_value(argument node @state) else expression(argument @state)
                 args.push(value)
             }
             let parameters:array<types.PosOrKwArg>=[]
@@ -813,13 +814,17 @@ array_literal = (node:hir.ArrayLiteral @state:State):>addr => {
 }
 array_index = (node:hir.Index @state:State writable:bool=false):>addr => {
     let prefix:array<addr>=[]
-    let descriptor=snapshot((if writable write_route(node.array @state) else expression(node.array @state)) @prefix @state)
-    let index=snapshot(expression(node.index @state) @prefix @state)
     if writable {
+        let route=array_route(node.array @prefix @state)
+        let index=snapshot(expression(node.index @state) @prefix @state)
         let type=array_type(hir.node_at(state.input.nodes node.array).value_type state)
         $runtime_assert type isnt? none
-        prefix.push(array_unique(descriptor type.element node @state))
+        let descriptor=detach_array(route type.element node @prefix @state)
+        prefix.push(array_element_address(descriptor index node @state))
+        return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
     }
+    let descriptor=snapshot(expression(node.array @state) @prefix @state)
+    let index=snapshot(expression(node.index @state) @prefix @state)
     prefix.push(array_element_address(descriptor index node @state))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
@@ -889,38 +894,23 @@ owned_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
 }
 
 # Copy-on-write is a provisional storage strategy, not a source-level alias.
-# Descriptors are private; owner 0 is borrowed/static, 1 unique arena data,
-# and an aligned pointer >1 names a shared reference-count word.
-array_shared = (descriptor:addr owner:addr node:hir.AST @state:State):>addr => {
-    let flag=word_op('__and__' read_word(descriptor layouts.array_descriptor.flags node @state) word(layouts.array_flags.shared node @state) node @state)
-    return put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'and' compare('__ne__' flag word(0 node @state) node @state) compare('__gt__' owner word(1 node @state) node @state)] @state)
-}
+# One arena descriptor is shared by reference count: owner 0 is a borrowed
+# or static view, owner >= 1 counts the handles sharing the descriptor and
+# its data, and -1 is raw-exposed pinned storage. Copying bumps the count;
+# a mutation detaches a shared descriptor into a fresh private one and the
+# mutating route stores that replacement back into its place.
 array_copy_body = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr => {
     if state.allocator is? none return array_copy_storage(value type node @state)
     let prefix:array<addr>=[]
     let source=snapshot(value @prefix @state)
     let owner=snapshot(read_word(source layouts.array_descriptor.owner node @state) @prefix @state)
-    let shared:array<addr>=[]
-    let establish:array<addr>=[]
-    establish.push(assign_value(owner allocation(word(8 node @state) node @state) node @state))
-    establish.push(store_word(word(1 node @state) owner 0 node @state))
-    establish.push(store_word(owner source layouts.array_descriptor.owner node @state))
-    establish.push(store_word(word_op('__or__' read_word(source layouts.array_descriptor.flags node @state) word(layouts.array_flags.shared node @state) node @state) source layouts.array_descriptor.flags node @state))
-    shared.push(conditional(compare('__eq__' owner word(1 node @state) node @state) sequence(establish node @state) node @state))
-    shared.push(store_word(word_op('__add__' read_word(owner 0 node @state) word(1 node @state) node @state) owner 0 node @state))
-    let target=snapshot(allocation(word(layouts.array_descriptor.size node @state) node @state) @shared @state)
-    let offsets:array<addr>=[layouts.array_descriptor.data layouts.array_descriptor.length layouts.array_descriptor.capacity layouts.array_descriptor.stride layouts.array_descriptor.owner]
-    loop offset in offsets {
-        shared.push(store_word(read_word(source offset node @state) target offset node @state))
-    }
-    shared.push(store_word(word(layouts.array_flags.mutable+layouts.array_flags.arena_descriptor+layouts.array_flags.shared node @state) target layouts.array_descriptor.flags node @state))
-    shared.push(target)
-    let arm=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'or' compare('__eq__' owner word(1 node @state) node @state) array_shared(source owner node @state)] @state) sequence(shared node @state)] @state)
+    let shared:array<addr>=[store_word(word_op('__add__' owner word(1 node @state) node @state) source layouts.array_descriptor.owner node @state) source]
+    let arm=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) compare('__ge__' owner word(1 node @state) node @state) sequence(shared node @state)] @state)
     prefix.push(put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [arm] array_copy_storage(source type node @state)] @state))
     return sequence(prefix node @state)
 }
 array_unique = (descriptor:addr element:addr node:hir.AST @state:State):>addr => {
-    if state.allocator is? none return sequence([] node @state)
+    if state.allocator is? none return descriptor
     let key="unique:{element}"
     let name=state.copy_helpers.get(key)
     if name is? none {
@@ -934,27 +924,63 @@ array_unique = (descriptor:addr element:addr node:hir.AST @state:State):>addr =>
     $runtime_assert name isnt? none
     return intrinsic(name [descriptor] types.primitive('int64' @state.type_nodes) node @state)
 }
+# The private descriptor to mutate: the source itself unless it is shared,
+# in which case one reference moves to an independent copy of the storage.
 array_unique_body = (source:addr element:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let owner=snapshot(read_word(source layouts.array_descriptor.owner node @state) @prefix @state)
-    let detached:array<addr>=[]
     let storage_type=array_type(types.array_type(element none @state.type_nodes) state)
     $runtime_assert storage_type isnt? none
-    let copied=snapshot(array_copy_storage(source storage_type node @state) @detached @state)
-    detached.push(store_word(word_op('__sub__' read_word(owner 0 node @state) word(1 node @state) node @state) owner 0 node @state))
-    let offsets:array<addr>=[layouts.array_descriptor.data layouts.array_descriptor.length layouts.array_descriptor.capacity layouts.array_descriptor.stride]
-    loop offset in offsets {
-        detached.push(store_word(read_word(copied offset node @state) source offset node @state))
-    }
-    detached.push(release_block(copied word(layouts.array_descriptor.size node @state) node @state))
-    let shared:array<addr>=[]
-    let arm=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) compare('__gt__' read_word(owner 0 node @state) word(1 node @state) node @state) sequence(detached node @state)] @state)
-    shared.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] release_block(owner word(8 node @state) node @state)] @state))
-    shared.push(store_word(word(1 node @state) source layouts.array_descriptor.owner node @state))
-    shared.push(store_word(word_op('__and__' read_word(source layouts.array_descriptor.flags node @state) word(-9 node @state) node @state) source layouts.array_descriptor.flags node @state))
-    prefix.push(conditional(array_shared(source owner node @state) sequence(shared node @state) node @state))
-    prefix.push(source)
+    let detached:array<addr>=[store_word(word_op('__sub__' owner word(1 node @state) node @state) source layouts.array_descriptor.owner node @state)]
+    detached.push(array_copy_storage(source storage_type node @state))
+    let arm=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) compare('__gt__' owner word(1 node @state) node @state) sequence(detached node @state)] @state)
+    prefix.push(put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [arm] source] @state))
     return sequence(prefix node @state)
+}
+# A mutable array route names where its descriptor handle lives: a local
+# (possibly boxed) binding, or a field/element slot address. Detaching a
+# shared descriptor stores the replacement through that same route.
+ArrayRoute:type = [place:addr? target:addr? fallback:addr?]
+array_route = (id:addr @prefix:array<addr> @state:State):>ArrayRoute => {
+    let node=hir.node_at(state.input.nodes id)
+    if array_valued(stored_type(id state) state) {
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+            let target=binding_storage(node stored_type(id state) @state)
+            if node.binding_id in? state.boxed return ArrayRoute[snapshot(target @prefix @state) none none]
+            return ArrayRoute[none target none]
+        }
+        if node is? hir.MemberAccess return ArrayRoute[snapshot(field_pointer(node @state writable=true) @prefix @state) none none]
+        if node is? hir.Index return ArrayRoute[snapshot(array_index(node @state writable=true) @prefix @state) none none]
+    }
+    # An array narrowed out of an optional/union cell lives in the cell's
+    # payload word; the cell itself is the stable place.
+    let stored=stored_type(id state)
+    if cell_members(stored @state) isnt? none and array_valued(node.value_type state) {
+        let cell:addr?=none
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+            let raw=binding_storage(node stored @state)
+            cell=if node.binding_id in? state.boxed array_load(raw stored node @state) else raw
+        } else if node is? hir.MemberAccess {cell=field_pointer(node @state writable=true)}
+        else if node is? hir.Index {cell=array_load(array_index(node @state writable=true) stored node @state)}
+        if cell isnt? none return ArrayRoute[snapshot(address(cell 8 node @state) @prefix @state) none none]
+    }
+    return ArrayRoute[none none snapshot(write_route(id @state) @prefix @state)]
+}
+route_descriptor = (route:ArrayRoute node:hir.AST @prefix:array<addr> @state:State):>addr => {
+    if route.place isnt? none return snapshot(read_word(route.place 0 node @state) @prefix @state)
+    if route.target isnt? none return route.target
+    $runtime_assert route.fallback isnt? none
+    return route.fallback
+}
+route_store = (route:ArrayRoute descriptor:addr node:hir.AST @prefix:array<addr> @state:State):>void => {
+    if route.place isnt? none {prefix.push(store_word(descriptor route.place 0 node @state))}
+}
+detach_array = (route:ArrayRoute element:addr node:hir.AST @prefix:array<addr> @state:State):>addr => {
+    let descriptor=route_descriptor(route node @prefix @state)
+    if state.allocator is? none return descriptor
+    prefix.push(assign_value(descriptor array_unique(descriptor element node @state) node @state))
+    route_store(route descriptor node @prefix @state)
+    return descriptor
 }
 # Raw pointers have no tracked lifetime. Detach existing snapshots and pin
 # the exposed tree: later ordinary copies must use the recursive fallback.
@@ -974,6 +1000,21 @@ pin_value = (value:addr type:addr node:hir.AST @state:State):>addr => {
     $runtime_assert name isnt? none
     return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
 }
+# Exposing an array through a stable route may replace its descriptor with
+# a private pinned one, so the route's place must receive that replacement.
+exposed_value = (id:addr node:hir.AST @state:State):>addr => {
+    let source=hir.node_at(state.input.nodes id)
+    if state.allocator isnt? none and array_valued(source.value_type state) and source is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index and array_valued(stored_type(id state) state) and not temporary_owner(id @state) {
+        let prefix:array<addr>=[]
+        let route=array_route(id @prefix @state)
+        let descriptor=route_descriptor(route node @prefix @state)
+        prefix.push(assign_value(descriptor pin_value(descriptor source.value_type node @state) node @state))
+        route_store(route descriptor node @prefix @state)
+        prefix.push(descriptor)
+        return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    }
+    return pin_value(expression(id @state) source.value_type node @state)
+}
 pin_record = (value:addr type:addr node:hir.AST @state:State):>addr => {
     let record=object_type(type state)
     $runtime_assert record isnt? none
@@ -984,7 +1025,8 @@ pin_record = (value:addr type:addr node:hir.AST @state:State):>addr => {
         let offset=layout.offsets.get(field.name)
         $runtime_assert offset isnt? none
         let member=field_read(address(value offset node @state) field.value_type node @state)
-        prefix.push(pin_value(member field.value_type node @state))
+        let pinned=pin_value(member field.value_type node @state)
+        prefix.push(if array_valued(field.value_type state) store_word(pinned address(value offset node @state) 0 node @state) else pinned)
     }
     return sequence(prefix node @state)
 }
@@ -992,18 +1034,20 @@ pin_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let array=array_type(type state)
     if array isnt? none {
-        let body:array<addr>=[array_unique(value array.element node @state)]
-        let copied:array<addr>=[]
-        let fresh=snapshot(array_copy_storage(value array node @state) @copied @state)
-        let offsets:array<addr>=[layouts.array_descriptor.data layouts.array_descriptor.length layouts.array_descriptor.capacity layouts.array_descriptor.stride]
-        loop offset in offsets {copied.push(store_word(read_word(fresh offset node @state) value offset node @state))}
-        copied.push(release_block(fresh word(layouts.array_descriptor.size node @state) node @state))
-        body.push(conditional(compare('__ne__' read_word(value layouts.array_descriptor.owner node @state) word(1 node @state) node @state) sequence(copied node @state) node @state))
+        # A shared or borrowed descriptor is replaced by a private copy of
+        # its storage; the pinned descriptor is then never released.
+        let body:array<addr>=[]
+        let owner=snapshot(read_word(value layouts.array_descriptor.owner node @state) @body @state)
+        let copied:array<addr>=[conditional(compare('__gt__' owner word(1 node @state) node @state) store_word(word_op('__sub__' owner word(1 node @state) node @state) value layouts.array_descriptor.owner node @state) node @state)]
+        copied.push(assign_value(value array_copy_storage(value array node @state) node @state))
+        body.push(conditional(compare('__ne__' owner word(1 node @state) node @state) sequence(copied node @state) node @state))
         body.push(store_word(word(-1 node @state) value layouts.array_descriptor.owner node @state))
         if aggregate(array.element state) {
             let index=snapshot(word(0 node @state) @body @state)
             let child=array_load(dict_element_pointer(value index array.element node @state) array.element node @state)
-            body.push(loop_while(compare('__lt__' index read_word(value layouts.array_descriptor.length node @state) node @state) [pin_value(child array.element node @state) assign_value(index word_op('__add__' index word(1 node @state) node @state) node @state)] node @state))
+            let pinned=pin_value(child array.element node @state)
+            let step=if array_valued(array.element state) store_word(pinned dict_element_pointer(value index array.element node @state) 0 node @state) else pinned
+            body.push(loop_while(compare('__lt__' index read_word(value layouts.array_descriptor.length node @state) node @state) [step assign_value(index word_op('__add__' index word(1 node @state) node @state) node @state)] node @state))
         }
         prefix.push(conditional(compare('__ne__' read_word(value layouts.array_descriptor.owner node @state) word(-1 node @state) node @state) sequence(body node @state) node @state))
     } else if object_valued(type state) {
@@ -1031,9 +1075,11 @@ pin_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
         loop member in members {
             if not aggregate(member state) continue
             let condition=compare((if optional isnt? none '__ne__' else '__eq__') tag word(if optional isnt? none 0 else member_tag(member @state) node @state) node @state)
-            arms.push(put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) condition pin_value(payload member node @state)] @state))
+            let pinned=pin_value(payload member node @state)
+            let step=if array_valued(member state) store_word(pinned value 8 node @state) else pinned
+            arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition step] @state))
         }
-        prefix.push(put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) arms word(0 node @state)] @state))
+        prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms none] @state))
     }
     prefix.push(value)
     return sequence(prefix node @state)
@@ -2176,8 +2222,9 @@ array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @st
     prefix.push(conditional(condition sequence(body node @state) node @state))
     return sequence(prefix node @state)
 }
+# Callers detach the descriptor before trimming it.
 array_trim = (descriptor:addr length:addr element:addr node:hir.AST @state:State):>addr => {
-    let prefix:array<addr>=[array_unique(descriptor element node @state)]
+    let prefix:array<addr>=[]
     if releasable(element @state) {
         let cursor=snapshot(length @prefix @state)
         let stop=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @prefix @state)
@@ -2196,8 +2243,8 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
     let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(call layout.detail @state)
     let prefix:array<addr>=[]
-    let descriptor=snapshot(write_route(method.array @state) @prefix @state)
-    prefix.push(array_unique(descriptor type.element call @state))
+    let route=array_route(method.array @prefix @state)
+    let descriptor=detach_array(route type.element call @prefix @state)
     let arguments:dict<string addr>=[]
     let names:array<string>=[]
     if method.name in? ['push' 'insert'] {names.push('value')}
@@ -2286,8 +2333,8 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
     let boolean=types.primitive('bool' @state.type_nodes)
     let unsigned=types.primitive('uint64' @state.type_nodes)
     let prefix:array<addr>=[]
-    let descriptor=snapshot(write_route(method.array @state) @prefix @state)
-    prefix.push(array_unique(descriptor type.element call @state))
+    let route=array_route(method.array @prefix @state)
+    let descriptor=detach_array(route type.element call @prefix @state)
     let key_function:addr?=none
     let key_signature:types.FunctionType?=none
     let key_type=type.element
@@ -2532,12 +2579,17 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     if node.binding_id is? none return false
     if node.binding_id in? state.boxed return false
     if node.binding_id not in? state.stable_bindings return false
+    if node.binding_id in? state.mutated_roots return false
     if node.annotation isnt? none and node.annotation not=? expr.value_type return false
     if stored_type(node.expr state) not=? expr.value_type return false
     if node.expr in? state.array_snapshots return false
     let route=borrowing.route(node.expr state.input.nodes)
     if route is? none or route.binding in? state.boxed return false
     return borrowing.stable_owner(route state.stable_bindings state.stable_parameters)
+}
+mark_mutated = (id:addr @mutated:set<addr> state:State):>void => {
+    let source=borrowing.route(id state.input.nodes)
+    if source isnt? none {mutated.add(source.binding)}
 }
 # The storage route a getter's result refers to, in terms of the getter's
 # own parameters. A terminal call to another getter contributes the route of
@@ -2992,6 +3044,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     let enabled=state.allocator isnt? none and '_arena_release' in? state.runtime_helpers
     let excluded=state.cleanup_excluded
     let rebound:set<addr>=set[]
+    let mutated:set<addr>=set[]
     let pending:array<addr>=[node.body]
     loop parameter in parameters(node) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
     let visited:set<addr>=set[]
@@ -3005,6 +3058,25 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             let target=hir.node_at(state.input.nodes current.target)
             if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {rebound.add(target.binding_id)}
         }
+        # A shared array descriptor is detached through the route that
+        # mutates it, so the binding at that route's root must own its
+        # reference: mutated parameters are private and such locals are
+        # never borrowed views.
+        if current is? hir.IndexAssign {
+            let target=hir.node_at(state.input.nodes current.target)
+            if target is? hir.Index {mark_mutated(target.array @mutated state)}
+        }
+        if current is? hir.MemberAssign {
+            let target=hir.node_at(state.input.nodes current.target)
+            if target is? hir.MemberAccess {mark_mutated(target.value @mutated state)}
+        }
+        if current is? hir.DictStore|hir.DictRemove|hir.DictLookup|hir.DictContains {
+            let keys=hir.node_at(state.input.nodes current.keys)
+            if keys is? hir.MemberAccess {mark_mutated(keys.value @mutated state)}
+        }
+        if current is? hir.DictEntries|hir.DictView|hir.DictMethod {mark_mutated(current.dictionary @mutated state)}
+        if current is? hir.Place {mark_mutated(current.target @mutated state)}
+        if current is? hir.Transmute {mark_mutated(current.expr @mutated state)}
         # Installed failure reporting uses raw I/O internally. It does not
         # expose the successful path's locals; only source message effects
         # participate in this lifetime decision, as in borrow analysis.
@@ -3015,13 +3087,15 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         if current is? hir.Transmute and (aggregate(current.value_type state) or aggregate(hir.node_at(state.input.nodes current.expr).value_type state)) {enabled=false}
         if current is? hir.FunctionCall {
             let callee=hir.node_at(state.input.nodes current.func)
+            if callee is? hir.ArrayMethod {mark_mutated(callee.array @mutated state)}
             if callee is? hir.ExpressedIdentifier and (callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') or callee.name in? ['__load__' '__store__']) {
                 loop argument in current.pos_args {if aggregate(hir.node_at(state.input.nodes argument).value_type state) {enabled=false}}
+                loop argument in current.pos_args {mark_mutated(argument @mutated state)}
             }
         }
         loop item in hir.children(current) {pending.push(item)}
     }
-    state.cleanup_enabled=enabled state.cleanup_owned=set[]
+    state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
     state.loop_depth=0 state.loop_levels=none state.loop_kind=none state.loop_prologue=[]
     let frame_start=state.cleanup_frames.length
     state.cleanup_frames.push([])
@@ -3035,7 +3109,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             arguments.push(hir.Param[name types.primitive('int64' @state.type_nodes) argument.binding_id argument.position_only false])
             continue
         }
-        let private=boxed or releasable(argument.value_type @state) and argument.binding_id isnt? none and argument.binding_id in? rebound
+        let private=boxed or releasable(argument.value_type @state) and argument.binding_id isnt? none and (argument.binding_id in? rebound or (argument.binding_id in? mutated and array_valued(argument.value_type state)))
         let condition:addr?=none
         if argument is? hir.BoundParam {
             let incoming=fresh('incoming' @state)
@@ -3763,17 +3837,25 @@ dict_element_pointer = (descriptor:addr index:addr element:addr node:hir.AST @st
     return word_op('__add__' read_word(descriptor layouts.array_descriptor.data node @state) word_op('__mul__' index word(layout.size node @state) node @state) node @state)
 }
 dict_element = (descriptor:addr index:addr element:addr node:hir.AST @state:State):>addr => array_load(dict_element_pointer(descriptor index element node @state) element node @state)
+# Dictionary arrays are detached by dict_array before any element store.
 dict_store_element = (descriptor:addr index:addr value:addr element:addr node:hir.AST @state:State):>addr => {
-    return sequence([array_unique(descriptor element node @state) array_store(value dict_element_pointer(descriptor index element node @state) element node @state)] node @state)
+    return array_store(value dict_element_pointer(descriptor index element node @state) element node @state)
+}
+# A container field holding a possibly shared descriptor: detach it and
+# store the private descriptor back into the field before mutating it.
+dict_array = (parts:DictParts name:string element:addr node:hir.AST @prefix:array<addr> @state:State):>addr => {
+    let offset=parts.layout.offsets.get(name)
+    $runtime_assert offset isnt? none
+    let descriptor=snapshot(read_word(parts.pointer offset node @state) @prefix @state)
+    if state.allocator is? none return descriptor
+    prefix.push(assign_value(descriptor array_unique(descriptor element node @state) node @state))
+    prefix.push(store_word(descriptor parts.pointer offset node @state))
+    return descriptor
 }
 dict_push = (descriptor:addr value:addr element:addr node:hir.AST @state:State):>addr => {
     let layout=layouts.element(element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let prefix:array<addr>=[]
-    # Detaching shared storage can reduce capacity to the live length.
-    # Reserve against that new capacity before appending, just as ordinary
-    # array push does; detaching at the final store would invalidate reserve.
-    prefix.push(array_unique(descriptor element node @state))
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @prefix @state)
     let next=word_op('__add__' length word(1 node @state) node @state)
     prefix.push(array_reserve(descriptor next layout.size node @state))
@@ -3845,13 +3927,10 @@ dict_rebuild = (parts:DictParts room:addr node:hir.AST @state:State):>addr => {
 dict_rebuild_body = (parts:DictParts room:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let word_type=types.primitive('int64' @state.type_nodes)
-    let keys=snapshot(dict_field(parts 'keys' node @state) @prefix @state)
-    let hashes=snapshot(dict_field(parts 'hashes' node @state) @prefix @state)
-    let slots=snapshot(dict_field(parts 'indices' node @state) @prefix @state)
-    prefix.push(array_unique(keys parts.key node @state))
-    prefix.push(array_unique(hashes word_type node @state))
-    prefix.push(array_unique(slots word_type node @state))
-    if parts.value isnt? none {prefix.push(array_unique(dict_field(parts 'values' node @state) parts.value node @state))}
+    let keys=dict_array(parts 'keys' parts.key node @prefix @state)
+    let hashes=dict_array(parts 'hashes' word_type node @prefix @state)
+    let slots=dict_array(parts 'indices' word_type node @prefix @state)
+    if parts.value isnt? none {let detached=dict_array(parts 'values' parts.value node @prefix @state)}
     let count=snapshot(read_word(keys layouts.array_descriptor.length node @state) @prefix @state)
     let hashed=snapshot(read_word(hashes layouts.array_descriptor.length node @state) @prefix @state)
     prefix.push(array_reserve(hashes count 8 node @state))
@@ -4045,17 +4124,25 @@ dict_insert = (parts:DictParts key:addr value:addr? node:hir.AST @prefix:array<a
     let probe=dict_probe(parts key node @prefix @state)
     let word_type=types.primitive('int64' @state.type_nodes)
     let added:array<addr>=[]
-    let keys=dict_field(parts 'keys' node @state)
+    let keys=dict_array(parts 'keys' parts.key node @added @state)
     added.push(set_local(probe.position read_word(keys layouts.array_descriptor.length node @state) node @state))
     added.push(dict_push(keys key parts.key node @state))
-    if value isnt? none and parts.value isnt? none {added.push(dict_push(dict_field(parts 'values' node @state) value parts.value node @state))}
-    added.push(dict_push(dict_field(parts 'hashes' node @state) probe.hash word_type node @state))
-    added.push(dict_store_element(dict_field(parts 'indices' node @state) probe.slot probe.position word_type node @state))
+    if value isnt? none and parts.value isnt? none {
+        let values=dict_array(parts 'values' parts.value node @added @state)
+        added.push(dict_push(values value parts.value node @state))
+    }
+    let hashes=dict_array(parts 'hashes' word_type node @added @state)
+    added.push(dict_push(hashes probe.hash word_type node @state))
+    let indices=dict_array(parts 'indices' word_type node @added @state)
+    added.push(dict_store_element(indices probe.slot probe.position word_type node @state))
     added.push(dict_set_field(parts 'live' word_op('__add__' dict_field(parts 'live' node @state) word(1 node @state) node @state) node @state))
     let changed=put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
     if value isnt? none and parts.value isnt? none {
-        let values=dict_field(parts 'values' node @state)
-        changed=sequence([array_unique(values parts.value node @state) release_value(dict_element(values probe.position parts.value node @state) parts.value node @state) dict_store_element(values probe.position value parts.value node @state)] node @state)
+        let found:array<addr>=[]
+        let values=dict_array(parts 'values' parts.value node @found @state)
+        found.push(release_value(dict_element(values probe.position parts.value node @state) parts.value node @state))
+        found.push(dict_store_element(values probe.position value parts.value node @state))
+        changed=sequence(found node @state)
     }
     changed=sequence([changed release_value(key parts.key node @state)] node @state)
     let arm=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) probe.found changed] @state)
@@ -4082,7 +4169,8 @@ dict_remove = (node:hir.DictRemove @state:State):>addr => {
         loop name in fields {
             let element:addr?=if name =? 'keys' parts.key else if name =? 'values' parts.value else types.primitive('int64' @state.type_nodes)
             $runtime_assert element isnt? none
-            prefix.push(array_trim(dict_field(parts name node @state) word(0 node @state) element node @state))
+            let descriptor=dict_array(parts name element node @prefix @state)
+            prefix.push(array_trim(descriptor word(0 node @state) element node @state))
         }
         prefix.push(dict_set_field(parts 'live' word(0 node @state) node @state))
         if parts.owner_type isnt? none {prefix.push(release_value(parts.pointer parts.owner_type node @state))}
@@ -4109,8 +4197,10 @@ dict_remove = (node:hir.DictRemove @state:State):>addr => {
     let element=if parts.value is? none parts.key else parts.value
     let field=if parts.value is? none 'keys' else 'values'
     let value=snapshot(dict_element(dict_field(parts field node @state) probe.position element node @state) @removed @state)
-    removed.push(dict_store_element(dict_field(parts 'hashes' node @state) probe.position word(-1 node @state) word_type node @state))
-    removed.push(dict_store_element(dict_field(parts 'indices' node @state) probe.slot word(-2 node @state) word_type node @state))
+    let hashes=dict_array(parts 'hashes' word_type node @removed @state)
+    removed.push(dict_store_element(hashes probe.position word(-1 node @state) word_type node @state))
+    let indices=dict_array(parts 'indices' word_type node @removed @state)
+    removed.push(dict_store_element(indices probe.slot word(-2 node @state) word_type node @state))
     removed.push(dict_set_field(parts 'live' word_op('__sub__' dict_field(parts 'live' node @state) word(1 node @state) node @state) node @state))
     if fallback isnt? none {removed.push(release_value(fallback node.value_type node @state))}
     let copied=owned_copy(value element node @state)
@@ -4334,12 +4424,8 @@ release_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     if array isnt? none {
         let data=snapshot(read_word(pointer layouts.array_descriptor.data node @state) @prefix @state)
         let owner=snapshot(read_word(pointer layouts.array_descriptor.owner node @state) @prefix @state)
-        let shared:array<addr>=[]
-        let count=snapshot(word_op('__sub__' read_word(owner 0 node @state) word(1 node @state) node @state) @shared @state)
-        shared.push(store_word(count owner 0 node @state))
-        shared.push(conditional(compare('__eq__' count word(0 node @state) node @state) release_block(owner word(8 node @state) node @state) node @state))
-        shared.push(assign_value(owner (put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) compare('__eq__' count word(0 node @state) node @state) word(1 node @state)] @state)] word(0 node @state)] @state)) node @state))
-        prefix.push(conditional(array_shared(pointer owner node @state) sequence(shared node @state) node @state))
+        # Other handles keep a shared descriptor alive: only drop this one.
+        let last:array<addr>=[]
         let owned:array<addr>=[]
         if releasable(array.element @state) {
             let length=snapshot(read_word(pointer layouts.array_descriptor.length node @state) @owned @state)
@@ -4349,10 +4435,12 @@ release_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
         }
         let size=word_op('__mul__' read_word(pointer layouts.array_descriptor.capacity node @state) read_word(pointer layouts.array_descriptor.stride node @state) node @state)
         owned.push(release_block(data size node @state))
-        prefix.push(conditional(intrinsic('__ne__' [owner word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) sequence(owned node @state) node @state))
+        last.push(conditional(intrinsic('__ne__' [owner word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) sequence(owned node @state) node @state))
         let flags=read_word(pointer layouts.array_descriptor.flags node @state)
         let arena=word_op('__and__' flags word(layouts.array_flags.arena_descriptor node @state) node @state)
-        prefix.push(conditional(intrinsic('__ne__' [arena word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) release_block(pointer word(layouts.array_descriptor.size node @state) node @state) node @state))
+        last.push(conditional(intrinsic('__ne__' [arena word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) release_block(pointer word(layouts.array_descriptor.size node @state) node @state) node @state))
+        let arm=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) compare('__gt__' owner word(1 node @state) node @state) store_word(word_op('__sub__' owner word(1 node @state) node @state) pointer layouts.array_descriptor.owner node @state)] @state)
+        prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] sequence(last node @state)] @state))
         return conditional(compare('__ge__' read_word(pointer layouts.array_descriptor.owner node @state) word(0 node @state) node @state) sequence(prefix node @state) node @state)
     } else if object_valued(type state) {
         prefix.push(release_record(pointer type node @state))

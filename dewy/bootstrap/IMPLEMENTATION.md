@@ -93,6 +93,16 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Shared array descriptors (2026-09-15). Native array copies bump a
+  reference count in the descriptor's owner word and return the same
+  descriptor; releases free at zero; `unique_array` detaches a shared
+  descriptor into a private one and every mutating route (`array_route`,
+  `detach_array`, `dict_array`) stores the replacement back into its place,
+  including optional/union cell payloads. Parameters and locals that root a
+  write route own their reference: mutated parameters are private and never
+  borrowed views (`mutated_roots`). Raw exposure pins through the same route
+  and writes back. Cold self-build 30.1 s to 25.0 s; fixture pinned.
+
 - Size-class arena entries (2026-09-15). `library/linux/system.dewy` adds
   `_arena_alloc_8/16/32/64` and `_arena_release_8/16/32/64`: the free-list
   fast path with the class fixed, no width argument, no class computation.

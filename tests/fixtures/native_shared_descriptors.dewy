@@ -1,0 +1,41 @@
+# Array descriptors are shared by reference count. A callee that mutates an
+# array parameter in place must own its reference: the caller's array keeps
+# its original contents and stays valid after the call.
+strip = (pos:array<int64> nodes:int64):>int64 => {
+    loop i in 0.. and i <? pos.length { pos[i] = pos[i] + nodes }
+    pos.push(nodes)
+    let total = 0
+    loop value in pos { total += value }
+    return total
+}
+Record:type = [types:dict<int64 int64> keys:array<int64>]
+Table:type = [rows:array<Record>]
+# A dictionary lookup takes a write route through the enclosing arrays: a
+# local view of a shared array must not give up a reference it never owned.
+lookup = (table:Table index:int64 key:int64):>int64 => {
+    let rows = table.rows
+    if index <? 0 or index >=? rows.length return 0
+    return rows[index].types.get(key default=0)
+}
+main=():>int64=>{
+    let pos_types:array<int64> = [1 2 3]
+    let first = strip(pos_types 10)
+    let second = strip(pos_types 100)
+    if first not=? 46 or second not=? 406 return 1
+    if pos_types.length not=? 3 or pos_types[0] not=? 1 or pos_types[2] not=? 3 return 2
+    let table = Table[[]]
+    loop i in 0.. and i <? 8 {
+        let row = Record[[] []]
+        row.types[i] = i * 3
+        row.keys.push(i)
+        table.rows.push(row)
+    }
+    let snapshot = table
+    let found = 0
+    loop i in 0.. and i <? 8 { found += lookup(table i i) }
+    if table.rows.length not=? 8 or snapshot.rows.length not=? 8 return 3
+    table.rows[3].keys.push(99)
+    if found not=? 84 return 4
+    if snapshot.rows[3].keys.length not=? 1 or table.rows[3].keys.length not=? 2 return 5
+    return 42
+}
