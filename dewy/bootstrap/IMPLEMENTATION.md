@@ -93,6 +93,12 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Analysis micro-optimizations (2026-09-16). The initialization analysis
+  records a single required binding per identifier read without building
+  a one-element set; the bounds fact state chains entries with equal hashes
+  intrusively (`heads`/`next`) instead of copying a bucket array per
+  insertion. Validation 2.13 s to 2.05 s, initialization 0.61 s to 0.57 s.
+
 - Donated arguments, alias forwarding, push_children (2026-09-16). A
   parameter whose single unconditional use pushes it or passes it to such a
   parameter owns its argument (callers donate temporaries, copy kept

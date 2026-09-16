@@ -22,7 +22,10 @@ Nonzero = type of Fact & [subject:addr]
 Order = type of Fact & [smaller:Term larger:Term]
 Remainder = type of Fact & [subject:Term upper:Term offset:addr]
 Entry:type = const [fact:Fact interval:ranges.Interval]
-State:type = [values:array<Entry>=[] buckets:dict<uint64 array<addr>>=[]]
+# Entries with the same hash form an intrusive chain through `next`
+# (position of the previous entry with that hash, or -1), starting at
+# `heads`. Inserting never copies a bucket array; positions are internal.
+State:type = [values:array<Entry>=[] heads:dict<uint64 int64>=[] next:array<int64>=[]]
 Vacuous = type of []
 Evidence:type = ranges.Interval | Vacuous | none
 Context:type = [
@@ -66,10 +69,11 @@ describe = (fact:Fact):>string => {
 # never their positions. Construct facts through the factories above so
 # equal descriptions always choose the same bucket.
 find = (state:State fact:Fact):>addr? => {
-    if fact.hash not in? state.buckets return none
-    loop position in state.buckets[fact.hash] {
-        $runtime_assert position <? state.values.length
+    let position:int64=state.heads.get(fact.hash default=(-1))
+    loop position >=? 0 {
+        $runtime_assert position >=? 0 and position <? state.values.length and position <? state.next.length
         if same(state.values[position].fact fact) return position
+        position=state.next[position]
     }
     return none
 }
@@ -93,32 +97,50 @@ put = (@state:State fact:Fact interval:ranges.Interval):>void => {
         state.values[position]=Entry[fact interval]
         return
     }
-    let bucket=state.buckets.get(fact.hash default=[])
-    bucket.push(state.values.length)
+    state.next.push(state.heads.get(fact.hash default=(-1)))
+    state.heads[fact.hash]=state.values.length
     state.values.push(Entry[fact interval])
-    state.buckets[fact.hash]=bucket
+}
+# Unlink `position` from its hash chain.
+unlink = (@state:State hash:uint64 position:addr):>void => {
+    let current:int64=state.heads.get(hash default=(-1))
+    if current =? position {
+        $runtime_assert position <? state.next.length
+        let following=state.next[position]
+        if following <? 0 {state.heads.pop(hash default=(-1));} else {state.heads[hash]=following}
+        return
+    }
+    loop current >=? 0 {
+        $runtime_assert current >=? 0 and current <? state.next.length
+        let following=state.next[current]
+        if following =? position {
+            $runtime_assert position <? state.next.length
+            state.next[current]=state.next[position]
+            return
+        }
+        current=following
+    }
 }
 remove = (@state:State fact:Fact):>void => {
     let position=find(state fact)
     if position is? none return
-    $runtime_assert position <? state.values.length and fact.hash in? state.buckets
-    let bucket=state.buckets[fact.hash]
-    loop i in 0.. and i <? bucket.length {
-        if bucket[i] =? position {bucket.pop(idx=i); break}
-    }
-    if bucket.length =? 0 {state.buckets.pop(fact.hash);}
-    else {state.buckets[fact.hash]=bucket}
-    $runtime_assert state.values.length >? 0
-    let last=state.values.pop
-    if position <? state.values.length {
+    $runtime_assert position <? state.values.length and position <? state.next.length
+    unlink(@state fact.hash position)
+    $runtime_assert state.values.length >? 0 and state.next.length >? 0
+    let moved_from=state.values.length-1
+    if position <? moved_from {
+        # Move the last entry into the hole and re-point its chain to it.
+        $runtime_assert moved_from <? state.values.length
+        let last=state.values[moved_from]
+        unlink(@state last.fact.hash moved_from)
+        $runtime_assert position <? state.values.length and position <? state.next.length
         state.values[position]=last
-        $runtime_assert last.fact.hash in? state.buckets
-        let moved=state.buckets[last.fact.hash]
-        loop i in 0.. and i <? moved.length {
-            if moved[i] =? state.values.length {moved[i]=position break}
-        }
-        state.buckets[last.fact.hash]=moved
+        state.next[position]=state.heads.get(last.fact.hash default=(-1))
+        state.heads[last.fact.hash]=position
     }
+    $runtime_assert state.values.length >? 0 and state.next.length >? 0
+    state.values.pop;
+    state.next.pop;
 }
 set_value = (@state:State term:Term interval:ranges.Interval?):>void => {
     let fact = value(term)

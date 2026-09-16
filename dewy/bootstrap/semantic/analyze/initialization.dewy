@@ -50,6 +50,16 @@ record_requirements = (required:set<addr> assumed:set<addr> @checker:Checker):>v
         record_frame_requirements(@checker.frames[i] required assumed)
     }
 }
+# The common case is one required binding per identifier read: record it
+# without building a one-element set for every read.
+record_frame_requirement = (@frame:CheckFrame id:addr):>void => {
+    if dense.contains(frame.available id) { frame.required.add(id) }
+}
+record_requirement = (id:addr @checker:Checker):>void => {
+    loop i in 0.. and i <? checker.frames.length {
+        record_frame_requirement(@checker.frames[i] id)
+    }
+}
 member_key = (id:addr nodes:array<hir.AST>):>MemberRoute | none => {
     let current = id
     let reversed:array<string> = []
@@ -317,7 +327,7 @@ object_field_value = (id:addr name:string parameters:dict<addr CallableEffect> s
 
 require_initialized = (node:hir.ExpressedIdentifier initialized:dense.Set @checker:Checker):>void => {
     if node.binding_id is? none return void
-    if dense.contains(initialized node.binding_id) { record_requirements(set[node.binding_id] set[] @checker) return void }
+    if dense.contains(initialized node.binding_id) { record_requirement(node.binding_id @checker) return void }
     let binding = bindings.binding_at(checker.registry node.binding_id)
     if binding.builtin return void
     checker.problem = Error[

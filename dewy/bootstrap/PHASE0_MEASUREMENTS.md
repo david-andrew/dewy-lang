@@ -291,6 +291,17 @@ donation change removes the latter's copy. And the hosted test gate leaves
 its compiled outputs under `__dewycache__/__external__`; ten gates filled
 the disk, which produced spurious link and write failures until cleared.
 
+### Analysis micro-optimizations (2026-09-16)
+
+The dense profile attributed 5 % of samples in the initialization analysis
+to building a one-element set per identifier read, and a similar share in
+validation to copying fact buckets: `put` fetched a bucket array, pushed
+(detaching a copy) and stored it back per insertion. The initialization
+analysis now records one required binding directly, and the fact state
+links entries with equal hashes through an intrusive `next` chain from
+`heads`. Cold self-build 20.46 / 20.52 s to 20.24 / 20.41 s (validation
+2.12 / 2.14 to 2.04 / 2.05, initialization 0.60 / 0.62 to 0.56 / 0.57).
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted

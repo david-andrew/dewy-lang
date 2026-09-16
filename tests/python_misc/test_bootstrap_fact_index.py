@@ -54,7 +54,7 @@ main=():>int64=>{
     # it completely. No stale position may survive either operation.
     facts.put(@state keys[0] ranges.exact(42))
     loop key in keys {facts.remove(@state key)}
-    if state.values.length not=? 0 or state.buckets.length not=? 0 return 4
+    if state.values.length not=? 0 or state.heads.length not=? 0 or state.next.length not=? 0 return 4
     state=facts.State[]
     facts.put(@state facts.value(facts.Term[1]) ranges.exact(42))
     facts.put(@state facts.order(facts.Term[1] facts.Term[2 'length']) ranges.exact(42))
