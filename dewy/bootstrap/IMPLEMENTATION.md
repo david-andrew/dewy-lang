@@ -93,6 +93,11 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- µDewy tool buffers (2026-09-16). `copy_bytes` copies words, and byte
+  buffers carry their string length-prefix slot and NUL in their own
+  storage so `bb_finalize_as_string` no longer copies. Identical output;
+  backend 3.76 s to 3.13 s; cold self-build 20.3 s to 19.65 s.
+
 - Analysis micro-optimizations (2026-09-16). The initialization analysis
   records a single required binding per identifier read without building
   a one-element set; the bounds fact state chains entries with equal hashes

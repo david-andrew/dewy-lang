@@ -14,9 +14,12 @@ const BB_OFF_LEN:int = 8
 const BB_OFF_DATA:int = 16
 const BB_HEADER_SIZE:int = 24
 
+# The data block reserves 8 bytes before `data` for a string length prefix
+# and one after the capacity for a NUL, so finalizing as a string needs no
+# copy: the buffer's own storage becomes the string.
 let bb_new = (initial_cap:int):>int => {
     let hdr:int = arena_alloc(BB_HEADER_SIZE)
-    let data:int = arena_alloc(initial_cap)
+    let data:int = arena_alloc(initial_cap + 9) + 8
     __store__(initial_cap hdr + BB_OFF_CAP)
     __store__(0 hdr + BB_OFF_LEN)
     __store__(data hdr + BB_OFF_DATA)
@@ -49,7 +52,7 @@ let bb_grow = (bb:int min_cap:int):>void => {
         new_cap = new_cap * 2
     }
     let old_data:int = bb_data(bb)
-    let new_data:int = arena_alloc(new_cap)
+    let new_data:int = arena_alloc(new_cap + 9) + 8
     let len:int = bb_len(bb)
     copy_bytes(new_data old_data len)
     __store__(new_cap bb + BB_OFF_CAP)
@@ -151,12 +154,12 @@ let bb_push_hex = (bb:int n:int):>void => {
 # making sure the bb is not modified after this call.
 let bb_finalize_as_string = (bb:int):>int => {
     let len:int = bb_len(bb)
-    # Allocate length-prefix (8) + data + trailing NUL (1). The NUL is not part
-    # of the string's value (str_len reads from out - 8) but lets arena strings
-    # double as cstrings, which makes interop with syscalls/libc safer.
-    let out:int = arena_alloc(len + 9)
-    __store__(len out)
-    copy_bytes(out + 8 bb_data(bb) len)
-    __store_u8__(0 out + 8 + len)
-    return out + 8
+    # The data block already carries the length-prefix slot and room for a
+    # trailing NUL. The NUL is not part of the string's value (str_len reads
+    # from out - 8) but lets arena strings double as cstrings, which makes
+    # interop with syscalls/libc safer.
+    let out:int = bb_data(bb)
+    __store__(len out - 8)
+    __store_u8__(0 out + len)
+    return out
 }

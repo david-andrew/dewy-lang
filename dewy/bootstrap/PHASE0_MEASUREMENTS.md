@@ -302,6 +302,26 @@ links entries with equal hashes through an intrusive `next` chain from
 `heads`. Cold self-build 20.46 / 20.52 s to 20.24 / 20.41 s (validation
 2.12 / 2.14 to 2.04 / 2.05, initialization 0.60 / 0.62 to 0.56 / 0.57).
 
+### Word copies and zero-copy strings in the µDewy tool (2026-09-16)
+
+Profiling the µDewy tool on the emitted compiler text put a third of its
+own time in byte-buffer work: `copy_bytes` copied one byte per iteration
+(every buffer growth and every finalized line), and `bb_finalize_as_string`
+copied each finished buffer into a fresh length-prefixed string, including
+the whole 60 MB assembler text. `copy_bytes` now copies whole words with a
+byte tail, and buffers reserve the length-prefix slot and trailing NUL in
+their own storage so finalizing is a header write. Output is byte-identical
+(chunks and binary), the tool rebuilds itself to an identical binary, and
+the µDewy tests pass.
+
+| µDewy tool | Tool alone on the compiler text | Backend | Wall |
+| --- | ---: | ---: | ---: |
+| parallel `as` | 3.45 / 3.48 s | 3.77 / 3.75 s | 20.39 / 20.25 s |
+| word copies, zero-copy strings | 2.96 / 2.85 s | 3.11 / 3.16 s | 19.57 / 19.72 s |
+
+The cold self-build is under 20 seconds. The backend is now roughly 1.1 s
+of tool time, 1.1 s of concurrent assembly and 0.5 s of linking.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted

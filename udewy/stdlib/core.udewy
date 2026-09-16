@@ -31,8 +31,14 @@ let store_u8 = (ptr:int idx:int val:int):>void => {
     return void
 }
 
+# Non-overlapping copy: whole words first, then the byte tail.
 let copy_bytes = (dst:int src:int len:int):>void => {
     let i:int = 0
+    let words:int = len and (-8)
+    loop i <? words {
+        __store__(__load__(src + i) dst + i)
+        i = i + 8
+    }
     loop i <? len {
         __store_u8__(__load_u8__(src + i) dst + i)
         i = i + 1
