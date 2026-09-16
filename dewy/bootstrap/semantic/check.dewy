@@ -1156,6 +1156,10 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
         }
         if node.delims =? '\{}' return block(id env @session scoped=true expected=expected)
     }
+    if node is? parser.Postfix {
+        let op = source_views.symbol(node.op env.lexical session)
+        if op =? 'or_throw' return propagate_exceptions(id node env @session)
+    }
     if node is? parser.Prefix {
         let op = source_views.symbol(node.op env.lexical session)
         if op =? '@' {
@@ -1443,8 +1447,6 @@ ambiguous = (id:addr node:parser.Ambiguous env:Environment @session:contexts.Ses
 # length, declaring a new name or assigning an existing one exactly as
 # `a = ...` would (`let` always declares). `_` discards an element.
 unpack = (targets_id:addr right:addr id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {
-    let targets=contexts.node_at(targets_id env.lexical session)
-    $runtime_assert targets is? parser.Block
     let loc=contexts.node_at(id env.lexical session).loc
     let void_type=types.primitive('void' @session.types)
     let statements:array<addr>=[]
@@ -1457,18 +1459,77 @@ unpack = (targets_id:addr right:addr id:addr env:Environment @session:contexts.S
     } else {
         let value=expression(right env @session)
         if value is? Error return value
-        let hidden="__dewy_unpack_{session.registry.next_id}"
-        let binding_id=bindings.allocate(@session.registry none hidden 'value' loc)
-        let binding=bindings.binding_at(session.registry binding_id)
-        let type=node_at(value session).value_type
-        binding.value_type=type binding.store_type=type
-        let declaration=put(hir.Declare[loc void_type 'let' hidden type value binding_id] @session)
-        binding.declaration=declaration
-        bindings.store_binding(@session.registry binding_id binding)
-        set_read_type(binding_id stored_read_type(value @session) env @session)
-        statements.push(declaration)
-        source=put(hir.ExpressedIdentifier[loc type hidden binding_id] @session)
+        let bound=hidden_binding("__dewy_unpack_{session.registry.next_id}" value loc env @session)
+        statements.push(bound.declaration)
+        source=bound.reference
     }
+    let unpacked=unpack_value(targets_id source id env @session constant=constant explicit=explicit)
+    if unpacked is? Error return unpacked
+    statements.push(unpacked)
+    return put(hir.Block[loc void_type statements false] @session)
+}
+HiddenBinding:type = const [declaration:addr reference:addr name:string binding_id:addr]
+hidden_binding = (name:string value:addr loc:Span env:Environment @session:contexts.Session):>HiddenBinding => {
+    let binding_id=bindings.allocate(@session.registry none name 'value' loc)
+    let binding=bindings.binding_at(session.registry binding_id)
+    let type=node_at(value session).value_type
+    binding.value_type=type binding.store_type=type
+    let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name type value binding_id] @session)
+    binding.declaration=declaration
+    bindings.store_binding(@session.registry binding_id binding)
+    set_read_type(binding_id stored_read_type(value @session) env @session)
+    return HiddenBinding[declaration put(hir.ExpressedIdentifier[loc type name binding_id] @session) name binding_id]
+}
+# `value or_throw`: the exception alternatives (`error` subtypes and `none`)
+# return from the enclosing function; the expression continues as the
+# ordinary alternatives. Checked as the hosted `OrThrow`, spelled here as a
+# hidden binding, a test with an early return, and a narrowed read.
+propagate_exceptions = (id:addr node:parser.Postfix env:Environment @session:contexts.Session):>addr|Error => {
+    let value=expression(node.item env @session)
+    if value is? Error return value
+    let type=node_at(value session).value_type
+    let shape=types.node_at(session.types types.strip_refinement(type session.types))
+    let members:array<addr>=if shape is? types.TypeOr shape.items else [type]
+    let exception=types.primitive('exception' @session.types)
+    let exceptions:array<addr>=[]
+    let ordinary:array<addr>=[]
+    loop member in members {
+        if subtyping.is_subtype(member exception session.links @session.types) {exceptions.push(member)} else {ordinary.push(member)}
+    }
+    if exceptions.length =? 0 return problem(id 'nothing to propagate' "this has type `{display.type_to_dewy(type session.types)}`, which has no `error` or `none` alternative" env session)
+    if ordinary.length =? 0 return problem(id '`or_throw` always returns' 'every alternative is propagated; write `return value` instead' env session)
+    if env.return_collector is? none return problem(id '`or_throw` outside a function' 'nothing here catches the propagated value' env session)
+    let expected=env.return_type
+    if expected is? none or types.is_primitive(types.node_at(session.types expected) 'void') return problem(id 'the enclosing function has no declared result type to propagate into' 'annotate the function result with `:>T | ...` including the propagated alternatives' env session)
+    loop member in exceptions {
+        if not subtyping.is_subtype(member expected session.links @session.types) return problem(id "the enclosing function does not return `{display.type_to_dewy(member session.types)}`" 'add that alternative to the function result type, or handle it with `is?` first' env session)
+    }
+    let loc=node.loc
+    let bound=hidden_binding("__dewy_or_throw_{session.registry.next_id}" value loc env @session)
+    let exception_type=types.union(exceptions @session.types)
+    let ordinary_type=types.union(ordinary @session.types)
+    let propagated=if types.is_primitive(types.node_at(session.types exception_type) 'none') put(hir.NoneValue[loc types.primitive('none' @session.types)] @session) else put(hir.ExpressedIdentifier[loc exception_type bound.name bound.binding_id] @session)
+    let converted=against(propagated expected id env @session)
+    if converted is? Error return converted
+    record_return(node_at(converted session).value_type loc env @session)
+    let boolean=types.primitive('bool' @session.types)
+    let void_type=types.primitive('void' @session.types)
+    let condition=put(hir.TypeTest[loc boolean bound.reference exception_type false] @session)
+    let exit=put(hir.Return[loc types.primitive('never' @session.types) converted] @session)
+    let arm=put(hir.IfArm[loc void_type condition exit] @session)
+    let flow=put(hir.Flow[loc void_type [arm] none] @session)
+    let result=put(hir.ExpressedIdentifier[loc ordinary_type bound.name bound.binding_id] @session)
+    return put(hir.Block[loc ordinary_type [bound.declaration flow result] false] @session)
+}
+# Each target takes a field by name from an object or an element by position
+# from an array of proven length; a nested `[...]` target unpacks that
+# element further through its own hidden binding.
+unpack_value = (targets_id:addr source:addr id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {
+    let targets=contexts.node_at(targets_id env.lexical session)
+    $runtime_assert targets is? parser.Block
+    let loc=contexts.node_at(id env.lexical session).loc
+    let void_type=types.primitive('void' @session.types)
+    let statements:array<addr>=[]
     let source_type=stored_read_type(source @session)
     let shape=types.node_at(session.types types.unfold(types.strip_refinement(source_type session.types) session.types))
     let entries=views.container_entry_types(source_type session.types)
@@ -1485,19 +1546,29 @@ unpack = (targets_id:addr right:addr id:addr env:Environment @session:contexts.S
             values.push(put(hir.MemberAccess[contexts.node_at(item env.lexical session).loc field.value_type source target_name field.mutable and not shape.immutable] @session))
         }
     } else if shape is? types.ArrayType {
-        if shape.length is? none return problem(right 'cannot prove how many elements this array has' 'unpacking needs an exact length: index the elements you need under a length guard instead' env session)
+        if shape.length is? none return problem(right_of(id env session) 'cannot prove how many elements this array has' 'unpacking needs an exact length: index the elements you need under a length guard instead' env session)
         if targets.inner.length not=? shape.length return problem(targets_id 'unpacking must name every element' "{targets.inner.length} targets for {shape.length} elements; use `_` for a value you do not need" env session)
         loop index in 0.. and index <? targets.inner.length {
             let item=targets.inner[index]
-            let target_name=source_views.identifier(item env.lexical session)
-            if target_name is? none return pending(id 'nested unpacking targets' env session)
-            if target_name =? '_' continue
-            let item_loc=contexts.node_at(item env.lexical session).loc
+            let item_node=contexts.node_at(item env.lexical session)
+            let item_loc=item_node.loc
             let position=put(hir.Integer[item_loc types.integer_literal(index @session.types) '0d' index] @session)
+            let element=put(hir.Index[item_loc shape.element source position index] @session)
+            if item_node is? parser.Block and item_node.delims =? '[]' {
+                let bound=hidden_binding("__dewy_entry_{session.registry.next_id}" element item_loc env @session)
+                statements.push(bound.declaration)
+                let inner=unpack_value(item bound.reference id env @session constant=constant explicit=explicit)
+                if inner is? Error return inner
+                statements.push(inner)
+                continue
+            }
+            let target_name=source_views.identifier(item env.lexical session)
+            if target_name is? none return problem(item 'unpack targets must be names' 'this is not a name (or a nested `[...]`)' env session)
+            if target_name =? '_' continue
             names.push(target_name)
-            values.push(put(hir.Index[item_loc shape.element source position index] @session))
+            values.push(element)
         }
-    } else return problem(right 'this value cannot be unpacked' 'unpacking takes an object or an array' env session)
+    } else return problem(targets_id 'this value cannot be unpacked' 'unpacking takes an object or an array' env session)
     loop i in 0.. and i <? names.length and i <? values.length {
         let target_name=names[i]
         let value=values[i]
@@ -1506,8 +1577,9 @@ unpack = (targets_id:addr right:addr id:addr env:Environment @session:contexts.S
         if existing isnt? none and not explicit {
             let prior=bindings.binding_at(session.registry existing)
             if prior.read_only_reason isnt? none return problem(id 'cannot assign to a constant' target_name env session)
-            let assigned=put(hir.ExpressedIdentifier[loc (if prior.store_type is? none node_at(value session).value_type else prior.store_type) target_name existing] @session)
-            let converted=against(value (if prior.store_type is? none node_at(value session).value_type else prior.store_type) id env @session)
+            let required=if prior.store_type is? none node_at(value session).value_type else prior.store_type
+            let assigned=put(hir.ExpressedIdentifier[loc required target_name existing] @session)
+            let converted=against(value required id env @session)
             if converted is? Error return converted
             container_state.changed(existing env.state @session)
             set_read_type(existing stored_read_type(converted @session) env @session)
@@ -1530,6 +1602,10 @@ unpack = (targets_id:addr right:addr id:addr env:Environment @session:contexts.S
         statements.push(declaration)
     }
     return put(hir.Block[loc void_type statements false] @session)
+}
+right_of = (id:addr env:Environment session:contexts.Session):>addr => {
+    let node=contexts.node_at(id env.lexical session)
+    return if node is? parser.BinOp node.right else id
 }
 declaration = (id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {
     let node = contexts.node_at(id env.lexical session)

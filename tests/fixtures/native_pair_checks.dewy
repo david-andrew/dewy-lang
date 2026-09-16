@@ -45,6 +45,8 @@ import p"native_error_family.dewy" as error_family
 import p"native_declared_callables.dewy" as declared_callables
 import p"native_bare_aliases.dewy" as bare_aliases
 import p"native_abstract_union_tests.dewy" as abstract_union_tests
+import p"native_or_throw.dewy" as or_throw_checks
+import p"native_type_facts.dewy" as type_fact_checks
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -133,5 +135,9 @@ let main=():>int64=>{
     if bare_aliases.main() not=?42 return 43
     printl('Checking abstract union tests')
     if abstract_union_tests.main() not=?42 return 44
+    printl('Checking or_throw')
+    if or_throw_checks.main() not=?42 return 45
+    printl('Checking type facts')
+    if type_fact_checks.main() not=?42 return 46
     return 42
 }

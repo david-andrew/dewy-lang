@@ -1,0 +1,28 @@
+# `value or_throw` returns the exception alternatives (`error` subtypes and
+# `none`) from the enclosing function and continues as the ordinary ones.
+NotFound = type of error
+Detail = type of error & [code:int64]
+check = (n:int64):>int64 | Detail | NotFound => {
+    if n <? 0 return Detail(code=n)
+    if n >? 100 return NotFound
+    return n
+}
+passthrough = (n:int64):>int64 | Detail | NotFound => {
+    let v:int64 = check(n) or_throw
+    return v + 1
+}
+maybe = (n:int64):>int64? => if n >? 0 n else none
+doubled = (n:int64):>int64? => {
+    let v = maybe(n) or_throw
+    return v * 2
+}
+main=():>int64=>{
+    let total:int64 = 0
+    match passthrough(7) { v:int64 => { total += v }  e:error => { total += 1000 } }
+    match passthrough(-3) { v:int64 => { total += 2000 }  d:Detail => { total += 0 - d.code }  <NotFound> => { total += 3000 } }
+    match passthrough(200) { v:int64 => { total += 4000 }  <Detail> => { total += 5000 }  <NotFound> => { total += 20 } }
+    let d = doubled(5)
+    if d is? int64 { total += d }
+    if doubled(0) is? none { total += 1 }
+    return total
+}

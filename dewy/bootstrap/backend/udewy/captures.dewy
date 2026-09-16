@@ -131,9 +131,14 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
     discover(root nodes @result @seen)
     let block=hir.node_at(nodes root)
     if block is? hir.Block {
-        loop id in block.items {
+        # A module item desugared into a statement group (an unpacking
+        # assignment) still declares globals.
+        let pending:array<addr>=block.items
+        loop pending.length >? 0 {
+            let id=pending.pop
             let node=hir.node_at(nodes id)
             if node is? hir.Declare and node.binding_id isnt? none {result.globals.add(node.binding_id)}
+            if node is? hir.Block and not node.scoped {loop item in node.items {pending.push(item)}}
         }
     }
     let functions=result.functions.keys

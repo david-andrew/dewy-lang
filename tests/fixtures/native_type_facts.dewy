@@ -1,0 +1,16 @@
+# A result contract `:> x is? T` (with its false-case `isnt?` counterpart)
+# is discharged by returning that very test on the parameter.
+Tok:type = $abstract type of any & [text:string]
+Word = type of Tok & []
+Space = type of Tok & []
+is_word = (tok:Tok):> tok is? Word => tok is? Word
+is_space = (tok:Tok):> tok isnt? Word => tok isnt? Word
+main=():>int64=>{
+    let total:int64 = 0
+    let w:Tok = Word(text="hi")
+    let s:Tok = Space(text=" ")
+    if is_word(w) { total += 40 }
+    if is_space(s) { total += 2 }
+    if is_word(s) { total += 100 }
+    return total
+}

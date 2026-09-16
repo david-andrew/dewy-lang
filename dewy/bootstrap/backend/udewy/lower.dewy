@@ -3582,8 +3582,17 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         startup.push(put(hir.Assign[block.loc void_type target '=' cell] @state))
         state.none_cell=name
     }
+    # A module item desugared into a statement group (an unpacking
+    # assignment) contributes its declarations as globals in order.
+    let items:array<addr>=[]
     loop id in block.items {
-        state.source_index=source_by_item.get(id)
+        let item=hir.node_at(input.nodes id)
+        if item is? hir.Block and not item.scoped {loop inner in item.items {items.push(inner)}}
+        else {items.push(id)}
+    }
+    loop id in items {
+        let owner=source_by_item.get(id)
+        if owner isnt? none {state.source_index=owner}
         state.source=if state.source_index is? none source else hir.source_at(state.source_index input.source_files)
         let node=hir.node_at(input.nodes id)
         if node is? hir.Declare {

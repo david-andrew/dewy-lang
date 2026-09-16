@@ -4,6 +4,7 @@ import p"../ty.dewy" as types
 import p"../bindings.dewy" as bindings
 import p"../type_queries.dewy" as views
 import p"../propositions.dewy" as propositions
+import p"../subtyping.dewy" as subtyping
 import p"hir_facts.dewy" as expressions
 import p"value_bounds.dewy" as values
 import p"expression_intervals.dewy" as intervals
@@ -165,6 +166,37 @@ position = (id:addr state:facts.State data:predicates.Data):>bool => {
 }
 
 verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<addr> @data:predicates.Data):>bool? => {
+    if p.tested_type isnt? none {
+        # `:> x is? T` holds when the result is true and the returned value
+        # is that very test (or a stronger one) on the same parameter.
+        let tested=p.tested_type
+        let current=expressions.strip_casts(value data.env.nodes)
+        loop true {
+            let inner=hir.node_at(data.env.nodes current)
+            if inner is? hir.Obligation {current=expressions.strip_casts(inner.value data.env.nodes) continue}
+            if inner is? hir.Block and not inner.scoped and inner.items.length =? 1 {current=expressions.strip_casts(inner.items[0] data.env.nodes) continue}
+            break
+        }
+        let returned=hir.node_at(data.env.nodes current)
+        if returned is? hir.TypeTest and p.when isnt? none {
+            let operand=hir.node_at(data.env.nodes expressions.strip_casts(returned.value data.env.nodes))
+            let same=false
+            if operand is? hir.ExpressedIdentifier {
+                let subject_id=p.subject_id
+                let name=propositions.parameter(p)
+                if subject_id isnt? none and operand.binding_id isnt? none and operand.binding_id =? subject_id {same=true}
+                else if name isnt? none and operand.name =? name {same=true}
+            }
+            let type_nodes=data.env.types
+            let exact=subtyping.is_subtype(returned.test_type tested data.links @type_nodes) and subtyping.is_subtype(tested returned.test_type data.links @type_nodes)
+            # The result is true exactly when the returned test holds. A
+            # fact conditioned on the result follows when its operator is
+            # the test's (result true) or the test's opposite (result false).
+            let asserted=if p.when =? true (if returned.negated 'isnt?' else 'is?') else (if returned.negated 'is?' else 'isnt?')
+            if same and exact and p.op =? asserted return true
+        }
+        return none
+    }
     let target=subject(p value state @data)
     if p.axiom =? 'addr' {
         if target.interval isnt? none and target.interval.upper isnt? none and target.interval.upper <=? data.env.cap return true
