@@ -34,6 +34,7 @@ import p"native_const_capture_facts.dewy" as const_captures
 import p"native_labeled_exit_cleanup.dewy" as labeled_cleanup
 import p"native_getter_field_views.dewy" as getter_views
 import p"native_shared_descriptors.dewy" as shared_descriptors
+import p"native_lazy_graphemes.dewy" as lazy_graphemes
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -100,5 +101,7 @@ let main=():>int64=>{
     if getter_views.main() not=?42 return 31
     printl('Checking shared descriptor ownership')
     if shared_descriptors.main() not=?42 return 32
+    printl('Checking lazy grapheme tables')
+    if lazy_graphemes.main() not=?42 return 33
     return 42
 }

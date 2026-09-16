@@ -1,4 +1,5 @@
 """Frame regions: string storage no `return` reaches comes from the function's region; returned strings stay in the arena."""
+import re
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile
 
@@ -19,7 +20,9 @@ def test_frame_only_views_use_the_region_and_release_it_at_exit() -> None:
 
 def test_returned_views_stay_in_the_arena() -> None:
     body = _body('let head = (text:string):>string => { if text.length >? 0 { return text[0..0] }  return text }\nlet main = ():>int64 => head("ab").length\n', 'head')
-    assert '_arena_alloc(' in body and '_region_alloc(' not in body
+    # The returned descriptor is arena storage; constant sizes select a
+    # size-class entry (`_arena_alloc_64`), larger ones the general entry.
+    assert re.search(r'_arena_alloc(_\d+)?\(', body) and '_region_alloc(' not in body
 
 
 def test_a_returned_local_view_keeps_its_source_out_of_the_region() -> None:

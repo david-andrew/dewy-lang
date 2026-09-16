@@ -262,7 +262,9 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.StringLength {
         let prefix:array<addr>=[]
         let receiver=read_operand(node.string @prefix @state)
-        return finish_read(read_word(receiver.value layouts.string_descriptor.grapheme_length node @state) receiver node @prefix @state)
+        let source=snapshot(receiver.value @prefix @state)
+        prefix.push(ensure_segmented(source node @state))
+        return finish_read(read_word(source layouts.string_descriptor.grapheme_length node @state) ReadOperand[source receiver.owner_type] node @prefix @state)
     }
     if node is? hir.StringIndex return string_index(node @state)
     if node is? hir.StringSlice return string_slice(node @state)
@@ -1577,7 +1579,7 @@ string_literal = (node:hir.String @state:State):>addr => {
 }
 string_data = (value:addr node:hir.AST @state:State):>addr => word_op('__add__' read_word(value layouts.string_descriptor.data node @state) read_word(value layouts.string_descriptor.start node @state) node @state)
 string_view = (value:addr first:addr count:addr node:hir.AST @state:State):>addr => {
-    let prefix:array<addr>=[]
+    let prefix:array<addr>=[ensure_segmented(value node @state)]
     let boundaries=snapshot(word_op('__add__' read_word(value layouts.string_descriptor.boundaries node @state) word_op('__mul__' first word(4 node @state) node @state) node @state) @prefix @state)
     let start=snapshot(intrinsic('__load_u32__' [boundaries] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let end_pointer=word_op('__add__' boundaries word_op('__mul__' count word(4 node @state) node @state) node @state)
@@ -1627,6 +1629,7 @@ string_frame_view = (id:addr @prefix:array<addr> @state:State):>addr? => {
     let first:addr=0
     let count:addr=0
     let value=snapshot(expression(node.string @state) @prefix @state)
+    prefix.push(ensure_segmented(value node @state))
     if node is? hir.StringIndex {
         first=snapshot(expression(node.index @state) @prefix @state)
         count=word(1 node @state)
@@ -1673,6 +1676,7 @@ string_slice = (node:hir.StringSlice @state:State):>addr => {
     if range isnt? hir.Range or range.step_pair isnt? none return reject(node 'stepped string slicing' @state)
     let prefix:array<addr>=[]
     let value=snapshot(owned_value(node.string @state) @prefix @state)
+    prefix.push(ensure_segmented(value node @state))
     let bounds=if range.bounds is? none '[]' else range.bounds
     let first=if range.left is? none word(0 node @state) else expression(range.left @state)
     if range.left isnt? none and bounds in? ['()' '(]'] {first=word_op('__add__' first word(1 node @state) node @state)}
@@ -1743,6 +1747,7 @@ string_bytes = (value:addr node:hir.AST @state:State):>addr => {
 string_graphemes = (value:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let source=snapshot(value @prefix @state)
+    prefix.push(ensure_segmented(source node @state))
     let length=snapshot(read_word(source layouts.string_descriptor.grapheme_length node @state) @prefix @state)
     let memory=array_memory(length 8 node @state)
     loop item in memory.prefix {prefix.push(item)}
@@ -1890,7 +1895,74 @@ segmented_string_into = (data:addr length:addr node:hir.AST optional:bool @state
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 
+# Joined strings are valid UTF-8 by construction, so their grapheme table
+# is built only when a consumer needs graphemes (length, index, slice,
+# iteration, shape tests). Until then the descriptor's boundaries word is
+# zero and its grapheme length is -1; `ensure_segmented` fills both, and
+# records the table in the shared control block so other handles adopt it.
+lazy_strings = (state:State):>bool => state.allocator isnt? none and state.shared_string_descriptors and '_utf8_boundaries_into' in? state.runtime_helpers
+lazy_string = (data:addr length:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    data=snapshot(data @prefix @state) length=snapshot(length @prefix @state)
+    let owner=string_runtime('_native_string_owner' [data length word(0 node @state) word(0 node @state)] node @state)
+    prefix.push(string_memory(data length word(0 node @state) word(-1 node @state) word(0 node @state) node @state owner=owner))
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+}
+ensure_segmented = (value:addr node:hir.AST @state:State):>addr => {
+    if not lazy_strings(state) return sequence([] node @state)
+    let key='string:segment'
+    let name=state.copy_helpers.get(key)
+    let empty=types.primitive('void' @state.type_nodes)
+    if name is? none {
+        let generated=fresh('segment_string' @state)
+        name=generated state.copy_helpers[key]=generated
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let parameter=fresh('segmented' @state)
+        let source=put(hir.ExpressedIdentifier[node.loc word_type parameter] @state)
+        let body=ensure_segmented_body(source node @state)
+        let signature=types.function_type([types.PosOrKwArg[parameter word_type]] [] none empty [] @state.type_nodes)
+        let literal=put(hir.FunctionLiteral[node.loc signature [hir.Param[parameter word_type]] [] none empty body source=state.source_index] @state)
+        state.generated.push(program.Function[generated literal])
+    }
+    $runtime_assert name isnt? none
+    return intrinsic(name [value] empty node @state)
+}
+ensure_segmented_body = (value:addr node:hir.AST @state:State):>addr => {
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let body:array<addr>=[]
+    let length=snapshot(read_word(value layouts.string_descriptor.byte_length node @state) @body @state)
+    let owner=snapshot(read_word(value layouts.string_descriptor.owner node @state) @body @state)
+    # Another handle of the same backing may have segmented it already.
+    let adopt:array<addr>=[store_word(read_word(owner 24 node @state) value layouts.string_descriptor.boundaries node @state) store_word(read_word(owner 40 node @state) value layouts.string_descriptor.grapheme_length node @state)]
+    let compute:array<addr>=[]
+    let size=snapshot(word_op('__mul__' word_op('__add__' length word(1 node @state) node @state) word(4 node @state) node @state) @compute @state)
+    let table=snapshot(allocation(size node @state) @compute @state)
+    let bytes=snapshot(byte_descriptor(read_word(value layouts.string_descriptor.data node @state) length node @state) @compute @state)
+    let checked=snapshot(string_runtime('_utf8_boundaries_into' [bytes table] node @state) @compute @state)
+    compute.push(release_block(bytes word(layouts.array_descriptor.size node @state) node @state))
+    let valid=intrinsic('__ne__' [read_word(checked 0 node @state) word(0 node @state)] boolean node @state)
+    let count=snapshot(put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type valid read_word(checked 8 node @state)] @state)] word(0 node @state)] @state) @compute @state)
+    let checked_block=release_block(checked word(16 node @state) node @state)
+    let shared_none=state.none_cell
+    if shared_none isnt? none {
+        let shared=put(hir.ExpressedIdentifier[node.loc word_type shared_none] @state)
+        checked_block=conditional(intrinsic('__ne__' [checked shared] boolean node @state) checked_block node @state)
+    }
+    compute.push(checked_block)
+    compute.push(store_word(table value layouts.string_descriptor.boundaries node @state))
+    compute.push(store_word(count value layouts.string_descriptor.grapheme_length node @state))
+    let record:array<addr>=[store_word(table owner 24 node @state) store_word(size owner 32 node @state) store_word(count owner 40 node @state)]
+    compute.push(conditional(intrinsic('__ne__' [owner word(0 node @state)] boolean node @state) sequence(record node @state) node @state))
+    let known=put(hir.ShortCircuit[node.loc boolean 'and' intrinsic('__ne__' [owner word(0 node @state)] boolean node @state) intrinsic('__ne__' [read_word(owner 24 node @state) word(0 node @state)] boolean node @state)] @state)
+    let arm=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) known sequence(adopt node @state)] @state)
+    body.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] sequence(compute node @state)] @state))
+    let pending=intrinsic('__eq__' [read_word(value layouts.string_descriptor.boundaries node @state) word(0 node @state)] boolean node @state)
+    return conditional(pending sequence(body node @state) node @state)
+}
+
 segmented_string = (data:addr length:addr node:hir.AST optional:bool @state:State):>addr => {
+    if not optional and lazy_strings(state) return lazy_string(data length node @state)
     if state.allocator isnt? none and '_utf8_boundaries_into' in? state.runtime_helpers return segmented_string_into(data length node optional @state)
     let binding=state.runtime_helpers.get('_utf8_boundaries')
     if binding is? none return reject(node 'runtime UTF-8 materialization needs the prelude segmentation helper' @state)
@@ -3422,6 +3494,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
             let pointer=word_op('__add__' data word_op('__mul__' cursor word(layout.size node @state) node @state) node @state)
             value=array_load(pointer array.element node @state)
         } else if string_type(source.value_type state) {
+            prefix.push(ensure_segmented(sequence node @state))
             length=snapshot(read_word(sequence layouts.string_descriptor.grapheme_length node @state) @prefix @state)
             value=string_view(sequence cursor word(1 node @state) node @state)
             let owner=if boxed array_load(into target.value_type node @state) else into
@@ -3728,6 +3801,7 @@ enum_read = (value:addr stored:addr view:addr node:hir.AST @state:State):>addr =
 string_type_test = (value:addr tested:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let source=snapshot(value @prefix @state)
+    prefix.push(ensure_segmented(source node @state))
     let boolean=types.primitive('bool' @state.type_nodes)
     let result=put(hir.Bool[node.loc boolean false] @state)
     loop member in type_tests.members(tested state.type_nodes) {

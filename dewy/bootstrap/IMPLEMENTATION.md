@@ -93,6 +93,13 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Lazy grapheme tables (2026-09-15). Joined native strings (concat,
+  interpolation, `join`) carry no boundary table until a grapheme consumer
+  asks; `ensure_segmented` guards length, index, slice, iteration, frame
+  views and shape tests and fills the descriptor plus the shared control
+  block (`owner+24/32/40`: table, size, count). Byte consumers never
+  segment. Emission time 1.32 s to 1.05 s, peak RSS 3.25 GB to 2.95 GB.
+
 - Shared array descriptors (2026-09-15). Native array copies bump a
   reference count in the descriptor's owner word and return the same
   descriptor; releases free at zero; `unique_array` detaches a shared

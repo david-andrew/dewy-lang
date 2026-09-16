@@ -148,6 +148,32 @@ so no new data copies were introduced. Peak process RSS fell from 3.61 GB to
 for now; the two protocols never meet inside one program, so semantics stay
 in parity while the generated-code strategies differ.
 
+### Lazy grapheme tables for joined strings (2026-09-15)
+
+Native string concatenation, interpolation and `join` no longer segment
+their result into a grapheme boundary table at construction. The joined
+bytes are valid UTF-8 by construction, so the descriptor is created with a
+zero boundaries word and grapheme length -1, and a generated
+`segment_string` helper fills both (and records the table in the shared
+control block, so other handles of the same backing adopt it) the first
+time a consumer needs graphemes: `.length`, indexing, slicing, iteration,
+frame views and string shape tests. Byte consumers (equality, hashing,
+output, further joins, the emitter) never segment. Conversions from bytes
+still validate eagerly. `tests/fixtures/native_lazy_graphemes.dewy` pins
+the consumer set, including a grapheme assembled across joined pieces.
+
+| Compiler source | Wall | Frontend | Validation | Lowering | Emission | Backend | Max RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| shared descriptors | 25.14 / 24.93 s | 8.51 / 8.49 | 2.21 / 2.22 | 4.03 / 3.98 | 1.33 / 1.31 | 6.79 / 6.65 | 3.25 GB |
+| lazy graphemes | 24.64 / 24.44 s | 8.40 / 8.32 | 2.29 / 2.31 | 3.84 / 3.73 | 1.05 / 1.06 | 6.51 / 6.43 | 2.95 GB |
+
+Emission allocation fell from 1.75 GB to 1.11 GB and its explicit copies
+from 145 MB to 71 MB; peak live payload fell from 2.92 GB to 2.54 GB. The
+gdb stack sampler had attributed about 8 % of samples to boundary building,
+mostly under the emitter; the measured gain is 2 %, so that sampler
+over-weights this code (attach cost varies with what the process is doing)
+and the next profile needs a lower-overhead sampler.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted

@@ -1,0 +1,39 @@
+# Joined strings segment their graphemes on first use. Every grapheme
+# consumer (length, index, slice, iteration, shape tests) sees the same
+# result whether it is the first or a later use, on any handle of the
+# backing, and one grapheme may be assembled across joined pieces.
+Named:type = [text:string]
+count = (value:string):>int64 => {
+    let total = 0
+    loop g in value { total += 1 }
+    return total
+}
+main=():>int64=>{
+    let u = "🇺"
+    let s = "🇸"
+    let flag = u + s
+    if flag.length not=? 1 return 1
+    let joined = "caf" + "e" + flag + "s"
+    let copy = joined
+    let record = Named[joined]
+    if joined.length not=? 6 return 2
+    if copy.length not=? 6 or record.text.length not=? 6 return 3
+    if joined[4] not=? flag return 4
+    if joined[0..2] not=? "caf" return 5
+    if count(joined) not=? 6 return 6
+    let interpolated = "{u}{s} {joined}!"
+    if interpolated.length not=? 9 return 7
+    if interpolated[0] not=? flag return 8
+    let parts:array<string> = ["ab" "c" "d" + u]
+    let together = parts.join(", ")
+    if together.length not=? 9 or together[8] not=? u return 9
+    let empty = "" + ""
+    if empty.length not=? 0 return 10
+    let long:string = ""
+    loop i in 0.. and i <? 40 { long = long + "xy" }
+    if long.length not=? 80 or long[79] not=? "y" return 11
+    if long isnt? string return 12
+    let one = "a" + ""
+    if one isnt? grapheme return 13
+    return 42
+}
