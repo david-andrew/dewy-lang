@@ -30,7 +30,7 @@ discharge = (root:addr constants:dict<addr bigint> @session:contexts.Session):>v
         if id in? seen continue
         seen.add(id)
         let node=hir.node_at(session.hir id)
-        loop child in hir.children(node) {pending.push(child)}
+        hir.push_children(node @pending)
         if node is? hir.Obligation {
             $runtime_assert id <? session.hir.length
             session.hir[id]=hir.Block[node.loc node.value_type [node.value] false]

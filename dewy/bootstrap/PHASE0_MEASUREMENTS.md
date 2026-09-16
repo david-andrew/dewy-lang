@@ -247,6 +247,50 @@ than one place parameter from scope borrowing (distinct places never
 overlap, the checker rejects that at every call). It changed lowering
 allocation by 0.1 % and wall time not at all, so it was not kept.
 
+### Donated arguments, alias forwarding, allocation-free traversal (2026-09-16)
+
+Three smaller slices, verified together (self-build on both routes, fixture
+bundle 72/4 on both, hosted bootstrap gate):
+
+*Donated arguments.* A parameter whose single, unconditional use (outside
+any loop, before any return) pushes it into an array or passes it on to
+another such parameter now takes ownership of its argument (`consumed`
+parameters in `borrowing.dewy`, adopted at that use via `consumed_uses`).
+Callers donate a temporary as is, copy a value they keep, and never release
+it. `hir.append_node` and every `put` wrapper stop copying the node; the
+copied-out-and-back HIR record per `put` disappears. Only functions called
+exclusively by direct calls qualify, so every caller and callee agree.
+Lowering allocation traffic fell 8.11 GB to 7.90 GB; wall time was within
+noise. `tests/fixtures/native_donated_arguments.dewy` pins the protocol.
+
+*Alias forwarding in the emitter.* Trivial `let x = y` and `let x = 5`
+declarations were 16 % of the emitted µDewy lines. The emitter now skips a
+`let` whose initializer is a never-reassigned local, parameter or
+integer/bool literal and whose name is itself never reassigned, writing the
+source at each read (`function_forwards`; chains resolve to a name that is
+actually written out, negative literals are parenthesized, globals are never
+sources because a callee may write them). Emitted text 38.1 MB to 32.8 MB,
+backend 4.15 s to 3.75 s, peak RSS 2.98 GB to 2.86 GB. The pre-scan costs
+about 0.3 s of emission time (1.05 s to 1.34 s), so the net is 0.3 s; making
+that scan cheaper is a follow-up.
+
+*Allocation-free traversal.* `hir.push_children(node @pending)` appends a
+node's children to an existing worklist; `hir.children` wraps it. The
+borrowing, lowering and emitter worklists use it, saving one array per
+visited node.
+
+| Compiler source | Wall | Frontend | Lowering | Emission | Backend | Max RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| borrowed wrappers (6f629865) | 20.76 / 20.88 s | 7.61 / 7.81 | 3.83 / 3.74 | 1.06 / 1.03 | 4.10 / 4.19 | 2.98 GB |
+| this batch | 20.54 / 20.47 s | 7.64 / 7.62 | 3.79 / 3.76 | 1.34 / 1.34 | 3.75 / 3.76 | 2.86 GB |
+
+Two operational notes. The gdb-free stack sampler at 5 ms attributes about
+5 % of samples to `node_at` copies (callers: the parser's `rewrite_*`, the
+checker's `expression`, validation) and 3.5 % to `append_node`; the
+donation change removes the latter's copy. And the hosted test gate leaves
+its compiled outputs under `__dewycache__/__external__`; ten gates filled
+the disk, which produced spurious link and write failures until cleared.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted

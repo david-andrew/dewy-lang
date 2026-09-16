@@ -23,10 +23,15 @@ Scope:type = [
     source:SrcFile=SrcFile['input' '']
     debug_locations:bool=false
     debug_source:debug.Source?=none
+    # Locals that are only ever another never-reassigned local or a literal:
+    # their declarations are not written and their reads name the source.
+    forwards:dict<string string>=[]
 ]
 State:type = [
     includes:dict<string string>=[]
     problem:Error?=none
+    # Names of the program's global declarations: never alias sources.
+    globals:set<string>=set[]
 ]
 const binary:dict<string string>=[
     '__add__'->'+' '__sub__'->'-' '__mul__'->'*'
@@ -267,16 +272,83 @@ write_call = (call:hir.FunctionCall @scope:Scope input:Input @state:State @out:W
 
 # A statement list owns separators, but leaves its final line open. This
 # preserves empty blocks, debug markers, and declaration shadowing exactly.
+# Forwarding: a `let` whose initializer is a never-reassigned local, a
+# parameter or an integer/bool literal, and that is itself never reassigned,
+# is an alias. Writing the source at each read instead removes about an
+# eighth of the emitted statements and the backend's stack slots for them.
+collect_forwards = (root:addr input:Input @assigned:set<string> @candidates:array<addr>):>void => {
+    let pending:array<addr>=[root]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let node=hir.node_at(input.nodes id)
+        if node is? hir.FunctionLiteral continue
+        if node is? hir.Assign {
+            let target=hir.node_at(input.nodes node.target)
+            if target is? hir.ExpressedIdentifier {assigned.add(target.name)}
+        }
+        if node is? hir.Declare and node.decltype =? 'let' {
+            let expr=hir.node_at(input.nodes node.expr)
+            if expr is? hir.ExpressedIdentifier|hir.Integer|hir.Bool and node.annotation isnt? none and node.annotation =? expr.value_type and types.node_at(input.types expr.value_type) isnt? types.CallableType {candidates.push(id)}
+        }
+        hir.push_children(node @pending)
+    }
+    return void
+}
+function_forwards = (function:hir.FunctionLiteral input:Input state:State):>dict<string string> => {
+    let assigned:set<string>=set[]
+    let candidates:array<addr>=[]
+    collect_forwards(function.body input @assigned @candidates)
+    # The worklist visits declarations out of source order, so record each
+    # alias's immediate source first and resolve chains afterwards: a read
+    # must name a local that is actually written out, never a dropped alias.
+    let sources:dict<string string>=[]
+    loop id in candidates {
+        let node=hir.node_at(input.nodes id)
+        $runtime_assert node is? hir.Declare
+        if node.name in? assigned continue
+        let expr=hir.node_at(input.nodes node.expr)
+        if expr is? hir.ExpressedIdentifier {
+            # Only this function's own never-reassigned locals and parameters:
+            # a global may be written by any callee between the snapshot and
+            # its use. Every non-global name read here is such a local.
+            if expr.name in? assigned or expr.name in? state.globals continue
+            sources[node.name]=expr.name
+        } else if expr is? hir.Integer {
+            # A bare negative literal in operand position would read as a
+            # binary minus; the parenthesized form is an atom everywhere.
+            let literal=integer_literal(expr)
+            sources[node.name]=if literal.startswith('-') "({literal})" else literal
+        }
+        else if expr is? hir.Bool {sources[node.name]=if expr.value 'true' else 'false'}
+    }
+    let forwards:dict<string string>=[]
+    loop [name source] in sources {
+        let target=source
+        let hops=0
+        loop target in? sources and hops <? 64 {
+            let next=sources.get(target)
+            if next is? none break
+            target=next hops+=1
+        }
+        forwards[name]=target
+    }
+    return forwards
+}
 write_statements = (items:array<addr> @scope:Scope input:Input @state:State @out:Writer):>void => {
     let first=true
+    let count:int64=items.length
+    let index:int64=0
     loop id in items {
+        index+=1
+        let node=hir.node_at(input.nodes id)
+        if node is? hir.Declare and node.name in? scope.forwards continue
+        if node is? hir.Void and index <? count continue
         if not first {newline(@out)} first=false
         if scope.debug_source isnt? none {
             let marker=debug.marker(hir.node_at(input.nodes id).loc scope.debug_source)
             if marker isnt? none {write(marker @out) newline(@out)}
         }
         write_ast(id @scope input @state @out)
-        let node=hir.node_at(input.nodes id)
         if node is? hir.Declare {scope.locals.add(node.name)}
     }
 }
@@ -306,6 +378,8 @@ write_ast = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void =>
         write(binary_literal(node.content) @out) return
     }
     if node is? hir.ExpressedIdentifier {
+        let forwarded=scope.forwards.get(node.name)
+        if forwarded isnt? none {write(forwarded @out) return}
         if types.node_at(input.types node.value_type) is? types.CallableType {write('@' @out)}
         write(node.name @out) return
     }
@@ -327,6 +401,7 @@ write_ast = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void =>
         write(if node is? hir.Break 'break' else 'continue' @out) return
     }
     if node is? hir.Declare {
+        if node.name in? scope.forwards return
         if hir.node_at(input.nodes node.expr) is? hir.FunctionLiteral {reject(node 'local functions require hoisting' scope @state) return}
         let type=if node.annotation is? none hir.node_at(input.nodes node.expr).value_type else node.annotation
         write("{node.decltype} {node.name}:{annotation(type input)} = " @out)
@@ -406,6 +481,7 @@ contains_return = (id:addr input:Input):>bool => {
 write_function = (name:string function:hir.FunctionLiteral scope:Scope input:Input @state:State @out:Writer):>void => {
     if function.kw_only_args.length >? 0 or function.rest_args isnt? none {reject(function 'function parameters require positional legalization' scope @state) return}
     let inner=Scope[scope.direct_functions set[] if function.source is? none scope.source else hir.source_at(function.source input.source_files)]
+    inner.forwards=function_forwards(function input state)
     if scope.debug_locations and function.source isnt? none {inner.debug_locations=true inner.debug_source=debug.prepare(hir.source_at(function.source input.source_files))}
     write("let {name} = (" @out)
     let first=true

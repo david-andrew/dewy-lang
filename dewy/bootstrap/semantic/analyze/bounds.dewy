@@ -728,7 +728,7 @@ collect = (root:addr @checker:Checker):>void => {
             let owner=node_at(access.root checker)
             if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.assigned.add(owner.binding_id)}
         }
-        loop child in hir.children(node) {pending.push(child)}
+        hir.push_children(node @pending)
     }
     let node=node_at(root checker)
     $runtime_assert node is? hir.Block

@@ -474,7 +474,7 @@ analyze_global_writes = (root:addr nodes:array<hir.AST> globals:set<addr> regist
             if resolved isnt? none {targets[id]=resolved}
             else {result[id]=globals}
         }
-        loop child in hir.children(node) {pending.push(child)}
+        hir.push_children(node @pending)
     }
     let summaries:dict<addr set<addr>>=[]
     let callers:dict<addr set<addr>>=[]
@@ -506,7 +506,7 @@ analyze_global_writes = (root:addr nodes:array<hir.AST> globals:set<addr> regist
                         }
                     }
                 }
-                loop child in hir.children(node) {pending.push(child)}
+                hir.push_children(node @pending)
             }
         }
         summaries[id]=writes

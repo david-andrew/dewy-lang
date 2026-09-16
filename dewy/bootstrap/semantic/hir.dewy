@@ -724,166 +724,167 @@ append_node = (@nodes:array<AST> node:AST):>addr<i => i <? nodes.length> => {
 # are HIR expressions: structural passes must visit their proofs, references,
 # and nested functions alongside the body. Evaluation analyses still decide
 # when to enter a function and which defaults a particular call evaluates.
-children = (node:AST):>array<addr> => {
-    let result:array<addr> = []
+# Append a node's immediate expression children to an existing worklist
+# without allocating a fresh array per node; `children` wraps it.
+push_children = (node:AST @result:array<addr>):>void => {
     if node is? Void | NoneValue | ErrorValue | GenericFunction | ScopeMetatag | Break | Continue | ExpressedIdentifier | Bool | TargetBool | DecidedBool | Integer | RationalConstant | TypeValue | BrandValue | ModuleNamespace | String | TargetString | BasedString | Partial {
-        return result
+        return void
     }
     if node is? Suppress {
         result.push(node.item)
-        return result
+        return void
     }
     if node is? ForwardingAccess | Obligation | TypeTest | Spread | MemberAccess | TypeOf {
         result.push(node.value)
-        return result
+        return void
     }
     if node is? OrThrow {
         result.push(node.value)
         result.push(node.propagated)
-        return result
+        return void
     }
     if node is? Return {
         if node.item isnt? none { result.push(node.item) }
-        return result
+        return void
     }
     if node is? IfArm | LoopArm {
         result.push(node.condition)
         result.push(node.body)
-        return result
+        return void
     }
     if node is? Flow {
         loop child in node.arms { result.push(child) }
         if node.default isnt? none { result.push(node.default) }
-        return result
+        return void
     }
     if node is? Assert {
         result.push(node.condition)
-        return result
+        return void
     }
     if node is? RuntimeFailure {
-        if node.lowered isnt? none return [node.lowered]
+        if node.lowered isnt? none { result.push(node.lowered) return void }
         if node.message isnt? none { result.push(node.message) }
-        return result
+        return void
     }
     if node is? ShortCircuit | SetAlgebra | StringEqual | StringConcat {
         result.push(node.left)
         result.push(node.right)
-        return result
+        return void
     }
     if node is? Declare | ValueCast | RepresentationCast | Transmute {
         result.push(node.expr)
-        return result
+        return void
     }
     if node is? Place {
         result.push(node.target)
-        return result
+        return void
     }
     if node is? Assign | MemberAssign | IndexAssign {
         result.push(node.target)
         result.push(node.value)
-        return result
+        return void
     }
     if node is? ArrayLiteral | Block | TypeBlock {
         loop child in node.items { result.push(child) }
-        return result
+        return void
     }
     if node is? ObjectLiteral {
         loop field in node.fields { result.push(field.value) }
-        return result
+        return void
     }
     if node is? BoundMethod {
         result.push(node.function)
         if node.receiver isnt? none { result.push(node.receiver) }
-        return result
+        return void
     }
     if node is? ArrayLength | ArrayMethod {
         result.push(node.array)
-        return result
+        return void
     }
     if node is? DictLookup {
         result.push(node.keys)
         result.push(node.values)
         result.push(node.key)
         if node.default isnt? none { result.push(node.default) }
-        return result
+        return void
     }
     if node is? DictStore {
         result.push(node.keys)
         if node.values isnt? none { result.push(node.values) }
         result.push(node.key)
         if node.value isnt? none { result.push(node.value) }
-        return result
+        return void
     }
     if node is? DictContains {
         result.push(node.keys)
         result.push(node.key)
-        return result
+        return void
     }
     if node is? DictRemove {
         result.push(node.keys)
         if node.values isnt? none { result.push(node.values) }
         if node.key isnt? none { result.push(node.key) }
         if node.default isnt? none { result.push(node.default) }
-        return result
+        return void
     }
     if node is? DictView | DictEntries | DictMethod {
         result.push(node.dictionary)
-        return result
+        return void
     }
     if node is? IteratorExpression {
         result.push(node.target)
         result.push(node.iterable)
-        return result
+        return void
     }
     if node is? MultiIteratorExpression {
         loop child in node.iterators { result.push(child) }
-        return result
+        return void
     }
     if node is? Index {
         result.push(node.array)
         result.push(node.index)
-        return result
+        return void
     }
     if node is? InterpolatedString {
         loop child in node.parts { result.push(child) }
-        return result
+        return void
     }
     if node is? StringLength {
         result.push(node.string)
-        return result
+        return void
     }
     if node is? StringIndex {
         result.push(node.string)
         result.push(node.index)
-        return result
+        return void
     }
     if node is? StringSlice {
         result.push(node.string)
         result.push(node.range)
-        return result
+        return void
     }
     if node is? FunctionLiteral {
         loop parameter in node.pos_or_kw_args {if parameter is? BoundParam {result.push(parameter.value)}}
         loop parameter in node.kw_only_args {if parameter is? BoundParam {result.push(parameter.value)}}
         if node.rest_args is? BoundParam {result.push(node.rest_args.value)}
         result.push(node.body)
-        return result
+        return void
     }
     if node is? OverloadedFunction {
         loop child in node.alternates { result.push(child) }
-        return result
+        return void
     }
     if node is? FunctionCall {
         result.push(node.func)
         loop child in node.pos_args { result.push(child) }
         loop child in node.kw_args.values { result.push(child) }
-        return result
+        return void
     }
     if node is? Range {
         if node.step_pair isnt? none { result.push(node.step_pair.first) result.push(node.step_pair.second) }
         if node.left isnt? none { result.push(node.left) }
         if node.right isnt? none { result.push(node.right) }
-        return result
+        return void
     }
     # A newly added HIR variant must make its traversal policy explicit.
     # Keep this an assertion: ordinary printing/exit would give every arena
@@ -891,6 +892,11 @@ children = (node:AST):>array<addr> => {
     $runtime_assert node is? RangeMembership, "internal compiler error: no HIR traversal for {node.typename}"
     result.push(node.value)
     result.push(node.range)
+    return void
+}
+children = (node:AST):>array<addr> => {
+    let result:array<addr> = []
+    push_children(node @result)
     return result
 }
 

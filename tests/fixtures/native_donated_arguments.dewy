@@ -1,0 +1,23 @@
+# A parameter whose single, unconditional use pushes it into an array (or
+# passes it on to such a parameter) takes ownership of its argument: a
+# temporary is donated without a copy, a value the caller keeps is copied,
+# and the caller's value stays intact and independent.
+Node:type = [kind:int64 name:string items:array<int64>]
+append = (@nodes:array<Node> node:Node):>int64 => { let id = nodes.length nodes.push(node) return id }
+put = (node:Node @nodes:array<Node>):>int64 => append(@nodes node)
+keep = (node:Node @nodes:array<Node>):>int64 => { let id = append(@nodes node) return id + node.kind }
+main=():>int64=>{
+    let nodes:array<Node> = []
+    let a = put(Node[1 "a" [1 2]] @nodes)
+    let mine = Node[2 "b" [3]]
+    let b = put(mine @nodes)
+    let c = keep(Node[3 "c" []] @nodes)
+    mine.items.push(4)
+    if nodes.length not=? 3 return 1
+    if nodes[1].items.length not=? 1 or mine.items.length not=? 2 return 2
+    let sum = 0
+    loop n in nodes { sum += n.kind + n.items.length + n.name.length }
+    if a not=? 0 or b not=? 1 or c not=? 5 return 3
+    if sum not=? 12 return 4
+    return 42
+}

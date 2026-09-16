@@ -60,6 +60,11 @@ State:type = [
     storage_types:dict<addr addr>=[]
     capture_plan:captures.Plan=captures.Plan[]
     borrowed_arguments:dict<addr set<addr>>=[]
+    # Value-boundary ownership transfers (see borrowing.Consumed): arguments
+    # the caller donates without releasing, and the parameter reads that
+    # adopt them instead of copying.
+    consumed_arguments:dict<addr set<addr>>=[]
+    consumed_uses:set<addr>=set[]
     stable_bindings:set<addr>=set[]
     stable_parameters:dict<addr effects.ParameterEffects>=[]
     array_snapshots:set<addr>=set[]
@@ -581,6 +586,8 @@ borrowed_getter_receiver = (id:addr @state:State):>bool => {
 expression_owns = (id:addr @state:State):>bool => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.Suppress return expression_owns(node.item @state)
+    # The single consuming read of a donated parameter adopts the value.
+    if node is? hir.ExpressedIdentifier and id in? state.consumed_uses return true
     if node is? hir.RepresentationCast and array_valued(node.value_type state) {
         let source=hir.node_at(state.input.nodes node.expr)
         let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(source.value_type state.type_nodes) state.type_nodes))
@@ -2587,7 +2594,7 @@ getter_read = (body:addr nodes:array<hir.AST>):>addr? => {
             let current=hir.node_at(nodes child)
             if current is? hir.FunctionLiteral continue
             if current is? hir.Return return none
-            loop child in hir.children(current) {pending.push(child)}
+            hir.push_children(current @pending)
         }
         node=hir.node_at(nodes terminal)
         # A block's implicit aggregate result needs its own type rewrite;
@@ -2611,7 +2618,7 @@ getter_read = (body:addr nodes:array<hir.AST>):>addr? => {
         let current=hir.node_at(nodes pending.pop)
         if current is? hir.FunctionLiteral continue
         if current is? hir.Return return none
-        loop child in hir.children(current) {pending.push(child)}
+        hir.push_children(current @pending)
     }
     return terminal
 }
@@ -3016,13 +3023,14 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
     let temporary:array<OwnedLocal>=[]
     let positional:array<addr>=[]
     let views_allowed=string_free_type(signature.ret @state)
+    let consumed=state.consumed_arguments.get(id set[])
     loop argument in node.pos_args {
-        let value=call_argument(argument borrowed disposable views_allowed @temporary @prefix @state)
+        let value=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
         positional.push(value)
     }
     let keywords:dict<string addr>=[]
     loop [name argument] in node.kw_args {
-        keywords[name]=call_argument(argument borrowed disposable views_allowed @temporary @prefix @state)
+        keywords[name]=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
     }
     let args:array<addr>=[]
     let index:addr=0
@@ -3110,7 +3118,11 @@ string_free_type = (id:addr @state:State depth:addr=0):>bool => {
     if plain is? types.FunctionType return false
     return true
 }
-call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State):>addr => {
+call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State):>addr => {
+    # A donated argument is an owned value the callee takes over: a fresh
+    # temporary passes as is, a kept value is copied, and nothing is
+    # released here.
+    if argument in? consumed return snapshot(owned_value(argument @state) @prefix @state)
     let peeled:addr?=if argument in? borrowed peel_borrowed(argument @state) else none
     if peeled isnt? none return snapshot(expression(peeled @state) @prefix @state)
     let source=hir.node_at(state.input.nodes argument)
@@ -3226,7 +3238,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
                 loop argument in current.pos_args {mark_mutated(argument @mutated state)}
             }
         }
-        loop item in hir.children(current) {pending.push(item)}
+        hir.push_children(current @pending)
     }
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
     state.loop_depth=0 state.loop_levels=none state.loop_kind=none state.loop_prologue=[]
@@ -3334,6 +3346,8 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.stable_parameters=borrowed.stable_parameters
     state.array_snapshots=borrowed.array_snapshots
     state.disposable_arguments=borrowed.disposable_arguments
+    state.consumed_arguments=borrowed.consumed_arguments
+    state.consumed_uses=borrowed.consumed_uses
     state.cleanup_excluded=borrowed.escaping_places
     loop unit in state.capture_plan.functions.values {
         loop binding in unit.captures {state.cleanup_excluded.add(binding)}

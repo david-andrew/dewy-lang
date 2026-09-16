@@ -78,7 +78,11 @@ render = (program:Program input:emit.Input debug_locations:bool=false):>string|E
         if declaration isnt? hir.Declare return Error[title='lowered global storage must be a declaration' srcfile=program.source]
         scope.locals.add(declaration.name)
     }
-    loop id in program.globals {emit.write_ast(id @scope input @state @out) emit.newline(@out)}
+    loop id in program.globals {
+        let global=hir.node_at(input.nodes id)
+        if global is? hir.Declare {state.globals.add(global.name)}
+        emit.write_ast(id @scope input @state @out) emit.newline(@out)
+    }
     loop function in program.functions {
         let literal=hir.node_at(input.nodes function.literal)
         if literal isnt? hir.FunctionLiteral return Error[title='lowered function unit must contain a function literal' srcfile=program.source]

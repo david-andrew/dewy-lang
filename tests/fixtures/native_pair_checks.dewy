@@ -35,6 +35,7 @@ import p"native_labeled_exit_cleanup.dewy" as labeled_cleanup
 import p"native_getter_field_views.dewy" as getter_views
 import p"native_shared_descriptors.dewy" as shared_descriptors
 import p"native_lazy_graphemes.dewy" as lazy_graphemes
+import p"native_donated_arguments.dewy" as donated_arguments
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -103,5 +104,7 @@ let main=():>int64=>{
     if shared_descriptors.main() not=?42 return 32
     printl('Checking lazy grapheme tables')
     if lazy_graphemes.main() not=?42 return 33
+    printl('Checking donated arguments')
+    if donated_arguments.main() not=?42 return 34
     return 42
 }

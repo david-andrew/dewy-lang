@@ -93,6 +93,14 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Donated arguments, alias forwarding, push_children (2026-09-16). A
+  parameter whose single unconditional use pushes it or passes it to such a
+  parameter owns its argument (callers donate temporaries, copy kept
+  values, never release); the emitter forwards trivial local aliases and
+  literal lets instead of writing them (text 38.1 MB to 32.8 MB, backend
+  4.15 s to 3.75 s); `hir.push_children` feeds worklists without allocating
+  a child array per node.
+
 - Borrowed arguments through wrappers (2026-09-16). Borrowing routes and
   the argument plan look through proof obligations and string-preserving
   casts; a borrowed call argument lowers the read underneath its block,

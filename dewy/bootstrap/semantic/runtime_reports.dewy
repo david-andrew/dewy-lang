@@ -79,7 +79,7 @@ lower = (root:addr helpers:dict<string addr> @session:contexts.Session):>Error? 
         if id in? seen continue
         seen.add(id)
         let node=hir.node_at(session.hir id)
-        loop child in hir.children(node) {pending.push(child)}
+        hir.push_children(node @pending)
         if node isnt? hir.RuntimeFailure or node.lowered isnt? none continue
         let index=indexed.get(node.source_file)
         if index is? none {
