@@ -93,6 +93,16 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Literal-union joins keep integer-word storage (2026-09-16). A local
+  annotated `1|2|3` is a refined `int64`; a test narrowed it to `3` and the
+  branch join produced `3 | int64<1..3>`, which the representation rules
+  read as a tagged cell while the storage was one word, so a later negated
+  test loaded a tag from the integer and released it as a cell
+  (`literal_types.dewy` crashed natively). The join now keeps the binding's
+  integer word type when every alternative fits it, as it already did for
+  record families; the lowering also folds a test its operand type decides
+  and lets integer storage decide the test path. Fixture
+  `native_literal_union_joins` (pair check 36).
 - Intermediate arena size classes (2026-09-16). Classes of 24, 40, 72,
   136 and 264 bytes hold headed records whose layout is a power of two;
   constant sizes select class entries, computed sizes the general entries,

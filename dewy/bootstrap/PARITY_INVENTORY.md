@@ -27,6 +27,32 @@ those cases. All other stderr remains byte-exact. Applying that policy to the
 saved assertion-failure result removes its semantic parity failure; the raw
 baseline counts and missing native value notes above remain recorded.
 
+## Refreshed corpus at `4814bd95` (2026-09-16)
+
+`tools/check_compiler_parity.py` with the current native compiler
+(C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
+pass; the pinned hosted run passed all expected results. All 44 remaining
+failures are native compilation rejections except `literal_types.dewy`,
+which compiled on both and crashed natively (a literal-union join invented
+a tagged cell for one integer word; fixed the same day, see
+IMPLEMENTATION.md). Every structural string interpolation case from the
+earlier list now passes. Grouped by first obstacle:
+
+| Count | First obstacle | Fixtures |
+| --- | --- | --- |
+| 7 | non-conjunctive iterator formula | multi_iterator_or, multi_iterator_formula, multi_iterator_exhausted_truth, multi_iterator_labeled_exits, multi_iterator_operators, range_stepped_labeled_exits, range_stepped_multi_optional |
+| 5 | undefined name `__pow__` | powers, units_algebra, trig, bigint, bigint_division |
+| 4 | parser: BinOp expression | refinements, nat_types, tokenizer_gaps, keyword_default_calls |
+| 4 | these type arguments | place_slots, type_values, recursive_mints, length_terms |
+| 2 | string slice is not proven in bounds | conditional_value_facts, length_preserving_calls |
+| 2 | parser: Postfix expression | precedence, error_values |
+| 2 | array index is not proven in bounds (`0..0`) | prototype_mode, prototype_panic |
+| 2 | tokenizer: No token matched | string_join_decode, runtime_grapheme_strings |
+| 1 each | no overload takes (`int64`, `uint8`); integer literal exceeds `int64`; undefined `length`; runtime test within one union payload alternative; undefined type `nonemptystring`; parser: Block expression; unreachable match arm (2 fixtures); undefined `ox` (unpacking); cannot prove refinement `@tok is? 0`; mixed record and array literal (spread); execution difference (literal_types); integer range `[0, ∞]` (array_iteration); `range` not iterable (range_values); `a` used before initialization (object_methods); character range ordinal conversion (string_ranges) | abstract_int, bigint_auto, addr_types, abstract_int_containers, refinement_chains, flow_body_lowering, error_fields, covariant_slots, unpacking, type_facts, spread, literal_types, array_iteration, range_values, object_methods, string_ranges |
+
+Records: `~/dev/dewy-build-artifacts/perf/parity-s2/results.jsonl` (not
+committed). Parser and tokenizer items belong with the bootstrap parser.
+
 ## Refreshed corpus at `49ad4c12`
 
 The next complete, isolated run passes **152/211 cases**: 142/201 accepted

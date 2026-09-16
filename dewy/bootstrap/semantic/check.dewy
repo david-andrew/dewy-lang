@@ -2035,6 +2035,10 @@ join_reads = (exits:array<Environment> env:Environment @session:contexts.Session
                 }
                 if covered {result=original}
             }
+            # A literal narrowed out of an integer word (`picked:1|2|3` is a
+            # refined `int64`) rejoins that word: `3 | int64<1..3>` would
+            # invent a tagged cell for storage that is one integer.
+            if original isnt? none and views.fixed_integer_layout(original session.types) isnt? none and result not=? original and subtyping.is_subtype(result original session.links @session.types) {result=original}
             joined.types[binding]=result
         }
     }

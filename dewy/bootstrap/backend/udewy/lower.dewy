@@ -1590,6 +1590,16 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
         if not test_refinements_implied(actual node.test_type @state) return reject(node 'runtime refinement predicates' @state)
         node=hir.TypeTest[node.loc node.value_type node.value views.strip_all_refinements(node.test_type @state.type_nodes) node.negated]
     }
+    # A value whose static type already decides the test (a local narrowed to
+    # one literal, a member that is a subtype of the tested type) has no
+    # tag to read: fold the answer and keep only the operand's evaluation.
+    let decided=subtyping.is_subtype(actual node.test_type state.links @state.type_nodes)
+    if decided or type_tests.disjoint(actual node.test_type state.links @state.type_nodes) {
+        let prefix:array<addr>=[]
+        let evaluated=snapshot(operand @prefix @state)
+        prefix.push(put(hir.Bool[node.loc types.primitive('bool' @state.type_nodes) decided not=? node.negated] @state))
+        return put(hir.Block[node.loc types.primitive('bool' @state.type_nodes) prefix false] @state)
+    }
     let optional=views.optional_payload(actual @state.type_nodes)
     if optional isnt? none {
         let present=subtyping.is_subtype(optional node.test_type state.links @state.type_nodes)
@@ -1622,6 +1632,17 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
         if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
         prefix.push(result)
         return put(hir.Block[node.loc boolean prefix false] @state)
+    }
+    # A narrowing join can give a read a union type (`3 | int64<1..3>`)
+    # while its storage is one integer word: the storage decides.
+    let storage=stored_type(node.value state)
+    if cell_members(storage @state) is? none and views.fixed_integer_layout(views.structural_base(storage state.type_nodes) state.type_nodes) isnt? none {
+        let prefix:array<addr>=[]
+        let source=snapshot(operand @prefix @state)
+        let result=integer_predicate(source storage node.test_type node @state)
+        if node.negated {result=intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state)}
+        prefix.push(result)
+        return put(hir.Block[node.loc node.value_type prefix false] @state)
     }
     let members=cell_members(actual @state)
     if members is? none {

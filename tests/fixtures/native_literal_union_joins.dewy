@@ -1,0 +1,18 @@
+# A local annotated with an integer literal union is one integer word. A
+# test narrows it to a literal; rejoining the branches must keep the word
+# representation, so a later negated test compares the word, not a tag.
+# A mixed literal enum narrowed by earlier arms still tests its string
+# alternatives by content.
+Mode:type = <1 | 2 | "fast" | "slow">
+describe = (m:Mode):>int64 =>
+    if m is? 1 10 else if m is? 2 20 else if m is? "fast" 30 else 40
+main=():>int64=>{
+    let picked:1|2|3 = 3
+    let total:int64 = 0
+    if picked is? 3 { total += 16 }
+    if picked isnt? 1 { total += 26 }
+    let m:Mode = "slow"
+    if describe(m) + describe(2) + describe("fast") =? 90 { total += 90 }
+    if picked is? 2 { total += 1000 }
+    return total - 90
+}

@@ -37,6 +37,7 @@ import p"native_shared_descriptors.dewy" as shared_descriptors
 import p"native_lazy_graphemes.dewy" as lazy_graphemes
 import p"native_donated_arguments.dewy" as donated_arguments
 import p"native_shared_records.dewy" as shared_records
+import p"native_literal_union_joins.dewy" as literal_union_joins
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -109,5 +110,7 @@ let main=():>int64=>{
     if donated_arguments.main() not=?42 return 34
     printl('Checking shared records')
     if shared_records.main() not=?42 return 35
+    printl('Checking literal union joins')
+    if literal_union_joins.main() not=?42 return 36
     return 42
 }
