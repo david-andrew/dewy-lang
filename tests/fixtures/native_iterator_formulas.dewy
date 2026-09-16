@@ -1,0 +1,24 @@
+# Iterator leaves combine by a logical formula. A leaf the formula lets run
+# past its end binds `none`; a formula that stays true after every counted
+# leaf ends repeats until the body exits.
+main=():>int64=>{
+    let total:int64 = 0
+    loop i in 0..1 or j in 10..12 {
+        if i is? none { total += 30 } else { total += i }
+        if j is? none { total += 1000 } else { total += j }
+    }
+    # 0+10, 1+11, 30+12: 64
+    let words:array<int64> = [5 6 7]
+    let seen:int64 = 0
+    # `xor` holds while exactly one leaf is available: the empty range is
+    # exhausted from the start, so every word is visited: 18.
+    loop w in words xor k in 1..0 {
+        if w isnt? none and k is? none { seen += w }
+    }
+    let repeats:int64 = 0
+    loop a in 1..0 nor b in 1..0 {
+        if a is? none and b is? none { repeats += 1 }
+        if repeats >=? 3 { break }
+    }
+    return total + seen + repeats - 43
+}

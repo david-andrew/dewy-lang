@@ -3702,9 +3702,28 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
     let target_name=symbol(target.name target.binding_id @state)
     let initial=placeholder(target_type node @state)
     let boxed=target.binding_id isnt? none and target.binding_id in? state.boxed
+    # A leaf that a formula lets run past its end binds an optional target:
+    # one frame cell per loop site, written with the element on each step
+    # and with `none` once the leaf is exhausted. The cell never owns its
+    # payload; the body borrows the element like an ordinary target.
+    let payload=views.optional_payload(target.value_type @state.type_nodes)
+    let element_semantic:addr?=none
+    if source isnt? hir.Range {
+        let array=array_type(source.value_type state)
+        if array isnt? none {element_semantic=array.element}
+    }
+    let optional_target=payload isnt? none and (source is? hir.Range or (element_semantic isnt? none and cell_members(payload @state) is? none))
+    let element_cell=optional_target and element_semantic isnt? none and cell_members(element_semantic @state) isnt? none
+    if optional_target {
+        if boxed return IteratorStep[prefix reject(node 'captured optional iterator targets' @state)]
+        if string_type(source.value_type state) return IteratorStep[prefix reject(node 'optional string iterator targets' @state)]
+        target_type=types.primitive('int64' @state.type_nodes)
+        initial=intrinsic('__static_alloca__' [word(16 node @state)] target_type node @state)
+    }
     if boxed {initial=box_value(initial target.value_type node @state) target_type=types.primitive('int64' @state.type_nodes)}
     prefix.push(put(hir.Declare[node.loc void_type 'let' target_name target_type initial target.binding_id] @state))
     let into=put(hir.ExpressedIdentifier[node.loc target_type target_name target.binding_id] @state)
+    if optional_target {prefix.push(store_word(word(0 node @state) into 0 node @state))}
     let cursor=snapshot(word(-1 node @state) @prefix @state)
     let length:addr?=none
     let wide_last:addr?=none
@@ -3778,9 +3797,24 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
     let increment=put(hir.Assign[node.loc void_type cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
     let available=if length is? none put(hir.Bool[node.loc bool_type true] @state) else intrinsic('__lt__' [cursor length] bool_type node @state)
     let store=if boxed array_store(value into target.value_type node @state) else put(hir.Assign[node.loc void_type into '=' value] @state)
+    if optional_target {
+        $runtime_assert payload isnt? none
+        let writes:array<addr>=[]
+        if element_cell {
+            let loaded=snapshot(value @writes @state)
+            writes.push(store_word(read_word(loaded 0 node @state) into 0 node @state))
+            writes.push(store_word(read_word(loaded 8 node @state) into 8 node @state))
+        } else {
+            writes.push(store_word(word(member_tag(payload @state) node @state) into 0 node @state))
+            writes.push(store_word(put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) value] @state) into 8 node @state))
+        }
+        store=sequence(writes node @state)
+    }
     let yes=put(hir.Bool[node.loc bool_type true] @state)
     let no=put(hir.Bool[node.loc bool_type false] @state)
+    if optional_target {no=put(hir.Block[node.loc bool_type [store_word(word(0 node @state) into 0 node @state) put(hir.Bool[node.loc bool_type false] @state)] false] @state)}
     if wide_more isnt? none and wide_last isnt? none {
+        if optional_target return IteratorStep[prefix reject(node 'optional targets over word-sized range counts' @state)]
         let next=intrinsic('__ne__' [cursor wide_last] bool_type node @state)
         let update=put(hir.Assign[node.loc void_type wide_more '=' next] @state)
         let body=put(hir.Block[node.loc bool_type [increment update store yes] false] @state)
@@ -3947,7 +3981,6 @@ iterator_condition = (node:hir.AST @state:State):>IteratorStep => {
     let sources:dict<addr DictParts>=[]
     if node is? hir.IteratorExpression return iterator_step(node @sources @state)
     if node isnt? hir.MultiIteratorExpression return IteratorStep[[] reject(node 'this iterator condition' @state)]
-    if node.repeats_when_exhausted return IteratorStep[[] reject(node 'repeating exhausted iterator formulas' @state)]
     let prefix:array<addr>=[]
     let advance:array<addr>=[]
     let values:array<addr>=[]

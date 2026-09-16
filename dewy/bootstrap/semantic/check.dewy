@@ -3193,6 +3193,15 @@ iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|E
     let name = source_views.identifier(node.left env.lexical session)
     if name is? none return pending(id 'iterator target unpacking over non-container values' env session)
     let value = node_at(iterable session)
+    # A stored range binding is compile-time syntax: iterate its literal, as
+    # membership does, with no runtime range representation.
+    if value isnt? hir.Range {
+        let stored = resolved_range(iterable session)
+        if stored isnt? none {
+            iterable = put(stored @session)
+            value = node_at(iterable session)
+        }
+    }
     let shape = types.node_at(session.types types.strip_refinement(value.value_type session.types))
     let target:addr? = none
     let first:bigint = 0
@@ -3266,6 +3275,82 @@ breaks_loop = (id:addr depth:addr session:contexts.Session):>bool => {
     loop child in hir.children(node) { if breaks_loop(child depth session) return true }
     return false
 }
+# A loop condition's iterator leaves combined by logical operators, as a
+# postfix formula over leaf indices (`i in a or j in b` is `0 1 or`). Each
+# leaf binds its target for the parts checked after it. A dictionary pair
+# contributes two leaves joined by `and`.
+collect_iterators = (part:addr body_env:Environment arm:parser.KeywordExpr changed:set<string> env:Environment @iterators:array<addr> @formula:array<hir.IteratorFormulaToken> @names:set<string> @session:contexts.Session):>Environment|Error => {
+    $runtime_assert arm.parts.length =? 3
+    let node=contexts.node_at(source_views.unparen(part env.lexical session) env.lexical session)
+    if node is? parser.BinOp {
+        let op=source_views.symbol(node.op env.lexical session)
+        if op in? ['and' 'or' 'xor' 'nand' 'nor' 'xnor'] and source_views.contains_iterator(node.left env.lexical session) and source_views.contains_iterator(node.right env.lexical session) {
+            let after_left=collect_iterators(node.left body_env arm changed env @iterators @formula @names @session)
+            if after_left is? Error return after_left
+            let after_right=collect_iterators(node.right after_left arm changed env @iterators @formula @names @session)
+            if after_right is? Error return after_right
+            if op =? 'and' {formula.push('and')}
+            else if op =? 'or' {formula.push('or')}
+            else if op =? 'xor' {formula.push('xor')}
+            else if op =? 'nand' {formula.push('nand')}
+            else if op =? 'nor' {formula.push('nor')}
+            else {formula.push('xnor')}
+            return after_right
+        }
+    }
+    let result=iterator(part body_env @session)
+    if result is? Error return result
+    let first=true
+    loop iterator_id in result.values {
+        let iter=node_at(iterator_id session)
+        $runtime_assert iter is? hir.IteratorExpression
+        let target=node_at(iter.target session)
+        $runtime_assert target is? hir.ExpressedIdentifier
+        if target.name in? names return problem(part 'duplicate iterator target' target.name env session)
+        names.add(target.name)
+        let owner=node_at(iter.iterable session)
+        let route=bindings.access_path(if owner is? hir.DictEntries owner.dictionary else iter.iterable session.hir)
+        let root=node_at(route.root session)
+        if owner is? hir.DictEntries {
+            if root is? hir.ExpressedIdentifier and root.name in? changed {
+                let fields:array<string>=[]
+                loop step in route.steps {
+                    let access=node_at(step session)
+                    if access isnt? hir.MemberAccess break
+                    fields.push(access.name)
+                }
+                if source_views.mutates_route(arm.parts[2] root.name fields env.lexical session) or source_views.mutates_route(arm.parts[1] root.name fields env.lexical session) return problem(part 'dictionary changes during iteration' 'the loop body writes this dictionary' env session)
+            }
+            container_state.forget_positions(owner.dictionary env.state @session)
+        }
+        formula.push(iterators.length)
+        if not first {formula.push('and')}
+        first=false
+        iterators.push(iterator_id)
+    }
+    return result.environment
+}
+evaluate_formula = (formula:array<hir.IteratorFormulaToken> active:array<bool>):>bool? => {
+    let stack:array<bool>=[]
+    loop token in formula {
+        if token is? addr {
+            if token >=? active.length return none
+            stack.push(active[token])
+            continue
+        }
+        if stack.length <? 2 return none
+        let right=stack.pop
+        let left=stack.pop
+        if token =? 'and' {stack.push(left and right)}
+        else if token =? 'or' {stack.push(left or right)}
+        else if token =? 'xor' {stack.push(left not=? right)}
+        else if token =? 'nand' {stack.push(not (left and right))}
+        else if token =? 'nor' {stack.push(not (left or right))}
+        else {stack.push(left =? right)}
+    }
+    if stack.length not=? 1 return none
+    return stack[0]
+}
 loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Session):>addr|Error => {
     let first=session.read_states.length
     let result=loop_flow_inner(id arm env @session)
@@ -3287,37 +3372,14 @@ loop_flow_inner = (id:addr arm:parser.KeywordExpr env:Environment @session:conte
         let predicates:array<addr> = []
         let names:set<string> = set[]
         let formula:array<hir.IteratorFormulaToken> = []
+        let joined=false
         loop part in source_views.conjuncts(arm.parts[1] env.lexical session) {
             if not source_views.contains_iterator(part env.lexical session) { predicates.push(part) continue }
-            let result = iterator(part body_env @session)
-            if result is? Error return result
-            loop iterator_id in result.values {
-                let iter = node_at(iterator_id session)
-                $runtime_assert iter is? hir.IteratorExpression
-                let target = node_at(iter.target session)
-                $runtime_assert target is? hir.ExpressedIdentifier
-                if target.name in? names return problem(part 'duplicate iterator target' target.name env session)
-                names.add(target.name)
-                let owner = node_at(iter.iterable session)
-                let route = bindings.access_path(if owner is? hir.DictEntries owner.dictionary else iter.iterable session.hir)
-                let root = node_at(route.root session)
-                if owner is? hir.DictEntries {
-                    if root is? hir.ExpressedIdentifier and root.name in? changed {
-                        let fields:array<string>=[]
-                        loop step in route.steps {
-                            let access=node_at(step session)
-                            if access isnt? hir.MemberAccess break
-                            fields.push(access.name)
-                        }
-                        if source_views.mutates_route(arm.parts[2] root.name fields env.lexical session) or source_views.mutates_route(arm.parts[1] root.name fields env.lexical session) return problem(part 'cannot mutate a container while iterating it' root.name env session)
-                    }
-                    container_state.forget_positions(owner.dictionary env.state @session)
-                }
-                formula.push(iterators.length)
-                if iterators.length >? 0 { formula.push('and') }
-                iterators.push(iterator_id)
-            }
-            body_env = result.environment
+            let collected=collect_iterators(part body_env arm changed env @iterators @formula @names @session)
+            if collected is? Error return collected
+            if joined {formula.push('and')}
+            joined=true
+            body_env=collected
         }
         $runtime_assert iterators.length >? 0
         loop predicate_id in predicates {
@@ -3344,8 +3406,57 @@ loop_flow_inner = (id:addr arm:parser.KeywordExpr env:Environment @session:conte
         }
         condition = iterators[0]
         if iterators.length >? 1 {
+            # Where the formula stops depends only on the leaves' static
+            # counts: a leaf exhausted before that point still binds its
+            # target, as `none`. A formula that stays true after every
+            # counted leaf ends repeats until the body exits.
+            let counts:array<bigint?> = []
+            let dynamic=false
+            loop iterator_id in iterators {
+                let iter=node_at(iterator_id session)
+                $runtime_assert iter is? hir.IteratorExpression
+                counts.push(iter.count)
+                if iter.count is? none and node_at(iter.iterable session) isnt? hir.Range {dynamic=true}
+            }
+            let lockstep=true
+            loop token in formula {if token isnt? addr and token not=? 'and' {lockstep=false}}
+            if dynamic and not lockstep return pending(id 'dynamic-length arrays in multiiterator formulas other than `and`' env session)
+            let boundaries:array<bigint> = [0]
+            loop count in counts {if count isnt? none and count not in? boundaries {boundaries.push(count)}}
+            let sorted:array<bigint> = []
+            loop value in boundaries {
+                let at:addr<i => i <=? sorted.length> = 0
+                loop at <? sorted.length and sorted[at] <? value {at += 1}
+                sorted.insert(value idx=at)
+            }
+            let stop:bigint? = none
+            loop iteration in sorted {
+                if stop isnt? none continue
+                let active:array<bool> = []
+                loop count in counts {active.push(count is? none or iteration <? count)}
+                let holds=evaluate_formula(formula active)
+                if holds is? none return problem(id 'invalid iterator formula' 'the loop condition is not a formula over its iterators' env session)
+                if not holds {stop=iteration}
+            }
+            let repeats = stop is? none and not (dynamic and lockstep)
+            loop index in 0.. and index <? iterators.length {
+                let iter=node_at(iterators[index] session)
+                $runtime_assert iter is? hir.IteratorExpression
+                let count=iter.count
+                if count is? none continue
+                if stop isnt? none and stop <=? count continue
+                let target=node_at(iter.target session)
+                $runtime_assert target is? hir.ExpressedIdentifier and target.binding_id isnt? none
+                let optional=views.optional(target.value_type @session.types)
+                let binding=bindings.binding_at(session.registry target.binding_id)
+                binding.value_type=optional binding.store_type=optional
+                bindings.store_binding(@session.registry target.binding_id binding)
+                contexts.replace_hir(iter.target hir.ExpressedIdentifier[target.loc optional target.name target.binding_id] @session)
+                let type=types.parameterize(types.primitive('iterator' @session.types) [optional] @session.types)
+                contexts.replace_hir(iterators[index] hir.IteratorExpression[iter.loc type iter.target iter.iterable iter.first iter.step iter.last iter.count iter.guarded] @session)
+            }
             let type = types.parameterize(types.primitive('multiiterator' @session.types) [types.primitive('int64' @session.types)] @session.types)
-            condition = put(hir.MultiIteratorExpression[arm.loc type iterators formula false] @session)
+            condition = put(hir.MultiIteratorExpression[arm.loc type iterators formula repeats] @session)
         }
     } else {
         let value = expression(arm.parts[1] env @session expected=types.primitive('bool' @session.types))
