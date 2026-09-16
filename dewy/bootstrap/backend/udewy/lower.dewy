@@ -537,8 +537,12 @@ address = (base:addr offset:addr node:hir.AST @state:State):>addr => if offset =
 arena_class_helper = (size:addr prefix:string @state:State):>string? => {
     if state.allocator is? none return none
     let constant=hir.node_at(state.nodes size)
-    if constant isnt? hir.Integer or constant.value <=? 0 or constant.value >? 256 return none
-    let width=if constant.value <=? 8 8 else if constant.value <=? 16 16 else if constant.value <=? 32 32 else if constant.value <=? 64 64 else if constant.value <=? 128 128 else 256
+    if constant isnt? hir.Integer or constant.value <=? 0 or constant.value >? 264 return none
+    # Power-of-two classes, plus one-word-larger classes for headed records.
+    # Constant and computed sizes must never mix for one block (see the
+    # arena in library/linux/system.dewy).
+    let value=constant.value
+    let width=if value <=? 8 8 else if value <=? 16 16 else if value <=? 24 24 else if value <=? 32 32 else if value <=? 40 40 else if value <=? 64 64 else if value <=? 72 72 else if value <=? 128 128 else if value <=? 136 136 else if value <=? 256 256 else 264
     let binding=state.runtime_helpers.get("{prefix}{width}")
     if binding is? none return none
     return state.symbols.get(binding)

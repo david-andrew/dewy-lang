@@ -93,6 +93,11 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Intermediate arena size classes (2026-09-16). Classes of 24, 40, 72,
+  136 and 264 bytes hold headed records whose layout is a power of two;
+  constant sizes select class entries, computed sizes the general entries,
+  never mixed for one block. Self-build 18.9-19.0 s to 18.2-18.5 s, peak
+  RSS 3.25 GB to 2.69 GB (below the 2.83 GB before shared records).
 - Shared record blocks (2026-09-16). Native record blocks carry a header
   word (sharing count, allocated size) and are shared by reference count;
   copies from whole-block handles bump the count, mutations through shared

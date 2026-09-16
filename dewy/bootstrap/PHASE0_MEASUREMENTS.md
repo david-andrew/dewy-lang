@@ -370,6 +370,29 @@ regressions. Intermediate size classes are the next step. Fixture
 `native_shared_records` (pair check 35) covers copies through locals,
 element slots, optional payloads, place arguments and nested fields.
 
+### Intermediate arena size classes (2026-09-16)
+
+The record header made every record whose layout is exactly a power of two
+occupy the next class. The arena now also has classes of 24, 40, 72, 136
+and 264 bytes (`_arena_alloc_N`/`_arena_release_N` with their own free
+lists) and generated code selects them for constant sizes; computed sizes
+keep the general entries, and one block is never allocated one way and
+released the other. Paired against the compiler before shared records, cold
+quiet self-build with C-built compilers:
+
+| | before shared records | shared records | + size classes |
+| --- | --- | --- | --- |
+| frontend | 7.75 / 7.50 s | 6.33 / 6.34 s | 6.30 / 6.38 s |
+| lowering | 3.77 / 3.88 s | 3.93 / 4.01 s | 3.80 / 3.64 s |
+| emission | 1.27 / 1.32 s | 1.46 / 1.45 s | 1.34 / 1.40 s |
+| backend | 3.02 / 3.01 s | 3.26 / 3.23 s | 3.13 / 3.38 s |
+| wall | 19.61 / 19.56 s | 18.89 / 19.04 s | 18.24 / 18.45 s |
+| peak RSS | 2.83 GB | 3.25 GB | 2.69 GB |
+
+The lowering, emission and backend regressions of the record slice were the
+doubled classes; with them gone the two slices together are worth 1.2-1.3 s
+and 140 MB.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted
