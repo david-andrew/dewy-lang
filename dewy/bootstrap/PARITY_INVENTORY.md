@@ -41,7 +41,7 @@ earlier list now passes. Grouped by first obstacle:
 | Count | First obstacle | Fixtures |
 | --- | --- | --- |
 | 7 | non-conjunctive iterator formula | multi_iterator_or, multi_iterator_formula, multi_iterator_exhausted_truth, multi_iterator_labeled_exits, multi_iterator_operators, range_stepped_labeled_exits, range_stepped_multi_optional |
-| 5 | undefined name `__pow__` | powers, units_algebra, trig, bigint, bigint_division |
+| 5 | undefined name `__pow__` (fixed the same day: `powers`, `bigint`, `bigint_division` and, after an emitter fix for indirect calls under `transmute`, `units_algebra` pass; `trig` then stops at `cos` of a degree quantity: no overload takes the angle) | powers, units_algebra, trig, bigint, bigint_division |
 | 4 | parser: BinOp expression | refinements, nat_types, tokenizer_gaps, keyword_default_calls |
 | 4 | these type arguments | place_slots, type_values, recursive_mints, length_terms |
 | 2 | string slice is not proven in bounds | conditional_value_facts, length_preserving_calls |

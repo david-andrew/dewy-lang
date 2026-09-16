@@ -93,6 +93,21 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Indirect calls under `transmute` (2026-09-16). The emitter spells a call
+  through a function value `(@f)(x)`; the µDewy tool does not read a
+  postfix `transmute` after that form, so a global initializer whose
+  callee had been hoisted into a step (`units_algebra.dewy`) failed to
+  assemble. Such operands are now parenthesized.
+- Power operator (2026-09-16). `__pow__` is a builtin and `pow_operation`
+  mirrors the hosted dispatch: constant integer and rational bases fold
+  (a negative exponent makes an integer base rational; dimensions are
+  raised with the exponent), runtime integer bases with a provably
+  non-negative exponent call `_int_pow`, rational bases take constant or
+  runtime integer exponents through `_rational_pow`/`_bigrational_pow` and
+  their negative forms, and big integers call `_bigint_pow`. Runtime
+  dimensioned powers stay pending like the other runtime quantity
+  arithmetic. `powers`, `bigint` and `bigint_division` now pass parity;
+  fixture `native_power_operator` (pair check 37).
 - Literal-union joins keep integer-word storage (2026-09-16). A local
   annotated `1|2|3` is a refined `int64`; a test narrowed it to `3` and the
   branch join produced `3 | int64<1..3>`, which the representation rules
