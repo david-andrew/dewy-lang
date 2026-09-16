@@ -14,11 +14,16 @@ facts = (state:addr session:contexts.Session):>array<keys.Fact> => {
     $runtime_assert state <? session.read_states.length
     return session.read_states[state].keys
 }
+# Read states are updated through their element place: copying a state out
+# and back would detach (copy) every array of its dictionaries per change.
+replace_keys = (@reads:contexts.ReadState current:array<keys.Fact>):>void => { reads.keys = current }
+drop_types = (@reads:contexts.ReadState children:array<addr>):>void => {
+    loop child in children { if child in? reads.types {reads.types.pop(child);} }
+}
+store_type = (@reads:contexts.ReadState id:addr type:addr):>void => { reads.types[id] = type }
 set_facts = (state:addr current:array<keys.Fact> @session:contexts.Session):>void => {
     $runtime_assert state <? session.read_states.length
-    let reads = session.read_states[state]
-    reads.keys = current
-    session.read_states[state] = reads
+    replace_keys(@session.read_states[state] current)
 }
 route = (value:addr @session:contexts.Session):>addr? => bindings.array_route_id(value session.hir @session.registry)
 changed = (binding:addr state:addr @session:contexts.Session):>void => {
@@ -30,12 +35,9 @@ changed = (binding:addr state:addr @session:contexts.Session):>void => {
     # Replacement invalidates facts about the whole projected subtree,
     # including narrowed member types, while unrelated sibling routes stay.
     $runtime_assert state <? session.read_states.length
-    let reads=session.read_states[state]
-    loop child in bindings.routes_under(session.registry owner prefix) {
-        current = keys.forget(current changed=child)
-        if child in? reads.types {reads.types.pop(child);}
-    }
-    session.read_states[state]=reads
+    let children = bindings.routes_under(session.registry owner prefix)
+    loop child in children { current = keys.forget(current changed=child) }
+    drop_types(@session.read_states[state] children)
     set_facts(state current @session)
 }
 replaced = (value:addr state:addr @session:contexts.Session):>void => {
@@ -187,9 +189,7 @@ seed_fields = (binding:addr value:addr state:addr @session:contexts.Session):>vo
         let child = bindings.route_id(@session.registry owner member_path declared.value_type field.loc)
         let field_value = hir.node_at(session.hir field.value)
         $runtime_assert state <? session.read_states.length
-        let reads = session.read_states[state]
-        reads.types[child] = field_value.value_type
-        session.read_states[state] = reads
+        store_type(@session.read_states[state] child field_value.value_type)
         seed(child field.value state @session)
         seed_fields(child field.value state @session)
     }

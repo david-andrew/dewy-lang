@@ -93,6 +93,14 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Word copies and in-place element updates (2026-09-16). Native
+  `array_copy_storage` copies whole words for word-multiple element widths.
+  Compiler sources mutate container elements through indexed place arguments
+  (`bind`, `set_read_type`, `record_requirements`, `container_state`) instead
+  of copying the element out and back, which detached every dictionary array
+  per insertion. Initialization/reachability 1.27 s to 0.60 s; frontend
+  explicit copies 626 MB to 267 MB; wall 24.6 s to 23.4 s.
+
 - Lazy grapheme tables (2026-09-15). Joined native strings (concat,
   interpolation, `join`) carry no boundary table until a grapheme consumer
   asks; `ensure_segmented` guards length, index, slice, iteration, frame

@@ -1590,11 +1590,12 @@ read_type = (id:addr env:Environment session:contexts.Session fallback:addr?=non
     if type isnt? none return type
     return if fallback is? none bindings.binding_at(session.registry id).value_type else fallback
 }
+# Update the state in place: copying it out and back would detach (copy)
+# every array of its dictionary for one insertion.
+store_read_type = (@state:contexts.ReadState id:addr type:addr):>void => { state.types[id] = type }
 set_read_type = (id:addr type:addr env:Environment @session:contexts.Session):>void => {
     $runtime_assert env.state <? session.read_states.length
-    let state = session.read_states[env.state]
-    state.types[id] = type
-    session.read_states[env.state] = state
+    store_read_type(@session.read_states[env.state] id type)
 }
 # Packing a value into its wider store union changes storage, not which
 # alternatives this value can contain. Keep that evidence for reads and

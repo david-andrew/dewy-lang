@@ -1130,9 +1130,12 @@ array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State)
     let cursor=snapshot(word(0 node @state) @prefix @state)
     let source_pointer=word_op('__add__' source cursor node @state)
     let into=word_op('__add__' memory.data cursor node @state)
-    let byte=intrinsic('__load_u8__' [source_pointer] types.primitive('uint8' @state.type_nodes) node @state)
-    let store=intrinsic('__store_u8__' [byte into] types.primitive('void' @state.type_nodes) node @state)
-    let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
+    # Copy whole words when the element width allows it: the C compiler does
+    # not vectorize the byte loop, and detaching a shared word array is hot.
+    let width=if layout.size % 8 =? 0 8 else 1
+    let unit=intrinsic("__load_u{width*8}__" [source_pointer] types.primitive("uint{width*8}" @state.type_nodes) node @state)
+    let store=intrinsic("__store_u{width*8}__" [unit into] types.primitive('void' @state.type_nodes) node @state)
+    let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__add__' cursor word(width node @state) node @state)] @state)
     let body=put(hir.Block[node.loc types.primitive('void' @state.type_nodes) [store increment] true] @state)
     let condition=intrinsic('__lt__' [cursor count] types.primitive('bool' @state.type_nodes) node @state)
     let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)

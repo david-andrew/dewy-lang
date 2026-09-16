@@ -39,12 +39,15 @@ Checker:type = [
     problem:Error?=none
 ]
 
+# Update each frame in place rather than copying it out and back, which
+# would detach (copy) every set for one insertion.
+record_frame_requirements = (@frame:CheckFrame required:set<addr> assumed:set<addr>):>void => {
+    loop id in required { if dense.contains(frame.available id) { frame.required.add(id) } }
+    loop id in assumed { if id not=? frame.function_id { frame.assumed_calls.add(id) } }
+}
 record_requirements = (required:set<addr> assumed:set<addr> @checker:Checker):>void => {
     loop i in 0.. and i <? checker.frames.length {
-        let frame = checker.frames[i]
-        loop id in required { if dense.contains(frame.available id) { frame.required.add(id) } }
-        loop id in assumed { if id not=? frame.function_id { frame.assumed_calls.add(id) } }
-        checker.frames[i] = frame
+        record_frame_requirements(@checker.frames[i] required assumed)
     }
 }
 member_key = (id:addr nodes:array<hir.AST>):>MemberRoute | none => {

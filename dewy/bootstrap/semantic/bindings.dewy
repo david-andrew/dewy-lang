@@ -172,11 +172,12 @@ lookup = (scopes:array<Scope> scope:addr name:string):>addr? => {
     }
     return none
 }
+bind_name = (@frame:Scope name:string binding:addr):>void => { frame.names[name] = binding }
 bind = (@scopes:array<Scope> scope:addr name:string binding:addr):>void => {
     $runtime_assert scope <? scopes.length
-    let frame = scopes[scope]
-    frame.names[name] = binding
-    scopes[scope] = frame
+    # Update the frame in place: copying it out and back would detach (copy)
+    # every array of its dictionary for one insertion.
+    bind_name(@scopes[scope] name binding)
 }
 
 # Access decomposition has an explicit view policy. A value cast can preserve
