@@ -62,11 +62,13 @@ the native compiler, which makes it:
 - a from-source bootstrap path with no trusted binary seed;
 - a convenient development loop for prototyping and inspecting analyses in
   Python before porting them. The 2026-09-15 complete direct-output build
-  checkpoints for the larger, cache-enabled compiler are about 76 seconds
+  checkpoints for the larger, cache-enabled compiler were about 76 seconds
   hosted and 40 seconds native, the latter using a C-built seed pair and
-  direct x86-64 output. Both remain above the revised native target; the
-  fully direct bootstrap remains open. These are single-generation measurements, not a new
-  fixed-point certification.
+  direct x86-64 output. The dedicated campaign (2026-09-15/16) brought the
+  native cold self-build to 18.2-18.5 seconds, under the 30-second target
+  but above the 10-second stretch goal; it was paused there by decision.
+  The fully direct bootstrap remains open. These are single-generation
+  measurements, not a new fixed-point certification.
   Recorded inputs, seeds and phase timings live in
   [`bootstrap/PHASE0_MEASUREMENTS.md`](bootstrap/PHASE0_MEASUREMENTS.md);
 - the way around staged seeds when the language changes: the compiler's
@@ -153,6 +155,11 @@ week when started. The duration is an investment in reaching the target,
 not a guarantee that the target will be achieved within a week. This
 milestone consolidates the performance work below and selected parts of
 Phase 1.1, rather than spreading it across ordinary feature development.
+
+**Status (2026-09-16):** paused at 18.2-18.5 s cold (from 41 s), target
+met, stretch goal not; slices, numbers and the remaining levers are recorded
+in `bootstrap/PHASE0_MEASUREMENTS.md`. Resume when a phase-1.1 ownership
+result or a backend change makes a whole category of work disappear.
 
 **Acceptance target (revised 2026-09-15):** the native compiler builds the
 Dewy compiler from source into an executable in **under 30 seconds** on a
