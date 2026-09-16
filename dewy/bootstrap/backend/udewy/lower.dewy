@@ -516,12 +516,25 @@ address = (base:addr offset:addr node:hir.AST @state:State):>addr => if offset =
 # later argument is evaluated, so callee mutation cannot affect the caller.
 # Frame storage remains available for small compiler-kernel tests without a
 # prelude; values using it are forbidden from escaping that frame.
+# Sizes up to 64 bytes cover cells, descriptors and small records; the
+# arena offers class-specialized entries for them (see `_arena_alloc_16`).
+arena_class_helper = (size:addr prefix:string @state:State):>string? => {
+    if state.allocator is? none return none
+    let constant=hir.node_at(state.nodes size)
+    if constant isnt? hir.Integer or constant.value <=? 0 or constant.value >? 64 return none
+    let width=if constant.value <=? 8 8 else if constant.value <=? 16 16 else if constant.value <=? 32 32 else 64
+    let binding=state.runtime_helpers.get("{prefix}{width}")
+    if binding is? none return none
+    return state.symbols.get(binding)
+}
 allocation = (size:addr node:hir.AST @state:State):>addr => {
     let name:string='__alloca__'
     if state.allocator isnt? none {
         let selected=state.symbols.get(state.allocator)
         if selected is? none return reject(node 'the requested arena allocator has no declaration' @state)
         name=selected
+        let specialized=arena_class_helper(size '_arena_alloc_' @state)
+        if specialized isnt? none return intrinsic(specialized [] types.primitive('int64' @state.type_nodes) node @state)
     }
     return intrinsic(name [size] types.primitive('int64' @state.type_nodes) node @state)
 }
@@ -4237,6 +4250,8 @@ releasable = (type:addr @state:State):>bool => owned_string(type state) or cell_
 release_block = (pointer:addr size:addr node:hir.AST @state:State):>addr => {
     let binding=state.runtime_helpers.get('_arena_release')
     if state.allocator is? none or binding is? none return sequence([] node @state)
+    let specialized=arena_class_helper(size '_arena_release_' @state)
+    if specialized isnt? none return intrinsic(specialized [pointer] types.primitive('void' @state.type_nodes) node @state)
     let name=state.symbols.get(binding)
     $runtime_assert name isnt? none
     return intrinsic(name [pointer size] types.primitive('void' @state.type_nodes) node @state)

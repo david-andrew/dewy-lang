@@ -93,6 +93,14 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Size-class arena entries (2026-09-15). `library/linux/system.dewy` adds
+  `_arena_alloc_8/16/32/64` and `_arena_release_8/16/32/64`: the free-list
+  fast path with the class fixed, no width argument, no class computation.
+  Native lowering selects them for constant sizes up to 64 bytes (cells,
+  descriptors, small records); the string helpers use them directly. On the
+  direct x86-64 route, where calls are not inlined, the self-built compiler's
+  frontend went from 53 s to 42 s and lowering from 23 s to 18.5 s.
+
 - One immortal `none` cell per program (2026-09-15). Packing or copying
   `none` into an optional yields a static two-word cell instead of a fresh
   16-byte allocation; cell block releases skip that address by identity.

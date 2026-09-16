@@ -81,7 +81,7 @@ lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
     let allocator=engine.prelude_bindings.get('_arena_alloc')
     let required:array<addr>=[]
     if allocator isnt? none {required.push(allocator)}
-    loop name in ['_utf8_boundaries' '_utf8_boundaries_into' 'exit' '_arena_release' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop'] {
+    loop name in ['_utf8_boundaries' '_utf8_boundaries_into' 'exit' '_arena_release' '_arena_alloc_8' '_arena_alloc_16' '_arena_alloc_32' '_arena_alloc_64' '_arena_release_8' '_arena_release_16' '_arena_release_32' '_arena_release_64' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop'] {
         let helper=engine.prelude_bindings.get(name)
         if helper isnt? none {required.push(helper)}
     }
@@ -101,7 +101,7 @@ compile = (entry:addr @engine:modules.Engine timings:bool=false):>Compilation|Er
     let allocator=engine.prelude_bindings.get('_arena_alloc')
     let required:array<addr>=[]
     if allocator isnt? none {required.push(allocator)}
-    loop name in ['_utf8_boundaries' '_utf8_boundaries_into' 'exit' '_arena_release' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop'] {
+    loop name in ['_utf8_boundaries' '_utf8_boundaries_into' 'exit' '_arena_release' '_arena_alloc_8' '_arena_alloc_16' '_arena_alloc_32' '_arena_alloc_64' '_arena_release_8' '_arena_release_16' '_arena_release_32' '_arena_release_64' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop'] {
         let helper=engine.prelude_bindings.get(name)
         if helper isnt? none {required.push(helper)}
     }

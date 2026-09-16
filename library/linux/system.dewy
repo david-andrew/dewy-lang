@@ -105,6 +105,108 @@ let _arena_alloc = (size:int64):>int64 => {
     loop cursor <? stop { __store_i64__(0 cursor)  cursor = cursor + 8 }
     return block
 }
+# Size-class specializations for the sizes generated code allocates most:
+# no class computation and no width argument on the hot path. Generated
+# code selects one by constant size; other sizes use the general entries.
+
+let _arena_alloc_8 = ():>int64 => {
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    let head_address:int64 = _arena_free_lists + 0
+    let block:int64 = __load_i64__(head_address)
+    _arena_allocated_bytes += 8
+    _arena_live_bytes += 8
+    if _arena_live_bytes >? _arena_peak_bytes {_arena_peak_bytes=_arena_live_bytes}
+    if block =? 0 { return _arena_bump(8) }
+    __store_i64__(__load_i64__(block) head_address)
+    __store_i64__(0 block+0)
+    return block
+}
+let _arena_release_8 = (block:int64):>void => {
+    if block =? 0 { return void }
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    _arena_live_bytes -= 8
+    let head_address:int64 = _arena_free_lists + 0
+    __store_i64__(__load_i64__(head_address) block)
+    __store_i64__(block head_address)
+    return void
+}
+
+let _arena_alloc_16 = ():>int64 => {
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    let head_address:int64 = _arena_free_lists + 8
+    let block:int64 = __load_i64__(head_address)
+    _arena_allocated_bytes += 16
+    _arena_live_bytes += 16
+    if _arena_live_bytes >? _arena_peak_bytes {_arena_peak_bytes=_arena_live_bytes}
+    if block =? 0 { return _arena_bump(16) }
+    __store_i64__(__load_i64__(block) head_address)
+    __store_i64__(0 block+0)
+    __store_i64__(0 block+8)
+    return block
+}
+let _arena_release_16 = (block:int64):>void => {
+    if block =? 0 { return void }
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    _arena_live_bytes -= 16
+    let head_address:int64 = _arena_free_lists + 8
+    __store_i64__(__load_i64__(head_address) block)
+    __store_i64__(block head_address)
+    return void
+}
+
+let _arena_alloc_32 = ():>int64 => {
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    let head_address:int64 = _arena_free_lists + 16
+    let block:int64 = __load_i64__(head_address)
+    _arena_allocated_bytes += 32
+    _arena_live_bytes += 32
+    if _arena_live_bytes >? _arena_peak_bytes {_arena_peak_bytes=_arena_live_bytes}
+    if block =? 0 { return _arena_bump(32) }
+    __store_i64__(__load_i64__(block) head_address)
+    __store_i64__(0 block+0)
+    __store_i64__(0 block+8)
+    __store_i64__(0 block+16)
+    __store_i64__(0 block+24)
+    return block
+}
+let _arena_release_32 = (block:int64):>void => {
+    if block =? 0 { return void }
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    _arena_live_bytes -= 32
+    let head_address:int64 = _arena_free_lists + 16
+    __store_i64__(__load_i64__(head_address) block)
+    __store_i64__(block head_address)
+    return void
+}
+
+let _arena_alloc_64 = ():>int64 => {
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    let head_address:int64 = _arena_free_lists + 24
+    let block:int64 = __load_i64__(head_address)
+    _arena_allocated_bytes += 64
+    _arena_live_bytes += 64
+    if _arena_live_bytes >? _arena_peak_bytes {_arena_peak_bytes=_arena_live_bytes}
+    if block =? 0 { return _arena_bump(64) }
+    __store_i64__(__load_i64__(block) head_address)
+    __store_i64__(0 block+0)
+    __store_i64__(0 block+8)
+    __store_i64__(0 block+16)
+    __store_i64__(0 block+24)
+    __store_i64__(0 block+32)
+    __store_i64__(0 block+40)
+    __store_i64__(0 block+48)
+    __store_i64__(0 block+56)
+    return block
+}
+let _arena_release_64 = (block:int64):>void => {
+    if block =? 0 { return void }
+    if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
+    _arena_live_bytes -= 64
+    let head_address:int64 = _arena_free_lists + 24
+    __store_i64__(__load_i64__(head_address) block)
+    __store_i64__(block head_address)
+    return void
+}
 let _arena_release = (block:int64 size:int64):>void => {
     if block =? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(384) }
@@ -132,7 +234,7 @@ let _arena_release = (block:int64 size:int64):>void => {
 # A descriptor's owner word (offset 40) is zero for immortal literals. Views
 # retain the original control even when their boundary/data pointers shift.
 let _native_string_owner = (data:int64 size:int64 boundaries:int64 boundary_size:int64):>int64 => {
-    let owner=_arena_alloc(40)
+    let owner=_arena_alloc_64()
     __store_i64__(1 owner)
     __store_i64__(data owner+8)
     __store_i64__(size owner+16)
@@ -153,7 +255,7 @@ let _native_string_copy = (value:int64):>int64 => {
     if owner =? 0 return value
     let refs=__load_i64__(owner)
     if refs <? 0 return value
-    let copy=_arena_alloc(48)
+    let copy=_arena_alloc_64()
     let offset:int64=0
     loop offset <? 48 {
         __store_i64__(__load_i64__(value+offset) copy+offset)
@@ -174,9 +276,9 @@ let _native_string_release = (value:int64):>void => {
     if refs =? 0 {
         _arena_release(__load_i64__(owner+8) __load_i64__(owner+16))
         _arena_release(__load_i64__(owner+24) __load_i64__(owner+32))
-        _arena_release(owner 40)
+        _arena_release_64(owner)
     }
-    _arena_release(value 48)
+    _arena_release_64(value)
     return void
 }
 let _native_string_pin = (value:int64):>int64 => {
@@ -193,7 +295,7 @@ let _native_string_pin = (value:int64):>int64 => {
 # Keep the old copy/release helpers above for existing bootstrap seeds; a
 # lowerer must select this complete helper family when constructing prefixes.
 let _native_string_descriptor = ():>int64 => {
-    let storage=_arena_alloc(56)
+    let storage=_arena_alloc_64()
     __store_i64__(1 storage)
     return storage+8
 }
@@ -219,9 +321,9 @@ let _native_string_drop = (value:int64):>void => {
     if refs =? 0 {
         _arena_release(__load_i64__(owner+8) __load_i64__(owner+16))
         _arena_release(__load_i64__(owner+24) __load_i64__(owner+32))
-        _arena_release(owner 40)
+        _arena_release_64(owner)
     }
-    _arena_release(value-8 56)
+    _arena_release_64(value-8)
     return void
 }
 
