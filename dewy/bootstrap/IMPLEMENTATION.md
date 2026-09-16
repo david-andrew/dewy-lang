@@ -93,6 +93,21 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
+  declare new names and assign existing ones by object field or array
+  position (`unpacking`, `addr_types`); a record error `type of error &
+  [...]` is a subtype of `error` (match arms `e:error` cover it,
+  `error_fields`, `covariant_slots`); a binding declared with a function
+  type keeps that signature as its read contract (`covariant_slots`); a
+  record literal's fields count as initialized for its methods
+  (`object_methods` now stops at method closures over sibling fields, an
+  honest lowering gap instead of a wrong initialization error); a bare
+  `Name = ...` rooted at a type name is a type alias (`refinement_chains`);
+  and an abstract `int` alternative in a container union answers a
+  fixed-width test by its presence (`abstract_int_containers`). Fixtures
+  `native_unpacking_targets`, `native_error_family`,
+  `native_declared_callables`, `native_bare_aliases`,
+  `native_abstract_union_tests` (pair checks 39-43).
 - Stored range bindings iterate (2026-09-16). `loop i in window` where
   `window = [0..10)` resolves the binding back to its range literal, as
   membership already did, with no runtime range representation
