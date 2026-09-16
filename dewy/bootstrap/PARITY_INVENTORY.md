@@ -31,7 +31,8 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-pass; the pinned hosted run passed all expected results. All 44 remaining
+passed at the start of the day and 186/211 by its end (the fixes marked
+"the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
 a tagged cell for one integer word; fixed the same day, see
@@ -48,7 +49,7 @@ earlier list now passes. Grouped by first obstacle:
 | 2 | parser: Postfix expression | precedence, error_values |
 | 2 | array index is not proven in bounds (`0..0`) | prototype_mode, prototype_panic |
 | 2 | tokenizer: No token matched | string_join_decode, runtime_grapheme_strings |
-| 1 each | no overload takes (`int64`, `uint8`); integer literal exceeds `int64`; undefined `length` (addr_types, fixed the same day); runtime test within one union payload alternative (fixed the same day); undefined type `nonemptystring` (fixed the same day); parser: Block expression; unreachable match arm (2 fixtures, fixed the same day; `error_fields` then needed `or_throw`, also added); undefined `ox` (unpacking; fixed, now stops at dictionary entry unpacking); cannot prove refinement `@tok is? 0` (fixed the same day); mixed record and array literal (spread); execution difference (literal_types); integer range `[0, ∞]` (array_iteration); `range` not iterable (range_values, fixed the same day); `a` used before initialization (object_methods; fixed, now stops at method closures over sibling fields); character range ordinal conversion (string_ranges) | abstract_int, bigint_auto, addr_types, abstract_int_containers, refinement_chains, flow_body_lowering, error_fields, covariant_slots, unpacking, type_facts, spread, literal_types, array_iteration, range_values, object_methods, string_ranges |
+| 1 each | no overload takes (`int64`, `uint8`); integer literal exceeds `int64`; undefined `length` (addr_types, fixed the same day); runtime test within one union payload alternative (fixed the same day); undefined type `nonemptystring` (fixed the same day); parser: Block expression; unreachable match arm (2 fixtures, fixed the same day; `error_fields` then needed `or_throw`, also added); undefined `ox` (unpacking; fixed the same day, including nested and dictionary/set entries); cannot prove refinement `@tok is? 0` (fixed the same day); mixed record and array literal (spread); execution difference (literal_types); integer range `[0, ∞]` (array_iteration); `range` not iterable (range_values, fixed the same day); `a` used before initialization (object_methods; fixed, now stops at method closures over sibling fields); character range ordinal conversion (string_ranges) | abstract_int, bigint_auto, addr_types, abstract_int_containers, refinement_chains, flow_body_lowering, error_fields, covariant_slots, unpacking, type_facts, spread, literal_types, array_iteration, range_values, object_methods, string_ranges |
 
 Records: `~/dev/dewy-build-artifacts/perf/parity-s2/results.jsonl` (not
 committed). Parser and tokenizer items belong with the bootstrap parser.

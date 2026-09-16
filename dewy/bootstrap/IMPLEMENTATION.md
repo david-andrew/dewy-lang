@@ -93,6 +93,10 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Dictionary and set unpacking (2026-09-16). `[[k v] ...] = dictionary`
+  and `[m ...] = set` take entries in insertion order when the entry count
+  is a fact on the container's `keys` route, as the hosted checker reads
+  it from its refinements (`unpacking.dewy` now passes parity).
 - `or_throw`, type-fact results, nested unpacking (2026-09-16).
   `value or_throw` is checked as in the hosted compiler and spelled as a
   hidden binding, a test with an early return of the exception alternatives

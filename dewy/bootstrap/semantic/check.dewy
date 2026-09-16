@@ -1533,10 +1533,64 @@ unpack_value = (targets_id:addr source:addr id:addr env:Environment @session:con
     let source_type=stored_read_type(source @session)
     let shape=types.node_at(session.types types.unfold(types.strip_refinement(source_type session.types) session.types))
     let entries=views.container_entry_types(source_type session.types)
-    if entries isnt? none return pending(id 'unpacking dictionary or set entries' env session)
     let names:array<string>=[]
     let values:array<addr>=[]
-    if shape is? types.ObjectType {
+    if entries isnt? none {
+        # A dictionary or set unpacks its entries in insertion order when the
+        # entry count is a fact here: a set's members like array elements, a
+        # dictionary's entries as `[key value]` pairs.
+        # The entry arrays' exact lengths live on their member routes' read
+        # types, as for any array field.
+        let key_type=types.array_type(entries.key none @session.types)
+        let value_element=entries.value
+        let value_type:addr?=if value_element is? none none else types.array_type(value_element none @session.types)
+        let count:bigint?=none
+        let source_node=node_at(source session)
+        if source_node is? hir.ExpressedIdentifier and source_node.binding_id isnt? none {
+            loop route in session.registry.routes_by_root.get(source_node.binding_id []) {
+                if route.path.length not=? 1 continue
+                let known=read_type(route.id env session)
+                if known is? none continue
+                let known_shape=types.node_at(session.types types.strip_refinement(known session.types))
+                if known_shape isnt? types.ArrayType continue
+                if route.path[0] =? 'keys' {key_type=known count=known_shape.length}
+                if route.path[0] =? 'values' {value_type=known}
+            }
+        }
+        let kind=if entries.value is? none 'set' else 'dictionary'
+        if count is? none return problem(right_of(id env session) "cannot prove how many entries this {kind} has" 'unpacking needs an exact count: look entries up by key instead' env session)
+        if targets.inner.length not=? count return problem(targets_id "unpacking must name every {if entries.value is? none 'member' else 'entry'}" "{targets.inner.length} targets for {count} entries; use `_` for a value you do not need" env session)
+        let key_member=put(hir.MemberAccess[loc key_type source 'keys' true] @session)
+        let value_member:addr?=none
+        if value_type isnt? none {value_member=put(hir.MemberAccess[loc value_type source 'values' true] @session)}
+        loop index in 0.. and index <? targets.inner.length {
+            let item=targets.inner[index]
+            let item_node=contexts.node_at(item env.lexical session)
+            let item_loc=item_node.loc
+            let position=put(hir.Integer[item_loc types.integer_literal(index @session.types) '0d' index] @session)
+            if value_member is? none {
+                let target_name=source_views.identifier(item env.lexical session)
+                if target_name is? none return problem(item 'unpack targets must be names' 'this is not a name' env session)
+                if target_name =? '_' continue
+                names.push(target_name)
+                values.push(put(hir.Index[item_loc entries.key key_member position index] @session))
+                continue
+            }
+            if item_node isnt? parser.Block or item_node.delims not=? '[]' or item_node.inner.length not=? 2 return problem(item 'a dictionary entry is a key and a value' 'unpack it as `[key value]`' env session)
+            let key_target=source_views.identifier(item_node.inner[0] env.lexical session)
+            let value_target=source_views.identifier(item_node.inner[1] env.lexical session)
+            if key_target is? none or value_target is? none return problem(item 'unpack targets must be names' 'each of `[key value]` is a name' env session)
+            $runtime_assert value_element isnt? none
+            if key_target not=? '_' {
+                names.push(key_target)
+                values.push(put(hir.Index[item_loc entries.key key_member position index] @session))
+            }
+            if value_target not=? '_' {
+                names.push(value_target)
+                values.push(put(hir.Index[item_loc value_element value_member position index] @session))
+            }
+        }
+    } else if shape is? types.ObjectType {
         loop item in targets.inner {
             let target_name=source_views.identifier(item env.lexical session)
             if target_name is? none or target_name =? '_' return problem(item 'objects unpack by field name' 'each target names the field it takes' env session)

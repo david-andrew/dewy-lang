@@ -1,6 +1,7 @@
 # `[a b] = value` unpacks an object by field name or an array of proven
 # length by position, declaring each new name and assigning existing ones;
 # `_` discards an element and a nested `[...]` unpacks an element further.
+# Dictionaries and sets unpack their entries in insertion order.
 origin = [ox=0 oy=0]
 [ox oy] = origin
 main=():>int64=>{
@@ -17,5 +18,11 @@ main=():>int64=>{
     let grid = [[1 2] [3 4]]
     let [[a0 a1] [b0 b1]] = grid
     total += a0 + a1 + b0 + b1
-    return total - 20
+    let ages = ['ann' -> 30 'bob' -> 7 'cy' -> 12]
+    [[k1 v1] [_ v2] [k3 _]] = ages
+    total += v1 + v2 + k1.length + k3.length
+    let members = set[7 8]
+    let [m1 m2] = members
+    total += m1 + m2
+    return total - 77
 }
