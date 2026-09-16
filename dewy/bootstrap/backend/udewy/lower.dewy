@@ -91,6 +91,8 @@ State:type = [
     scalar_projections:dict<string ScalarProjection>=[]
     pending_projections:array<ScalarProjection>=[]
     result_projection:ScalarProjection?=none
+    # One immortal `none` cell (tag 0, payload 0) shared by every optional.
+    none_cell:string?=none
     problem:Error?=none
 ]
 Result:type = const [program:program.Program input:emit.Input]
@@ -385,6 +387,12 @@ expression = (id:addr @state:State):>addr => {
             value=ordinary_call(node.expr call runtime_type(call.value_type call @state) @state projection=projection)
         } else if borrowed_route_local(node @state) {value=expression(node.expr @state) borrowed=true}
         else {value=owned_value(node.expr @state)}
+        # An addressed optional local is written through its own cell, which
+        # must therefore never be the shared static `none` cell.
+        if state.none_cell isnt? none and node.binding_id isnt? none and node.binding_id in? state.addressed and node.binding_id not in? state.boxed and not borrowed {
+            let stored=if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation
+            if views.optional_payload(stored @state.type_nodes) isnt? none {value=cell_private(value stored node @state)}
+        }
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
         if node.binding_id isnt? none and node.binding_id in? state.boxed {
             value=box_value(value if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
@@ -1213,13 +1221,39 @@ cell_write = (destination:addr source:addr type:addr node:hir.AST @state:State):
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms fallback] @state))
     return sequence(prefix node @state)
 }
+# Copy a cell into fresh storage unconditionally (see addressed locals).
+cell_private = (value:addr type:addr node:hir.AST @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let source=snapshot(value @prefix @state)
+    let shared_none=state.none_cell
+    if shared_none is? none return source
+    let shared=put(hir.ExpressedIdentifier[node.loc word_type shared_none] @state)
+    let fresh_cell:array<addr>=[]
+    let cell=snapshot(allocation(word(16 node @state) node @state) @fresh_cell @state)
+    fresh_cell.push(cell_write(cell source type node @state))
+    fresh_cell.push(cell)
+    let allocated=put(hir.Block[node.loc word_type fresh_cell false] @state)
+    let same=intrinsic('__eq__' [source shared] types.primitive('bool' @state.type_nodes) node @state)
+    prefix.push(put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type same allocated] @state)] source] @state))
+    return put(hir.Block[node.loc word_type prefix false] @state)
+}
 cell_copy_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
+    let word_type=types.primitive('int64' @state.type_nodes)
     let source=snapshot(value @prefix @state)
-    let cell=snapshot(allocation(word(16 node @state) node @state) @prefix @state)
-    prefix.push(cell_write(cell source type node @state))
-    prefix.push(cell)
-    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    let fresh_cell:array<addr>=[]
+    let cell=snapshot(allocation(word(16 node @state) node @state) @fresh_cell @state)
+    fresh_cell.push(cell_write(cell source type node @state))
+    fresh_cell.push(cell)
+    let allocated=put(hir.Block[node.loc word_type fresh_cell false] @state)
+    let shared_none=state.none_cell
+    if shared_none isnt? none and views.optional_payload(type @state.type_nodes) isnt? none {
+        let absent=intrinsic('__eq__' [read_word(source 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let shared=put(hir.ExpressedIdentifier[node.loc word_type shared_none] @state)
+        prefix.push(put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type absent shared] @state)] allocated] @state))
+    } else {prefix.push(allocated)}
+    return put(hir.Block[node.loc word_type prefix false] @state)
 }
 cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owned:bool=false):>addr => {
     let members=cell_members(expected @state)
@@ -1264,6 +1298,10 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owne
         $runtime_assert last is? hir.IfArm
         prefix.push(put(hir.Flow[node.loc output arms last.body] @state))
         return put(hir.Block[node.loc output prefix false] @state)
+    }
+    let shared_none=state.none_cell
+    if shared_none isnt? none and views.optional_payload(expected @state.type_nodes) isnt? none and types.is_primitive(types.node_at(state.type_nodes types.unfold(selected state.type_nodes)) 'none') {
+        return put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) shared_none] @state)
     }
     let prefix:array<addr>=[]
     let content=value
@@ -1782,7 +1820,13 @@ segmented_string_into = (data:addr length:addr node:hir.AST optional:bool @state
     let selected=prefix.pop
     let output=snapshot(selected @prefix @state)
     # The helper returns only an optional word, with no scratch array tree.
-    prefix.push(release_block(checked word(16 node @state) node @state))
+    let checked_block=release_block(checked word(16 node @state) node @state)
+    let shared_none=state.none_cell
+    if shared_none isnt? none {
+        let shared=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) shared_none] @state)
+        checked_block=conditional(intrinsic('__ne__' [checked shared] types.primitive('bool' @state.type_nodes) node @state) checked_block node @state)
+    }
+    prefix.push(checked_block)
     prefix.push(output)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
@@ -3094,6 +3138,17 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let main:string?=none
     let entry_literal:addr?=none
     let void_type=types.primitive('void' @state.type_nodes)
+    if state.allocator isnt? none {
+        # Packing or copying `none` into an optional yields this static cell
+        # instead of a fresh allocation; releases skip it by identity.
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let name=fresh('none_cell' @state)
+        globals.push(put(hir.Declare[block.loc void_type 'let' name word_type put(hir.Integer[block.loc word_type '0d' 0] @state)] @state))
+        let target=put(hir.ExpressedIdentifier[block.loc word_type name] @state)
+        let cell=intrinsic('__static_words__' [word(0 block @state) word(0 block @state)] word_type block @state)
+        startup.push(put(hir.Assign[block.loc void_type target '=' cell] @state))
+        state.none_cell=name
+    }
     loop id in block.items {
         state.source_index=source_by_item.get(id)
         state.source=if state.source_index is? none source else hir.source_at(state.source_index input.source_files)
@@ -4289,7 +4344,13 @@ release_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
         prefix.push(release_block(pointer word(object_layout(type node @state).size node @state) node @state))
     } else if cell_members(type @state) isnt? none {
         prefix.push(release_cell(pointer type node @state))
-        prefix.push(release_block(pointer word(16 node @state) node @state))
+        let block=release_block(pointer word(16 node @state) node @state)
+        let shared_none=state.none_cell
+        if shared_none isnt? none {
+            let shared=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) shared_none] @state)
+            block=conditional(intrinsic('__ne__' [pointer shared] types.primitive('bool' @state.type_nodes) node @state) block node @state)
+        }
+        prefix.push(block)
     }
     return sequence(prefix node @state)
 }

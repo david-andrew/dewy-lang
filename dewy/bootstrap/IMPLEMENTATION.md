@@ -93,6 +93,14 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- One immortal `none` cell per program (2026-09-15). Packing or copying
+  `none` into an optional yields a static two-word cell instead of a fresh
+  16-byte allocation; cell block releases skip that address by identity.
+  An addressed optional local (one exposed as a place) is written through
+  its own cell, so its declaration always materializes a private cell. The
+  self-build's frontend allocation traffic fell from 32.0 GB to 28.9 GB;
+  the self-built compiler passes the fixture bundle on both backends.
+
 - Native lowering borrows more and allocates less (2026-09-15, performance
   campaign). Scope borrows no longer depend on a function-wide "opaque"
   bit: a local or parameter is stable when it is never written, captured,
