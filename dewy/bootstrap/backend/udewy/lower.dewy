@@ -1603,6 +1603,7 @@ string_frame_view = (id:addr @prefix:array<addr> @state:State):>addr? => {
     # and single-item blocks; the storage read underneath is the same.
     loop true {
         if node is? hir.Suppress {id=node.item node=hir.node_at(state.input.nodes id) continue}
+        if node is? hir.Obligation {id=node.value node=hir.node_at(state.input.nodes id) continue}
         if node is? hir.Block and not node.scoped and node.items.length =? 1 {id=node.items[0] node=hir.node_at(state.input.nodes id) continue}
         if node is? hir.ValueCast|hir.RepresentationCast and owned_string(node.value_type state) and owned_string(hir.node_at(state.input.nodes node.expr).value_type state) {id=node.expr node=hir.node_at(state.input.nodes id) continue}
         break
@@ -3014,18 +3015,14 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
     let disposable=state.disposable_arguments.get(id set[])-borrowed
     let temporary:array<OwnedLocal>=[]
     let positional:array<addr>=[]
+    let views_allowed=string_free_type(signature.ret @state)
     loop argument in node.pos_args {
-        let value=snapshot((if argument in? borrowed expression(argument @state) else owned_value(argument @state)) @prefix @state)
+        let value=call_argument(argument borrowed disposable views_allowed @temporary @prefix @state)
         positional.push(value)
-        let source=hir.node_at(state.input.nodes argument)
-        if argument in? disposable and source isnt? hir.Place and releasable(source.value_type @state) {temporary.push(OwnedLocal[value source.value_type])}
     }
     let keywords:dict<string addr>=[]
     loop [name argument] in node.kw_args {
-        let value=snapshot((if argument in? borrowed expression(argument @state) else owned_value(argument @state)) @prefix @state)
-        keywords[name]=value
-        let source=hir.node_at(state.input.nodes argument)
-        if argument in? disposable and source isnt? hir.Place and releasable(source.value_type @state) {temporary.push(OwnedLocal[value source.value_type])}
+        keywords[name]=call_argument(argument borrowed disposable views_allowed @temporary @prefix @state)
     }
     let args:array<addr>=[]
     let index:addr=0
@@ -3069,6 +3066,67 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
         if value isnt? none {prefix.push(value)}
     }
     return put(hir.Block[node.loc result_type prefix false] @state)
+}
+# Borrowing looks through the wrappers contextual typing puts around an
+# argument: single-item blocks, proof obligations and string casts. A
+# borrowed argument lowers the storage read underneath those wrappers: a
+# block would otherwise yield an owned copy that nobody releases. The
+# casts keep the descriptor only between owned strings; a compact string
+# enum or a union cell would need a real conversion, so those copy.
+peel_borrowed = (id:addr @state:State):>addr? => {
+    let current=id
+    loop true {
+        let node=hir.node_at(state.input.nodes current)
+        if node is? hir.Suppress {current=node.item continue}
+        if node is? hir.Obligation {current=node.value continue}
+        if node is? hir.Block and not node.scoped and node.items.length =? 1 {current=node.items[0] continue}
+        if node is? hir.ValueCast|hir.RepresentationCast {
+            let inner=hir.node_at(state.input.nodes node.expr)
+            if not (owned_string(node.value_type state) and owned_string(inner.value_type state)) return none
+            current=node.expr continue
+        }
+        return current
+    }
+}
+# A borrowed argument passes the callee's read-only view; anything else is
+# an owned copy the caller reclaims after the call when the callee does not
+# keep it (a borrowable argument that needed a conversion is such a copy).
+# The effects summary does not treat a returned value as an escape, so a
+# frame view may only be passed when the callee's result cannot carry a
+# string (a returned slice of the view would outlive the frame slot).
+string_free_type = (id:addr @state:State depth:addr=0):>bool => {
+    if depth >? 6 return false
+    let plain=types.node_at(state.type_nodes types.unfold(types.strip_refinement(id state.type_nodes) state.type_nodes))
+    if string_type(id state) return false
+    if plain is? types.ArrayType return string_free_type(plain.element @state depth=depth+1)
+    if plain is? types.ObjectType {
+        loop field in plain.fields {if not string_free_type(field.value_type @state depth=depth+1) return false}
+        return true
+    }
+    if plain is? types.TypeOr {
+        loop member in plain.items {if not string_free_type(member @state depth=depth+1) return false}
+        return true
+    }
+    if plain is? types.FunctionType return false
+    return true
+}
+call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State):>addr => {
+    let peeled:addr?=if argument in? borrowed peel_borrowed(argument @state) else none
+    if peeled isnt? none return snapshot(expression(peeled @state) @prefix @state)
+    let source=hir.node_at(state.input.nodes argument)
+    # A one-grapheme or slice temporary of a stable string, passed to a
+    # callee that neither keeps nor exposes it, is read through the
+    # statement's frame descriptor: no allocation, no owner reference.
+    if views_allowed and argument in? disposable and owned_string(source.value_type state) {
+        let inner=peel_borrowed(argument @state)
+        if inner isnt? none and hir.node_at(state.input.nodes inner) is? hir.StringIndex|hir.StringSlice {
+            let view=string_frame_view(argument @prefix @state)
+            if view isnt? none return view
+        }
+    }
+    let value=snapshot(owned_value(argument @state) @prefix @state)
+    if (argument in? disposable or argument in? borrowed) and source isnt? hir.Place and releasable(source.value_type @state) {temporary.push(OwnedLocal[value source.value_type])}
+    return value
 }
 # Only the lifted code signature contains captures. Ordinary function values
 # retain the source callable ABI, so a capturing unit cannot masquerade as

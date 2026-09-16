@@ -93,6 +93,14 @@ the native fixed point is not grounds for retiring them yet.
 
 ## Current state
 
+- Borrowed arguments through wrappers (2026-09-16). Borrowing routes and
+  the argument plan look through proof obligations and string-preserving
+  casts; a borrowed call argument lowers the read underneath its block,
+  obligation and cast wrappers instead of the wrapper (a lowered block was
+  an owned copy that leaked); temporary string indexes/slices of stable
+  strings pass as frame descriptors to callees whose results cannot carry
+  a string. Tokenizer probe calls no longer retain the source slice.
+
 - Parallel assembly in the µDewy tool (2026-09-16). The x86-64 route
   assembles a large debug-free module as up to `UDEWY_JOBS` chunks
   concurrently and links the objects; function and data labels are global

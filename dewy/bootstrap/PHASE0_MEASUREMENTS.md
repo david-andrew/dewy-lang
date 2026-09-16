@@ -225,6 +225,28 @@ On the emitted compiler text alone: 6.1 s to 3.8 s. The remaining backend
 time is the tool's own parsing and encoding (about 2.1 s), one chunk's
 assembly (about 1.1 s) and `ld` (0.5 s).
 
+### Borrowed arguments through the checker's wrappers (2026-09-16)
+
+An instrumented build showed that the tokenizer's probe calls retained the
+source slice on every call even though the borrowing plan allowed the
+borrow: the checker wraps such arguments in a single-item block (and, for
+refined parameters, a proof obligation), the lowering evaluated the wrapper,
+and lowering a block always yields an owned copy that the borrowed path
+never released. Three changes: routes and the borrowing plan look through
+proof obligations and representation-preserving string casts; a borrowed
+argument now lowers the storage read underneath its wrappers
+(`peel_borrowed`), and a borrowable argument that still needs a conversion
+is released after the call; and a one-grapheme or slice temporary of a
+stable string is passed as the statement's frame descriptor when the callee
+neither keeps nor exposes it and its result type cannot carry a string.
+`probe_context` went from 23 retains to 2; parse time 2.85 s to 2.69 s; the
+leaked retains are gone. Wall stays within noise of 20.8 s.
+
+A follow-up experiment relaxed the rule that excludes functions with more
+than one place parameter from scope borrowing (distinct places never
+overlap, the checker rejects that at every call). It changed lowering
+allocation by 0.1 % and wall time not at all, so it was not kept.
+
 ## Reproduction and isolation
 
 `tools/measure_compiler.py SOURCE --output NEW_DIRECTORY` measures the hosted

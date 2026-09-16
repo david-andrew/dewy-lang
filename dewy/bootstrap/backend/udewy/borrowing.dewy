@@ -5,6 +5,7 @@ import p"captures.dewy" as captures
 import p"emit.dewy" as emit
 import p"callbacks.dewy" as callbacks
 import p"../../semantic/subtyping.dewy" as subtyping
+import p"../../semantic/type_queries.dewy" as views
 
 # Value copies remain the default. A direct callee may borrow a read-only
 # aggregate argument when no later argument or place can change its storage.
@@ -16,6 +17,8 @@ route = (id:addr nodes:array<hir.AST>):>Route? => {
     loop true {
         let node=hir.node_at(nodes current)
         if node is? hir.Block and not node.scoped and node.items.length =? 1 {current=node.items[0] continue}
+        # A proof obligation is transparent to storage: it lowers its value.
+        if node is? hir.Obligation {current=node.value continue}
         if node is? hir.MemberAccess {reverse.push(node.name) current=node.value continue}
         # Unknown indices may alias; only fields above the index distinguish
         # storage. Do not infer that two different index expressions differ.
@@ -24,6 +27,26 @@ route = (id:addr nodes:array<hir.AST>):>Route? => {
         let fields:array<string>=[]
         loop reverse.length >? 0 {fields.push(reverse.pop)}
         return Route[node.binding_id fields]
+    }
+}
+# Contextual typing wraps an argument in representation-preserving casts
+# (a literal or refined string passed as `string`) and single-item blocks.
+# The storage read underneath is the same route, so borrowing looks through
+# them; the lowering separately confirms the cast keeps the representation.
+peel_argument = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>addr => {
+    let current=id
+    loop true {
+        let node=hir.node_at(nodes current)
+        if node is? hir.Suppress {current=node.item continue}
+        if node is? hir.Obligation {current=node.value continue}
+        if node is? hir.Block and not node.scoped and node.items.length =? 1 {current=node.items[0] continue}
+        if node is? hir.ValueCast|hir.RepresentationCast {
+            let inner=hir.node_at(nodes node.expr)
+            let outer_plain=types.unfold(types.strip_refinement(node.value_type type_nodes) type_nodes)
+            let inner_plain=types.unfold(types.strip_refinement(inner.value_type type_nodes) type_nodes)
+            if views.string_valued(outer_plain type_nodes) and views.string_valued(inner_plain type_nodes) {current=node.expr continue}
+        }
+        return current
     }
 }
 overlap = (a:Route b:Route):>bool => {
@@ -453,7 +476,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             let retained:set<addr>=set[]
             let position:addr=0
             loop pair in pairs {
-                let source=route(pair.argument nodes)
+                let source=route(peel_argument(pair.argument nodes type_nodes) nodes)
                 let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
                 if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.add(pair.argument)}
                 else {retained.add(pair.argument)}
