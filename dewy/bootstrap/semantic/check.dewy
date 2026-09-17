@@ -1133,6 +1133,24 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             }
             let target_type=if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types)
             let target:types.Type = types.node_at(session.types target_type)
+            # `[x... ...]`: the first spread's source decides between a record
+            # (an object source) and an array (an array or set source).
+            let first_spread:addr? = none
+            loop item in node.inner {
+                let operand=spread_operand(item env session)
+                if operand isnt? none { first_spread=operand break }
+            }
+            if first_spread isnt? none {
+                let source=spread_source(first_spread env @session)
+                if source is? Error return source
+                let source_type=node_at(source session).value_type
+                let source_shape=types.node_at(session.types types.unfold(types.strip_refinement(source_type session.types) session.types))
+                if source_shape is? types.ObjectType and views.container_entry_types(source_type session.types) is? none return record_literal(id node env @session expected=expected)
+                let wanted_element:addr? = if target is? types.ArrayType target.element else none
+                let value=spread_array(id node wanted_element env @session)
+                if value is? Error return value
+                return if expected is? none value else against(value expected id env @session)
+            }
             if target is? types.ObjectType and expected isnt? none {
                 let constructor=hir.TypeValue[node.loc types.primitive('type' @session.types) types.strip_refinement(expected session.types) display.type_to_dewy(expected session.types)]
                 return construct(constructor id id env @session expected=expected)
@@ -2833,6 +2851,7 @@ string_method = (receiver:addr name:string id:addr env:Environment @session:cont
 # Record fields enter a fresh lexical scope in source order, so later values
 # can refer to earlier fields. These bindings identify the already evaluated
 # field values; they do not cause the initializer to run again.
+RecordEntry:type = const [name:string syntax:addr read:addr? read_type:addr? mutable:bool loc:Span]
 record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.control env.return_collector]
     let selected = if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types)
@@ -2869,9 +2888,67 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
     if expected isnt? none and wanted isnt? types.ObjectType return problem(id 'type mismatch' 'the expected type must select one record alternative' env session)
     let fields:array<hir.ObjectField> = []
     let layout:array<types.ObjectField> = []
+    # Spread rows (`obj...`) contribute their source's fields as member reads.
+    # Names repeat in the splat sense: the later entry wins, at the position
+    # of the first; two written fields with one name are a mistake.
+    let entries:array<RecordEntry> = []
     loop row_id in node.inner {
+        let row_loc=contexts.node_at(row_id env.lexical session).loc
+        let operand=spread_operand(row_id env session)
+        if operand isnt? none {
+            let source=spread_source(operand env @session)
+            if source is? Error return source
+            let source_type=node_at(source session).value_type
+            let shape=types.node_at(session.types types.unfold(types.strip_refinement(source_type session.types) session.types))
+            if shape isnt? types.ObjectType or views.container_entry_types(source_type session.types) isnt? none return problem(row_id 'object spread requires an object' display.type_to_dewy(source_type session.types) env session)
+            loop field in shape.fields {
+                let read=put(hir.MemberAccess[row_loc field.value_type source field.name field.mutable and not shape.immutable] @session)
+                entries.push(RecordEntry[field.name row_id read field.value_type field.mutable row_loc])
+            }
+            continue
+        }
         let row = contexts.node_at(row_id env.lexical session)
         if row isnt? parser.BinOp or not source_views.is_operator(row.op '=' env.lexical session) return problem(row_id 'mixed record and array literal' 'each record field needs a named value' env session)
+        let written_target = contexts.node_at(row.left env.lexical session)
+        let written_name_id = if written_target is? parser.BinOp and source_views.is_operator(written_target.op ':' env.lexical session) written_target.left else row.left
+        let written_name = source_views.identifier(written_name_id env.lexical session)
+        if written_name is? none return problem(row_id 'record field needs a name' 'use `name=value` or `name:Type=value`' env session)
+        entries.push(RecordEntry[written_name row_id none none true row_loc])
+    }
+    let merged:array<RecordEntry> = []
+    loop entry in entries {
+        let at:addr<i => i <=? merged.length> = 0
+        loop at <? merged.length and merged[at].name not=? entry.name { at += 1 }
+        if at <? merged.length {
+            if entry.read is? none and merged[at].read is? none return problem(entry.syntax 'duplicate record field' entry.name env session)
+            merged[at]=entry
+        } else { merged.push(entry) }
+    }
+    loop entry in merged {
+        let row_id = entry.syntax
+        let spread_read = entry.read
+        if spread_read isnt? none {
+            let read_type = entry.read_type
+            $runtime_assert read_type isnt? none
+            let name = entry.name
+            let value:addr = spread_read
+            let type:addr = read_type
+            let field:types.ObjectField? = if wanted is? types.ObjectType types.object_field(wanted name) else none
+            if field isnt? none {
+                let converted = against(value field.value_type row_id inner @session)
+                if converted is? Error return converted
+                value = converted
+                type = field.value_type
+            }
+            let binding = bind_field(name type entry.loc inner @session)
+            let mutable = if field is? none entry.mutable else field.mutable
+            if wanted is? types.ObjectType and wanted.immutable { mutable = false }
+            fields.push(hir.ObjectField[entry.loc name value binding mutable])
+            if field isnt? none {layout.push(field)} else {layout.push(types.ObjectField[name type])}
+            continue
+        }
+        let row = contexts.node_at(row_id env.lexical session)
+        $runtime_assert row is? parser.BinOp
         let target = contexts.node_at(row.left env.lexical session)
         let name_id = row.left
         let annotation:addr? = none
@@ -3850,6 +3927,82 @@ container_array = (items:array<addr> wanted:addr? id:addr env:Environment @sessi
     }
     let loc = contexts.node_at(id env.lexical session).loc
     return put(hir.ArrayLiteral[loc types.array_type(element converted.length @session.types) converted] @session)
+}
+# The operand of a spread item `x...`, else none.
+spread_operand = (row_id:addr env:Environment session:contexts.Session):>addr? => {
+    let row=contexts.node_at(row_id env.lexical session)
+    if row isnt? parser.BinOp or not source_views.is_operator(row.op 'EllipsisJuxtapose' env.lexical session) return none
+    let marker=source_views.identifier(row.right env.lexical session)
+    if marker is? none or marker not=? '...' return none
+    return row.left
+}
+# A spread operand is a named place, so reading it several times is one
+# evaluation, as in the hosted checker.
+spread_source = (operand:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let checked=expression(operand env @session)
+    if checked is? Error return checked
+    let placed=node_at(checked session)
+    let value:addr = if placed is? hir.Place placed.target else checked
+    let node=node_at(value session)
+    if node isnt? hir.ExpressedIdentifier|hir.MemberAccess return pending(operand 'spreading a computed value (bind it to a name first)' env session)
+    if types.node_at(session.types types.strip_refinement(node.value_type session.types)) is? types.TypeOr return problem(operand 'cannot spread a union-typed value' 'narrow it with `is?` first' env session)
+    return value
+}
+# `[xs... 0 ys...]`: the elements of the spread arrays (a set spreads its
+# members) in order with the written elements. The length is exact when
+# every spread operand's is; a spread fixes the element type.
+spread_array = (id:addr node:parser.Block wanted:addr? env:Environment @session:contexts.Session):>addr|Error => {
+    let loc=contexts.node_at(id env.lexical session).loc
+    let items:array<addr>=[]
+    let spreads:array<bool>=[]
+    let plain:array<addr>=[]
+    let length:addr?=0
+    let first_element:addr?=none
+    loop item in node.inner {
+        let operand=spread_operand(item env session)
+        if operand is? none {
+            let value=expression(item env @session expected=wanted)
+            if value is? Error return value
+            items.push(value) spreads.push(false) plain.push(value)
+            if length isnt? none { length=length+1 }
+            continue
+        }
+        let source=spread_source(operand env @session)
+        if source is? Error return source
+        let source_type=node_at(source session).value_type
+        let entry=views.container_entry_types(source_type session.types)
+        if entry isnt? none and entry.value is? none {
+            source=put(hir.DictView[loc types.array_type(entry.key none @session.types) source 'values'] @session)
+            source_type=node_at(source session).value_type
+        }
+        let shape=types.node_at(session.types types.unfold(types.strip_refinement(source_type session.types) session.types))
+        if shape isnt? types.ArrayType return problem(item 'array spread requires an array or set' 'dictionaries spread into dictionary literals; objects into object literals' env session)
+        if first_element is? none { first_element=shape.element }
+        let extra=shape.length
+        if extra is? none { length=none }
+        else if length isnt? none { length=length+extra }
+        items.push(put(hir.Spread[loc source_type source] @session)) spreads.push(true)
+    }
+    let element:addr?=wanted
+    if element is? none {
+        $runtime_assert first_element isnt? none
+        element=first_element
+        let literal=types.node_at(session.types element)
+        if literal is? types.IntegerLiteralType|types.StringLiteralType and plain.length >? 0 {
+            let common=capture_element(plain id env @session)
+            if common is? Error return common
+            element=common
+        }
+    }
+    $runtime_assert element isnt? none
+    let checked:array<addr>=[]
+    loop i in 0.. and i <? items.length and i <? spreads.length {
+        if spreads[i] { checked.push(items[i]) continue }
+        let value=against(items[i] element id env @session)
+        if value is? Error return value
+        checked.push(value)
+    }
+    return put(hir.ArrayLiteral[loc types.array_type(element length @session.types) checked] @session)
 }
 # Value identity alone is not permission to discard evaluation: a call can
 # have a singleton result type and still change state. Only literal payloads

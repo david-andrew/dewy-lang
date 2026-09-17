@@ -31,7 +31,7 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-passed at the start of the day and 195/211 by its end (the fixes marked
+passed at the start of the day and 196/211 by its end (the fixes marked
 "the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
@@ -254,7 +254,7 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [type_facts.dewy](../tests/type_facts.dewy) | @tok is? 0 is required when the result is true |
 | [string_join_decode.dewy](../tests/string_join_decode.dewy) | No implemented token starts here (passes since 2026-09-16) |
 | [error_values.dewy](../tests/error_values.dewy) | Postfix expression (passes since 2026-09-16) |
-| [spread.dewy](../tests/spread.dewy) | each record field needs a named value |
+| [spread.dewy](../tests/spread.dewy) | each record field needs a named value (passes since 2026-09-16) |
 | [refined_results_fields.dewy](../tests/refined_results_fields.dewy) | 1/3 does not fit [numerator:int64 denominator:int64<i => i >? 0>] |
 | [loop_temporaries.dewy](../tests/loop_temporaries.dewy) | 0/1 does not fit [numerator:int64 denominator:int64<i => i >? 0>] |
 | [array_iteration.dewy](../tests/array_iteration.dewy) | its range is [0, ∞]; annotate a fixed width, prove its range, or use bigint (passes since 2026-09-16: an open counter and-joined with a counted leaf is an `int64`) |

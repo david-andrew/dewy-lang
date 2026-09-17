@@ -837,6 +837,9 @@ array_literal = (node:hir.ArrayLiteral @state:State):>addr => {
     $runtime_assert type isnt? none
     let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
+    let spread=false
+    loop item in node.items { if hir.node_at(state.input.nodes item) is? hir.Spread { spread=true } }
+    if spread return spread_array_literal(node type.element layout.size @state)
     let memory=array_memory(word(node.items.length node @state) layout.size node @state)
     let offset:addr=0
     loop item in node.items {
@@ -845,6 +848,50 @@ array_literal = (node:hir.ArrayLiteral @state:State):>addr => {
     }
     memory.prefix.push(memory.descriptor)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) memory.prefix false] @state)
+}
+# `[xs... 0 ys...]`: sum the lengths, allocate once, then copy element by
+# element behind a running cursor. Spread elements are copied as owned
+# values; written elements are stored as in a plain literal.
+spread_array_literal = (node:hir.ArrayLiteral element:addr stride:addr @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let empty=types.primitive('void' @state.type_nodes)
+    let bool_type=types.primitive('bool' @state.type_nodes)
+    let sources:array<addr?>=[]
+    let plain_count:addr=0
+    loop item in node.items { if hir.node_at(state.input.nodes item) isnt? hir.Spread { plain_count+=1 } }
+    let total=snapshot(word(plain_count node @state) @prefix @state)
+    loop item in node.items {
+        let current=hir.node_at(state.input.nodes item)
+        if current isnt? hir.Spread { sources.push(none) continue }
+        let source=snapshot(expression(current.value @state) @prefix @state)
+        sources.push(source)
+        prefix.push(put(hir.Assign[node.loc empty total '=' word_op('__add__' total read_word(source layouts.array_descriptor.length node @state) node @state)] @state))
+    }
+    let memory=array_memory(total stride node @state)
+    loop statement in memory.prefix { prefix.push(statement) }
+    let cursor=snapshot(word(0 node @state) @prefix @state)
+    let stride_word=word(stride node @state)
+    loop i in 0.. and i <? node.items.length and i <? sources.length {
+        let item=node.items[i]
+        let source=sources[i]
+        let destination=word_op('__add__' memory.data word_op('__mul__' cursor stride_word node @state) node @state)
+        let advance=put(hir.Assign[node.loc empty cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
+        if source is? none {
+            prefix.push(array_store(owned_value(item @state) destination element node @state))
+            prefix.push(advance)
+            continue
+        }
+        let index=snapshot(word(0 node @state) @prefix @state)
+        let count=read_word(source layouts.array_descriptor.length node @state)
+        let running=intrinsic('__lt__' [index count] bool_type node @state)
+        let origin=word_op('__add__' read_word(source 0 node @state) word_op('__mul__' index stride_word node @state) node @state)
+        let value=copy_value(array_load(origin element node @state) element node @state)
+        let step=put(hir.Assign[node.loc empty index '=' word_op('__add__' index word(1 node @state) node @state)] @state)
+        let body=sequence([array_store(value destination element node @state) step advance] node @state)
+        prefix.push(put(hir.Flow[node.loc empty [put(hir.LoopArm[node.loc empty running body] @state)] none] @state))
+    }
+    prefix.push(memory.descriptor)
+    return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 array_index = (node:hir.Index @state:State writable:bool=false):>addr => {
     let prefix:array<addr>=[]

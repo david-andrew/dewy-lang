@@ -145,6 +145,16 @@ the native fixed point is not grounds for retiring them yet.
   values`) ends where the formula stops: its counter is an `int64` with
   that last value and count (`array_iteration`; covered by
   `native_runtime_range_ends`).
+- Spreading (2026-09-16). `[obj... c=3]` spreads an object's fields into a
+  record literal as member reads of the (named) source; names repeat in the
+  splat sense, the later entry winning at the position of the first, while
+  two written fields with one name are a mistake. `[xs... 0 ys...]` spreads
+  arrays and sets (their values view) into an array literal whose element
+  type the first spread fixes and whose length is exact when every
+  operand's is. A literal of spreads alone is a record when the first
+  source is an object. Lowering sums the lengths, allocates once and copies
+  behind a running cursor, spread elements as owned copies (`spread`;
+  fixture `native_spread`, pair check 53).
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &
