@@ -214,6 +214,14 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
             return against(converted expected id env @session)
         }
     }
+    if target is? types.ObjectType and numeric_values.is_family(expected 'Fixed' env.lexical session) and not numeric_values.is_family(node.value_type 'Fixed' env.lexical session) {
+        let source=types.node_at(session.types types.strip_refinement(node.value_type session.types))
+        if source is? types.IntegerLiteralType|types.RationalLiteralType or numeric_values.is_family(node.value_type 'Rational' env.lexical session) or views.integer_valued(node.value_type session.types) {
+            let converted=to_fixed(value id env @session)
+            if converted is? Error return converted
+            return against(converted expected id env @session)
+        }
+    }
     let materialized=union_bigint_materialization(value expected id env @session)
     if materialized is? Error return materialized
     if materialized isnt? none return materialized
@@ -613,6 +621,88 @@ pow_operation = (arguments:array<addr> id:addr env:Environment @session:contexts
     if integer is? Error return integer
     return library_call('_int_pow' [integer exponent64] id env @session)
 }
+# A compile-time number as a fixed value: the raw Q32.32 word, rounded to
+# nearest, as a `Fixed` record literal (the constant raw is then a fact).
+fixed_constant = (top:bigint bottom:bigint id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let family=numeric_values.family('Fixed' env.lexical session)
+    if family is? none return problem(id 'fixed-point values need the numeric prelude' 'Fixed' env session)
+    let divisor:bigint=2*bottom
+    if divisor <=? 0 return problem(id 'value is outside the fixed-point range' 'a fixed constant needs a positive denominator' env session)
+    $runtime_assert divisor not=? 0
+    let numerator:bigint=if top <? 0 (-top) else top
+    let magnitude:bigint=(2*numerator*4294967296 + bottom) // divisor
+    let raw:bigint=if top <? 0 (-magnitude) else magnitude
+    if raw <? -9223372036854775808 or raw >? 9223372036854775807 return problem(id 'value is outside the fixed-point range' 'this constant does not fit Q32.32' env session)
+    let loc=contexts.node_at(id env.lexical session).loc
+    let word=put(hir.Integer[loc types.integer_literal(raw @session.types) '0d' raw] @session)
+    return put(hir.ObjectLiteral[loc numeric_values.object_member(family session.types) [hir.ObjectField[loc 'raw' word]]] @session)
+}
+# A value as its number (the dimension dropped) for a prelude helper call.
+strip_dimension = (value:addr @session:contexts.Session):>addr => {
+    let node=node_at(value session)
+    let type=types.node_at(session.types node.value_type)
+    if type isnt? types.QuantityType return value
+    return put(hir.ValueCast[node.loc type.number value] @session)
+}
+# An operand as a runtime `Fixed`: constants and rationals convert, as in
+# the hosted checker's `_to_fixed`.
+to_fixed = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let number=numeric_constants.number_type(value session)
+    if numeric_values.is_family(number 'Fixed' env.lexical session) return strip_dimension(value @session)
+    let constant=numeric_constants.value(value session)
+    if constant isnt? none return fixed_constant(constant.numerator constant.denominator id env @session)
+    if numeric_values.is_family(number 'Rational' env.lexical session) return library_call('_fixed_from_rational' [strip_dimension(value @session)] id env @session)
+    if numeric_values.is_family(number 'BigRational' env.lexical session) return problem(id 'a runtime `rational` in fixed-point arithmetic' 'its big-integer parts may not fit the fixed representation; convert it first with `let f:fixed = q`' env session)
+    if not views.integer_valued(number session.types) return problem(id 'no fixed-point conversion for this operand' display.type_to_dewy(node_at(value session).value_type session.types) env session)
+    let integer=against(strip_dimension(value @session) types.primitive('int64' @session.types) id env @session)
+    if integer is? Error return integer
+    return library_call('_fixed_from_int' [integer] id env @session)
+}
+const fixed_binary:dict<string string>=[
+    '__add__'->'_fixed_add' '__sub__'->'_fixed_sub' '__mul__'->'_fixed_mul' '__truediv__'->'_fixed_div'
+    '__eq__'->'_fixed_eq' '__ne__'->'_fixed_ne' '__lt__'->'_fixed_lt' '__le__'->'_fixed_le' '__gt__'->'_fixed_gt' '__ge__'->'_fixed_ge'
+]
+# Operations with a fixed operand: fixed absorbs integers and rationals, and
+# a dimensioned result keeps its dimension, as in the hosted checker.
+fixed_operation = (name:string arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
+    let fixed=false
+    loop argument in arguments {
+        if numeric_values.is_family(numeric_constants.number_type(argument session) 'Fixed' env.lexical session) {fixed=true}
+    }
+    if not fixed return none
+    let dimension=numeric_constants.result_dimension(name arguments @session)
+    if dimension is? string return problem(id dimension 'only quantities of the same dimension add, subtract, or compare' env session)
+    let family=numeric_values.family('Fixed' env.lexical session)
+    if family is? none return problem(id 'fixed-point values need the numeric prelude' 'Fixed' env session)
+    let loc=contexts.node_at(id env.lexical session).loc
+    let dimensioned=dimension isnt? none and types.dimension_at(dimension session.types).powers.length >? 0
+    if name =? '__unary_sub__' and arguments.length =? 1 {
+        let operand=to_fixed(arguments[0] id env @session)
+        if operand is? Error return operand
+        let negated=library_call('_fixed_neg' [operand] id env @session)
+        if negated is? Error return negated
+        if not dimensioned return negated
+        $runtime_assert dimension isnt? none
+        return put(hir.ValueCast[loc types.quantity_type(node_at(negated session).value_type dimension @session.types) negated] @session)
+    }
+    let helper=fixed_binary.get(name)
+    if helper is? none or arguments.length not=? 2 return problem(id 'operator is not defined for fixed-point values' 'fixed supports `+ - * /`, negation, and comparisons' env session)
+    if name =? '__truediv__' {
+        let constant=numeric_constants.value(arguments[1] session)
+        if constant isnt? none and constant.numerator =? 0 return problem(id 'division by zero' 'the divisor is the constant `0`' env session)
+    }
+    let operands:array<addr>=[]
+    loop argument in arguments {
+        let converted=to_fixed(argument id env @session)
+        if converted is? Error return converted
+        operands.push(converted)
+    }
+    let call=library_call(helper operands id env @session)
+    if call is? Error return call
+    if name in? ['__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__'] or not dimensioned return call
+    $runtime_assert dimension isnt? none
+    return put(hir.ValueCast[loc types.quantity_type(node_at(call session).value_type dimension @session.types) call] @session)
+}
 rational_operation = (name:string arguments:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error|none => {
     let word=false
     let big=false
@@ -876,6 +966,9 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
                 if powered is? Error return powered
                 if powered isnt? none return if expected is? none powered else against(powered expected id env @session)
             }
+            let fixed=fixed_operation(func.name positional id env @session)
+            if fixed is? Error return fixed
+            if fixed isnt? none return if expected is? none fixed else against(fixed expected id env @session)
             let rational=rational_operation(func.name positional id env @session)
             if rational is? Error return rational
             if rational isnt? none return if expected is? none rational else against(rational expected id env @session)
@@ -1411,6 +1504,8 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             # result representation depends on the numeric operands.
             if operator =? '__truediv__' and declarations.lookup(operator env.lexical session) is? none {
                 let value=folded_number(operator [left right] id env @session)
+                if value is? Error return value
+                if value is? none {value=fixed_operation(operator [left right] id env @session)}
                 if value is? Error return value
                 if value is? none {value=rational_operation(operator [left right] id env @session)}
                 if value is? Error return value
@@ -4377,6 +4472,9 @@ folded_number = (name:string arguments:array<addr> id:addr env:Environment @sess
             result_type=types.quantity_type(type dimension @session.types)
         }
         return put(hir.RationalConstant[loc result_type normalized.numerator normalized.denominator] @session)
+    }
+    loop argument in arguments {
+        if numeric_values.is_family(numeric_constants.number_type(argument session) 'Fixed' env.lexical session) return none
     }
     if dimension isnt? none return pending(id 'runtime quantity arithmetic materialization' env session)
     return none

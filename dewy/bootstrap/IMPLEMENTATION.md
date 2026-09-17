@@ -178,8 +178,18 @@ the native fixed point is not grounds for retiring them yet.
   prefers the exact rational overload when both apply, as the hosted
   checker does; the checking boundary materializes the literal into the
   rational record and keeps the dimension (`cos(45°)` selects
-  `_cos_rational`). `trig` then stops at runtime quantity arithmetic:
-  the native checker has no fixed-point (`fixed`) arithmetic yet.
+  `_cos_rational`).
+- Fixed-point arithmetic (2026-09-17). Operations with a `fixed` operand
+  route to the prelude's `_fixed_*` helpers as in the hosted checker:
+  fixed absorbs integers and rationals (`to_fixed`: a compile-time number
+  becomes a `Fixed` record literal with its rounded Q32.32 raw word, a
+  rational converts through `_fixed_from_rational`, an integer through
+  `_fixed_from_int`), comparisons yield `bool`, and a dimensioned result
+  keeps its dimension; exact division takes the same route before the
+  rational one. A number at a `fixed` boundary converts the same way. The
+  family test also recognizes a helper's structural result type
+  (`numeric_values.is_family` unfolds both sides). `trig` passes; fixture
+  `native_fixed_point` (pair check 56).
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &

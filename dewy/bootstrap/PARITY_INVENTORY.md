@@ -31,7 +31,7 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-passed at the start of the day and 197/211 by its end, then 199/211 on 2026-09-17 (the fixes marked
+passed at the start of the day and 197/211 by its end, then 200/211 on 2026-09-17 (the fixes marked
 "the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
@@ -217,7 +217,7 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [rationals.dewy](../tests/rationals.dewy) | runtime rational materialization |
 | [powers.dewy](../tests/powers.dewy) | no declaration of this name is in scope |
 | [units_algebra.dewy](../tests/units_algebra.dewy) | no declaration of this name is in scope |
-| [trig.dewy](../tests/trig.dewy) | no declaration of this name is in scope (since 2026-09-17: `cos(45°)` dispatches; stops at fixed-point arithmetic, `20N * 10m * cos(45°)`) |
+| [trig.dewy](../tests/trig.dewy) | no declaration of this name is in scope (passes since 2026-09-17: quantity dispatch and fixed-point arithmetic) |
 | [refinements.dewy](../tests/refinements.dewy) | BinOp expression (passes since 2026-09-16) |
 | [abstract_int.dewy](../tests/abstract_int.dewy) | no overload takes (int64, uint8) |
 | [bigint.dewy](../tests/bigint.dewy) | no declaration of this name is in scope |

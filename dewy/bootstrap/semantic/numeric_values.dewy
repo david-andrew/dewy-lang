@@ -36,7 +36,10 @@ is_family = (type:addr name:string context:contexts.Context session:contexts.Ses
     let declared=family(name context session)
     if declared is? none return false
     let plain=types.strip_refinement(type session.types)
-    return types.same_type(plain declared session.types) or types.same_type(plain object_member(declared session.types) session.types)
+    if types.same_type(plain declared session.types) or types.same_type(plain object_member(declared session.types) session.types) return true
+    # A prelude helper's result names the family's record structurally.
+    let unfolded=types.unfold(plain session.types)
+    return types.same_type(unfolded types.unfold(declared session.types) session.types) or types.same_type(unfolded types.unfold(object_member(declared session.types) session.types) session.types)
 }
 nonzero_form = (type:addr name:string context:contexts.Context session:contexts.Session):>bool => {
     let declared=family(name context session)
