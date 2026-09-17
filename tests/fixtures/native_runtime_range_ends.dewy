@@ -10,6 +10,11 @@ main=():>int64=>{
     total += count_to(3)                           # 3 + 4 = 7
     let words:array<string> = ['a' 'b' 'c' 'd' 'e']
     loop i in [0..words.length) { total += 3 }     # 22
-    loop i in [1..words.length) { total += 5 }     # 42
+    loop i in [1..words.length) { total += 2 }     # 30
+    # An open counter and-joined with a fixed-length leaf ends with it and
+    # is a word-sized integer.
+    let index_sum:int64 = 0
+    loop i in 0.. and w in words { index_sum += i }
+    if index_sum =? 10 { total += 12 }               # 42
     return total
 }

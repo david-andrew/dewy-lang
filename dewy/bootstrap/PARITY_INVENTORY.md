@@ -31,7 +31,7 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-passed at the start of the day and 193/211 by its end (the fixes marked
+passed at the start of the day and 195/211 by its end (the fixes marked
 "the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
@@ -43,7 +43,7 @@ earlier list now passes. Grouped by first obstacle:
 | --- | --- | --- |
 | 7 | non-conjunctive iterator formula (fixed the same day; all seven pass) | multi_iterator_or, multi_iterator_formula, multi_iterator_exhausted_truth, multi_iterator_labeled_exits, multi_iterator_operators, range_stepped_labeled_exits, range_stepped_multi_optional |
 | 5 | undefined name `__pow__` (fixed the same day: `powers`, `bigint`, `bigint_division` and, after an emitter fix for indirect calls under `transmute`, `units_algebra` pass; `trig` then stops at `cos` of a degree quantity: no overload takes the angle) | powers, units_algebra, trig, bigint, bigint_division |
-| 4 | parser: BinOp expression (`refinements` and `tokenizer_gaps` pass the same day: refined bare-array alias arguments, alias conditions, pipe operators, runtime range ends `[0..n)` iterated under a guard, nested loop unpack targets; `keyword_default_calls` then stops at an object method closing over a sibling field, the `object_methods` lowering gap; `nat_types` at a `->` pair in a loop comprehension) | refinements, nat_types, tokenizer_gaps, keyword_default_calls |
+| 4 | parser: BinOp expression (`refinements` and `tokenizer_gaps` pass the same day: refined bare-array alias arguments, alias conditions, pipe operators, runtime range ends `[0..n)` iterated under a guard, nested loop unpack targets; `keyword_default_calls` then stops at an object method closing over a sibling field, the `object_methods` lowering gap; `nat_types`, after dictionary captures landed, at a `nat64` sum inside a loop, a bounds proof) | refinements, nat_types, tokenizer_gaps, keyword_default_calls |
 | 4 | these type arguments | place_slots, type_values, recursive_mints, length_terms |
 | 2 | string slice is not proven in bounds | conditional_value_facts, length_preserving_calls |
 | 2 | parser: Postfix expression (fixed the same day: pipe operators `\|>`/`<\|`; both pass) | precedence, error_values |
@@ -230,7 +230,7 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [place_slots.dewy](../tests/place_slots.dewy) | these type arguments |
 | [conditional_value_facts.dewy](../tests/conditional_value_facts.dewy) | effective endpoint intervals are 0..0 and -1..281474976710654 |
 | [length_preserving_calls.dewy](../tests/length_preserving_calls.dewy) | effective endpoint intervals are 0..0 and -1..281474976710654 |
-| [nat_types.dewy](../tests/nat_types.dewy) | BinOp expression (`w -> w.length` pair in a loop comprehension) |
+| [nat_types.dewy](../tests/nat_types.dewy) | BinOp expression (dictionary captures pass since 2026-09-16; now `total += x` over `array<nat64>` cannot prove `>=? 0`) |
 | [addr_types.dewy](../tests/addr_types.dewy) | no declaration of this name is in scope |
 | [printing.dewy](../tests/printing.dewy) | structural and union string conversion |
 | [union_containers.dewy](../tests/union_containers.dewy) | structural string interpolation |
@@ -257,7 +257,7 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [spread.dewy](../tests/spread.dewy) | each record field needs a named value |
 | [refined_results_fields.dewy](../tests/refined_results_fields.dewy) | 1/3 does not fit [numerator:int64 denominator:int64<i => i >? 0>] |
 | [loop_temporaries.dewy](../tests/loop_temporaries.dewy) | 0/1 does not fit [numerator:int64 denominator:int64<i => i >? 0>] |
-| [array_iteration.dewy](../tests/array_iteration.dewy) | its range is [0, ∞]; annotate a fixed width, prove its range, or use bigint |
+| [array_iteration.dewy](../tests/array_iteration.dewy) | its range is [0, ∞]; annotate a fixed width, prove its range, or use bigint (passes since 2026-09-16: an open counter and-joined with a counted leaf is an `int64`) |
 | [range_values.dewy](../tests/range_values.dewy) | range |
 | [iterator_labeled_exits.dewy](../tests/iterator_labeled_exits.dewy) | Metatag value |
 | [multi_iterator_or.dewy](../tests/multi_iterator_or.dewy) | non-conjunctive iterator formula |

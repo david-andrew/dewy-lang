@@ -133,6 +133,18 @@ the native fixed point is not grounds for retiring them yet.
   `native_pipe_operators`, `native_keyword_only`,
   `native_runtime_range_ends`, `native_fused_quote`,
   `native_nested_loop_targets` (pair checks 47-51).
+- Dictionary captures (2026-09-16). `[loop w in words w -> w.length]`
+  builds a dictionary: while a capture body is checked (`capture_pairs`
+  on the check state), `k -> v` at a value position is the pair literal
+  `[__dewy_key=k __dewy_value=v]`, as the hosted rewrite spells it; the
+  capture declares a dictionary of the joined key and value types (or the
+  annotated ones) and stores each pair. Fixture `native_dict_captures`
+  (pair check 52). `nat_types` then stops at a `nat64` sum inside a loop
+  (`total += x` over `array<nat64>`), a bounds proof. An open range leaf
+  and-joined with a statically counted leaf (`loop i in 0.. and v in
+  values`) ends where the formula stops: its counter is an `int64` with
+  that last value and count (`array_iteration`; covered by
+  `native_runtime_range_ends`).
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &

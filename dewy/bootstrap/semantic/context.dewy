@@ -66,6 +66,9 @@ CheckState:type = [
     pending_aliases:dict<addr PendingAlias>=[]
     resolving_aliases:set<addr>=set[]
     named_refs:dict<addr addr>=[]
+    # Depth of loop-capture bodies being checked: `k -> v` at a value
+    # position there is a pair, not an unsupported operator.
+    capture_pairs:addr=0
 ]
 # Types and syntax references are interned append-only. HIR also appends,
 # except for the few checking rewrites recorded below. A speculative parser
@@ -110,6 +113,7 @@ checkpoint = (session:Session):>Checkpoint => {
         pending_aliases=session.pending_aliases
         resolving_aliases=session.resolving_aliases
         named_refs=session.named_refs
+        capture_pairs=session.capture_pairs
     ]
     return Checkpoint[state session.syntax_refs.length session.types.entries.length session.hir.length session.hir_edits.length]
 }
@@ -163,6 +167,7 @@ restore = (checkpoint:Checkpoint @session:Session):>void => {
     session.pending_aliases=checkpoint.state.pending_aliases
     session.resolving_aliases=checkpoint.state.resolving_aliases
     session.named_refs=checkpoint.state.named_refs
+    session.capture_pairs=checkpoint.state.capture_pairs
 }
 
 # Branch environments live only while checking their enclosing flow/body.

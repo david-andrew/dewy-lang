@@ -1,0 +1,11 @@
+# `[loop ... k -> v]` captures pairs into a dictionary.
+main=():>int64=>{
+    let total:int64 = 0
+    let words:array<string> = ['a' 'bb' 'ccc']
+    let lengths = [loop w in words w -> w.length]
+    if lengths.length =? 3 { total += 10 }
+    if 'bb' in? lengths and lengths['bb'] =? 2 { total += 12 }
+    let squares:dict<int64 int64> = [loop i in [1..4) i -> i * i]
+    if 3 in? squares and squares[3] =? 9 and squares.length =? 3 { total += 20 }
+    return total
+}

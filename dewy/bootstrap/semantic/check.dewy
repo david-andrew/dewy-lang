@@ -1217,6 +1217,23 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
         }
         if contexts.node_at(node.op env.lexical session) is? post.CombinedAssignment return compound_assignment(id node env @session)
         if op =? '=>' return function_literal(id node env @session expected_signature=expected)
+        if op =? '->' and session.capture_pairs >? 0 {
+            # `k -> v` at a loop-capture value position is a pair, checked
+            # as the object literal `[__dewy_key=k __dewy_value=v]` as in the
+            # hosted rewrite; the capture stores it into a dictionary.
+            let key=expression(node.left env @session)
+            if key is? Error return key
+            key=widen(key node.left env @session)
+            if key is? Error return key
+            let value=expression(node.right env @session)
+            if value is? Error return value
+            value=widen(value node.right env @session)
+            if value is? Error return value
+            let layout=[types.ObjectField['__dewy_key' node_at(key session).value_type] types.ObjectField['__dewy_value' node_at(value session).value_type]]
+            let type=types.object_type(layout none false [] [] @session.types)
+            let fields=[hir.ObjectField[node.loc '__dewy_key' key] hir.ObjectField[node.loc '__dewy_value' value]]
+            return put(hir.ObjectLiteral[node.loc type fields] @session)
+        }
         if op =? '|>' or op =? '<|' {
             # `x |> f` calls the function value `f` with `x`; `f <| x` is
             # the mirror image. A named function is written `@name`.
@@ -3731,6 +3748,29 @@ loop_flow_inner = (id:addr arm:parser.KeywordExpr env:Environment @session:conte
                 if not holds {stop=iteration}
             }
             let repeats = stop is? none and not (dynamic and lockstep)
+            # An open range leaf (`i in 0..`) ends where the formula stops:
+            # with a static stop whose values fit a word, the counter is an
+            # `int64` with that last value and count, as in the hosted checker.
+            if stop isnt? none {
+                loop index in 0.. and index <? iterators.length {
+                    let iter=node_at(iterators[index] session)
+                    $runtime_assert iter is? hir.IteratorExpression
+                    if iter.count isnt? none or node_at(iter.iterable session) isnt? hir.Range continue
+                    let effective_last:bigint = if stop >? 0 iter.first + (stop-1)*iter.step else iter.first - iter.step
+                    let fits=true
+                    loop n in [iter.first iter.step effective_last stop] { if n <? -9223372036854775808 or n >? 9223372036854775807 { fits=false } }
+                    if not fits continue
+                    let word=types.primitive('int64' @session.types)
+                    let target=node_at(iter.target session)
+                    $runtime_assert target is? hir.ExpressedIdentifier and target.binding_id isnt? none
+                    let binding=bindings.binding_at(session.registry target.binding_id)
+                    binding.value_type=word binding.store_type=word
+                    bindings.store_binding(@session.registry target.binding_id binding)
+                    contexts.replace_hir(iter.target hir.ExpressedIdentifier[target.loc word target.name target.binding_id] @session)
+                    let type=types.parameterize(types.primitive('iterator' @session.types) [word] @session.types)
+                    contexts.replace_hir(iterators[index] hir.IteratorExpression[iter.loc type iter.target iter.iterable iter.first iter.step effective_last stop iter.guarded] @session)
+                }
+            }
             loop index in 0.. and index <? iterators.length {
                 let iter=node_at(iterators[index] session)
                 $runtime_assert iter is? hir.IteratorExpression
@@ -5410,9 +5450,20 @@ capture_pushes = (id:addr receiver:addr element:addr syntax:addr env:Environment
     }
     let type=types.node_at(session.types node.value_type)
     if types.is_primitive(type 'void') or types.is_primitive(type 'never') return id
+    let entry=views.container_entry_types(node_at(receiver session).value_type session.types)
+    if entry isnt? none and entry.value isnt? none {
+        # A dictionary capture stores the pair literal's key and value.
+        $runtime_assert node is? hir.ObjectLiteral and node.fields.length =? 2
+        let key=against(node.fields[0].value entry.key syntax env @session)
+        if key is? Error return key
+        let stored=against(node.fields[1].value entry.value syntax env @session)
+        if stored is? Error return stored
+        let arrays=container_values.arrays(receiver @session)
+        return put(hir.DictStore[node.loc void_type arrays.keys arrays.values key stored] @session)
+    }
     let value=against(id element syntax env @session)
     if value is? Error return value
-    if views.container_entry_types(node_at(receiver session).value_type session.types) isnt? none {
+    if entry isnt? none {
         let arrays=container_values.arrays(receiver @session)
         return put(hir.DictStore[node.loc void_type arrays.keys none value none] @session)
     }
@@ -5420,28 +5471,76 @@ capture_pushes = (id:addr receiver:addr element:addr syntax:addr env:Environment
     let method=put(hir.ArrayMethod[node.loc signature receiver 'push'] @session)
     return put(hir.FunctionCall[node.loc void_type method [value] []] @session)
 }
+# The common storage type of captured values: each widened, joined by
+# subtyping; values of unrelated types need an annotated container.
+capture_element = (values:array<addr> id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let element:addr?=none
+    loop value in values {
+        let widened=widen(value id env @session)
+        if widened is? Error return widened
+        let current=node_at(widened session).value_type
+        if element is? none {element=current}
+        else if subtyping.is_subtype(current element session.links @session.types) {}
+        else if subtyping.is_subtype(element current session.links @session.types) {element=current}
+        else return problem(id 'loop capture values differ in type' 'annotate the container to choose its element type' env session)
+    }
+    $runtime_assert element isnt? none
+    return element
+}
+capture_pair = (id:addr session:contexts.Session):>bool => {
+    let node=node_at(id session)
+    return node is? hir.ObjectLiteral and node.fields.length =? 2 and node.fields[0].name =? '__dewy_key' and node.fields[1].name =? '__dewy_value'
+}
 loop_capture = (id:addr syntax:addr env:Environment @session:contexts.Session expected:addr?=none is_set:bool=false):>addr|Error => {
+    session.capture_pairs += 1
     let checked=expression(syntax env @session)
+    if session.capture_pairs >? 0 { session.capture_pairs -= 1 }
     if checked is? Error return checked
     let values=capture_values(checked session)
     if values.length =? 0 return problem(id 'this loop expresses no value to capture' 'end the body with the value to collect' env session)
     let target_type=if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types)
     let target=types.node_at(session.types target_type)
     let entries=if expected is? none none else views.container_entry_types(expected session.types)
+    let loc=contexts.node_at(id env.lexical session).loc
+    # `[loop ... k -> v]` builds a dictionary from pair values.
+    let pairs:addr=0
+    loop value in values { if capture_pair(value session) { pairs += 1 } }
+    if pairs >? 0 {
+        if is_set return problem(id 'a set capture takes members, not pairs' '`->` builds a dictionary: write `[loop ... k -> v]`' env session)
+        if pairs not=? values.length return problem(id 'a capture mixes pairs and values' 'every value of a dictionary capture is a `key -> value` pair' env session)
+        let keys:array<addr>=[]
+        let stored:array<addr>=[]
+        loop value in values {
+            let pair=node_at(value session)
+            $runtime_assert pair is? hir.ObjectLiteral and pair.fields.length =? 2
+            keys.push(pair.fields[0].value) stored.push(pair.fields[1].value)
+        }
+        let key_type:addr|Error=if entries isnt? none entries.key else capture_element(keys id env @session)
+        if key_type is? Error return key_type
+        let value_type:addr|Error=if entries isnt? none and entries.value isnt? none entries.value else capture_element(stored id env @session)
+        if value_type is? Error return value_type
+        let type=views.container_type(key_type value_type @session.types)
+        let name="__dewy_capture_{session.registry.next_id}"
+        let binding_id=bindings.allocate_param(@session.registry name type loc)
+        let receiver=put(hir.ExpressedIdentifier[loc type name binding_id] @session)
+        let empty_keys=put(hir.ArrayLiteral[loc types.array_type(key_type 0 @session.types) []] @session)
+        let empty_values=put(hir.ArrayLiteral[loc types.array_type(value_type 0 @session.types) []] @session)
+        let initial=container_values.literal(loc type empty_keys empty_values @session)
+        let declaration=put(hir.Declare[loc types.primitive('void' @session.types) 'let' name type initial binding_id] @session)
+        let binding=bindings.binding_at(session.registry binding_id)
+        binding.declaration=declaration binding.store_type=type
+        bindings.store_binding(@session.registry binding_id binding)
+        let filled=capture_pushes(checked receiver key_type id env @session)
+        if filled is? Error return filled
+        return put(hir.Block[loc type [declaration filled receiver] true] @session)
+    }
     let element:addr?=if is_set and entries isnt? none entries.key else if target is? types.ArrayType target.element else none
     if element is? none {
-        loop value in values {
-            let widened=widen(value id env @session)
-            if widened is? Error return widened
-            let current=node_at(widened session).value_type
-            if element is? none {element=current}
-            else if subtyping.is_subtype(current element session.links @session.types) {}
-            else if subtyping.is_subtype(element current session.links @session.types) {element=current}
-            else return problem(id 'loop capture values differ in type' 'annotate the container to choose its element type' env session)
-        }
+        let common=capture_element(values id env @session)
+        if common is? Error return common
+        element=common
     }
     $runtime_assert element isnt? none
-    let loc=contexts.node_at(id env.lexical session).loc
     let type=if is_set views.set_type(element @session.types) else types.array_type(element none @session.types)
     let name="__dewy_capture_{session.registry.next_id}"
     let binding_id=bindings.allocate_param(@session.registry name type loc)
