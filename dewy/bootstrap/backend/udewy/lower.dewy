@@ -4098,6 +4098,21 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     # with the iterator frame still active so a return there cleans it too.
     let fallback:addr?=none
     if position+1 <? node.arms.length or node.default isnt? none {fallback=lower_flow(node position+1 @state)}
+    # `loop c {...} else {...}`: a µDewy loop takes no else. The else arm
+    # runs when the loop never enters, as a later flow arm would: the body
+    # marks entry, and the fallback follows the loop under that flag.
+    let else_guard:addr?=none
+    if arm is? hir.LoopArm and fallback isnt? none {
+        if not types.is_primitive(types.node_at(state.type_nodes type) 'void') and not types.is_primitive(types.node_at(state.type_nodes type) 'never') return reject(node 'a loop with an else arm that produces a value' @state)
+        let boolean=types.primitive('bool' @state.type_nodes)
+        let void_type=types.primitive('void' @state.type_nodes)
+        let entered=snapshot(put(hir.Bool[node.loc boolean false] @state) @prefix @state)
+        let mark=put(hir.Assign[node.loc void_type entered '=' put(hir.Bool[node.loc boolean true] @state)] @state)
+        body=sequence([mark body] node @state)
+        let skipped=intrinsic('__not__' [entered] boolean node @state)
+        else_guard=put(hir.Flow[node.loc void_type [put(hir.IfArm[node.loc void_type skipped fallback] @state)] none] @state)
+        fallback=none
+    }
     let arm_type=runtime_type(arm.value_type arm @state)
     let physical_type=type
     # A source-level diverging loop may now break to its signal checkpoint.
@@ -4109,6 +4124,7 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     }
     let lowered=put(if arm is? hir.IfArm hir.IfArm[arm.loc arm_type condition body] else hir.LoopArm[arm.loc arm_type condition body] @state)
     let flow=put(hir.Flow[node.loc physical_type [lowered] fallback] @state)
+    if else_guard isnt? none {flow=sequence([flow else_guard] node @state)}
     if scoped {
         let result:addr?=none
         if types.is_primitive(types.node_at(state.type_nodes type) 'void') or types.is_primitive(types.node_at(state.type_nodes type) 'never') {prefix.push(flow)}

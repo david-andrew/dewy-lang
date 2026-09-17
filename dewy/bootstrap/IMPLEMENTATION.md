@@ -197,6 +197,15 @@ the native fixed point is not grounds for retiring them yet.
   record uniformly (the receiver-method convention above); a literal given
   to a constructor is marked as a method the same way. The native keeps
   accepting such fields, which the hosted checker still rejects.
+- Loop else arms (2026-09-17). `loop c {...} else {...}` (a native-only
+  form; the hosted checker rejects it) lowers to a µDewy loop whose body
+  marks entry, followed by the else arm under `not entered`, since a
+  µDewy loop takes no else; a loop-else producing a value is rejected.
+  With that, `test_native_scalar_lowering` runs to its end: the arena
+  growth case expects the net growth under the eight-element floor
+  (`56`, updated), and one case remains open, `value is? Sign` on a
+  `-1|0|1` word where `Sign = -1|1` (the true branch does not yet carry
+  `value not=? 0` into the result contract: a refinement narrowing).
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &
