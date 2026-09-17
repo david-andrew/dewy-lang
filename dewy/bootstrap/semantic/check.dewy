@@ -2960,6 +2960,36 @@ string_method = (receiver:addr name:string id:addr env:Environment @session:cont
 # can refer to earlier fields. These bindings identify the already evaluated
 # field values; they do not cause the initializer to run again.
 RecordEntry:type = const [name:string syntax:addr read:addr? read_type:addr? mutable:bool loc:Span]
+# A function stored in a record field is a receiver method: a call through
+# the field passes the record as its hidden first argument. A literal is
+# marked; another function value (`Box[@twice]`) is wrapped in a thunk that
+# takes the hidden receiver and forwards the arguments to it.
+receiver_method = (value:addr type:addr env:Environment @session:contexts.Session):>addr => {
+    let node=node_at(value session)
+    if node is? hir.FunctionLiteral {
+        if node.object_receiver return value
+        contexts.replace_hir(value hir.FunctionLiteral[node.loc node.value_type node.pos_or_kw_args node.kw_only_args node.rest_args node.rettype node.body object_receiver=true object_fields=node.object_fields object_type=node.object_type source=node.source] @session)
+        return value
+    }
+    let signature=types.node_at(session.types types.unfold(types.strip_refinement(type session.types) session.types))
+    if signature isnt? types.FunctionType or signature.kw_only.length >? 0 or signature.rest isnt? none or signature.type_params.length >? 0 return value
+    let loc=node.loc
+    let params:array<hir.Param>=[]
+    let reads:array<addr>=[]
+    loop i in 0.. and i <? signature.pos_or_kw.length {
+        let slot=signature.pos_or_kw[i]
+        let name:string=if slot.name is? none "__dewy_p{i}" else slot.name
+        let binding_id=bindings.allocate_param(@session.registry name slot.value_type loc)
+        let binding=bindings.binding_at(session.registry binding_id)
+        binding.store_type=slot.value_type
+        bindings.store_binding(@session.registry binding_id binding)
+        params.push(hir.Param[name slot.value_type binding_id position_only=false place=slot.place])
+        let read=put(hir.ExpressedIdentifier[loc slot.value_type name binding_id] @session)
+        reads.push(if slot.place put(hir.Place[loc slot.value_type read] @session) else read)
+    }
+    let call=put(hir.FunctionCall[loc signature.ret value reads []] @session)
+    return put(hir.FunctionLiteral[loc type params [] none signature.ret call object_receiver=true source=env.lexical.source] @session)
+}
 record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
     let inner = Environment[contexts.child(env.lexical @session) env.state env.return_type env.control env.return_collector]
     let selected = if expected is? none types.primitive('any' @session.types) else types.unfold(types.strip_refinement(expected session.types) session.types)
@@ -3093,6 +3123,7 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
             value = against(value required row_id inner @session)
             if value is? Error return value
         }
+        value = receiver_method(value type inner @session)
         let binding = bind_field(name type row.loc inner @session)
         let mutable = if field is? none true else field.mutable
         if wanted is? types.ObjectType and wanted.immutable { mutable = false }
@@ -3240,6 +3271,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
             value = checked
         }
         $runtime_assert value isnt? none
+        value = receiver_method(value field.value_type inner @session)
         let binding = bind_field(field.name field.value_type node_at(value session).loc inner @session)
         fields.push(hir.ObjectField[node_at(value session).loc field.name value binding field.mutable and not shape.immutable])
     }

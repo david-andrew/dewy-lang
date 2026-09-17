@@ -190,6 +190,13 @@ the native fixed point is not grounds for retiring them yet.
   family test also recognizes a helper's structural result type
   (`numeric_values.is_family` unfolds both sides). `trig` passes; fixture
   `native_fixed_point` (pair check 56).
+- Function values in record fields (2026-09-17). A record field holding a
+  function that is not a literal (`Box[@twice]`, then `box.f(21)`) is
+  wrapped in a thunk that takes the hidden receiver and forwards the
+  arguments, so every call through a record's function field passes the
+  record uniformly (the receiver-method convention above); a literal given
+  to a constructor is marked as a method the same way. The native keeps
+  accepting such fields, which the hosted checker still rejects.
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &
