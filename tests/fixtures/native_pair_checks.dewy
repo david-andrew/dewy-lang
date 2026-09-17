@@ -58,6 +58,7 @@ import p"native_character_ranges.dewy" as character_ranges
 import p"native_object_methods.dewy" as object_methods
 import p"native_fixed_point.dewy" as fixed_point
 import p"native_loop_else.dewy" as loop_else
+import p"native_type_values.dewy" as type_values
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -172,5 +173,7 @@ let main=():>int64=>{
     if fixed_point.main() not=?42 return 56
     printl('Checking loop else arms')
     if loop_else.main() not=?42 return 57
+    printl('Checking type values')
+    if type_values.main() not=?42 return 58
     return 42
 }

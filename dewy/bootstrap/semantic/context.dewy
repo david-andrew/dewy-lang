@@ -229,9 +229,15 @@ child = (context:Context @session:Session):>Context => {
     let scope = bindings.push_scope(@session.scopes context.scope)
     return Context[context.source scope context.refinement_subject context.immutable_record]
 }
-begin = (srcfile:SrcFile nodes:array<tokens.Token> @session:Session):>Context => {
+# A parsed text becomes one more source of the session: a module, or a
+# compiler-synthesized helper checked in an existing scope.
+add_source = (srcfile:SrcFile nodes:array<tokens.Token> @session:Session):>addr => {
     let source = session.sources.length
     session.sources.push(Source[srcfile normalization.prepare(nodes)])
+    return source
+}
+begin = (srcfile:SrcFile nodes:array<tokens.Token> @session:Session):>Context => {
+    let source = add_source(srcfile nodes @session)
     let scope = bindings.push_scope(@session.scopes none)
     if session.builtin_aliases.length =? 0 { session.builtin_aliases = builtins.type_aliases(@session.types) }
     return Context[source scope]

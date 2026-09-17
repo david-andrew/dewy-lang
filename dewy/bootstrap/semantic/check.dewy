@@ -1,4 +1,4 @@
-from reporting import Error, Span, Warning, Pointer
+from reporting import Error, Span, Warning, Pointer, SrcFile
 import p"source_views.dewy" as source_views
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
@@ -28,6 +28,7 @@ import p"match_patterns.dewy" as patterns
 import p"propositions.dewy" as propositions
 import p"inferred_results.dewy" as inferred_results
 import p"type_names.dewy" as type_names
+import p"brands.dewy" as brands
 import p"function_contracts.dewy" as contracts
 import p"text_shapes.dewy" as text_shapes
 import p"text_formatting.dewy" as text_formatting
@@ -210,6 +211,7 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     let node = node_at(value session)
     if types.is_primitive(types.node_at(session.types node.value_type) 'never') return value
     let target = types.node_at(session.types expected)
+    if target is? types.MetaType and node is? hir.TypeValue return brand_value(node target expected id env @session)
     if target is? types.RefinedType {
         let total = views.total_dict_key(expected session.types)
         if total isnt? none {
@@ -1010,6 +1012,11 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
         }
     }
     if keyword.length =? 0 {
+        if positional.length =? 2 and func is? hir.ExpressedIdentifier and func.binding_id isnt? none and func.name in? ['__eq__' '__ne__'] and bindings.binding_at(session.registry func.binding_id).builtin {
+            let compared=metatype_equality(function positional func.name =? '__ne__' id env @session)
+            if compared is? Error return compared
+            if compared isnt? none return if expected is? none compared else against(compared expected id env @session)
+        }
         let specialized=builtin_value(function positional id env @session)
         if specialized is? Error return specialized
         if specialized isnt? none return if expected is? none specialized else against(specialized expected id env @session)
@@ -1386,6 +1393,8 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             # type is known. Concrete bindings/literals have no evaluation
             # prefix to retain; arbitrary value expressions stay runtime tests.
             let input=node_at(value session)
+            let metatype=metatype_of(input.value_type session)
+            if metatype isnt? none return metatype_test(value metatype tested op =? 'isnt?' node.loc @session)
             if input is? hir.ExpressedIdentifier|hir.Integer|hir.Bool|hir.String|hir.NoneValue|hir.TypeValue {
                 let decided=type_tests.decide(input.value_type tested session.links @session.types)
                 if decided isnt? none return put(hir.DecidedBool[node.loc types.primitive('bool' @session.types) decided not=? (op =? 'isnt?')] @session)
@@ -1477,11 +1486,17 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             return problem(id '`set` takes a string or an array' display.type_to_dewy(type session.types) env session)
         }
         if adjacency is? post.Juxtapose and adjacency.options.length >? 1 {
+            if 'CallJuxtapose' in? adjacency.options and is_typeof_call(node.left env session) {
+                let value=type_of(node.right id env @session)
+                if value is? Error return value
+                return if expected is? none value else against(value expected id env @session)
+            }
             let left = expression(node.left env @session call_target=true allow_place=allow_place)
             if left is? Error return left
             let value = node_at(left session)
             if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
             let type = types.node_at(session.types types.strip_refinement(value.value_type session.types))
+            if 'CallJuxtapose' in? adjacency.options and metatype_of(value.value_type session) isnt? none return metatype_construct(left node.right id env @session expected=expected)
             if type is? types.CallableType and 'CallJuxtapose' in? adjacency.options return call_syntax(left node.right id env @session expected=expected)
             if (type is? types.ArrayType|types.BinaryLiteralType|types.StringType|types.StringLiteralType or types.is_primitive(type 'string') or views.container_entry_types(value.value_type session.types) isnt? none) and 'IndexJuxtapose' in? adjacency.options return index_syntax(left node.right id env @session)
             let number = types.primitive('number' @session.types)
@@ -1496,10 +1511,16 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             return pending(id 'ambiguous adjacency involving this value type' env session)
         }
         if op =? 'CallJuxtapose' {
+            if is_typeof_call(node.left env session) {
+                let value=type_of(node.right id env @session)
+                if value is? Error return value
+                return if expected is? none value else against(value expected id env @session)
+            }
             let func = expression(node.left env @session call_target=true)
             if func is? Error return func
             let value = node_at(func session)
             if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
+            if metatype_of(value.value_type session) isnt? none return metatype_construct(func node.right id env @session expected=expected)
             return call_syntax(func node.right id env @session expected=expected)
         }
         if op =? 'IndexJuxtapose' {
@@ -2415,6 +2436,12 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
 # broad nominal family selects the tested descendant itself.
 select_type = (current:addr tested:addr truth:bool @session:contexts.Session):>addr => {
     let node = types.node_at(session.types current)
+    if node is? types.MetaType {
+        # `kind is? Whitespace`: the type value names a type under `Whitespace`
+        let target=types.node_at(session.types types.unfold(tested session.types))
+        if truth and target is? types.ObjectType and target.minted and target.brand isnt? none return types.meta_type(types.unfold(tested session.types) @session.types)
+        return current
+    }
     if node is? types.TypeOr {
         let members:array<addr> = []
         loop member in node.items { members.push(select_type(member tested truth @session)) }
@@ -2916,6 +2943,7 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
         let binding = bindings.binding_at(session.registry field.binding_id)
         return put(hir.ExpressedIdentifier[loc field.value_type binding.name field.binding_id] @session)
     }
+    if type is? types.MetaType return metatype_member(receiver type name id env @session)
     if value is? hir.TypeValue and value.value is? addr {
         if name =? 'typename' return type_names.literal(value.value loc @session)
         let selected=method_member(value.value none name id env @session)
@@ -5412,6 +5440,318 @@ bind_member_proxy = (name:string value:addr lexical:contexts.Context @session:co
 }
 
 
+# Types as runtime values: a `type<Family>` value is a type minted under
+# `Family`, carried as its brand id (the hosted MetaType). Such a value is
+# stored, compared, matched, dispatched on and constructed through.
+brand_value = (node:hir.TypeValue target:types.MetaType expected:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    if node.value isnt? addr return problem(id 'type value outside its family' 'a generic alias is not a runtime type value' env session)
+    let minted_id=types.unfold(node.value session.types)
+    let minted=types.node_at(session.types minted_id)
+    if minted isnt? types.ObjectType or not minted.minted or minted.brand is? none return problem(id 'type mismatch' "`{display.type_to_dewy(node.value session.types)}` does not fit `{display.type_to_dewy(expected session.types)}`" env session)
+    let family=types.node_at(session.types target.family)
+    $runtime_assert family is? types.ObjectType
+    if minted_id not=? target.family and not subtyping.brand_descends(minted family session.types) return problem(id 'type value outside its family' "`{minted.brand}` is not minted under `{display.type_to_dewy(target.family session.types)}`" env session)
+    return put(hir.BrandValue[node.loc types.meta_type(minted_id @session.types) minted.brand] @session)
+}
+metatype_of = (id:addr session:contexts.Session):>types.MetaType? => {
+    let node=types.node_at(session.types types.unfold(types.strip_refinement(id session.types) session.types))
+    return if node is? types.MetaType node else none
+}
+# `typeof(value)`: the minted type a value carries, as a `type<Family>` value
+# read from its brand word when the static type has types under it, else
+# that type itself as a compile-time type value.
+type_of = (arguments_id:addr? id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let items=source_arguments(arguments_id env session)
+    if items.length not=? 1 return problem(id '`typeof` takes one value' 'the value whose type is wanted' env session)
+    let value=expression(items[0] env @session)
+    if value is? Error return value
+    let node=node_at(value session)
+    let source=types.node_at(session.types node.value_type)
+    if types.is_primitive(source 'void') or types.is_primitive(source 'never') return problem(id '`typeof` operand needs a value' 'this expression does not produce one' env session)
+    if metatype_of(node.value_type session) isnt? none return value
+    let plain=types.unfold(types.strip_refinement(node.value_type session.types) session.types)
+    let shape=types.node_at(session.types plain)
+    let loc=contexts.node_at(id env.lexical session).loc
+    if shape isnt? types.ObjectType or not shape.minted or shape.brand is? none return put(hir.TypeValue[loc types.primitive('type' @session.types) plain] @session)
+    return put(hir.TypeOf[loc types.meta_type(plain @session.types) value] @session)
+}
+is_typeof_call = (callee:addr env:Environment session:contexts.Session):>bool =>
+    source_views.identifier(callee env.lexical session) =? 'typeof' and declarations.lookup('typeof' env.lexical session) is? none
+# `kind is? Whitespace` on a `type<Token>` value: whether the type it names
+# is `Whitespace` or minted under it, a brand range test on the value itself;
+# decided when the static family already settles it.
+metatype_test = (value:addr metatype:types.MetaType tested:addr negated:bool loc:Span @session:contexts.Session):>addr => {
+    let boolean=types.primitive('bool' @session.types)
+    let tested_id=types.unfold(tested session.types)
+    let target=types.node_at(session.types tested_id)
+    let family=types.node_at(session.types metatype.family)
+    $runtime_assert family is? types.ObjectType
+    if target isnt? types.ObjectType or not target.minted or target.brand is? none return put(hir.DecidedBool[loc boolean negated] @session)
+    if tested_id =? metatype.family or subtyping.brand_descends(family target session.types) return put(hir.DecidedBool[loc boolean not negated] @session)
+    if not subtyping.brand_descends(target family session.types) return put(hir.DecidedBool[loc boolean negated] @session)
+    return put(hir.TypeTest[loc boolean value tested_id negated] @session)
+}
+# `kind =? Whitespace`: type values compare by brand id; any type of the
+# family compares, so both sides are read as values of the root family.
+metatype_equality = (function:addr positional:array<addr> negated:bool id:addr env:Environment @session:contexts.Session):>addr|none|Error => {
+    let family:addr?=none
+    loop argument in positional {
+        let meta=metatype_of(node_at(argument session).value_type session)
+        if meta isnt? none {family=meta.family break}
+    }
+    if family is? none return none
+    let shape=types.node_at(session.types family)
+    $runtime_assert shape is? types.ObjectType and shape.brand isnt? none
+    let root_name=brands.root(shape.brand session.brands)
+    let root=brands.lookup(root_name session.brands)
+    $runtime_assert root isnt? none
+    let root_type=types.meta_type(root.value_type @session.types)
+    let word=types.primitive('int64' @session.types)
+    let words:array<addr>=[]
+    loop argument in positional {
+        let converted=against(argument root_type id env @session)
+        if converted is? Error return converted
+        words.push(put(hir.Transmute[node_at(converted session).loc word converted] @session))
+    }
+    return call(function words [] id env @session)
+}
+# A member of a `type<Family>` value: `typename`, or a static method (or a
+# function-typed slot) dispatched by the brand through a hidden function.
+metatype_member = (receiver:addr metatype:types.MetaType name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let loc=contexts.node_at(id env.lexical session).loc
+    if name =? 'typename' return type_names.instance(receiver loc @session)
+    let family=types.node_at(session.types metatype.family)
+    $runtime_assert family is? types.ObjectType and family.brand isnt? none
+    let signature=family_signature(metatype.family name env @session)
+    if signature is? Error return signature
+    if signature is? none return problem(id "a type value has no member `{name}`" "`{display.type_to_dewy(types.meta_type(metatype.family @session.types) session.types)}` names a type, not a value of it; `typename` gives its name; a static method or a function-typed slot declared on the family dispatches" env session)
+    let dispatcher=brand_dispatcher(metatype.family name signature id env @session)
+    if dispatcher is? Error return dispatcher
+    return method_value(contexts.MethodEntry[dispatcher metatype.family] receiver loc @session)
+}
+# `kind(src=... idx=...)`: construct whichever type under the family `kind`
+# names, through the family's hidden constructor.
+metatype_construct = (kind:addr arguments_id:addr? id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    let node=node_at(kind session)
+    let metatype=metatype_of(node.value_type session)
+    $runtime_assert metatype isnt? none
+    let constructor=brand_constructor(metatype.family id env @session)
+    if constructor is? Error return constructor
+    let bound=method_value(contexts.MethodEntry[constructor metatype.family] kind node.loc @session)
+    return call_syntax(bound arguments_id id env @session expected=expected)
+}
+# The signature a family declares for `name`: a static method's, or a
+# function-typed slot's.
+family_signature = (family_id:addr name:string env:Environment @session:contexts.Session):>addr|none|Error => {
+    let static=static_method(family_id name env @session)
+    if static is? Error return static
+    if static isnt? none {
+        let binding=bindings.binding_at(session.registry static)
+        if binding.value_type isnt? none and types.node_at(session.types binding.value_type) is? types.FunctionType return binding.value_type
+    }
+    let family=types.node_at(session.types family_id)
+    $runtime_assert family is? types.ObjectType
+    let slot=types.object_field(family name)
+    if slot isnt? none and types.node_at(session.types slot.value_type) is? types.FunctionType return slot.value_type
+    return none
+}
+# The hidden function of a static method of the type, else none.
+static_method = (type_id:addr name:string env:Environment @session:contexts.Session):>addr|none|Error => {
+    let type=types.node_at(session.types type_id)
+    if type isnt? types.ObjectType return none
+    let method=types.object_method(type name)
+    if method is? none return none
+    let alias=if type.brand is? none display.type_to_dewy(type_id session.types) else type.brand
+    let error=prepare_methods(type_id alias env @session)
+    if error isnt? none return error
+    let entry=session.methods.get(method_key(type_id method))
+    if entry is? none or entry.receiver_type isnt? none return none
+    return entry.binding
+}
+slot_filled = (type:types.ObjectType name:string session:contexts.Session):>bool => {
+    let slot=types.object_field(type name)
+    return slot isnt? none and types.node_at(session.types slot.value_type) is? types.FunctionType and slot.default isnt? none
+}
+concrete_brands_under = (name:string session:contexts.Session):>array<string> => {
+    let found:array<string>=[]
+    loop brand in brands.descendants(name session.brands) {if brands.concrete(brand session.brands) {found.push(brand)}}
+    # Sorted by name: the arm order is the hosted dispatcher's.
+    loop i in 1.. and i <? found.length {
+        let item=found[i]
+        let j=i
+        loop j >? 0 and string_before(item found[j-1]) {found[j]=found[j-1] j-=1}
+        found[j]=item
+    }
+    return found
+}
+brand_type = (name:string session:contexts.Session):>addr => {
+    let entry=brands.lookup(name session.brands)
+    $runtime_assert entry isnt? none
+    return entry.value_type
+}
+# The synthesized text names types through hidden aliases bound in the
+# helper's scope (`__dewy_family`, `__dewy_brand_0`, `__dewy_t0`, ...),
+# as a generic instance binds its type parameters: a brand's spelling may
+# carry a disambiguating suffix, and a parameter type need not be nameable
+# where the helper is checked.
+HiddenAlias:type = const [name:string value:addr]
+# Code point order, as the hosted `sorted` on brand names (UTF-8 bytes order
+# as code points do).
+string_before = (a:string b:string):>bool => {
+    let left=a as array<uint8>
+    let right=b as array<uint8>
+    loop i in 0.. and i <? left.length and i <? right.length {
+        if left[i] not=? right[i] return left[i] <? right[i]
+    }
+    return left.length <? right.length
+}
+# The hidden function `Family__dispatch__name(kind args...)` calling the
+# static method `name` of whichever type under the family `kind` names,
+# synthesized as Dewy like the hosted checker: a `match` over the family's
+# concrete types, each arm a static call.
+brand_dispatcher = (family_id:addr name:string signature_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let family=types.node_at(session.types family_id)
+    $runtime_assert family is? types.ObjectType and family.brand isnt? none
+    let key="dispatch:{family.brand}:{name}"
+    let existing=session.methods.get(key)
+    if existing isnt? none return existing.binding
+    let signature=types.node_at(session.types signature_id)
+    $runtime_assert signature is? types.FunctionType
+    if signature.kw_only.length >? 0 or signature.rest isnt? none or signature.type_params.length >? 0 return pending(id 'dispatching a keyword-only, rest, or generic signature through a type value' env session)
+    let members=concrete_brands_under(family.brand session)
+    loop brand in members {
+        let child_id=brand_type(brand session)
+        let child=types.node_at(session.types child_id)
+        $runtime_assert child is? types.ObjectType
+        let static=static_method(child_id name env @session)
+        if static is? Error return static
+        if static is? none and not slot_filled(child name session) return problem(id "`{brand}` has no static `{name}`" "every type under `{family.brand}` needs one to dispatch `{name}` through a type value" env session)
+    }
+    let aliases:array<HiddenAlias>=[HiddenAlias['__dewy_family' family_id]]
+    let params:array<string>=[]
+    let args:array<string>=[]
+    loop i in 0.. and i <? signature.pos_or_kw.length {
+        let slot=signature.pos_or_kw[i]
+        let parameter=if slot.name is? none "__dewy_p{i}" else slot.name
+        let prefix=if slot.place '@' else ''
+        aliases.push(HiddenAlias["__dewy_t{i}" slot.value_type])
+        params.push("{prefix}{parameter}:__dewy_t{i}")
+        args.push("{prefix}{parameter}")
+    }
+    let ret=types.node_at(session.types signature.ret)
+    let result:string=''
+    if not (types.is_primitive(ret 'void') or types.is_primitive(ret 'untyped')) {
+        aliases.push(HiddenAlias['__dewy_ret' signature.ret])
+        result=':>__dewy_ret'
+    }
+    let arms:array<string>=[]
+    loop i in 0.. and i <? members.length {
+        aliases.push(HiddenAlias["__dewy_brand_{i}" brand_type(members[i] session)])
+        arms.push("    <__dewy_brand_{i}> => return __dewy_brand_{i}.{name}({args.join(' ')})")
+    }
+    let text="(__dewy_kind:type<__dewy_family> {params.join(' ')}){result} => \{ match __dewy_kind \{\n{arms.join('\n')}\n} }\n"
+    let hidden=hoist_hidden_function("{family.brand}__dispatch__{name}" text aliases id env @session)
+    if hidden is? Error return hidden
+    session.methods[key]=contexts.MethodEntry[hidden family_id]
+    return hidden
+}
+# The hidden function `Family__construct(kind fields...)` constructing
+# whichever type under the family `kind` names, with the family's own
+# required fields (a function-typed slot is the child's; a child's extra
+# fields default).
+brand_constructor = (family_id:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let family=types.node_at(session.types family_id)
+    $runtime_assert family is? types.ObjectType and family.brand isnt? none
+    let key="construct:{family.brand}"
+    let existing=session.methods.get(key)
+    if existing isnt? none return existing.binding
+    let given:array<types.ObjectField>=[]
+    loop field in family.fields {
+        if field.default is? none and types.node_at(session.types field.value_type) isnt? types.FunctionType {given.push(field)}
+    }
+    let members=concrete_brands_under(family.brand session)
+    loop brand in members {
+        let child=types.node_at(session.types brand_type(brand session))
+        $runtime_assert child is? types.ObjectType
+        loop field in child.fields {
+            if field.default isnt? none continue
+            let is_slot=types.node_at(session.types field.value_type) is? types.FunctionType
+            if is_slot {
+                if not implemented_slot(child field session) return problem(id "`{brand}` leaves the slot `{field.name}` unfilled" "every type constructed through a `type<{family.brand}>` value fills its function-typed slots with a method" env session)
+                continue
+            }
+            if types.object_field(family field.name) is? none return problem(id "`{brand}` cannot be constructed through a `type<{family.brand}>` value" "its field `{field.name}` has no default, and only `{family.brand}`'s fields are given here" env session)
+        }
+    }
+    let aliases:array<HiddenAlias>=[HiddenAlias['__dewy_family' family_id]]
+    let params:array<string>=[]
+    let args:array<string>=[]
+    loop i in 0.. and i <? given.length {
+        let field=given[i]
+        let declared=if field.refinement.length >? 0 types.refined_type(field.value_type field.refinement @session.types) else field.value_type
+        aliases.push(HiddenAlias["__dewy_t{i}" declared])
+        params.push("{field.name}:__dewy_t{i}")
+        args.push("{field.name}={field.name}")
+    }
+    let arms:array<string>=[]
+    loop i in 0.. and i <? members.length {
+        aliases.push(HiddenAlias["__dewy_brand_{i}" brand_type(members[i] session)])
+        arms.push("    <__dewy_brand_{i}> => return __dewy_brand_{i}({args.join(' ')})")
+    }
+    let text="(__dewy_kind:type<__dewy_family> {params.join(' ')}):>__dewy_family => \{ match __dewy_kind \{\n{arms.join('\n')}\n} }\n"
+    let hidden=hoist_hidden_function("{family.brand}__construct" text aliases id env @session)
+    if hidden is? Error return hidden
+    session.methods[key]=contexts.MethodEntry[hidden family_id]
+    return hidden
+}
+# The module scope of the current context (under the prelude and builtins):
+# synthesized helpers are checked there, as the hosted checker checks them
+# in the module context, and become module-level hidden functions.
+module_scope = (scope:addr session:contexts.Session):>addr => {
+    let current=scope
+    loop true {
+        let frame=bindings.scope_at(session.scopes current)
+        if frame.parent is? none return current
+        let parent=bindings.scope_at(session.scopes frame.parent)
+        if parent.parent is? none or bindings.scope_at(session.scopes parent.parent).parent is? none return current
+        current=frame.parent
+    }
+}
+# Typecheck a synthesized function literal as a module-level hidden
+# function, like a generic instance or a type's method.
+hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let srcfile=SrcFile["<{name}>" text]
+    let parsed=parser.parse(srcfile)
+    if parsed is? Error return parsed
+    let source=contexts.add_source(srcfile parsed.nodes @session)
+    let lexical=contexts.child(contexts.Context[source module_scope(env.lexical.scope session)] @session)
+    loop alias in aliases {
+        let alias_id=bindings.allocate_param(@session.registry alias.name types.primitive('type' @session.types) contexts.node_at(id env.lexical session).loc)
+        let alias_binding=bindings.binding_at(session.registry alias_id)
+        alias_binding.type_value=alias.value
+        bindings.store_binding(@session.registry alias_id alias_binding)
+        bindings.bind(@session.scopes lexical.scope alias.name alias_id)
+    }
+    let root=contexts.node_at(parsed.root lexical session)
+    $runtime_assert root is? parser.Block and root.inner.length =? 1
+    let literal_id=root.inner[0]
+    let literal=contexts.node_at(literal_id lexical session)
+    $runtime_assert literal is? parser.BinOp
+    let binding_id=bindings.allocate(@session.registry none name 'function' literal.loc)
+    let defining=Environment[lexical env.state]
+    let value=function_literal(literal_id literal defining @session name=name)
+    if value is? Error return value
+    let checked=node_at(value session)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=checked.value_type binding.store_type=checked.value_type binding.function=value
+    let declared=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'let' name none value binding_id] @session)
+    binding.declaration=declared
+    bindings.store_binding(@session.registry binding_id binding)
+    session.hidden_bindings.add(binding_id)
+    session.hoisted.push(declared)
+    return binding_id
+}
+
 # An explicit conversion is a value operation, distinct from an annotation's
 # store contract. In particular `7 as int64` may retain its singleton type;
 # a word-width conversion emits a cast whose range the analysis must prove.
@@ -5455,7 +5795,7 @@ explicit_conversion = (value:addr target:addr id:addr env:Environment @session:c
     if subtyping.is_subtype(node.value_type types.primitive('int' @session.types) session.links @session.types) and views.fixed_integer_layout(target session.types) isnt? none return put(hir.ValueCast[node.loc target value] @session)
     # An object can carry a descendant's brand, conversion method and fields.
     # Dispatch before choosing the base type's conversion protocol.
-    if views.string_valued(target session.types) and types.node_at(session.types views.structural_base(node.value_type session.types)) is? types.ObjectType return text_part(value id env @session)
+    if views.string_valued(target session.types) and types.node_at(session.types views.structural_base(node.value_type session.types)) is? types.ObjectType|types.MetaType return text_part(value id env @session)
     let converted=conversion_method(value target id env @session)
     if converted is? Error return converted
     if converted isnt? none return converted
@@ -5520,6 +5860,7 @@ text_part = (value:addr id:addr env:Environment @session:contexts.Session dispat
     let type=types.node_at(session.types views.structural_base(node.value_type session.types))
     if types.is_primitive(type 'none') return put(hir.String[node.loc types.string_literal('none' @session.types) 'none'] @session)
     if types.is_primitive(type 'void') or types.is_primitive(type 'never') return problem(id 'string interpolation needs a value' 'this expression does not produce one' env session)
+    if type is? types.MetaType return type_names.instance(value node.loc @session)   # a type value: its name
     if dispatch_brands and type is? types.ObjectType {
         let choices=type_names.alternatives(node.value_type session)
         if choices.length >? 0 return branded_text(value choices id env @session)

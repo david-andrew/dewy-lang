@@ -83,10 +83,12 @@ mutation_target = (node:tokens.Token nodes:array<tokens.Token> replacements:bool
     }
     return none
 }
+# A conservative pre-scan over the whole tree, as the hosted checker's
+# `_binding_write_names`: a `=>` body is scanned too, since a match arm's
+# body runs in place (a function literal's writes over-approximate).
 mutations = (id:addr nodes:array<tokens.Token> replacements:bool=false):>set<string> => {
     let node=tokens.node_at(nodes id)
     let names:set<string>=set[]
-    if node is? parser.BinOp and syntax.symbol(node.op nodes) =? '=>' return names
     let target=mutation_target(node nodes replacements)
     if target isnt? none {
         let name=root_name(target nodes)

@@ -799,6 +799,15 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
         if argument is? Error return argument
         arguments.push(argument)
     }
+    if name =? 'type' and lookup('type' context session) is? none {
+        # `type<Token>`: the types under the minted `Token` as runtime values
+        # (their brand ids), as the hosted checker's MetaType.
+        if arguments.length not=? 1 or promises.length >? 0 return contexts.problem(node.right '`type<...>` takes one type' 'the family whose types are the values' context session)
+        let family=types.unfold(arguments[0] session.types)
+        let shape=types.node_at(session.types family)
+        if shape isnt? types.ObjectType or not shape.minted or shape.brand is? none return contexts.problem(node.right '`type<...>` needs a minted type' "`{display.type_to_dewy(family session.types)}` is not minted with `type of`, so its types are not runtime values" context session)
+        return types.meta_type(family @session.types)
+    }
     if name =? 'array' {
         if arguments.length =? 0 and promises.length >? 0 return refine(types.primitive('array' @session.types) promises @session)
         if arguments.length not=? 1 return contexts.problem(id 'array type requires an element type' 'use `array<T>`' context session)

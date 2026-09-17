@@ -475,6 +475,9 @@ covered = (member:addr other:addr seen:set<string> links:Graph @nodes:types.Tabl
     else if m is? types.ArrayType and o is? types.ArrayType {
         if not covered(m.element o.element seen links @nodes) return false
     }
+    # A `type<Child>` value is a `type<Parent>` value: the join of two type
+    # values is the wider family's, as the hosted join treats MetaType pairs.
+    else if m is? types.MetaType and o is? types.MetaType return is_subtype(m_id o_id links @nodes)
     else if o is? types.CallableType | types.TypeParameterize | types.TypeAnd | types.TypeOr | types.TypeNot | types.SequenceType | types.MetaType | types.QuantityType | types.TypeVariable {
         # More variance/obligation rules are needed before these alternatives
         # can absorb one another. Preserve the hosted conservative boundary.

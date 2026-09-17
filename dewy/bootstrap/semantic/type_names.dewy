@@ -17,6 +17,8 @@ test of its parent. The receiver is evaluated once before dispatch.
 
 spelling = (id:addr session:contexts.Session):>string => {
     let node=types.node_at(session.types views.structural_base(id session.types))
+    # A type value names its family's type; its runtime brand may be deeper.
+    if node is? types.MetaType {node=types.node_at(session.types node.family)}
     if node is? types.ObjectType and node.minted and node.brand isnt? none return node.brand
     return display.type_to_dewy(id session.types)
 }
@@ -27,6 +29,9 @@ literal = (id:addr loc:Span @session:contexts.Session):>addr => {
 Alternative:type = const [value_type:addr depth:addr]
 alternatives = (type:addr session:contexts.Session):>array<Alternative> => {
     let owner=types.node_at(session.types views.structural_base(type session.types))
+    # A `type<Family>` value carries any brand under the family, tested on
+    # the value itself (its brand word).
+    if owner is? types.MetaType {owner=types.node_at(session.types owner.family)}
     let choices:array<Alternative>=[]
     if owner is? types.ObjectType {
         loop brand in session.brands.entries {

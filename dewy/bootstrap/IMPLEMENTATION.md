@@ -163,6 +163,33 @@ the native fixed point is not grounds for retiring them yet.
   rewrites its UTF-8 bytes and byte length on every step from the
   counter's ordinal, as the hosted backend does (`string_ranges`; fixture
   `native_character_ranges`, pair check 54).
+- Types as runtime values (2026-09-17). `type<Family>` resolves to the
+  hosted MetaType (a type minted under `Family`, carried as its brand id);
+  a minted type named where one is expected becomes a `BrandValue`, and
+  `typeof(value)` reads a minted record's brand word (`TypeOf`) or is the
+  static type as a compile-time value. Type values compare by brand id
+  (both sides read as the root family's), `is?` tests and `match` arms
+  test the value itself against a brand range (decided when the family
+  settles it; narrowing keeps the tested family), `typename` and string
+  conversion name the carried brand, and a join of two type values is the
+  wider family's. A member of a type value is a static method or a
+  function-typed slot of the family, dispatched through a hidden
+  `Family__dispatch__name(kind args...)`; a call on a type value
+  constructs through `Family__construct(kind fields...)`. Both helpers are
+  synthesized as Dewy text and checked in the module scope like the hosted
+  checker's, but name their types through hidden aliases bound in the
+  helper's scope (`__dewy_family`, `__dewy_brand_0`, `__dewy_t0`, ...)
+  rather than spelling brand names: a brand may carry a `#id`
+  disambiguating suffix when another module mints the same name, which
+  the hosted synthesized text cannot tokenize (a hosted limitation to
+  fix there). Also fixed on the way: the syntactic mutation pre-scan of
+  loop bodies skipped every `=>` body, so a push inside a `match` arm
+  inside a loop kept the array's literal length (the hosted scan descends
+  into all bodies). `type_values`, `place_slots` and `recursive_mints`
+  pass; `length_terms` now stops at its bounds chain (the dispatcher's
+  result promise carried through a record field, a captured array, a
+  sort and an unpack; the same program fails natively with a direct
+  static call). Fixture `native_type_values` (pair check 58).
 - Record-literal methods (2026-09-17). A function stored in a record
   literal is a method of that record, as the hosted checker marks it
   (`object_receiver`, `object_fields`, `object_type`): its sibling fields
