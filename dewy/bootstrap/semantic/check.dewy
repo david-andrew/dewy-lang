@@ -3454,7 +3454,7 @@ range_value = (id:addr node:parser.Flat env:Environment @session:contexts.Sessio
     if checked_right isnt? none { anchors.push(checked_right) }
     if pair isnt? none { anchors.push(pair.first) anchors.push(pair.second) }
     loop anchor in anchors {
-        if views.string_valued(node_at(anchor session).value_type session.types) return pending(id 'character range ordinal conversion' env session)
+        if views.string_valued(node_at(anchor session).value_type session.types) and scalar_ordinal(anchor session) is? none return pending(id 'character range ordinal conversion' env session)
     }
     let delims:('[]'|'[)'|'(]'|'()')? = none
     if bounds isnt? none {
@@ -3462,6 +3462,21 @@ range_value = (id:addr node:parser.Flat env:Environment @session:contexts.Sessio
         delims = bounds
     }
     return put(hir.Range[contexts.node_at(id env.lexical session).loc types.primitive('range' @session.types) delims pair checked_left checked_right] @session)
+}
+# A character range anchor: a one-scalar string literal's dense Unicode
+# ordinal (the surrogate gap omitted), as the hosted checker orders scalars.
+scalar_ordinal = (id:addr session:contexts.Session):>bigint? => {
+    let node=node_at(id session)
+    loop node is? hir.RepresentationCast|hir.ValueCast { node=node_at(node.expr session) }
+    if node isnt? hir.String or node.content.length not=? 1 return none
+    let scalars=node.content as array<uint32>
+    if scalars.length not=? 1 return none
+    let scalar:bigint=scalars[0]
+    return if scalar <? 0xD800 scalar else scalar - 0x800
+}
+range_anchor = (id:addr session:contexts.Session):>bigint? => {
+    let constant=constant_integer(id session)
+    return if constant isnt? none constant else scalar_ordinal(id session)
 }
 constant_integer = (id:addr session:contexts.Session):>bigint? => {
     let value = constants.constant_in(id session.hir session.types session.registry)
@@ -3570,6 +3585,7 @@ iterator = (id:addr env:Environment @guards:array<addr> @prelude:array<addr> @se
     let step:bigint = 1
     let last:bigint? = none
     let count:bigint? = none
+    let character_range = false
     if shape is? types.ArrayType {
         target = shape.element
         count = shape.length
@@ -3579,20 +3595,24 @@ iterator = (id:addr env:Environment @guards:array<addr> @prelude:array<addr> @se
         if shape is? types.StringLiteralType { count = shape.value.length }
     } else if value is? hir.Range {
         if value.left is? none return problem(id 'range iteration requires a left anchor' 'this range has no first value to iterate from' env session)
-        let anchor = constant_integer(value.left session)
+        # Character ranges iterate scalar ordinals; the target is a grapheme.
+        let character = views.string_valued(node_at(value.left session).value_type session.types)
+        character_range = character
+        let anchor = range_anchor(value.left session)
         let second:bigint? = none
         let right:bigint? = none
-        if value.step_pair isnt? none { second = constant_integer(value.step_pair.second session) }
-        if value.right isnt? none { right = constant_integer(value.right session) }
+        if value.step_pair isnt? none { second = range_anchor(value.step_pair.second session) }
+        if value.right isnt? none { right = range_anchor(value.right session) }
         if anchor is? none or (value.step_pair isnt? none and second is? none) or (value.right isnt? none and right is? none) return pending(id 'runtime range endpoint normalization' env session)
+        if character and right is? none { right = if second is? none or second >? anchor 1112063 else 0 }
         let bounds = if value.bounds is? none '[]' else value.bounds
         let normalized=integer_ranges.normalize(anchor second right bounds)
         if normalized is? none return problem(id 'range iterator step cannot be zero' 'choose a distinct second anchor' env session)
         first=normalized.first step=normalized.step count=normalized.count
-        target = types.primitive('int' @session.types)
+        target = if character types.string_type(1 @session.types) else types.primitive('int' @session.types)
     } else return problem(id 'value is not iterable' display.type_to_dewy(value.value_type session.types) env session)
     if count isnt? none { last = first + (count-1)*step }
-    if value is? hir.Range and count isnt? none and last isnt? none {
+    if value is? hir.Range and count isnt? none and last isnt? none and not character_range {
         let fits = true
         loop n in [first step last count] { if n <? -9223372036854775808 or n >? 9223372036854775807 { fits = false } }
         if fits { target = types.primitive('int64' @session.types) }

@@ -1,0 +1,15 @@
+# A range of one-scalar strings iterates scalar ordinals; the target is the
+# grapheme at each step (the surrogate gap is skipped).
+main=():>int64=>{
+    let total:int64 = 0
+    loop c in 'a'..'e' {
+        total += 1                                 # 5
+        if c =? 'c' { total += 10 }                # 15
+    }
+    loop c in 'f','d'..'b' { total += 2 }          # 21: f d b
+    let collected:string = ""
+    loop c in 'x'..'z' { collected += c }
+    if collected =? "xyz" and collected.length =? 3 { total += 9 }   # 30
+    loop c in '퟿'..'' { total += 6 }    # 42: two scalars around the gap
+    return total
+}

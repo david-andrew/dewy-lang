@@ -31,7 +31,7 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-passed at the start of the day and 196/211 by its end (the fixes marked
+passed at the start of the day and 197/211 by its end (the fixes marked
 "the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
@@ -268,7 +268,7 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [range_stepped_labeled_exits.dewy](../tests/range_stepped_labeled_exits.dewy) | Metatag value |
 | [range_stepped_multi_optional.dewy](../tests/range_stepped_multi_optional.dewy) | non-conjunctive iterator formula |
 | [object_methods.dewy](../tests/object_methods.dewy) | a is initialized here; a may be accessed here before it is initialized |
-| [string_ranges.dewy](../tests/string_ranges.dewy) | character range ordinal conversion |
+| [string_ranges.dewy](../tests/string_ranges.dewy) | character range ordinal conversion (passes since 2026-09-16) |
 | [runtime_grapheme_strings.dewy](../tests/runtime_grapheme_strings.dewy) | No implemented token starts here (passes since 2026-09-16) |
 | [keyword_default_calls.dewy](../tests/keyword_default_calls.dewy) | BinOp expression (keyword-only parameters check since 2026-09-16; stops at an object method closing over a sibling field) |
 | [position_only_calls.dewy](../tests/position_only_calls.dewy) | write this parameter as name:type |

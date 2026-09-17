@@ -54,6 +54,7 @@ import p"native_fused_quote.dewy" as fused_quotes
 import p"native_nested_loop_targets.dewy" as nested_targets
 import p"native_dict_captures.dewy" as dict_captures
 import p"native_spread.dewy" as spreads
+import p"native_character_ranges.dewy" as character_ranges
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -160,5 +161,7 @@ let main=():>int64=>{
     if dict_captures.main() not=?42 return 52
     printl('Checking spreads')
     if spreads.main() not=?42 return 53
+    printl('Checking character ranges')
+    if character_ranges.main() not=?42 return 54
     return 42
 }

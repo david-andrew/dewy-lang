@@ -3760,6 +3760,60 @@ command_line = (entry:hir.FunctionLiteral @state:State):>CommandLine => {
 # containing function. The condition advances the cursor so `continue`
 # advances exactly once as well. An exhausted sequence never reads an item.
 IteratorStep:type = [prefix:array<addr> condition:addr]
+# A character range target: a frame-resident one-scalar string, rebuilt on
+# every step from the counter's dense ordinal (the surrogate gap skipped),
+# with a control word of zero so it is never released. Its storage is
+# reserved once per loop site.
+scalar_string = (ordinal:addr node:hir.AST @prefix:array<addr> @state:State):>addr => {
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let void_type=types.primitive('void' @state.type_nodes)
+    let bool_type=types.primitive('bool' @state.type_nodes)
+    let byte_type=types.primitive('uint8' @state.type_nodes)
+    let u32_type=types.primitive('uint32' @state.type_nodes)
+    let data=snapshot(intrinsic('__static_alloca__' [word(4 node @state)] word_type node @state) @prefix @state)
+    let boundaries=snapshot(intrinsic('__static_alloca__' [word(8 node @state)] word_type node @state) @prefix @state)
+    prefix.push(intrinsic('__store_u32__' [put(hir.Transmute[node.loc u32_type word(0 node @state)] @state) boundaries] void_type node @state))
+    let descriptor=snapshot(string_memory(data word(0 node @state) boundaries word(1 node @state) word(0 node @state) node @state static_storage=true) @prefix @state)
+    let steps:array<addr>=[]
+    let scalar=snapshot(ordinal @steps @state)
+    steps.push(conditional(intrinsic('__ge__' [scalar word(0xD800 node @state)] bool_type node @state) put(hir.Assign[node.loc void_type scalar '=' word_op('__add__' scalar word(0x800 node @state) node @state)] @state) node @state))
+    let length=snapshot(word(1 node @state) @steps @state)
+    # UTF-8 encoding by scalar magnitude: a leading byte plus continuation
+    # bytes of six bits each.
+    let b0=word_op('__add__' data word(0 node @state) node @state)
+    let b1=word_op('__add__' data word(1 node @state) node @state)
+    let b2=word_op('__add__' data word(2 node @state) node @state)
+    let b3=word_op('__add__' data word(3 node @state) node @state)
+    let mask=word(0x3F node @state)
+    let cont0=word_op('__add__' word(0x80 node @state) word_op('__and__' scalar mask node @state) node @state)
+    let cont6=word_op('__add__' word(0x80 node @state) word_op('__and__' word_op('__rshift__' scalar word(6 node @state) node @state) mask node @state) node @state)
+    let cont12=word_op('__add__' word(0x80 node @state) word_op('__and__' word_op('__rshift__' scalar word(12 node @state) node @state) mask node @state) node @state)
+    let one=sequence([intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type scalar] @state) b0] void_type node @state)] node @state)
+    let two=sequence([
+        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type word_op('__add__' word(0xC0 node @state) word_op('__rshift__' scalar word(6 node @state) node @state) node @state)] @state) b0] void_type node @state)
+        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont0] @state) b1] void_type node @state)
+        put(hir.Assign[node.loc void_type length '=' word(2 node @state)] @state)] node @state)
+    let three=sequence([
+        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type word_op('__add__' word(0xE0 node @state) word_op('__rshift__' scalar word(12 node @state) node @state) node @state)] @state) b0] void_type node @state)
+        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont6] @state) b1] void_type node @state)
+        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont0] @state) b2] void_type node @state)
+        put(hir.Assign[node.loc void_type length '=' word(3 node @state)] @state)] node @state)
+    let four=sequence([
+        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type word_op('__add__' word(0xF0 node @state) word_op('__rshift__' scalar word(18 node @state) node @state) node @state)] @state) b0] void_type node @state)
+        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont12] @state) b1] void_type node @state)
+        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont6] @state) b2] void_type node @state)
+        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont0] @state) b3] void_type node @state)
+        put(hir.Assign[node.loc void_type length '=' word(4 node @state)] @state)] node @state)
+    let arms=[
+        put(hir.IfArm[node.loc void_type intrinsic('__lt__' [scalar word(0x80 node @state)] bool_type node @state) one] @state)
+        put(hir.IfArm[node.loc void_type intrinsic('__lt__' [scalar word(0x800 node @state)] bool_type node @state) two] @state)
+        put(hir.IfArm[node.loc void_type intrinsic('__lt__' [scalar word(0x10000 node @state)] bool_type node @state) three] @state)]
+    steps.push(put(hir.Flow[node.loc void_type arms four] @state))
+    steps.push(intrinsic('__store_u32__' [put(hir.Transmute[node.loc u32_type length] @state) word_op('__add__' boundaries word(4 node @state) node @state)] void_type node @state))
+    steps.push(store_word(length descriptor layouts.string_descriptor.byte_length node @state))
+    steps.push(descriptor)
+    return put(hir.Block[node.loc word_type steps false] @state)
+}
 iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @state:State):>IteratorStep => {
     let prefix:array<addr>=[]
     let bool_type=types.primitive('bool' @state.type_nodes)
@@ -3812,6 +3866,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
             } else {length=word(node.count node @state)}
         }
         value=word_op('__add__' word(node.first node @state) word_op('__mul__' cursor word(node.step node @state) node @state) node @state)
+        if string_type(target.value_type state) { value=scalar_string(value node @prefix @state) }
     } else {
         let sequence:addr=0
         if source is? hir.DictEntries {

@@ -155,6 +155,14 @@ the native fixed point is not grounds for retiring them yet.
   source is an object. Lowering sums the lengths, allocates once and copies
   behind a running cursor, spread elements as owned copies (`spread`;
   fixture `native_spread`, pair check 53).
+- Character ranges (2026-09-16). `loop c in 'a'..'e'` (and stepped or
+  right-unbounded forms) iterates dense Unicode scalar ordinals, the
+  surrogate gap omitted, from one-scalar string anchors; the target is a
+  one-grapheme string. The lowering keeps a frame-resident descriptor per
+  loop site (four data bytes, two boundaries, control word zero) and
+  rewrites its UTF-8 bytes and byte length on every step from the
+  counter's ordinal, as the hosted backend does (`string_ranges`; fixture
+  `native_character_ranges`, pair check 54).
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &
