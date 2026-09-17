@@ -4,7 +4,7 @@
 # backing, and one grapheme may be assembled across joined pieces.
 Named:type = [text:string]
 count = (value:string):>int64 => {
-    let total = 0
+    let total:int64 = 0
     loop g in value { total += 1 }
     return total
 }

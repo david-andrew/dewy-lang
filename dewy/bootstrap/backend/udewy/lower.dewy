@@ -3429,7 +3429,21 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
     if signature isnt? types.FunctionType return reject(node 'a call requires its selected concrete signature' @state)
     if signature.rest isnt? none return reject(node 'rest argument legalization' @state)
     let prefix:array<addr>=[]
-    let function=if direct is? none snapshot(expression(node.func @state) @prefix @state) else code_reference(direct callee @state)
+    # A record's function field is a receiver method: the record is its
+    # hidden first argument, as the hosted backend passes it. Evaluate the
+    # record once, for the field read and for the argument.
+    let receiver:addr?=none
+    if direct is? none and callee is? hir.MemberAccess and object_type(hir.node_at(state.input.nodes callee.value).value_type state) isnt? none {
+        receiver=snapshot(expression(callee.value @state) @prefix @state)
+    }
+    let function:addr=0
+    if receiver isnt? none {
+        $runtime_assert callee is? hir.MemberAccess
+        let stored=stored_type(node.func state)
+        let pointer=field_address(receiver callee @state)
+        function=snapshot(read_value(field_read(pointer stored callee @state) stored callee.value_type callee @state) @prefix @state)
+    } else if direct is? none {function=snapshot(expression(node.func @state) @prefix @state)}
+    else {function=code_reference(direct callee @state)}
     if projection isnt? none {function=put(hir.ExpressedIdentifier[node.loc code_type(projection.function node @state result=projection.result) projection.symbol] @state)}
     let borrowed=state.borrowed_arguments.get(id set[])
     let disposable=state.disposable_arguments.get(id set[])-borrowed
@@ -3446,11 +3460,7 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
         keywords[name]=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
     }
     let args:array<addr>=[]
-    # A record's function field is a receiver method: the record is its
-    # hidden first argument, as the hosted backend passes it.
-    if callee is? hir.MemberAccess and object_type(hir.node_at(state.input.nodes callee.value).value_type state) isnt? none {
-        args.push(snapshot(expression(callee.value @state) @prefix @state))
-    }
+    if receiver isnt? none {args.push(receiver)}
     let index:addr=0
     loop parameter in signature.pos_or_kw {
         let value:addr?=none

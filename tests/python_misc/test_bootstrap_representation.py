@@ -117,7 +117,10 @@ main=():>int64=>{{
     }}
     let huge=hir.node_at(session.hir {names[id(huge.declaration)]})
     $runtime_assert huge is? hir.Declare
-    let literal=hir.node_at(session.hir huge.expr)
+    # The native pass makes the store into the zero/record cell explicit.
+    let stored=hir.node_at(session.hir huge.expr)
+    $runtime_assert stored is? hir.ValueCast and stored.value_type =? state.big_type
+    let literal=hir.node_at(session.hir stored.expr)
     $runtime_assert literal is? hir.ObjectLiteral and literal.integer_value isnt? none
     $runtime_assert literal.integer_value =? {2**100}
     # A big local cannot silently change a function's declared word ABI.

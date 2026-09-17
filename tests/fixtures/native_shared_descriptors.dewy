@@ -4,7 +4,7 @@
 strip = (pos:array<int64> nodes:int64):>int64 => {
     loop i in 0.. and i <? pos.length { pos[i] = pos[i] + nodes }
     pos.push(nodes)
-    let total = 0
+    let total:int64 = 0
     loop value in pos { total += value }
     return total
 }

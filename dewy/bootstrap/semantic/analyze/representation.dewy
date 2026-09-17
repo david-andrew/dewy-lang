@@ -72,6 +72,15 @@ prelude_call = (name:string args:array<addr> loc:Span @state:State @session:cont
     else if name =? '_bigint_neg' {operation='__unary_sub__'}
     return put(hir.FunctionCall[loc signature.ret func args [] none operation] @session)
 }
+# A big value stored into a `bigint` binding crosses the union boundary:
+# a nonzero record or the literal zero packs into the zero/record cell, as
+# an ordinary checked store would (the hosted lowering packs implicitly).
+stored_big = (id:addr @state:State @session:contexts.Session):>addr => {
+    let value=to_big(id @state @session)
+    let node=node_at(value session)
+    if node.value_type =? state.big_type return value
+    return put(hir.ValueCast[node.loc state.big_type value] @session)
+}
 to_big = (id:addr @state:State @session:contexts.Session nonzero:bool=false):>addr => {
     if is_big(id state session) return id
     let node=node_at(id session)
@@ -179,11 +188,11 @@ rewrite_node = (id:addr @state:State @session:contexts.Session):>hir.AST => {
     } else if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none and node.binding_id in? state.big_bindings {node.value_type=state.big_type}
     } else if node is? hir.Declare {
-        if node.binding_id isnt? none and node.binding_id in? state.big_bindings {node.expr=to_big(node.expr @state @session) node.annotation=state.big_type}
+        if node.binding_id isnt? none and node.binding_id in? state.big_bindings {node.expr=stored_big(node.expr @state @session) node.annotation=state.big_type}
     } else if node is? hir.Assign {
         let target=node_at(node.target session)
         if target is? hir.ExpressedIdentifier and target.binding_id isnt? none and target.binding_id in? state.big_bindings {
-            if node.op =? '=' {node.value=to_big(node.value @state @session)}
+            if node.op =? '=' {node.value=stored_big(node.value @state @session)}
             else {
                 let helper=if node.op =? '+=' '_bigint_add' else '_bigint_sub'
                 $runtime_assert node.op in? ['+=' '-=']

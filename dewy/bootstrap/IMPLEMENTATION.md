@@ -163,6 +163,25 @@ the native fixed point is not grounds for retiring them yet.
   rewrites its UTF-8 bytes and byte length on every step from the
   counter's ordinal, as the hosted backend does (`string_ranges`; fixture
   `native_character_ranges`, pair check 54).
+- Abstract integer declarations (2026-09-17). An unannotated integer
+  binding (`let base = 5`, `total = 0`) is the abstract `int`, as the
+  hosted `_widen_inferred_let_value` makes it, instead of a word chosen at
+  the declaration: representation selection decides a word (when the
+  bounds analysis proves every value fits) or a big integer (an oversized
+  literal, a product of unknown range, a loop accumulator), and `int +
+  uint8` meets the fixed width under a fit proof. Container elements and
+  record fields keep their word representation. A binding rewritten to
+  `bigint` now packs its initializer or assigned value into the
+  zero/record cell (`stored_big`), which the hosted lowering did
+  implicitly; native lowered the raw record or the word `0` as the cell
+  and crashed. `abstract_int` and `bigint_auto` pass.
+- Record receivers evaluated once (2026-09-17). A call through a
+  record's function field (`Word().eat(src)`) lowered the record
+  expression twice, for the field read and for the hidden receiver
+  argument; since the slot-forwarder literals declare a field binding,
+  the duplicate declaration broke `slice_lengths` (a regression of the
+  record-methods slice). The call now snapshots the receiver once and
+  reads the field from it.
 - Types as runtime values (2026-09-17). `type<Family>` resolves to the
   hosted MetaType (a type minted under `Family`, carried as its brand id);
   a minted type named where one is expected becomes a `BrandValue`, and

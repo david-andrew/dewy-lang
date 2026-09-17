@@ -31,7 +31,7 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-passed at the start of the day and 197/211 by its end, then 203/211 on 2026-09-17 (the fixes marked
+passed at the start of the day and 197/211 by its end, then 205/211 on 2026-09-17 (the fixes marked
 "the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
@@ -219,9 +219,9 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [units_algebra.dewy](../tests/units_algebra.dewy) | no declaration of this name is in scope |
 | [trig.dewy](../tests/trig.dewy) | no declaration of this name is in scope (passes since 2026-09-17: quantity dispatch and fixed-point arithmetic) |
 | [refinements.dewy](../tests/refinements.dewy) | BinOp expression (passes since 2026-09-16) |
-| [abstract_int.dewy](../tests/abstract_int.dewy) | no overload takes (int64, uint8) |
+| [abstract_int.dewy](../tests/abstract_int.dewy) | no overload takes (int64, uint8) (passes since 2026-09-17: unannotated integer declarations stay abstract) |
 | [bigint.dewy](../tests/bigint.dewy) | no declaration of this name is in scope |
-| [bigint_auto.dewy](../tests/bigint_auto.dewy) | its range is [123456789012345678901234567890, 123456789012345678901234567890]; annotate a fixed width, prove its range, or use bigint |
+| [bigint_auto.dewy](../tests/bigint_auto.dewy) | its range is [123456789012345678901234567890, 123456789012345678901234567890]; annotate a fixed width, prove its range, or use bigint (passes since 2026-09-17) |
 | [bigint_division.dewy](../tests/bigint_division.dewy) | runtime exact division materialization |
 | [literal_unions.dewy](../tests/literal_unions.dewy) | int64 does not fit -1 &#124; 1 |
 | [bigint_zero_or_nonzero.dewy](../tests/bigint_zero_or_nonzero.dewy) | runtime exact division materialization |

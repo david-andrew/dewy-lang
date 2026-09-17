@@ -447,13 +447,18 @@ union_bigint_materialization = (value:addr expected:addr id:addr env:Environment
     return put(hir.Block[node.loc expected [saved.declaration flow] true] @session)
 }
 
-widen = (value:addr id:addr env:Environment @session:contexts.Session strings:bool=true):>addr|Error => {
+widen = (value:addr id:addr env:Environment @session:contexts.Session strings:bool=true abstract:bool=false):>addr|Error => {
     let node = node_at(value session)
     let type=types.node_at(session.types node.value_type)
     if type is? types.IntegerLiteralType {
+        # An unannotated integer binding is the abstract `int`, as in the
+        # hosted checker (`_widen_inferred_let_value`): representation
+        # selection owns its storage choice (a word when the bounds analysis
+        # proves every value fits, else a big integer); a source annotation
+        # materializes it now. Container elements and record fields keep
+        # their word representation.
+        if abstract and node is? hir.Integer return put(hir.Integer[node.loc types.primitive('int' @session.types) node.prefix node.value] @session)
         if type.value <? -9223372036854775808 or type.value >? 9223372036854775807 {
-            # Representation selection owns an inferred abstract integer's
-            # storage choice; a source annotation can materialize it now.
             return put(hir.Integer[node.loc types.primitive('int' @session.types) '0d' type.value] @session)
         }
         return against(value types.primitive('int64' @session.types) id env @session)
@@ -1870,7 +1875,7 @@ unpack_value = (targets_id:addr source:addr id:addr env:Environment @session:con
             continue
         }
         if existing isnt? none return problem(id "duplicate declaration `{target_name}`" 'this scope already declares the name' env session)
-        let widened=if constant value else widen(value id env @session strings=false)
+        let widened=if constant value else widen(value id env @session strings=false abstract=true)
         if widened is? Error return widened
         let type=node_at(widened session).value_type
         let binding_id=bindings.allocate(@session.registry none target_name 'value' loc)
@@ -1987,7 +1992,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         if inhabitant isnt? none {value=inhabitant}
     }
     if value is? Error return value
-    if annotation is? none and not constant { value = widen(value node.right env @session strings=false) }
+    if annotation is? none and not constant { value = widen(value node.right env @session strings=false abstract=true) }
     if value is? Error return value
     let checked = node_at(value session)
     let syntax_id = contexts.syntax_ref(id env.lexical @session)
