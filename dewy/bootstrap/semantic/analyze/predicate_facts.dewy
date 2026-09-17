@@ -127,6 +127,24 @@ atomic = (state:facts.State condition:addr truth:bool context:paths.Context @dat
                 if ranges.is_empty(narrowed) return none
                 facts.set_value(@current facts.Term[tested.binding_id] narrowed)
             }
+            # A tested type that excludes zero (`Sign = -1|1`, or a word
+            # refined by `not=? 0`) establishes the nonzero fact an interval
+            # cannot carry, as a declared refinement would.
+            let shape=types.node_at(data.env.types types.unfold(node.test_type data.env.types))
+            let excludes_zero=false
+            if shape is? types.RefinedType {
+                loop p in shape.propositions { if p.subject =? 'self' and p.projection =? 'value' and p.op =? 'not=?' and p.value =? 0 and p.term is? none { excludes_zero=true } }
+            } else if shape is? types.TypeOr {
+                let literal_set=shape.items.length >? 0
+                let has_zero=false
+                loop member in shape.items {
+                    let literal=types.node_at(data.env.types member)
+                    if literal isnt? types.IntegerLiteralType { literal_set=false break }
+                    if literal.value =? 0 { has_zero=true }
+                }
+                excludes_zero=literal_set and not has_zero
+            } else if shape is? types.IntegerLiteralType { excludes_zero=shape.value not=? 0 }
+            if excludes_zero { facts.put(@current facts.nonzero(tested.binding_id) ranges.exact(1)) }
         }
         return selected_member(node truth current @data)
     }

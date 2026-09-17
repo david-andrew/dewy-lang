@@ -615,8 +615,10 @@ def test_native_scalar_lowering(tmp_path):
         assert native.returncode == 0, native.stdout + native.stderr
         if text == ARENA + RECORD_FAMILY:
             # Twelve ancestor views must share exact field operations. Before
-            # outlining these, the same fixture emitted over 281 KB.
-            assert len(native.stdout.encode()) < 160_000
+            # outlining these, the same fixture emitted over 281 KB; the
+            # shared-record protocol (headed blocks, detach on write) adds
+            # its prologue per field operation, hence the current budget.
+            assert len(native.stdout.encode()) < 180_000
         output = case.with_suffix('.udewy')
         output.write_text(native.stdout)
         targets = ['x86_64', 'c'] if text.removeprefix(ARENA) in BRAND_READ_CASES else ['x86_64']

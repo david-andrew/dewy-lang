@@ -1650,11 +1650,64 @@ runtime_test = (node:hir.TypeTest @state:State):>addr => {
     let value=runtime_test_value(receiver.value node @state)
     return finish_read(value receiver node @prefix @state)
 }
+# A tested word type whose refinement is a closed set of bounds and gaps on
+# the value itself: comparable at runtime, unlike a general predicate.
+closed_word_set = (test_type:addr actual:addr state:State):>bool => {
+    if views.fixed_integer_layout(actual state.type_nodes) is? none return false
+    let refined_test=types.node_at(state.type_nodes types.unfold(test_type state.type_nodes))
+    if refined_test isnt? types.RefinedType or refined_test.propositions.length =? 0 return false
+    if views.fixed_integer_layout(refined_test.base state.type_nodes) is? none return false
+    loop p in refined_test.propositions { if p.subject not=? 'self' or p.projection not=? 'value' or p.term isnt? none or p.tested_type isnt? none or p.when isnt? none or p.op not in? ['>=?' '<=?' 'not=?' '=?'] return false }
+    return true
+}
 runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
     let actual=hir.node_at(state.input.nodes node.value).value_type
-    if test_has_refinement(node.test_type state) {
+    if test_has_refinement(node.test_type state) and not closed_word_set(node.test_type actual state) {
         if not test_refinements_implied(actual node.test_type @state) return reject(node 'runtime refinement predicates' @state)
         node=hir.TypeTest[node.loc node.value_type node.value views.strip_all_refinements(node.test_type @state.type_nodes) node.negated]
+    }
+    # A word tested against a closed set of integer literals (`x is? Sign`
+    # where `Sign = -1|1`) compares the word with each member.
+    let unfolded_test=types.unfold(node.test_type state.type_nodes)
+    let set_type=types.node_at(state.type_nodes types.strip_refinement(unfolded_test state.type_nodes))
+    let set_members:array<addr>=if set_type is? types.TypeOr set_type.items else [types.strip_refinement(unfolded_test state.type_nodes)]
+    let literal_set=set_members.length >? 0 and views.fixed_integer_layout(actual state.type_nodes) isnt? none
+    loop member in set_members { if types.node_at(state.type_nodes member) isnt? types.IntegerLiteralType {literal_set=false} }
+    # A word tested against a refined word of bounds and gaps (`Sign` as the
+    # word `int64<>=? -1, <=? 1, not=? 0>`) compares against each promise.
+    let refined_test=types.node_at(state.type_nodes unfolded_test)
+    if not literal_set and refined_test is? types.RefinedType and views.fixed_integer_layout(refined_test.base state.type_nodes) isnt? none and views.fixed_integer_layout(actual state.type_nodes) isnt? none and refined_test.propositions.length >? 0 {
+        let closed=true
+        loop p in refined_test.propositions { if p.subject not=? 'self' or p.projection not=? 'value' or p.term isnt? none or p.tested_type isnt? none or p.when isnt? none or p.op not in? ['>=?' '<=?' 'not=?' '=?'] {closed=false} }
+        if closed {
+            let prefix:array<addr>=[]
+            let boolean=types.primitive('bool' @state.type_nodes)
+            let source=snapshot(operand @prefix @state)
+            let result:addr?=none
+            loop p in refined_test.propositions {
+                let name=if p.op =? '>=?' '__ge__' else if p.op =? '<=?' '__le__' else if p.op =? 'not=?' '__ne__' else '__eq__'
+                let part=intrinsic(name [source word(p.value node @state)] boolean node @state)
+                result=if result is? none part else put(hir.ShortCircuit[node.loc boolean 'and' result part] @state)
+            }
+            $runtime_assert result isnt? none
+            prefix.push(if node.negated intrinsic('__not__' [result] boolean node @state) else result)
+            return put(hir.Block[node.loc boolean prefix false] @state)
+        }
+    }
+    if literal_set {
+        let prefix:array<addr>=[]
+        let boolean=types.primitive('bool' @state.type_nodes)
+        let source=snapshot(operand @prefix @state)
+        let result:addr?=none
+        loop member in set_members {
+            let literal=types.node_at(state.type_nodes member)
+            $runtime_assert literal is? types.IntegerLiteralType
+            let same=intrinsic('__eq__' [source word(literal.value node @state)] boolean node @state)
+            result=if result is? none same else put(hir.ShortCircuit[node.loc boolean 'or' result same] @state)
+        }
+        $runtime_assert result isnt? none
+        prefix.push(if node.negated intrinsic('__not__' [result] boolean node @state) else result)
+        return put(hir.Block[node.loc boolean prefix false] @state)
     }
     # A value whose static type already decides the test (a local narrowed to
     # one literal, a member that is a subtype of the tested type) has no

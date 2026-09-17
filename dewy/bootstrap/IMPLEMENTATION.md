@@ -203,9 +203,17 @@ the native fixed point is not grounds for retiring them yet.
   µDewy loop takes no else; a loop-else producing a value is rejected.
   With that, `test_native_scalar_lowering` runs to its end: the arena
   growth case expects the net growth under the eight-element floor
-  (`56`, updated), and one case remains open, `value is? Sign` on a
-  `-1|0|1` word where `Sign = -1|1` (the true branch does not yet carry
-  `value not=? 0` into the result contract: a refinement narrowing).
+  (`56`, updated).
+- Closed value-set tests (2026-09-17). `value is? Sign` on a `-1|0|1`
+  word where `Sign = -1|1`: the lowering compares the word against the
+  set's bounds and gaps (a refined word or a union of integer literals)
+  instead of rejecting a runtime refinement predicate; the bounds analysis
+  takes a tested type that excludes zero as the nonzero fact an interval
+  cannot carry; and the checking boundary discharges a refined expectation
+  without an obligation when every alternative already establishes it (a
+  narrowed word carrying the promises, a closed literal set, a constant,
+  or a flow whose arms each do), as the hosted checker does. With that
+  every `test_native_scalar_lowering` case passes.
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &

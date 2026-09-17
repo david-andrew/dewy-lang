@@ -158,6 +158,54 @@ begin = (source:contexts.Context @session:contexts.Session inherited:dict<string
 # Conversion to a refinement adds an obligation, never an assumption. More
 # specialized materializations (bigint, rational, quantities, protocol slots)
 # will join this boundary rather than becoming per-expression exceptions.
+carries_promises = (id:addr target:types.RefinedType session:contexts.Session):>bool => {
+    let node=node_at(id session)
+    if node is? hir.ValueCast|hir.RepresentationCast return carries_promises(node.expr target session)
+    if node is? hir.Obligation return carries_promises(node.value target session)
+    let plain=true
+    loop promise in target.propositions {
+        if promise.subject not=? 'self' or promise.projection not=? 'value' or promise.term isnt? none or promise.tested_type isnt? none or promise.when isnt? none or promise.axiom isnt? none {plain=false}
+    }
+    if not plain return false
+    let constant=constant_integer(id session)
+    if constant isnt? none {
+        loop promise in target.propositions { if not propositions.holds(promise constant) return false }
+        return true
+    }
+    let own=types.node_at(session.types node.value_type)
+    if own is? types.RefinedType {
+        let carried:set<string>=set[]
+        loop p in own.propositions {carried.add(propositions.identity_key(p))}
+        let all_carried=true
+        loop promise in target.propositions { if propositions.identity_key(promise) not in? carried {all_carried=false break} }
+        if all_carried return true
+    }
+    let members=types.node_at(session.types types.strip_refinement(node.value_type session.types))
+    if members is? types.TypeOr and members.items.length >? 0 {
+        let all_hold=true
+        loop item in members.items {
+            let literal=types.node_at(session.types item)
+            if literal isnt? types.IntegerLiteralType {all_hold=false break}
+            loop promise in target.propositions { if not propositions.holds(promise literal.value) {all_hold=false break} }
+            if not all_hold break
+        }
+        if all_hold return true
+    }
+    if node is? hir.Block {
+        if node.items.length =? 0 return false
+        return carries_promises(node.items[node.items.length-1] target session)
+    }
+    if node is? hir.Flow {
+        if node.default is? none return false
+        loop arm_id in node.arms {
+            let arm=node_at(arm_id session)
+            if arm isnt? hir.IfArm|hir.LoopArm return false
+            if not carries_promises(arm.body target session) return false
+        }
+        return carries_promises(node.default target session)
+    }
+    return false
+}
 against = (value:addr expected:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let node = node_at(value session)
     if types.is_primitive(types.node_at(session.types node.value_type) 'never') return value
@@ -183,6 +231,11 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
             }
             if proven return checked
         }
+        # A value whose every alternative already establishes the promises
+        # needs no obligation: a word narrowed by `is? Sign` to Sign's own
+        # value set, a closed literal set, a constant, or a flow whose arms
+        # each do. The hosted checker discharges these at the boundary too.
+        if carries_promises(value target session) return checked
         return put(hir.Obligation[node.loc node_at(checked session).value_type checked expected display.type_to_dewy(expected session.types)] @session)
     }
     let inhabitant=unit_inhabitant(value expected id env @session)
