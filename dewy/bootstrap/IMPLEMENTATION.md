@@ -172,6 +172,14 @@ the native fixed point is not grounds for retiring them yet.
   record's function field passes the record as the hidden first argument.
   `object_methods` and `keyword_default_calls` pass; fixture
   `native_object_methods` (pair check 55).
+- Compile-time quantities at rational parameters (2026-09-17). Dispatch
+  accepts a compile-time number, or a quantity of one, for a parameter of
+  the prelude's rational or fixed record (with the same dimension), and
+  prefers the exact rational overload when both apply, as the hosted
+  checker does; the checking boundary materializes the literal into the
+  rational record and keeps the dimension (`cos(45°)` selects
+  `_cos_rational`). `trig` then stops at runtime quantity arithmetic:
+  the native checker has no fixed-point (`fixed`) arithmetic yet.
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &

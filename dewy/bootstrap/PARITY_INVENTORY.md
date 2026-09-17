@@ -217,7 +217,7 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [rationals.dewy](../tests/rationals.dewy) | runtime rational materialization |
 | [powers.dewy](../tests/powers.dewy) | no declaration of this name is in scope |
 | [units_algebra.dewy](../tests/units_algebra.dewy) | no declaration of this name is in scope |
-| [trig.dewy](../tests/trig.dewy) | no declaration of this name is in scope |
+| [trig.dewy](../tests/trig.dewy) | no declaration of this name is in scope (since 2026-09-17: `cos(45°)` dispatches; stops at fixed-point arithmetic, `20N * 10m * cos(45°)`) |
 | [refinements.dewy](../tests/refinements.dewy) | BinOp expression (passes since 2026-09-16) |
 | [abstract_int.dewy](../tests/abstract_int.dewy) | no overload takes (int64, uint8) |
 | [bigint.dewy](../tests/bigint.dewy) | no declaration of this name is in scope |

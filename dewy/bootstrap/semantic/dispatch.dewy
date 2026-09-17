@@ -18,8 +18,39 @@ System:type = [
     # Prelude materializations belong to call acceptance, not structural
     # subtyping. Absent prelude declarations cannot grant numeric conversions.
     bigint:addr?=none
+    # A compile-time number materializes into the prelude's rational or
+    # fixed record (also inside a quantity of the same dimension).
+    rational:addr?=none
+    fixed:addr?=none
 ]
 ArgumentPair:type = const [formal:addr actual:addr]
+# The number of a quantity type, else the type itself (refinements stripped).
+number_of = (type:addr nodes:types.Table):>addr => {
+    let plain=types.strip_refinement(type nodes)
+    let node=types.node_at(nodes plain)
+    return if node is? types.QuantityType node.number else plain
+}
+dimensions_match = (formal:addr actual:addr nodes:types.Table):>bool => {
+    let a=types.node_at(nodes types.strip_refinement(formal nodes))
+    let b=types.node_at(nodes types.strip_refinement(actual nodes))
+    if a is? types.QuantityType return b is? types.QuantityType and a.dimension =? b.dimension
+    return b isnt? types.QuantityType
+}
+# Whether a type is the prelude family's record (a family may be a union
+# whose record alternative is the runtime form).
+family_is = (type:addr family:addr? nodes:types.Table):>bool => {
+    if family is? none return false
+    let plain=types.strip_refinement(type nodes)
+    if types.same_type(plain family nodes) return true
+    let declared=types.node_at(nodes family)
+    if declared isnt? types.TypeOr return false
+    loop item in declared.items { if types.node_at(nodes item) is? types.ObjectType and types.same_type(plain item nodes) return true }
+    return false
+}
+compile_time_number = (type:addr nodes:types.Table):>bool => {
+    let node=types.node_at(nodes types.strip_refinement(number_of(type nodes) nodes))
+    return node is? types.IntegerLiteralType|types.RationalLiteralType
+}
 ShapeMatch:type = [pairs:array<ArgumentPair>]
 Inference:type = [bindings:dict<string addr>=[] contextual:set<string>=set[]]
 Candidate:type = const [index:addr method:addr]
@@ -191,6 +222,10 @@ match_shape = (method:types.FunctionType pos:array<addr> kw:dict<string addr>):>
 
 accepts = (actual:addr formal:addr system:System @nodes:types.Table):>bool => {
     if subtyping.is_subtype(actual formal system.links @nodes) return true
+    if compile_time_number(actual nodes) and dimensions_match(formal actual nodes) {
+        let wanted=number_of(formal nodes)
+        if family_is(wanted system.rational nodes) or family_is(wanted system.fixed nodes) return true
+    }
     if system.bigint is? none return false
     let target=types.node_at(nodes types.strip_refinement(formal nodes))
     if target is? types.TypeOr {
@@ -401,9 +436,29 @@ match_best_function = (methods:array<addr> pos:array<addr> kw:dict<string addr> 
         }
         if not shadowed { winners.push(candidate) }
     }
-    # The exact-number preference joins this step when the rational/fixed
-    # representation atoms are ported. It precedes the contextual return
-    # preference in the hosted checker (not merely a default-width choice).
+    # Compile-time numbers pick exact (rational) parameters over fixed ones:
+    # a literal such as `45°` materializes into whichever representation the
+    # parameter wants, so both overloads apply and the exact one wins. This
+    # precedes the contextual return preference, as in the hosted checker.
+    if winners.length >? 1 {
+        let scores:array<addr> = []
+        let best:addr = 0
+        loop candidate in winners {
+            let method = method_at(nodes candidate.method)
+            let score:addr = 0
+            loop i in 0.. and i <? pos.length and i <? method.pos_or_kw.length {
+                if not compile_time_number(pos[i] nodes) continue
+                let param = number_of(method.pos_or_kw[i].value_type nodes)
+                if family_is(param system.rational nodes) { score += 2 }
+                else if family_is(param system.fixed nodes) { score += 1 }
+            }
+            scores.push(score)
+            if score >? best { best = score }
+        }
+        let exact:array<Candidate> = []
+        loop i in 0.. and i <? winners.length and i <? scores.length { if scores[i] =? best { exact.push(winners[i]) } }
+        winners = exact
+    }
     if winners.length >? 1 and expected isnt? none {
         let by_result:array<Candidate> = []
         loop candidate in winners {

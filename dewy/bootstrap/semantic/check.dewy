@@ -188,6 +188,19 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
     let inhabitant=unit_inhabitant(value expected id env @session)
     if inhabitant is? Error return inhabitant
     if inhabitant isnt? none return against(inhabitant expected id env @session)
+    # A compile-time quantity (`45°`) materializes into the rational record
+    # its parameter wants, keeping the dimension, as the hosted checker does.
+    if target is? types.QuantityType {
+        let actual_quantity=types.node_at(session.types node.value_type)
+        if actual_quantity is? types.QuantityType and actual_quantity.dimension =? target.dimension {
+            let literal=types.node_at(session.types types.strip_refinement(actual_quantity.number session.types))
+            if literal is? types.IntegerLiteralType|types.RationalLiteralType and numeric_values.is_family(target.number 'Rational' env.lexical session) {
+                let converted=to_rational(value true id env @session)
+                if converted is? Error return converted
+                return put(hir.ValueCast[node.loc expected converted] @session)
+            }
+        }
+    }
     let word_rational=target is? types.ObjectType and numeric_values.is_family(expected 'Rational' env.lexical session)
     let big_rational=target is? types.ObjectType|types.TypeOr and numeric_values.is_family(expected 'BigRational' env.lexical session)
     if (word_rational or big_rational) and types.node_at(session.types node.value_type) is? types.IntegerLiteralType|types.RationalLiteralType {
@@ -917,7 +930,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     let kw_types:dict<string addr> = []
     loop argument in positional { pos_types.push(node_at(argument session).value_type) }
     loop [name argument] in keyword { kw_types[name] = node_at(argument session).value_type }
-    let system = dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session)]
+    let system = dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)]
     let hint=call_hint(expected function positional env session)
     let matched = if order.length =? 0 dispatch.match_best_function(methods pos_types kw_types hint system @session.types) else dispatch.match_ordered(methods pos_types kw_types order hint system @session.types)
     if matched is? dispatch.DispatchError {
@@ -4457,7 +4470,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
     if original.function is? none return none
     let generic = node_at(original.function session)
     if generic isnt? hir.GenericFunction return none
-    let inference = dispatch.infer_type_args(signature positional keyword expected dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session)] @session.types)
+    let inference = dispatch.infer_type_args(signature positional keyword expected dispatch.System[session.links builtins.promotions bigint=numeric_values.family('BigInt' env.lexical session) rational=numeric_values.family('Rational' env.lexical session) fixed=numeric_values.family('Fixed' env.lexical session)] @session.types)
     if inference is? none return problem(id 'cannot infer generic type parameters' 'the arguments do not determine every type parameter' env session)
     let arguments:dict<string addr> = []
     loop param in generic.source.params {
