@@ -13,6 +13,7 @@ def test_native_string_descriptor_sharing(tmp_path):
         'native_string_descriptor_sharing', 'native_string_lifetimes',
         'native_string_scratch', 'native_string_materialization',
         'native_static_strings', 'native_string_boundary_storage', 'native_word_memory_arguments',
+        'native_string_span_comparisons',
     )]
     # A long literal crosses the uint32 offset table's low-byte boundary.
     # Its embedded NUL and multi-scalar graphemes also check static byte order,
@@ -48,4 +49,21 @@ let main=():>int64=>{
     (tmp_path / 'text').mkdir()
     check_structural_text(binary, tmp_path / 'text', cases=[
         "let f=(s:string):>string=>s\nlet main=():>int64=>{let s=f('ab'+'cd') let old=s s='x' return if old=?'abcd' and s=?'x' 42 else 0}",
-    ], errors=[])
+        """let text:string='abc'
+let calls:int64=0
+let first=():>0=>{calls=calls*10+1 return 0}
+let last=():>1=>{calls=calls*10+2 return 1}
+let right=():>string=>{calls=calls*10+3 text='changed' return 'ab'}
+let main=():>int64=>{
+    if text.length <?2 return 1
+    let equal=text[first()..last()] =? right()
+    return if equal and calls=?123 and text=?'changed' 42 else 2
+}
+""",
+        "let choose=():>'ab'|'cd'=>'ab'\nlet main=():>int64=>if (choose() as string)=?('a'+'b') 42 else 1",
+        "let check=(s:string):>int64=>{if s.length <?4 return 1 return if (s[1..])[..2)=?'bc' 42 else 2}\nlet main=():>int64=>check('abcd')",
+    ], errors=[
+        "let check=(s:string):>string=>(s[1..])[..2)\nlet main=():>int64=>{let value=check('x') return 0}",
+        "let check=(s:string):>string=>{if s.length not=?4 return '' return (s[1..])[..4)}\nlet main=():>int64=>{let value=check('abcd') return 0}",
+        "let check=(s:string):>string=>{if s.length not=?4 return '' return (s[1..])[(-1)..2)}\nlet main=():>int64=>{let value=check('abcd') return 0}",
+    ])

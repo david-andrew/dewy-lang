@@ -1,0 +1,29 @@
+# Immediate slice/index comparisons need no owned view descriptor. Byte spans
+# must still respect grapheme boundaries, including nested and shifted views.
+let allocated=():>int64=>_arena_allocated_bytes
+let live=():>int64=>_arena_live_bytes
+let compare=(text:string):>bool=>{
+    if text.length not=?4 return false
+    let before=allocated()
+    loop i in 0.. and i <?10000 {
+        if text[1..3) not=?'é🇺🇸' return false
+        if (text[1..])[..2) not=?'é🇺🇸' return false
+        if text[0] not=?'A' or text[3] not=?'z' return false
+        if text[1] =?'e' return false
+        if text[0] =?text[3] return false
+        if not text.startswith('A') or not text.endswith('z') return false
+    }
+    return allocated()-before =?0
+}
+let exercise=():>bool=>{
+    let text='A'+'é🇺🇸z'
+    if not compare(text) return false
+    let shifted='x'+text
+    if shifted.length not=?5 return false
+    return compare(shifted[1..])
+}
+let main=():>int64=>{
+    let before=live()
+    if not exercise() return 1
+    return if live()=?before 42 else 2
+}

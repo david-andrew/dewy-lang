@@ -2489,6 +2489,7 @@ class _BoundsValidator:
 
     def _eval_string_slice(self, node: hir.StringSlice, state: State, *, validate: bool) -> Interval | None:
         self._eval(node.string, state, validate=validate)
+        receiver_length = self._length_interval(node.string, state)
         left = (
             Interval.exact(0)
             if node.range.left is None
@@ -2500,7 +2501,7 @@ class _BoundsValidator:
         else:
             right = self._eval(node.range.right, state, validate=validate)
         if validate:
-            self._validate_string_slice(node, left, right, length, state)
+            self._validate_string_slice(node, left, right, length, state, receiver_length=receiver_length)
         return None
 
     def _eval_string_equal(self, node: hir.StringEqual, state: State, *, validate: bool) -> Interval | None:
@@ -3971,6 +3972,8 @@ class _BoundsValidator:
         right: Interval | None,
         length: int | None,
         state: State | None = None,
+        *,
+        receiver_length: Interval | None = None,
     ) -> None:
         """Require every possible dynamic endpoint to address a valid boundary.
 
@@ -3980,6 +3983,20 @@ class _BoundsValidator:
         if node.range.left is None and node.range.right is None:
             return
         bounds = node.range.bounds or '[]'
+        # This interval belongs to the evaluated receiver. Temporary slices
+        # have no binding identity, but their numeric length is still evidence.
+        if receiver_length is not None and receiver_length.lower is not None:
+            minimum = receiver_length.lower
+            def within(endpoint, interval, delta, lowest, limit):
+                return endpoint is None or (
+                    interval is not None and interval.lower is not None
+                    and interval.upper is not None
+                    and interval.lower + delta >= lowest
+                    and interval.upper + delta <= limit
+                )
+            if (within(node.range.left, left, int(bounds[0] == '('), 0, minimum)
+                and within(node.range.right, right, -int(bounds[1] == ')'), -1, minimum - 1)):
+                return
         if length is None and state is not None:
             string_id = self._array_id(node.string)
             if string_id is not None:

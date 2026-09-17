@@ -11490,9 +11490,10 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context, array: hir.AST | None = None) -
         if (
             length is None
             and (index.left is not None or index.right is not None)
-            and not (_is_string_type(array.type) and sb.array_route_id(array, ctx.binding_registry) is not None)
+            and not _is_string_type(array.type)
         ):
-            # a named runtime-length string defers to the bounds analysis
+            # String expressions defer to bounds analysis, which also tracks
+            # the lengths of temporary slices without a named storage route.
             user_error(
                 ctx.srcfile,
                 'sequence slice is not proven in bounds',

@@ -1985,37 +1985,78 @@ string_index = (node:hir.StringIndex @state:State):>addr => {
     prefix.push(result)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
-string_slice = (node:hir.StringSlice @state:State):>addr => {
-    let range=hir.node_at(state.input.nodes node.range)
-    if range isnt? hir.Range or range.step_pair isnt? none return reject(node 'stepped string slicing' @state)
-    let prefix:array<addr>=[]
-    let value=snapshot(owned_value(node.string @state) @prefix @state)
-    prefix.push(ensure_segmented(value node @state))
+StringBounds:type = const [first:addr count:addr]
+string_bounds = (range:hir.Range length:addr node:hir.AST @prefix:array<addr> @state:State):>StringBounds => {
     let bounds=if range.bounds is? none '[]' else range.bounds
     let first=if range.left is? none word(0 node @state) else expression(range.left @state)
     if range.left isnt? none and bounds in? ['()' '(]'] {first=word_op('__add__' first word(1 node @state) node @state)}
     first=snapshot(first @prefix @state)
-    let stop=if range.right is? none read_word(value layouts.string_descriptor.grapheme_length node @state) else expression(range.right @state)
+    let stop=if range.right is? none length else expression(range.right @state)
     if range.right isnt? none and bounds in? ['[]' '(]'] {stop=word_op('__add__' stop word(1 node @state) node @state)}
     stop=snapshot(stop @prefix @state)
     let count=snapshot(word_op('__sub__' stop first node @state) @prefix @state)
     let negative=intrinsic('__lt__' [count word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
     let zero=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) count '=' word(0 node @state)] @state)
     prefix.push(conditional(negative zero node @state))
-    let result=snapshot(string_view(value first count node @state) @prefix @state)
+    return StringBounds[first count]
+}
+string_slice = (node:hir.StringSlice @state:State):>addr => {
+    let range=hir.node_at(state.input.nodes node.range)
+    if range isnt? hir.Range or range.step_pair isnt? none return reject(node 'stepped string slicing' @state)
+    let prefix:array<addr>=[]
+    let value=snapshot(owned_value(node.string @state) @prefix @state)
+    let bounds=string_bounds(range read_word(value layouts.string_descriptor.grapheme_length node @state) node @prefix @state)
+    let result=snapshot(string_view(value bounds.first bounds.count node @state) @prefix @state)
     prefix.push(string_runtime('_native_string_release' [value] node @state result_void=true))
     prefix.push(result)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+
+# An immediately consumed view needs byte boundaries and an owning root,
+# not a separately allocated string descriptor. Keeping that root until the
+# whole comparison finishes preserves the left value across right-hand calls
+# that replace its source. Bounds still execute once, in source order.
+StringSpan:type = const [root:addr data:addr boundaries:addr start:addr byte_length:addr length:addr]
+string_span = (id:addr @prefix:array<addr> @state:State):>StringSpan => {
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.ValueCast|hir.RepresentationCast and owned_string(node.value_type state) and owned_string(hir.node_at(state.input.nodes node.expr).value_type state) {
+        return string_span(node.expr @prefix @state)
+    }
+    if node is? hir.StringSlice|hir.StringIndex {
+        let source=string_span(node.string @prefix @state)
+        let first:addr=0
+        let count:addr=0
+        if node is? hir.StringSlice {
+            let range=hir.node_at(state.input.nodes node.range)
+            if range isnt? hir.Range or range.step_pair isnt? none {
+                reject(node 'stepped string slicing' @state);
+                return source
+            }
+            let bounds=string_bounds(range source.length node @prefix @state)
+            first=bounds.first count=bounds.count
+        } else {
+            first=snapshot(expression(node.index @state) @prefix @state)
+            count=word(1 node @state)
+        }
+        let boundaries=snapshot(word_op('__add__' source.boundaries word_op('__mul__' first word(4 node @state) node @state) node @state) @prefix @state)
+        let start=snapshot(intrinsic('__load_u32__' [boundaries] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+        let stop_pointer=word_op('__add__' boundaries word_op('__mul__' count word(4 node @state) node @state) node @state)
+        let stop=snapshot(intrinsic('__load_u32__' [stop_pointer] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+        let length=snapshot(word_op('__sub__' stop start node @state) @prefix @state)
+        return StringSpan[source.root source.data boundaries start length count]
+    }
+    let root=snapshot(owned_value(id @state) @prefix @state)
+    return StringSpan[root read_word(root layouts.string_descriptor.data node @state) read_word(root layouts.string_descriptor.boundaries node @state) read_word(root layouts.string_descriptor.start node @state) read_word(root layouts.string_descriptor.byte_length node @state) read_word(root layouts.string_descriptor.grapheme_length node @state)]
+}
 string_equal = (node:hir.StringEqual @state:State):>addr => {
     let prefix:array<addr>=[]
-    let left_view=string_frame_view(node.left @prefix @state)
-    let right_view=string_frame_view(node.right @prefix @state)
-    let left=if left_view isnt? none left_view else snapshot(owned_value(node.left @state) @prefix @state)
-    let right=if right_view isnt? none right_view else snapshot(owned_value(node.right @state) @prefix @state)
-    let result=snapshot(string_equal_values(left right node node.negated @state) @prefix @state)
-    if left_view is? none {prefix.push(string_runtime('_native_string_release' [left] node @state result_void=true))}
-    if right_view is? none {prefix.push(string_runtime('_native_string_release' [right] node @state result_void=true))}
+    let left=string_span(node.left @prefix @state)
+    let right=string_span(node.right @prefix @state)
+    let a=word_op('__add__' left.data left.start node @state)
+    let b=word_op('__add__' right.data right.start node @state)
+    let result=snapshot(string_equal_bytes(a left.byte_length b right.byte_length node node.negated @state) @prefix @state)
+    prefix.push(string_runtime('_native_string_release' [left.root] node @state result_void=true))
+    prefix.push(string_runtime('_native_string_release' [right.root] node @state result_void=true))
     prefix.push(result)
     return put(hir.Block[node.loc types.primitive('bool' @state.type_nodes) prefix false] @state)
 }
@@ -2023,12 +2064,17 @@ string_equal_values = (a_value:addr b_value:addr node:hir.AST negated:bool @stat
     let prefix:array<addr>=[]
     let left=snapshot(a_value @prefix @state)
     let right=snapshot(b_value @prefix @state)
-    let length=snapshot(read_word(left layouts.string_descriptor.byte_length node @state) @prefix @state)
+    prefix.push(string_equal_bytes(string_data(left node @state) read_word(left layouts.string_descriptor.byte_length node @state) string_data(right node @state) read_word(right layouts.string_descriptor.byte_length node @state) node negated @state))
+    return put(hir.Block[node.loc types.primitive('bool' @state.type_nodes) prefix false] @state)
+}
+string_equal_bytes = (left:addr left_length:addr right:addr right_length:addr node:hir.AST negated:bool @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let length=snapshot(left_length @prefix @state)
     let boolean=types.primitive('bool' @state.type_nodes)
-    let same=snapshot(intrinsic('__eq__' [length read_word(right layouts.string_descriptor.byte_length node @state)] boolean node @state) @prefix @state)
+    let same=snapshot(intrinsic('__eq__' [length right_length] boolean node @state) @prefix @state)
     let cursor=snapshot(word(0 node @state) @prefix @state)
-    let a=snapshot(string_data(left node @state) @prefix @state)
-    let b=snapshot(string_data(right node @state) @prefix @state)
+    let a=snapshot(left @prefix @state)
+    let b=snapshot(right @prefix @state)
     let byte_type=types.primitive('uint8' @state.type_nodes)
     let av=intrinsic('__load_u8__' [word_op('__add__' a cursor node @state)] byte_type node @state)
     let bv=intrinsic('__load_u8__' [word_op('__add__' b cursor node @state)] byte_type node @state)

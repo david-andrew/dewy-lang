@@ -2862,7 +2862,7 @@ index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:con
 sequence_slice = (sequence:addr index:addr range:hir.Range type:types.Type length:addr? route:addr? id:addr env:Environment @session:contexts.Session):>addr|Error => {
     if range.step_pair isnt? none return pending(id 'stepped sequence slicing' env session)
     let string = views.string_valued(node_at(sequence session).value_type session.types)
-    if length is? none and (range.left isnt? none or range.right isnt? none) and not (string and route isnt? none) return problem(id 'sequence slice is not proven in bounds' 'bounded slicing requires a known length or a named string whose bounds can be checked' env session)
+    if length is? none and (range.left isnt? none or range.right isnt? none) and not string return problem(id 'sequence slice is not proven in bounds' 'bounded slicing requires a known sequence length' env session)
     let start:bigint? = none
     let stop:bigint? = none
     let count:addr? = none

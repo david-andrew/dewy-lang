@@ -56,9 +56,18 @@ check = (node:hir.StringSlice state:facts.State srcfile:SrcFile @data:predicates
     let right:ranges.Interval?=none
     if range.right isnt? none {right=data.snapshot.numbers.get(range.right)}
     else if length isnt? none {right=ranges.exact(length-1)}
+    # The evaluated receiver keeps its length even when it is a temporary
+    # slice with no storage route. Numeric endpoint bounds need no identity.
+    let measured=data.snapshot.lengths.get(node.string)
+    if measured isnt? none and measured.lower isnt? none {
+        let first=shifted(left opening)
+        let last=shifted(right closing)
+        let first_ok=range.left is? none or first.lower isnt? none and first.upper isnt? none and first.lower >=? 0 and first.upper <=? measured.lower
+        let last_ok=range.right is? none or last.lower isnt? none and last.upper isnt? none and last.lower >=? -1 and last.upper <? measured.lower
+        if first_ok and last_ok return none
+    }
     let sequence=data.snapshot.sequences.get(node.string)
     if length is? none and sequence isnt? none {
-        let measured=data.snapshot.lengths.get(node.string)
         let minimum:bigint=if measured is? none or measured.lower is? none 0 else measured.lower
         if endpoint(range.left left opening true sequence minimum state @data) and endpoint(range.right right closing false sequence minimum state @data) return none
     }
