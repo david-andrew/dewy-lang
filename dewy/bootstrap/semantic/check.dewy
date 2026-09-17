@@ -3014,10 +3014,10 @@ string_method = (receiver:addr name:string id:addr env:Environment @session:cont
 # field values; they do not cause the initializer to run again.
 RecordEntry:type = const [name:string syntax:addr read:addr? read_type:addr? mutable:bool loc:Span]
 # A function stored in a record field is a receiver method: a call through
-# the field passes the record as its hidden first argument. A literal is
-# marked; another function value (`Box[@twice]`) is wrapped in a thunk that
-# takes the hidden receiver and forwards the arguments to it.
-receiver_method = (value:addr type:addr env:Environment @session:contexts.Session):>addr => {
+# the field passes the record as its hidden first argument. Only a literal
+# can be one; another function value (`Box[@twice]`) is rejected as in the
+# hosted checker, rather than wrapped, until closures exist.
+receiver_method = (value:addr type:addr id:addr env:Environment @session:contexts.Session forward:bool=false):>addr|Error => {
     let node=node_at(value session)
     if node is? hir.FunctionLiteral {
         if node.object_receiver return value
@@ -3025,7 +3025,15 @@ receiver_method = (value:addr type:addr env:Environment @session:contexts.Sessio
         return value
     }
     let signature=types.node_at(session.types types.unfold(types.strip_refinement(type session.types) session.types))
-    if signature isnt? types.FunctionType or signature.kw_only.length >? 0 or signature.rest isnt? none or signature.type_params.length >? 0 return value
+    if signature isnt? types.FunctionType return value
+    if forward return slot_forwarder(value signature type env @session)
+    return pending(id 'storing a non-literal function in an object field' env session)
+}
+# A slot's default forwarding to the type's method, as the hosted checker's
+# `_slot_forwarder`: the field holds a literal in the field's convention (the
+# record first) that calls the method, whose body keeps its own.
+slot_forwarder = (value:addr signature:types.FunctionType type:addr env:Environment @session:contexts.Session):>addr => {
+    let node=node_at(value session)
     let loc=node.loc
     let params:array<hir.Param>=[]
     let reads:array<addr>=[]
@@ -3176,7 +3184,9 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
             value = against(value required row_id inner @session)
             if value is? Error return value
         }
-        value = receiver_method(value type inner @session)
+        let marked = receiver_method(value type row_id inner @session)
+        if marked is? Error return marked
+        value = marked
         let binding = bind_field(name type row.loc inner @session)
         let mutable = if field is? none true else field.mutable
         if wanted is? types.ObjectType and wanted.immutable { mutable = false }
@@ -3281,6 +3291,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
     loop field in shape.fields {
         let supplied = given.get(field.name)
         let value:addr? = none
+        let from_default = false
         if supplied isnt? none {
             let checked = expression(supplied inner @session expected=field.value_type)
             if checked is? Error return checked
@@ -3299,6 +3310,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
             let checked=against(function field.value_type id env @session)
             if checked is? Error return checked
             value=checked
+            from_default=true
         } else {
             if field.default is? none return problem(id 'missing constructor field' field.name env session)
             $runtime_assert field.default <? session.syntax_refs.length
@@ -3311,6 +3323,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
             let checked = expression(reference.node default_env @session expected=field.value_type)
             if checked is? Error return checked
             value = checked
+            from_default = true
         }
         $runtime_assert value isnt? none
         if field.refinement.length >? 0 {
@@ -3324,7 +3337,9 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
             value = checked
         }
         $runtime_assert value isnt? none
-        value = receiver_method(value field.value_type inner @session)
+        let marked = receiver_method(value field.value_type id inner @session forward=from_default)
+        if marked is? Error return marked
+        value = marked
         let binding = bind_field(field.name field.value_type node_at(value session).loc inner @session)
         fields.push(hir.ObjectField[node_at(value session).loc field.name value binding field.mutable and not shape.immutable])
     }

@@ -26,7 +26,6 @@ CASES = [
     ('Box:type=[values:array<int64>]\nlet main=():>int64=>{let value=Box[[40 2]] let copy=value copy.values[0]=99 return value.values[0]+copy.values[1]}', 42),
     ('Base:type=type of [x:int64]\nChild:type=type of Base & [y:int64]\nWide:type=type of Base & [a:int64 b:int64 c:int64]\nlet main=():>int64=>{let value:Base=Child[40 2] let copy=value if copy is? Child return copy.x+copy.y return 0}', 42),
     ('Root:type=[x:int64]\nMint:type=type of Root\nChild:type=type of Mint & [y:int64]\nlet main=():>int64=>{let value:Root=Child[40 2] let copy=value if copy is? Child return copy.x+copy.y return 0}', 42),
-    ('Fn:type=(x:int64):>int64\nBox:type=[f:Fn]\nlet twice=(x:int64):>int64=>x*2\nlet main=():>int64=>{let box=Box[@twice] return box.f(21)}', 42),
 
     ('let main=():>int64=>{let values:array<int64>=[20 22] return values[0]+values[1]}', 42),
     ('let main=():>int64=>{let values:array<int64>=[40 2] let copy=values copy[0]=99 return values[0]+copy[1]}', 42),
@@ -633,6 +632,14 @@ def test_native_scalar_lowering(tmp_path):
         native=subprocess.run([binary,case],capture_output=True,text=True,timeout=60,check=False)
         assert native.returncode!=0,text
         assert 'no overload takes' in native.stderr,native.stdout+native.stderr
+
+    # A function stored in a record field is a receiver method; a function
+    # value that is not a literal is rejected there, as the hosted checker does.
+    case=tmp_path/'field-function.dewy'
+    case.write_text('Fn:type=(x:int64):>int64\nBox:type=[f:Fn]\nlet twice=(x:int64):>int64=>x*2\nlet main=():>int64=>{let box=Box[@twice] return box.f(21)}')
+    native=subprocess.run([binary,case],capture_output=True,text=True,timeout=60,check=False)
+    assert native.returncode!=0
+    assert 'non-literal function in an object field' in native.stderr,native.stdout+native.stderr
 
     # This driver deliberately stops below full bounds analysis. Unknown or
     # refuted promises must survive checking and prevent unchecked lowering.

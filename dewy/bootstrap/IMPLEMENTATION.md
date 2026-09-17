@@ -191,16 +191,19 @@ the native fixed point is not grounds for retiring them yet.
   (`numeric_values.is_family` unfolds both sides). `trig` passes; fixture
   `native_fixed_point` (pair check 56).
 - Function values in record fields (2026-09-17). A record field holding a
-  function that is not a literal (`Box[@twice]`, then `box.f(21)`) is
-  wrapped in a thunk that takes the hidden receiver and forwards the
-  arguments, so every call through a record's function field passes the
-  record uniformly (the receiver-method convention above); a literal given
-  to a constructor is marked as a method the same way. The native keeps
-  accepting such fields, which the hosted checker still rejects.
-- Loop else arms (2026-09-17). `loop c {...} else {...}` (a native-only
-  form; the hosted checker rejects it) lowers to a µDewy loop whose body
-  marks entry, followed by the else arm under `not entered`, since a
-  µDewy loop takes no else; a loop-else producing a value is rejected.
+  function that is not a literal (`Box[@twice]`) is rejected as in the
+  hosted checker: every function field is a receiver method (the convention
+  above), and a plain function value would need a closure or a wrapper.
+  A literal given to a constructor is marked as a method the same way. A
+  type's static method filling its slot in a constructor (`T[].f(2)`) is
+  held through a forwarding literal in the field's convention that calls
+  the method, as the hosted checker's `_slot_forwarder` does.
+- Loop else arms (2026-09-17). A loop is a flow arm: when it never enters,
+  the next arm runs, so `if`, `loop`, `else if` and `else loop` mix in one
+  chain with one trailing `else` (agreed with David). The lowering makes
+  the loop's body mark entry and puts the rest of the chain under `not
+  entered`, since a µDewy loop takes no else; a loop arm producing a value
+  is rejected. The hosted checker does not implement the form yet.
   With that, `test_native_scalar_lowering` runs to its end: the arena
   growth case expects the net growth under the eight-element floor
   (`56`, updated).

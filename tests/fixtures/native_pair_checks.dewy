@@ -57,6 +57,7 @@ import p"native_spread.dewy" as spreads
 import p"native_character_ranges.dewy" as character_ranges
 import p"native_object_methods.dewy" as object_methods
 import p"native_fixed_point.dewy" as fixed_point
+import p"native_loop_else.dewy" as loop_else
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -169,5 +170,7 @@ let main=():>int64=>{
     if object_methods.main() not=?42 return 55
     printl('Checking fixed point')
     if fixed_point.main() not=?42 return 56
+    printl('Checking loop else arms')
+    if loop_else.main() not=?42 return 57
     return 42
 }

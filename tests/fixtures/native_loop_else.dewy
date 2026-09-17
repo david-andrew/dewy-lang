@@ -1,0 +1,12 @@
+# A loop is a flow arm: when it never enters, the next arm runs. Loops and
+# conditions mix in one chain with one trailing else (native only for now).
+main=():>int64=>{
+    let total:int64 = 0
+    let n:int64 = 0
+    loop n <? 0 { total += 100 } else { total += 2 }              # 2
+    loop n <? 3 { n += 1 total += 1 } else { total += 100 }       # 5
+    if total >? 50 { total = 0 } else loop n <? 0 { total += 100 } else if n =? 3 { total += 7 } else { total += 100 }   # 12
+    let i:int64 = 0
+    loop i <? 0 { i += 1 } else loop i <? 2 { i += 1 total += 15 }   # 42
+    return total
+}
