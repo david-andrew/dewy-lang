@@ -3005,6 +3005,16 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
         }
     }
     let type = if wanted is? types.ObjectType and expected isnt? none selected else types.object_type(layout none false [] [] @session.types)
+    # A function stored in a record literal is a method of that record: it
+    # takes the record as a hidden receiver and reads sibling fields through
+    # it, as the hosted checker marks it (`object_receiver`).
+    let field_bindings:array<hir.FieldBinding> = []
+    loop field in fields { if field.binding_id isnt? none { field_bindings.push(hir.FieldBinding[field.binding_id field.name]) } }
+    loop field in fields {
+        let literal = node_at(field.value session)
+        if literal isnt? hir.FunctionLiteral continue
+        contexts.replace_hir(field.value hir.FunctionLiteral[literal.loc literal.value_type literal.pos_or_kw_args literal.kw_only_args literal.rest_args literal.rettype literal.body object_receiver=true object_fields=field_bindings object_type=type source=literal.source] @session)
+    }
     let value = put(hir.ObjectLiteral[node.loc type fields] @session)
     return if expected is? none value else against(value expected id env @session)
 }

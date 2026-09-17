@@ -160,6 +160,10 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
         loop parameter in parameters {
             if parameter is? hir.BoundParam {references(parameter.value nodes result symbols @function @seen)}
         }
+        # A receiver method reads its record's fields through the receiver.
+        if literal.object_receiver {
+            loop field in literal.object_fields { function.direct.pop(field.id default=field.id); }
+        }
         function.captures=function.direct
         result.functions[id]=function
     }

@@ -59,6 +59,11 @@ State:type = [
     cell_types:dict<addr array<addr>>=[]
     storage_types:dict<addr addr>=[]
     capture_plan:captures.Plan=captures.Plan[]
+    # The enclosing receiver method: its hidden receiver parameter, its
+    # record type, and the sibling field bindings read through it.
+    receiver_symbol:string?=none
+    receiver_type:addr?=none
+    receiver_fields:dict<addr string>=[]
     borrowed_arguments:dict<addr set<addr>>=[]
     # Value-boundary ownership transfers (see borrowing.Consumed): arguments
     # the caller donates without releasing, and the parameter reads that
@@ -370,6 +375,19 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Integer return put(hir.Integer[node.loc type node.prefix node.value] @state)
     if node is? hir.Bool return put(hir.Bool[node.loc type node.value] @state)
     if node is? hir.ExpressedIdentifier {
+        let receiver_symbol=state.receiver_symbol
+        let receiver_type=state.receiver_type
+        let sibling:string?=if node.binding_id is? none none else state.receiver_fields.get(node.binding_id)
+        if sibling isnt? none and receiver_symbol isnt? none and receiver_type isnt? none {
+            # A sibling field read inside a receiver method: that field of the receiver.
+            let handle=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) receiver_symbol] @state)
+            let layout=object_layout(receiver_type node @state)
+            let offset=layout.offsets.get(sibling)
+            if offset is? none return reject(node 'a sibling field is absent from its record layout' @state)
+            let stored=stored_type(id state)
+            let pointer=address(handle offset node @state)
+            return read_value(field_read(pointer stored node @state) stored node.value_type node @state)
+        }
         let function=if node.binding_id is? none none else state.capture_plan.named.get(node.binding_id)
         if function isnt? none return function_value(function node @state)
         let stored=stored_type(id state)
@@ -433,6 +451,7 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.Assign {
         let original=hir.node_at(state.input.nodes node.target)
         if original isnt? hir.ExpressedIdentifier return reject(node 'a non-binding assignment target' @state)
+        if original.binding_id isnt? none and state.receiver_symbol isnt? none and state.receiver_fields.get(original.binding_id) isnt? none return reject(node 'assigning a sibling field from a method' @state)
         let stored=stored_type(node.target state)
         let target=binding_storage(original stored @state)
         let boxed=original.binding_id isnt? none and original.binding_id in? state.boxed
@@ -3275,6 +3294,11 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
         keywords[name]=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
     }
     let args:array<addr>=[]
+    # A record's function field is a receiver method: the record is its
+    # hidden first argument, as the hosted backend passes it.
+    if callee is? hir.MemberAccess and object_type(hir.node_at(state.input.nodes callee.value).value_type state) isnt? none {
+        args.push(snapshot(expression(callee.value @state) @prefix @state))
+    }
     let index:addr=0
     loop parameter in signature.pos_or_kw {
         let value:addr?=none
@@ -3422,6 +3446,16 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     let capture=state.capture_plan.functions.get(id)
     $runtime_assert capture isnt? none
     if node.object_receiver and capture.captures.length >? 0 return reject(node 'an object method reading enclosing locals needs closure storage' @state)
+    let previous_receiver=state.receiver_symbol
+    let previous_receiver_type=state.receiver_type
+    let previous_receiver_fields=state.receiver_fields
+    if node.object_receiver {
+        let receiver=fresh('self' @state)
+        arguments.push(hir.Param[receiver types.primitive('int64' @state.type_nodes)])
+        let names:dict<addr string>=[]
+        loop field in node.object_fields {names[field.id]=field.name}
+        state.receiver_symbol=receiver state.receiver_type=node.object_type state.receiver_fields=names
+    } else {state.receiver_symbol=none state.receiver_type=none state.receiver_fields=[]}
     loop binding in capture.captures {
         if binding in? capture.writes return reject(node 'writing to a binding from an enclosing function needs closure storage' @state)
     }
@@ -3572,6 +3606,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         if result isnt? none {prologue.push(result)}
         body=put(hir.Block[node.loc result_type prologue false] @state)
     }
+    state.receiver_symbol=previous_receiver state.receiver_type=previous_receiver_type state.receiver_fields=previous_receiver_fields
     return put(hir.FunctionLiteral[node.loc code_type(id node @state result=if projection is? none none else projection.result) arguments [] none result_type body source=node.source] @state)
 }
 

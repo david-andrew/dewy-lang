@@ -55,6 +55,7 @@ import p"native_nested_loop_targets.dewy" as nested_targets
 import p"native_dict_captures.dewy" as dict_captures
 import p"native_spread.dewy" as spreads
 import p"native_character_ranges.dewy" as character_ranges
+import p"native_object_methods.dewy" as object_methods
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -163,5 +164,7 @@ let main=():>int64=>{
     if spreads.main() not=?42 return 53
     printl('Checking character ranges')
     if character_ranges.main() not=?42 return 54
+    printl('Checking object methods')
+    if object_methods.main() not=?42 return 55
     return 42
 }

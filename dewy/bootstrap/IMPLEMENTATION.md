@@ -163,6 +163,15 @@ the native fixed point is not grounds for retiring them yet.
   rewrites its UTF-8 bytes and byte length on every step from the
   counter's ordinal, as the hosted backend does (`string_ranges`; fixture
   `native_character_ranges`, pair check 54).
+- Record-literal methods (2026-09-17). A function stored in a record
+  literal is a method of that record, as the hosted checker marks it
+  (`object_receiver`, `object_fields`, `object_type`): its sibling fields
+  are not captures (the captures analysis excludes them), the lowering
+  gives it a hidden receiver parameter and reads a sibling field as that
+  field of the receiver (writes are rejected), and a call through a
+  record's function field passes the record as the hidden first argument.
+  `object_methods` and `keyword_default_calls` pass; fixture
+  `native_object_methods` (pair check 55).
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &

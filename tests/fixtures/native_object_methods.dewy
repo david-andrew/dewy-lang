@@ -1,0 +1,18 @@
+# A function stored in a record literal is a method: it takes the record as
+# a hidden receiver and reads sibling fields through it.
+main=():>int64=>{
+    let total:int64 = 0
+    let counter = [
+        base = 40
+        step = 2
+        bump = (times:int64):>int64 => base + step * times
+        name = "counter"
+        label = ():>string => name
+    ]
+    total += counter.bump(1)                        # 42
+    if counter.label() =? "counter" { total += 8 } # 50
+    let other = [base = 1 step = 1 bump = (times:int64=3):>int64 => base + step * times]
+    total += other.bump()                           # 54
+    total -= other.bump(11)                         # 42
+    return total
+}
