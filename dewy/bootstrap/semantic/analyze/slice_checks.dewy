@@ -56,10 +56,12 @@ check = (node:hir.StringSlice state:facts.State srcfile:SrcFile @data:predicates
     let right:ranges.Interval?=none
     if range.right isnt? none {right=data.snapshot.numbers.get(range.right)}
     else if length isnt? none {right=ranges.exact(length-1)}
-    # The evaluated receiver keeps its length even when it is a temporary
-    # slice with no storage route. Numeric endpoint bounds need no identity.
     let measured=data.snapshot.lengths.get(node.string)
-    if measured isnt? none and measured.lower isnt? none {
+    # The evaluated receiver keeps its length even when it is a temporary
+    # slice with no storage route (`(s[1..])[..2)`). Numeric endpoint bounds
+    # need no identity. An exactly known length uses the exact rule below,
+    # as the hosted checker does, so `''[0..)` is still refused.
+    if length is? none and measured isnt? none and measured.lower isnt? none {
         let first=shifted(left opening)
         let last=shifted(right closing)
         let first_ok=range.left is? none or first.lower isnt? none and first.upper isnt? none and first.lower >=? 0 and first.upper <=? measured.lower

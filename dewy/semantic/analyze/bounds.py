@@ -1138,6 +1138,9 @@ class _BoundsValidator:
         _drop_index_facts(state, array_id=binding_id)
 
     def _length_interval(self, node: hir.AST, state: State) -> Interval | None:
+        # `(s[1..])[..2)`: a parenthesized receiver is the expression inside
+        while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            node = node.items[0]
         plain = ty.unfold(ty.strip_refinement(node.type))
         original = ty.unfold(ty.strip_refinement(_strip_casts(node).type))
         if isinstance(plain, ty.ArrayType):
