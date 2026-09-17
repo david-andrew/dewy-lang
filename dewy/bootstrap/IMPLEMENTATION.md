@@ -114,8 +114,8 @@ the native fixed point is not grounds for retiring them yet.
   argument; a parenthesized statement group `(a += 1 b += 1)` is an
   unscoped block; `let`-form aliases and alias arguments (`NonEmptyArray<int>`
   for a refined bare `array`, `Positive<i => i <? 10>` conditions) resolve
-  as in the hosted checker, except that a bare value-like builtin name
-  (`let copy = fixed`) stays a read (`precedence`, `error_values`,
+  as in the hosted checker (a bare name on the right of `let`/`const` is a
+  value use, as there) (`precedence`, `error_values`,
   `refinements`, `flow_body_lowering`). A `...` divider in a signature
   starts the keyword-only parameters (`FunctionArgs`); the emitted
   signature appends them after the positional ones, the order call

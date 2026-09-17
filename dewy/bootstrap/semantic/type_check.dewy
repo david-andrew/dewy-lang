@@ -918,18 +918,12 @@ predeclare_alias = (id:addr context:contexts.Context @session:contexts.Session):
         # in the hosted checker.
         let root=type_expression_root(node.right context session)
         if root is? none or not names_type(root context session) return none
-        # A bare name on the right of `let`/`const` is a value (`let value =
-        # Default` constructs a unit value; `let copy = fixed` reads a local
-        # declared later in the block), never an alias. A bare assignment
-        # `A = B` aliases only a declared alias.
+        # As in the hosted checker: a bare name on the right of `let`/`const`
+        # is a value use (`let value = Default` constructs a unit value,
+        # `let w = Space` reads an inhabitant), never an alias; otherwise the
+        # root naming a known type (looked up above) makes it an alias.
         let right=contexts.node_at(source_views.unparen(node.right context session) context session)
-        if right is? parser.Atom {
-            if explicit return none
-            let alias_id=lookup(root context session)
-            if alias_id is? none return none
-            let alias=bindings.binding_at(session.registry alias_id)
-            if alias.type_value is? none and alias_id not in? session.pending_aliases return none
-        }
+        if right is? parser.Atom and explicit return none
         name = source_views.identifier(node.left context session)
         if name is? none return none
     }
