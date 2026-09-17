@@ -1,6 +1,7 @@
 from pathlib import Path
 from shutil import which
 
+import re
 import pytest
 
 from dewy.backend.udewy import codegen
@@ -587,8 +588,9 @@ let main = ():>int64 => {
 
     emitted = codegen(SrcFile.from_path(path))
 
-    assert '= (__dewy_shift_value_1 >> __dewy_shift_count_2)' in emitted
-    assert '__signed_shr__(__dewy_shift_value_3 __dewy_shift_count_4)' in emitted
+    # The temporaries are numbered after the prelude's own lowered shifts.
+    assert re.search(r'= \(__dewy_shift_value_\d+ >> __dewy_shift_count_\d+\)', emitted)
+    assert re.search(r'__signed_shr__\(__dewy_shift_value_\d+ __dewy_shift_count_\d+\)', emitted)
 
 
 def test_explicit_signed_shift_intrinsic_roundtrips(tmp_path: Path) -> None:
