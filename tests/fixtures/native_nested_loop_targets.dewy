@@ -1,0 +1,11 @@
+# A nested unpack target in a loop condition declares its names from the
+# element's fields at the start of every iteration.
+let specs:dict<string [a:int64 b:int64]> = ['x' -> [a=1 b=2] 'y' -> [a=3 b=4]]
+main=():>int64=>{
+    let total:int64 = 0
+    loop [k [a b]] in specs { total += a * b }        # 2 + 12 = 14
+    loop [k [b]] in specs { total += b * 2 }          # 14 + 4 + 8 = 26
+    let marks:array<grapheme> = ['؀' 'A' '́']
+    if marks.length =? 3 { total += 16 }               # 42
+    return total
+}

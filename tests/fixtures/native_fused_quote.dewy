@@ -1,0 +1,15 @@
+# A combining mark directly after the opening quote (one grapheme in the
+# source) is the string's first scalar, not part of the delimiter.
+main=():>int64=>{
+    let total:int64 = 0
+    let mark = '́'
+    if mark.length =? 1 { total += 10 }
+    let parts:array<grapheme> = ['e' '́' 'x']
+    let joined = parts.join
+    if joined.length =? 2 and joined =? "éx" { total += 22 }
+    let escaped = "\ŕ"                         # `\r` then the mark
+    if escaped.length =? 2 and escaped =? "\r\u0301" { total += 4 }
+    let converted:string = parts as string
+    if converted =? joined and converted.length =? 2 { total += 6 }
+    return total
+}

@@ -109,6 +109,30 @@ the native fixed point is not grounds for retiring them yet.
   (the globals scan and the module emitter flatten desugared statement
   groups). Fixtures `native_or_throw`, `native_type_facts` (pair checks
   45-46) and the extended `native_unpacking_targets`.
+- Pipes, keyword-only parameters, runtime range ends, fused quotes
+  (2026-09-16). `x |> @f` and `@f <| x` call the function value with one
+  argument; a parenthesized statement group `(a += 1 b += 1)` is an
+  unscoped block; `let`-form aliases and alias arguments (`NonEmptyArray<int>`
+  for a refined bare `array`, `Positive<i => i <? 10>` conditions) resolve
+  as in the hosted checker, except that a bare value-like builtin name
+  (`let copy = fixed`) stays a read (`precedence`, `error_values`,
+  `refinements`, `flow_body_lowering`). A `...` divider in a signature
+  starts the keyword-only parameters (`FunctionArgs`); the emitted
+  signature appends them after the positional ones, the order call
+  lowering already used. `loop i in [0..n)` with a runtime end iterates
+  the open range under a synthesized `i <? n` guard (`<=?` when
+  inclusive), which marks the counter guarded, as the hosted rewrite does;
+  `loop [k [a b]] in specs` declares `a` and `b` from the hidden element
+  per iteration (`tokenizer_gaps`). The grapheme-indexed tokenizer opens
+  a string on a quote fused with a following combining mark or ZWJ and
+  closes it on a quote fused with preceding prepend scalars (`'؀'`); t1
+  restores the fused scalars as content, and decodes an escape letter
+  fused with marks (`\ŕ`) as the escape plus the marks. `array<grapheme>
+  as string` (any string-valued elements) lowers as a join with no
+  separator (`string_join_decode`, `runtime_grapheme_strings`). Fixtures
+  `native_pipe_operators`, `native_keyword_only`,
+  `native_runtime_range_ends`, `native_fused_quote`,
+  `native_nested_loop_targets` (pair checks 47-51).
 - Six parity fixes (2026-09-16). Unpacking assignments `[a b] = value`
   declare new names and assign existing ones by object field or array
   position (`unpacking`, `addr_types`); a record error `type of error &

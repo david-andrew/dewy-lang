@@ -1,0 +1,15 @@
+# A range whose end is a runtime value iterates the open range under a guard.
+count_to = (n:int64):>int64 => {
+    let total:int64 = 0
+    loop i in [0..n) { total += 1 }
+    loop i in [1..n) { total += 2 }
+    return total
+}
+main=():>int64=>{
+    let total:int64 = 0
+    total += count_to(3)                           # 3 + 4 = 7
+    let words:array<string> = ['a' 'b' 'c' 'd' 'e']
+    loop i in [0..words.length) { total += 3 }     # 22
+    loop i in [1..words.length) { total += 5 }     # 42
+    return total
+}

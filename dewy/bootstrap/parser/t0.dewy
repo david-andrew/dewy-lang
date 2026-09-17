@@ -390,7 +390,17 @@ probe_string_opener = (src:nonemptystring):>OpenStringMatch? => {
     else if src.startswith('t"') or src.startswith("t'") { mode = 'template' start = 1 }
     if start >=? src.length return none
     quote = src[start]
-    if quote isnt? '"' | "'" return none
+    if quote isnt? '"' | "'" {
+        # A quote fused with a following combining mark (a quote then U+0301, the
+        # isolated mark) is one grapheme. Open on the quote alone; t1 restores
+        # the mark as the first content scalar. The hosted tokenizer indexes
+        # code points, so it never sees the fused form.
+        scalars = src[start..start+1) as array<uint32>
+        if scalars.length <? 2 return none
+        if scalars[0] =? 0x22 return OpenStringMatch[length=start+1 mode=mode ending=QuoteEnd['"']]
+        if scalars[0] =? 0x27 return OpenStringMatch[length=start+1 mode=mode ending=QuoteEnd["'"]]
+        return none
+    }
     i:addr = start + 1
     loop i <? src.length and src[i] =? quote { i += 1 }
     count = i-start
@@ -460,6 +470,18 @@ ending_description = (ending:StringEnding):>string => {
     return _quoted(ending.text)
 }
 
+# A closing quote fused with preceding prepend scalars (U+0600 then a quote joins
+# the grapheme after it) is one grapheme whose last scalar is the quote. The
+# closer is that grapheme; t1 restores the leading scalars as content.
+fused_closer = (src:nonemptystring ending:StringEnding):>bool => {
+    if ending isnt? QuoteEnd or ending.text.length not=? 1 return false
+    scalars = src[0..1) as array<uint32>
+    if scalars.length <? 2 return false
+    quote = ending.text as array<uint32>
+    if quote.length not=? 1 return false
+    return scalars[scalars.length-1] =? quote[0]
+}
+
 probe_string_closer = (src:nonemptystring ctx:QuotedStringContexts):>CloseStringMatch? => {
     ending = ctx.ending
     if ending is? EndOfFile return none
@@ -467,6 +489,7 @@ probe_string_closer = (src:nonemptystring ctx:QuotedStringContexts):>CloseString
     if src.startswith(delimiter) {
         return CloseStringMatch[length=delimiter.length opening=ctx.opening heredoc=(ending is? HeredocEnd)]
     }
+    if fused_closer(src ending) return CloseStringMatch[length=1 opening=ctx.opening]
     return none
 }
 
@@ -475,6 +498,7 @@ probe_string_chars = (src:nonemptystring ctx:StringBody | RawStringBody | Templa
     ending = ctx.ending
     loop i <? src.length {
         if ending isnt? EndOfFile and src[i..].startswith(ending.text) break
+        if ending isnt? EndOfFile and fused_closer(src[i..] ending) break
         if ctx isnt? RawStringBody {
             if src[i] =? '\\' break
             if ctx is? StringBody and src[i] =? '\{' break

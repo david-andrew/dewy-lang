@@ -1,0 +1,13 @@
+# `...` divides positional-or-keyword parameters from keyword-only ones.
+let required = (x:int64 ... y:int64):>int64 => x + y
+let defaulted = (... scale:int64=3):>int64 => scale * 5
+let mixed = (base:int64 ... step:int64=1 count:int64):>int64 => base + step * count
+main=():>int64=>{
+    let total:int64 = 0
+    total += required(10 y=4)                  # 14
+    total += defaulted()                       # 29
+    total += defaulted(scale=1)                # 34
+    total += mixed(2 count=3)                  # 39
+    total += mixed(1 count=1 step=2)           # 42
+    return total
+}

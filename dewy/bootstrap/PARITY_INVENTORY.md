@@ -31,7 +31,7 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-passed at the start of the day and 186/211 by its end (the fixes marked
+passed at the start of the day and 193/211 by its end (the fixes marked
 "the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
@@ -43,13 +43,13 @@ earlier list now passes. Grouped by first obstacle:
 | --- | --- | --- |
 | 7 | non-conjunctive iterator formula (fixed the same day; all seven pass) | multi_iterator_or, multi_iterator_formula, multi_iterator_exhausted_truth, multi_iterator_labeled_exits, multi_iterator_operators, range_stepped_labeled_exits, range_stepped_multi_optional |
 | 5 | undefined name `__pow__` (fixed the same day: `powers`, `bigint`, `bigint_division` and, after an emitter fix for indirect calls under `transmute`, `units_algebra` pass; `trig` then stops at `cos` of a degree quantity: no overload takes the angle) | powers, units_algebra, trig, bigint, bigint_division |
-| 4 | parser: BinOp expression | refinements, nat_types, tokenizer_gaps, keyword_default_calls |
+| 4 | parser: BinOp expression (`refinements` and `tokenizer_gaps` pass the same day: refined bare-array alias arguments, alias conditions, pipe operators, runtime range ends `[0..n)` iterated under a guard, nested loop unpack targets; `keyword_default_calls` then stops at an object method closing over a sibling field, the `object_methods` lowering gap; `nat_types` at a `->` pair in a loop comprehension) | refinements, nat_types, tokenizer_gaps, keyword_default_calls |
 | 4 | these type arguments | place_slots, type_values, recursive_mints, length_terms |
 | 2 | string slice is not proven in bounds | conditional_value_facts, length_preserving_calls |
-| 2 | parser: Postfix expression | precedence, error_values |
+| 2 | parser: Postfix expression (fixed the same day: pipe operators `\|>`/`<\|`; both pass) | precedence, error_values |
 | 2 | array index is not proven in bounds (`0..0`) | prototype_mode, prototype_panic |
-| 2 | tokenizer: No token matched | string_join_decode, runtime_grapheme_strings |
-| 1 each | no overload takes (`int64`, `uint8`); integer literal exceeds `int64`; undefined `length` (addr_types, fixed the same day); runtime test within one union payload alternative (fixed the same day); undefined type `nonemptystring` (fixed the same day); parser: Block expression; unreachable match arm (2 fixtures, fixed the same day; `error_fields` then needed `or_throw`, also added); undefined `ox` (unpacking; fixed the same day, including nested and dictionary/set entries); cannot prove refinement `@tok is? 0` (fixed the same day); mixed record and array literal (spread); execution difference (literal_types); integer range `[0, ∞]` (array_iteration); `range` not iterable (range_values, fixed the same day); `a` used before initialization (object_methods; fixed, now stops at method closures over sibling fields); character range ordinal conversion (string_ranges) | abstract_int, bigint_auto, addr_types, abstract_int_containers, refinement_chains, flow_body_lowering, error_fields, covariant_slots, unpacking, type_facts, spread, literal_types, array_iteration, range_values, object_methods, string_ranges |
+| 2 | tokenizer: No token matched (a quote or escape letter fused with a combining mark or prepend into one grapheme; fixed the same day with `array<grapheme> as string` lowering; both pass) | string_join_decode, runtime_grapheme_strings |
+| 1 each | no overload takes (`int64`, `uint8`); integer literal exceeds `int64`; undefined `length` (addr_types, fixed the same day); runtime test within one union payload alternative (fixed the same day); undefined type `nonemptystring` (fixed the same day); parser: Block expression (flow_body_lowering, fixed the same day: a parenthesized statement group as a flow body); unreachable match arm (2 fixtures, fixed the same day; `error_fields` then needed `or_throw`, also added); undefined `ox` (unpacking; fixed the same day, including nested and dictionary/set entries); cannot prove refinement `@tok is? 0` (fixed the same day); mixed record and array literal (spread); execution difference (literal_types); integer range `[0, ∞]` (array_iteration); `range` not iterable (range_values, fixed the same day); `a` used before initialization (object_methods; fixed, now stops at method closures over sibling fields); character range ordinal conversion (string_ranges) | abstract_int, bigint_auto, addr_types, abstract_int_containers, refinement_chains, flow_body_lowering, error_fields, covariant_slots, unpacking, type_facts, spread, literal_types, array_iteration, range_values, object_methods, string_ranges |
 
 Records: `~/dev/dewy-build-artifacts/perf/parity-s2/results.jsonl` (not
 committed). Parser and tokenizer items belong with the bootstrap parser.
@@ -218,7 +218,7 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [powers.dewy](../tests/powers.dewy) | no declaration of this name is in scope |
 | [units_algebra.dewy](../tests/units_algebra.dewy) | no declaration of this name is in scope |
 | [trig.dewy](../tests/trig.dewy) | no declaration of this name is in scope |
-| [refinements.dewy](../tests/refinements.dewy) | BinOp expression |
+| [refinements.dewy](../tests/refinements.dewy) | BinOp expression (passes since 2026-09-16) |
 | [abstract_int.dewy](../tests/abstract_int.dewy) | no overload takes (int64, uint8) |
 | [bigint.dewy](../tests/bigint.dewy) | no declaration of this name is in scope |
 | [bigint_auto.dewy](../tests/bigint_auto.dewy) | its range is [123456789012345678901234567890, 123456789012345678901234567890]; annotate a fixed width, prove its range, or use bigint |
@@ -230,18 +230,18 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [place_slots.dewy](../tests/place_slots.dewy) | these type arguments |
 | [conditional_value_facts.dewy](../tests/conditional_value_facts.dewy) | effective endpoint intervals are 0..0 and -1..281474976710654 |
 | [length_preserving_calls.dewy](../tests/length_preserving_calls.dewy) | effective endpoint intervals are 0..0 and -1..281474976710654 |
-| [nat_types.dewy](../tests/nat_types.dewy) | BinOp expression |
+| [nat_types.dewy](../tests/nat_types.dewy) | BinOp expression (`w -> w.length` pair in a loop comprehension) |
 | [addr_types.dewy](../tests/addr_types.dewy) | no declaration of this name is in scope |
 | [printing.dewy](../tests/printing.dewy) | structural and union string conversion |
 | [union_containers.dewy](../tests/union_containers.dewy) | structural string interpolation |
 | [token_arrays.dewy](../tests/token_arrays.dewy) | structural string interpolation |
 | [abstract_int_containers.dewy](../tests/abstract_int_containers.dewy) | a runtime test within one union payload alternative |
-| [precedence.dewy](../tests/precedence.dewy) | Postfix expression |
+| [precedence.dewy](../tests/precedence.dewy) | Postfix expression (passes since 2026-09-16) |
 | [refinement_chains.dewy](../tests/refinement_chains.dewy) | no type of this name is in scope |
-| [tokenizer_gaps.dewy](../tests/tokenizer_gaps.dewy) | BinOp expression |
+| [tokenizer_gaps.dewy](../tests/tokenizer_gaps.dewy) | BinOp expression (passes since 2026-09-16) |
 | [prototype_mode.dewy](../tests/prototype_mode.dewy) | the index interval here is 0..0 |
 | [prototype_panic.dewy](../tests/prototype_panic.dewy) | the index interval here is 0..0 |
-| [flow_body_lowering.dewy](../tests/flow_body_lowering.dewy) | Block expression |
+| [flow_body_lowering.dewy](../tests/flow_body_lowering.dewy) | Block expression (passes since 2026-09-16) |
 | [error_fields.dewy](../tests/error_fields.dewy) | earlier arms already cover these values |
 | [protocol_tables.dewy](../tests/protocol_tables.dewy) | structural string interpolation |
 | [dynamic_strings.dewy](../tests/dynamic_strings.dewy) | structural string interpolation |
@@ -252,8 +252,8 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [unpacking.dewy](../tests/unpacking.dewy) | no declaration of this name is in scope |
 | [length_terms.dewy](../tests/length_terms.dewy) | these type arguments |
 | [type_facts.dewy](../tests/type_facts.dewy) | @tok is? 0 is required when the result is true |
-| [string_join_decode.dewy](../tests/string_join_decode.dewy) | No implemented token starts here |
-| [error_values.dewy](../tests/error_values.dewy) | Postfix expression |
+| [string_join_decode.dewy](../tests/string_join_decode.dewy) | No implemented token starts here (passes since 2026-09-16) |
+| [error_values.dewy](../tests/error_values.dewy) | Postfix expression (passes since 2026-09-16) |
 | [spread.dewy](../tests/spread.dewy) | each record field needs a named value |
 | [refined_results_fields.dewy](../tests/refined_results_fields.dewy) | 1/3 does not fit [numerator:int64 denominator:int64<i => i >? 0>] |
 | [loop_temporaries.dewy](../tests/loop_temporaries.dewy) | 0/1 does not fit [numerator:int64 denominator:int64<i => i >? 0>] |
@@ -269,8 +269,8 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [range_stepped_multi_optional.dewy](../tests/range_stepped_multi_optional.dewy) | non-conjunctive iterator formula |
 | [object_methods.dewy](../tests/object_methods.dewy) | a is initialized here; a may be accessed here before it is initialized |
 | [string_ranges.dewy](../tests/string_ranges.dewy) | character range ordinal conversion |
-| [runtime_grapheme_strings.dewy](../tests/runtime_grapheme_strings.dewy) | No implemented token starts here |
-| [keyword_default_calls.dewy](../tests/keyword_default_calls.dewy) | BinOp expression |
+| [runtime_grapheme_strings.dewy](../tests/runtime_grapheme_strings.dewy) | No implemented token starts here (passes since 2026-09-16) |
+| [keyword_default_calls.dewy](../tests/keyword_default_calls.dewy) | BinOp expression (keyword-only parameters check since 2026-09-16; stops at an object method closing over a sibling field) |
 | [position_only_calls.dewy](../tests/position_only_calls.dewy) | write this parameter as name:type |
 
 ## Position-only parameters

@@ -1115,6 +1115,9 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             if content is? parser.Flat and source_views.is_operator(content.op 'RangeJuxtapose' env.lexical session) return range_value(id content env @session bounds=node.delims)
         }
         if node.delims =? '()' and node.inner.length =? 1 return expression(node.inner[0] env @session expected=expected call_target=call_target allow_place=allow_place)
+        # `(a += 1 i += 2)`: a parenthesized statement group is an unscoped
+        # block, as in the hosted checker.
+        if node.delims =? '()' and node.inner.length >? 1 return block(id env @session scoped=false expected=expected)
         if node.delims =? '[]' {
             let captured=captured_loop(node env session)
             if captured isnt? none return loop_capture(id captured env @session expected=expected)
@@ -1214,6 +1217,15 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
         }
         if contexts.node_at(node.op env.lexical session) is? post.CombinedAssignment return compound_assignment(id node env @session)
         if op =? '=>' return function_literal(id node env @session expected_signature=expected)
+        if op =? '|>' or op =? '<|' {
+            # `x |> f` calls the function value `f` with `x`; `f <| x` is
+            # the mirror image. A named function is written `@name`.
+            let callable = expression(if op =? '|>' node.right else node.left env @session)
+            if callable is? Error return callable
+            let argument = expression(if op =? '|>' node.left else node.right env @session)
+            if argument is? Error return argument
+            return call(callable [argument] [] id env @session expected=expected)
+        }
         if op =? '=' or op =? ':=' or op =? '::' return declaration(id env @session)
         if op =? 'as' {
             let included=source_views.include_arguments(node.left env.lexical session)
@@ -1970,6 +1982,7 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
         let arguments = contexts.node_at(parameter_id env.lexical session)
         let rows:array<addr> = if arguments is? parser.Block arguments.inner else [parameter_id]
         loop item in rows {
+            if declarations.is_divider(item env.lexical session) continue
             let parsed=declarations.parameter_source(item env.lexical session)
             if parsed is? Error return parsed
             if parsed.annotation is? none return problem(item 'a generic function needs every parameter type declared' 'annotate this parameter' env session)
@@ -1978,7 +1991,7 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     let args = declarations.function_args(parameter_id lexical @session literal=true)
     if args is? Error return args
     let parameters:array<types.PosOrKwArg> = []
-    loop arg in args {
+    loop arg in args.pos_or_kw {
         parameters.push(types.PosOrKwArg[arg.name arg.value_type arg.required arg.place])
     }
     let result=if result_id is? none types.primitive('untyped' @session.types) else declarations.function_result(result_id lexical @session)
@@ -1986,7 +1999,7 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     # Abstract integers keep mathematical arithmetic until bounds analysis
     # chooses their representation. Selecting a word here would silently
     # give an `int` function wrapping arithmetic before its proofs run.
-    return types.function_type(parameters [] none result generic @session.types)
+    return types.function_type(parameters args.kw_only none result generic @session.types)
 }
 predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error? => {
     let node = contexts.node_at(id env.lexical session)
@@ -2103,9 +2116,16 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     let prefix = contexts.node_at(parameter_id env.lexical session)
     if prefix is? parser.BinOp and source_views.is_operator(prefix.op 'TypeParamJuxtapose' env.lexical session) { parameter_id = prefix.right }
     let arguments = contexts.node_at(parameter_id env.lexical session)
-    let rows:array<addr> = if arguments is? parser.Block arguments.inner else [parameter_id]
+    let source_rows:array<addr> = if arguments is? parser.Block arguments.inner else [parameter_id]
+    # The `...` divider is not a parameter; keyword-only rows follow it.
+    let rows:array<addr> = []
+    loop row in source_rows { if not declarations.is_divider(row env.lexical session) { rows.push(row) } }
     let position:addr = 0
-    loop param in shape.pos_or_kw {
+    let positional_count = shape.pos_or_kw.length
+    let parameter_slots:array<types.PosOrKwArg> = []
+    loop param in shape.pos_or_kw { parameter_slots.push(param) }
+    loop param in shape.kw_only { parameter_slots.push(types.PosOrKwArg[param.name param.value_type param.required param.place]) }
+    loop param in parameter_slots {
         $runtime_assert position <? rows.length
         let parsed=declarations.parameter_source(rows[position] env.lexical session)
         if parsed is? Error return parsed
@@ -2143,6 +2163,12 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
             binding.store_type=resolved
             bindings.store_binding(@session.registry param.binding_id binding)
         }
+    }
+    let keyword_parameters:array<hir.Param> = []
+    if parameters.length >? positional_count {
+        let positional:array<hir.Param> = []
+        loop i in 0.. and i <? parameters.length { if i <? positional_count { positional.push(parameters[i]) } else { keyword_parameters.push(parameters[i]) } }
+        parameters=positional
     }
     if method isnt? none and owner isnt? none {
         let member_scope=contexts.child(env.lexical @session)
@@ -2184,7 +2210,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     if method isnt? none and method.receiver_type isnt? none {slots.push(types.PosOrKwArg['__dewy_receiver' method.receiver_type true method.place_self])}
     loop slot in shape.pos_or_kw {slots.push(slot)}
     let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types)
-    let value=put(hir.FunctionLiteral[literal.loc function_type parameters [] none returns body source=env.lexical.source] @session)
+    let value=put(hir.FunctionLiteral[literal.loc function_type parameters keyword_parameters none returns body source=env.lexical.source] @session)
     return if expected_signature is? none value else against(value expected_signature id env @session)
 }
 
@@ -3411,13 +3437,13 @@ range_membership = (value:addr range:hir.Range id:addr env:Environment @session:
 }
 
 IteratorResult:type = const [values:array<addr> environment:Environment]
-iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|Error => {
+iterator = (id:addr env:Environment @guards:array<addr> @prelude:array<addr> @session:contexts.Session):>IteratorResult|Error => {
     let node = contexts.node_at(source_views.unparen(id env.lexical session) env.lexical session)
     if node isnt? parser.BinOp or not source_views.is_operator(node.op 'in' env.lexical session) return pending(id 'non-conjunctive iterator formula' env session)
     let iterable = expression(node.right env @session)
     if iterable is? Error return iterable
     let entry = views.container_entry_types(node_at(iterable session).value_type session.types)
-    if entry isnt? none return container_iterators(id node iterable entry env @session)
+    if entry isnt? none return container_iterators(id node iterable entry env @prelude @session)
     let name = source_views.identifier(node.left env.lexical session)
     if name is? none return pending(id 'iterator target unpacking over non-container values' env session)
     let value = node_at(iterable session)
@@ -3427,6 +3453,20 @@ iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|E
         let stored = resolved_range(iterable session)
         if stored isnt? none {
             iterable = put(stored @session)
+            value = node_at(iterable session)
+        }
+    }
+    # A range whose end is a runtime expression (`[0..argv.length)`) iterates
+    # the open range under a guard, as the hosted checker rewrites it: the end
+    # becomes the predicate `target <? end` (`<=?` when inclusive), which
+    # bounds the counter like an explicit guard and stops the loop.
+    let runtime_end:addr? = none
+    let end_comparison:string = '<?'
+    if value is? hir.Range and value.step_pair is? none and value.left isnt? none and value.right isnt? none and (value.bounds is? none or value.bounds.startswith('[')) {
+        if constant_integer(value.left session) isnt? none and constant_integer(value.right session) is? none {
+            runtime_end = value.right
+            if value.bounds isnt? none and value.bounds.endswith(']') { end_comparison = '<=?' }
+            iterable = put(hir.Range[value.loc value.value_type '[]' none value.left none] @session)
             value = node_at(iterable session)
         }
     }
@@ -3473,6 +3513,16 @@ iterator = (id:addr env:Environment @session:contexts.Session):>IteratorResult|E
     bindings.bind(@session.scopes inner.lexical.scope name binding_id)
     let target_node = put(hir.ExpressedIdentifier[contexts.node_at(node.left env.lexical session).loc target name binding_id] @session)
     let type = types.parameterize(types.primitive('iterator' @session.types) [target] @session.types)
+    if runtime_end isnt? none {
+        let operator=builtins.binary_operators.get(end_comparison)
+        $runtime_assert operator isnt? none
+        let function=identifier(operator id inner @session)
+        if function is? Error return function
+        let counter=put(hir.ExpressedIdentifier[contexts.node_at(node.left env.lexical session).loc target name binding_id] @session)
+        let guard=call(function [counter runtime_end] [] id inner @session expected=types.primitive('bool' @session.types))
+        if guard is? Error return guard
+        guards.push(guard)
+    }
     return IteratorResult[[put(hir.IteratorExpression[node.loc type target_node iterable first step last count] @session)] inner]
 }
 
@@ -3507,15 +3557,15 @@ breaks_loop = (id:addr depth:addr session:contexts.Session):>bool => {
 # postfix formula over leaf indices (`i in a or j in b` is `0 1 or`). Each
 # leaf binds its target for the parts checked after it. A dictionary pair
 # contributes two leaves joined by `and`.
-collect_iterators = (part:addr body_env:Environment arm:parser.KeywordExpr changed:set<string> env:Environment @iterators:array<addr> @formula:array<hir.IteratorFormulaToken> @names:set<string> @session:contexts.Session):>Environment|Error => {
+collect_iterators = (part:addr body_env:Environment arm:parser.KeywordExpr changed:set<string> env:Environment @iterators:array<addr> @formula:array<hir.IteratorFormulaToken> @names:set<string> @guards:array<addr> @prelude:array<addr> @session:contexts.Session):>Environment|Error => {
     $runtime_assert arm.parts.length =? 3
     let node=contexts.node_at(source_views.unparen(part env.lexical session) env.lexical session)
     if node is? parser.BinOp {
         let op=source_views.symbol(node.op env.lexical session)
         if op in? ['and' 'or' 'xor' 'nand' 'nor' 'xnor'] and source_views.contains_iterator(node.left env.lexical session) and source_views.contains_iterator(node.right env.lexical session) {
-            let after_left=collect_iterators(node.left body_env arm changed env @iterators @formula @names @session)
+            let after_left=collect_iterators(node.left body_env arm changed env @iterators @formula @names @guards @prelude @session)
             if after_left is? Error return after_left
-            let after_right=collect_iterators(node.right after_left arm changed env @iterators @formula @names @session)
+            let after_right=collect_iterators(node.right after_left arm changed env @iterators @formula @names @guards @prelude @session)
             if after_right is? Error return after_right
             if op =? 'and' {formula.push('and')}
             else if op =? 'or' {formula.push('or')}
@@ -3526,7 +3576,7 @@ collect_iterators = (part:addr body_env:Environment arm:parser.KeywordExpr chang
             return after_right
         }
     }
-    let result=iterator(part body_env @session)
+    let result=iterator(part body_env @guards @prelude @session)
     if result is? Error return result
     let first=true
     loop iterator_id in result.values {
@@ -3579,6 +3629,29 @@ evaluate_formula = (formula:array<hir.IteratorFormulaToken> active:array<bool>):
     if stack.length not=? 1 return none
     return stack[0]
 }
+# A predicate tested after the iterators advance: its truth refines the body,
+# a bounded counter is marked guarded, and its falsity breaks the loop.
+loop_predicate = (predicate:addr iterators:array<addr> body_env:Environment @prefix:array<addr> @session:contexts.Session):>Environment => {
+    hoist_condition(predicate @session)
+    let refined_env = refined(predicate true body_env @session)
+    loop index in 0.. and index <? iterators.length {
+        let iter = node_at(iterators[index] session)
+        $runtime_assert iter is? hir.IteratorExpression
+        let target = node_at(iter.target session)
+        $runtime_assert target is? hir.ExpressedIdentifier and target.binding_id isnt? none
+        if hir_facts.predicate_bounds_counter(predicate target.binding_id session.hir session.types) {
+            let item = iterators[index]
+            $runtime_assert item <? session.hir.length
+            contexts.replace_hir(item hir.IteratorExpression[iter.loc iter.value_type iter.target iter.iterable iter.first iter.step iter.last iter.count true] @session)
+        }
+    }
+    let loc = node_at(predicate session).loc
+    let empty = put(hir.Void[loc types.primitive('void' @session.types)] @session)
+    let guard = put(hir.IfArm[loc node_at(empty session).value_type predicate empty] @session)
+    let stop = put(hir.Break[loc types.primitive('never' @session.types)] @session)
+    prefix.push(put(hir.Flow[loc node_at(empty session).value_type [guard] stop] @session))
+    return refined_env
+}
 loop_flow = (id:addr arm:parser.KeywordExpr env:Environment @session:contexts.Session):>addr|Error => {
     let first=session.read_states.length
     let result=loop_flow_inner(id arm env @session)
@@ -3598,39 +3671,30 @@ loop_flow_inner = (id:addr arm:parser.KeywordExpr env:Environment @session:conte
     if source_views.contains_iterator(arm.parts[1] env.lexical session) {
         let iterators:array<addr> = []
         let predicates:array<addr> = []
+        let guards:array<addr> = []
+        let prelude:array<addr> = []
         let names:set<string> = set[]
         let formula:array<hir.IteratorFormulaToken> = []
         let joined=false
         loop part in source_views.conjuncts(arm.parts[1] env.lexical session) {
             if not source_views.contains_iterator(part env.lexical session) { predicates.push(part) continue }
-            let collected=collect_iterators(part body_env arm changed env @iterators @formula @names @session)
+            let collected=collect_iterators(part body_env arm changed env @iterators @formula @names @guards @prelude @session)
             if collected is? Error return collected
             if joined {formula.push('and')}
             joined=true
             body_env=collected
         }
         $runtime_assert iterators.length >? 0
+        # Guards synthesized for runtime range ends precede the written
+        # predicates, as in the hosted rewrite.
+        # Nested unpack targets declare their names from the hidden element
+        # binding at the start of every iteration, before any guard.
+        loop declaration in prelude { prefix.push(declaration) }
+        loop guard in guards { body_env = loop_predicate(guard iterators body_env @prefix @session) }
         loop predicate_id in predicates {
             let predicate = expression(predicate_id body_env @session expected=types.primitive('bool' @session.types))
             if predicate is? Error return predicate
-            hoist_condition(predicate @session)
-            body_env = refined(predicate true body_env @session)
-            loop index in 0.. and index <? iterators.length {
-                let iter = node_at(iterators[index] session)
-                $runtime_assert iter is? hir.IteratorExpression
-                let target = node_at(iter.target session)
-                $runtime_assert target is? hir.ExpressedIdentifier and target.binding_id isnt? none
-                if hir_facts.predicate_bounds_counter(predicate target.binding_id session.hir session.types) {
-                    let item = iterators[index]
-                    $runtime_assert item <? session.hir.length
-                    contexts.replace_hir(item hir.IteratorExpression[iter.loc iter.value_type iter.target iter.iterable iter.first iter.step iter.last iter.count true] @session)
-                }
-            }
-            let loc = contexts.node_at(predicate_id env.lexical session).loc
-            let empty = put(hir.Void[loc types.primitive('void' @session.types)] @session)
-            let guard = put(hir.IfArm[loc node_at(empty session).value_type predicate empty] @session)
-            let stop = put(hir.Break[loc types.primitive('never' @session.types)] @session)
-            prefix.push(put(hir.Flow[loc node_at(empty session).value_type [guard] stop] @session))
+            body_env = loop_predicate(predicate iterators body_env @prefix @session)
         }
         condition = iterators[0]
         if iterators.length >? 1 {
@@ -3957,7 +4021,7 @@ prove_total = (value:addr key_type:addr id:addr env:Environment @session:context
 # A dictionary's key/value targets advance together over its compacted live
 # entry arrays. This uses the same iterator HIR as arrays, preserving the
 # binding identity of the key so `d[key]` is proven inside the body.
-container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.EntryTypes env:Environment @session:contexts.Session):>IteratorResult|Error => {
+container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.EntryTypes env:Environment @prelude:array<addr> @session:contexts.Session):>IteratorResult|Error => {
     let target_syntax = contexts.node_at(node.left env.lexical session)
     let targets:array<addr> = [node.left]
     let fields:array<string> = ['keys']
@@ -3972,7 +4036,19 @@ container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.Entry
     let values:array<addr> = []
     loop i in 0.. and i <? targets.length and i <? fields.length and i <? elements.length {
         let name = source_views.identifier(targets[i] env.lexical session)
-        if name is? none return pending(id 'nested iterator target unpacking' env session)
+        # `loop [k [a b]] in specs`: a nested target is a hidden binding of
+        # the element; each written name is declared per iteration as the
+        # field of that name (objects unpack by name), as the hosted rewrite.
+        let nested:array<addr> = []
+        if name is? none {
+            let nested_syntax = contexts.node_at(targets[i] env.lexical session)
+            if nested_syntax isnt? parser.Block or nested_syntax.delims not=? '[]' return pending(id 'nested iterator target unpacking' env session)
+            loop item in nested_syntax.inner {
+                if source_views.identifier(item env.lexical session) is? none return pending(id 'nested iterator target unpacking' env session)
+                nested.push(item)
+            }
+            name = "__dewy_unpack_{session.registry.next_id}"
+        }
         let scope = bindings.scope_at(session.scopes inner.lexical.scope)
         if name in? scope.names return problem(id 'duplicate iterator target' name env session)
         let element = elements[i]
@@ -3987,6 +4063,28 @@ container_iterators = (id:addr node:parser.BinOp iterable:addr entry:views.Entry
         let type = types.parameterize(types.primitive('iterator' @session.types) [element] @session.types)
         values.push(put(hir.IteratorExpression[node.loc type target entries 0 1 none none] @session))
         if fields[i] =? 'keys' { container_state.remember(iterable target inner.state @session) }
+        if nested.length >? 0 {
+            let shape = types.node_at(session.types types.unfold(types.strip_refinement(element session.types) session.types))
+            if shape isnt? types.ObjectType return problem(targets[i] 'nested unpacking needs an object element' display.type_to_dewy(element session.types) env session)
+            loop item in nested {
+                let field_name = source_views.identifier(item env.lexical session)
+                $runtime_assert field_name isnt? none
+                let field:types.ObjectField? = none
+                loop candidate in shape.fields { if candidate.name =? field_name { field = candidate } }
+                if field is? none return problem(item "no field `{field_name}` to unpack" 'objects unpack by field name: write the names of the fields you need' env session)
+                let field_scope = bindings.scope_at(session.scopes inner.lexical.scope)
+                if field_name in? field_scope.names return problem(item 'duplicate iterator target' field_name env session)
+                let item_loc = contexts.node_at(item env.lexical session).loc
+                let field_binding = bindings.allocate_param(@session.registry field_name field.value_type item_loc)
+                let stored = bindings.binding_at(session.registry field_binding)
+                stored.store_type = field.value_type
+                bindings.store_binding(@session.registry field_binding stored)
+                bindings.bind(@session.scopes inner.lexical.scope field_name field_binding)
+                let source = put(hir.ExpressedIdentifier[item_loc element name binding_id] @session)
+                let member = put(hir.MemberAccess[item_loc field.value_type source field_name field.mutable and not shape.immutable] @session)
+                prelude.push(put(hir.Declare[item_loc types.primitive('void' @session.types) 'let' field_name field.value_type member field_binding] @session))
+            }
+        }
     }
     return IteratorResult[values inner]
 }

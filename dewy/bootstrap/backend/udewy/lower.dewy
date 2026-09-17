@@ -2363,6 +2363,13 @@ representation = (node:hir.RepresentationCast @state:State):>addr => {
         prefix.push(result)
         return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
     }
+    # `array<grapheme> as string` (or any string-valued elements): the
+    # concatenation of the elements, which is a join with no separator.
+    if source_array isnt? none and optional is? none and string_type(target state) and string_type(source_array.element state) {
+        let method=hir.ArrayMethod[node.loc node.value_type node.expr 'join']
+        let call=hir.FunctionCall[node.loc node.value_type put(method @state) [] []]
+        return string_join(call method @state)
+    }
     # Both logical and representation conversions can consume a fresh union
     # result. Preserve its payload before retiring the source cell instead
     # of treating that result as a borrowed binding and abandoning it.

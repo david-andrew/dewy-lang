@@ -259,7 +259,11 @@ normalize = (source:program.Program input:emit.Input):>Result => {
         # returns remain exits when `write` lifts this implicit result.
         if not types.is_primitive(result 'void') and not types.is_primitive(result 'never') and not types.is_primitive(tail 'void') and not types.is_primitive(tail 'never') {body=put(hir.Return[function.loc void_type(@state) body] @state)}
         let lowered=block(function statement(body @state) @state)
-        functions.push(program.Function[entry.symbol put(hir.FunctionLiteral[function.loc function.value_type function.pos_or_kw_args function.kw_only_args function.rest_args function.rettype lowered source=function.source] @state)])
+        # Keyword-only parameters follow the positional ones in the emitted
+        # signature; call lowering already orders arguments the same way.
+        let merged:array<hir.Param>=function.pos_or_kw_args
+        loop parameter in function.kw_only_args {merged.push(parameter)}
+        functions.push(program.Function[entry.symbol put(hir.FunctionLiteral[function.loc function.value_type merged [] function.rest_args function.rettype lowered source=function.source] @state)])
     }
     state.in_function=false
     let startup:array<addr>=[]

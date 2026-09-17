@@ -68,6 +68,21 @@ escape_text = (token:raw.StringEscape srcfile:SrcFile):>string | TokenError => {
     if text.length <? 2 return lexical_error(srcfile token.loc "Incomplete string escape")
     let code = text[1..]
     if code in? escape_map return escape_map[code]
+    # An escape letter fused with following combining marks (backslash, r, U+0301 is `\r`
+    # then U+0301) is one grapheme: decode its first scalar and keep the rest.
+    let code_scalars = code as array<uint32>
+    let first_scalar:uint32 = if code_scalars.length >? 0 code_scalars[0] else 0
+    if code_scalars.length >? 1 and first_scalar <? 0x110000 {
+        let head = chr(first_scalar)
+        if head in? escape_map {
+            let decoded = escape_map[head]
+            loop i in 1.. and i <? code_scalars.length {
+                let scalar = code_scalars[i]
+                if scalar <? 0x110000 { decoded += chr(scalar) }
+            }
+            return decoded
+        }
+    }
     if text[1] is? 'u' | 'U' {
         let alphabet = raw.BASE_SPECS['0x'].alphabet
         let value:uint32 = 0
@@ -191,6 +206,16 @@ compound_range = (tokens:array<raw.Token> partners:dict<addr addr> start:addr st
             let chunks:array<addr> = []
             let plain:string = ""
             let interpolated:bool = false
+            # A combining mark fused with the opening quote (one grapheme in
+            # the source) belongs to the content: a quote, U+0301, quote is the mark alone.
+            if token is? raw.StringQuoteOpener | raw.RawStringQuoteOpener | raw.TemplateStringQuoteOpener {
+                let opener_scalars = raw.token_text(token) as array<uint32>
+                let past_quote = false
+                loop scalar in opener_scalars {
+                    if scalar =? 0x22 or scalar =? 0x27 { past_quote = true continue }
+                    if past_quote and scalar <? 0x110000 { plain += chr(scalar) }
+                }
+            }
             let j:addr = i+1
             loop j <? close and j <? tokens.length {
                 let part = tokens[j]
@@ -222,6 +247,14 @@ compound_range = (tokens:array<raw.Token> partners:dict<addr addr> start:addr st
                 }
                 else { return lexical_error(srcfile part.loc "Invalid token in string body") }
                 j += 1
+            }
+            # Prepend scalars fused with the closing quote (U+0600 then a quote) are content.
+            if not eof and close <? tokens.length and tokens[close] is? raw.StringQuoteCloser {
+                let closer_scalars = raw.token_text(tokens[close]) as array<uint32>
+                loop scalar in closer_scalars {
+                    if scalar =? 0x22 or scalar =? 0x27 break
+                    if scalar <? 0x110000 { plain += chr(scalar) }
+                }
             }
             let span = Span[loc.start limit]
             if interpolated {

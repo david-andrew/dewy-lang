@@ -397,14 +397,30 @@ parameter_source = (id:addr context:contexts.Context session:contexts.Session):>
     return ParameterSource[name annotation default place position_only]
 }
 
-function_args = (id:addr context:contexts.Context @session:contexts.Session literal:bool=false):>array<types.PosOrKwArg>|Error => {
+# A bare `...` divides the positional-or-keyword parameters from the
+# keyword-only ones, as in the hosted checker. A rest parameter (`...name`)
+# is still unsupported.
+FunctionArgs:type = const [pos_or_kw:array<types.PosOrKwArg> kw_only:array<types.KwOnlyArg>]
+is_divider = (id:addr context:contexts.Context session:contexts.Session):>bool => {
+    let name=source_views.identifier(id context session)
+    return name isnt? none and name =? '...'
+}
+function_args = (id:addr context:contexts.Context @session:contexts.Session literal:bool=false):>FunctionArgs|Error => {
     let node=contexts.node_at(id context session)
     let items:array<addr>=if node is? parser.Block and node.delims =? '()' node.inner else [id]
     let result:array<types.PosOrKwArg>=[]
+    let kw_only:array<types.KwOnlyArg>=[]
+    let keyword_only=false
     loop item in items {
+        if is_divider(item context session) {
+            if keyword_only return contexts.problem(item 'multiple `...` in function signature' 'a function signature may contain at most one `...` divider' context session)
+            keyword_only=true
+            continue
+        }
         let parsed=parameter_source(item context session)
         if parsed is? Error return parsed
         if parsed.position_only and not literal return contexts.unsupported(item 'position-only function type parameters' context session)
+        if parsed.position_only and keyword_only return contexts.problem(item 'position-only parameter after `...`' 'position-only parameters must be before the keyword-only divider' context session)
         let type=types.primitive('any' @session.types)
         if parsed.annotation isnt? none {
             let inner=contexts.Context[context.source context.scope parsed.name]
@@ -418,10 +434,14 @@ function_args = (id:addr context:contexts.Context @session:contexts.Session lite
             if inferred is? Error return inferred
             type=inferred
         }
+        if keyword_only {
+            kw_only.push(types.KwOnlyArg[parsed.name type required=parsed.default is? none place=parsed.place])
+            continue
+        }
         let name:string?=if parsed.position_only none else parsed.name
         result.push(types.PosOrKwArg[name type required=parsed.default is? none place=parsed.place])
     }
-    return result
+    return FunctionArgs[result kw_only]
 }
 
 # Integer singleton unions at storage boundaries are a word plus its exact
@@ -545,7 +565,7 @@ field = (id:addr context:contexts.Context @session:contexts.Session):>types.Obje
                 if args is? Error return args
                 let ret = function_result(row.right context @session)
                 if ret is? Error return ret
-                return types.ObjectField[name types.function_type(args [] none ret [] @session.types) mutable default]
+                return types.ObjectField[name types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types) mutable default]
             }
         }
     }
@@ -719,7 +739,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
             if args is? Error return args
             let ret = function_result(node.right context @session)
             if ret is? Error return ret
-            return types.function_type(args [] none ret [] @session.types)
+            return types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types)
         }
         if op =? '|' or op =? 'or' {
             let left = bool_arm(node.left context @session)
@@ -819,6 +839,33 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
             let value = resolve_alias(binding_id @session)
             if value is? Error return value
             if value is? types.GenericTypeAlias return aliases.instantiate(value arguments session.links @session.types source_views.srcfile(context session) node.loc)
+            # `NonEmptyArray<int>` where `NonEmptyArray = array<length >? 0>`:
+            # a refined bare `array` takes its element here and keeps its
+            # propositions. `Positive<i => i <? 10>`: conditions refine the
+            # alias's type further.
+            let alias_node=types.node_at(session.types value)
+            let alias_base=types.node_at(session.types types.strip_refinement(value session.types))
+            let alias_propositions:array<facts.Proposition>=if alias_node is? types.RefinedType alias_node.propositions else []
+            if types.is_primitive(alias_base 'array') and arguments.length =? 1 {
+                return refine(types.array_type(word_element(arguments[0] @session) none @session.types) alias_propositions @session)
+            }
+            let argument_block=contexts.node_at(node.right context session)
+            if argument_block is? parser.Block {
+                let promises:array<facts.Proposition>=[]
+                let all_conditions=argument_block.inner.length >? 0
+                loop item in argument_block.inner {
+                    let parsed=conditions(item context @session)
+                    if parsed is? Error return parsed
+                    if parsed is? none {all_conditions=false break}
+                    loop p in parsed {promises.push(p)}
+                }
+                if all_conditions {
+                    let bound=bind_subjects(types.strip_refinement(value session.types) promises id context @session)
+                    if bound is? Error return bound
+                    loop p in alias_propositions {bound.push(p)}
+                    return refine(types.strip_refinement(value session.types) bound @session)
+                }
+            }
             return contexts.problem(node.left 'type alias is not generic' 'this alias takes no arguments' context session)
         }
     }
@@ -865,16 +912,27 @@ predeclare_alias = (id:addr context:contexts.Context @session:contexts.Session):
         explicit=true
         name = source_views.identifier(target.left context session)
     } else if source_views.is_mint(node.right context session) { name = source_views.identifier(node.left context session) }
-    else if not explicit {
-        # `Positive = int<i => i >? 0>` / `Short = string<length <=? 3>` /
-        # `Both = A & B`: a bare assignment rooted at a type name is an alias,
-        # as in the hosted checker.
+    else {
+        # `Positive = int<i => i >? 0>` / `let Short = string<length <=? 3>` /
+        # `Both = A & B`: an assignment rooted at a type name is an alias, as
+        # in the hosted checker.
         let root=type_expression_root(node.right context session)
         if root is? none or not names_type(root context session) return none
+        # A bare name on the right of `let`/`const` is a value (`let value =
+        # Default` constructs a unit value; `let copy = fixed` reads a local
+        # declared later in the block), never an alias. A bare assignment
+        # `A = B` aliases only a declared alias.
+        let right=contexts.node_at(source_views.unparen(node.right context session) context session)
+        if right is? parser.Atom {
+            if explicit return none
+            let alias_id=lookup(root context session)
+            if alias_id is? none return none
+            let alias=bindings.binding_at(session.registry alias_id)
+            if alias.type_value is? none and alias_id not in? session.pending_aliases return none
+        }
         name = source_views.identifier(node.left context session)
         if name is? none return none
     }
-    else return none
     if name is? none return contexts.problem(id 'type alias needs a name' 'use `Name:type = ...`' context session)
     # A bare assignment to an outer name does not declare a shadow, even when
     # its right side is a mint. Let ordinary assignment checking diagnose it.

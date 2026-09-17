@@ -47,6 +47,11 @@ import p"native_bare_aliases.dewy" as bare_aliases
 import p"native_abstract_union_tests.dewy" as abstract_union_tests
 import p"native_or_throw.dewy" as or_throw_checks
 import p"native_type_facts.dewy" as type_fact_checks
+import p"native_pipe_operators.dewy" as pipes
+import p"native_keyword_only.dewy" as keyword_only
+import p"native_runtime_range_ends.dewy" as range_ends
+import p"native_fused_quote.dewy" as fused_quotes
+import p"native_nested_loop_targets.dewy" as nested_targets
 
 let main=():>int64=>{
     printl('Checking string value lifetimes')
@@ -139,5 +144,15 @@ let main=():>int64=>{
     if or_throw_checks.main() not=?42 return 45
     printl('Checking type facts')
     if type_fact_checks.main() not=?42 return 46
+    printl('Checking pipe operators')
+    if pipes.main() not=?42 return 47
+    printl('Checking keyword-only parameters')
+    if keyword_only.main() not=?42 return 48
+    printl('Checking runtime range ends')
+    if range_ends.main() not=?42 return 49
+    printl('Checking fused quotes')
+    if fused_quotes.main() not=?42 return 50
+    printl('Checking nested loop targets')
+    if nested_targets.main() not=?42 return 51
     return 42
 }
