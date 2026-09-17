@@ -362,6 +362,19 @@ distinguishes Dewy from every other systems language, and the standing rule
 applies throughout: proofs come from facts the analysis carries, not from
 restructuring code into a shape the analysis happens to understand.
 
+Two concrete gaps probed on 2026-09-16 and recorded in `status.md` are the
+first tests for that system, because both are loop invariants the interval
+rules cannot express one rule at a time. Array length is exact through
+straight-line pushes but is dropped at every loop head, so build-then-read
+and parallel-array loops need a guard after the loop that restates what the
+loop already established (`array_sort.dewy` carries one). And a counter
+bounded by an enclosing range iterator (`loop j in [0..i)` inside
+`loop i in [0..xs.length)`) is rejected as unbounded although the same loop
+written with an explicit `int64` counter proves. The symbolic state across
+mutation described above should carry "length grows by one per iteration"
+and "an iterator's interval is a fact inside nested loops" as consequences
+of the design rather than as two more transfer rules.
+
 ### 1.3 Effects as a real vocabulary
 
 The transitive parameter effect analysis exists
