@@ -74,12 +74,19 @@ def expected_outcome(case: dict, result: dict, work: Path) -> bool:
             and not list(work.rglob('*.udewy')))
 
 
-def same_output(case: dict, left: dict, right: dict) -> bool:
+def same_output(case: dict, left: dict, right: dict, left_work: 'Path | None' = None, right_work: 'Path | None' = None) -> bool:
     # Ordinary stderr is program output and remains byte-exact. For an
     # explicitly specified failure report, each implementation has already
     # passed its expected fragments, exit and stdout checks independently.
+    # A program printing its own path (`argv[0]`) differs only by the
+    # per-implementation work directory, which is not program behavior.
     streams = ('stdout_hex',) if case.get('diagnostic_stderr') else ('stdout_hex', 'stderr_hex')
-    return all(left[key] == right[key] for key in streams)
+
+    def normalized(result: dict, key: str, work: 'Path | None') -> bytes:
+        data = bytes.fromhex(result[key])
+        return data.replace(str(work).encode(), b'<work>') if work is not None else data
+
+    return all(normalized(left, key, left_work) == normalized(right, key, right_work) for key in streams)
 
 
 def main() -> int:
@@ -154,7 +161,7 @@ def main() -> int:
             (work / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         if all(outcomes) and case['accepts']:
             left, right = record['hosted']['run'], record['native']['run']
-            record['same_output'] = same_output(case, left, right)
+            record['same_output'] = same_output(case, left, right, output / f'{index:03}-{source.stem}' / 'hosted', output / f'{index:03}-{source.stem}' / 'native')
             record['same_stderr_bytes'] = left['stderr_hex'] == right['stderr_hex']
         record['passed'] = all(outcomes) and record.get('same_output', True)
         passed += record['passed']

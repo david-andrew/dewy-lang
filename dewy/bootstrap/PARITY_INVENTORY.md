@@ -31,7 +31,7 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-passed at the start of the day and 197/211 by its end, then 209/211 on 2026-09-17 (the fixes marked
+passed at the start of the day and 197/211 by its end, then 209/211 on 2026-09-18 (the fixes marked
 "the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
