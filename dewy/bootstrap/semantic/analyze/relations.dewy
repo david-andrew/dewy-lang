@@ -11,6 +11,14 @@ copies value evidence, not an alias between the two storage locations.
 """
 
 Context:type = const [facts:facts.Context minimum_lengths:dict<addr bigint>=[]]
+# Element routes allocated during validation join the vacuous-fact roots
+# (the hosted rule reads the registry live). The context is immutable, so a
+# changed root table rebuilds it.
+with_element_roots = (context:Context roots:dict<addr addr>):>Context => {
+    let updated=context.facts
+    updated.element_roots=roots
+    return Context[updated context.minimum_lengths]
+}
 interval_of = (term:facts.Term state:facts.State context:Context):>ranges.Interval => {
     let known = facts.known(state term context.facts)
     if known isnt? none return known

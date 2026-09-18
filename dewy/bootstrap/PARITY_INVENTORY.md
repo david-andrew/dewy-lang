@@ -31,7 +31,7 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-passed at the start of the day and 197/211 by its end, then 209/211 on 2026-09-18 (the fixes marked
+passed at the start of the day and 197/211 by its end, then 210/211 on 2026-09-18 (the fixes marked; `nat_types` is rejected by the hosted compiler as well
 "the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
@@ -230,7 +230,7 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [place_slots.dewy](../tests/place_slots.dewy) | these type arguments (passes since 2026-09-17) |
 | [conditional_value_facts.dewy](../tests/conditional_value_facts.dewy) | effective endpoint intervals are 0..0 and -1..281474976710654 (passes since 2026-09-17) |
 | [length_preserving_calls.dewy](../tests/length_preserving_calls.dewy) | effective endpoint intervals are 0..0 and -1..281474976710654 (passes since 2026-09-17) |
-| [nat_types.dewy](../tests/nat_types.dewy) | BinOp expression (dictionary captures pass since 2026-09-16; now `total += x` over `array<nat64>` cannot prove `>=? 0`) |
+| [nat_types.dewy](../tests/nat_types.dewy) | BinOp expression (dictionary captures pass since 2026-09-16; now `total += x` over `array<nat64>` cannot prove `>=? 0`, in the hosted compiler as well: a hosted bounds gap) |
 | [addr_types.dewy](../tests/addr_types.dewy) | no declaration of this name is in scope |
 | [printing.dewy](../tests/printing.dewy) | structural and union string conversion |
 | [union_containers.dewy](../tests/union_containers.dewy) | structural string interpolation |
@@ -250,7 +250,7 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [type_values.dewy](../tests/type_values.dewy) | these type arguments (passes since 2026-09-17) |
 | [recursive_mints.dewy](../tests/recursive_mints.dewy) | these type arguments (passes since 2026-09-17) |
 | [unpacking.dewy](../tests/unpacking.dewy) | no declaration of this name is in scope |
-| [length_terms.dewy](../tests/length_terms.dewy) | these type arguments (type values pass since 2026-09-17; now the slice `src[i..i+length)` after the promise travels through a record field, a captured array, a sort and an unpack) |
+| [length_terms.dewy](../tests/length_terms.dewy) | these type arguments (passes since 2026-09-18: type values, then element facts through the capture and its joins) |
 | [type_facts.dewy](../tests/type_facts.dewy) | @tok is? 0 is required when the result is true |
 | [string_join_decode.dewy](../tests/string_join_decode.dewy) | No implemented token starts here (passes since 2026-09-16) |
 | [error_values.dewy](../tests/error_values.dewy) | Postfix expression (passes since 2026-09-16) |

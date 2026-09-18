@@ -34,6 +34,11 @@ routes = (array:addr registry:bindings.Registry):>array<bindings.Route> => {
     }
     return result
 }
+# Element routes are allocated while the analysis runs (a first push, a
+# first element read); the vacuous-fact rule must know their roots too.
+note_roots = (array:addr @roots:dict<addr addr> registry:bindings.Registry):>void => {
+    loop item in routes(array registry) { if item.id not in? roots { roots[item.id] = array } }
+}
 roots = (registry:bindings.Registry):>dict<addr addr> => {
     let result:dict<addr addr> = []
     loop [root group] in registry.routes_by_root {

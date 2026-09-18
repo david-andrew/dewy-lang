@@ -13,6 +13,13 @@ import p"fact_state.dewy" as facts
 import p"relations.dewy" as relations
 import p"intervals.dewy" as ranges
 
+note_element_routes = (array:addr @data:predicates.Data):>void => {
+    let known=data.relations.facts.element_roots
+    let before=known.length
+    elements.note_roots(array @known data.registry)
+    if known.length not=? before {data.relations=relations.with_element_roots(data.relations known)}
+}
+
 doc"""
 Transfer an evaluated value's evidence into named storage.
 
@@ -64,6 +71,8 @@ call_result = (@state:facts.State subject:addr value:addr @data:predicates.Data)
 }
 
 seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data:predicates.Data):>void => {
+    # A block's value is its last item (a loop capture's hidden array).
+    value=expressions.value_leaf(value data.env.nodes)
     call_result(@state subject value @data)
     if not intervals.stable(value data.snapshot data.env.nodes) return
     terms.seed_sum(@state subject value data.env data.relations @data.registry)
@@ -97,6 +106,7 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
         if sequence isnt? none {relations.copy_relational(@state facts.Term[sequence 'length'] facts.Term[subject 'length'])}
         if node is? hir.ExpressedIdentifier {
             elements.copy(@state saved.term.binding_id subject word_type loc @data.registry)
+            note_element_routes(subject @data)
             # Snapshot the routes before allocating copies of them.
             let routes=data.registry.routes_by_root.get(saved.term.binding_id [])
             loop route in routes {
@@ -113,7 +123,7 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
     if element isnt? none {relations.copy_relational(@state facts.Term[element] target)}
     if node is? hir.Index {
         let source=data.snapshot.sequences.get(node.array)
-        if source isnt? none {elements.read(@state source subject word_type loc @data.registry)}
+        if source isnt? none {elements.read(@state source subject word_type loc @data.registry) note_element_routes(source @data)}
     }
 }
 

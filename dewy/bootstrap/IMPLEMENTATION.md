@@ -163,6 +163,20 @@ the native fixed point is not grounds for retiring them yet.
   rewrites its UTF-8 bytes and byte length on every step from the
   counter's ordinal, as the hosted backend does (`string_ranges`; fixture
   `native_character_ranges`, pair check 54).
+- Element facts through captures and joins (2026-09-18). A loop
+  capture's result is a block (the hidden array's declaration, the loop,
+  the array); binding it now copies the hidden array's element facts to
+  the target (`value_leaf`: a block's value is its last item, whose facts
+  are still live). Element routes allocated during validation (a first
+  push, a first element read) now join the vacuous-fact roots, so a fact
+  about the elements survives a join with the path that left the array
+  empty, as the hosted rule reading the registry live. A loop variable's
+  refinement is also seeded from the iterable binding's declared element
+  type (`_read_element`), not only the read's type. `length_terms` passes:
+  `eat(src[i..])`'s promise reaches `src[i..i+length)` through the
+  captured record, the sort, and the unpack. `nat_types` remains: the
+  hosted compiler rejects it too (`total += x` over `array<nat64>` inside
+  a loop has no known bound), a hosted bounds gap to close first.
 - Conditional values bind as statements (2026-09-17). `let c = if p a
   else b` (or `c = ...`) is analyzed as `if p { c = a } else { c = b }`,
   as the hosted `_bind_conditional`: under each arm's condition the

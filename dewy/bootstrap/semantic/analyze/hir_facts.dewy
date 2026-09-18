@@ -22,6 +22,17 @@ strip_casts = (id:addr nodes:array<hir.AST>):>addr => {
         else return current
     }
 }
+# The value a block expresses: its last item, through casts and nested
+# blocks (a loop capture is `{ let hidden = []  loop ... push  hidden }`;
+# the hidden array's facts are still live when the block's value is bound).
+value_leaf = (id:addr nodes:array<hir.AST>):>addr => {
+    let current = strip_casts(id nodes)
+    loop true {
+        let node = hir.node_at(nodes current)
+        if node is? hir.Block and node.items.length >? 0 { current = strip_casts(node.items[node.items.length-1] nodes) continue }
+        return current
+    }
+}
 call_function_type = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>types.FunctionType? => {
     let node = hir.node_at(nodes strip_casts(id nodes))
     if node isnt? hir.FunctionCall return none

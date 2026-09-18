@@ -75,6 +75,16 @@ configure = (@checker:Checker prepared:facts.Context?=none):>void => {
     checker.proof_context=proofs.Context[checker.data.env checker.data.relations]
 }
 node_at = (id:addr checker:Checker):>hir.AST => hir.node_at(checker.data.env.nodes id)
+# Element routes allocated during validation join the vacuous-fact roots
+# (the hosted rule reads the registry live), including the path context's copy.
+note_element_routes = (array:addr @checker:Checker):>void => {
+    let known=checker.data.relations.facts.element_roots
+    let before=known.length
+    elements.note_roots(array @known checker.data.registry)
+    if known.length =? before return
+    checker.data.relations=relations.with_element_roots(checker.data.relations known)
+    checker.path_context=paths.Context[checker.data.env.nodes checker.data.relations.facts checker.call_writes]
+}
 fail = (id:addr title:string message:string @checker:Checker hint:string=''):>void => {
     if checker.problem isnt? none return
     checker.problem=Error[srcfile=checker.srcfile title=title pointers=[Pointer[span=node_at(id checker).loc message=message]] hint=hint]
@@ -279,7 +289,7 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
     if validate and method.name =? 'truncate' and (count is? none or count.lower is? none or count.lower <? 0) {fail(id 'truncate length is not proven nonnegative' 'the count may be negative' @checker)}
     if method.name in? ['push' 'insert'] {
         let value=if call.pos_args.length >? 0 call.pos_args[0] else call.kw_args.get('value')
-        if value isnt? none {elements.store(@state sequence value checker.word_type call.loc checker.data.env @checker.data.registry)}
+        if value isnt? none {elements.store(@state sequence value checker.word_type call.loc checker.data.env @checker.data.registry) note_element_routes(sequence @checker)}
     }
     if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear'] {
         let name:lengths.Method=if method.name =? 'push' 'push' else if method.name =? 'insert' 'insert' else if method.name =? 'pop' 'pop' else if method.name =? 'truncate' 'truncate' else 'clear'
@@ -527,6 +537,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
                 let sequence=terms.sequence_id(target.target checker.data.env @checker.data.registry)
                 if sequence isnt? none {
                     elements.store(@state sequence node.pos_args[1] checker.word_type node.loc checker.data.env @checker.data.registry)
+                    note_element_routes(sequence @checker)
                     intervals.forget(@checker.data.snapshot sequence)
                     lengths.apply(@state sequence 'push' none checker.data.env.cap);
                 }
@@ -603,7 +614,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         $runtime_assert target is? hir.Index
         forget_value(target.array @state @checker)
         let array=terms.sequence_id(target.array checker.data.env @checker.data.registry)
-        if array isnt? none {elements.store(@state array node.value checker.word_type node.loc checker.data.env @checker.data.registry)}
+        if array isnt? none {elements.store(@state array node.value checker.word_type node.loc checker.data.env @checker.data.registry) note_element_routes(array @checker)}
     }
     if node is? hir.DictStore|hir.DictRemove {
         let arrays:array<addr>=[node.keys]
@@ -731,10 +742,21 @@ enter_iterators = (iterators:array<addr> state:facts.State @checker:Checker):>fa
         if target.binding_id is? none continue
         facts.set_value(@current facts.Term[target.binding_id] values.loop_counter_interval(node checker.element_intervals checker.data.env))
         let sequence=terms.sequence_id(node.iterable checker.data.env @checker.data.registry)
-        if sequence isnt? none {elements.read(@current sequence target.binding_id checker.word_type node.loc @checker.data.registry)}
-        let iterable=types.node_at(checker.data.env.types node_at(node.iterable checker).value_type)
-        if iterable is? types.ArrayType {
-            let element=types.node_at(checker.data.env.types iterable.element)
+        if sequence isnt? none {elements.read(@current sequence target.binding_id checker.word_type node.loc @checker.data.registry) note_element_routes(sequence @checker)}
+        # `loop x in xs` over an `array<nat64>`: the element type's promise
+        # holds of `x`. The read may carry a narrower element type (a literal's),
+        # so the iterable binding's declared type is consulted as well, as the
+        # hosted `_read_element` does.
+        let candidates:array<addr>=[node_at(node.iterable checker).value_type]
+        if sequence isnt? none and bindings.has_binding(checker.data.registry sequence) {
+            let binding=bindings.binding_at(checker.data.registry sequence)
+            if binding.store_type isnt? none {candidates.push(binding.store_type)}
+            else if binding.value_type isnt? none {candidates.push(binding.value_type)}
+        }
+        loop candidate in candidates {
+            let iterable=types.node_at(checker.data.env.types types.unfold(types.strip_refinement(candidate checker.data.env.types) checker.data.env.types))
+            if iterable isnt? types.ArrayType continue
+            let element=types.node_at(checker.data.env.types types.unfold(iterable.element checker.data.env.types))
             if element is? types.RefinedType {refinements.seed_binding(@current @checker.declared target.binding_id element checker.refinement_context node.loc @checker.data.registry)}
         }
     }
