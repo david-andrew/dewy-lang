@@ -94,7 +94,7 @@ check_of = (id:addr site:Deferred @session:contexts.Session):>Check? => {
         let index=word(node.index loc @session)
         if index is? none return none
         let condition=conjoin([comparison('__le__' integer(0 loc @session) index loc @session) comparison('__lt__' index length loc @session)] loc @session)
-        return Check[condition "{what} index out of bounds: this index was past the {what}'s end (or negative)"]
+        return Check[condition "this index was past the {what}'s end (or negative)"]
     }
     if site.kind =? 'cast' {
         if node isnt? hir.ValueCast or not simple(node.expr session) return none
@@ -116,7 +116,7 @@ check_of = (id:addr site:Deferred @session:contexts.Session):>Check? => {
             parts.push(comparison('__le__' value integer(if maximum <? 9223372036854775807 maximum else 9223372036854775807 loc @session) loc @session))
         }
         if parts.length =? 0 return none
-        return Check[conjoin(parts loc @session) "value does not fit `{display.type_to_dewy(node.value_type session.types)}`: this value was outside its range [{_bigint_as_string(minimum)}, {_bigint_as_string(maximum)}]"]
+        return Check[conjoin(parts loc @session) "this value was outside `{display.type_to_dewy(node.value_type session.types)}`'s range [{_bigint_as_string(minimum)}, {_bigint_as_string(maximum)}]"]
     }
     if site.kind =? 'obligation' {
         if site.refined is? none or not simple(id session) return none
@@ -132,10 +132,10 @@ check_of = (id:addr site:Deferred @session:contexts.Session):>Check? => {
             if subject is? none return none
             if p.value <? -9223372036854775808 or p.value >? 9223372036854775807 return none
             parts.push(comparison(name subject integer(p.value loc @session) loc @session))
-            requirements.push("{if p.projection =? 'length' 'length' else 'value'} {p.op} {_bigint_as_string(p.value)}")
+            requirements.push("{if p.projection =? 'length' 'length' else 'value'} {if p.op =? 'not=?' 'not =?' else p.op} {_bigint_as_string(p.value)}")
         }
         if parts.length =? 0 return none
-        return Check[conjoin(parts loc @session) "requirement violated: {requirements.join(', ')}"]
+        return Check[conjoin(parts loc @session) "this value was required to satisfy `{requirements.join(', ')}`, and did not"]
     }
     return none
 }

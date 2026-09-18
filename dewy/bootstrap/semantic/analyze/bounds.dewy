@@ -204,37 +204,19 @@ analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer =
             else {loop alternate in value.alternates {if node_at(alternate checker) is? hir.FunctionLiteral {checker.deferred.push(alternate)}}}
             return Transfer[current]
         }
+        let flow_id=value_flow_of(node.expr checker)
+        if flow_id isnt? none and node.binding_id isnt? none return bind_conditional(id flow_id current @checker validate)
         evaluate(node.expr @current @checker validate)
-        if node.binding_id isnt? none {
-            # Save the observed value before removing last iteration's slot.
-            stores.forget(@current node.binding_id @checker.data)
-            install(@current node.binding_id node.expr node.annotation node.loc @checker)
-            if node.binding_id not in? checker.assigned {values.record_elements(@checker.element_intervals node.binding_id node.expr checker.data.env)}
-        }
+        declare_value(node node.expr @current @checker)
         return Transfer[current]
     }
     if node is? hir.Assign {
-        evaluate(node.value @current @checker validate)
         let target=node_at(node.target checker)
         $runtime_assert target is? hir.ExpressedIdentifier
-        if target.binding_id is? none return Transfer[current]
-        let subject=target.binding_id
-        let interval=checker.data.snapshot.numbers.get(node.value)
-        let shift=terms.assignment_shift(node checker.data.env @checker.data.registry)
-        let shifted:facts.State=facts.State[]
-        if shift isnt? none {shifted=facts.shifted(current facts.Term[subject] shift)}
-        if node.op in? ['+=' '-='] {interval=values.binary(if node.op =? '+=' '__add__' else '__sub__' facts.lookup(current facts.value(facts.Term[subject])) interval target.value_type checker.data.env.types)}
-        else if node.op not=? '=' {interval=none}
-        stores.forget(@current subject @checker.data)
-        facts.set_value(@current facts.Term[subject] interval)
-        loop entry in shifted.values {facts.put(@current entry.fact entry.interval)}
-        if node.op =? '=' {
-            let length=checker.data.snapshot.lengths.get(node.value)
-            if length isnt? none {facts.set_value(@current facts.Term[subject 'length'] length)}
-            if shift is? none {stores.seed(@current subject node.value checker.word_type node.loc @checker.data)}
-        }
-        let declared=checker.declared.get(subject)
-        if declared isnt? none {refinements.seed_binding(@current @checker.declared subject declared checker.refinement_context node.loc @checker.data.registry)}
+        let flow_id=if node.op =? '=' value_flow_of(node.value checker) else none
+        if flow_id isnt? none and target.binding_id isnt? none return bind_conditional(id flow_id current @checker validate)
+        evaluate(node.value @current @checker validate)
+        assign_value(node node.value @current @checker)
         return Transfer[current]
     }
     if node is? hir.Assert {
@@ -376,6 +358,126 @@ evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => 
             checker.problem=error return
         }
     }
+}
+
+# A declaration's binding takes an (already evaluated) value with its facts.
+declare_value = (node:hir.Declare value:addr @current:facts.State @checker:Checker):>void => {
+    if node.binding_id is? none return
+    # Save the observed value before removing last iteration's slot.
+    stores.forget(@current node.binding_id @checker.data)
+    install(@current node.binding_id value node.annotation node.loc @checker)
+    if node.binding_id not in? checker.assigned {values.record_elements(@checker.element_intervals node.binding_id value checker.data.env)}
+}
+assign_value = (node:hir.Assign value:addr @current:facts.State @checker:Checker):>void => {
+    let target=node_at(node.target checker)
+    $runtime_assert target is? hir.ExpressedIdentifier
+    if target.binding_id is? none return
+    let subject=target.binding_id
+    let interval=checker.data.snapshot.numbers.get(value)
+    let rebound=hir.Assign[node.loc node.value_type node.target node.op value]
+    let shift=terms.assignment_shift(rebound checker.data.env @checker.data.registry)
+    let shifted:facts.State=facts.State[]
+    if shift isnt? none {shifted=facts.shifted(current facts.Term[subject] shift)}
+    if node.op in? ['+=' '-='] {interval=values.binary(if node.op =? '+=' '__add__' else '__sub__' facts.lookup(current facts.value(facts.Term[subject])) interval target.value_type checker.data.env.types)}
+    else if node.op not=? '=' {interval=none}
+    stores.forget(@current subject @checker.data)
+    facts.set_value(@current facts.Term[subject] interval)
+    loop entry in shifted.values {facts.put(@current entry.fact entry.interval)}
+    if node.op =? '=' {
+        let length=checker.data.snapshot.lengths.get(value)
+        if length isnt? none {facts.set_value(@current facts.Term[subject 'length'] length)}
+        if shift is? none {stores.seed(@current subject value checker.word_type node.loc @checker.data)}
+    }
+    let declared=checker.declared.get(subject)
+    if declared isnt? none {refinements.seed_binding(@current @checker.declared subject declared checker.refinement_context node.loc @checker.data.registry)}
+}
+# A value conditional an expression is (through casts and a wrapping
+# block): `if p a else b` with a value type and no loop arms.
+value_flow_of = (id:addr checker:Checker):>addr? => {
+    let current=expressions.strip_casts(id checker.data.env.nodes)
+    loop true {
+        let node=node_at(current checker)
+        if node is? hir.Block and not node.scoped and node.items.length =? 1 {current=expressions.strip_casts(node.items[0] checker.data.env.nodes) continue}
+        if node isnt? hir.Flow return none
+        let type=types.node_at(checker.data.env.types node.value_type)
+        if types.is_primitive(type 'void') or types.is_primitive(type 'never') return none
+        loop arm_id in node.arms {if node_at(arm_id checker) is? hir.LoopArm return none}
+        return current
+    }
+}
+# `let c = if p a else b` (or `c = ...`) analyzed as the statement form
+# `if p { c = a } else { c = b }`, as the hosted `_bind_conditional`: under
+# each arm's condition the binding takes that arm's value *with its facts*
+# (`c = src.length` copies the length's, `c = k` under a failed
+# `src.length <? k` keeps `c <=? src.length`), and the arms join as states;
+# a value conditional evaluated as an expression would keep only the union
+# of the arms' intervals.
+bind_conditional = (id:addr flow_id:addr state:facts.State @checker:Checker validate:bool):>Transfer => {
+    let flow=node_at(flow_id checker)
+    $runtime_assert flow is? hir.Flow
+    let remaining:facts.State?=state
+    let exits:array<facts.State>=[]
+    let output=Transfer[none]
+    loop arm_id in flow.arms {
+        if remaining is? none break
+        let arm=node_at(arm_id checker)
+        $runtime_assert arm is? hir.IfArm
+        let current=remaining
+        evaluate(arm.condition @current @checker validate)
+        let positive=refine(current arm.condition true @checker)
+        remaining=refine(current arm.condition false @checker)
+        if positive isnt? none {
+            let bound=bind_arm(id arm.body positive @checker validate)
+            append_exits(@output bound)
+            if bound.normal isnt? none {exits.push(bound.normal)}
+        }
+    }
+    if remaining isnt? none {
+        if flow.default isnt? none {
+            let bound=bind_arm(id flow.default remaining @checker validate)
+            append_exits(@output bound)
+            if bound.normal isnt? none {exits.push(bound.normal)}
+        } else {exits.push(remaining)}
+    }
+    output.normal=if exits.length =? 0 state else joined(exits checker)
+    return output
+}
+bind_arm = (id:addr body_id:addr arm_state:facts.State @checker:Checker validate:bool):>Transfer => {
+    let output=Transfer[arm_state]
+    let value=body_id
+    let locals:set<addr>=set[]
+    let body=node_at(body_id checker)
+    if body is? hir.Block and body.items.length >? 0 {
+        loop index in 0.. and index <? body.items.length {
+            if index + 1 =? body.items.length break
+            let item=body.items[index]
+            let declared=node_at(item checker)
+            if declared is? hir.Declare and declared.binding_id isnt? none {locals.add(declared.binding_id)}
+            let current=output.normal
+            if current is? none break
+            let transfer=analyze(item current @checker validate)
+            output.normal=transfer.normal
+            append_exits(@output transfer)
+        }
+        value=body.items[body.items.length - 1]
+    }
+    let reached=output.normal
+    if reached is? none return output
+    let current:facts.State=reached
+    let value_type=types.node_at(checker.data.env.types node_at(value checker).value_type)
+    if types.is_primitive(value_type 'never') {
+        let transfer=analyze(value current @checker validate)
+        output.normal=transfer.normal
+        append_exits(@output transfer)
+        return output
+    }
+    evaluate(value @current @checker validate)
+    let node=node_at(id checker)
+    if node is? hir.Declare {declare_value(node value @current @checker)}
+    else if node is? hir.Assign {assign_value(node value @current @checker)}
+    loop local in locals {stores.forget(@current local @checker.data)}
+    output.normal=current
+    return output
 }
 
 # All children execute in source order. Short circuits, functions and flows

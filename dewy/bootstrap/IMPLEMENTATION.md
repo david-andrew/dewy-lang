@@ -163,6 +163,15 @@ the native fixed point is not grounds for retiring them yet.
   rewrites its UTF-8 bytes and byte length on every step from the
   counter's ordinal, as the hosted backend does (`string_ranges`; fixture
   `native_character_ranges`, pair check 54).
+- Conditional values bind as statements (2026-09-17). `let c = if p a
+  else b` (or `c = ...`) is analyzed as `if p { c = a } else { c = b }`,
+  as the hosted `_bind_conditional`: under each arm's condition the
+  binding takes that arm's value with its facts (`c = src.length` copies
+  the length's; `c = k` under a failed `src.length <? k` keeps `c <=?
+  src.length`) and the arms join as states, so `src[..c)` proves.
+  `conditional_value_facts` and `length_preserving_calls` pass. The
+  parity expectations declare the `prototype_panic` report fragments
+  (its wording follows the hosted panic text; notes differ).
 - `$prototype` mode (2026-09-17). An unproven index, fixed-width
   narrowing, or refinement obligation in the entry module becomes a
   runtime check instead of a compile error, as the hosted
