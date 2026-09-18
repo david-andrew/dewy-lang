@@ -11,6 +11,7 @@ import p"analyze/representation.dewy" as representation
 import p"runtime_reports.dewy" as runtime_reports
 import p"validation_state.dewy" as proofs
 import p"validation_analysis.dewy" as analysis
+import p"analyze/prototype_checks.dewy" as prototype
 
 # Bounds validation precedes representation selection. Library foundations
 # cannot fall back to the BigInt helpers they are themselves defining.
@@ -71,6 +72,21 @@ validate = (@engine:modules.Engine):>Result|Error => {
         let module=loaded[index]
         let checked=decisions[index]
         loop warning in checked.warnings {result.warnings.push(warning)}
+        if checked.deferred.length >? 0 {
+            # `$prototype`: each unproven site becomes a runtime check that
+            # panics with the deferred report; one with no safe check stays
+            # a compile error. The edits go into the session's graph.
+            let unhandled=prototype.insert(checked.deferred module.context.source @engine.session)
+            if unhandled.length >? 0 return unhandled[0]
+            if module.options.prototype_warnings {
+                loop [id site] in checked.deferred {
+                    let report=site.report
+                    let notes=report.notes
+                    notes.push('deferred to a runtime check by `$prototype`')
+                    result.warnings.push(Warning[srcfile=report.srcfile title="prototype: {report.title}" pointers=report.pointers notes=notes hint=report.hint])
+                }
+            }
+        }
         let strict=module.prelude or module.no_prelude or 'BigInt' not in? engine.prelude_bindings
         if not strict {
             let source=sources.srcfile(module.context engine.session)

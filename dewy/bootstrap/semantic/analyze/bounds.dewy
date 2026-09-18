@@ -22,6 +22,7 @@ import p"obligations.dewy" as obligations
 import p"index_checks.dewy" as indices
 import p"slice_checks.dewy" as slices
 import p"effects.dewy" as effects
+import p"prototype_checks.dewy" as prototype
 
 # The visitor owns evaluation order; the smaller modules own individual
 # transfer and proof rules. Loop iterations compute evidence without issuing
@@ -45,6 +46,8 @@ Checker:type = [
     element_intervals:values.ElementIntervals=[]
     unfit:dict<addr Unfit>=[] constant_indices:dict<addr bigint>=[] problem:Error?=none
     warnings:array<Warning>=[]
+    # `$prototype`: unproven sites become runtime checks instead of errors.
+    prototype:bool=false deferred_sites:dict<addr prototype.Deferred>=[]
     result_obligations:dict<addr array<addr>>=[]
 ]
 # Construct the same declared-width environment for every invocation. Tests
@@ -368,7 +371,10 @@ evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => 
     loop refined in required {
         let obligation=hir.Obligation[node.loc node.value_type id refined 'result contract']
         let error=obligations.check(obligation state checker.assigned checker.srcfile checker.path_context @checker.data)
-        if error isnt? none {checker.problem=error return}
+        if error isnt? none {
+            if checker.prototype and id not in? checker.deferred_sites {checker.deferred_sites[id]=prototype.Deferred['obligation' error refined] continue}
+            checker.problem=error return
+        }
     }
 }
 
@@ -515,7 +521,10 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
     if node is? hir.Index|hir.StringIndex {
         let sequence=if node is? hir.Index node.array else node.string
         let checked=indices.check_index(node checker.data.snapshot.numbers.get(node.index) checker.data.snapshot.lengths.get(sequence) state checker.proof_context checker.data.snapshot.numbers checker.srcfile @checker.data.registry symbolic=intervals.stable(node.index checker.data.snapshot checker.data.env.nodes))
-        if checked is? Error {checker.problem=checked}
+        if checked is? Error {
+            if checker.prototype {checker.deferred_sites[id]=prototype.Deferred['index' checked]}
+            else {checker.problem=checked}
+        }
         else if checked.constant_index isnt? none {checker.constant_indices[id]=checked.constant_index}
     }
     if node is? hir.StringSlice {
@@ -529,7 +538,13 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         let source=intervals.meet(checker.data.snapshot.numbers.get(node.expr) values.fixed_bounds(node_at(node.expr checker).value_type checker.data.env.types))
         let width=values.fixed_bounds(node.value_type checker.data.env.types)
         let target=types.node_at(checker.data.env.types types.strip_refinement(node.value_type checker.data.env.types))
-        if width isnt? none and ranges.fits(source width) is? none and target is? types.Primitive {checker.unfit[id]=Unfit[source target.name]}
+        if width isnt? none and ranges.fits(source width) is? none and target is? types.Primitive {
+            # `$prototype`: a fixed-width narrowing becomes a runtime range check
+            if checker.prototype and views.fixed_integer_layout(types.strip_refinement(node_at(node.expr checker).value_type checker.data.env.types) checker.data.env.types) isnt? none {
+                let report=Error[srcfile=checker.srcfile title="cannot prove this integer fits `{target.name}`" pointers=[Pointer[span=node.loc message="the value's range is not proven inside `{target.name}`"]] hint='narrow the value with a comparison to prove it']
+                checker.deferred_sites[id]=prototype.Deferred['cast' report]
+            } else {checker.unfit[id]=Unfit[source target.name]}
+        }
     }
 }
 

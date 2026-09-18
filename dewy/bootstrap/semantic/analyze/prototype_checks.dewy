@@ -1,0 +1,167 @@
+from reporting import Error, Span, Pointer
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../context.dewy" as contexts
+import p"../type_queries.dewy" as views
+import p"../propositions.dewy" as propositions
+import p"../type_display.dewy" as display
+
+doc"""
+`$prototype`: an unproven proof obligation (an index, a fixed-width
+narrowing, a refinement) becomes a runtime check that panics with the
+deferred compile error, as the hosted `insert_prototype_checks`. The bounds
+checker records each site instead of failing; this pass wraps the site's
+node in a block: the check (a flow whose else arm panics), then the node,
+when a safe check can be built from effect-free operands. A site with no such check stays a compile
+error.
+"""
+
+Deferred:type = const [kind:string report:Error refined:addr?=none]
+
+# An operand a check may re-read: effect-free (names, literals, lengths,
+# member reads, arithmetic over those), so evaluating it twice is only a cost.
+const pure_calls:set<string>=set['__add__' '__sub__' '__mul__' '__floordiv__' '__mod__' '__lshift__' '__rshift__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__']
+simple = (id:addr session:contexts.Session):>bool => {
+    let node=hir.node_at(session.hir id)
+    if node is? hir.ExpressedIdentifier|hir.Integer|hir.Bool return true
+    if node is? hir.ValueCast|hir.RepresentationCast return simple(node.expr session)
+    if node is? hir.Obligation return simple(node.value session)
+    if node is? hir.ArrayLength return simple(node.array session)
+    if node is? hir.StringLength return simple(node.string session)
+    if node is? hir.MemberAccess return simple(node.value session)
+    if node is? hir.Block and not node.scoped and node.items.length =? 1 return simple(node.items[0] session)
+    if node is? hir.FunctionCall and node.kw_args.length =? 0 {
+        let func=hir.node_at(session.hir node.func)
+        if func isnt? hir.ExpressedIdentifier or func.name not in? pure_calls return false
+        loop argument in node.pos_args {if not simple(argument session) return false}
+        return true
+    }
+    return false
+}
+put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
+integer = (value:bigint loc:Span @session:contexts.Session):>addr => put(hir.Integer[loc types.primitive('int64' @session.types) '0d' value] @session)
+# A compared operand as a signed word (a check compares words).
+word = (id:addr loc:Span @session:contexts.Session):>addr? => {
+    let node=hir.node_at(session.hir id)
+    let plain=types.node_at(session.types types.strip_refinement(node.value_type session.types))
+    if plain is? types.IntegerLiteralType return if plain.value <? -9223372036854775808 or plain.value >? 9223372036854775807 none else integer(plain.value loc @session)
+    if types.is_primitive(plain 'int64') return id
+    if views.fixed_integer_layout(node.value_type session.types) is? none return none
+    return put(hir.ValueCast[loc types.primitive('int64' @session.types) id] @session)
+}
+comparison = (name:string left:addr right:addr loc:Span @session:contexts.Session):>addr => {
+    let int64=types.primitive('int64' @session.types)
+    let boolean=types.primitive('bool' @session.types)
+    let signature=types.function_type([types.PosOrKwArg[none int64] types.PosOrKwArg[none int64]] [] none boolean [] @session.types)
+    let func=put(hir.ExpressedIdentifier[loc signature name] @session)
+    return put(hir.FunctionCall[loc boolean func [left right] []] @session)
+}
+conjoin = (parts:array<addr> loc:Span @session:contexts.Session):>addr => {
+    let boolean=types.primitive('bool' @session.types)
+    let condition:addr?=none
+    loop part in parts {condition=if condition is? none part else put(hir.ShortCircuit[loc boolean 'and' condition part] @session)}
+    $runtime_assert condition isnt? none
+    return condition
+}
+length_of = (id:addr loc:Span @session:contexts.Session):>addr? => {
+    let node=hir.node_at(session.hir id)
+    let int64=types.primitive('int64' @session.types)
+    let plain=types.node_at(session.types types.unfold(types.strip_refinement(node.value_type session.types) session.types))
+    if plain is? types.ArrayType return put(hir.ArrayLength[loc int64 id] @session)
+    if views.string_valued(node.value_type session.types) return put(hir.StringLength[loc int64 id] @session)
+    return none
+}
+power_of_two = (exponent:int64):>bigint => {
+    let result:bigint=1
+    let i:int64=0
+    loop i <? exponent {result=result * 2 i+=1}
+    return result
+}
+Check:type = const [condition:addr message:string]
+# The runtime condition of a check for an unproven site, and the message
+# the panic reports (the violated requirement, concretely), or none when no
+# safe check can be built.
+check_of = (id:addr site:Deferred @session:contexts.Session):>Check? => {
+    let node=hir.node_at(session.hir id)
+    let loc=node.loc
+    if site.kind =? 'index' {
+        if node isnt? hir.Index|hir.StringIndex return none
+        let sequence=if node is? hir.Index node.array else node.string
+        let what=if node is? hir.Index 'array' else 'string'
+        if not simple(node.index session) or hir.node_at(session.hir sequence) isnt? hir.ExpressedIdentifier return none
+        let length=length_of(sequence loc @session)
+        if length is? none return none
+        let index=word(node.index loc @session)
+        if index is? none return none
+        let condition=conjoin([comparison('__le__' integer(0 loc @session) index loc @session) comparison('__lt__' index length loc @session)] loc @session)
+        return Check[condition "{what} index out of bounds: this index was past the {what}'s end (or negative)"]
+    }
+    if site.kind =? 'cast' {
+        if node isnt? hir.ValueCast or not simple(node.expr session) return none
+        let source_layout=views.fixed_integer_layout(types.strip_refinement(hir.node_at(session.hir node.expr).value_type session.types) session.types)
+        let target_layout=views.fixed_integer_layout(node.value_type session.types)
+        if source_layout is? none or target_layout is? none return none
+        let bits=target_layout.bits
+        let magnitude=power_of_two(if target_layout.signed bits - 1 else bits)
+        let minimum:bigint=if target_layout.signed 0 - magnitude else 0
+        let maximum:bigint=magnitude - 1
+        let parts:array<addr>=[]
+        if not source_layout.signed {
+            # an unsigned source: only the maximum can fail, compared unsigned
+            if maximum <? 18446744073709551615 {parts.push(comparison('__unsigned_lte__' node.expr integer(maximum loc @session) loc @session))}
+        } else {
+            let value=word(node.expr loc @session)
+            if value is? none return none
+            if minimum >? -9223372036854775808 {parts.push(comparison('__le__' integer(minimum loc @session) value loc @session))}
+            parts.push(comparison('__le__' value integer(if maximum <? 9223372036854775807 maximum else 9223372036854775807 loc @session) loc @session))
+        }
+        if parts.length =? 0 return none
+        return Check[conjoin(parts loc @session) "value does not fit `{display.type_to_dewy(node.value_type session.types)}`: this value was outside its range [{_bigint_as_string(minimum)}, {_bigint_as_string(maximum)}]"]
+    }
+    if site.kind =? 'obligation' {
+        if site.refined is? none or not simple(id session) return none
+        let refined=types.node_at(session.types site.refined)
+        if refined isnt? types.RefinedType return none
+        let parts:array<addr>=[]
+        let requirements:array<string>=[]
+        loop p in refined.propositions {
+            if p.term isnt? none or p.tested_type isnt? none or p.when isnt? none or p.subject not=? 'self' return none
+            let name=if p.op =? '=?' '__eq__' else if p.op =? 'not=?' '__ne__' else if p.op =? '<?' '__lt__' else if p.op =? '<=?' '__le__' else if p.op =? '>?' '__gt__' else if p.op =? '>=?' '__ge__' else ''
+            if name =? '' return none
+            let subject:addr?=if p.projection =? 'length' length_of(id loc @session) else word(id loc @session)
+            if subject is? none return none
+            if p.value <? -9223372036854775808 or p.value >? 9223372036854775807 return none
+            parts.push(comparison(name subject integer(p.value loc @session) loc @session))
+            requirements.push("{if p.projection =? 'length' 'length' else 'value'} {p.op} {_bigint_as_string(p.value)}")
+        }
+        if parts.length =? 0 return none
+        return Check[conjoin(parts loc @session) "requirement violated: {requirements.join(', ')}"]
+    }
+    return none
+}
+# Wrap one site in place: the node's id now holds `{ check  moved }`.
+wrap = (id:addr site:Deferred source:addr @session:contexts.Session):>bool => {
+    let node=hir.node_at(session.hir id)
+    # The check reads the moved copy: the site's id becomes the wrapping block.
+    let moved=put(node @session)
+    let check=check_of(moved site @session)
+    if check is? none return false
+    let loc=node.loc
+    let never=types.primitive('never' @session.types)
+    let nothing=types.primitive('void' @session.types)
+    let message=put(hir.String[loc types.string_literal(check.message @session.types) check.message] @session)
+    let failure=put(hir.RuntimeFailure[loc never source '' 'panic' none message none] @session)
+    let panic=put(hir.Block[loc never [failure] true] @session)
+    let arm=put(hir.IfArm[loc nothing check.condition put(hir.Void[loc nothing] @session)] @session)
+    let flow=put(hir.Flow[loc nothing [arm] panic] @session)
+    contexts.replace_hir(id hir.Block[loc node.value_type [flow moved] false] @session)
+    return true
+}
+# Returns the reports of sites no check could be built for.
+insert = (sites:dict<addr Deferred> source:addr @session:contexts.Session):>array<Error> => {
+    let unhandled:array<Error>=[]
+    loop [id site] in sites {
+        if not wrap(id site source @session) {unhandled.push(site.report)}
+    }
+    return unhandled
+}

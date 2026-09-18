@@ -40,7 +40,8 @@ materialize = (node:hir.RuntimeFailure helpers:dict<string addr> index:lines.Ind
     let contents=source.body[begin..limit)
     let supplied=node.message
     let message:addr=if supplied is? none text(if node.mode =? 'fail' 'the test reached `$fail`' else 'this condition was false' node @session) else supplied
-    let report=helper(if node.mode =? 'assert' '_assertion_report' else '_expectation_report' [integer(span.start-begin node @session) integer(stop-begin node @session) integer(dim-begin node @session) message] node helpers @session)
+    let report_helper=if node.mode =? 'assert' '_assertion_report' else if node.mode =? 'panic' '_panic_report' else '_expectation_report'
+    let report=helper(report_helper [integer(span.start-begin node @session) integer(stop-begin node @session) integer(dim-begin node @session) message] node helpers @session)
     if report is? Error return report
     let type=hir.node_at(session.hir report).value_type
     let name="__dewy_assert_report_{session.registry.next_id}"
@@ -56,8 +57,9 @@ materialize = (node:hir.RuntimeFailure helpers:dict<string addr> index:lines.Ind
     let body:array<addr>=[declaration rendered]
     # TODO: expose the guard's saved operand values as report notes. Keep
     # side effects single-evaluation; rebuilding the condition here is wrong.
-    if node.mode =? 'assert' {
-        let exit=helper('exit' [integer(101 node @session)] node helpers @session)
+    if node.mode =? 'assert' or node.mode =? 'panic' {
+        # A failed `$prototype` check exits 102, as the hosted `_prototype_panic`.
+        let exit=helper('exit' [integer(if node.mode =? 'panic' 102 else 101 node @session)] node helpers @session)
         if exit is? Error return exit
         body.push(exit)
     } else {

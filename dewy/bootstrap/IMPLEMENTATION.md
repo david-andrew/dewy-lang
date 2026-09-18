@@ -163,6 +163,19 @@ the native fixed point is not grounds for retiring them yet.
   rewrites its UTF-8 bytes and byte length on every step from the
   counter's ordinal, as the hosted backend does (`string_ranges`; fixture
   `native_character_ranges`, pair check 54).
+- `$prototype` mode (2026-09-17). An unproven index, fixed-width
+  narrowing, or refinement obligation in the entry module becomes a
+  runtime check instead of a compile error, as the hosted
+  `insert_prototype_checks`: the bounds checker records the site
+  (`deferred_sites`), the validation driver wraps the site's node in a
+  block (a flow whose else arm is a `RuntimeFailure` in the new `panic`
+  mode, rendered through the prelude's `_panic_report` and exiting 102)
+  followed by the moved node, when the check can be built from effect-free
+  operands (names, literals, lengths, member reads, pure arithmetic); a
+  site with no safe check stays a compile error. Each deferral is a
+  `prototype:` warning unless `prototype_warnings=false`. The insertion
+  happens in the driver because analysis receives the session by value.
+  `prototype_mode` and `prototype_panic` pass (exit 42 and 102).
 - Abstract integer declarations (2026-09-17). An unannotated integer
   binding (`let base = 5`, `total = 0`) is the abstract `int`, as the
   hosted `_widen_inferred_let_value` makes it, instead of a word chosen at

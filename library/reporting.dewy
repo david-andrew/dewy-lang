@@ -804,6 +804,8 @@ let _condition_report = (title:string start:addr stop:addr dim_stop:addr message
 
 let _assertion_report = (start:addr stop:addr dim_stop:addr message:string):>Report => _condition_report("assertion failed" start stop dim_stop message)
 let _expectation_report = (start:addr stop:addr dim_stop:addr message:string):>Report => _condition_report("expectation failed" start stop dim_stop message)
+# a `$prototype` check that failed at runtime: the deferred proof, observed violated
+let _panic_report = (start:addr stop:addr dim_stop:addr message:string):>Report => _condition_report("Runtime Panic" start stop dim_stop message)
 
 let _assertion_note = (@report:Report text:string):>void => {
     report.note(text)

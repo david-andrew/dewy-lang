@@ -1,4 +1,4 @@
-from reporting import SrcFile, Error, Pointer
+from reporting import SrcFile, Error, Pointer, Warning
 import p"module_state.dewy" as modules
 import p"context.dewy" as contexts
 import p"source_views.dewy" as sources
@@ -22,6 +22,7 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
     let checker=bounds.Checker[data source word source_files=source_files]
     bounds.configure(@checker prepared)
     checker.data.links=session.links
+    checker.prototype=module.options.prototype and not module.prelude
     bounds.validate(module.root @checker)
     if checker.problem isnt? none return checker.problem
     let strict=module.prelude or module.no_prelude or 'BigInt' not in? prelude
@@ -33,7 +34,7 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
         }
         unfit[id]=proofs.Unfit[flag.interval flag.word]
     }
-    return proofs.Decision[unfit checker.constant_indices checker.warnings]
+    return proofs.Decision[unfit checker.constant_indices checker.warnings checker.deferred_sites]
 }
 
 reusable = (saved:proofs.Prelude loaded:array<modules.Module> session:contexts.Session):>bool => {

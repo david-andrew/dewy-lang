@@ -31,7 +31,7 @@ baseline counts and missing native value notes above remain recorded.
 
 `tools/check_compiler_parity.py` with the current native compiler
 (C-built, direct x86-64 output, shared prelude cache): 167/211 parity cases
-passed at the start of the day and 197/211 by its end, then 205/211 on 2026-09-17 (the fixes marked
+passed at the start of the day and 197/211 by its end, then 207/211 on 2026-09-17 (the fixes marked
 "the same day" below); the pinned hosted run passed all expected results. All 44 remaining
 failures are native compilation rejections except `literal_types.dewy`,
 which compiled on both and crashed natively (a literal-union join invented
@@ -47,7 +47,7 @@ earlier list now passes. Grouped by first obstacle:
 | 4 | these type arguments (`type<Family>` values: fixed 2026-09-17, three pass; `length_terms` then stops at a bounds chain: a result promise `n <=? src.length` through a record field, a captured array, a sort and an unpack) | place_slots, type_values, recursive_mints, length_terms |
 | 2 | string slice is not proven in bounds | conditional_value_facts, length_preserving_calls |
 | 2 | parser: Postfix expression (fixed the same day: pipe operators `\|>`/`<\|`; both pass) | precedence, error_values |
-| 2 | array index is not proven in bounds (`0..0`) | prototype_mode, prototype_panic |
+| 2 | array index is not proven in bounds (`0..0`) (`$prototype` deferral implemented 2026-09-17; both pass) | prototype_mode, prototype_panic |
 | 2 | tokenizer: No token matched (a quote or escape letter fused with a combining mark or prepend into one grapheme; fixed the same day with `array<grapheme> as string` lowering; both pass) | string_join_decode, runtime_grapheme_strings |
 | 1 each | no overload takes (`int64`, `uint8`); integer literal exceeds `int64`; undefined `length` (addr_types, fixed the same day); runtime test within one union payload alternative (fixed the same day); undefined type `nonemptystring` (fixed the same day); parser: Block expression (flow_body_lowering, fixed the same day: a parenthesized statement group as a flow body); unreachable match arm (2 fixtures, fixed the same day; `error_fields` then needed `or_throw`, also added); undefined `ox` (unpacking; fixed the same day, including nested and dictionary/set entries); cannot prove refinement `@tok is? 0` (fixed the same day); mixed record and array literal (spread); execution difference (literal_types); integer range `[0, ∞]` (array_iteration); `range` not iterable (range_values, fixed the same day); `a` used before initialization (object_methods; fixed, now stops at method closures over sibling fields); character range ordinal conversion (string_ranges) | abstract_int, bigint_auto, addr_types, abstract_int_containers, refinement_chains, flow_body_lowering, error_fields, covariant_slots, unpacking, type_facts, spread, literal_types, array_iteration, range_values, object_methods, string_ranges |
 
@@ -239,8 +239,8 @@ matching expected results and output (`parity-prelude-cache/results.jsonl`).
 | [precedence.dewy](../tests/precedence.dewy) | Postfix expression (passes since 2026-09-16) |
 | [refinement_chains.dewy](../tests/refinement_chains.dewy) | no type of this name is in scope |
 | [tokenizer_gaps.dewy](../tests/tokenizer_gaps.dewy) | BinOp expression (passes since 2026-09-16) |
-| [prototype_mode.dewy](../tests/prototype_mode.dewy) | the index interval here is 0..0 |
-| [prototype_panic.dewy](../tests/prototype_panic.dewy) | the index interval here is 0..0 |
+| [prototype_mode.dewy](../tests/prototype_mode.dewy) | the index interval here is 0..0 (passes since 2026-09-17: `$prototype` runtime checks) |
+| [prototype_panic.dewy](../tests/prototype_panic.dewy) | the index interval here is 0..0 (passes since 2026-09-17: `$prototype` runtime checks) |
 | [flow_body_lowering.dewy](../tests/flow_body_lowering.dewy) | Block expression (passes since 2026-09-16) |
 | [error_fields.dewy](../tests/error_fields.dewy) | earlier arms already cover these values |
 | [protocol_tables.dewy](../tests/protocol_tables.dewy) | structural string interpolation |
