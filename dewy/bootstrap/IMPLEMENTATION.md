@@ -27,9 +27,26 @@ is required for this C-built release.
 All 26 native integration cases, grouped actual-analysis memory checks,
 test discovery, scalar checks, and µDewy's conditional-only short-circuit
 checks pass through both x86-64 and C output. Fixed-point comparison does
-not establish full language parity. A full bootstrap through the direct
-backend, without C acceleration, remains unverified; the storage helpers
-themselves are Dewy code and their bounded tests pass on both backends.
+not establish full language parity. The storage helpers themselves are
+Dewy code and their bounded tests pass on both backends.
+
+**Fully direct fixed point (2026-09-18, sources `89182947`).** Both
+compilers rebuilt twice through the direct x86-64 backend only, with no C
+compiler involved after the seeds (`tools/bootstrap_native.sh --target
+x86_64`, seeds: the current-source C-route Dewy `gen-r2-c` and the µDewy
+tool `udewy-par-c2`). Generation 1 and generation 2 are byte-identical for
+both executables; the whole run took 137 s wall (generation 2: 57 s) and
+2.9 GB peak. The native execution checks (`tools/check_native.sh`,
+including test discovery through both targets) pass on the pair, and the
+fixture suite passes with it at 96/4 (the four known bounds cases). With a
+seed built from older sources the first generation differs from the second
+(the seed's lowering, not the sources), so the direct fixed point needs a
+seed of the same sources or a third generation. Digests:
+
+```text
+ca74388f8cbfae77197ee3856e4982ec4e27bae56e59ebd526f50de51dac5b1b  dewy
+2e08f57d7001cae239083cefe8b1ede53f526023d07c27d083f8b84dc2c99873  udewy
+```
 
 ## Hosted parity gaps
 

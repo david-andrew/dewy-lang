@@ -4174,3 +4174,17 @@ Dewy seed SHA-256:
 `native-paged-bindings-full`. C seed preparation is separate from the measured
 direct-output invocation. These are isolated single samples with OS page cache
 uncontrolled; no new hosted timing was taken for this native representation.
+
+### Fully direct two-generation fixed point (2026-09-18)
+
+Sources `89182947`. `tools/bootstrap_native.sh --target x86_64` with the
+current-source C-route Dewy (`gen-r2-c`) and the µDewy tool (`udewy-par-c2`)
+as seeds: generation 1 in 24 s (including its execution checks), generation 2 in 57 s, 137 s wall in total,
+2,876,256 KiB peak. `dewy` (13,551,008 bytes) and `udewy` (881,808 bytes)
+are byte-identical across the two generations; no C compiler ran after the
+seeds. A first attempt seeded with the older `seed-dewy-c` produced a
+generation 1 that differed from generation 2 (15.2 MB against 13.6 MB): a
+stale seed lowers the current sources differently, so the two-generation
+comparison needs a seed of the same sources. `tools/check_native.sh` passes
+on the pair; the native fixture suite passes at 96/4 with it.
+

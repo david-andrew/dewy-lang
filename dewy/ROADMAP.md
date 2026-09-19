@@ -67,8 +67,10 @@ the native compiler, which makes it:
   direct x86-64 output. The dedicated campaign (2026-09-15/16) brought the
   native cold self-build to 18.2-18.5 seconds, under the 30-second target
   but above the 10-second stretch goal; it was paused there by decision.
-  The fully direct bootstrap remains open. These are single-generation
-  measurements, not a new fixed-point certification.
+  The fully direct bootstrap (both compilers, two byte-identical
+  generations, no C after the seeds) was verified on 2026-09-18 in 137 s.
+  The timings above are single-generation measurements, not fixed-point
+  certifications.
   Recorded inputs, seeds and phase timings live in
   [`bootstrap/PHASE0_MEASUREMENTS.md`](bootstrap/PHASE0_MEASUREMENTS.md);
 - the way around staged seeds when the language changes: the compiler's
@@ -112,7 +114,8 @@ Exit criteria that the later phases depend on:
 
 - verified fixed point: two native generations of both compilers, byte
   identical, built without Python (`tools/bootstrap_native.sh`); achieved
-  with C acceleration on 2026-09-14;
+  with C acceleration on 2026-09-14 and through the direct x86-64 backend
+  alone on 2026-09-18;
 - the native pair passes the full end-to-end corpus, the differential
   `test_bootstrap_*` groups, and the `$test` runner;
 - installer and release wired to the verified package (achieved); CI green
