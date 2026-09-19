@@ -198,9 +198,18 @@ the native fixed point is not grounds for retiring them yet.
   `__dewy_function_...` and `__dewy_<hint>_...` (a fifth of the bytes
   were names; nothing parses them); (4) array descriptors and union cells
   are built by one generated helper per program (`_new_array`, `_new_cell`)
-  instead of an allocate-and-store sequence at each site. What remains is
-  mostly needed: loop-invariant loads captured before loops, values held
-  across releases, and the retain/release pairs themselves, which only
+  instead of an allocate-and-store sequence at each site. A second round
+  took it to 20.5 MB (hello world 265 KB): (5) a condition lowered as a
+  block of steps ending in a test keeps the test as the condition, and a
+  constant short-circuit operand folds; (6) `not (a and b)` conditions are
+  rewritten by De Morgan, since µDewy short-circuits only the condition's
+  own `and`/`or`; (7) a loop's entered bit exists only with an else arm;
+  (8) string byte comparison is one generated `_bytes_equal` helper, not a
+  loop at each `=?`; (9) a plain single iterator puts its element store at
+  the top of the body so the loop condition is a comparison, not a flow
+  writing a flag. What remains is mostly needed: loop-invariant loads
+  captured before loops, values held across releases, and the
+  retain/release pairs, copies and cell boxing themselves, which only
   ownership proofs (Phase 1.1) can remove.
 - Element facts through captures and joins (2026-09-18). A loop
   capture's result is a block (the hidden array's declaration, the loop,

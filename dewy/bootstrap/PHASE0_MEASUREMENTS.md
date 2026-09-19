@@ -4207,4 +4207,13 @@ suite unchanged (96/4). The remaining text is dominated by temporaries the
 lowering needs (loop-invariant loads, values held across releases: 8.0 MB),
 control flow (3.1 MB), stores (2.8 MB), flag slots for conditions with
 lifted operands (2.1 MB) and releases (1.8 MB); symbol names are 3.1 MB.
+A second round (conditions through step blocks and constant folding, De
+Morgan for negated conditions, no entered bit without an else arm, one
+`_bytes_equal` helper, plain single-iterator loops) reached 20,496,062
+bytes (383,804 lines) and hello world 265,432 bytes. Cold self-build with
+the C-built compiler: 17.2-17.5 s wall, emission 0.97 s, backend 2.6-2.7 s,
+peak 2,700,740 KiB. The four-line `brands.lookup` lowers to 24 lines, from
+42: what remains there is the string retains around a comparison, the copy
+on returning an element, and the optional's cell, the ownership traffic
+that only Phase 1.1 proofs remove.
 

@@ -2164,7 +2164,43 @@ string_equal_values = (a_value:addr b_value:addr node:hir.AST negated:bool @stat
     prefix.push(string_equal_bytes(string_data(left node @state) read_word(left layouts.string_descriptor.byte_length node @state) string_data(right node @state) read_word(right layouts.string_descriptor.byte_length node @state) node negated @state))
     return put(hir.Block[node.loc types.primitive('bool' @state.type_nodes) prefix false] @state)
 }
+# Byte comparison is one generated helper per program, not a loop at every
+# `=?` on strings (a dozen lines each, over a thousand sites in the compiler).
 string_equal_bytes = (left:addr left_length:addr right:addr right_length:addr node:hir.AST negated:bool @state:State):>addr => {
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let helper=bytes_equal_helper(node @state)
+    if helper isnt? none {
+        let same=intrinsic(helper [left left_length right right_length] boolean node @state)
+        return if negated intrinsic('__not__' [same] boolean node @state) else same
+    }
+    return string_equal_bytes_inline(left left_length right right_length node negated @state)
+}
+bytes_equal_helper = (node:hir.AST @state:State):>string? => {
+    if state.allocator is? none return none
+    let existing=state.copy_helpers.get('bytes_equal')
+    if existing isnt? none return existing
+    let generated=fresh('bytes_equal' @state)
+    state.copy_helpers['bytes_equal']=generated
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let parameters:array<hir.Param>=[]
+    let slots:array<types.PosOrKwArg>=[]
+    let names=[fresh('bytes' @state) fresh('bytes' @state) fresh('bytes' @state) fresh('bytes' @state)]
+    loop parameter in names {
+        parameters.push(hir.Param[parameter word_type])
+        slots.push(types.PosOrKwArg[parameter word_type])
+    }
+    let a=put(hir.ExpressedIdentifier[node.loc word_type names[0]] @state)
+    let a_length=put(hir.ExpressedIdentifier[node.loc word_type names[1]] @state)
+    let b=put(hir.ExpressedIdentifier[node.loc word_type names[2]] @state)
+    let b_length=put(hir.ExpressedIdentifier[node.loc word_type names[3]] @state)
+    let body=string_equal_bytes_inline(a a_length b b_length node false @state)
+    let signature=types.function_type(slots [] none boolean [] @state.type_nodes)
+    let literal=put(hir.FunctionLiteral[node.loc signature parameters [] none boolean body source=state.source_index] @state)
+    state.generated.push(program.Function[generated literal])
+    return generated
+}
+string_equal_bytes_inline = (left:addr left_length:addr right:addr right_length:addr node:hir.AST negated:bool @state:State):>addr => {
     let prefix:array<addr>=[]
     let length=snapshot(left_length @prefix @state)
     let boolean=types.primitive('bool' @state.type_nodes)
@@ -4000,7 +4036,10 @@ command_line = (entry:hir.FunctionLiteral @state:State):>CommandLine => {
 # Iterator setup belongs to the point where its flow arm is reached, not the
 # containing function. The condition advances the cursor so `continue`
 # advances exactly once as well. An exhausted sequence never reads an item.
-IteratorStep:type = [prefix:array<addr> condition:addr]
+# `entry` holds the element store of a plain single iterator: it runs at
+# the top of the body, so the condition itself stays a comparison instead of
+# a flow writing a flag slot. Formula leaves keep the store in the condition.
+IteratorStep:type = [prefix:array<addr> condition:addr entry:array<addr>=[]]
 # A character range target: a frame-resident one-scalar string, rebuilt on
 # every step from the counter's dense ordinal (the surrogate gap skipped),
 # with a control word of zero so it is never released. Its storage is
@@ -4055,7 +4094,7 @@ scalar_string = (ordinal:addr node:hir.AST @prefix:array<addr> @state:State):>ad
     steps.push(descriptor)
     return put(hir.Block[node.loc word_type steps false] @state)
 }
-iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @state:State):>IteratorStep => {
+iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @state:State plain:bool=false):>IteratorStep => {
     let prefix:array<addr>=[]
     let bool_type=types.primitive('bool' @state.type_nodes)
     let void_type=types.primitive('void' @state.type_nodes)
@@ -4188,7 +4227,9 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
     }
     let stores:array<addr>=[]
     if view_owner isnt? none {stores.push(string_runtime('_native_string_release' [view_owner] node @state result_void=true))}
-    stores.push(store) stores.push(yes)
+    stores.push(store)
+    if plain and not optional_target return IteratorStep[prefix put(hir.Block[node.loc bool_type [increment available] false] @state) stores]
+    stores.push(yes)
     let body=put(hir.Block[node.loc bool_type stores false] @state)
     let arm=put(hir.IfArm[node.loc bool_type available body] @state)
     let condition=put(hir.Flow[node.loc bool_type [arm] no] @state)
@@ -4283,9 +4324,10 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     if scoped {state.cleanup_frames.push([])}
     let prefix:array<addr>=[]
     let condition:addr=0
+    let entry:array<addr>=[]
     if iterator {
         let step=iterator_condition(test @state)
-        prefix=step.prefix condition=step.condition
+        prefix=step.prefix condition=step.condition entry=step.entry
     } else {condition=expression(arm.condition @state)}
     let previous_depth=state.loop_depth
     if arm is? hir.LoopArm {
@@ -4293,6 +4335,11 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
         if state.cleanup_enabled {state.cleanup_loops.push(state.cleanup_frames.length)}
     }
     let body=flow_value(arm.body node.value_type @state)
+    if entry.length >? 0 {
+        let items=entry
+        items.push(body)
+        body=put(hir.Block[node.loc hir.node_at(state.nodes body).value_type items false] @state)
+    }
     # Restore the lexical depth after recursive lowering; a recursive place
     # call cannot promise the caller that subtraction is still nonnegative.
     state.loop_depth=previous_depth
@@ -4360,7 +4407,7 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
 # advancement: otherwise a later leaf would resume at a different position.
 iterator_condition = (node:hir.AST @state:State):>IteratorStep => {
     let sources:dict<addr DictParts>=[]
-    if node is? hir.IteratorExpression return iterator_step(node @sources @state)
+    if node is? hir.IteratorExpression return iterator_step(node @sources @state plain=true)
     if node isnt? hir.MultiIteratorExpression return IteratorStep[[] reject(node 'this iterator condition' @state)]
     let prefix:array<addr>=[]
     let advance:array<addr>=[]

@@ -172,9 +172,69 @@ expression = (id:addr @state:State):>Expression => {
 # µDewy short-circuits `and`/`or` in an `if`/`loop` condition (bitwise
 # elsewhere). A condition whose operands lift no statements stays an
 # expression instead of a result slot written by a flow.
+# `not (a and b)` as a condition: `(not a) or (not b)` short-circuits where
+# the negated conjunction would be a flag slot. Only shapes that simplify
+# are rewritten, so the rewrite always terminates.
+negatable = (id:addr state:State):>bool => {
+    let node=node_at(id state)
+    if node is? hir.Bool return true
+    if node is? hir.ShortCircuit return node.op in? ['and' 'or']
+    if node is? hir.Block and not node.scoped and node.items.length >? 0 return negatable(node.items[end] state)
+    if node is? hir.FunctionCall and node.pos_args.length =? 1 and node.kw_args.length =? 0 {
+        let callee=node_at(node.func state)
+        return callee is? hir.ExpressedIdentifier and callee.name =? '__not__'
+    }
+    return false
+}
+negate = (id:addr @state:State):>addr => {
+    let node=node_at(id state)
+    if node is? hir.Bool return put(hir.Bool[node.loc node.value_type not node.value] @state)
+    if node is? hir.ShortCircuit and node.op in? ['and' 'or'] return put(hir.ShortCircuit[node.loc node.value_type if node.op =? 'and' 'or' else 'and' negate(node.left @state) negate(node.right @state)] @state)
+    if node is? hir.Block and not node.scoped and node.items.length >? 0 {
+        let items=node.items
+        items[end]=negate(items[end] @state)
+        return put(hir.Block[node.loc node.value_type items false] @state)
+    }
+    if node is? hir.FunctionCall and node.pos_args.length =? 1 and node.kw_args.length =? 0 {
+        let callee=node_at(node.func state)
+        if callee is? hir.ExpressedIdentifier and callee.name =? '__not__' return node.pos_args[0]
+    }
+    let type=types.function_type([types.PosOrKwArg[none boolean(@state)]] [] none boolean(@state) [] @state.types)
+    return put(hir.FunctionCall[node.loc boolean(@state) reference('__not__' type node @state) [id] []] @state)
+}
 condition_expression = (id:addr @state:State):>Expression => {
     let node=node_at(id state)
+    if node is? hir.FunctionCall and node.pos_args.length =? 1 and node.kw_args.length =? 0 {
+        let callee=node_at(node.func state)
+        if callee is? hir.ExpressedIdentifier and callee.name =? '__not__' and negatable(node.pos_args[0] state) return condition_expression(negate(node.pos_args[0] @state) @state)
+    }
+    # A test lowered as `{ steps...  a and b }`: the steps run first either
+    # way, so the tail is still a condition.
+    if node is? hir.Block and node.items.length >? 0 and not node.scoped {
+        let last=node_at(node.items[end] state)
+        let tail_type=types.node_at(state.types last.value_type)
+        if last isnt? hir.Return and not types.is_primitive(tail_type 'void') and not types.is_primitive(tail_type 'never') {
+            let prefix:array<addr>=[]
+            loop i in 0.. and i <? node.items.length {
+                if i + 1 =? node.items.length break
+                append(@prefix statement(node.items[i] @state))
+            }
+            let tail=condition_expression(node.items[end] @state)
+            append(@prefix tail.prefix)
+            return Expression[prefix tail.value]
+        }
+    }
     if node is? hir.ShortCircuit and node.op in? ['and' 'or'] {
+        # A constant operand decides or drops out: `false and x` is false,
+        # `true and x` is x, and symmetrically for `or`.
+        let left_node=node_at(node.left state)
+        let right_node=node_at(node.right state)
+        let conjunction=node.op =? 'and'
+        if left_node is? hir.Bool {
+            if left_node.value =? conjunction return condition_expression(node.right @state)
+            return Expression[[] node.left]
+        }
+        if right_node is? hir.Bool and right_node.value =? conjunction return condition_expression(node.left @state)
         # Lower each operand once. A chain re-lowered through the general
         # path would be lowered again at every level.
         let left=condition_expression(node.left @state)
@@ -182,7 +242,6 @@ condition_expression = (id:addr @state:State):>Expression => {
         if left.prefix.length =? 0 and right.prefix.length =? 0 return Expression[[] put(hir.ShortCircuit[node.loc node.value_type node.op left.value right.value] @state)]
         # The right operand's lifted statements run only when the left
         # decides nothing: a flow over the lowered pieces.
-        let conjunction=node.op =? 'and'
         let other=put(hir.Bool[node.loc boolean(@state) not conjunction] @state)
         let right_items=right.prefix
         right_items.push(right.value)
@@ -216,18 +275,24 @@ flow = (node:hir.Flow position:addr @state:State):>array<addr> => {
         let lowered=put(hir.LoopArm[arm.loc void_type(@state) condition.value body] @state)
         return [put(hir.Flow[node.loc void_type(@state) [lowered] fallback] @state)]
     }
-    let name=fresh(@state)
-    let entered=reference(name boolean(@state) node @state)
-    let result:array<addr>=[put(hir.Declare[node.loc void_type(@state) 'let' name boolean(@state) zero(boolean(@state) node @state)] @state)]
+    # The entered bit exists only for a loop with an else arm.
     let yes=put(hir.Bool[node.loc boolean(@state) true] @state)
-    let entered_body=block(node [put(hir.Assign[node.loc void_type(@state) entered '=' yes] @state) body] @state)
+    let result:array<addr>=[]
+    let entered_body=body
+    let entered:addr?=none
+    if fallback isnt? none {
+        let name=fresh(@state)
+        entered=reference(name boolean(@state) node @state)
+        result.push(put(hir.Declare[node.loc void_type(@state) 'let' name boolean(@state) zero(boolean(@state) node @state)] @state))
+        entered_body=block(node [put(hir.Assign[node.loc void_type(@state) entered '=' yes] @state) body] @state)
+    }
     let branch=put(hir.IfArm[node.loc void_type(@state) condition.value entered_body] @state)
     let stop=put(hir.Break[node.loc void_type(@state)] @state)
     condition.prefix.push(put(hir.Flow[node.loc void_type(@state) [branch] stop] @state))
     let loop_body=block(node condition.prefix @state)
     let loop_arm=put(hir.LoopArm[node.loc void_type(@state) yes loop_body] @state)
     result.push(put(hir.Flow[node.loc void_type(@state) [loop_arm] none] @state))
-    if fallback isnt? none {
+    if fallback isnt? none and entered isnt? none {
         let already=put(hir.IfArm[node.loc void_type(@state) entered block(node [] @state)] @state)
         result.push(put(hir.Flow[node.loc void_type(@state) [already] fallback] @state))
     }
