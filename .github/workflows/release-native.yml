@@ -57,7 +57,10 @@ jobs:
         # Generation two must then match it byte for byte.
         env:
           DEWY_BOOTSTRAP_LTO_JOBS: 2
-        run: bash tools/bootstrap_native.sh --target c seed/dewy seed/udewy native-pair
+        # The published seed was built from older sources, so its first
+        # generation lowers this source differently; the last two of three
+        # generations are both products of this source and must match.
+        run: bash tools/bootstrap_native.sh --target c --generations 3 seed/dewy seed/udewy native-pair
       - name: Package the verified pair and matching library
         run: bash tools/package_native.sh native-pair dewy-linux-x86_64.tar.gz
       - name: Compare with previous release
@@ -85,4 +88,4 @@ jobs:
           gh release create "$release_tag" dewy-linux-x86_64.tar.gz dewy-linux-x86_64.tar.gz.sha256 \
             udewy-linux-x86_64 udewy-linux-x86_64.sha256 \
             --latest --target "$GITHUB_SHA" --title "Dewy native ${GITHUB_SHA::12}" \
-            --notes "Development native Dewy/µDewy pair from ${GITHUB_SHA} for Linux x86_64; two native generations verified byte-for-byte, with matching runtime library. See dewy/bootstrap/IMPLEMENTATION.md at this commit for validation and remaining hosted-parity gaps."
+            --notes "Development native Dewy/µDewy pair from ${GITHUB_SHA} for Linux x86_64; the last two of three native generations verified byte-for-byte, with matching runtime library. See dewy/bootstrap/IMPLEMENTATION.md at this commit for validation and remaining hosted-parity gaps."

@@ -4187,4 +4187,9 @@ generation 1 that differed from generation 2 (15.2 MB against 13.6 MB): a
 stale seed lowers the current sources differently, so the two-generation
 comparison needs a seed of the same sources. `tools/check_native.sh` passes
 on the pair; the native fixture suite passes at 96/4 with it.
+Seeded with the older `seed-dewy-c` instead, `--generations 3` (added the
+same day) converges: generation 2 and 3 are byte-identical, with the same
+digests as the fresh-seed pair, in 618 s wall (generations of 83, 220 and
+126 s). The native release workflow, which seeds from the last published
+pair, now builds three generations for this reason.
 

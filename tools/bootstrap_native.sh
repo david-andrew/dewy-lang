@@ -6,8 +6,19 @@ set -euo pipefail
 
 bootstrap_target=x86_64
 bootstrap_resume=false
-while [[ ${1:-} == --target || ${1:-} == --resume ]]; do
+# Two generations certify a seed built from these very sources. A seed built
+# from older sources lowers them differently, so its generation 1 differs
+# from generation 2 although generation 2 already is the fixed point; three
+# generations compare the last two, which are both products of this source.
+bootstrap_generations=2
+while [[ ${1:-} == --target || ${1:-} == --resume || ${1:-} == --generations ]]; do
     if [[ $1 == --resume ]]; then bootstrap_resume=true; shift; continue; fi
+    if [[ $1 == --generations ]]; then
+        if [[ $# -lt 2 || ! ${2:-} =~ ^[23]$ ]]; then echo '--generations needs 2 or 3' >&2; exit 2; fi
+        bootstrap_generations=$2
+        shift 2
+        continue
+    fi
     if [[ $# -lt 2 ]]; then echo '--target needs x86_64 or c' >&2; exit 2; fi
     bootstrap_target=$2
     shift 2
@@ -23,7 +34,7 @@ if [[ $bootstrap_gcc_no_pre != 0 && $bootstrap_gcc_no_pre != 1 ]] ||
     exit 2
 fi
 if [[ $# -lt 2 || $# -gt 3 ]]; then
-    echo "Usage: $0 [--resume] [--target x86_64|c] NATIVE_DEWY_SEED NATIVE_UDEWY_SEED [OUTPUT_DIRECTORY]" >&2
+    echo "Usage: $0 [--resume] [--target x86_64|c] [--generations 2|3] NATIVE_DEWY_SEED NATIVE_UDEWY_SEED [OUTPUT_DIRECTORY]" >&2
     exit 2
 fi
 
@@ -180,7 +191,7 @@ fi
 # Preserve a generation before rebuilding the shared cache artifact. Each
 # Dewy compiler runs with the new µDewy generation and the source library
 # belonging to this checkout, independent of the user's installed compilers.
-for ((bootstrap_generation=bootstrap_first; bootstrap_generation<=2; bootstrap_generation++)); do
+for ((bootstrap_generation=bootstrap_first; bootstrap_generation<=bootstrap_generations; bootstrap_generation++)); do
     bootstrap_previous=$((bootstrap_generation - 1))
     echo "Building native compiler generation $bootstrap_generation ($bootstrap_target)"
     bootstrap_started=$SECONDS
@@ -214,13 +225,18 @@ for ((bootstrap_generation=bootstrap_first; bootstrap_generation<=2; bootstrap_g
     fi
 done
 
-cmp -- "$bootstrap_output/udewy-stage1" "$bootstrap_output/udewy-stage2"
-cmp -- "$bootstrap_output/dewy-stage1" "$bootstrap_output/dewy-stage2"
-cp -- "$bootstrap_output/udewy-stage2" "$bootstrap_output/udewy"
-cp -- "$bootstrap_output/dewy-stage2" "$bootstrap_output/dewy"
+bootstrap_last=$bootstrap_generations
+bootstrap_before_last=$((bootstrap_generations - 1))
+cmp -- "$bootstrap_output/udewy-stage$bootstrap_before_last" "$bootstrap_output/udewy-stage$bootstrap_last"
+cmp -- "$bootstrap_output/dewy-stage$bootstrap_before_last" "$bootstrap_output/dewy-stage$bootstrap_last"
+cp -- "$bootstrap_output/udewy-stage$bootstrap_last" "$bootstrap_output/udewy"
+cp -- "$bootstrap_output/dewy-stage$bootstrap_last" "$bootstrap_output/dewy"
 (
     cd -- "$bootstrap_output"
-    sha256sum BACKEND dewy-stage0 dewy-stage1 dewy-stage2 dewy \
-        udewy-stage0 udewy-stage1 udewy-stage2 udewy > SHA256SUMS
+    bootstrap_stage_files=()
+    for ((bootstrap_stage=0; bootstrap_stage<=bootstrap_last; bootstrap_stage++)); do
+        bootstrap_stage_files+=("dewy-stage$bootstrap_stage" "udewy-stage$bootstrap_stage")
+    done
+    sha256sum BACKEND "${bootstrap_stage_files[@]}" dewy udewy > SHA256SUMS
 )
 echo "Verified identical native compiler generations: $bootstrap_output"
