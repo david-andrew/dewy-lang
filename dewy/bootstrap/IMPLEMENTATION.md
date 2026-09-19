@@ -180,6 +180,23 @@ the native fixed point is not grounds for retiring them yet.
   rewrites its UTF-8 bytes and byte length on every step from the
   counter's ordinal, as the hosted backend does (`string_ranges`; fixture
   `native_character_ranges`, pair check 54).
+- Less emitted text, third round (2026-09-19): 20.5 MB to 17.4 MB (hello
+  world 212 KB). (10) A string literal is static data with owner zero, so
+  it is handed to an owning slot and to a call as itself, with no retain
+  and no release after the call (`static_literal`, through the casts
+  contextual typing adds). (11) Ordinary builds spell symbols `_b<id>` and
+  `_f<id>`; the source-name suffix is emitted for `dewy debug` only
+  (`Engine.debug_names`). (12) `let x = if c a else b` and `x = if ...`
+  store into `x` directly instead of a result slot copied afterwards
+  (`needs_slot`). (13) A record allocation with its header word is one
+  generated `_alloc<N>` per record size. (14) `push` is one generated
+  `_push<N>` per element layout instead of five lines per site. (15)
+  Generated helpers (release, copy, unique, share, write, push) are keyed
+  by a recursive layout signature (`layout_key`: offsets and field kinds,
+  cell tags, array elements) rather than by type identity; a minted
+  record keeps its own key since its release dispatches over the brand
+  family. Release helpers went from 3,196 to 2,713; most of the
+  compiler's records are minted, so the sharing is bounded.
 - Less emitted text, at the source (2026-09-19). Four lowering changes cut
   the self-build's µDewy from 29.3 MB to 22.4 MB (hello world 380 KB to
   284 KB) without a cleanup pass over the text: (1) a single-use pure

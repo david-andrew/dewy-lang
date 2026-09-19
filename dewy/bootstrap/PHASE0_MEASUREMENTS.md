@@ -4216,4 +4216,12 @@ peak 2,700,740 KiB. The four-line `brands.lookup` lowers to 24 lines, from
 42: what remains there is the string retains around a comparison, the copy
 on returning an element, and the optional's cell, the ownership traffic
 that only Phase 1.1 proofs remove.
+A third round (static literals without retain/release, identity-only
+symbols in ordinary builds, conditional values stored into their binding,
+generated headed allocation and push helpers, helpers keyed by layout
+signature) reached 17,361,272 bytes and hello world 211,963 bytes. Cold
+self-build with the C-built compiler: 17.1-17.2 s wall, emission 0.90 s,
+backend 2.4-2.5 s, peak 2,631,044 KiB. From the 29.3 MB start of the day
+the emitted text is down 41%, peak memory 14%, and the backend's share of
+the build from 2.8 s to 2.4 s.
 

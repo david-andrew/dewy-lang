@@ -24,6 +24,7 @@ build = (request:options.Request cwd:string library:string executable:string?=no
         engine.prelude_cache=prelude_cache.Config[executable "{cwd}/__dewycache__/prelude" request.target engine.library_roots engine.prelude_files]
     }
     engine.test_mode=request.command =? 'test'
+    engine.debug_names=request.command =? 'debug'
     if engine.test_mode {engine.entry_name=tests.entry_name}
     let started=timing.start(request.timings)
     let entry=modules.load(paths.absolute(request.source cwd) @engine)

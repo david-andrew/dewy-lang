@@ -310,6 +310,17 @@ statement = (id:addr @state:State):>array<addr> => {
     }
     return result
 }
+# A value that `expression` would give a fresh result slot: a flow, or a
+# block that does not simply end in its value.
+needs_slot = (id:addr state:State):>bool => {
+    let node=node_at(id state)
+    if node is? hir.Flow return true
+    if node isnt? hir.Block return false
+    if node.items.length =? 0 return true
+    let tail=node_at(node.items[end] state)
+    let tail_type=types.node_at(state.types tail.value_type)
+    return tail is? hir.Return or types.is_primitive(tail_type 'void') or types.is_primitive(tail_type 'never')
+}
 statement_inner = (id:addr @state:State):>array<addr> => {
     let node=node_at(id state)
     if node is? hir.Block {
@@ -319,11 +330,21 @@ statement_inner = (id:addr @state:State):>array<addr> => {
     }
     if node is? hir.Flow return flow(node 0 @state)
     if node is? hir.Declare {
+        # `let x = if c a else b`: the arms store into `x` itself rather
+        # than into a result slot copied to `x` afterwards.
+        if needs_slot(node.expr state) {
+            let expr=node_at(node.expr state)
+            let type=if node.annotation is? none expr.value_type else node.annotation
+            let result:array<addr>=[put(hir.Declare[node.loc node.value_type node.decltype node.name node.annotation zero(type expr @state) node.binding_id] @state)]
+            append(@result write(node.expr put(hir.ExpressedIdentifier[node.loc type node.name node.binding_id] @state) @state))
+            return result
+        }
         let value=expression(node.expr @state)
         value.prefix.push(put(hir.Declare[node.loc node.value_type node.decltype node.name node.annotation value.value node.binding_id] @state))
         return value.prefix
     }
     if node is? hir.Assign {
+        if node.op =? '=' and needs_slot(node.value state) return write(node.value node.target @state)
         let value=expression(node.value @state)
         value.prefix.push(put(hir.Assign[node.loc node.value_type node.target node.op value.value] @state))
         return value.prefix
