@@ -15,7 +15,7 @@ def check_getter_locals(binary, tmp_path):
     source.write_text(ARENA + (ROOT / 'tests/fixtures/native_getter_locals.dewy').read_text())
     lowered = subprocess.run([binary, source], capture_output=True, text=True, timeout=60)
     assert lowered.returncode == 0, lowered.stdout + lowered.stderr
-    assert '__dewy_borrow_' in lowered.stdout
+    assert '_borrow' in lowered.stdout
     output = source.with_suffix('.udewy')
     output.write_text(lowered.stdout)
     for target in ['x86_64', 'c']:

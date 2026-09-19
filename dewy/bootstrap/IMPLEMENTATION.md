@@ -180,6 +180,28 @@ the native fixed point is not grounds for retiring them yet.
   rewrites its UTF-8 bytes and byte length on every step from the
   counter's ordinal, as the hosted backend does (`string_ranges`; fixture
   `native_character_ranges`, pair check 54).
+- Less emitted text, at the source (2026-09-19). Four lowering changes cut
+  the self-build's µDewy from 29.3 MB to 22.4 MB (hello world 380 KB to
+  284 KB) without a cleanup pass over the text: (1) a single-use pure
+  temporary (a load, a name, arithmetic over those) is emitted at its use
+  when only pure evaluation stands between capture and use, and a
+  single-use call result when the very next statement evaluates it first
+  (`statements.dewy`: `inline_temporaries`, an ordered walk that stops at
+  a store, an effectful call, an assignment, an exit or a loop; removals
+  are marked and compacted once, since rebuilding a list per removal
+  allocated quadratically); (2) an `and`/`or` in an `if`/`loop` condition
+  whose operands lift no statements stays an expression, where µDewy
+  short-circuits it, instead of a flag slot written by a flow (each
+  operand lowered once: re-lowering through the general path was
+  exponential in the chain length); (3) symbols are `_b<id>_<name>`,
+  `_f<id>_<name>` and `_<hint><serial>` instead of `__dewy_binding_...`,
+  `__dewy_function_...` and `__dewy_<hint>_...` (a fifth of the bytes
+  were names; nothing parses them); (4) array descriptors and union cells
+  are built by one generated helper per program (`_new_array`, `_new_cell`)
+  instead of an allocate-and-store sequence at each site. What remains is
+  mostly needed: loop-invariant loads captured before loops, values held
+  across releases, and the retain/release pairs themselves, which only
+  ownership proofs (Phase 1.1) can remove.
 - Element facts through captures and joins (2026-09-18). A loop
   capture's result is a block (the hidden array's declaration, the loop,
   the array); binding it now copies the hidden array's element facts to

@@ -4193,3 +4193,18 @@ digests as the fresh-seed pair, in 618 s wall (generations of 83, 220 and
 126 s). The native release workflow, which seeds from the last published
 pair, now builds three generations for this reason.
 
+### Less emitted text at the source (2026-09-19)
+
+Four lowering changes (single-use temporaries emitted at their use, short-
+circuit conditions as expressions, short symbol spellings, generated array
+descriptor and union cell constructors; see IMPLEMENTATION.md) cut the
+self-build's µDewy from 29,283,725 to 22,364,743 bytes (560,468 to 452,714
+lines) and hello world from 381,820 to 284,264 bytes. Cold self-build with
+the C-built compiler: 17.6-17.9 s wall (the same session's previous
+generation: 18.4-18.7 s), emission 1.05 s from 1.22 s, backend 2.7 s from
+2.8 s, peak 2,804,988 KiB from 3,053,612 KiB. Fixed point and fixture
+suite unchanged (96/4). The remaining text is dominated by temporaries the
+lowering needs (loop-invariant loads, values held across releases: 8.0 MB),
+control flow (3.1 MB), stores (2.8 MB), flag slots for conditions with
+lifted operands (2.1 MB) and releases (1.8 MB); symbol names are 3.1 MB.
+

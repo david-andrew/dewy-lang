@@ -201,20 +201,20 @@ discover = (id:addr @state:State):>void => {
         }
     }
     if node is? hir.Declare and node.binding_id isnt? none {
-        state.symbols[node.binding_id]="__dewy_binding_{node.binding_id}_{node.name}"
+        state.symbols[node.binding_id]="_b{node.binding_id}_{node.name}"
         state.storage_types[node.binding_id]=if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation
     }
     if node is? hir.ObjectLiteral {
         loop field in node.fields {
             if field.binding_id isnt? none {
-                state.symbols[field.binding_id]="__dewy_binding_{field.binding_id}_{field.name}"
+                state.symbols[field.binding_id]="_b{field.binding_id}_{field.name}"
                 state.storage_types[field.binding_id]=hir.node_at(state.input.nodes field.value).value_type
             }
         }
     }
     if node is? hir.FunctionLiteral {
         loop parameter in parameters(node) {
-            if parameter.binding_id isnt? none {state.symbols[parameter.binding_id]="__dewy_binding_{parameter.binding_id}_{parameter.name}" state.storage_types[parameter.binding_id]=parameter.value_type}
+            if parameter.binding_id isnt? none {state.symbols[parameter.binding_id]="_b{parameter.binding_id}_{parameter.name}" state.storage_types[parameter.binding_id]=parameter.value_type}
             if parameter.place and parameter.binding_id isnt? none {
                 state.addressed.add(parameter.binding_id)
                 state.place_parameters.add(parameter.binding_id)
@@ -225,7 +225,7 @@ discover = (id:addr @state:State):>void => {
     if node is? hir.IteratorExpression {
         let target=hir.node_at(state.input.nodes node.target)
         if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
-            state.symbols[target.binding_id]="__dewy_binding_{target.binding_id}_{target.name}"
+            state.symbols[target.binding_id]="_b{target.binding_id}_{target.name}"
             state.storage_types[target.binding_id]=target.value_type
         }
     }
@@ -815,6 +815,39 @@ owned_record = (value:addr actual:addr expected:addr node:hir.AST @state:State):
     return put(hir.Block[node.loc runtime_type(expected node @state) prefix false] @state)
 }
 ArrayMemory:type = [descriptor:addr data:addr prefix:array<addr>]
+# Fresh descriptors and union cells are built by one generated helper per
+# program (`_new_array`, `_new_cell`) rather than an allocate-and-store
+# sequence at every construction site: the same work, a call's worth of
+# text instead of seven lines. Programs without an arena keep the inline
+# form, as the record helpers do.
+construction_helper = (key:string arity:addr node:hir.AST @state:State):>string? => {
+    if state.allocator is? none return none
+    let existing=state.copy_helpers.get(key)
+    if existing isnt? none return existing
+    let generated=fresh(key @state)
+    state.copy_helpers[key]=generated
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let parameters:array<hir.Param>=[]
+    let slots:array<types.PosOrKwArg>=[]
+    let inputs:array<addr>=[]
+    loop i in 0.. and i <? arity {
+        let parameter=fresh('field' @state)
+        parameters.push(hir.Param[parameter word_type])
+        slots.push(types.PosOrKwArg[parameter word_type])
+        inputs.push(put(hir.ExpressedIdentifier[node.loc word_type parameter] @state))
+    }
+    let prefix:array<addr>=[]
+    let size=if key =? 'new_array' layouts.array_descriptor.size else 16
+    let block=snapshot(allocation(word(size node @state) node @state) @prefix @state)
+    let offset:addr=0
+    loop input in inputs {prefix.push(store_word(input block offset node @state)) offset+=8}
+    prefix.push(block)
+    let body=put(hir.Block[node.loc word_type prefix false] @state)
+    let signature=types.function_type(slots [] none word_type [] @state.type_nodes)
+    let literal=put(hir.FunctionLiteral[node.loc signature parameters [] none word_type body source=state.source_index] @state)
+    state.generated.push(program.Function[generated literal])
+    return generated
+}
 array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory => {
     let prefix:array<addr>=[]
     let size=word_op('__mul__' length word(stride node @state) node @state)
@@ -823,8 +856,13 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory 
     # descriptor instead of a second allocation for zero bytes.
     let count=hir.node_at(state.nodes length)
     let data=if count is? hir.Integer and count.value =? 0 snapshot(word(0 node @state) @prefix @state) else snapshot(allocation(size node @state) @prefix @state)
-    let descriptor=snapshot(allocation(word(layouts.array_descriptor.size node @state) node @state) @prefix @state)
     let fields:array<addr>=[data length length word(stride node @state) word(layouts.array_flags.mutable + (if state.allocator is? none 0 else layouts.array_flags.arena_descriptor) node @state) word(if state.allocator is? none 0 else 1 node @state)]
+    let helper=construction_helper('new_array' 6 node @state)
+    if helper isnt? none {
+        let descriptor=snapshot(intrinsic(helper fields types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+        return ArrayMemory[descriptor data prefix]
+    }
+    let descriptor=snapshot(allocation(word(layouts.array_descriptor.size node @state) node @state) @prefix @state)
     let offset:addr=0
     loop value in fields {
         prefix.push(intrinsic('__store_i64__' [value address(descriptor offset node @state)] types.primitive('void' @state.type_nodes) node @state))
@@ -1611,8 +1649,14 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owne
     else if object_valued(actual state) and object_valued(selected state) {content=owned_record(value actual selected node @state)}
     let payload=snapshot(content @prefix @state)
     let word_value=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) payload] @state)
+    let tag=word(member_tag(selected @state) node @state)
+    let helper=construction_helper('new_cell' 2 node @state)
+    if helper isnt? none {
+        prefix.push(intrinsic(helper [tag word_value] types.primitive('int64' @state.type_nodes) node @state))
+        return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    }
     let cell=snapshot(allocation(word(16 node @state) node @state) @prefix @state)
-    prefix.push(store_word(word(member_tag(selected @state) node @state) cell 0 node @state))
+    prefix.push(store_word(tag cell 0 node @state))
     prefix.push(store_word(word_value cell 8 node @state))
     prefix.push(cell)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
@@ -3393,7 +3437,7 @@ object_test = (operand:addr node:hir.TypeTest @state:State):>addr => {
 fresh = (hint:string @state:State):>string => {
     state.serial+=1
     if hint =? 'argument' return "_a{state.serial}"
-    return "__dewy_{hint}_{state.serial}"
+    return "_{hint}{state.serial}"
 }
 snapshot = (value:addr @prefix:array<addr> @state:State):>addr => {
     let node=hir.node_at(state.nodes value)
@@ -3804,12 +3848,12 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     }
     let units=state.capture_plan.functions
     let named=state.capture_plan.named
-    loop [id capture] in units {state.code_symbols[id]="__dewy_function_{id}"}
+    loop [id capture] in units {state.code_symbols[id]="_f{id}"}
     # Carry the source name of a named function into its symbol so stack
     # traces, profiles and emitted text identify it. Unique ids stay in front.
     loop [binding id] in named {
         let source_name=state.capture_plan.names.get(binding)
-        if source_name isnt? none {state.code_symbols[id]="__dewy_function_{id}_{source_name}"}
+        if source_name isnt? none {state.code_symbols[id]="_f{id}_{source_name}"}
     }
     loop [binding id] in named {
         let name=state.code_symbols.get(id)

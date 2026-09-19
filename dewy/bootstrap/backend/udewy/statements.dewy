@@ -169,6 +169,33 @@ expression = (id:addr @state:State):>Expression => {
     return Expression[[] id]
 }
 
+# µDewy short-circuits `and`/`or` in an `if`/`loop` condition (bitwise
+# elsewhere). A condition whose operands lift no statements stays an
+# expression instead of a result slot written by a flow.
+condition_expression = (id:addr @state:State):>Expression => {
+    let node=node_at(id state)
+    if node is? hir.ShortCircuit and node.op in? ['and' 'or'] {
+        # Lower each operand once. A chain re-lowered through the general
+        # path would be lowered again at every level.
+        let left=condition_expression(node.left @state)
+        let right=condition_expression(node.right @state)
+        if left.prefix.length =? 0 and right.prefix.length =? 0 return Expression[[] put(hir.ShortCircuit[node.loc node.value_type node.op left.value right.value] @state)]
+        # The right operand's lifted statements run only when the left
+        # decides nothing: a flow over the lowered pieces.
+        let conjunction=node.op =? 'and'
+        let other=put(hir.Bool[node.loc boolean(@state) not conjunction] @state)
+        let right_items=right.prefix
+        right_items.push(right.value)
+        let right_block=put(hir.Block[node.loc node.value_type right_items false] @state)
+        let arm=put(hir.IfArm[node.loc node.value_type left.value if conjunction right_block else other] @state)
+        let selected=put(hir.Flow[node.loc node.value_type [arm] if conjunction other else right_block] @state)
+        let lowered=expression(selected @state)
+        let prefix=left.prefix
+        append(@prefix lowered.prefix)
+        return Expression[prefix lowered.value]
+    }
+    return expression(id @state)
+}
 # A later arm's condition is evaluated only after preceding arms fail. A
 # lifted loop condition runs on every iteration. The entered bit retains the
 # loop/else rule: the fallback runs only when that arm never entered.
@@ -176,7 +203,7 @@ flow = (node:hir.Flow position:addr @state:State):>array<addr> => {
     if position >=? node.arms.length return if node.default is? none [] else statement(node.default @state)
     let arm=node_at(node.arms[position] state)
     $runtime_assert arm is? hir.IfArm|hir.LoopArm
-    let condition=expression(arm.condition @state)
+    let condition=condition_expression(arm.condition @state)
     let body=block(arm statement(arm.body @state) @state)
     let later=flow(node position+1 @state)
     let fallback:addr?=if later.length =? 0 none else block(node later @state)
@@ -245,6 +272,205 @@ statement_inner = (id:addr @state:State):>array<addr> => {
     value.prefix.push(value.value)
     return value.prefix
 }
+# Single-use temporaries. The ownership lowering names every intermediate
+# value so that evaluation order and releases are explicit. Most of those
+# names are read exactly once, by the very next statement, and hold a pure
+# value (a load, a name, arithmetic over those): emitting the value in place
+# is the same program with less text for the backend to parse. The rule is
+# deliberately narrow: the one read must be the first thing the following
+# statement evaluates, so nothing (a store, a call, a loop iteration) can
+# come between the capture and the use.
+Uses:type = [reads:dict<string addr>=[]]
+count_uses = (root:addr @uses:Uses state:State):>void => {
+    let pending:array<addr>=[root]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let node=node_at(id state)
+        if node is? hir.ExpressedIdentifier {uses.reads[node.name]=uses.reads.get(node.name 0)+1}
+        hir.push_children(node @pending)
+    }
+}
+temporary_name = (name:string):>bool => {
+    if name.length <? 3 or name[0] not=? '_' or name[1] not=? 'a' return false
+    loop i in 2.. and i <? name.length {if name[i] not in? ['0' '1' '2' '3' '4' '5' '6' '7' '8' '9'] return false}
+    return true
+}
+pure = (id:addr state:State):>bool => {
+    let node=node_at(id state)
+    if node is? hir.Integer|hir.Bool|hir.String|hir.BasedString|hir.ExpressedIdentifier return true
+    if node is? hir.Transmute|hir.ValueCast return pure(node.expr state)
+    if node is? hir.FunctionCall {
+        if node.kw_args.length >? 0 return false
+        let callee=node_at(node.func state)
+        if callee isnt? hir.ExpressedIdentifier return false
+        let name=callee.name
+        let reads=name.startswith('__load_') or name in? emit.binary or name in? emit.prefix or name =? '__static_words__'
+        if not reads return false
+        loop argument in node.pos_args {if not pure(argument state) return false}
+        return true
+    }
+    return false
+}
+# The identifier a statement evaluates first, or none when it starts with
+# something else (a literal, a loop, a call through a name).
+first_leaf = (id:addr state:State):>addr? => {
+    let node=node_at(id state)
+    if node is? hir.ExpressedIdentifier return id
+    if node is? hir.Declare return first_leaf(node.expr state)
+    if node is? hir.Assign return first_leaf(node.value state)
+    if node is? hir.Return return if node.item is? none none else first_leaf(node.item state)
+    if node is? hir.Suppress return first_leaf(node.item state)
+    if node is? hir.Transmute|hir.ValueCast return first_leaf(node.expr state)
+    if node is? hir.ShortCircuit return first_leaf(node.left state)
+    if node is? hir.FunctionCall {
+        let callee=node_at(node.func state)
+        if callee is? hir.ExpressedIdentifier and temporary_name(callee.name) return node.func
+        if callee isnt? hir.ExpressedIdentifier return first_leaf(node.func state)
+        return if node.pos_args.length =? 0 none else first_leaf(node.pos_args[0] state)
+    }
+    if node is? hir.Flow {
+        if node.arms.length =? 0 return none
+        let arm=node_at(node.arms[0] state)
+        return if arm is? hir.IfArm first_leaf(arm.condition state) else none
+    }
+    if node is? hir.Block return if node.items.length =? 0 none else first_leaf(node.items[0] state)
+    return none
+}
+# Walk a statement in evaluation order looking for the one read of `name`.
+# Everything evaluated before that read must be pure (loads, names,
+# arithmetic); a store, a call with effects, an assignment, an exit or a
+# loop is a barrier the captured value must not move past.
+Found:type = [leaf:addr?=none blocked:bool=false]
+impure_call = (node:hir.FunctionCall state:State):>bool => {
+    let callee=node_at(node.func state)
+    if callee isnt? hir.ExpressedIdentifier return true
+    let name=callee.name
+    return not (name.startswith('__load_') or name in? emit.binary or name in? emit.prefix or name =? '__static_words__')
+}
+find_use = (id:addr name:string state:State):>Found => {
+    let node=node_at(id state)
+    if node is? hir.ExpressedIdentifier return if node.name =? name Found[leaf=id] else Found[]
+    if node is? hir.Integer|hir.Bool|hir.String|hir.BasedString|hir.Void return Found[]
+    if node is? hir.Declare return find_use(node.expr name state)
+    if node is? hir.Assign {
+        let inner=find_use(node.value name state)
+        if inner.leaf isnt? none or inner.blocked return inner
+        return Found[blocked=true]
+    }
+    if node is? hir.Return {
+        if node.item isnt? none {
+            let inner=find_use(node.item name state)
+            if inner.leaf isnt? none or inner.blocked return inner
+        }
+        return Found[blocked=true]
+    }
+    if node is? hir.Break|hir.Continue return Found[blocked=true]
+    if node is? hir.Suppress return find_use(node.item name state)
+    if node is? hir.Transmute|hir.ValueCast return find_use(node.expr name state)
+    if node is? hir.ShortCircuit {
+        let left=find_use(node.left name state)
+        if left.leaf isnt? none or left.blocked return left
+        return find_use(node.right name state)
+    }
+    if node is? hir.FunctionCall {
+        let callee=node_at(node.func state)
+        if callee is? hir.ExpressedIdentifier and callee.name =? name return Found[leaf=node.func]
+        if callee isnt? hir.ExpressedIdentifier {
+            let inner=find_use(node.func name state)
+            if inner.leaf isnt? none or inner.blocked return inner
+        }
+        loop argument in node.pos_args {
+            let inner=find_use(argument name state)
+            if inner.leaf isnt? none or inner.blocked return inner
+        }
+        return Found[blocked=impure_call(node state)]
+    }
+    if node is? hir.Flow {
+        loop arm_id in node.arms {
+            let arm=node_at(arm_id state)
+            if arm isnt? hir.IfArm return Found[blocked=true]
+            let condition=find_use(arm.condition name state)
+            if condition.leaf isnt? none or condition.blocked return condition
+            let body=find_use(arm.body name state)
+            if body.leaf isnt? none or body.blocked return body
+        }
+        if node.default isnt? none return find_use(node.default name state)
+        return Found[]
+    }
+    if node is? hir.Block {
+        loop item in node.items {
+            let inner=find_use(item name state)
+            if inner.leaf isnt? none or inner.blocked return inner
+        }
+        return Found[]
+    }
+    return Found[blocked=true]
+}
+inline_temporaries = (@items:array<addr> uses:Uses @state:State):>void => {
+    # Removed declarations are marked and compacted once at the end: the
+    # compiler's largest bodies hold thousands of statements, and rebuilding
+    # the list per removal would allocate quadratically.
+    let removed:set<addr>=set[]
+    let i:addr=0
+    loop i <? items.length {
+        if items[i] in? removed {i+=1 continue}
+        let item=node_at(items[i] state)
+        if item is? hir.Flow {
+            loop arm_id in item.arms {
+                let arm=node_at(arm_id state)
+                if arm is? hir.IfArm|hir.LoopArm {inline_block(arm.body uses @state)}
+            }
+            if item.default isnt? none {inline_block(item.default uses @state)}
+        } else if item is? hir.Block {inline_block(items[i] uses @state)}
+        if item is? hir.Declare and item.binding_id is? none and temporary_name(item.name) and uses.reads.get(item.name 0) =? 1 and (pure(item.expr state) or node_at(item.expr state) is? hir.FunctionCall) {
+            # A pure value moves forward past other pure evaluation. A call
+            # result moves only into the very next statement, and only when
+            # that statement evaluates it first: the call keeps its place.
+            let movable=pure(item.expr state)
+            let k=i+1
+            let inlined=false
+            let adjacent=true
+            loop k <? items.length {
+                if items[k] in? removed {k+=1 continue}
+                let found=find_use(items[k] item.name state)
+                if found.leaf isnt? none {
+                    if movable or (adjacent and first_leaf(items[k] state) =? found.leaf) {
+                        let leaf=found.leaf
+                        $runtime_assert leaf <? state.nodes.length
+                        state.nodes[leaf]=node_at(item.expr state)
+                        inlined=true
+                    }
+                    break
+                }
+                if found.blocked or not movable break
+                adjacent=false
+                k+=1
+            }
+            if inlined {
+                removed.add(items[i])
+                # The previous live declaration may now reach its use.
+                loop i >? 0 {i-=1 if items[i] not in? removed break}
+                continue
+            }
+        }
+        i+=1
+    }
+    if removed.length >? 0 {
+        let kept:array<addr>=[]
+        loop id in items {if id not in? removed {kept.push(id)}}
+        items=kept
+    }
+}
+inline_block = (id:addr uses:Uses @state:State):>void => {
+    let node=node_at(id state)
+    if node isnt? hir.Block return
+    let items=node.items
+    inline_temporaries(@items uses @state)
+    node.items=items
+    $runtime_assert id <? state.nodes.length
+    state.nodes[id]=node
+}
+
 normalize = (source:program.Program input:emit.Input):>Result => {
     let state=State[input.nodes input.types]
     let functions:array<program.Function>=[]
@@ -259,6 +485,9 @@ normalize = (source:program.Program input:emit.Input):>Result => {
         # returns remain exits when `write` lifts this implicit result.
         if not types.is_primitive(result 'void') and not types.is_primitive(result 'never') and not types.is_primitive(tail 'void') and not types.is_primitive(tail 'never') {body=put(hir.Return[function.loc void_type(@state) body] @state)}
         let lowered=block(function statement(body @state) @state)
+        let uses=Uses[]
+        count_uses(lowered @uses state)
+        inline_block(lowered uses @state)
         # Keyword-only parameters follow the positional ones in the emitted
         # signature; call lowering already orders arguments the same way.
         let merged:array<hir.Param>=function.pos_or_kw_args
@@ -268,6 +497,9 @@ normalize = (source:program.Program input:emit.Input):>Result => {
     state.in_function=false
     let startup:array<addr>=[]
     loop item in source.startup_items {append(@startup statement(item @state))}
+    let startup_uses=Uses[]
+    loop item in startup {count_uses(item @startup_uses state)}
+    inline_temporaries(@startup startup_uses @state)
     let argv_prologue:array<addr>|none=none
     let argv_value=source.argv_value
     if source.argv_prologue isnt? none {
