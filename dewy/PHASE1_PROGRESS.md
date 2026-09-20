@@ -611,3 +611,40 @@ built with the frame-slot change executes the allocation, scalar-place and
 strict-copy kernels (42); the final generation built in 65.03s. All 77 paired
 Phase 1 cases passed. The build timing remains above target.
 Artifacts: `../dewy-build-artifacts/phase1-allocation-effects-stage4-2026-09-20`.
+
+Direct array ownership checkpoint: native direct-only functions can own a
+caller-prepared mutable array when escape summaries prove it cannot be kept.
+The caller transfers a fresh/moved/copied value; the callee releases it on
+normal and early exits, including replacement and forwarding through a place.
+This is separate from single-use consumption: reading the parameter does not
+consume it. First-class functions, defaults, captures and runtime entrypoints
+retain the ordinary ABI. Callback target analysis now includes only observed
+function values (and still treats raw callable ingress as unknown), rather
+than every function with a compatible signature. Shared HIR nodes are checked
+by parent-child use, so a direct call cannot hide a value use of the same node.
+
+Hosted lowering now retains and releases caller-prepared nonescaping argument
+snapshots. Rebound parameters own their replacement storage separately from
+the caller's incoming descriptor. Mutable array parameters of functions used
+as values isolate their contents on entry; callback forwarding cannot mutate
+the caller's ordinary by-value input. Fresh nested literal elements transfer
+into lasting replacement buffers instead of leaking their initial owners.
+Strict-copy accounting uses the source's known outer extent at a runtime-length
+parameter boundary, while retaining the destination's child-storage costs.
+True unbounded implicit argument copies remain errors under `$explicit_copies`.
+
+Validation so far: the direct native second generation built in 64.26 seconds
+and passed the three ownership kernels on x86 and C. The broad paired corpus
+passed 211/211. The final hosted ownership/strict-copy group passed 19 tests,
+and 35 array/lifetime regressions passed. Native timing remains above target;
+this checkpoint does not certify a new fixed point or complete Phase 1.
+Artifacts: `../dewy-build-artifacts/phase1-owned-parameters-stage3-2026-09-20`.
+
+A proof gap exposed by the nested-array lifetime kernel remains: checking
+`rows[0].length` does not currently establish a stable fact route for a later
+`rows[0][0]`. A named local row view does carry that fact, but the general
+indexed-route proof and its mutation invalidation are still required; the
+fixture's local views do not constitute a fix for that proof gap.
+Final integration check: all 82 paired Phase 1 cases passed, including the
+nested-array lifetime kernel and both bounded/unbounded strict-copy argument
+cases. Results: `../dewy-build-artifacts/phase1-owned-parameters-final-parity-2026-09-20`.

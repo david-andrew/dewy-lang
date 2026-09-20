@@ -459,6 +459,7 @@ class _Lowerer(
         self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
         self.owned_array_elements: dict[str, ty.TypeExpr] = {}   # one element contract drives recursive cleanup
+        self.rebound_array_owners: dict[int, hir.ExpressedIdentifier] = {}
         self.owned_objects: dict[LocalBindingKey, ty.ObjectType] = {}   # object locals (dictionaries and sets included) whose members are released at scope exit
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
@@ -518,6 +519,22 @@ class _Lowerer(
         self._classify_array_representations()
         self._analyze_string_results()
         self._check_captures()
+        # An indirect caller cannot use a callee-specific array protocol.
+        # Functions exposed as values therefore isolate mutable by-value
+        # arrays on entry, just as native lowering does for its ordinary ABI.
+        self.value_function_ids = set()
+        for parent in hir.walk(self.root):
+            for child in hir.children(parent):
+                if isinstance(parent, hir.FunctionCall) and child is parent.func:
+                    continue
+                if isinstance(parent, hir.Declare) and child is parent.expr and isinstance(child, hir.FunctionLiteral):
+                    continue
+                if isinstance(child, hir.FunctionLiteral):
+                    self.value_function_ids.add(id(child))
+                elif isinstance(child, hir.ExpressedIdentifier):
+                    binding = self.identifier_bindings.get(id(child))
+                    if binding is not None and binding.kind in {'function', 'overload'}:
+                        self.value_function_ids.update(id(function.literal) for function in self._resolve_callable(child))
         # Scope borrows need the captured-binding set discovery just collected.
         captured = {binding.semantic_id for uses in self.captures.values() for _use, binding in uses if binding.semantic_id is not None}
         self.borrow_plan = borrowing.analyze(self.root, captured, self.program_effects, set(self.binding_by_semantic_id))
@@ -755,6 +772,8 @@ class _Lowerer(
         parameter_prologue: list[hir.AST] = []
         parameter_objects: dict[LocalBindingKey, ty.ObjectType] = {}
         parameter_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] = {}
+        parameter_arrays: dict[str, ty.TypeExpr] = {}
+        rebound_array_owners: dict[int, hir.ExpressedIdentifier] = {}
         place_parameter_cells: dict[int, hir.ExpressedIdentifier] = {}
 
         def lower_param(param: hir.Param) -> hir.Param:
@@ -803,6 +822,30 @@ class _Lowerer(
                     binding_id=None,
                     place=False,
                 )
+            if isinstance(param.type, ty.ArrayType) and param.binding_id is not None:
+                summary = self.program_effects.for_param_binding(param.binding_id)
+                if id(literal) in self.value_function_ids and (summary is None or not summary.read_only):
+                    incoming_name = self._new_array_name(f'arg_{param.name}')
+                    incoming = hir.ExpressedIdentifier(literal.loc, param.type, incoming_name)
+                    copied, value = self._clone_array_value(incoming, param.type)
+                    self._note_copy('array', param.type, f'copied on entry as `{param.name}`',
+                                    'a function-valued caller cannot prepare a callee-specific mutable argument', literal.loc)
+                    parameter_prologue.extend(copied)
+                    parameter_prologue.append(hir.Declare(literal.loc, ty.VOID_TYPE, 'let', param.name,
+                                                          'int64', value, binding_id=param.binding_id))
+                    if summary is not None and not summary.escapes:
+                        parameter_arrays[param.name] = param.type.element
+                    return replace(param, name=incoming_name, type='int64', binding_id=None)
+                if param.type.length is None and summary is not None and summary.rebinds and not summary.escapes:
+                    # The incoming descriptor belongs to the caller. Only a
+                    # replacement made by this function belongs to its scope.
+                    # A zero-initialized owner slot handles early returns and
+                    # repeated replacement without releasing the incoming value.
+                    owner = hir.ExpressedIdentifier(literal.loc, 'int64', self._new_array_name('parameter_owner'))
+                    parameter_prologue.append(hir.Declare(literal.loc, ty.VOID_TYPE, 'let', owner.name,
+                                                          'int64', self._int64_literal(literal.loc, 0)))
+                    parameter_arrays[owner.name] = param.type.element
+                    rebound_array_owners[param.binding_id] = owner
             if isinstance(param.type, ty.ObjectType):
                 incoming_name = self._new_object_name(f'arg_{param.name}')
                 incoming = hir.ExpressedIdentifier(
@@ -1199,10 +1242,14 @@ class _Lowerer(
                     [*default_prologue, transformed_body],
                     True,
                 )
+        previous_array_owners = self.rebound_array_owners
+        self.rebound_array_owners = rebound_array_owners
         body = self._lower_function_body(
             transformed_body, literal.rettype, parameter_prologue,
             parameter_objects=parameter_objects, parameter_cells=parameter_cells,
+            parameter_arrays=parameter_arrays,
         )
+        self.rebound_array_owners = previous_array_owners
         self.current_optional_result = previous_result
         self.current_object_result = previous_object_result
         self.current_array_result = previous_array_result
@@ -3242,10 +3289,11 @@ class _Lowerer(
         self, node: hir.AST, rettype: ty.Type, prologue: list[hir.AST] | None = None,
         *, parameter_objects: dict[LocalBindingKey, ty.ObjectType] | None = None,
         parameter_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] | None = None,
+        parameter_arrays: dict[str, ty.TypeExpr] | None = None,
     ) -> hir.AST:
         """Lower a function body and install labeled-exit signal state when needed."""
-        self.owned_array_names = set()
-        self.owned_array_elements = {}
+        self.owned_array_names = set(parameter_arrays or {})
+        self.owned_array_elements = dict(parameter_arrays or {})
         self.owned_objects = dict(parameter_objects or {})
         # Already-lowered parameter copies belong to this scope just like
         # body declarations. Register them before lowering writes/returns so
@@ -5408,11 +5456,7 @@ class _Lowerer(
                     and isinstance(boundary.parameter.type, ty.ArrayType)
                 ):
                     copy_type = boundary.parameter.type
-                    arg_prelude, lowered_arg = self._independent_array_value(
-                        arg,
-                        copy_type,
-                        site='passed to a call',
-                    )
+                    arg_prelude, lowered_arg = self._independent_array_argument(arg, copy_type, boundary.parameter)
                 elif isinstance(expected_type, ty.ArrayType):
                     arg_prelude, lowered_arg = self._extract_array_operand(arg, expected_type)
                 elif payload is not None:
@@ -5457,11 +5501,7 @@ class _Lowerer(
                     and isinstance(boundary.parameter.type, ty.ArrayType)
                 ):
                     copy_type = boundary.parameter.type
-                    arg_prelude, lowered_arg = self._independent_array_value(
-                        arg,
-                        copy_type,
-                        site='passed to a call',
-                    )
+                    arg_prelude, lowered_arg = self._independent_array_argument(arg, copy_type, boundary.parameter)
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload, temporary=True)
                 elif ty.runtime_union_members(arg.type) is not None:

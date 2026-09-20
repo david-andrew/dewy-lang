@@ -1,7 +1,8 @@
 $explicit_copies
 change=(values:array<int64>):>void=>{values.push(99)}
-main=():>int64=>{
-    let values:array<int64>=[42]
+exercise=(values:array<int64>):>int64=>{
     change(values);
+    if values.length =? 0 return 1
     return values[0]
 }
+main=():>int64=>exercise([42])

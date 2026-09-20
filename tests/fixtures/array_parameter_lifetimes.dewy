@@ -1,0 +1,40 @@
+# Rebinding owns its replacements, while the caller's original stays live.
+replace = (values:array<array<string>> early:bool):>array<array<string>> => {
+    if early return values
+    loop i in 0.. and i <? 4 {values=[['new'+'!']]}
+    return values
+}
+change = (values:array<string length=1>):>void => {values[0]='private'+'!'}
+invoke = (callback:(values:array<string length=1>):>void values:array<string length=1>):>void => callback(values)
+later = (@values:array<int64 length=1>):>bool => {values[0]=99 return true}
+consume = (values:array<int64> ready:bool):>int64 => {
+    if values.length =? 0 return 0
+    let old=values[0]
+    values[0]=42
+    return old
+}
+exercise = ():>int64 => {
+    let source:array<array<string>>=[['kept'+'!']]
+    let first=replace(source true)
+    let replaced=replace(source false)
+    if first.length not=? 1 or replaced.length not=? 1 or source.length not=? 1 return 1
+    const first_row=@first[0]
+    const replaced_row=@replaced[0]
+    const source_row=@source[0]
+    if first_row.length not=? 1 or replaced_row.length not=? 1 or source_row.length not=? 1 return 2
+    if first_row[0] not=? 'kept!' or replaced_row[0] not=? 'new!' or source_row[0] not=? 'kept!' return 3
+    let words:array<string length=1>=['kept'+'!']
+    invoke(@change words)
+    if words[0] not=? 'kept!' return 4
+    let values:array<int64 length=1>=[7]
+    let result=consume(values later(@values))
+    if result not=?7 or values[0] not=?99 return 5
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 20 {if exercise() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

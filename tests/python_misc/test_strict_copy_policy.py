@@ -86,13 +86,23 @@ def test_entry_policy_does_not_apply_to_unmarked_dependency(tmp_path):
 @pytest.mark.parametrize('call', ['change(values)', 'change(values=values)'])
 def test_implicit_array_argument_copy_is_reported_and_enforced(call):
     source = SrcFile(None, 'change=(values:array<int64>):>void=>{values.push(99)} '
-                     'main=():>int64=>{let values:array<int64>=[42] '+call+'; return values[0]}')
+                     'exercise=(values:array<int64>):>int64=>{'+call+'; '
+                     'if values.length =? 0 return 1 return values[0]} '
+                     'main=():>int64=>exercise([42])')
     from dewy.backend.udewy import lower
     codegen(source)
     assert any(note.kind == 'array' and note.site == 'passed to a call'
                for note in lower.last_copy_notes)
     with pytest.raises(ReportException, match='unproven copy'):
         codegen(SrcFile(None, '$explicit_copies\n'+source.body))
+
+
+@pytest.mark.parametrize('call', ['change(values)', 'change(values=values)'])
+def test_known_source_extent_bounds_copy_into_runtime_length_parameter(call):
+    source = SrcFile(None, '$explicit_copies\n'
+                     'change=(values:array<int64>):>void=>{values.push(99)} '
+                     'main=():>int64=>{let values:array<int64>=[42] '+call+'; return values[0]}')
+    codegen(source)
 
 
 def test_implicit_array_assignment_is_reported_and_enforced():

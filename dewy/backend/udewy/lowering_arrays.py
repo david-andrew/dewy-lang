@@ -1007,6 +1007,11 @@ class _ArrayLowering(_ArraySharing):
             else None
         )
         fresh = self._array_expression_owns_fresh_storage(node.value)
+        # Literal buffers belong to this expression, and their element handles
+        # have no other owner. Moving those handles into the lasting buffer
+        # avoids abandoning the literal's nested arrays/strings. Call results
+        # keep their separate temporary-owner protocol.
+        move_literal = isinstance(self._copy_source_expression(node.value), hir.ArrayLiteral)
         if place_cell is not None or self._array_use_representation(node.target) == 'stack_data' or array_type.length is None or not fresh:
             self._note_copy('array', array_type, f'assigned to `{node.target.name}`',
                             self._copy_reason(node.value), node.loc)
@@ -1015,7 +1020,7 @@ class _ArrayLowering(_ArraySharing):
                 # The caller owns this place. Finish the copy before releasing
                 # its previous value (the RHS may read it), and publish an
                 # arena descriptor, never a pointer into this callee's frame.
-                prelude, copied = self._clone_array_value(node.value, array_type, arena=True)
+                prelude, copied = self._clone_array_value(node.value, array_type, arena=True, move=move_literal)
                 fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('place_rebound'))
                 target = replace(node.target, type='int64')
                 element = array_type.element
@@ -1043,14 +1048,22 @@ class _ArrayLowering(_ArraySharing):
         elif array_type.length is None:
             # Rebinding can cross a block/loop boundary. Its RHS frame buffer
             # dies at that boundary, while the target remains live.
-            prelude, copied = self._clone_array_value(node.value, array_type, arena=True)
+            prelude, copied = self._clone_array_value(node.value, array_type, arena=True, move=move_literal)
         else:
             prelude, copied = self._independent_array_value(
                 node.value,
                 array_type,
             )
         assignment = replace(node, value=copied)
-        if node.target.name in self.owned_array_names and array_type.length is None:
+        replacement_owner = self.rebound_array_owners.get(node.target.binding_id)
+        if replacement_owner is not None:
+            # Evaluate before releasing: the RHS may read the old parameter.
+            fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('parameter_rebound'))
+            return [*prelude, hir.Declare(node.loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', copied),
+                    *self._release_owned_array(replacement_owner, node.loc, element=array_type.element),
+                    replace(node, value=fresh),
+                    hir.Assign(node.loc, ty.VOID_TYPE, replacement_owner, '=', replace(node.target, type='int64'))]
+        if node.target.name in self.owned_array_names:
             # the old value is dead once the new one is computed — compute it
             # first (`x = shift(x 2)` reads the old `x`), then release, then rebind
             statements = list(prelude)
@@ -1076,8 +1089,29 @@ class _ArrayLowering(_ArraySharing):
             self._consume_array_value(node)   # the taker owns this fresh storage
             return self._extract_expression(node)
         if site is not None:
-            self._note_copy('array', array_type, site, self._copy_reason(node), node.loc)
+            source_type = ty.strip_refinement(node.type)
+            # A runtime-length parameter does not erase a known source extent.
+            # Keep the destination element type: its children may still carry
+            # runtime-sized storage even when the outer copy is bounded.
+            copy_type = replace(array_type, length=source_type.length) if isinstance(source_type, ty.ArrayType) and source_type.length is not None else array_type
+            self._note_copy('array', copy_type, site, self._copy_reason(node), node.loc)
         return self._clone_array_value(node, array_type, move=move)
+
+    def _independent_array_argument(self, node: hir.AST, array_type: ty.ArrayType, parameter: hir.Param):
+        """The caller owns its snapshot until a nonescaping call finishes.
+
+        A callee may mutate the supplied descriptor but cannot keep it. Track
+        the original descriptor even if it rebinds its local parameter name;
+        replacement storage has a separate callee lifetime.
+        """
+        before, value = self._independent_array_value(node, array_type, site='passed to a call')
+        summary = self.program_effects.for_param_binding(parameter.binding_id) if parameter.binding_id is not None else None
+        if self.lowering_module_startup or summary is None or summary.escapes or not self._has_arena():
+            return before, value
+        temp = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('argument_owner'))
+        self.statement_temporaries.append(('array', temp))
+        self.temporary_array_elements[temp.name] = array_type.element
+        return [*before, hir.Assign(node.loc, ty.VOID_TYPE, temp, '=', value)], replace(temp, type=array_type)
 
     def _clone_array_to_raw(
         self,

@@ -1,0 +1,11 @@
+$explicit_copies
+# The caller supplies fresh storage. Mutating it must not force another
+# implicit parameter-entry copy; only the requested element snapshot copies.
+Box:type=[text:string number:int64]
+read=(values:array<Box>):>int64=>{
+    if values.length =? 0 return 0
+    let saved=values[0].copy()
+    values[0].number=99
+    return saved.number
+}
+main=():>int64=>read([Box['hello' 42]])

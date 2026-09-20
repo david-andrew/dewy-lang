@@ -85,6 +85,9 @@ State:type = [
     # adopt them instead of copying.
     consumed_arguments:dict<addr set<addr>>=[]
     consumed_uses:set<addr>=set[]
+    # Direct-only mutable parameters receive the caller's prepared owner.
+    # They release it normally; their reads never implicitly consume it.
+    owned_parameters:set<addr>=set[]
     stable_bindings:set<addr>=set[]
     stable_parameters:dict<addr effects.ParameterEffects>=[]
     array_snapshots:set<addr>=set[]
@@ -875,7 +878,7 @@ note_parameter_copy = (argument:hir.Param|hir.BoundParam boxed:bool rebound:set<
     if kind is? none return
     let binding=argument.binding_id
     let reason="the body writes the elements of `{argument.name}`"
-    if boxed {reason="`{argument.name}` is captured by a closure"}
+    if boxed {reason="the body needs a writable slot for `{argument.name}`"}
     else if binding isnt? none {
         if binding in? rebound {reason="the body rebinds `{argument.name}`"}
         else if binding in? written {reason="the body writes the fields of `{argument.name}`"}
@@ -4286,7 +4289,12 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             continue
         }
         let whole=argument.binding_id isnt? none and argument.binding_id in? written and object_valued(argument.value_type state)
-        let private=boxed or releasable(argument.value_type @state) and argument.binding_id isnt? none and (argument.binding_id in? rebound or (argument.binding_id in? mutated and array_valued(argument.value_type state)) or whole)
+        let owned=argument.binding_id isnt? none and argument.binding_id in? state.owned_parameters
+        # The plan may only transfer ownership when this function can release
+        # it. Keep a checked internal boundary rather than silently leaking if
+        # a new raw operation is added to one analysis but not the other.
+        if owned and (not enabled or (argument.binding_id isnt? none and argument.binding_id in? excluded)) return reject(node 'an owning parameter without a proven cleanup lifetime' @state)
+        let private=owned or boxed or releasable(argument.value_type @state) and argument.binding_id isnt? none and (argument.binding_id in? rebound or (argument.binding_id in? mutated and array_valued(argument.value_type state)) or whole)
         let condition:addr?=none
         if argument is? hir.BoundParam {
             let incoming=fresh('incoming' @state)
@@ -4308,8 +4316,11 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         } else if private {
             let incoming=fresh('incoming' @state)
             arguments.push(hir.Param[incoming type position_only=argument.position_only])
-            note_parameter_copy(argument boxed rebound mutated written node @state)
-            let value=copy_value(put(hir.ExpressedIdentifier[node.loc type incoming] @state) argument.value_type node @state shared=whole)
+            let value=put(hir.ExpressedIdentifier[node.loc type incoming] @state)
+            if not owned {
+                note_parameter_copy(argument boxed rebound mutated written node @state)
+                value=copy_value(value argument.value_type node @state shared=whole)
+            }
             if boxed {value=box_value(value argument.value_type node @state binding=argument.binding_id) type=types.primitive('int64' @state.type_nodes)}
             prologue.push(put(hir.Declare[node.loc void_type 'let' name type value argument.binding_id] @state))
         } else {arguments.push(hir.Param[name type argument.binding_id argument.position_only false])}
@@ -4377,7 +4388,18 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
     discover(root @state)
     state.capture_plan=captures.analyze(root input.nodes state.symbols.keys)
-    let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links)
+    # Entrypoints and compiler-emitted runtime calls do not go through source
+    # argument preparation. Exclude their ABI from ownership specialization.
+    let external:set<addr>=set[]
+    loop [binding id] in state.capture_plan.named {
+        let source_name=state.capture_plan.names.get(binding)
+        if (entry_binding isnt? none and binding =? entry_binding) or (infer_entry and source_name isnt? none and source_name =? 'main') {external.add(id)}
+    }
+    loop binding in runtime_helpers.values {
+        let id=state.capture_plan.named.get(binding)
+        if id isnt? none {external.add(id)}
+    }
+    let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers)
     state.borrowed_arguments=borrowed.arguments
     state.stable_bindings=borrowed.stable_bindings
     state.stable_parameters=borrowed.stable_parameters
@@ -4385,6 +4407,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.disposable_arguments=borrowed.disposable_arguments
     state.consumed_arguments=borrowed.consumed_arguments
     state.consumed_uses=borrowed.consumed_uses
+    state.owned_parameters=borrowed.owned_parameters
     state.borrow_rejections=borrowed.rejections
     state.cleanup_excluded=borrowed.escaping_places
     loop unit in state.capture_plan.functions.values {

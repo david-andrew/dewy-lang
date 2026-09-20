@@ -7,7 +7,9 @@ import p"captures.dewy" as captures
 # This executable has no separately linked Dewy functions or escaping closure
 # ABI. Without raw function-pointer ingress/exposure, every callable value
 # comes from a checked function literal. For an indirect parameter call we can
-# merge the effects of ALL type-compatible literals. This is an overestimate,
+# merge the effects of ALL type-compatible literals whose addresses occur
+# as source values. Merely defining a function does not expose its address:
+# direct-only functions can have an internal ownership ABI. This remains an overestimate,
 # not devirtualization: the runtime call still uses the supplied pointer.
 #
 # A raw pointer conversion or memory access involving callable storage opens
@@ -49,7 +51,7 @@ contains_callable = (root:addr nodes:types.Table):>bool => {
     }
     return false
 }
-analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph):>dict<addr array<addr>> => {
+analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph function_values:(set<addr>)?=none):>dict<addr array<addr>> => {
     let parameters:set<addr>=set[]
     # Iterators and sibling-field bindings have checked origins too, although
     # they are not Declare nodes. Include every lexical binding before deciding
@@ -106,12 +108,13 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     }
     let signatures:dict<addr array<addr>>=[]
     let result:dict<addr array<addr>>=[]
+    let values=if function_values is? none captures.value_functions(root nodes plan) else function_values
     loop call in calls {
         let signature=types.strip_refinement(hir.node_at(nodes call.func).value_type type_nodes)
         if types.node_at(type_nodes types.unfold(signature type_nodes)) isnt? types.FunctionType continue
         if signature not in? signatures {
             let targets:array<addr>=[]
-            loop id in plan.functions.keys {
+            loop id in values {
                 let literal=hir.node_at(nodes id)
                 if subtyping.is_subtype(literal.value_type signature links @type_nodes) {targets.push(id)}
             }

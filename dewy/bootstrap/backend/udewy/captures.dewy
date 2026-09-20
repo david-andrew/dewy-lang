@@ -57,6 +57,30 @@ resolve = (id:addr selected:addr? plan:Plan nodes:array<hir.AST>):>addr? => {
     if selected is? none return if alternatives.length =? 1 alternatives[0] else none
     return if selected <? alternatives.length alternatives[selected] else none
 }
+# Function addresses observed by source value expressions. Inspect edges:
+# one shared checked node may be both a direct callee and a stored value.
+# A declaration defines its literal; every other use may expose its address.
+value_functions = (root:addr nodes:array<hir.AST> plan:Plan):>set<addr> => {
+    let result:set<addr>=set[]
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(nodes id)
+        loop child in hir.children(node) {
+            let value=hir.node_at(nodes child)
+            if node is? hir.FunctionCall and node.func =? child continue
+            if node is? hir.Declare and node.expr =? child and value is? hir.FunctionLiteral continue
+            if value isnt? hir.ExpressedIdentifier|hir.FunctionLiteral|hir.OverloadedFunction|hir.Block continue
+            let targets=callables(child plan nodes)
+            if targets isnt? none {loop target in targets {result.add(target)}}
+        }
+        hir.push_children(node @pending)
+    }
+    return result
+}
 locals = (id:addr nodes:array<hir.AST> @result:set<addr> @seen:set<addr>):>void => {
     if id in? seen return void
     seen.add(id)

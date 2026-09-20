@@ -353,7 +353,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
 }
 # `rejections` explains, per source binding, why its last considered use as
 # an argument was not borrowed (for `dewy analyze`).
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[]]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[]]
 
 # Ownership transfer at a value boundary. A parameter whose only use, on
 # every path and outside any loop, pushes it into an array or passes it on
@@ -411,28 +411,8 @@ consuming_use = (sites:array<ReadSite> nodes:array<hir.AST> plan:captures.Plan p
     }
     return none
 }
-consumed_parameters = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan indirect:dict<addr array<addr>>):>Consumed => {
+consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan valued:set<addr>):>Consumed => {
     let result=Consumed[]
-    # Functions reachable through function values (indirect calls, or a
-    # named function read anywhere but a call position) keep the ordinary
-    # argument protocol: an unknown caller cannot know to donate.
-    let valued:set<addr>=set[]
-    loop [caller targets] in indirect {loop target in targets {valued.add(target)}}
-    let call_positions:set<addr>=set[]
-    let pending:array<addr>=[root]
-    let seen:set<addr>=set[]
-    loop pending.length >? 0 {
-        let id=pending.pop
-        if id in? seen continue
-        seen.add(id)
-        let node=hir.node_at(nodes id)
-        if node is? hir.FunctionCall {call_positions.add(node.func)}
-        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and id not in? call_positions {
-            let named=plan.named.get(node.binding_id)
-            if named isnt? none {valued.add(named)}
-        }
-        hir.push_children(node @pending)
-    }
     # Candidate parameters and their read sites, scanned once per function.
     let scans:dict<addr ReadScan>=[]
     let candidates:dict<addr array<addr>>=[]
@@ -471,6 +451,33 @@ consumed_parameters = (root:addr nodes:array<hir.AST> type_nodes:types.Table pla
     return result
 }
 
+# A separate ownership protocol for mutable array parameters. The caller
+# supplies an independent value (fresh, moved, or copied); the callee owns
+# that value until it rebinds the parameter or exits. Unlike the single-use
+# protocol above, no parameter read itself consumes the owner. This avoids
+# retaining a second descriptor reference only to detach it at the first
+# write. Unknown/first-class callers retain the ordinary borrowed ABI.
+owned_array_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects valued:set<addr> retaining:set<addr> captured:set<addr> consumed:set<addr>):>set<addr> => {
+    let result:set<addr>=set[]
+    let named:set<addr>=set[]
+    loop id in plan.named.values {named.add(id)}
+    loop [id function] in plan.functions {
+        if id not in? named or id in? valued or id in? retaining continue
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        if literal.object_receiver or function.captures.length >? 0 continue
+        loop parameter in effects.literal_params(literal) {
+            let binding=parameter.binding_id
+            if binding is? none or parameter.place or parameter is? hir.BoundParam or binding in? captured or binding in? consumed continue
+            let type=types.node_at(type_nodes types.unfold(types.strip_refinement(parameter.value_type type_nodes) type_nodes))
+            if type isnt? types.ArrayType continue
+            let summary=summaries.by_param_binding.get(binding)
+            if summary isnt? none and summary.escapes.length =? 0 and effects.writes(summary) {result.add(binding)}
+        }
+    }
+    return result
+}
+
 # A write to state.output cannot invalidate a view into state.input. Prefix
 # routes deliberately treat indices as possibly overlapping; a shortened
 # summary route covers every deeper field. Rebinding/escaping the root covers
@@ -488,8 +495,12 @@ stable_owner = (source:Route stable:set<addr> parameters:dict<addr effects.Param
     return true
 }
 analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
-details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links):>Plan => {
-    let indirect=callbacks.analyze(root nodes type_nodes plan links)
+details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links external:set<addr>=set[] owned_parameter_protocol:bool=false):>Plan => {
+    let valued=captures.value_functions(root nodes plan)
+    let indirect=callbacks.analyze(root nodes type_nodes plan links function_values=valued)
+    # Compiler-generated callers also keep the ordinary ABI. They are not
+    # added to source callback targets merely because the runtime calls them.
+    loop id in external {valued.add(id)}
     # Checked value casts borrow while evaluating but do not expose raw
     # storage. At a value boundary lowering supplies an independent owner,
     # including an aggregate wrapped into an optional result.
@@ -551,7 +562,8 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             if summary isnt? none {stable_parameters[binding]=summary}
         }
     }
-    let consumed=consumed_parameters(root nodes type_nodes plan indirect)
+    let consumed=consumed_parameters(nodes type_nodes plan valued)
+    let owned:set<addr>=if owned_parameter_protocol owned_array_parameters(nodes type_nodes plan summaries valued retaining captured consumed.parameters) else set[]
     let consumed_arguments:dict<addr set<addr>>=[]
     let array_snapshots:set<addr>=set[]
     let result:dict<addr set<addr>>=[]
@@ -609,7 +621,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                         if source isnt? none and source.binding not in? rejections {rejections[source.binding]='the arguments could not be paired with the parameters'}
                     }
                 }
-                allowed_all.clear temporary_all.clear
+                allowed_all.clear temporary_all.clear consumed_all.clear
                 break
             }
             loop pair in pairs {
@@ -625,7 +637,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             let donated:set<addr>=set[]
             let position:addr=0
             loop pair in pairs {
-                if pair.parameter isnt? none and pair.parameter in? consumed.parameters {
+                if pair.parameter isnt? none and (pair.parameter in? consumed.parameters or pair.parameter in? owned) {
                     donated.add(pair.argument) rejected.add(pair.argument) retained.add(pair.argument)
                     position+=1
                     continue
@@ -667,5 +679,5 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             if source isnt? none {escaping.add(source.binding)}
         }
     }
-    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections]
+    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned]
 }

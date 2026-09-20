@@ -31,7 +31,13 @@ let main=():>int64=>{
         hir.append_node(@nodes hir.Declare[loc empty 'let' 'reader' signature reader 100])
         hir.append_node(@nodes hir.Declare[loc empty 'let' 'writer' signature writer 101])
         hir.append_node(@nodes hir.Declare[loc empty 'let' 'caller' caller_type caller 102])
+        # These are the possible source function values. A same-signature
+        # function that is only defined must not constrain an indirect ABI.
+        hir.append_node(@nodes hir.ExpressedIdentifier[loc signature 'reader' 100])
+        hir.append_node(@nodes hir.ExpressedIdentifier[loc signature 'writer' 101])
     ]
+    let unused=hir.append_node(@nodes hir.FunctionLiteral[loc signature [hir.Param['values' array 12]] [] none word zero])
+    items.push(hir.append_node(@nodes hir.Declare[loc empty 'let' 'unused' signature unused 103]))
     let root=hir.append_node(@nodes hir.Block[loc empty items true])
     let plan=captures.analyze(root nodes set[10 11 20 21 100 101 102])
     let known=callbacks.analyze(root nodes ts plan subtyping.default_links)

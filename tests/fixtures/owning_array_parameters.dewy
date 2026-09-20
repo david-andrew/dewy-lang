@@ -1,0 +1,53 @@
+# A known direct callee can own the caller's independent array value. A
+# fresh argument needs neither a second entry snapshot nor a COW detach.
+mutate = (values:array<int64>):>int64 => {
+    if values.length =? 0 return 0
+    let before:int64=_arena_allocated_bytes
+    values[0]=42
+    if _arena_allocated_bytes not=? before return 1
+    return values[0]
+}
+replace = (values:array<int64>):>int64 => {
+    values=[42]
+    return values[0]
+}
+set_value = (@values:array<int64>):>void => {
+    if values.length >? 0 {values[0]=42}
+}
+forward_place = (values:array<int64>):>int64 => {
+    set_value(@values)
+    if values.length =? 0 return 0
+    return values[0]
+}
+# A callback keeps the ordinary protocol: all callers must agree about who
+# releases the value. This also checks that the kept input stays independent.
+via_value = (values:array<int64>):>int64 => {
+    if values.length =? 0 return 0
+    values[0]=42
+    return values[0]
+}
+invoke = (callback:(values:array<int64>):>int64 values:array<int64>):>int64 => callback(values)
+keep = (values:array<int64>):>int64 => {
+    if values.length =? 0 return 0
+    let answer=via_value(values)
+    if values[0] not=? 7 return 1
+    return answer
+}
+exercise = ():>int64 => {
+    if mutate([1]) not=? 42 return 1
+    if mutate([]) not=? 0 return 2
+    if replace([1 2]) not=? 42 return 3
+    if forward_place([1]) not=? 42 return 4
+    if invoke(@via_value [1]) not=? 42 return 5
+    if keep([7]) not=? 42 return 6
+    let kept:array<int64>=[7]
+    if invoke(@via_value kept) not=? 42 or kept[0] not=? 7 return 7
+    return 42
+}
+main = ():>int64 => {
+    if exercise() not=? 42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {if exercise() not=? 42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

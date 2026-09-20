@@ -1,0 +1,49 @@
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/backend/udewy/captures.dewy" as captures
+import p"../../dewy/bootstrap/backend/udewy/borrowing.dewy" as borrowing
+main=():>int64=>{
+    let nodes:array<hir.AST>=[]
+    let ts=types.Table[]
+    let loc=Span[0 0]
+    let word=types.primitive('int64' @ts)
+    let empty=types.primitive('void' @ts)
+    let array=types.array_type(word none @ts)
+    let signature=types.function_type([types.PosOrKwArg['values' array]] [] none empty [] @ts)
+    let value=hir.append_node(@nodes hir.ExpressedIdentifier[loc array 'values' 1])
+    let zero=hir.append_node(@nodes hir.Integer[loc word '0d' 0])
+    let item=hir.append_node(@nodes hir.Index[loc word value zero 0])
+    let store=hir.append_node(@nodes hir.IndexAssign[loc empty item zero])
+    let function=hir.append_node(@nodes hir.FunctionLiteral[loc signature [hir.Param['values' array 1]] [] none empty store])
+    let declaration=hir.append_node(@nodes hir.Declare[loc empty 'const' 'change' signature function 100])
+    let callee=hir.append_node(@nodes hir.ExpressedIdentifier[loc signature 'change' 100])
+    let fresh=hir.append_node(@nodes hir.ArrayLiteral[loc array [zero]])
+    let call=hir.append_node(@nodes hir.FunctionCall[loc empty callee [fresh] []])
+    let root=hir.append_node(@nodes hir.Block[loc empty [declaration call] true])
+    let plan=captures.analyze(root nodes set[100])
+    let owned=borrowing.details(root nodes ts plan owned_parameter_protocol=true)
+    if 1 not in? owned.owned_parameters return 1
+    if call not in? owned.consumed_arguments or fresh not in? owned.consumed_arguments[call] return 2
+    if owned.consumed_uses.length not=? 0 return 3
+    let ordinary=borrowing.details(root nodes ts plan)
+    if ordinary.owned_parameters.length not=? 0 return 4
+    # Compiler-emitted calls and the entry ABI are not prepared source calls.
+    let external=borrowing.details(root nodes ts plan external=set[function] owned_parameter_protocol=true)
+    if external.owned_parameters.length not=? 0 return 5
+    # One shared HIR expression appears both as a callee and as a value.
+    # A per-node call-position set must not hide the value edge.
+    let alias=hir.append_node(@nodes hir.Declare[loc empty 'const' 'alias' signature callee 101])
+    let aliased_root=hir.append_node(@nodes hir.Block[loc empty [declaration alias call] true])
+    let aliased_plan=captures.analyze(aliased_root nodes set[100 101])
+    let aliased=borrowing.details(aliased_root nodes ts aliased_plan owned_parameter_protocol=true)
+    if aliased.owned_parameters.length not=? 0 return 6
+    # A literal can likewise be used as a value without an identifier read.
+    let functions=types.array_type(signature 1 @ts)
+    let stored=hir.append_node(@nodes hir.ArrayLiteral[loc functions [function]])
+    let stored_root=hir.append_node(@nodes hir.Block[loc empty [declaration stored call] true])
+    let stored_plan=captures.analyze(stored_root nodes set[100])
+    let valued=borrowing.details(stored_root nodes ts stored_plan owned_parameter_protocol=true)
+    if valued.owned_parameters.length not=? 0 return 7
+    return 42
+}
