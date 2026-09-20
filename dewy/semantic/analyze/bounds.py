@@ -4852,7 +4852,9 @@ def validate_bounds(
     """
 
     from .. import proofs
+    from . import public_effects
     proofs.validate(root, registry, srcfile)
+    public_effects.validate(root, registry, srcfile)
     validator = _BoundsValidator(registry, srcfile, root, target=target)
     validator.unfit = unfit
     validator.prototype_sites = prototype_sites

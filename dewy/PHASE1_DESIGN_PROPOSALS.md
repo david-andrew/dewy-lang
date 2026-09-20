@@ -260,7 +260,9 @@ retains its buffer. Source contracts should not accidentally promise that
 later COW detachment cannot occur. This proposal does not settle allocation
 failure behavior or the resource-exhaustion policy.
 
-David approved these starting rules on 2026-09-20. Implementation is still
-pending. A future builtin `resource` base type could make resource mints
+David approved these starting rules on 2026-09-20. Both compilers now have
+a separate public row representation and check the explicit empty row for
+a conservative initial subset. Named resource contracts, negative source
+rows and effect-row generic parameters remain to be integrated. A future builtin `resource` base type could make resource mints
 more explicit; ordinary nominal mints suffice for this first implementation.
 The allocation rule remains open to refinement from practical experience.

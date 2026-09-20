@@ -15,7 +15,7 @@ from itertools import count
 from typing import Callable, Literal, NoReturn, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
-from . import builtins, hir, ty
+from . import builtins, hir, ty, effect_rows
 from .analyze import predicate_effects
 from .hir import children as hir_children
 from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, user_warning, not_implemented, require_valued
@@ -7043,13 +7043,13 @@ def _generic_signature(fn_ast: p0.BinOp, *, ctx: Context) -> tuple[ty.FunctionTy
     params, generic_ctx = _declare_generic_parameters(type_block, ctx=ctx)
     if not params:
         user_error(ctx.srcfile, 'a generic function needs at least one type parameter', Pointer(span=type_block.loc, message='this parameter list is empty'))
-    rettype = ast_to_type(rettype_ast, ctx=generic_ctx)
+    rettype = _function_result_type(rettype_ast, ctx=generic_ctx)
     pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(params_block, ctx=generic_ctx)
     all_params = [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args is not None else [])]
     if any(p.type == ty.INFERRED_TYPE for p in all_params):
         user_error(ctx.srcfile, 'a generic function needs every parameter type declared', Pointer(span=params_block.loc, message='annotate each parameter'))
     signature = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
-    return replace(signature, type_params=params), params
+    return replace(signature, type_params=params, effects=_function_effects(rettype_ast)[1]), params
 
 
 def _instantiation_name(name: str, bindings: dict[str, ty.TypeExpr], params: list[ty.GenericParam]) -> str:
@@ -12643,8 +12643,33 @@ def _void_facts_annotation(ast: p0.AST, *, ctx: Context) -> ty.RefinedType | Non
     return None   # `:> <(x:int64):>int64>` is a type in a type block, as before
 
 
+def _function_effects(ast: p0.AST) -> tuple[p0.AST, effect_rows.Contract | None]:
+    """Split the reviewed empty row from the value-result annotation.
+
+    Only the result boundary interprets this syntax; effects never enter a
+    value union/intersection. Other row forms will use this same boundary.
+    """
+    if isinstance(ast, p0.Block) and ast.kind == '()' and len(ast.inner) == 1:
+        return _function_effects(ast.inner[0])
+    if not isinstance(ast, p0.BinOp) or _operator_symbol(ast.op) != '&':
+        return ast, None
+    right = ast.right
+    while isinstance(right, p0.Block) and right.kind == '()' and len(right.inner) == 1:
+        right = right.inner[0]
+    empty = isinstance(right, p0.Atom) and isinstance(right.item, t1.Identifier) and right.item.name == 'no_effects'
+    empty |= (isinstance(right, p0.BinOp) and isinstance(right.op, t2.TypeParamJuxtapose)
+              and isinstance(right.left, p0.Atom) and isinstance(right.left.item, t1.Identifier)
+              and right.left.item.name == 'Effect' and isinstance(right.right, p0.Block)
+              and right.right.kind == '<>' and not right.right.inner)
+    if empty:
+        result, _ = _function_effects(ast.left)
+        return result, effect_rows.Contract(effect_rows.Row())
+    return ast, None
+
+
 def _function_result_type(ast: p0.AST, *, ctx: Context, proof: bool = False) -> ty.Type:
     """A signature and a literal interpret their result annotation alike."""
+    ast, _ = _function_effects(ast)
     facts = _void_facts_annotation(ast, ctx=ctx)
     if facts is not None and not proof:
         user_error(ctx.srcfile, 'a bare fact return is only for `$proof`', Pointer(span=ast.loc, message='an ordinary procedure uses `:> void & <P>`'))
@@ -12667,7 +12692,7 @@ def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     params = [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args is not None else [])]
     if any(p.type == ty.INFERRED_TYPE for p in params):
         return None
-    return typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
+    return replace(typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype), effects=_function_effects(signature.right)[1])
 
 
 def _discarded_expressed_sites(body: hir.AST) -> list[hir.AST]:
@@ -12716,12 +12741,14 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
         user_error(ctx.srcfile, 'a proof needs a fact-only return contract', Pointer(span=signature.loc, message='write `:> <P>` after the parameters'))
     if bare_facts is not None and not is_proof:
         user_error(ctx.srcfile, 'a bare fact return is only for `$proof`', Pointer(span=signature.loc, message='an ordinary procedure uses `:> void & <P>`'))
+    effect_contract: effect_rows.Contract | None = None
     rettype: ty.Type = ty.INFERRED_TYPE
     rettype_loc: Span | None = None
     
     # if the return type was annotated, capture it
     void_facts: ty.RefinedType | None = None
     if isinstance(signature, p0.BinOp) and signature.op.symbol == ':>':
+        _, effect_contract = _function_effects(signature.right)
         declared = _function_result_type(signature.right, ctx=ctx, proof=is_proof)
         if isinstance(declared, ty.RefinedType) and declared.base == ty.VOID_TYPE:
             # A runtime procedure with `void & <facts>` has no expressed
@@ -12882,6 +12909,9 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
             # the end of the body is a return too: the facts are owed there
             body = hir.Block(body.loc, ty.VOID_TYPE, [body, _void_obligation(Span(body.loc.stop - 1, body.loc.stop), void_facts, ctx=inner_ctx)], False)
     ftype = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
+    if effect_contract is None and isinstance(expected, ty.FunctionType):
+        effect_contract = expected.effects
+    ftype = replace(ftype, effects=effect_contract)
     if void_facts is not None:
         ftype = replace(ftype, ret=void_facts)   # the promise travels with the function type; the value is still nothing
 
@@ -13224,6 +13254,7 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
                 [],
                 None,
                 _function_result_type(item.right, ctx=ctx),
+                effects=_function_effects(item.right)[1],
             ),
             mutable,
         )
@@ -14515,6 +14546,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 [],
                 None,
                 _function_result_type(ast.right, ctx=ctx),
+                effects=_function_effects(ast.right)[1],
             )
 
         case p0.BinOp(op=t1.Operator(symbol='*')):
@@ -14661,6 +14693,11 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
 
     def collect_param(item: p0.AST, *, position_only: bool = False) -> hir.Param | hir.BoundParam:
         item = _sink_ambiguity(item)
+        # `callback:(args):>Result` has the same callable annotation shape
+        # as an object field. Attach the arrow under the binding colon.
+        if (isinstance(item, p0.BinOp) and _operator_symbol(item.op) == ':>'
+                and isinstance(item.left, p0.BinOp) and _operator_symbol(item.left.op) == ':'):
+            item = replace(item.left, right=replace(item, left=item.left.right))
         def mark_place(
             param: hir.Param | hir.BoundParam,
             loc: Span,
@@ -14789,7 +14826,7 @@ def collect_function_signature_args(signature: p0.AST, *, ctx: Context) -> tuple
             case (
                 p0.Atom(item=t1.Identifier())
                 | p0.Prefix(op=t1.Operator(symbol='@'))
-                | p0.BinOp(op=t1.Operator(symbol=':'|'='))
+                | p0.BinOp(op=t1.Operator(symbol=':'|'='|':>'))
             ):
                 (kw_only_args if saw_rest else pos_or_kw_args).append(collect_param(item))
             case p0.BinOp(op=t2.EllipsisJuxtapose(), left=p0.Atom(item=t1.Identifier(name='...')), right=p0.Atom(item=t1.Identifier(name=name))):

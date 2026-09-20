@@ -151,7 +151,12 @@ function_to_dewy = (node:types.FunctionType nodes:types.Table):>string => {
         signature = args[0]
     }
     let prefix = if node.type_params.length =? 0 '' else "<{generic_params(node.type_params nodes)}>"
-    return "<{prefix}{signature}:>{type_to_dewy(node.ret nodes)}>"
+    let effect:string=''
+    if node.effects isnt? none and node.effects.allowed isnt? none {
+        let row=node.effects.allowed
+        if row.atoms.length =? 0 and row.variables.length =? 0 and not row.unknown {effect=' & no_effects'}
+    }
+    return "<{prefix}{signature}:>{type_to_dewy(node.ret nodes)}{effect}>"
 }
 
 type_to_dewy = (id:addr nodes:types.Table):>string => {

@@ -194,7 +194,8 @@ def _function_type_to_dewy(t: ty.FunctionType) -> str:
         signature = args[0]
     else:
         signature = f'({" ".join(args)})'
-    parts.append(f'{signature}:>{type_to_dewy(t.ret)}')
+    effect = ' & no_effects' if t.effects is not None and t.effects.allowed is not None and not t.effects.allowed.atoms and not t.effects.allowed.variables and not t.effects.allowed.unknown else ''
+    parts.append(f'{signature}:>{type_to_dewy(t.ret)}{effect}')
     return f'<{"".join(parts)}>'
 
 

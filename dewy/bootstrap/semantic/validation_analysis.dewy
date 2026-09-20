@@ -1,4 +1,5 @@
 from reporting import SrcFile, Error, Pointer, Warning
+import p"analyze/public_effects.dewy" as public_effects
 import p"module_state.dewy" as modules
 import p"context.dewy" as contexts
 import p"source_views.dewy" as sources
@@ -21,6 +22,8 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
     let source=sources.srcfile(module.context session)
     let proof_error=checked_proofs.validate(module.root source session)
     if proof_error isnt? none return proof_error
+    let effect_error=public_effects.validate(module.root source session)
+    if effect_error isnt? none return effect_error
     let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry]
     let checker=bounds.Checker[data source word source_files=source_files]
     bounds.configure(@checker prepared)

@@ -267,3 +267,27 @@ paired cases passed. Native generations built in 62.99s and 59.59s; both run
 the nested-counter fixture with result 42. General bigint iterator lowering
 and broader liquid inference remain open.
 Artifacts: `../dewy-build-artifacts/phase1-counters-stage2-2026-09-20`.
+
+Checkpoint: both compilers now check source `no_effects` and its desugared
+`Effect<>` form. Public rows live separately from internal parameter-access
+summaries and participate in callable subtyping, signature substitution,
+native type interning and prelude serialization. Callback parameters also
+accept the reviewed `f:(args):>Result & no_effects` shape. Unknown callback
+behavior cannot satisfy the empty row. Defaults and direct-call dependencies
+are included; purity does not imply termination.
+
+The initial inference subset covers scalar computation, private scalar
+mutation and read-only value access. Unsupported storage operations remain
+unknown; returning a runtime-length `.copy()` cannot claim purity just because
+COW may defer its allocation. Named source effects, negative source guarantees,
+row generics, complete inferred callable rows, and a complete allocation model
+remain outstanding. The native checker skips this pass when its type arena
+contains no effect contracts.
+
+Validation: 93 focused row/contract/proof/access checks and 53 signature,
+generic, runtime-key and native type-factory regressions passed. Both native
+generations execute the callback/private-mutation fixture (42); 19 native
+acceptance/rejection probes and all 48 paired cases passed. Integration builds
+were 64.11s and 69.42s, with other checks running concurrently; these are not
+isolated performance measurements or a new fixed-point certification.
+Artifacts: `../dewy-build-artifacts/phase1-effects-stage2-2026-09-20`.

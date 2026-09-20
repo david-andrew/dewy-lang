@@ -1,3 +1,4 @@
+import p"effect_rows.dewy" as effect_rows
 import p"propositions.dewy" as facts
 
 doc"""
@@ -5,7 +6,7 @@ Type expressions and their Boolean algebra, corresponding to semantic/ty.py.
 
 Types describe values; void and untyped describe expression/checking states
 and do not participate in the value-type hierarchy. In particular, noreturn
-is an effect, not an alternative to never.
+is a control-flow guarantee, not a may-effect or an alternative to never.
 
 The table interns completed descriptions. References are stable indices, so
 recursive aliases can later refer to a separately resolved binding without
@@ -62,6 +63,7 @@ FunctionType = type of Type & [
     rest:string?
     ret:addr
     type_params:array<GenericParam>
+    effects:effect_rows.Contract?=none
 ]
 # Alternatives retain declaration order. Dispatch later records which one
 # won, so lowering never has to infer a function's identity from its shape.
@@ -112,6 +114,8 @@ Clause:type = [literals:array<SignedAtom>]
 # the key). Description ids remain stable for the retained prefix.
 Table:type = [
     entries:array<Type>=[] positions:dict<string addr>=[]
+    # Skip public-effect validation entirely until a source contract exists.
+    effect_contracts:bool=false
     # Completed descriptions are stable: normalize each tree once per arena.
     # Alias resolution only changes the target of an atomic NamedType.
     normal_forms:dict<addr addr>=[]
@@ -422,7 +426,8 @@ type_variable = (name:string bound:addr @nodes:Table):>addr => {
     return intern(@nodes TypeVariable[key=key shape="V{_quoted(name)}:{shapes_key([bound] nodes)}" name=name bound=bound])
 }
 
-function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr params:array<GenericParam> @nodes:Table):>addr => {
+function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr params:array<GenericParam> @nodes:Table effects:effect_rows.Contract?=none):>addr => {
+    if effects isnt? none {nodes.effect_contracts=true}
     let slots:array<string> = []
     loop p in pos {
         let name = if p.name is? none 'none' else _quoted(p.name)
@@ -435,7 +440,8 @@ function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr
         slots.push("G{_quoted(p.name)}:{p.bound}")
     }
     let rest_key = if rest is? none 'none' else _quoted(rest)
-    let key = "F{slots.join(';')}:R{rest_key}:T{ret}"
+    let effect_key=effect_rows.identity(effects)
+    let key = "F{slots.join(';')}:R{rest_key}:T{ret}:E{effect_key}"
     let known=nodes.positions.get(key)
     if known isnt? none return known
     let shapes:array<string> = []
@@ -445,8 +451,8 @@ function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr
     }
     loop p in kw { shapes.push("K{_quoted(p.name)}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}") }
     loop p in params { shapes.push("G{_quoted(p.name)}:{shapes_key([p.bound] nodes)}") }
-    let shape = "F{shapes.join(';')}:R{rest_key}:T{shapes_key([ret] nodes)}"
-    return intern(@nodes FunctionType[key=key shape=shape pos_or_kw=pos kw_only=kw rest=rest ret=ret type_params=params])
+    let shape = "F{shapes.join(';')}:R{rest_key}:T{shapes_key([ret] nodes)}:E{effect_key}"
+    return intern(@nodes FunctionType[key=key shape=shape pos_or_kw=pos kw_only=kw rest=rest ret=ret type_params=params effects=effects])
 }
 
 # Lowered operations have required, unnamed value arguments. Keep that common
@@ -683,7 +689,7 @@ substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:
     loop p in node.pos_or_kw { pos.push(PosOrKwArg[p.name substitute(p.value_type inner @nodes) p.required p.place]) }
     loop p in node.kw_only { kw.push(KwOnlyArg[p.name substitute(p.value_type inner @nodes) p.required p.place]) }
     let ret = substitute(node.ret inner @nodes)
-    return function_type(pos kw node.rest ret params @nodes)
+    return function_type(pos kw node.rest ret params @nodes effects=node.effects)
 }
 
 # De Morgan's laws put not only on atoms. A type constructor is itself an atom

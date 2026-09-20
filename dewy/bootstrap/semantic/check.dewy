@@ -2298,7 +2298,8 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     # Abstract integers keep mathematical arithmetic until bounds analysis
     # chooses their representation. Selecting a word here would silently
     # give an `int` function wrapping arithmetic before its proofs run.
-    return types.function_type(parameters args.kw_only none result generic @session.types)
+    let effect_contract=if result_id is? none none else declarations.function_effects(result_id lexical session).effects
+    return types.function_type(parameters args.kw_only none result generic @session.types effects=effect_contract)
 }
 predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error? => {
     let node = contexts.node_at(id env.lexical session)
@@ -2394,10 +2395,14 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         return put(hir.GenericFunction[literal.loc resolved name hir.GenericSource[reference env.state shape.type_params]] @session)
     }
     shape.pos_or_kw=contextual_parameters(literal shape expected_signature env session)
+    let effect_contract=shape.effects
     let contract=shape.ret
     if expected_signature isnt? none {
         let required=types.node_at(session.types types.strip_refinement(expected_signature session.types))
-        if required is? types.FunctionType and required.type_params.length =? 0 {contract=contracts.adopt(contract required shape.pos_or_kw @session.types)}
+        if required is? types.FunctionType and required.type_params.length =? 0 {
+            contract=contracts.adopt(contract required shape.pos_or_kw @session.types)
+            if effect_contract is? none {effect_contract=required.effects}
+        }
     }
     let infer=types.is_primitive(types.node_at(session.types contract) 'untyped')
     let collector=session.return_collectors.length
@@ -2524,7 +2529,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     let slots:array<types.PosOrKwArg>=[]
     if method isnt? none and method.receiver_type isnt? none {slots.push(types.PosOrKwArg['__dewy_receiver' method.receiver_type true method.place_self])}
     loop slot in shape.pos_or_kw {slots.push(slot)}
-    let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types)
+    let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types effects=effect_contract)
     let value=put(hir.FunctionLiteral[literal.loc function_type parameters keyword_parameters none returns body source=env.lexical.source proof=is_proof_literal(literal env session)] @session)
     return if expected_signature is? none value else against(value expected_signature id env @session)
 }
@@ -3150,7 +3155,7 @@ string_method = (receiver:addr name:string id:addr env:Environment @session:cont
     if signature isnt? types.FunctionType or signature.pos_or_kw.length =? 0 return problem(id 'string method has no receiver parameter' name env session)
     let parameters:array<types.PosOrKwArg>=[]
     loop i in 1.. and i <? signature.pos_or_kw.length {parameters.push(signature.pos_or_kw[i])}
-    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types)
+    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=signature.effects)
     let loc=contexts.node_at(id env.lexical session).loc
     let function=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding_id] @session)
     return put(hir.BoundMethod[loc exposed function receiver] @session)
@@ -5446,7 +5451,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let parameters:array<types.PosOrKwArg>=[]
         if instance {parameters.push(types.PosOrKwArg['__dewy_receiver' type_id true mutates])}
         loop parameter in signature.pos_or_kw {parameters.push(parameter)}
-        let full=types.function_type(parameters signature.kw_only signature.rest signature.ret [] @session.types)
+        let full=types.function_type(parameters signature.kw_only signature.rest signature.ret [] @session.types effects=signature.effects)
         let ordinal:addr=0
         loop earlier in type.methods {
             if earlier.literal =? spec.literal break
@@ -5512,7 +5517,7 @@ method_value = (entry:contexts.MethodEntry receiver:addr? loc:Span @session:cont
         if index >? 0 or entry.receiver_type is? none {parameters.push(slot)}
         index += 1
     }
-    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types)
+    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=signature.effects)
     let function=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding.id] @session)
     return put(hir.BoundMethod[loc exposed function if entry.receiver_type is? none none else receiver] @session)
 }

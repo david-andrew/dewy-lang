@@ -1,0 +1,141 @@
+from reporting import SrcFile, Error, Pointer
+import p"../context.dewy" as contexts
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../bindings.dewy" as bindings
+import p"../effect_rows.dewy" as rows
+import p"effects.dewy" as access
+
+# Initial public checking recognizes scalar computation and read-only value
+# access. Storage operations without a checked allocation model stay unknown.
+# Recursion may be pure without terminating: $proof checks termination itself.
+const SCALAR_OPERATIONS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
+scalar = (id:addr nodes:types.Table):>bool => {
+    let node=types.node_at(nodes types.strip_refinement(id nodes))
+    if node is? types.IntegerLiteralType return node.value >=? -9223372036854775808 and node.value <? 18446744073709551616
+    return node is? types.Primitive and node.name in? ['void' 'never' 'none' 'bool' 'true' 'false' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64']
+}
+Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis]
+Scan:type = [private:set<addr>=set[] unknown:bool=false dependencies:set<addr>=set[]]
+visit = (id:addr input:Input @scan:Scan):>void => {
+    if scan.unknown return
+    let node=hir.node_at(input.nodes id)
+    if node is? hir.FunctionLiteral return
+    if node is? hir.Void|hir.NoneValue|hir.Bool|hir.Integer|hir.String|hir.Break|hir.Continue|hir.ScopeMetatag|hir.TypeValue return
+    if node is? hir.ExpressedIdentifier {
+        if node.binding_id is? none or node.binding_id not in? scan.private {scan.unknown=true}
+        return
+    }
+    if node is? hir.Assert and not node.runtime and not node.expect return
+    if node is? hir.FunctionCall {
+        if node.proof return
+        let targets=access.direct_targets(node input.analysis input.nodes)
+        let callee=hir.node_at(input.nodes node.func)
+        let signature=types.node_at(input.types callee.value_type)
+        let builtin=false
+        if callee is? hir.ExpressedIdentifier {
+            builtin=callee.binding_id is? none
+            if callee.binding_id isnt? none {
+                let binding=bindings.find_binding(input.registry callee.binding_id)
+                builtin=binding isnt? none and binding.builtin
+            }
+        }
+        let scalar_operation=callee is? hir.ExpressedIdentifier and builtin and callee.name in? SCALAR_OPERATIONS and scalar(node.value_type input.types)
+        loop arg in node.pos_args {if not scalar(hir.node_at(input.nodes arg).value_type input.types) {scalar_operation=false}}
+        if targets isnt? none {loop target in targets {scan.dependencies.add(target)}}
+        else if scalar_operation {}
+        else if signature is? types.FunctionType and rows.implies(signature.effects rows.Contract[rows.Row[]]) {visit(node.func input @scan)}
+        else {scan.unknown=true}
+        loop arg in node.pos_args {visit(arg input @scan)}
+        loop arg in node.kw_args.values {visit(arg input @scan)}
+        return
+    }
+    if node is? hir.Declare {
+        let value=hir.node_at(input.nodes node.expr)
+        if not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {scan.unknown=true}
+        else {visit(node.expr input @scan)}
+        return
+    }
+    if node is? hir.Assign {
+        let target=hir.node_at(input.nodes node.target)
+        if target isnt? hir.ExpressedIdentifier or target.binding_id is? none or target.binding_id not in? scan.private or not scalar(target.value_type input.types) {scan.unknown=true}
+        else {visit(node.value input @scan)}
+        return
+    }
+    if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {scan.unknown=true return}
+    if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.MemberAccess|hir.Index|hir.ValueCast|hir.RepresentationCast {
+        loop child in hir.children(node) {visit(child input @scan)}
+        return
+    }
+    scan.unknown=true
+}
+validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
+    if not session.types.effect_contracts return none
+    let constrained:array<addr>=[]
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(session.hir id)
+        loop child in hir.children(node) {pending.push(child)}
+        if node is? hir.FunctionLiteral {
+            let signature=types.node_at(session.types node.value_type)
+            if signature is? types.FunctionType and signature.effects isnt? none {constrained.push(id)}
+        }
+    }
+    if constrained.length =? 0 return none
+    let analysis=access.collect(root session.hir)
+    let input=Input[session.hir session.types session.registry analysis]
+    let unknown:set<addr>=set[]
+    let edges:dict<addr set<addr>>=[]
+    loop id in analysis.literals {
+        let node=hir.node_at(session.hir id)
+        $runtime_assert node is? hir.FunctionLiteral
+        let scan=Scan[unknown=not scalar(node.rettype session.types)]
+        let params=node.pos_or_kw_args
+        loop param in node.kw_only_args {params.push(param)}
+        if node.rest_args isnt? none {params.push(node.rest_args)}
+        loop param in params {if not param.place and param.binding_id isnt? none {scan.private.add(param.binding_id)}}
+        let pending:array<addr>=[node.body]
+        loop pending.length >? 0 {
+            let body=hir.node_at(session.hir pending.pop)
+            if body is? hir.FunctionLiteral continue
+            if body is? hir.Declare and body.binding_id isnt? none {scan.private.add(body.binding_id)}
+            loop child in hir.children(body) {pending.push(child)}
+        }
+        visit(node.body input @scan)
+        loop param in params {if param is? hir.BoundParam {visit(param.value input @scan)}}
+        if scan.unknown {unknown.add(id)}
+        loop target in scan.dependencies {
+            let callers=edges.get(target set[])
+            callers.add(id)
+            edges[target]=callers
+        }
+    }
+    pending=[]
+    loop id in unknown {pending.push(id)}
+    loop pending.length >? 0 {
+        let target=pending.pop
+        let callers=edges.get(target set[])
+        loop caller in callers {
+            if caller not in? unknown {unknown.add(caller) pending.push(caller)}
+        }
+    }
+    loop id in constrained {
+        let node=hir.node_at(session.hir id)
+        $runtime_assert node is? hir.FunctionLiteral
+        let signature=types.node_at(session.types node.value_type)
+        $runtime_assert signature is? types.FunctionType and signature.effects isnt? none
+        if not rows.satisfies(rows.Row[unknown=id in? unknown] signature.effects) {
+            let src=source
+            if node.source isnt? none {
+                $runtime_assert node.source <? session.sources.length
+                src=session.sources[node.source].srcfile
+            }
+            return Error[srcfile=src title='function does not satisfy its effect contract' pointers=[Pointer[span=node.loc message='cannot establish `no_effects`: an operation or callee may have effects']] hint='omit the row to infer conservatively, or remove the operation requiring effects']
+        }
+    }
+    return none
+}

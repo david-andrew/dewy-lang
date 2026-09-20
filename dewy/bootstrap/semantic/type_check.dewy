@@ -1,4 +1,5 @@
 from reporting import Error
+import p"effect_rows.dewy" as effect_rows
 import p"source_views.dewy" as source_views
 import p"../targets.dewy" as targets
 import p"../parser/p0.dewy" as parser
@@ -365,7 +366,7 @@ field_refinement_base = (base:addr promises:array<facts.Proposition> nodes:types
 
 # Keep lexical names separate from the callable's public argument names.
 # A position-only parameter still has a name in its body and its contracts.
-ParameterSource:type = const [name:string annotation:addr? default:addr? place:bool position_only:bool]
+ParameterSource:type = const [name:string annotation:addr? default:addr? place:bool position_only:bool callable_result:addr?=none]
 parameter_source = (id:addr context:contexts.Context session:contexts.Session):>ParameterSource|Error => {
     let target_id=id
     let row=contexts.node_at(target_id context session)
@@ -385,6 +386,12 @@ parameter_source = (id:addr context:contexts.Context session:contexts.Session):>
         place=true target_id=row.item
         row=contexts.node_at(target_id context session)
     }
+    let callable_result:addr?=none
+    if row is? parser.BinOp and source_views.is_operator(row.op ':>' context session) {
+        callable_result=row.right
+        target_id=row.left
+        row=contexts.node_at(target_id context session)
+    }
     let annotation:addr?=none
     if row is? parser.BinOp and source_views.is_operator(row.op ':' context session) {
         annotation=row.right target_id=row.left
@@ -394,7 +401,7 @@ parameter_source = (id:addr context:contexts.Context session:contexts.Session):>
     let name=source_views.identifier(target_id context session)
     if name is? none return contexts.problem(id 'function type parameter requires a name' 'write this parameter as `name:type`' context session)
     if place and default isnt? none return contexts.problem(id 'place parameters cannot have defaults' 'every call must explicitly supply the storage' context session)
-    return ParameterSource[name annotation default place position_only]
+    return ParameterSource[name annotation default place position_only callable_result]
 }
 
 # A bare `...` divides the positional-or-keyword parameters from the
@@ -424,7 +431,14 @@ function_args = (id:addr context:contexts.Context @session:contexts.Session lite
         let type=types.primitive('any' @session.types)
         if parsed.annotation isnt? none {
             let inner=contexts.Context[context.source context.scope parsed.name]
-            let declared=resolve(parsed.annotation inner @session)
+            let declared:addr|Error=types.primitive('untyped' @session.types)
+            if parsed.callable_result isnt? none {
+                let parameters=function_args(parsed.annotation inner @session)
+                if parameters is? Error return parameters
+                let result=function_result(parsed.callable_result inner @session)
+                if result is? Error return result
+                declared=types.function_type(parameters.pos_or_kw parameters.kw_only none result [] @session.types effects=function_effects(parsed.callable_result inner session).effects)
+            } else {declared=resolve(parsed.annotation inner @session)}
             if declared is? Error return declared
             let stored=value_type(declared parsed.annotation inner @session)
             if stored is? Error return stored
@@ -475,7 +489,27 @@ value_type = (value:addr id:addr context:contexts.Context @session:contexts.Sess
 
 # A fact-only result is void with promises; a type enclosed in angle
 # brackets is still an ordinary result type, e.g. :> <(x:int64):>int64>.
+EffectResult:type = const [value:addr effects:effect_rows.Contract?=none]
+function_effects = (id:addr context:contexts.Context session:contexts.Session):>EffectResult => {
+    let current=source_views.unparen(id context session)
+    let node=contexts.node_at(current context session)
+    if node is? parser.BinOp and source_views.is_operator(node.op '&' context session) {
+        let right=source_views.unparen(node.right context session)
+        let empty=source_views.identifier(right context session) =? 'no_effects'
+        let item=contexts.node_at(right context session)
+        if item is? parser.BinOp and source_views.is_operator(item.op 'TypeParamJuxtapose' context session) and source_views.identifier(item.left context session) =? 'Effect' {
+            let block=contexts.node_at(item.right context session)
+            if block is? parser.Block and block.delims =? '<>' and block.inner.length =? 0 {empty=true}
+        }
+        if empty {
+            let result=function_effects(node.left context session)
+            return EffectResult[result.value effect_rows.Contract[effect_rows.Row[]]]
+        }
+    }
+    return EffectResult[current]
+}
 function_result = (id:addr context:contexts.Context @session:contexts.Session proof:bool=false):>addr|Error => {
+    id=function_effects(id context session).value
     let node = contexts.node_at(id context session)
     if node is? parser.Block and node.delims =? '<>' and node.inner.length >? 0 {
         let promises:array<facts.Proposition> = []
@@ -569,7 +603,7 @@ field = (id:addr context:contexts.Context @session:contexts.Session):>types.Obje
                 if args is? Error return args
                 let ret = function_result(row.right context @session)
                 if ret is? Error return ret
-                return types.ObjectField[name types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types) mutable default]
+                return types.ObjectField[name types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types effects=function_effects(row.right context session).effects) mutable default]
             }
         }
     }
@@ -743,7 +777,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
             if args is? Error return args
             let ret = function_result(node.right context @session)
             if ret is? Error return ret
-            return types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types)
+            return types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types effects=function_effects(node.right context session).effects)
         }
         if op =? '|' or op =? 'or' {
             let left = bool_arm(node.left context @session)

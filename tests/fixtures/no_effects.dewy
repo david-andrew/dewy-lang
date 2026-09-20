@@ -1,0 +1,15 @@
+# Private arithmetic and read-only by-value access have no external effects.
+# A callback retains its contract through the function-handle parameter.
+count = (xs:array<int64>):>int64 & no_effects => xs.length
+increment = (x:int64):>int64 & Effect<> => x + 1
+apply = (f:(x:int64):>int64 & no_effects x:int64):>int64 & no_effects => f(x)
+local_work = (x:int64):>int64 & no_effects => {
+    let answer=x
+    answer+=1
+    return answer
+}
+main = ():>int64 => {
+    if count([1 2]) not=? 2 return 1
+    if apply(@increment 40) not=? 41 return 2
+    return local_work(41)
+}

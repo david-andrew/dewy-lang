@@ -1,3 +1,4 @@
+import p"effect_rows.dewy" as effect_rows
 import p"ty.dewy" as types
 import p"text_shapes.dewy" as text_shapes
 
@@ -512,6 +513,7 @@ join = (items:array<addr> links:Graph @nodes:types.Table):>addr => {
 # G's result. Defaults and keyword names affect the call shape; source
 # parameter bodies and default expressions do not participate here.
 function_subtype = (f:types.FunctionType g:types.FunctionType links:Graph @nodes:types.Table):>bool => {
+    if not effect_rows.implies(f.effects g.effects) return false
     if f.pos_or_kw.length not=? g.pos_or_kw.length return false
     loop i in 0.. and i <? f.pos_or_kw.length {
         let fp = f.pos_or_kw[i]

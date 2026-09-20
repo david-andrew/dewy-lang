@@ -1,0 +1,3 @@
+# COW deferral cannot make an escaping runtime-length snapshot effect-free.
+snapshot = (xs:array<int64>):>array<int64> & no_effects => xs.copy()
+main = ():>int64 => snapshot([42]).length

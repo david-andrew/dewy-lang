@@ -1,3 +1,4 @@
+from . import effect_rows
 from dataclasses import dataclass, field
 from ..utils import dataclass_replace as replace
 from collections import defaultdict
@@ -212,6 +213,7 @@ class FunctionType:
     rest: str | None  # rest param name, or None
     ret: TypeExpr
     type_params: list[GenericParam] = field(default_factory=list)
+    effects: effect_rows.Contract | None = None
 
 @dataclass(slots=True, weakref_slot=True)
 class OverloadType:
@@ -1124,6 +1126,8 @@ def _runtime_order_key(value: object) -> tuple:
         return (type(value).__name__, value)
     if isinstance(value, (tuple, list)):
         return (type(value).__name__, tuple(_runtime_order_key(item) for item in value))
+    if isinstance(value, effect_rows.Contract):
+        return ('effects', effect_rows.identity(value))
     if type(value).__module__ == __name__:
         return (type(value).__name__, tuple(
             _runtime_order_key(getattr(value, field.name))
@@ -2006,6 +2010,8 @@ class TypeSystem:
         Optional parameters on G cannot be required on F; F may add optional
         keyword-only extras.
         """
+        if not effect_rows.implies(f.effects, g.effects):
+            return False
         if len(f.pos_or_kw) != len(g.pos_or_kw):
             return False
         for fp, gp in zip(f.pos_or_kw, g.pos_or_kw):
@@ -2809,6 +2815,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
             t.rest,
             substitute_type(t.ret, inner),
             list(t.type_params),
+            t.effects,
         )
     if isinstance(t, OverloadType):
         methods: list[FunctionType] = []
@@ -2846,6 +2853,7 @@ def instantiate_method(m: FunctionType, type_args: dict[str, TypeExpr]) -> Funct
         m.rest,
         substitute_type(m.ret, type_args),
         [],
+        m.effects,
     )
 
 
