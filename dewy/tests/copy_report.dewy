@@ -20,5 +20,8 @@ let main = ():>int64 => {
     let g = lookup(facts 1)
     let h = g
     h.weight = 5
+    if maybe(facts 1) is? none { return 3 }
     return g.weight + h.weight + first_name(xs).length
 }
+let maybe = (facts:dict<int64 Fact> id:int64):>Fact? => facts.get(id)
+

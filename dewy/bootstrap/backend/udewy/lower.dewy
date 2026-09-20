@@ -1717,7 +1717,9 @@ cell_copy_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     } else {prefix.push(allocated)}
     return put(hir.Block[node.loc word_type prefix false] @state)
 }
-cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owned:bool=false):>addr => {
+# `shared`: a record payload read from a container slot may share the block
+# (a refcount bump on a headed block) rather than copy it, as `d[k]` does.
+cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owned:bool=false shared:bool=false):>addr => {
     let members=cell_members(expected @state)
     $runtime_assert members isnt? none
     if cell_members(actual @state) isnt? none return read_value(value actual expected node @state)
@@ -1767,7 +1769,7 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owne
     }
     let prefix:array<addr>=[]
     let content=value
-    if not owned {content=owned_copy(value selected node @state)}
+    if not owned {content=owned_copy(value selected node @state shared=shared and object_valued(selected state))}
     else if object_valued(actual state) and object_valued(selected state) {content=owned_record(value actual selected node @state)}
     let payload=snapshot(content @prefix @state)
     let word_value=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) payload] @state)
@@ -5072,15 +5074,19 @@ dict_lookup = (node:hir.DictLookup @state:State):>addr => {
         if fallback is? none {
             let absent=types.primitive('none' @state.type_nodes)
             fallback=cell_pack(word(0 node @state) absent node.value_type node @state)
-            value=cell_pack(value parts.value node.value_type node @state)
+            let kind=copy_kind(parts.value @state)
+            if kind isnt? none {note_copy(kind parts.value 'looked up with get' (if kind =? 'record' 'the optional result owns its payload: a headed block is shared, another is copied' else 'the optional result must own its payload') node @state)}
+            value=cell_pack(value parts.value node.value_type node @state shared=true)
             # An already-optional stored element uses its existing cell;
             # a lookup result must independently own that payload too.
             if cell_members(parts.value @state) isnt? none {value=copy_value(value node.value_type node @state)}
         } else {
             let selected:array<addr>=[]
+            let kind=copy_kind(parts.value @state)
+            if kind isnt? none {note_copy(kind parts.value 'looked up with get' (if kind =? 'record' 'the result owns its payload: a headed block is shared, another is copied' else 'the result must own its payload') node @state)}
             if cell_members(parts.value @state) is? none and cell_members(node.value_type @state) isnt? none {
-                value=cell_pack(value parts.value node.value_type node @state)
-            } else {value=copy_value(read_value(value parts.value node.value_type node @state) node.value_type node @state)}
+                value=cell_pack(value parts.value node.value_type node @state shared=true)
+            } else {value=copy_value(read_value(value parts.value node.value_type node @state) node.value_type node @state shared=object_valued(parts.value state))}
             value=snapshot(value @selected @state)
             $runtime_assert node.default isnt? none
             selected.push(release_value(fallback hir.node_at(state.input.nodes node.default).value_type node @state))

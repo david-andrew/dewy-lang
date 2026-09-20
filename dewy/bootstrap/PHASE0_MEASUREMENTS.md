@@ -4412,3 +4412,27 @@ and returns the result (`find_binding`), so the next slice is views
 through `get` and through a call that returns a view of a read-only
 parameter.
 
+### Dictionary `get` shares record payloads; the profile was an artifact (2026-09-20)
+
+The native lowering of an unproven lookup (`d.get(k)`, an optional result)
+now packs a record payload through the same shared path a proven `d[k]`
+read uses (`cell_pack(... shared=true)`: a headed block's count is bumped
+instead of the record being copied field by field; a block without a
+header is still copied), and `dewy analyze` names the lookup as a copy
+site (`looked up with get`) in both compilers. Measured on the second
+generation, where the new lowering shapes the compiler's own code, the
+self-build does not move: C-built 20.0 to 19.9 s, direct 44.7 to 44.6 s
+(alternating pairs). A 20 ms gdb sample of the direct build is flat: the
+largest frame is the wait for the backend process (7%), then string drop
+and retain, arena allocation and dictionary probes at 2-3% each, and the
+inclusive weight sits in the checker's recursion. The earlier 3-5 ms
+samples that put two thirds of the time in one record copy and one release
+dispatch were biased by the sampler's overhead (a 46 s build ran for over
+400 s under it) and are withdrawn; the emitter gains recorded above were
+timed, not sampled, and stand. Consequences: the direct route's remaining
+gap to the C build is spread across the checker rather than concentrated
+in ownership traffic, so Phase 1.1 is measured by the copy report and the
+runtime byte counters from here on, not by self-build seconds; profiling
+needs a lower-overhead sampler (20 ms intervals at least, or `perf` when it
+is available) before any single function is called hot again.
+

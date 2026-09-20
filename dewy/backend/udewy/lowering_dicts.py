@@ -538,6 +538,7 @@ class _DictLowering:
             # an object value: bind the element's handle to a name typed as the
             # object, then let the optional write copy it into the cell's prepared
             # tree (a raw object-typed load would be re-extracted as a call)
+            self._note_copy('record', ty.unfold(payload), 'looked up with get', 'the optional result owns its payload', loc)
             element = self._name('dict_element', loc)
             found_body = [
                 self._declare(element, replace(value_at(position), type='int64'), loc),
