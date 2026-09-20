@@ -1,0 +1,6 @@
+# The mode prefix must survive a quote fused with the first combining mark.
+# This is raw text: backslash-n stays two scalars rather than a newline.
+let main=():>int64=>{
+    let raw=r"́a\n"
+    return if raw=?"́a\\n" 42 else 1
+}

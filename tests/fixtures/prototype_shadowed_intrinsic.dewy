@@ -1,0 +1,9 @@
+# Expected rejection: a user function cannot be re-evaluated as intrinsic
+# arithmetic while constructing a deferred bounds check.
+$prototype
+let calls:int64=0
+let __add__=(x:int64 y:int64):>int64=>{calls+=1 return 0}
+let main=(argv:array<string>):>int64=>{
+    let x=argv[__add__(0 1)]
+    return if calls=?1 42 else 1
+}

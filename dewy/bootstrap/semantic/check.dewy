@@ -634,11 +634,16 @@ pow_operation = (arguments:array<addr> id:addr env:Environment @session:contexts
         let magnitude=if exponent_value <? 0 (-exponent_value) else exponent_value
         let top:bigint=1
         let bottom:bigint=1
-        let count:bigint=0
-        loop count <? magnitude {
-            top=top*base_value.numerator
-            bottom=bottom*base_value.denominator
-            count+=1
+        # Exponentiation by squaring does logarithmic work in the exponent
+        # (apart from the unavoidable cost of growing the exact result).
+        # In particular, 0 and ±1 do not take exponent-sized loops.
+        let remaining=magnitude
+        let numerator:bigint=base_value.numerator
+        let denominator:bigint=base_value.denominator
+        loop remaining >? 0 {
+            if remaining % 2 not=? 0 {top=top*numerator bottom=bottom*denominator}
+            remaining=remaining // 2
+            if remaining >? 0 {numerator=numerator*numerator denominator=denominator*denominator}
         }
         if exponent_value <? 0 {
             let swapped=top

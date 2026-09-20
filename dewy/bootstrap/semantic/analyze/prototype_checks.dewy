@@ -32,7 +32,9 @@ simple = (id:addr session:contexts.Session):>bool => {
     if node is? hir.Block and not node.scoped and node.items.length =? 1 return simple(node.items[0] session)
     if node is? hir.FunctionCall and node.kw_args.length =? 0 {
         let func=hir.node_at(session.hir node.func)
-        if func isnt? hir.ExpressedIdentifier or func.name not in? pure_calls return false
+        # Only intrinsic operations are known effect-free by their spelling.
+        # A user binding with the same name may change state on every call.
+        if func isnt? hir.ExpressedIdentifier or func.binding_id isnt? none or func.name not in? pure_calls return false
         loop argument in node.pos_args {if not simple(argument session) return false}
         return true
     }

@@ -16700,6 +16700,7 @@ def _prototype_simple(node: hir.AST) -> bool:
     if (
         isinstance(node, hir.FunctionCall)
         and isinstance(node.func, hir.ExpressedIdentifier)
+        and node.func.binding_id is None  # a user function's spelling does not prove purity
         and node.func.name in _PROTOTYPE_PURE_CALLS
         and not node.kw_args
     ):
