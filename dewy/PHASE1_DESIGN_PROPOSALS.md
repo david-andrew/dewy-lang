@@ -1,74 +1,100 @@
 # Phase 1 proof and effect surfaces — proposals for review
 
-These are proposals, not implemented language rules. David requested review
-before implementation on 2026-09-20. The settled ownership work can proceed
+This document separates approved direction from proposals still awaiting
+review. David requested review before implementation on 2026-09-20. The settled ownership work can proceed
 independently. The existing `$runtime_assert` and `$prototype` rules remain
 unchanged.
 
 ## Checked and unchecked local facts
 
-Proposed spellings:
+Use the existing static assertion and the proposed unsafe metatag:
 
 ```dewy
-$prove i <? xs.length
-$unsafe i <? xs.length
+$assert i <? xs.length
+$unsafe_assume i <? xs.length
 ```
 
-`$prove P` asks the static solver to establish P. Failure or exhaustion of
-its bounded search is a compile error, with “unknown” distinguished from a
-contradiction. It does not insert a runtime branch. `$unsafe P` introduces
-that single assumption, with no runtime check, and emits an auditable entry
-naming the proposition, source location, and obligations it discharges.
-Neither form weakens unrelated checking or disables checking for a block.
+`$assert` already implements the checked boundary: proven assertions erase,
+refuted assertions fail, and unknown assertions fail with a different
+explanation. There is no reason to add a synonymous `$prove` directive.
+The proof-engine work should improve the facts `$assert` can establish.
+
+`$unsafe_assume P` introduces that one assumption without a runtime check.
+It emits an auditable entry naming the proposition, source location, and
+obligations it discharges. It neither weakens unrelated checking nor disables
+checking for a block. David confirmed that these boundaries should be
+metatags, and proposed this more explicit spelling on 2026-09-20.
 
 Both accept only the liquid proposition language. Their facts refer to the
 current value versions, and are invalidated by the same writes and calls as
-facts learned from ordinary conditions. An unsafe assertion is not a claim
-that remains true after the value changes. A false assertion can invalidate
-bounds or representation safety; it must stay visible even if optimization
-erases all the affected code. No unchecked external proof certificates.
+facts learned from ordinary conditions. An unsafe assumption is not a claim
+that remains true after a value changes. A false assumption can invalidate
+bounds or representation safety; its audit entry must survive optimization.
+No unchecked external proof certificates.
 
-Question: are metatags the right surface for these two boundaries, or should
-`unsafe` be a syntactic construct? I favor the metatags because these are
-instructions about proof obligations rather than runtime values.
+## Proof functions — revised proposal, awaiting review
 
-## Checked lemmas
-
-Proposed first form uses an ordinary function signature for parameters and
-preconditions, a `$lemma` declaration tag, and a `$proves` conclusion in its
-body:
+Use `$proof`, with the conclusion in a fact-only return annotation:
 
 ```dewy
-$lemma
-ordered = (a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):>void => {
-    $proves a <=? c
+$proof
+ordered = (a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):> <a <=? c> => {
+    $assert a <=? b
+    $assert b <=? c
 }
 ```
 
-The checker proves the declared conclusion on every feasible normal exit.
-An empty body is valid only when the preconditions already imply it, as in
-this deliberately simple example. Branches and calls to other checked
-lemmas can decompose harder proofs. The conclusion must mention parameters
-and trusted measures, not body-local names or mutable globals. Calls check
-the preconditions and instantiate the conclusion into the caller's current
-value versions. The checked proof has no runtime body or runtime result.
+This extends the existing `<predicate>` fact notation to a complete return
+contract. It means “establish this fact,” rather than “produce a Boolean that
+might be false.” The parameter annotations supply the preconditions; the
+body supplies the checked argument; the return annotation names exactly what
+the caller gains. There is no `$proves` statement hidden in the body.
 
-For an initial implementation I propose finite, acyclic proof evaluation:
-no unproved recursive lemma cycles, effectful calls, allocation, unchecked
+The checker must establish the return fact at every feasible normal exit.
+The two assertions in this deliberately simple example document intermediate
+steps; an empty body would also succeed because the preconditions imply the
+conclusion. The return fact can mention parameters and trusted measures,
+not proof-local names or mutable globals. Conjunctions use the existing
+proposition language, e.g. `:> <P and Q>`.
+
+An invocation has ordinary function shape:
+
+```dewy
+ordered(low middle high)
+# low <=? high is now available to the caller's checker.
+```
+
+The call checks the preconditions, substitutes the arguments into the
+conclusion, and associates the resulting fact with their current value
+versions. The invocation and its proof body erase; no heap proof object or
+Boolean return is produced. Reassigning an argument later invalidates the
+fact normally. Initial proof arguments must be side-effect-free fact terms
+(names, literals, trusted measures), so erasure cannot drop an observable
+argument evaluation.
+
+For the first implementation, proof evaluation is finite and acyclic:
+no unproved recursive proof cycles, effectful calls, allocation, unchecked
 assumptions, or diverging paths that could make a false conclusion appear
-vacuously true. This is a small checked proof boundary, not a general proof
-language. A future richer proof language can produce the same checked
-conclusion representation. It must not silently turn an unknown obligation
-into an accepted proof.
+vacuously true. Branches and calls to other checked proof functions can
+structure a larger argument. A future richer proof language can produce the
+same checked conclusion representation.
 
-Questions: approve the declaration/conclusion spelling, and the initial
-restriction to terminating, effect-free proof evaluation? An alternative is
-a proposition-valued return contract, but that needs a new proof-value kind
-and a decision about its relationship to ordinary Boolean values.
+A spelling requiring less new type syntax would be `:> void & <P>`. I favor
+`:> <P>` for proof functions because the returned information is the fact
+itself; the `void` is only a representation detail. This fact-only contract
+is a proposed extension, not something the compiler already supports.
+Initially it is restricted to `$proof` functions; ordinary result-bearing
+functions retain their existing refined return types. General first-class
+proof values and effectful functions returning standalone facts are outside
+this proposal.
+
+Review needed: approve `$proof` and the fact-only `:> <P>` return contract,
+including erasure and the initial terminating/pure subset? David rejected
+the earlier `$lemma`/body-`$proves` shape; neither will be implemented.
 
 ## Effect contracts
 
-Keep the direction in `resources/types_and_effects_systems.md`: attach an
+David approved this starting direction on 2026-09-20. Keep the direction in `resources/types_and_effects_systems.md`: attach an
 effect row to a function result annotation, with kind checking separating
 value-type intersection from effect combination:
 
@@ -87,8 +113,11 @@ Proposed semantics for the first implementation:
 
 - No written row means infer, preserving existing source compatibility.
 - A written row is an upper bound: inferred behavior must be a subset.
-  We need an explicit empty-row spelling; I propose `& Effects<>` using
-  the already sketched `Effects<...>` form.
+  For the explicit empty row I recommend `& Effects<never>`, replacing the
+  earlier empty-parameter spelling. `never` denotes an empty set of possible
+  effects; `none` ordinarily denotes an inhabitant, not the empty set. This
+  uses the bottom concept in the effect kind, not a runtime `never` result.
+  The exact spelling remains subject to David's review.
 - Start with reads, writes/mutation, allocation, escape, and possible
   process failure. Returning an error alternative is not an effect.
 - Function subtyping permits fewer effects than the caller allows.
@@ -102,7 +131,7 @@ Proposed semantics for the first implementation:
   for “this call never returns.” Likewise, an error return and a process
   failure must remain distinct.
 
-Questions: approve the row interpretation and explicit empty row? How
-should effect identities and effect parameters be introduced? Allocation
+Still to review: `Effects<never>` versus `Effects<none>`, and how effect
+identities and effect parameters should be introduced. Allocation
 failure policy remains separately tentative; this proposal does not choose
 `$fallible_allocation`, error identities, or an exit code on its behalf.
