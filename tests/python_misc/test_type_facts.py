@@ -247,7 +247,7 @@ let main = ():>int64 => {
     with pytest.raises(UserError, match='cannot prove type fact'):   # a guard that does not guard
         _check(program.replace('{ if tok isnt? Word { exit(2) } }', '{ }'))
     with pytest.raises(UserError, match='a fact block as a result speaks of the parameters'):
-        _check('let f = (n:int64):> <i => i >? 0> => { }\n')
+        _check('let f = (n:int64):> void & <i => i >? 0> => { }\n')
 
 
 def test_facts_on_a_union_member_apply_where_the_result_is_narrowed_to_it() -> None:

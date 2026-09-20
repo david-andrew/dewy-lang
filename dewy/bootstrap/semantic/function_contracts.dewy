@@ -1,5 +1,6 @@
 import p"ty.dewy" as types
 import p"hir.dewy" as hir
+import p"analyze/hir_facts.dewy" as expressions
 import p"propositions.dewy" as facts
 import p"type_queries.dewy" as views
 import p"bindings.dewy" as bindings
@@ -137,7 +138,11 @@ at_call = (id:addr arguments:dict<string addr> hir_nodes:array<hir.AST> @nodes:t
             let route=facts.named_route(p.term)
             let argument=arguments.get(route.root)
             if argument isnt? none {
-                let supplied=hir.node_at(hir_nodes argument)
+                let supplied=hir.node_at(hir_nodes expressions.strip_casts(argument hir_nodes))
+                if supplied is? hir.Integer and route.fields.length =? 0 and p.term_projection =? 'value' {
+                    promises.push(facts.Proposition[p.subject p.op supplied.value p.projection none none p.term_projection p.tested_type p.when p.subject_id p.axiom])
+                    continue
+                }
                 let value=if supplied is? hir.Place supplied.target else argument
                 let stable=true
                 if supplied isnt? hir.Place {

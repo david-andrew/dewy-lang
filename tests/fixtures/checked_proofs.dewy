@@ -1,0 +1,31 @@
+# Fact returns belong to proofs; the calls and bodies carry no runtime code.
+$proof
+ordered = (a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):> <a <=? c> => {
+    $assert a <=? b
+    $assert b <=? c
+}
+
+$proof
+positive = (x:int64<v => v >? 0>):> <x >? 0> => {
+    if x =? 1 { return } else { $assert x >? 0 }
+}
+
+$proof
+positive_again = (x:int64<v => v >? 0>):> <x >? 0> => {
+    positive(x)
+}
+
+$proof
+positive_keyword = (... x:int64<v => v >? 0>):> <x >? 0> => {}
+
+main = ():>int64 => {
+    positive_keyword(x=42)
+    ordered(1 2 3)
+    positive_again(42)
+    let low:int64 = 1
+    let middle:int64 = 2
+    let high:int64 = 3
+    ordered(low middle high)
+    $assert low <=? high
+    return 42
+}

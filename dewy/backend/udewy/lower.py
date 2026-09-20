@@ -5919,6 +5919,8 @@ def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main'
     """Legalize checked HIR function constructs for udewy source emission."""
     if not isinstance(root, hir.Block):
         raise TypeError(f'expected Block, got {type(root).__name__}')
+    from ...semantic import proofs
+    root = proofs.erase(root)
     root = _uniquify_module_locals(root)   # every local of a function under a name of its own
     lowerer = _Lowerer(root, srcfile, entry_name)
     program = lowerer.lower()

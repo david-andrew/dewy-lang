@@ -104,7 +104,14 @@ class Context:
     grown_array_names: frozenset[str] = frozenset()  # names some `.push`/`.pop`/... targets
     target: str = 'x86_64'  # backend target: `$target`
     allow_place_expression: bool = False
+    proof_literals: dict[int, p0.BinOp] = field(default_factory=dict)
+    proof_markers: dict[int, p0.AST] = field(default_factory=dict)
     # TODO: etc stuff
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self.proof_literals = {id(node): node for node in self.proof_literals.values()}
+        self.proof_markers = {id(node): node for node in self.proof_markers.values()}
 
     def __repr__(self) -> str:
         # Scopes share declarations and point back to module contexts. A
@@ -979,6 +986,10 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             # literals fold, so `if $target =? "x86_64" { ... }` resolves
             # during checking.
             return hir.TargetString(ast.loc, ty.StringLiteralType(ctx.target), ctx.target)
+        case p0.Atom(item=t1.Metatag(name='proof')):
+            if id(ast) not in ctx.proof_markers:
+                user_error(ctx.srcfile, '`$proof` must mark a function declaration', Pointer(span=ast.loc, message='put it immediately before the declaration'))
+            return hir.Void(ast.loc, ty.VOID_TYPE)
         case p0.Atom(item=t1.Metatag(name=name)):
             return tcr_scope_metatag(ast, name=name, ctx=ctx)
         case p0.Atom(item=t1.Real() as real):
@@ -5142,7 +5153,7 @@ def _collect_label_scope(block: p0.Block, *, ctx: Context) -> LabelScope:
     labels: dict[str, Span] = {}
     for item in block.inner:
         metatag = _direct_scope_metatag(item)
-        if metatag is None or metatag.name == 'test':
+        if metatag is None or metatag.name in ('test', 'proof'):
             continue
         previous = labels.get(metatag.name)
         duplicate = previous is not None
@@ -6315,9 +6326,10 @@ def _collect_block_bindings(block: p0.Block, *, ctx: Context) -> None:
         declaration = _block_declaration_parts(item, seen, ctx=ctx)
         if declaration is None:
             continue
-        if id(item) in ctx.binding_registry.by_syntax:
-            continue
         name, expression = declaration
+        if id(item) in ctx.binding_registry.by_syntax:
+            ctx.binding_registry.by_syntax[id(item)].proof = id(expression) in ctx.proof_literals
+            continue
         kind: sb.BindingKind = (
             'function'
             if isinstance(expression, p0.BinOp)
@@ -6325,7 +6337,34 @@ def _collect_block_bindings(block: p0.Block, *, ctx: Context) -> None:
             and expression.op.symbol == '=>'
             else 'value'
         )
-        ctx.binding_registry.allocate(item, name, kind, item.loc)
+        binding = ctx.binding_registry.allocate(item, name, kind, item.loc)
+        binding.proof = id(expression) in ctx.proof_literals
+        if binding.proof:
+            binding.read_only_reason = 'is a proof declaration and cannot be reassigned'
+
+
+def _collect_proof_annotations(block: p0.Block, *, ctx: Context) -> None:
+    for index, item in enumerate(block.inner):
+        tag = _direct_scope_metatag(item)
+        if tag is None or tag.name != 'proof':
+            continue
+        following = block.inner[index + 1] if index + 1 < len(block.inner) else None
+        parts = _block_declaration_parts(following, set(), ctx=ctx) if following is not None else None
+        if parts is None or not isinstance(parts[1], p0.BinOp) or _operator_symbol(parts[1].op) != '=>':
+            user_error(ctx.srcfile, '`$proof` must mark a function declaration', Pointer(span=item.loc, message='expected `name = (parameters):> <facts> => { ... }` next'))
+        literal = parts[1]
+        if _generic_function_parts(literal) is not None:
+            user_error(ctx.srcfile, 'generic proof functions are not supported yet', Pointer(span=literal.loc, message='the initial proof subset uses concrete parameter types'))
+        ctx.proof_literals[id(literal)] = literal  # keep syntax alive while its identity is used
+        ctx.proof_markers[id(item)] = item
+
+
+def _proof_binding(value: hir.AST, *, ctx: Context) -> sb.Binding | None:
+    if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None:
+        binding = ctx.binding_registry.by_id.get(value.binding_id)
+        if binding is not None and binding.proof:
+            return binding
+    return None
 
 
 def _type_alias_rhs(item: p0.AST) -> tuple[str, p0.AST] | None:
@@ -7876,6 +7915,8 @@ def _auto_call_function_value(node: hir.AST, *, ctx: Context, expected: ty.Type 
     """A bare function name is a call. `@name` is the way to mean the function itself."""
     if not isinstance(node, hir.ExpressedIdentifier) or not isinstance(node.type, (ty.FunctionType, ty.OverloadType)):
         return node
+    if _proof_binding(node, ctx=ctx) is not None:
+        user_error(ctx.srcfile, 'a proof requires a direct statement call', Pointer(span=node.loc, message=f'write `{node.name}(...)`; a proof is not a callback or value'))
     if _accepts_no_arguments(node.type):
         return tcr_function_call(node, p0.Block(node.loc, [], '()', None), ctx=ctx, expected=expected)
     type_error(
@@ -9491,6 +9532,7 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
         if spreads:
             return _tcr_spread_array_literal(block, expected=expected, ctx=ctx)
 
+    _collect_proof_annotations(block, ctx=ctx)
     _collect_block_bindings(block, ctx=ctx)
     aliases = _prebind_type_aliases(block, ctx=ctx)
 
@@ -11152,6 +11194,8 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
             handle_ast = handle_ast.inner[0]
         if isinstance(handle_ast, p0.Atom) and isinstance(handle_ast.item, t1.Identifier):
             handle = tcr_identifier(handle_ast.item, ctx=ctx)
+            if _proof_binding(handle, ctx=ctx) is not None:
+                user_error(ctx.srcfile, 'a proof function is not a value', Pointer(span=prefix.loc, message='only a direct statement call of a known `$proof` is allowed'))
             if isinstance(handle.type, ty.FunctionType) and handle.type.type_params:
                 user_error(
                     ctx.srcfile,
@@ -12571,9 +12615,11 @@ def _void_facts_annotation(ast: p0.AST, *, ctx: Context) -> ty.RefinedType | Non
     return None   # `:> <(x:int64):>int64>` is a type in a type block, as before
 
 
-def _function_result_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
+def _function_result_type(ast: p0.AST, *, ctx: Context, proof: bool = False) -> ty.Type:
     """A signature and a literal interpret their result annotation alike."""
     facts = _void_facts_annotation(ast, ctx=ctx)
+    if facts is not None and not proof:
+        user_error(ctx.srcfile, 'a bare fact return is only for `$proof`', Pointer(span=ast.loc, message='an ordinary procedure uses `:> void & <P>`'))
     return facts if facts is not None else _value_type(ast_to_type(ast, ctx=ctx), loc=ast.loc, ctx=ctx)
 
 
@@ -12588,7 +12634,7 @@ def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     signature = fn_ast.left
     if not (isinstance(signature, p0.BinOp) and isinstance(signature.op, t1.Operator) and signature.op.symbol == ':>'):
         return None
-    rettype = _function_result_type(signature.right, ctx=ctx)
+    rettype = _function_result_type(signature.right, ctx=ctx, proof=ctx.proof_literals.get(id(fn_ast)) is fn_ast)
     pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature.left, ctx=ctx)
     params = [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args is not None else [])]
     if any(p.type == ty.INFERRED_TYPE for p in params):
@@ -12631,14 +12677,24 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
             'a generic function must be declared with `let`',
             Pointer(span=binop.loc, message='its instances are created where it is called by name'),
         )
+    is_proof = ctx.proof_literals.get(id(binop)) is binop
     signature = binop.left
+    bare_facts = (
+        _void_facts_annotation(signature.right, ctx=ctx)
+        if isinstance(signature, p0.BinOp) and _operator_symbol(signature.op) == ':>'
+        else None
+    )
+    if is_proof and bare_facts is None:
+        user_error(ctx.srcfile, 'a proof needs a fact-only return contract', Pointer(span=signature.loc, message='write `:> <P>` after the parameters'))
+    if bare_facts is not None and not is_proof:
+        user_error(ctx.srcfile, 'a bare fact return is only for `$proof`', Pointer(span=signature.loc, message='an ordinary procedure uses `:> void & <P>`'))
     rettype: ty.Type = ty.INFERRED_TYPE
     rettype_loc: Span | None = None
     
     # if the return type was annotated, capture it
     void_facts: ty.RefinedType | None = None
     if isinstance(signature, p0.BinOp) and signature.op.symbol == ':>':
-        declared = _function_result_type(signature.right, ctx=ctx)
+        declared = _function_result_type(signature.right, ctx=ctx, proof=is_proof)
         if isinstance(declared, ty.RefinedType) and declared.base == ty.VOID_TYPE:
             # A runtime procedure with `void & <facts>` has no expressed
             # value. Its parameter facts are obligations at each return,
@@ -12807,7 +12863,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     # breakpoints on whatever lines those offsets happen to name
     arrow = binop.op.loc
     written = 0 <= arrow.start < arrow.stop <= len(ctx.srcfile.body) and ctx.srcfile.body[arrow.start:arrow.stop] == '=>'
-    return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body, source=ctx.srcfile if written else None)
+    return hir.FunctionLiteral(binop.loc, ftype, pos_or_kw_args, kw_only_args, rest_args, rettype, body, source=ctx.srcfile if written else None, proof=is_proof)
 
 def _inferred_predicate(body: hir.AST, params: dict[int, str], *, ctx: Context) -> ty.Type | None:
     """The predicate type of a boolean body that is one proposition about the
@@ -12931,6 +12987,12 @@ def _parameter_type_at_call(param_type: ty.Type, arguments: dict[str, hir.AST], 
                     reads = predicate_effects.read_bindings(argument)
                     if any(reads & predicate_effects.mutated_bindings(other) for other in arguments.values()):
                         argument = None
+                constant = argument
+                while isinstance(constant, (hir.ValueCast, hir.RepresentationCast, hir.Obligation)):
+                    constant = constant.value if isinstance(constant, hir.Obligation) else constant.expr
+                if isinstance(constant, hir.Integer) and not fields and proposition.term_of == 'value':
+                    propositions.append(replace(proposition, term=None, term_id=None, value=constant.value))
+                    continue
                 route = sb.field_route(argument, tuple(fields)) if argument is not None else None
                 term_id = sb.array_route_id(route, ctx.binding_registry) if route is not None else None
                 proposition = replace(proposition, term_id=term_id if term_id is not None else _UNPROVABLE_TERM)
@@ -14772,7 +14834,7 @@ def parse_call_arguments(
                 kw_args[name] = (
                     arg
                     if isinstance(arg, hir.Place) or expected_arg is None
-                    else check_against(arg, expected_arg, ctx=ctx)
+                    else check_against(arg, ty.strip_refinement(expected_arg), ctx=ctx)
                 )
                 order.append(name)
                 if method is not None:
@@ -14809,7 +14871,7 @@ def parse_call_arguments(
                 pos_args.append(
                     arg
                     if isinstance(arg, hir.Place) or expected_arg is None
-                    else check_against(arg, expected_arg, ctx=ctx)
+                    else check_against(arg, ty.strip_refinement(expected_arg), ctx=ctx)
                 )
                 order.append(None)
                 if index is not None:
@@ -15873,6 +15935,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         apply_promotions(contextual_pos_args, result.promote_pos),
         contextual_kw_args,
         result.method_index if isinstance(left.type, ty.OverloadType) else None,
+        proof=_proof_binding(left, ctx=ctx) is not None,
     )
     if isinstance(left, hir.ArrayMethod):
         if left.name == 'sort':

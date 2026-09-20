@@ -235,6 +235,16 @@ affine = (id:addr snapshot:Snapshot env:values.Environment @registry:bindings.Re
     if node.pos_args.length not=? 2 return none
     let function=hir.node_at(env.nodes node.func)
     if function isnt? hir.ExpressedIdentifier or (function.name not=? '__add__' and function.name not=? '__sub__') return none
+    # An affine relationship is mathematical evidence, not modular word
+    # arithmetic. Retain it only if each fixed-width intermediate fits.
+    let width=values.result_width(node.value_type env.types)
+    if width isnt? none {
+        let left=snapshot.numbers.get(node.pos_args[0])
+        let right=snapshot.numbers.get(node.pos_args[1])
+        if left is? none or right is? none return none
+        let mathematical=if function.name =? '__add__' ranges.add(left right) else ranges.subtract(left right)
+        if ranges.fits(mathematical width) is? none return none
+    }
     loop side in 0..1 {
         if side =? 1 and function.name =? '__sub__' break
         let value=if side =? 0 node.pos_args[0] else node.pos_args[1]

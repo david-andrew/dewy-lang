@@ -99,9 +99,9 @@ establishes a fact. It need not be a pure, terminating proof and is not
 erased on that account. It owes the fact on each normal return; its ordinary
 effects and possible nonreturning behavior remain part of the call.
 
-Implementation change required: the current compiler also accepts bare
-`:> <P>` on ordinary functions and represents it as refined `void`. Tighten
-that syntax to `$proof` only and migrate ordinary uses to `:> void & <P>`.
+Implementation: both compilers now reserve bare `:> <P>` for `$proof`.
+Ordinary fact procedures use `:> void & <P>`. The HIR keeps explicit proof
+flags rather than inferring erasure from refined `void`.
 This restriction concerns fact blocks, not ordinary type blocks such as a
 function-handle result `:> <(x:int64):>int64>`.
 The existing exit-obligation machinery can be shared, but proof declarations
@@ -151,7 +151,7 @@ Proposed semantics for the first implementation:
   for “this call never returns.” Likewise, an error return and a process
   failure must remain distinct.
 
-### Negative guarantees — proposed details for review
+### Negative guarantees — approved initial rules
 
 David proposed `no effectname`, e.g. `no reads<filesystem>`. Treat this as
 an exclusion constraint on the inferred row, not the complement of an
@@ -168,7 +168,7 @@ graph, including callbacks. An unknown indirect call cannot satisfy an
 exclusion without a compatible signature contract. Resource aliasing must
 not let a filesystem read evade the constraint under a different name.
 
-Recommended initial surface rules, still awaiting review:
+David approved these initial surface rules in the follow-up review on 2026-09-20:
 
 | Annotation | Meaning |
 | --- | --- |
@@ -191,7 +191,7 @@ The internal empty row `Effect<>` is distinct from instantiating an effect
 family with no subjects. Future effect-polymorphic elaboration may produce
 empty rows without exposing this ambiguous source shorthand.
 
-Still to review: the negative-guarantee details above, and how effect
-identities and effect parameters should be introduced. Allocation
+Still to review: how effect identities and effect parameters should be
+introduced. Allocation
 failure policy remains separately tentative; this proposal does not choose
 `$fallible_allocation`, error identities, or an exit code on its behalf.

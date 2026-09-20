@@ -14,7 +14,7 @@ let p = (a:int64):>int64<i => i >? 0> => a
 let q = (src:string):>uint64<n => n <=? src.length> => src.length
 let r = (src:string prefix:string):> true & <prefix.length <=? src.length> | false => false
 let s = (tok:Token):> tok is? Word => tok is? Word
-let t = (@xs:array<int64>):> <xs.length >? 0> => { }
+let t = (@xs:array<int64>):> void & <xs.length >? 0> => { }
 # calls
 let u = f()
 let v = i(1 2)

@@ -71,8 +71,26 @@ narrow = (@state:facts.State op:propositions.Operator subject:Operand other:Oper
     return true
 }
 
+decide_order = (op:propositions.Operator left:Operand right:Operand state:facts.State context:relations.Context):>bool? => {
+    if left.affine is? none or right.affine is? none return none
+    if op =? '>?' or op =? '>=?' return decide_order(reverse(op) right left state context)
+    let delta=left.shift-right.shift
+    if op =? '<?' or op =? '<=?' {
+        let strict=op =? '<?'
+        if relations.ordered(left.affine right.affine delta+(if strict 1 else 0) state context) return true
+        if relations.ordered(right.affine left.affine (-delta+(if strict 0 else 1)) state context) return false
+    } else {
+        if relations.ordered(left.affine right.affine delta+1 state context) or relations.ordered(right.affine left.affine 1-delta state context) return op =? 'not=?'
+        if relations.ordered(left.affine right.affine delta state context) and relations.ordered(right.affine left.affine (-delta) state context) return op =? '=?'
+    }
+    return none
+}
+
 refine = (state:facts.State op:propositions.Operator left:Operand right:Operand truth:bool context:relations.Context):>facts.State? => {
     let decided=ranges.decide(op left.interval right.interval)
+    # Consult incoming relations before installing this comparison. A
+    # comparison must never justify itself by the facts it is about to add.
+    if decided is? none {decided=decide_order(op left right state context)}
     if decided isnt? none and decided not=? truth return none
     let result=state
     let effective=if truth op else negate(op)

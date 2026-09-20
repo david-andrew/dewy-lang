@@ -1,0 +1,17 @@
+Base = $abstract type of [label:addr=0]
+Wrapped = type of Base & [value:addr]
+Literal = type of Base & [value:bigint]
+get = (values:array<Base> start:addr):>bigint => {
+    $runtime_assert start <? values.length
+    let supplied = values[start]
+    loop supplied is? Wrapped {
+        $runtime_assert supplied.value <? values.length
+        supplied=values[supplied.value]
+    }
+    if supplied is? Literal return supplied.value
+    return 0
+}
+main = ():>int64 => {
+    let values:array<Base>=[Literal[value=42] Wrapped[value=0]]
+    return if get(values 1) =? 42 42 else 1
+}

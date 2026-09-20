@@ -1,0 +1,183 @@
+from reporting import SrcFile, Error, Pointer
+import p"context.dewy" as contexts
+import p"hir.dewy" as hir
+import p"bindings.dewy" as bindings
+import p"ty.dewy" as types
+
+# Proofs use the ordinary obligation checker, but have a stricter erasure
+# boundary. This finite subset admits assertions, conditional branches and
+# direct calls of other proofs. It cannot hide a runtime effect or diverge.
+const OPERATIONS:set<string>=set['__add__' '__sub__' '__mul__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__']
+Input:type = const [nodes:array<hir.AST> registry:bindings.Registry sources:array<contexts.Source>]
+source_at = (id:addr input:Input):>SrcFile => {
+    $runtime_assert id <? input.sources.length
+    return input.sources[id].srcfile
+}
+State:type = [input:Input source:SrcFile problem:Error?=none functions:dict<addr addr>=[] edges:dict<addr set<addr>>=[]]
+fail = (node:hir.AST title:string message:string @state:State):>void => {
+    let pointer=Pointer[span=node.loc message=message]
+    if state.problem is? none {state.problem=Error[srcfile=state.source title=title pointers=[pointer]]}
+}
+proof_binding = (id:addr input:Input):>addr? => {
+    let node=hir.node_at(input.nodes id)
+    if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return none
+    let binding=bindings.find_binding(input.registry node.binding_id)
+    return if binding isnt? none and binding.proof binding.id else none
+}
+fact_term = (id:addr input:Input parameters:(set<addr>)?=none):>bool => {
+    let node=hir.node_at(input.nodes id)
+    if node is? hir.ExpressedIdentifier return node.binding_id isnt? none and (parameters is? none or node.binding_id in? parameters)
+    if node is? hir.Integer|hir.Bool return true
+    if node is? hir.ValueCast|hir.RepresentationCast return fact_term(node.expr input parameters)
+    if node is? hir.Obligation|hir.MemberAccess|hir.TypeTest return fact_term(node.value input parameters)
+    if node is? hir.ArrayLength return fact_term(node.array input parameters)
+    if node is? hir.StringLength return fact_term(node.string input parameters)
+    if node is? hir.ShortCircuit return fact_term(node.left input parameters) and fact_term(node.right input parameters)
+    if node is? hir.Block and not node.scoped and node.items.length =? 1 return fact_term(node.items[0] input parameters)
+    if node is? hir.FunctionCall and not node.proof and node.kw_args.length =? 0 {
+        let callee=hir.node_at(input.nodes node.func)
+        if callee isnt? hir.ExpressedIdentifier or callee.name not in? OPERATIONS return false
+        if callee.binding_id isnt? none {
+            let binding=bindings.find_binding(input.registry callee.binding_id)
+            if binding is? none or not binding.builtin return false
+        }
+        loop arg in node.pos_args {if not fact_term(arg input parameters) return false}
+        return true
+    }
+    return false
+}
+check_call = (node:hir.FunctionCall @state:State parameters:(set<addr>)?=none):>addr? => {
+    let target=proof_binding(node.func state.input)
+    if target is? none {
+        fail(node 'a proof requires a known direct callee' 'proofs cannot be called through a callback or stored handle' @state)
+        return none
+    }
+    let args=node.pos_args
+    loop arg in node.kw_args.values {args.push(arg)}
+    loop arg in args {
+        if not fact_term(arg state.input parameters) {fail(hir.node_at(state.input.nodes arg) 'a proof argument must be a pure fact term' 'use a name, literal, trusted measure, or arithmetic over those; the call is erased' @state)}
+    }
+    return target
+}
+body = (id:addr parameters:set<addr> @dependencies:set<addr> @state:State):>void => {
+    if state.problem isnt? none return
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Block {loop item in node.items {body(item parameters @dependencies @state)} return}
+    if node is? hir.Void return
+    if node is? hir.Suppress {body(node.item parameters @dependencies @state) return}
+    if node is? hir.Return {
+        if node.item isnt? none {body(node.item parameters @dependencies @state)}
+        return
+    }
+    if node is? hir.Obligation {body(node.value parameters @dependencies @state) return}
+    if node is? hir.Assert and not node.runtime and not node.expect {
+        if not fact_term(node.condition state.input parameters) {fail(node 'a proof assertion must use pure fact terms' 'proofs cannot read mutable globals or call runtime functions' @state)}
+        return
+    }
+    if node is? hir.FunctionCall and node.proof {
+        let target=check_call(node @state parameters)
+        if target isnt? none {dependencies.add(target)}
+        return
+    }
+    if node is? hir.Flow {
+        loop item in node.arms {
+            let arm=hir.node_at(state.input.nodes item)
+            if arm isnt? hir.IfArm {fail(arm 'unsupported operation in a checked proof' 'the initial proof subset has no loops' @state) return}
+            if not fact_term(arm.condition state.input parameters) {fail(arm 'a proof condition must use pure fact terms' 'runtime evaluation cannot be erased' @state) return}
+            body(arm.body parameters @dependencies @state)
+        }
+        if node.default isnt? none {body(node.default parameters @dependencies @state)}
+        return
+    }
+    fail(node 'unsupported operation in a checked proof' 'the initial terminating subset permits assertions, branches, and direct calls of other proofs' @state)
+}
+visit = (id:addr statement:bool @state:State):>void => {
+    if state.problem isnt? none return
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.FunctionLiteral {
+        let saved=state.source
+        if node.source isnt? none {state.source=source_at(node.source state.input)}
+        if node.proof {
+            let params=node.pos_or_kw_args
+            loop param in node.kw_only_args {params.push(param)}
+            let ids:set<addr>=set[]
+            if node.rest_args isnt? none {fail(node 'proof parameters must be explicit values' 'rest parameters are outside the initial proof subset' @state)}
+            loop param in params {
+                if param.place or param is? hir.BoundParam {fail(node 'proof parameters must be explicit values' 'place and default parameters are outside the initial proof subset' @state)}
+                if param.binding_id isnt? none {ids.add(param.binding_id)}
+            }
+            let dependencies:set<addr>=set[]
+            body(node.body ids @dependencies @state)
+            state.edges[id]=dependencies
+        }
+        visit(node.body true @state)
+        state.source=saved
+        return
+    }
+    if node is? hir.Declare and node.binding_id isnt? none {
+        let value=hir.node_at(state.input.nodes node.expr)
+        if value is? hir.FunctionLiteral and value.proof {state.functions[node.binding_id]=node.expr}
+    }
+    if node is? hir.FunctionCall and node.proof {
+        if not statement {fail(node 'a proof call is a statement, not a value' 'do not bind, return, or pass its result' @state)}
+        check_call(node @state);
+        return
+    }
+    if node is? hir.ExpressedIdentifier and proof_binding(id state.input) isnt? none {fail(node 'a proof function is not a value' 'only direct statement calls are supported' @state) return}
+    if node is? hir.Block {loop item in node.items {visit(item true @state)} return}
+    if node is? hir.Flow {
+        loop item in node.arms {
+            let arm=hir.node_at(state.input.nodes item)
+            $runtime_assert arm is? hir.IfArm|hir.LoopArm
+            visit(arm.condition false @state)
+            visit(arm.body statement @state)
+        }
+        if node.default isnt? none {visit(node.default statement @state)}
+        return
+    }
+    if node is? hir.Suppress {visit(node.item statement @state) return}
+    if node is? hir.Obligation {visit(node.value statement @state) return}
+    loop child in hir.children(node) {visit(child false @state)}
+}
+acyclic = (binding:addr @active:set<addr> @checked:set<addr> @state:State):>void => {
+    if binding in? checked or state.problem isnt? none return
+    let id=state.functions.get(binding)
+    if id is? none return # Imported definitions were checked in their own module.
+    if binding in? active {
+        let node=hir.node_at(state.input.nodes id)
+        $runtime_assert node is? hir.FunctionLiteral
+        if node.source isnt? none {state.source=source_at(node.source state.input)}
+        fail(node 'a checked proof cannot depend on itself' 'the initial proof-call graph must be acyclic' @state)
+        return
+    }
+    active.add(binding)
+    loop dependency in state.edges.get(id set[]) {acyclic(dependency @active @checked @state)}
+    active.pop(binding default=binding);
+    checked.add(binding)
+}
+validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
+    if session.proof_literals.length =? 0 return none
+    let state=State[Input[session.hir session.registry session.sources] source]
+    visit(root true @state)
+    let active:set<addr>=set[]
+    let checked:set<addr>=set[]
+    loop binding in state.functions.keys {acyclic(binding @active @checked @state)}
+    return state.problem
+}
+
+# The validated graph keeps the binding identity and source for diagnostics.
+# Erasure occurs only on entry to backend assembly, before reachability; the
+# proof's arguments must not keep runtime functions or allocations alive.
+erase = (@session:contexts.Session):>void => {
+    if session.proof_literals.length =? 0 return
+    let empty=types.primitive('void' @session.types)
+    loop id in 0.. and id <? session.hir.length {
+        let node=hir.node_at(session.hir id)
+        let remove=node is? hir.FunctionCall and node.proof
+        if node is? hir.Declare {
+            let value=hir.node_at(session.hir node.expr)
+            if value is? hir.FunctionLiteral and value.proof {remove=true}
+        }
+        if remove {session.hir[id]=hir.Void[node.loc empty]}
+    }
+}

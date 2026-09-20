@@ -525,6 +525,7 @@ FunctionLiteral = type of AST & [
     # Index into the compilation source table, shared by diagnostics and
     # debug locations. Copying HIR never copies the complete source text.
     # None for compiler-synthesized functions without a source origin.
+    proof:bool=false
 ]
 
 # A callable value formed by combining callable operands with `&`.
@@ -637,6 +638,7 @@ FunctionCall = type of AST & [
     selected_method_index:(addr)?=none
     # Library lowering retains the operator's numeric meaning for proofs.
     integer_operation:string?=none
+    proof:bool=false
 ]
 
 Partial = type of AST

@@ -475,7 +475,7 @@ value_type = (value:addr id:addr context:contexts.Context @session:contexts.Sess
 
 # A fact-only result is void with promises; a type enclosed in angle
 # brackets is still an ordinary result type, e.g. :> <(x:int64):>int64>.
-function_result = (id:addr context:contexts.Context @session:contexts.Session):>addr|Error => {
+function_result = (id:addr context:contexts.Context @session:contexts.Session proof:bool=false):>addr|Error => {
     let node = contexts.node_at(id context session)
     if node is? parser.Block and node.delims =? '<>' and node.inner.length >? 0 {
         let promises:array<facts.Proposition> = []
@@ -486,8 +486,12 @@ function_result = (id:addr context:contexts.Context @session:contexts.Session):>
             if parsed is? none { all_facts = false break }
             loop p in parsed { promises.push(p) }
         }
-        if all_facts return attach_facts(types.primitive('void' @session.types) promises id context @session)
+        if all_facts {
+            if not proof return contexts.problem(id 'a bare fact return is only for `$proof`' 'an ordinary procedure uses `:> void & <P>`' context session)
+            return attach_facts(types.primitive('void' @session.types) promises id context @session)
+        }
     }
+    if proof return contexts.problem(id 'a proof needs a fact-only return contract' 'write `:> <P>` after the parameters' context session)
     let declared=resolve(id context @session)
     if declared is? Error return declared
     return value_type(declared id context @session)

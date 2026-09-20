@@ -219,19 +219,19 @@ let main = ():>int64 => {
 }
 ```
 
-The facts a result may state about a parameter are type tests (`tok is? Word`, `tok isnt? Word`), bounds on its length (`prefix.length <=? src.length`, against another length or a number, in either direction), and bounds on its value — against a number (`true & <n >? 0> | false`) or another parameter (`(a:uint64 b:uint64) => a <=? b` is a predicate whose `true` arm makes `b - a` a proven `uint64` at the call). The value's own facts may likewise bound it by a parameter's length in either direction (`n >=? src.length`, `n =? src.length`) or by a parameter's value (`n => n <=? limit`). A length term may also appear on a parameter's own annotation, naming a sibling — `(src:string n:uint64<v => v <=? src.length>)` makes `src[0..n)` proven inside and `n <=? src.length` an obligation on the arguments at every call (the term names the argument passed for `src`, which must be a binding) — and on a local's, naming a binding in scope: `let n:uint64<v => v <=? src.length> = 3` is proven where it is declared and at every assignment to `n`, holds wherever `n` is read, and requires that `src` is never reassigned in that function. A function that returns nothing may still establish facts: a result of only facts, `:> <facts>`, is owed at every `return` and at the end of the body, and holds for the caller after the call — the shape of a checking or fixing *procedure*. A boolean parameter promised `=? true` establishes the argument's own condition, so a library can write what `$runtime_assert` does; an `@` place argument gets the facts the call establishes about it, the only facts that survive passing it by place; a type fact narrows the argument:
+The facts a result may state about a parameter are type tests (`tok is? Word`, `tok isnt? Word`), bounds on its length (`prefix.length <=? src.length`, against another length or a number, in either direction), and bounds on its value — against a number (`true & <n >? 0> | false`) or another parameter (`(a:uint64 b:uint64) => a <=? b` is a predicate whose `true` arm makes `b - a` a proven `uint64` at the call). The value's own facts may likewise bound it by a parameter's length in either direction (`n >=? src.length`, `n =? src.length`) or by a parameter's value (`n => n <=? limit`). A length term may also appear on a parameter's own annotation, naming a sibling — `(src:string n:uint64<v => v <=? src.length>)` makes `src[0..n)` proven inside and `n <=? src.length` an obligation on the arguments at every call (the term names the argument passed for `src`, which must be a binding) — and on a local's, naming a binding in scope: `let n:uint64<v => v <=? src.length> = 3` is proven where it is declared and at every assignment to `n`, holds wherever `n` is read, and requires that `src` is never reassigned in that function. A function that returns nothing may still establish facts: a runtime result `:> void & <facts>` is owed at every `return` and at the end of the body, and holds for the caller after the call — the shape of a checking or fixing *procedure*. A boolean parameter promised `=? true` establishes the argument's own condition, so a library can write what `$runtime_assert` does; an `@` place argument gets the facts the call establishes about it, the only facts that survive passing it by place; a type fact narrows the argument:
 
 ```dewy
-let require = (ok:bool msg:string):> <ok =? true> => { if not ok { printl"{msg}"  exit(1) } }
-let ensure_nonempty = (@xs:array<int64>):> <xs.length >? 0> => { if xs.length =? 0 { xs.push(0) } }
-let must_be_word = (tok:Token):> <tok is? Word> => { if tok isnt? Word { exit(2) } }
+let require = (ok:bool msg:string):> void & <ok =? true> => { if not ok { printl"{msg}"  exit(1) } }
+let ensure_nonempty = (@xs:array<int64>):> void & <xs.length >? 0> => { if xs.length =? 0 { xs.push(0) } }
+let must_be_word = (tok:Token):> void & <tok is? Word> => { if tok isnt? Word { exit(2) } }
 
 ensure_nonempty(@xs)  let first = xs[0]                 # proven
 require(i <? text.length "i out of range")  let c = text[i]
 must_be_word(t)  let w:Word = t
 ```
 
-Facts may sit on any member of a union result — `true & <…> | false & <…>` is the case where the members are the two booleans. `Ok & <tok is? Word n <=? src.length> | Trouble` says what holds when the result is `Ok`: each `return Ok` owes those facts, and a caller that narrows the result to that member (`if r isnt? exception`, `if r is? Ok`, `=? none`) has them, until the result binding is reassigned. A bare fact block anywhere but a result — a parameter's or a local's annotation — is an error that says which type is missing (`T & <facts>`).
+Facts may sit on any member of a union result — `true & <…> | false & <…>` is the case where the members are the two booleans. `Ok & <tok is? Word n <=? src.length> | Trouble` says what holds when the result is `Ok`: each `return Ok` owes those facts, and a caller that narrows the result to that member (`if r isnt? exception`, `if r is? Ok`, `=? none`) has them, until the result binding is reassigned. A bare fact block outside a `$proof` result — a parameter's or a local's annotation — is an error that says which type is missing (`T & <facts>`).
 
 What a caller learns follows the argument: a fact about a parameter's length becomes a fact about the argument's length, about `src.length - i` for a tail `src[i..]`, about `j - i` for a window `src[i..j)` (or `j - i + 1` for `src[i..j]`) — so `let k = take(text[i..j))` then `text[i..i+k)` proves under `i <=? j <=? text.length` — or a bound on a known length. Facts are never assumed from a type: a function type that states them (a slot `eat:eatfn`) makes them the contract of every implementation.
 
@@ -302,18 +302,49 @@ The assertion directives are _forms_ with their own argument grammar, like `if c
 
 ## Effects
 
-An effect describes observable behavior relevant beyond a function's return value. The intended effect model covers at least mutation, allocation, blocking, I/O or host capability access, failure, nonreturning control flow, and escape of storage or handles.
+An effect describes observable behavior relevant beyond a function's return value. The intended effect model covers at least mutation, allocation, blocking, I/O or host capability access, process failure, and escape of storage or handles.
 
 Effects propagate through calls. A caller may preserve a refinement or borrow storage only when the callee's effects prove that behavior safe. Unresolved indirect calls require a conservative effect contract.
 
-`noreturn` is a settled effect used by a function that cannot return to its caller. It is distinct from the `never` result type.
+`noreturn` is a control-flow guarantee that a function cannot return to its caller. It is kept separate from the may-effect row: permitting fewer possible effects does not imply that a call never returns.
 
 Expected failures remain [error alternatives in the return type](errors-and-forwarding.md), not members of the effect set. A contract may contain both a returned error union and effects, but `|` combines the returned alternatives while the effect syntax describes evaluation behavior separately.
 
 ## `unsafe`
 
-`unsafe` identifies a proof or memory-safety obligation the compiler has not established. It is an auditable trust boundary, not a request to turn off unrelated checking.
+The approved form `$unsafe_assert condition [, message]` introduces an auditable assumption without a runtime check. It does not turn off unrelated checking; its facts must be invalidated normally after mutation. This boundary and its audit records are still being implemented.
 
 ## Provisional Boundary
 
-The complete proposition grammar, qualifier inference, proof-value form, effect vocabulary, effect polymorphism, and surface syntax for `unsafe` remain provisional. Error-value propagation has its own settled core and provisional surface details; see [Errors and Forwarding](errors-and-forwarding.md) and [Design Maturity](design-status.md).
+The complete proposition grammar, qualifier inference, effect identity declarations and effect-parameter syntax still need work. The initial `$proof` statement boundary below is implemented. Source effect contracts are approved but still being implemented: positive rows are upper bounds, omitted rows are inferred, `no_effects` is the explicit empty row, and `no reads<resource>` excludes one effect while `no reads` excludes the family. Empty family forms such as `reads<>` are rejected by the design; `Effect<>` is the desugared empty row. Error-value propagation has its own settled core and provisional surface details; see [Errors and Forwarding](errors-and-forwarding.md) and [Design Maturity](design-status.md).
+
+
+### Checked proof statements
+
+A `$proof` declaration establishes a fact without producing a value. Its
+fact-only result, `:> <P>`, is reserved for proofs; an ordinary runtime
+procedure uses `:> void & <P>` and retains its runtime behavior.
+
+```dewy
+$proof
+ordered = (a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):> <a <=? c> => {
+    $assert a <=? b
+    $assert b <=? c
+}
+ordered(1 2 3)
+```
+
+Every normal exit must establish the result fact. Proof bodies initially
+permit static assertions, conditional branches, returns without a value,
+and direct calls of other proofs. The proof-call graph must be acyclic;
+loops, runtime calls, global reads, default arguments and place parameters
+are outside this initial finite subset. `$prototype` cannot defer proof
+obligations or checks on erased arguments.
+
+Only direct statement calls of statically known proofs are supported,
+including imported proofs. A proof cannot be stored, passed as a callback,
+or used as a value: both `let x = ordered(1 2 3)` and `@ordered` are errors.
+Arguments must be pure fact terms such as names, literals, trusted lengths,
+and supported arithmetic over those terms. Definitions and calls erase
+only after validation. Returned facts refer to current argument values;
+subsequent mutation invalidates them normally.

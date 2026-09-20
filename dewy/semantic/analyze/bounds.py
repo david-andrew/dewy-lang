@@ -1711,7 +1711,13 @@ class _BoundsValidator:
             if isinstance(param, hir.BoundParam):
                 self._eval(param.value, state, validate=validate)
         self._seed_parameter_refinements(function, state)
-        self._analyze(function.body, state, validate=validate)
+        prototype_sites = self.prototype_sites
+        if function.proof:
+            self.prototype_sites = None  # erased proofs cannot defer checks to runtime
+        try:
+            self._analyze(function.body, state, validate=validate)
+        finally:
+            self.prototype_sites = prototype_sites
 
     def _bind_conditional(self, node: hir.Declare | hir.Assign, flow: hir.Flow, state: State, *, validate: bool) -> State:
         """`let c = if p a else b` (or `c = …`) analyzed as the statement form
@@ -2341,7 +2347,15 @@ class _BoundsValidator:
     ) -> Interval | None:
         # A known result is a value fact, not evidence that evaluation is
         # pure. Calls, indexing and casts can still mutate the proof state.
-        interval = self._eval_handler(type(node))(self, node, state, validate=validate)
+        if isinstance(node, hir.FunctionCall) and node.proof:
+            prototype_sites = self.prototype_sites
+            self.prototype_sites = None
+            try:
+                interval = self._eval_handler(type(node))(self, node, state, validate=validate)
+            finally:
+                self.prototype_sites = prototype_sites
+        else:
+            interval = self._eval_handler(type(node))(self, node, state, validate=validate)
         return Interval.exact(node.type.value) if isinstance(node.type, ty.IntegerLiteralType) else interval
 
     def _eval_block(self, node: hir.Block, state: State, *, validate: bool) -> Interval | None:
@@ -3299,9 +3313,61 @@ class _BoundsValidator:
                     return True   # `length <= src.length - i` bounds `length` by `src.length` too (`i >= 0`)
         return False
 
+    def _decide_ordered_comparison(self, name: str, left: hir.AST, right: hir.AST, state: State) -> bool | None:
+        """Use relational evidence to rule out a contradictory predicate path.
+
+        Intervals alone cannot decide `a <= b` for two full-width parameters,
+        even when a dependent contract already supplies that exact relation.
+        Query before adding the condition's own facts; otherwise it would
+        prove itself. Offsets keep strictness correct for affine terms.
+        """
+        if name not in {'__lt__', '__le__', '__gt__', '__ge__', '__eq__', '__ne__'}:
+            return None
+        a, b = self._checked_offset_term(left, state), self._checked_offset_term(right, state)
+        if a is None or b is None:
+            return None
+        if name in {'__gt__', '__ge__'}:
+            a, b = b, a
+            name = '__lt__' if name == '__gt__' else '__le__'
+        delta = a[1] - b[1]
+        if name in {'__lt__', '__le__'}:
+            strict = name == '__lt__'
+            if self._ordered(a[0], b[0], delta + int(strict), state):
+                return True
+            if self._ordered(b[0], a[0], -delta + int(not strict), state):
+                return False
+        else:
+            if self._ordered(a[0], b[0], delta + 1, state) or self._ordered(b[0], a[0], 1 - delta, state):
+                return name == '__ne__'
+            if self._ordered(a[0], b[0], delta, state) and self._ordered(b[0], a[0], -delta, state):
+                return name == '__eq__'
+        return None
+
     def _id_bounded_by_length(self, subject: int, sequence_id: int, gap: int, state: State) -> bool:
         """`sequence.length - subject >= gap` for a term the facts name."""
         return self._ordered(subject, _length_key(sequence_id), gap, state)
+
+    def _checked_offset_term(self, node: hir.AST, state: State) -> tuple[int, int] | None:
+        """An affine term only when every fixed-width intermediate fits.
+
+        Word arithmetic wraps: `x + 1 > x` is not a universal fact. The
+        existing syntactic offset recognizer alone cannot justify it.
+        """
+        bare = _strip_casts(node)
+        term = self._offset_term(bare)
+        if term is None or self._binding_id(bare) is not None:
+            return term
+        if not isinstance(bare, hir.FunctionCall):
+            return None
+        for argument in bare.pos_args:
+            if self._offset_term(argument) is not None and self._checked_offset_term(argument, state) is None:
+                return None
+        if ty.fixed_integer_layout(ty.strip_refinement(bare.type)) is not None:
+            left, right = [self._eval(arg, dict(state), validate=False) for arg in bare.pos_args]
+            mathematical = self._binary_interval(bare.func.name, left, right, 'int')
+            if self._fit_type(mathematical, ty.strip_refinement(bare.type)) is None:
+                return None
+        return term
 
     def _offset_term(self, node: hir.AST) -> tuple[int, int] | None:
         """A named term plus a constant, for facts such as `i + 1 < stop`."""
@@ -4291,6 +4357,8 @@ class _BoundsValidator:
         left_observed = self._eval(left, refined, validate=False)
         right_observed = self._eval(right, refined, validate=False)
         decided = self._decide_comparison(name, left_observed, right_observed)
+        if decided is None:
+            decided = self._decide_ordered_comparison(name, left, right, refined)
         if decided is not None and decided != truth:
             return None  # the operand intervals settle the comparison: this path is impossible
         # `i <? xs.length` holding, or `i >=? xs.length` failing, is the same index fact
@@ -4729,6 +4797,8 @@ def validate_bounds(
     Representation selection happens afterward and outside its query cache.
     """
 
+    from .. import proofs
+    proofs.validate(root, registry, srcfile)
     validator = _BoundsValidator(registry, srcfile, root, target=target)
     validator.unfit = unfit
     validator.prototype_sites = prototype_sites

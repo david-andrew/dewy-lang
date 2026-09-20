@@ -3,6 +3,7 @@ import p"module_state.dewy" as modules
 import p"context.dewy" as contexts
 import p"source_views.dewy" as sources
 import p"hir.dewy" as hir
+import p"proofs.dewy" as checked_proofs
 import p"../targets.dewy" as targets
 import p"validation_state.dewy" as proofs
 import p"analyze/bounds.dewy" as bounds
@@ -18,6 +19,8 @@ import p"analyze/representation.dewy" as representation
 # entry checking without creating a loader/validation import cycle.
 validate_module = (module:modules.Module source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr prelude:dict<string addr> session:contexts.Session):>proofs.Decision|Error => {
     let source=sources.srcfile(module.context session)
+    let proof_error=checked_proofs.validate(module.root source session)
+    if proof_error isnt? none return proof_error
     let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry]
     let checker=bounds.Checker[data source word source_files=source_files]
     bounds.configure(@checker prepared)

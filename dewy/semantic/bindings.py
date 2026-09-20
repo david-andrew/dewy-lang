@@ -48,6 +48,8 @@ class Binding:
     """For a hidden *route* binding (`bag.items`): the root binding's id.
     Length and index facts are keyed by these ids so member arrays get the
     same proofs as named arrays; assigning the root or a prefix drops them."""
+    proof: bool = False
+    """A checked, erased proof declaration, never an ordinary function value."""
 
 
 @dataclass

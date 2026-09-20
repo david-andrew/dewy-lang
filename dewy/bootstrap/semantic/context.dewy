@@ -53,6 +53,10 @@ CheckState:type = [
     # Synthesized helpers and method implementations are module declarations,
     # but do not become source-facing namespace exports.
     hidden_bindings:set<addr>=set[]
+    # Proof syntax is keyed by source arena, then function-body/marker node.
+    # Speculative checking restores these along with ordinary declarations.
+    proof_literals:dict<addr set<addr>>=[]
+    proof_markers:dict<addr set<addr>>=[]
     object_strings:dict<addr addr>=[]
     preparing_methods:set<addr>=set[]
     prepared_methods:set<addr>=set[]
@@ -114,6 +118,8 @@ checkpoint = (session:Session):>Checkpoint => {
         resolving_aliases=session.resolving_aliases
         named_refs=session.named_refs
         capture_pairs=session.capture_pairs
+        proof_literals=session.proof_literals
+        proof_markers=session.proof_markers
     ]
     return Checkpoint[state session.syntax_refs.length session.types.entries.length session.hir.length session.hir_edits.length]
 }
@@ -168,6 +174,8 @@ restore = (checkpoint:Checkpoint @session:Session):>void => {
     session.resolving_aliases=checkpoint.state.resolving_aliases
     session.named_refs=checkpoint.state.named_refs
     session.capture_pairs=checkpoint.state.capture_pairs
+    session.proof_literals=checkpoint.state.proof_literals
+    session.proof_markers=checkpoint.state.proof_markers
 }
 
 # Branch environments live only while checking their enclosing flow/body.

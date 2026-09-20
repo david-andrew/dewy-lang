@@ -40,9 +40,9 @@ CASES = [
     'Missing:type = type of error\nMissing',
     'Message:type = type of error & [text:string]\nMessage',
     'none & <tok is? int64>', 'true & <n >? 0> | false',
-    '(tok:int64|string):> tok is? int64', '(@xs:array<int64>):> <xs.length >? 0>',
+    '(tok:int64|string):> tok is? int64', '(@xs:array<int64>):> void & <xs.length >? 0>',
     '(x:int64):> <(y:string):>int64>', '[sign:-1|1]',
-    '[read:(x:int64):>string notify:(@xs:array<int64>):> <xs.length >? 0>]',
+    '[read:(x:int64):>string notify:(@xs:array<int64>):> void & <xs.length >? 0>]',
 ]
 
 ERROR_CASES = [

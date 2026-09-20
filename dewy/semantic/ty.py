@@ -87,9 +87,9 @@ type InferredType = Literal['untyped']  # untyped if you want to explicitly indi
 INFERRED_TYPE: InferredType = 'untyped'
 
 
-# TODO: probably some sort of Effect base type for the effect system
-# type NoReturnEffect = Literal['noreturn']
-# NORETURN_EFFECT: NoReturnEffect = 'noreturn'  # NOTE: noreturn is an effect, not a type!
+# Source effect rows are separate from result types. `noreturn` is a
+# control-flow guarantee, not an atom in a may-effect row (whose subtype
+# rule permits fewer effects). See PHASE1_DESIGN_PROPOSALS.md.
 
 
 

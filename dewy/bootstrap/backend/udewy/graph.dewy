@@ -3,6 +3,7 @@ import p"../../timing.dewy" as timing
 import p"../../semantic/modules.dewy" as modules
 import p"../../semantic/source_views.dewy" as sources
 import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/proofs.dewy" as checked_proofs
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/validation.dewy" as validation
 import p"../../semantic/analyze/initialization.dewy" as initialization
@@ -36,6 +37,7 @@ visit = (id:addr functions:dict<addr addr> nodes:array<hir.AST> @seen:set<addr> 
     loop child in hir.children(node) {visit(child functions nodes @seen @live)}
 }
 assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):>Prepared => {
+    checked_proofs.erase(@engine.session)
     let module=modules.module_at(entry engine)
     let source=sources.srcfile(module.context engine.session)
     let main=module.exports.get(engine.entry_name)

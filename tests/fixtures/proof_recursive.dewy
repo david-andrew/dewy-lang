@@ -1,0 +1,6 @@
+# Neither declaration may use the other's conclusion to justify itself.
+$proof
+alpha=(x:int64):> <x >? 0> => {beta(x)}
+$proof
+beta=(x:int64):> <x >? 0> => {alpha(x)}
+main=():>int64 => {alpha(42) return 42}

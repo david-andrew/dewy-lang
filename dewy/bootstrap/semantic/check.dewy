@@ -81,7 +81,7 @@ collect_labels = (node:parser.Block env:Environment session:contexts.Session):>C
         let item=contexts.node_at(id env.lexical session)
         if item isnt? parser.Atom continue
         let tag=contexts.node_at(item.item env.lexical session)
-        if tag isnt? tokens.Metatag or tag.name =? 'test' continue
+        if tag isnt? tokens.Metatag or tag.name in? ['test' 'proof'] continue
         if tag.name in? labels return problem(id "duplicate scope metatag `${tag.name}`" 'this scope already declares the name' env session)
         if label_scope(tag.name env.control) isnt? none return problem(id "scope metatag `${tag.name}` shadows an active declaration" 'metatag names may be reused only in disjoint sibling scopes' env session)
         labels[tag.name]=id
@@ -129,6 +129,43 @@ void_at = (id:addr env:Environment @session:contexts.Session):>addr => {
 }
 problem = (id:addr title:string message:string env:Environment session:contexts.Session):>Error => contexts.problem(id title message env.lexical session)
 pending = (id:addr detail:string env:Environment session:contexts.Session):>Error => contexts.unsupported(id detail env.lexical session)
+
+# Proof markers annotate declarations before forward signatures are collected.
+# Source/body arena identities survive checkpointing and native cache reloads.
+is_proof_literal = (literal:parser.BinOp env:Environment session:contexts.Session):>bool => literal.right in? session.proof_literals.get(env.lexical.source set[])
+is_proof_binding = (id:addr session:contexts.Session):>bool => {
+    let node=node_at(id session)
+    if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return false
+    return bindings.binding_at(session.registry node.binding_id).proof
+}
+collect_proof_annotations = (node:parser.Block env:Environment @session:contexts.Session):>Error? => {
+    let marked=session.proof_literals.get(env.lexical.source set[])
+    let markers=session.proof_markers.get(env.lexical.source set[])
+    loop index in 0.. and index <? node.inner.length {
+        let id=node.inner[index]
+        let item=contexts.node_at(id env.lexical session)
+        if item isnt? parser.Atom continue
+        let tag=contexts.node_at(item.item env.lexical session)
+        if tag isnt? tokens.Metatag or tag.name not=? 'proof' continue
+        if index+1 >=? node.inner.length return problem(id '`$proof` must mark a function declaration' 'put it immediately before a named function declaration' env session)
+        let declaration=contexts.node_at(node.inner[index+1] env.lexical session)
+        if declaration is? parser.KeywordExpr and declaration.parts.length =? 2 {
+            let keyword=contexts.node_at(declaration.parts[0] env.lexical session)
+            if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] {declaration=contexts.node_at(declaration.parts[1] env.lexical session)}
+        }
+        if declaration isnt? parser.BinOp or source_views.symbol(declaration.op env.lexical session) not in? ['=' '::' ':='] return problem(id '`$proof` must mark a function declaration' 'expected a named function next' env session)
+        let name=source_views.identifier(declaration.left env.lexical session)
+        let literal=contexts.node_at(declaration.right env.lexical session)
+        if name is? none or literal isnt? parser.BinOp or not source_views.is_operator(literal.op '=>' env.lexical session) return problem(id '`$proof` must mark a function declaration' 'expected a named function with a fact return contract next' env session)
+        marked.add(literal.right)
+        markers.add(id)
+    }
+    if markers.length >? 0 {
+        session.proof_literals[env.lexical.source]=marked
+        session.proof_markers[env.lexical.source]=markers
+    }
+    return none
+}
 
 # Builtins are ordinary stable bindings. A lexical declaration may shadow a
 # source operator name; synthesized compiler helpers retain their own ids.
@@ -1192,7 +1229,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
             session.prepared_methods.add(path.value_type)
         }
     }
-    let result = put(hir.FunctionCall[source.loc result_type callee args kwargs selected] @session)
+    let result = put(hir.FunctionCall[source.loc result_type callee args kwargs selected proof=is_proof_binding(callee session)] @session)
     return if expected is? none result else against(result expected id env @session)
 }
 
@@ -1200,6 +1237,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
 # instance method cannot escape its receiver; only truly zero-argument
 # methods auto-call (defaults alone do not make a record method zero-arg).
 auto_call = (value:addr id:addr env:Environment @session:contexts.Session expected:addr?=none):>addr|Error => {
+    if is_proof_binding(value session) return problem(id 'a proof requires a direct statement call' 'a proof is not a callback or value; write its explicit argument list' env session)
     let node=node_at(value session)
     if node is? hir.BoundMethod {
         let signature=dispatch.method_at(session.types node.value_type)
@@ -1286,6 +1324,10 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
         }
         else if atom is? tokens.Bool { value = put(hir.Bool[node.loc types.primitive('bool' @session.types) atom.value] @session) }
         else if atom is? tokens.Metatag and atom.name =? 'target' {value=put(hir.TargetString[node.loc types.string_literal(session.target @session.types) session.target] @session)}
+        else if atom is? tokens.Metatag and atom.name =? 'proof' {
+            if id not in? session.proof_markers.get(env.lexical.source set[]) return problem(id '`$proof` must mark a function declaration' 'put it immediately before the declaration' env session)
+            value=void_at(id env @session)
+        }
         else if atom is? tokens.Metatag {
             let count=env.control.scopes.length
             if count =? 0 return pending(id 'metatag expression outside a direct scoped-block declaration' env session)
@@ -1382,6 +1424,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
         if op =? '@' {
             let value = expression(node.item env @session call_target=true)
             if value is? Error return value
+            if is_proof_binding(value session) return problem(id 'a proof function is not a value' 'only direct statement calls are supported' env session)
             let target = node_at(value session)
             let type=types.node_at(session.types target.value_type)
             if type is? types.FunctionType and type.type_params.length >? 0 return problem(id 'a generic function cannot be used as a value' 'call it by name, where its type arguments can be determined' env session)
@@ -2076,6 +2119,8 @@ block = (id:addr env:Environment @session:contexts.Session scoped:bool=false exp
         if control is? Error return control
         inner=Environment[inner.lexical inner.state inner.return_type control inner.return_collector]
     }
+    let proof_error=collect_proof_annotations(node inner @session)
+    if proof_error isnt? none return proof_error
     let aliases:array<addr>=[]
     loop statement in node.inner {
         let alias = declarations.predeclare_alias(statement inner.lexical @session)
@@ -2206,6 +2251,7 @@ fork = (env:Environment @session:contexts.Session):>Environment => {
 # is checked. Initialization analysis, not name resolution, decides whether
 # an eager call reaches a declaration before its value has been initialized.
 function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session concrete:bool=false):>addr|Error => {
+    let proof=is_proof_literal(literal env session)
     let signature = contexts.node_at(literal.left env.lexical session)
     let parameter_id=literal.left
     let result_id:addr?=none
@@ -2244,7 +2290,9 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     loop arg in args.pos_or_kw {
         parameters.push(types.PosOrKwArg[arg.name arg.value_type arg.required arg.place])
     }
-    let result=if result_id is? none types.primitive('untyped' @session.types) else declarations.function_result(result_id lexical @session)
+    if proof and generic.length >? 0 return problem(literal.left 'generic proof functions are not supported yet' 'the initial proof subset uses concrete parameter types' env session)
+    if proof and result_id is? none return problem(literal.left 'a proof needs a fact-only return contract' 'write `:> <P>` after the parameters' env session)
+    let result=if result_id is? none types.primitive('untyped' @session.types) else declarations.function_result(result_id lexical @session proof=proof)
     if result is? Error return result
     # Abstract integers keep mathematical arithmetic until bounds analysis
     # chooses their representation. Selecting a word here would silently
@@ -2288,6 +2336,8 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
     let binding_id = bindings.allocate(@session.registry reference name 'function' node.loc)
     let binding = bindings.binding_at(session.registry binding_id)
     binding.value_type = shape binding.store_type = shape
+    binding.proof=is_proof_literal(literal env session)
+    if binding.proof {binding.read_only_reason='is a proof declaration and cannot be reassigned'}
     binding.literal_path_parameter=source_views.path_parameter(literal env.lexical session)
     if signature_type.type_params.length >? 0 {
         let literal_ref = contexts.syntax_ref(node.right env.lexical @session)
@@ -2438,29 +2488,43 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         $runtime_assert inner.lexical.scope <? session.scopes.length
         session.scopes[inner.lexical.scope]=parameter_scope
     }
+    let all_parameters=parameters
+    loop param in keyword_parameters {all_parameters.push(param)}
     if not infer {
-        let unknown=contracts.unknown_parameter(contract parameters session.types)
+        let unknown=contracts.unknown_parameter(contract all_parameters session.types)
         if unknown isnt? none return problem(id 'result fact names something that is not a parameter' unknown env session)
-        contract=contracts.bind_parameters(contract parameters @session.types @session.registry)
+        contract=contracts.bind_parameters(contract all_parameters @session.types @session.registry)
         annotation=contract
         inner=Environment[inner.lexical inner.state contract inner.control inner.return_collector]
     }
-    let body=expression(literal.right inner @session expected=annotation)
+    # A void fact contract is checked at normal exits, including an empty
+    # body or an if without an else. It is not a value supplied by the last
+    # statement. Explicit returns already check the same contract above.
+    let promised=types.node_at(session.types contract)
+    let void_contract=promised is? types.RefinedType and types.is_primitive(types.node_at(session.types promised.base) 'void')
+    let body=expression(literal.right inner @session expected=if void_contract none else annotation)
     if body is? Error return body
     let result=infer_function_result(body literal.right inner @session)
     if result is? Error return result
     if not infer and not subtyping.is_subtype(types.strip_refinement(result session.types) types.strip_refinement(contract session.types) session.links @session.types) return problem(id 'function body does not provide its result' display.type_to_dewy(contract session.types) env session)
+    if void_contract {
+        let empty=void_at(literal.right inner @session)
+        let obligation=against(empty contract literal.right inner @session)
+        if obligation is? Error return obligation
+        let original=node_at(body session)
+        body=put(hir.Block[original.loc original.value_type [body obligation] false] @session)
+    }
     let returns=if infer result else contract
     $runtime_assert collector <? session.return_collectors.length
     if infer and session.return_collectors[collector].sites.length =? 0 and types.is_primitive(types.node_at(session.types returns) 'bool') {
-        let predicate=inferred_results.predicate(body parameters @session)
+        let predicate=inferred_results.predicate(body all_parameters @session)
         if predicate isnt? none {returns=predicate}
     }
     let slots:array<types.PosOrKwArg>=[]
     if method isnt? none and method.receiver_type isnt? none {slots.push(types.PosOrKwArg['__dewy_receiver' method.receiver_type true method.place_self])}
     loop slot in shape.pos_or_kw {slots.push(slot)}
     let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types)
-    let value=put(hir.FunctionLiteral[literal.loc function_type parameters keyword_parameters none returns body source=env.lexical.source] @session)
+    let value=put(hir.FunctionLiteral[literal.loc function_type parameters keyword_parameters none returns body source=env.lexical.source proof=is_proof_literal(literal env session)] @session)
     return if expected_signature is? none value else against(value expected_signature id env @session)
 }
 
@@ -3941,10 +4005,10 @@ invalidate_loop_names = (names:set<string> replacements:set<string> env:Environm
             let shape = types.node_at(session.types types.strip_refinement(current session.types))
             if shape is? types.ArrayType { set_read_type(id types.array_type(shape.element none @session.types) env @session) }
         }
-        loop route in bindings.routes_under(session.registry id []) {
-            let field = bindings.binding_at(session.registry route)
-            if field.value_type isnt? none { set_read_type(route field.value_type env @session) }
-        }
+        # Projected facts were dropped by changed(). Do not reinstall a
+        # route's first observed type: replacing a nominal variant can give
+        # the same field name a different type. The next read uses its
+        # current owner's declaration as the fallback.
     }
 }
 breaks_loop = (id:addr depth:addr session:contexts.Session):>bool => {

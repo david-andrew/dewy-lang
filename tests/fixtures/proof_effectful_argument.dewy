@@ -1,0 +1,4 @@
+$proof
+positive=(x:int64<v => v >? 0>):> <x >? 0> => {}
+make_value=():>int64<v => v >? 0> => {printl('must not be erased') return 42}
+main=():>int64 => {positive(make_value()) return 42}

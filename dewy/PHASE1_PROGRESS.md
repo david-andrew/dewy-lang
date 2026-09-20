@@ -91,8 +91,9 @@ statement calls, checked termination/purity and erasure; `:> <P>` is proof-
 only, while ordinary functions use `:> T & <P>` (including `void`). The
 unsafe boundary is `$unsafe_assert cond [, message]`. Positive effect rows
 are upper bounds, omitted rows are inferred, and `no_effects` is the preferred
-empty-row spelling. Negative effect guarantees, effect identity declarations,
-and effect-parameter syntax still have details to review. Implementation is
+empty-row spelling. Negative guarantees (`no reads<resource>` and `no reads`, rejecting empty
+family arguments) are also approved. Effect identity declarations and
+effect-parameter syntax still have details to review. Implementation is
 pending; approval does not mark 1.2 or 1.3 complete.
 
 Checkpoint: callable/numeric unions at juxtaposition now reject with the
@@ -158,3 +159,29 @@ retain `void &` so ordinary function contracts are not printed as proof-only
 `:> <P>` syntax. The fact-bearing procedure fixture mutates an empty array
 and returns 42 in the native compiler; the hosted fact suite passes 25 tests.
 The separate `$proof` marker and statement-call checks are still in progress.
+
+
+Checkpoint: the initial `$proof` boundary is implemented in both compilers.
+Proofs have explicit HIR/binding identity, fact-only returns, direct statement
+calls, pure arguments, finite bodies and an acyclic call graph. They erase
+only after validation; callbacks, first-class values, mutation/effects and
+`$prototype` deferral are rejected. Named and keyword-only parameters and
+imported proofs retain their contracts. Native snapshot codecs preserve the
+new metadata. `$unsafe_assert` and source effect rows remain pending.
+
+The same work fixes general fact-contract rules: dependent arguments are
+checked after substitution (including literals), known order relationships
+can settle assertions, and mathematical affine evidence is not inferred
+from possibly wrapping word arithmetic. Native empty void procedures now
+check fallthrough obligations. Replacing a nominal record in a loop no
+longer reinstalls the first variant's field type on exit.
+
+Validation: 109 hosted proof/fact/call/prototype tests, two native type and
+comparison harnesses, 20 direct native acceptance/rejection cases, and all
+33 focused parity cases passed. A native compiler rebuilt itself in 59.94s;
+a subsequent native generation with the keyword-only contract fix built in
+62.50s and executed the composed proof and variant-loop fixtures (42).
+These are integration timings, not a claim to meet the under-30s target.
+The wider 211-case paired corpus is running at this checkpoint.
+Artifacts: `../dewy-build-artifacts/phase1-proofs-stage2-2026-09-20` and
+`../dewy-build-artifacts/phase1-proofs-final-2026-09-20`.

@@ -699,6 +699,7 @@ class FunctionLiteral(AST):
     source: SrcFile | None = field(default=None, kw_only=True, compare=False)
     """The file the literal (and so every span in its body) was written in:
     debug locations point there. None for compiler-synthesized functions."""
+    proof: bool = field(default=False, kw_only=True)
 
 # TODO: Partial evaluation is roughly a stack of function calls. Explicitly
 # supplied values are evaluated and saved immediately; signature defaults stay
@@ -821,6 +822,7 @@ class FunctionCall(AST):
     # Numeric meaning retained when an operator is implemented by a library
     # function. Never inferred from the spelling of a user-defined function.
     integer_operation: str | None = field(default=None, kw_only=True)
+    proof: bool = field(default=False, kw_only=True)
     #TODO: spread args
 
 @dataclass(slots=True, weakref_slot=True)

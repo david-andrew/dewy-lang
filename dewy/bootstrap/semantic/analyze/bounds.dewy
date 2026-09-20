@@ -254,6 +254,8 @@ function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Che
     if id in? checker.checked return
     # Exploratory loop passes must not mark a body validated.
     if validate {checker.checked.add(id)}
+    let prototype=checker.prototype
+    if node.proof {checker.prototype=false}
     let enclosing=state
     let globals=checker.mutable_globals
     loop global in globals {stores.forget(@enclosing global @checker.data)}
@@ -269,6 +271,7 @@ function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Che
     analyze(node.body enclosing @checker validate);
     checker.srcfile=source
     checker.data.snapshot=saved
+    checker.prototype=prototype
 }
 
 array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.State @checker:Checker validate:bool):>void => {
@@ -350,6 +353,13 @@ analyze_result = (id:addr state:facts.State required:array<addr> @checker:Checke
     return result
 }
 evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
+    let node=node_at(id checker)
+    let prototype=checker.prototype
+    if node is? hir.FunctionCall and node.proof {checker.prototype=false}
+    evaluate_checked(id @state @checker validate)
+    checker.prototype=prototype
+}
+evaluate_checked = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
     let node=node_at(id checker)
     if node is? hir.Obligation {
         let previous=checker.result_obligations
