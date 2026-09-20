@@ -115,8 +115,10 @@ ALLOCA_ALIGNMENT_RESULTS = {
 
 MANY_LOCALS_EXPECTATIONS = {
     "x86_64": ["subq $1648, %rsp", "movq %rax, -1640(%rbp)", "movq -1640(%rbp), %rax"],
-    "riscv": ["addi sp, sp, -1712", "sd a0, -1704(s0)", "ld a0, -1704(s0)"],
-    "arm": ["sub sp, sp, #1616", "sub x9, x9, #1608", "str x0, [x9]", "ldr x0, [x9]"],
+    # The last local is read as the right operand of `+`, so it loads straight
+    # into the operand register.
+    "riscv": ["addi sp, sp, -1712", "sd a0, -1704(s0)", "ld t0, -1704(s0)"],
+    "arm": ["sub sp, sp, #1616", "sub x9, x9, #1608", "str x0, [x9]", "ldr x9, [x9]"],
 }
 
 

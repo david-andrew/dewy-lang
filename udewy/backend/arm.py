@@ -61,6 +61,12 @@ class ArmBackend(Backend):
         self._if_stack: list[tuple[str, str, bool]] = []
         self._loop_stack: list[tuple[str, str]] = []
         self._locals = LocalRegisterAllocator()
+        # The visible value may be pending rather than in x0: the flags of the
+        # last comparison (the condition that would make it -1) or a local not
+        # yet loaded. Branches, saves and comparisons consume pending values
+        # directly; every other emitter flushes them first.
+        self._pending_cc: str | None = None
+        self._pending_slot: int | None = None
         
         # Symbol tracking
         self._fn_labels: dict[int, str] = {}
@@ -353,6 +359,7 @@ class ArmBackend(Backend):
     
     def push_string_ref(self, label_id: int) -> None:
         """Push address of string data onto value stack."""
+        self._flush()
         label = self._string_labels[label_id]
         self._emit(f"adrp x0, {label}")
         self._emit(f"add x0, x0, :lo12:{label}")
@@ -360,18 +367,21 @@ class ArmBackend(Backend):
     
     def push_global_ref(self, label_id: int) -> None:
         """Push address of global onto value stack."""
+        self._flush()
         label = self._global_labels[label_id]
         self._emit(f"adrp x0, {label}")
         self._emit(f"add x0, x0, :lo12:{label}")
 
     def push_static_ref(self, label_id: int) -> None:
         """Push address of raw static storage onto value stack."""
+        self._flush()
         label = self._static_labels[label_id]
         self._emit(f"adrp x0, {label}")
         self._emit(f"add x0, x0, :lo12:{label}")
     
     def load_global(self, label_id: int) -> None:
         """Load value of global onto value stack."""
+        self._flush()
         label = self._global_labels[label_id]
         self._emit(f"adrp x9, {label}")
         self._emit(f"add x9, x9, :lo12:{label}")
@@ -379,6 +389,7 @@ class ArmBackend(Backend):
     
     def store_global(self, label_id: int) -> None:
         """Pop value from stack and store to global."""
+        self._flush()
         label = self._global_labels[label_id]
         self._emit(f"adrp x9, {label}")
         self._emit(f"add x9, x9, :lo12:{label}")
@@ -427,16 +438,60 @@ class ArmBackend(Backend):
         return (-slot - 16) >> 3
 
     def _note_local_access(self, slot: int, other: str, store: bool) -> None:
-        """Slots beyond the single-instruction offset range keep their frame homes."""
+        """Slots beyond the single-instruction offset range keep their frame homes.
+
+        The register form of a slot access is a move: `mov REG, other` for a
+        store, `mov other, REG` for a load.
+        """
         assert self._current_fn_code is not None
-        if self._frame_slot_operand(slot) is not None:
-            self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), other, store)
-        else:
+        if self._frame_slot_operand(slot) is None:
             self._locals.pin(self._slot_key(slot))
+        elif store:
+            self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), '    mov ', f', {other}')
+        else:
+            self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), f'    mov {other}, ', '')
 
     def _note_clobber(self) -> None:
         assert self._current_fn_code is not None
         self._locals.note_clobber(len(self._current_fn_code))
+
+    _INVERSE_CC = {'eq': 'ne', 'ne': 'eq', 'lt': 'ge', 'ge': 'lt', 'gt': 'le', 'le': 'gt',
+                   'hi': 'ls', 'ls': 'hi', 'lo': 'hs', 'hs': 'lo'}
+
+    def _load_pending_slot(self, register: str) -> None:
+        """Load a pending local straight into `register` (its site is recorded)."""
+        slot, self._pending_slot = self._pending_slot, None
+        assert slot is not None
+        self._note_local_access(slot, register, False)
+        self._load_frame_slot(register, slot)
+
+    def _flush(self) -> None:
+        """Materialize a pending value into x0."""
+        if self._pending_cc is not None:
+            cc, self._pending_cc = self._pending_cc, None
+            self._emit(f'csetm x0, {cc}')
+        elif self._pending_slot is not None:
+            self._load_pending_slot('x0')
+
+    def _branch_pending(self, label: str, when_true: bool) -> bool:
+        """Consume a pending condition as a branch taken when it holds or fails."""
+        if self._pending_cc is None:
+            return False
+        cc, self._pending_cc = self._pending_cc, None
+        if not when_true:
+            cc = self._INVERSE_CC[cc]
+        self._emit(f'b.{cc} {label}')
+        return True
+
+    def _operands(self) -> None:
+        """The right operand goes to x9 and the saved left operand to x0."""
+        if self._pending_cc is not None:
+            self._flush()
+        if self._pending_slot is not None:
+            self._load_pending_slot('x9')
+        else:
+            self._emit('mov x9, x0')
+        self._pop_saved_into('x0')
 
     def _allocate_locals(self) -> None:
         """Debug builds retain their existing stack locations (as on x86-64)."""
@@ -444,7 +499,7 @@ class ArmBackend(Backend):
             return
         assert self._current_fn_code is not None
         self._locals.assign(self._CALLEE_LOCAL_REGS, self._CALLER_LOCAL_REGS)
-        self._locals.rewrite(self._current_fn_code, lambda src, dst: f'    mov {dst}, {src}')
+        self._locals.rewrite(self._current_fn_code)
 
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""
@@ -452,6 +507,8 @@ class ArmBackend(Backend):
         self._saved_depth = 0
         self._spilled_depth = 0
         self._min_slot_offset = 0
+        self._pending_cc = None
+        self._pending_slot = None
         self._locals.begin_function()
         
         self._current_fn_code = []
@@ -501,6 +558,7 @@ class ArmBackend(Backend):
     def end_function(self) -> None:
         """End function definition."""
         assert self._current_fn_code is not None
+        self._flush()
         # Sites index the body as emitted; rewrite before the prologue is spliced in.
         self._allocate_locals()
         local_bytes = self._local_area_bytes()
@@ -530,6 +588,7 @@ class ArmBackend(Backend):
     
     def alloc_local(self) -> int:
         """Allocate a local variable slot."""
+        self._flush()
         slot = self._stack_offset
         self._stack_offset -= 8
         self._note_slot(slot)
@@ -539,11 +598,12 @@ class ArmBackend(Backend):
 
     def load_local(self, slot: int) -> None:
         """Push local variable value onto the value stack."""
-        self._note_local_access(slot, "x0", False)
-        self._load_frame_slot("x0", slot)
+        self._flush()
+        self._pending_slot = slot
 
     def store_local(self, slot: int) -> None:
         """Pop value from stack and store to local variable."""
+        self._flush()
         self._note_local_access(slot, "x0", True)
         self._store_frame_slot("x0", slot)
     
@@ -553,6 +613,7 @@ class ArmBackend(Backend):
     
     def push_const_i64(self, value: int) -> None:
         """Push a 64-bit integer constant onto the value stack."""
+        self._flush()
         value = wrap_i64(value)
         if 0 <= value <= 65535:
             self._emit(f"mov x0, #{value}")
@@ -564,24 +625,33 @@ class ArmBackend(Backend):
     
     def push_void(self) -> None:
         """Push void (zero) onto the value stack."""
+        self._flush()
         self._emit("mov x0, #0")
     
     def push_fn_ref(self, label_id: int) -> None:
         """Push address of function onto the value stack."""
+        self._flush()
         label = self._fn_labels[label_id]
         self._emit(f"adrp x0, {label}")
         self._emit(f"add x0, x0, :lo12:{label}")
     
     def pop_value(self) -> None:
-        """Discard the top value on the stack."""
-        pass
+        """Discard the top value; one never materialized costs nothing."""
+        self._pending_cc = None
+        self._pending_slot = None
     
     def save_value(self) -> None:
         """Save the top value to physical stack."""
+        if self._pending_slot is not None and self._spilled_depth == 0 and self._saved_depth < len(self._VALUE_CACHE_REGS):
+            self._load_pending_slot(self._VALUE_CACHE_REGS[self._saved_depth])
+            self._saved_depth += 1
+            return
+        self._flush()
         self._save_reg("x0")
     
     def restore_value(self) -> None:
         """Restore a previously saved value."""
+        self._flush()
         self._pop_saved_into("x0")
     
     # ========================================================================
@@ -590,6 +660,11 @@ class ArmBackend(Backend):
     
     def unary_op(self, op_kind: t1.Kind) -> None:
         """Apply unary operator to top of stack."""
+        # A pending condition is exactly -1 or 0, so `not` is its inverse.
+        if op_kind == t1.Kind.TK_NOT and self._pending_cc is not None:
+            self._pending_cc = self._INVERSE_CC[self._pending_cc]
+            return
+        self._flush()
         if op_kind == t1.Kind.TK_MINUS:
             self._emit("neg x0, x0")
         elif op_kind == t1.Kind.TK_NOT:
@@ -597,10 +672,7 @@ class ArmBackend(Backend):
     
     def binary_op(self, op_kind: t1.Kind) -> None:
         """Apply binary operator to top two values on stack."""
-        # Right operand in x0, left on stack
-        self._emit("mov x9, x0")       # right in x9
-        self._pop_saved_into("x0")     # left in x0
-        
+        self._operands()
         if op_kind == t1.Kind.TK_PLUS:
             self._emit("add x0, x0, x9")
         elif op_kind == t1.Kind.TK_MINUS:
@@ -623,22 +695,22 @@ class ArmBackend(Backend):
             self._emit("eor x0, x0, x9")
         elif op_kind == t1.Kind.TK_EQ:
             self._emit("cmp x0, x9")
-            self._emit("csetm x0, eq")
+            self._pending_cc = "eq"
         elif op_kind == t1.Kind.TK_NOT_EQ:
             self._emit("cmp x0, x9")
-            self._emit("csetm x0, ne")
+            self._pending_cc = "ne"
         elif op_kind == t1.Kind.TK_GT:
             self._emit("cmp x0, x9")
-            self._emit("csetm x0, gt")
+            self._pending_cc = "gt"
         elif op_kind == t1.Kind.TK_LT:
             self._emit("cmp x0, x9")
-            self._emit("csetm x0, lt")
+            self._pending_cc = "lt"
         elif op_kind == t1.Kind.TK_GT_EQ:
             self._emit("cmp x0, x9")
-            self._emit("csetm x0, ge")
+            self._pending_cc = "ge"
         elif op_kind == t1.Kind.TK_LT_EQ:
             self._emit("cmp x0, x9")
-            self._emit("csetm x0, le")
+            self._pending_cc = "le"
     
     # ========================================================================
     # Memory operations
@@ -764,17 +836,9 @@ class ArmBackend(Backend):
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
-        self._emit("mov x9, x0")
-        self._pop_saved_into("x0")
+        self._operands()
         self._emit("cmp x0, x9")
-        if kind == "gt":
-            self._emit("csetm x0, hi")
-        elif kind == "lt":
-            self._emit("csetm x0, lo")
-        elif kind == "gte":
-            self._emit("csetm x0, hs")
-        elif kind == "lte":
-            self._emit("csetm x0, ls")
+        self._pending_cc = {"gt": "hi", "lt": "lo", "gte": "hs", "lte": "ls"}[kind]
 
     def alloca(self) -> None:
         """Allocate temporary stack storage and return its address."""
@@ -790,6 +854,7 @@ class ArmBackend(Backend):
     
     def call_direct(self, label_id: int, num_args: int) -> None:
         """Call a function directly by label."""
+        self._flush()
         stack_bytes = self._prepare_call_args(num_args)
         label = self._fn_labels[label_id]
         self._note_clobber()
@@ -799,6 +864,7 @@ class ArmBackend(Backend):
     
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via pointer."""
+        self._flush()
         stack_bytes = self._prepare_call_args(num_args, "x9")
         self._note_clobber()
         self._emit("blr x9")
@@ -954,11 +1020,14 @@ class ArmBackend(Backend):
         else_label = self._new_label("else")
         end_label = self._new_label("if_end")
         self._if_stack.append((else_label, end_label, False))
-        
+        if self._branch_pending(else_label, False):
+            return
+        self._flush()
         self._emit("cbz x0, " + else_label)
     
     def begin_else(self) -> None:
         """Begin the else branch."""
+        self._flush()
         else_label, end_label, _ = self._if_stack[-1]
         self._if_stack[-1] = (else_label, end_label, True)
         self._emit(f"b {end_label}")
@@ -966,6 +1035,7 @@ class ArmBackend(Backend):
     
     def end_if(self) -> None:
         """End an if statement."""
+        self._flush()
         else_label, end_label, else_emitted = self._if_stack.pop()
         if not else_emitted:
             self._emit_label(else_label)
@@ -973,6 +1043,7 @@ class ArmBackend(Backend):
     
     def begin_loop(self) -> None:
         """Begin a loop."""
+        self._flush()
         start_label = self._new_label("loop_start")
         end_label = self._new_label("loop_end")
         self._loop_stack.append((start_label, end_label))
@@ -983,14 +1054,21 @@ class ArmBackend(Backend):
     def begin_loop_body(self) -> None:
         """Begin the loop body after condition check."""
         _, end_label = self._loop_stack[-1]
+        if self._branch_pending(end_label, False):
+            return
+        self._flush()
         self._emit(f"cbz x0, {end_label}")
 
     def cond_and_split(self) -> str:
         false_label = self._new_label("cond_and_false")
+        if self._branch_pending(false_label, False):
+            return false_label
+        self._flush()
         self._emit(f"cbz x0, {false_label}")
         return false_label
 
     def cond_and_join(self, false_label: str) -> None:
+        self._flush()
         done_label = self._new_label("cond_and_done")
         self._emit(f"b {done_label}")
         self._emit_label(false_label)
@@ -999,14 +1077,22 @@ class ArmBackend(Backend):
 
     def cond_or_split(self) -> str:
         done_label = self._new_label("cond_or_done")
+        if self._pending_cc is not None:
+            # The taken path must carry the true value; mov leaves the flags alone.
+            self._emit("mov x0, #-1")
+            self._branch_pending(done_label, True)
+            return done_label
+        self._flush()
         self._emit(f"cbnz x0, {done_label}")
         return done_label
 
     def cond_or_join(self, done_label: str) -> None:
+        self._flush()
         self._emit_label(done_label)
     
     def end_loop(self) -> None:
         """End a loop."""
+        self._flush()
         start_label, end_label = self._loop_stack.pop()
         self._emit(f"b {start_label}")
         self._emit_label(end_label)
@@ -1015,16 +1101,19 @@ class ArmBackend(Backend):
     
     def emit_break(self) -> None:
         """Emit a break statement."""
+        self._flush()
         _, end_label = self._loop_stack[-1]
         self._emit(f"b {end_label}")
     
     def emit_continue(self) -> None:
         """Emit a continue statement."""
+        self._flush()
         start_label, _ = self._loop_stack[-1]
         self._emit(f"b {start_label}")
     
     def emit_return(self) -> None:
         """Emit a return statement."""
+        self._flush()
         self._emit(f"b {self._current_fn_epilogue}")
     
     # ========================================================================
@@ -1061,6 +1150,7 @@ class ArmBackend(Backend):
     
     def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
         """Emit code for an intrinsic call."""
+        self._flush()
         if name == "__load_u8__":
             self.load_mem(8, signed=False)
         elif name == "__load_u16__":

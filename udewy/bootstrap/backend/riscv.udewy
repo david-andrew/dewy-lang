@@ -559,6 +559,7 @@ let rv_intern_static = (size:int):>int => {
 }
 
 let rv_push_string_ref = (label_id:int):>void => {
+    rv_flush()
     let label:int = intmap_get(rv_string_labels label_id)
     rv_emit_2op("la" "a0" label)
     rv_emit_indented("addi a0, a0, 8")
@@ -566,22 +567,26 @@ let rv_push_string_ref = (label_id:int):>void => {
 }
 
 let rv_push_global_ref = (label_id:int):>void => {
+    rv_flush()
     rv_emit_2op("la" "a0" intmap_get(rv_global_labels label_id))
     return void
 }
 
 let rv_push_static_ref = (label_id:int):>void => {
+    rv_flush()
     rv_emit_2op("la" "a0" intmap_get(rv_static_labels label_id))
     return void
 }
 
 let rv_load_global = (label_id:int):>void => {
+    rv_flush()
     rv_emit_2op("la" "t0" intmap_get(rv_global_labels label_id))
     rv_emit_mem("ld" "a0" 0 "t0")
     return void
 }
 
 let rv_store_global = (label_id:int):>void => {
+    rv_flush()
     rv_emit_2op("la" "t0" intmap_get(rv_global_labels label_id))
     rv_emit_mem("sd" "a0" 0 "t0")
     return void
@@ -632,23 +637,118 @@ let rv_declare_extern_function = (name:int num_params:int):>int => {
 # operands); t2-t4 are free between calls and syscalls.
 let rv_callee_local_regs:int = 0
 let rv_caller_local_regs:int = 0
+# The visible value may be pending rather than in a0: a comparison whose
+# operands sit in a0 (left) and t0 (right) (`rv_pending_cc` names the branch
+# condition that would make it -1) or a local not yet loaded
+# (`rv_pending_slot`). Branches, saves and comparisons consume pending
+# values directly; every other emitter flushes them first.
+let rv_pending_cc:int = 0
+let rv_pending_slot:int = 0
+let rv_has_pending_slot:int = false
+
+let rv_invert_cc = (cc:int):>int => {
+    if str_eq(cc "eq") { return "ne" }
+    if str_eq(cc "ne") { return "eq" }
+    if str_eq(cc "lt") { return "ge" }
+    if str_eq(cc "ge") { return "lt" }
+    if str_eq(cc "gt") { return "le" }
+    if str_eq(cc "le") { return "gt" }
+    if str_eq(cc "ltu") { return "geu" }
+    if str_eq(cc "geu") { return "ltu" }
+    if str_eq(cc "gtu") { return "leu" }
+    return "gtu"
+}
+
+# Load a pending local straight into `register` (its site is recorded).
+let rv_load_pending_slot = (register:int):>void => {
+    rv_has_pending_slot = false
+    rv_note_local_access(rv_pending_slot register false)
+    rv_emit_mem("ld" register rv_pending_slot "s0")
+    return void
+}
+
+# Materialize a pending value into a0 as -1 or 0.
+let rv_flush = ():>void => {
+    if rv_pending_cc not=? 0 {
+        let cc:int = rv_pending_cc
+        rv_pending_cc = 0
+        if str_eq(cc "eq") {
+            rv_emit_3op("sub" "t1" "a0" "t0")
+            rv_emit_2op("seqz" "a0" "t1")
+        } else if str_eq(cc "ne") {
+            rv_emit_3op("sub" "t1" "a0" "t0")
+            rv_emit_2op("snez" "a0" "t1")
+        } else if str_eq(cc "gt") {
+            rv_emit_3op("sgt" "a0" "a0" "t0")
+        } else if str_eq(cc "lt") {
+            rv_emit_3op("slt" "a0" "a0" "t0")
+        } else if str_eq(cc "ge") {
+            rv_emit_3op("slt" "a0" "a0" "t0")
+            rv_emit_2op("seqz" "a0" "a0")
+        } else if str_eq(cc "le") {
+            rv_emit_3op("sgt" "a0" "a0" "t0")
+            rv_emit_2op("seqz" "a0" "a0")
+        } else if str_eq(cc "gtu") {
+            rv_emit_3op("sltu" "a0" "t0" "a0")
+        } else if str_eq(cc "ltu") {
+            rv_emit_3op("sltu" "a0" "a0" "t0")
+        } else if str_eq(cc "geu") {
+            rv_emit_3op("sltu" "a0" "a0" "t0")
+            rv_emit_2op("seqz" "a0" "a0")
+        } else {
+            rv_emit_3op("sltu" "a0" "t0" "a0")
+            rv_emit_2op("seqz" "a0" "a0")
+        }
+        rv_emit_2op("neg" "a0" "a0")
+    } else if rv_has_pending_slot {
+        rv_load_pending_slot("a0")
+    }
+    return void
+}
+
+# Consume a pending comparison as a branch taken when it holds or fails.
+let rv_branch_pending = (label:int when_true:int):>int => {
+    if rv_pending_cc =? 0 { return false }
+    let cc:int = rv_pending_cc
+    rv_pending_cc = 0
+    if not when_true { cc = rv_invert_cc(cc) }
+    let bb:int = bb_new(32)
+    bb_push_str(bb "    b")
+    bb_push_str(bb cc)
+    bb_push_str(bb " a0, t0, ")
+    bb_push_str(bb label)
+    vec_push(rv_current_fn_code bb_finalize_as_string(bb))
+    return true
+}
+
+# The right operand goes to t0 and the saved left operand to a0.
+let rv_operands = ():>void => {
+    if rv_pending_cc not=? 0 { rv_flush() }
+    if rv_has_pending_slot { rv_load_pending_slot("t0") }
+    else { rv_emit_2op("mv" "t0" "a0") }
+    rv_pop_saved_into("a0")
+    return void
+}
 
 let rv_slot_key = (slot:int):>int => {
     return (0 - slot - RV_SAVE_AREA_BYTES) >> 3
 }
 
+# The register form of a slot access is a move: `mv REG, other` for a store,
+# `mv other, REG` for a load.
 let rv_note_local_access = (slot:int other:int store:int):>void => {
-    la_note_site(vec_len(rv_current_fn_code) rv_slot_key(slot) other store)
+    let bb:int = bb_new(16 + str_len(other))
+    if store {
+        bb_push_str(bb ", ")
+        bb_push_str(bb other)
+        la_note_site(vec_len(rv_current_fn_code) rv_slot_key(slot) "    mv " bb_finalize_as_string(bb))
+    } else {
+        bb_push_str(bb "    mv ")
+        bb_push_str(bb other)
+        bb_push_str(bb ", ")
+        la_note_site(vec_len(rv_current_fn_code) rv_slot_key(slot) bb_finalize_as_string(bb) "")
+    }
     return void
-}
-
-let rv_format_move = (src:int dst:int):>int => {
-    let bb:int = bb_new(32)
-    bb_push_str(bb "    mv ")
-    bb_push_str(bb dst)
-    bb_push_str(bb ", ")
-    bb_push_str(bb src)
-    return bb_finalize_as_string(bb)
 }
 
 # Debug builds retain their existing stack locations (as on x86-64).
@@ -670,7 +770,7 @@ let rv_allocate_locals = ():>void => {
         vec_push(rv_caller_local_regs "t4")
     }
     la_assign(rv_callee_local_regs rv_caller_local_regs)
-    la_rewrite(rv_current_fn_code rv_format_move)
+    la_rewrite(rv_current_fn_code)
     return void
 }
 
@@ -679,6 +779,8 @@ let rv_begin_function = (label_id:int name:int param_count:int is_main:int):>voi
     rv_saved_depth = 0
     rv_spilled_depth = 0
     rv_min_slot_offset = 0
+    rv_pending_cc = 0
+    rv_has_pending_slot = false
     la_begin_function()
     let code:int = vec_new(64)
     vec_push(rv_function_ids label_id)
@@ -724,6 +826,7 @@ let rv_begin_function = (label_id:int name:int param_count:int is_main:int):>voi
 
 # Reconstruct the prologue: stack adjust + frame pointer setup + save regs.
 let rv_end_function = ():>void => {
+    rv_flush()
     # Sites index the body as emitted; rewrite before the prologue is spliced in.
     rv_allocate_locals()
     let fb:int = rv_frame_bytes()
@@ -801,6 +904,7 @@ let rv_load_param = (index:int):>void => {
 }
 
 let rv_alloc_local = ():>int => {
+    rv_flush()
     let slot:int = rv_stack_offset
     rv_stack_offset = rv_stack_offset - 8
     rv_note_slot(slot)
@@ -809,36 +913,60 @@ let rv_alloc_local = ():>int => {
 }
 
 let rv_load_local = (slot:int):>void => {
-    rv_note_local_access(slot "a0" false)
-    rv_emit_mem("ld" "a0" slot "s0")
+    rv_flush()
+    rv_pending_slot = slot
+    rv_has_pending_slot = true
     return void
 }
 
 let rv_store_local = (slot:int):>void => {
+    rv_flush()
     rv_note_local_access(slot "a0" true)
     rv_emit_mem("sd" "a0" slot "s0")
     return void
 }
 
-let rv_push_const_i64 = (value:int):>void => { rv_emit_imm("li" "a0" value)  return void }
-let rv_push_void = ():>void => { rv_emit_indented("li a0, 0")  return void }
+let rv_push_const_i64 = (value:int):>void => { rv_flush()  rv_emit_imm("li" "a0" value)  return void }
+let rv_push_void = ():>void => { rv_flush()  rv_emit_indented("li a0, 0")  return void }
 let rv_push_fn_ref = (label_id:int):>void => {
+    rv_flush()
     rv_emit_2op("la" "a0" intmap_get(rv_fn_labels label_id))
     return void
 }
-let rv_pop_value = ():>void => { return void }
-let rv_save_value = ():>void => { rv_save_reg("a0")  return void }
-let rv_restore_value = ():>void => { rv_pop_saved_into("a0")  return void }
+# A discarded value that was never materialized costs nothing.
+let rv_pop_value = ():>void => {
+    rv_pending_cc = 0
+    rv_has_pending_slot = false
+    return void
+}
+
+let rv_save_value = ():>void => {
+    if rv_has_pending_slot and rv_spilled_depth =? 0 and rv_saved_depth <? 3 {
+        rv_load_pending_slot(rv_value_cache_reg(rv_saved_depth))
+        rv_saved_depth = rv_saved_depth + 1
+        return void
+    }
+    rv_flush()
+    rv_save_reg("a0")
+    return void
+}
+
+let rv_restore_value = ():>void => { rv_flush()  rv_pop_saved_into("a0")  return void }
 
 let rv_unary_op = (op_kind:int):>void => {
+    # A pending condition is exactly -1 or 0, so `not` is its inverse.
+    if op_kind =? TK_NOT and rv_pending_cc not=? 0 {
+        rv_pending_cc = rv_invert_cc(rv_pending_cc)
+        return void
+    }
+    rv_flush()
     if op_kind =? TK_MINUS { rv_emit_2op("neg" "a0" "a0") }
     else if op_kind =? TK_NOT { rv_emit_2op("not" "a0" "a0") }
     return void
 }
 
 let rv_binary_op = (op_kind:int):>void => {
-    rv_emit_2op("mv" "t0" "a0")
-    rv_pop_saved_into("a0")
+    rv_operands()
     if op_kind =? TK_PLUS         { rv_emit_3op("add" "a0" "a0" "t0") }
     else if op_kind =? TK_MINUS   { rv_emit_3op("sub" "a0" "a0" "t0") }
     else if op_kind =? TK_MUL     { rv_emit_3op("mul" "a0" "a0" "t0") }
@@ -849,29 +977,12 @@ let rv_binary_op = (op_kind:int):>void => {
     else if op_kind =? TK_AND     { rv_emit_3op("and" "a0" "a0" "t0") }
     else if op_kind =? TK_OR      { rv_emit_3op("or"  "a0" "a0" "t0") }
     else if op_kind =? TK_XOR     { rv_emit_3op("xor" "a0" "a0" "t0") }
-    else if op_kind =? TK_EQ {
-        rv_emit_3op("sub" "t1" "a0" "t0")
-        rv_emit_2op("seqz" "a0" "t1")
-        rv_emit_2op("neg" "a0" "a0")
-    } else if op_kind =? TK_NOT_EQ {
-        rv_emit_3op("sub" "t1" "a0" "t0")
-        rv_emit_2op("snez" "a0" "t1")
-        rv_emit_2op("neg" "a0" "a0")
-    } else if op_kind =? TK_GT {
-        rv_emit_3op("sgt" "a0" "a0" "t0")
-        rv_emit_2op("neg" "a0" "a0")
-    } else if op_kind =? TK_LT {
-        rv_emit_3op("slt" "a0" "a0" "t0")
-        rv_emit_2op("neg" "a0" "a0")
-    } else if op_kind =? TK_GT_EQ {
-        rv_emit_3op("slt" "a0" "a0" "t0")
-        rv_emit_2op("seqz" "a0" "a0")
-        rv_emit_2op("neg" "a0" "a0")
-    } else if op_kind =? TK_LT_EQ {
-        rv_emit_3op("sgt" "a0" "a0" "t0")
-        rv_emit_2op("seqz" "a0" "a0")
-        rv_emit_2op("neg" "a0" "a0")
-    }
+    else if op_kind =? TK_EQ { rv_pending_cc = "eq" }
+    else if op_kind =? TK_NOT_EQ { rv_pending_cc = "ne" }
+    else if op_kind =? TK_GT { rv_pending_cc = "gt" }
+    else if op_kind =? TK_LT { rv_pending_cc = "lt" }
+    else if op_kind =? TK_GT_EQ { rv_pending_cc = "ge" }
+    else if op_kind =? TK_LT_EQ { rv_pending_cc = "le" }
     return void
 }
 
@@ -920,20 +1031,11 @@ let rv_unsigned_mod = ():>void => {
 
 # kind: 0=gt, 1=lt, 2=gte, 3=lte
 let rv_unsigned_cmp = (kind:int):>void => {
-    rv_emit_2op("mv" "t0" "a0")
-    rv_pop_saved_into("a0")
-    if kind =? 0 {
-        rv_emit_3op("sltu" "a0" "t0" "a0")
-    } else if kind =? 1 {
-        rv_emit_3op("sltu" "a0" "a0" "t0")
-    } else if kind =? 2 {
-        rv_emit_3op("sltu" "a0" "a0" "t0")
-        rv_emit_2op("seqz" "a0" "a0")
-    } else {
-        rv_emit_3op("sltu" "a0" "t0" "a0")
-        rv_emit_2op("seqz" "a0" "a0")
-    }
-    rv_emit_2op("neg" "a0" "a0")
+    rv_operands()
+    if kind =? 0 { rv_pending_cc = "gtu" }
+    else if kind =? 1 { rv_pending_cc = "ltu" }
+    else if kind =? 2 { rv_pending_cc = "geu" }
+    else { rv_pending_cc = "leu" }
     return void
 }
 
@@ -947,6 +1049,7 @@ let rv_alloca = ():>void => {
 }
 
 let rv_call_direct = (label_id:int num_args:int):>void => {
+    rv_flush()
     let stack_bytes:int = rv_prepare_call_args(num_args 0)
     let label:int = intmap_get(rv_fn_labels label_id)
     let bb:int = bb_new(32 + str_len(label))
@@ -961,6 +1064,7 @@ let rv_call_direct = (label_id:int num_args:int):>void => {
 }
 
 let rv_call_indirect = (num_args:int):>void => {
+    rv_flush()
     let stack_bytes:int = rv_prepare_call_args(num_args "t5")
     la_note_clobber(vec_len(rv_current_fn_code))
     rv_emit_indented("jalr ra, t5, 0")
@@ -1104,6 +1208,8 @@ let rv_begin_if = ():>void => {
     vec_push(rv_if_else_labels el)
     vec_push(rv_if_end_labels en)
     vec_push(rv_if_else_emitted false)
+    if rv_branch_pending(el false) { return void }
+    rv_flush()
     let bb:int = bb_new(32)
     bb_push_str(bb "    beqz a0, ")
     bb_push_str(bb el)
@@ -1112,6 +1218,7 @@ let rv_begin_if = ():>void => {
 }
 
 let rv_begin_else = ():>void => {
+    rv_flush()
     let top:int = vec_len(rv_if_else_labels) - 1
     let el:int = vec_get(rv_if_else_labels top)
     let en:int = vec_get(rv_if_end_labels top)
@@ -1125,6 +1232,7 @@ let rv_begin_else = ():>void => {
 }
 
 let rv_end_if = ():>void => {
+    rv_flush()
     let top:int = vec_len(rv_if_else_labels) - 1
     let el:int = vec_get(rv_if_else_labels top)
     let en:int = vec_get(rv_if_end_labels top)
@@ -1138,6 +1246,7 @@ let rv_end_if = ():>void => {
 }
 
 let rv_begin_loop = ():>void => {
+    rv_flush()
     let s:int = rv_new_label("loop_start")
     let e:int = rv_new_label("loop_end")
     vec_push(rv_loop_start_labels s)
@@ -1149,6 +1258,8 @@ let rv_begin_loop = ():>void => {
 
 let rv_begin_loop_body = ():>void => {
     let top:int = vec_len(rv_loop_end_labels) - 1
+    if rv_branch_pending(vec_get(rv_loop_end_labels top) false) { return void }
+    rv_flush()
     let bb:int = bb_new(32)
     bb_push_str(bb "    beqz a0, ")
     bb_push_str(bb vec_get(rv_loop_end_labels top))
@@ -1157,6 +1268,7 @@ let rv_begin_loop_body = ():>void => {
 }
 
 let rv_end_loop = ():>void => {
+    rv_flush()
     let top:int = vec_len(rv_loop_start_labels) - 1
     let s:int = vec_get(rv_loop_start_labels top)
     let e:int = vec_get(rv_loop_end_labels top)
@@ -1172,6 +1284,7 @@ let rv_end_loop = ():>void => {
 }
 
 let rv_emit_break = ():>void => {
+    rv_flush()
     let top:int = vec_len(rv_loop_end_labels) - 1
     let bb:int = bb_new(16)
     bb_push_str(bb "    j ")
@@ -1181,6 +1294,7 @@ let rv_emit_break = ():>void => {
 }
 
 let rv_emit_continue = ():>void => {
+    rv_flush()
     let top:int = vec_len(rv_loop_start_labels) - 1
     let bb:int = bb_new(16)
     bb_push_str(bb "    j ")
@@ -1191,6 +1305,8 @@ let rv_emit_continue = ():>void => {
 
 let rv_cond_and_split = ():>int => {
     let lbl:int = rv_new_label("cond_and_false")
+    if rv_branch_pending(lbl false) { return lbl }
+    rv_flush()
     let bb:int = bb_new(32)
     bb_push_str(bb "    beqz a0, ")
     bb_push_str(bb lbl)
@@ -1199,6 +1315,7 @@ let rv_cond_and_split = ():>int => {
 }
 
 let rv_cond_and_join = (false_label:int):>void => {
+    rv_flush()
     let done:int = rv_new_label("cond_and_done")
     let bb:int = bb_new(16)
     bb_push_str(bb "    j ")
@@ -1212,6 +1329,7 @@ let rv_cond_and_join = (false_label:int):>void => {
 
 let rv_cond_or_split = ():>int => {
     let done:int = rv_new_label("cond_or_done")
+    rv_flush()
     let bb:int = bb_new(32)
     bb_push_str(bb "    bnez a0, ")
     bb_push_str(bb done)
@@ -1220,11 +1338,13 @@ let rv_cond_or_split = ():>int => {
 }
 
 let rv_cond_or_join = (done_label:int):>void => {
+    rv_flush()
     rv_emit_label_str(done_label)
     return void
 }
 
 let rv_emit_return = ():>void => {
+    rv_flush()
     let bb:int = bb_new(16)
     bb_push_str(bb "    j ")
     bb_push_str(bb rv_current_fn_epilogue)
@@ -1287,6 +1407,7 @@ let rv_intrinsic_static_arg_indices = (name:int):>int => {
 }
 
 let rv_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
+    rv_flush()
     if str_eq(name "__load_u8__")        { rv_load_mem(8 0) }
     else if str_eq(name "__load_u16__")  { rv_load_mem(16 0) }
     else if str_eq(name "__load_u32__")  { rv_load_mem(32 0) }

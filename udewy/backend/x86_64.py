@@ -97,6 +97,12 @@ class X86_64Backend(Backend):
         self._min_slot_offset: int = 0
         self._frame_subtract_index: int = -1
         self._locals = LocalRegisterAllocator()
+        # The visible value may be pending rather than in %rax: the flags of
+        # the last comparison (the condition that would make it -1) or a local
+        # not yet loaded. Branches, saves and comparisons consume pending
+        # values directly; every other emitter flushes them first.
+        self._pending_cc: str | None = None
+        self._pending_slot: int | None = None
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
@@ -254,6 +260,7 @@ class X86_64Backend(Backend):
         """A `.loc` row: the assembler builds the DWARF line table from these."""
         if not self.debug_info or self._current_fn_code is None:
             return   # nothing is emitted between functions
+        self._flush()
         number = self._source_files.get(path)
         if number is None:
             number = len(self._source_files) + 1
@@ -380,26 +387,31 @@ class X86_64Backend(Backend):
     
     def push_string_ref(self, label_id: int) -> None:
         """Push address of string data onto value stack."""
+        self._flush()
         label = self._string_labels[label_id]
         self._emit(f"leaq {label}+8(%rip), %rax")
     
     def push_global_ref(self, label_id: int) -> None:
         """Push address of global onto value stack."""
+        self._flush()
         label = self._global_labels[label_id]
         self._emit(f"leaq {label}(%rip), %rax")
 
     def push_static_ref(self, label_id: int) -> None:
         """Push address of raw static storage onto value stack."""
+        self._flush()
         label = self._static_labels[label_id]
         self._emit(f"leaq {label}(%rip), %rax")
     
     def load_global(self, label_id: int) -> None:
         """Load value of global onto value stack."""
+        self._flush()
         label = self._global_labels[label_id]
         self._emit(f"movq {label}(%rip), %rax")
     
     def store_global(self, label_id: int) -> None:
         """Pop value from stack and store to global."""
+        self._flush()
         label = self._global_labels[label_id]
         self._emit(f"movq %rax, {label}(%rip)")
 
@@ -442,6 +454,8 @@ class X86_64Backend(Backend):
         self._saved_depth = 0
         self._spilled_depth = 0
         self._min_slot_offset = 0
+        self._pending_cc = None
+        self._pending_slot = None
         self._locals.begin_function()
         
         self._current_fn_code = []
@@ -484,13 +498,11 @@ class X86_64Backend(Backend):
             self._locals.note_alloc(self._slot_key(slot), len(self._current_fn_code))
             
             if i < 6:
-                self._note_local_access(slot, self._ARG_REGS[i], True)
-                self._emit(f"movq {self._ARG_REGS[i]}, {slot}(%rbp)")
+                self._emit_slot_store(self._ARG_REGS[i], slot)
             else:
                 caller_offset = 16 + (i - 6) * 8
                 self._emit(f"movq {caller_offset}(%rbp), %rax")
-                self._note_local_access(slot, '%rax', True)
-                self._emit(f"movq %rax, {slot}(%rbp)")
+                self._emit_slot_store('%rax', slot)
             
             self._stack_offset -= 8
         # Incoming argument registers stay live through the last parameter
@@ -503,6 +515,7 @@ class X86_64Backend(Backend):
     def end_function(self) -> None:
         """End function definition."""
         assert self._current_fn_code is not None
+        self._flush()
         self._end_debug_function()
         self._allocate_locals()
         frame_bytes = self._frame_bytes()
@@ -542,6 +555,7 @@ class X86_64Backend(Backend):
     def begin_scope(self) -> None:
         if self._debug_scope is None or self._current_fn_code is None:
             return
+        self._flush()
         end_label = self._new_label("dbg_end")
         node = _DebugScope(self._debug_label(), end_label)
         self._debug_scope.children.append(node)
@@ -551,6 +565,7 @@ class X86_64Backend(Backend):
     def end_scope(self) -> None:
         if not self._debug_frames or self._current_fn_code is None:
             return
+        self._flush()
         _node, end_label, outer = self._debug_frames.pop()
         self._emit_label(end_label)
         self._debug_scope = outer
@@ -751,11 +766,55 @@ class X86_64Backend(Backend):
     def _slot_key(self, slot: int) -> int:
         return (-slot - self._FIXED_FRAME_BYTES) >> 3
 
-    def _note_local_access(self, slot: int, other: str, store: bool) -> None:
-        if self.debug_info:
-            return
+    def _emit_slot_access(self, slot: int, prefix: str, suffix: str) -> None:
+        """Emit one instruction that reads or writes a local.
+
+        The line is `prefix` + operand + `suffix`: the frame slot now, the
+        slot's register after allocation. Debug builds keep the frame slot.
+        """
         assert self._current_fn_code is not None
-        self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), other, store)
+        if not self.debug_info:
+            self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), prefix, suffix)
+        self._current_fn_code.append(f'{prefix}{slot}(%rbp){suffix}')
+
+    def _emit_slot_load(self, slot: int, register: str) -> None:
+        self._emit_slot_access(slot, '    movq ', f', {register}')
+
+    def _emit_slot_store(self, register: str, slot: int) -> None:
+        self._emit_slot_access(slot, f'    movq {register}, ', '')
+
+    _INVERSE_CC = {'e': 'ne', 'ne': 'e', 'l': 'ge', 'ge': 'l', 'g': 'le', 'le': 'g',
+                   'a': 'be', 'be': 'a', 'b': 'ae', 'ae': 'b'}
+
+    def _flush(self) -> None:
+        """Materialize a pending value into %rax."""
+        if self._pending_cc is not None:
+            cc, self._pending_cc = self._pending_cc, None
+            self._emit(f'set{cc} %al')
+            self._emit('movzbq %al, %rax')
+            self._emit('negq %rax')
+        elif self._pending_slot is not None:
+            slot, self._pending_slot = self._pending_slot, None
+            self._emit_slot_load(slot, '%rax')
+
+    def _branch_pending(self, label: str, when_true: bool) -> bool:
+        """Consume a pending condition as a branch taken when it holds or fails."""
+        if self._pending_cc is None:
+            return False
+        cc, self._pending_cc = self._pending_cc, None
+        if not when_true:
+            cc = self._INVERSE_CC[cc]
+        self._emit(f'j{cc} {label}')
+        return True
+
+    def _compare_pending(self, cc: str, left: str) -> None:
+        """Compare `left` with the visible value and leave the condition pending."""
+        if self._pending_slot is not None:
+            slot, self._pending_slot = self._pending_slot, None
+            self._emit_slot_access(slot, '    cmpq ', f', {left}')
+        else:
+            self._emit(f'cmpq %rax, {left}')
+        self._pending_cc = cc
 
     def _allocate_locals(self) -> None:
         """Keep busy locals in registers (see LocalRegisterAllocator).
@@ -767,10 +826,11 @@ class X86_64Backend(Backend):
             return
         assert self._current_fn_code is not None
         self._locals.assign(self._CALLEE_LOCAL_REGS, self._CALLER_LOCAL_REGS)
-        self._locals.rewrite(self._current_fn_code, lambda src, dst: f'    movq {src}, {dst}')
+        self._locals.rewrite(self._current_fn_code)
     
     def alloc_local(self) -> int:
         """Allocate a local variable slot."""
+        self._flush()
         slot = self._stack_offset
         self._stack_offset -= 8
         self._note_slot(slot)
@@ -780,13 +840,13 @@ class X86_64Backend(Backend):
     
     def load_local(self, slot: int) -> None:
         """Push local variable value onto the value stack."""
-        self._note_local_access(slot, '%rax', False)
-        self._emit(f"movq {slot}(%rbp), %rax")
+        self._flush()
+        self._pending_slot = slot
     
     def store_local(self, slot: int) -> None:
         """Pop value from stack and store to local variable."""
-        self._note_local_access(slot, '%rax', True)
-        self._emit(f"movq %rax, {slot}(%rbp)")
+        self._flush()
+        self._emit_slot_store('%rax', slot)
     
     # ========================================================================
     # Value stack operations
@@ -794,27 +854,38 @@ class X86_64Backend(Backend):
     
     def push_const_i64(self, value: int) -> None:
         """Push a 64-bit integer constant onto the value stack."""
+        self._flush()
         self._emit(f"movq ${wrap_i64(value)}, %rax")
     
     def push_void(self) -> None:
         """Push void (zero) onto the value stack."""
+        self._flush()
         self._emit("xorq %rax, %rax")
     
     def push_fn_ref(self, label_id: int) -> None:
         """Push address of function onto the value stack."""
+        self._flush()
         label = self._fn_labels[label_id]
         self._emit(f"leaq {label}(%rip), %rax")
     
     def pop_value(self) -> None:
-        """Discard the top value on the stack."""
-        pass
+        """Discard the top value; one never materialized costs nothing."""
+        self._pending_cc = None
+        self._pending_slot = None
     
     def save_value(self) -> None:
         """Save the top value to physical stack."""
+        if self._pending_slot is not None and self._spilled_depth == 0 and self._saved_depth < len(self._VALUE_CACHE_REGS):
+            slot, self._pending_slot = self._pending_slot, None
+            self._emit_slot_load(slot, self._VALUE_CACHE_REGS[self._saved_depth])
+            self._saved_depth += 1
+            return
+        self._flush()
         self._save_reg("%rax")
     
     def restore_value(self) -> None:
         """Restore a previously saved value."""
+        self._flush()
         self._pop_saved_into("%rax")
     
     # ========================================================================
@@ -823,6 +894,11 @@ class X86_64Backend(Backend):
     
     def unary_op(self, op_kind: t1.Kind) -> None:
         """Apply unary operator to top of stack."""
+        # A pending condition is exactly -1 or 0, so `not` is its inverse.
+        if op_kind == t1.Kind.TK_NOT and self._pending_cc is not None:
+            self._pending_cc = self._INVERSE_CC[self._pending_cc]
+            return
+        self._flush()
         if op_kind == t1.Kind.TK_MINUS:
             self._emit("negq %rax")
         elif op_kind == t1.Kind.TK_NOT:
@@ -847,6 +923,18 @@ class X86_64Backend(Backend):
     def binary_immediate(self, op_kind: t1.Kind, value: int) -> None:
         # Literals are unsigned words; unary minus wraps in the same word.
         # Most x86 immediate operands sign-extend 32 bits, unlike movabsq.
+        condition = self._SIGNED_COMPARISONS.get(op_kind)
+        signed = wrap_i64(value)
+        if condition is not None and -2147483648 <= signed <= 2147483647:
+            if self._pending_slot is not None:
+                slot, self._pending_slot = self._pending_slot, None
+                self._emit_slot_access(slot, f'    cmpq ${signed}, ', '')
+            else:
+                self._flush()
+                self._emit(f'cmpq ${signed}, %rax')
+            self._pending_cc = condition
+            return
+        self._flush()
         instruction = self._IMMEDIATE_OPERATIONS.get(op_kind)
         if instruction is not None:
             operation, condition, shift = instruction
@@ -865,14 +953,25 @@ class X86_64Backend(Backend):
                 if -2147483648 <= offset <= 2147483647:
                     self._address_adjustment = (self._current_fn_code, len(self._current_fn_code), offset)
             if condition is not None:
-                self._emit(f'set{condition} %al')
-                self._emit('movzbq %al, %rax')
-                self._emit('negq %rax')
+                self._pending_cc = condition
             return
         super().binary_immediate(op_kind, value)
 
     def binary_op(self, op_kind: t1.Kind) -> None:
         """Combine the saved left value and %rax without staging extra copies."""
+        if self._pending_cc is not None:
+            self._flush()
+        condition = self._SIGNED_COMPARISONS.get(op_kind)
+        if condition is not None:
+            self._compare_pending(condition, self._saved_operand())
+            return
+        if op_kind == t1.Kind.TK_MINUS and self._pending_slot is not None:
+            slot, self._pending_slot = self._pending_slot, None
+            left = self._saved_operand()
+            self._emit_slot_access(slot, '    subq ', f', {left}')
+            self._emit(f'movq {left}, %rax')
+            return
+        self._flush()
         operation = self._COMMUTATIVE_OPS.get(op_kind)
         if operation is not None:
             self._emit(f'{operation} {self._saved_operand()}, %rax')
@@ -881,13 +980,6 @@ class X86_64Backend(Backend):
             left = self._saved_operand()
             self._emit(f'subq %rax, {left}')
             self._emit(f'movq {left}, %rax')
-            return
-        condition = self._SIGNED_COMPARISONS.get(op_kind)
-        if condition is not None:
-            self._emit(f'cmpq %rax, {self._saved_operand()}')
-            self._emit(f'set{condition} %al')
-            self._emit('movzbq %al, %rax')
-            self._emit('negq %rax')
             return
         # Division and shifts require the hardware's fixed operand registers.
         self._emit("movq %rax, %rcx")
@@ -1040,17 +1132,9 @@ class X86_64Backend(Backend):
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
-        self._emit(f'cmpq %rax, {self._saved_operand()}')
-        if kind == "gt":
-            self._emit("seta %al")
-        elif kind == "lt":
-            self._emit("setb %al")
-        elif kind == "gte":
-            self._emit("setae %al")
-        elif kind == "lte":
-            self._emit("setbe %al")
-        self._emit("movzbq %al, %rax")
-        self._emit("negq %rax")
+        if self._pending_cc is not None:
+            self._flush()
+        self._compare_pending({"gt": "a", "lt": "b", "gte": "ae", "lte": "be"}[kind], self._saved_operand())
 
     def alloca(self) -> None:
         """Keep expression spills below storage that lives until return.
@@ -1082,6 +1166,7 @@ class X86_64Backend(Backend):
 
     def call_direct(self, label_id: int, num_args: int) -> None:
         """Call a function directly by label."""
+        self._flush()
         stack_bytes = self._prepare_call_args(num_args)
         label = self._fn_labels[label_id]
         self._note_clobber()
@@ -1091,6 +1176,7 @@ class X86_64Backend(Backend):
     
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via pointer."""
+        self._flush()
         stack_bytes = self._prepare_call_args(num_args, "%r11")
         self._note_clobber()
         self._emit("call *%r11")
@@ -1236,12 +1322,14 @@ class X86_64Backend(Backend):
         else_label = self._new_label("else")
         end_label = self._new_label("if_end")
         self._if_stack.append((else_label, end_label, False))
-        
-        self._emit("testq %rax, %rax")
-        self._emit(f"jz {else_label}")
+        if not self._branch_pending(else_label, False):
+            self._flush()
+            self._emit("testq %rax, %rax")
+            self._emit(f"jz {else_label}")
     
     def begin_else(self) -> None:
         """Begin the else branch."""
+        self._flush()
         else_label, end_label, _ = self._if_stack[-1]
         self._if_stack[-1] = (else_label, end_label, True)
         self._emit(f"jmp {end_label}")
@@ -1249,6 +1337,7 @@ class X86_64Backend(Backend):
     
     def end_if(self) -> None:
         """End an if statement."""
+        self._flush()
         else_label, end_label, else_emitted = self._if_stack.pop()
         if not else_emitted:
             self._emit_label(else_label)
@@ -1256,6 +1345,7 @@ class X86_64Backend(Backend):
     
     def begin_loop(self) -> None:
         """Begin a loop."""
+        self._flush()
         start_label = self._new_label("loop_start")
         end_label = self._new_label("loop_end")
         self._loop_stack.append((start_label, end_label))
@@ -1266,16 +1356,21 @@ class X86_64Backend(Backend):
     def begin_loop_body(self) -> None:
         """Begin the loop body after condition check."""
         _, end_label = self._loop_stack[-1]
-        self._emit("testq %rax, %rax")
-        self._emit(f"jz {end_label}")
+        if not self._branch_pending(end_label, False):
+            self._flush()
+            self._emit("testq %rax, %rax")
+            self._emit(f"jz {end_label}")
 
     def cond_and_split(self) -> str:
         false_label = self._new_label("cond_and_false")
-        self._emit("testq %rax, %rax")
-        self._emit(f"jz {false_label}")
+        if not self._branch_pending(false_label, False):
+            self._flush()
+            self._emit("testq %rax, %rax")
+            self._emit(f"jz {false_label}")
         return false_label
 
     def cond_and_join(self, false_label: str) -> None:
+        self._flush()
         done_label = self._new_label("cond_and_done")
         self._emit(f"jmp {done_label}")
         self._emit_label(false_label)
@@ -1284,15 +1379,23 @@ class X86_64Backend(Backend):
 
     def cond_or_split(self) -> str:
         done_label = self._new_label("cond_or_done")
-        self._emit("testq %rax, %rax")
-        self._emit(f"jnz {done_label}")
+        if self._pending_cc is not None:
+            # The taken path must carry the true value; movq leaves the flags alone.
+            self._emit("movq $-1, %rax")
+            self._branch_pending(done_label, True)
+        else:
+            self._flush()
+            self._emit("testq %rax, %rax")
+            self._emit(f"jnz {done_label}")
         return done_label
 
     def cond_or_join(self, done_label: str) -> None:
+        self._flush()
         self._emit_label(done_label)
     
     def end_loop(self) -> None:
         """End a loop."""
+        self._flush()
         start_label, end_label = self._loop_stack.pop()
         self._emit(f"jmp {start_label}")
         self._emit_label(end_label)
@@ -1301,15 +1404,18 @@ class X86_64Backend(Backend):
     
     def emit_break(self) -> None:
         """Emit a break statement."""
+        self._flush()
         _, end_label = self._loop_stack[-1]
         self._emit(f"jmp {end_label}")
     
     def emit_continue(self) -> None:
         """Emit a continue statement."""
+        self._flush()
         start_label, _ = self._loop_stack[-1]
         self._emit(f"jmp {start_label}")
     
     def emit_return(self) -> None:
+        self._flush()
         """Emit a return statement."""
         self._emit(f"jmp {self._current_fn_epilogue}")
     
@@ -1346,6 +1452,7 @@ class X86_64Backend(Backend):
         return set(range(1, 1 + mixed_args * 2, 2))
     
     def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
+        self._flush()
         """Emit code for an intrinsic call."""
         if name == "__load_u8__":
             self.load_mem(8, signed=False)

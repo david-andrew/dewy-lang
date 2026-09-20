@@ -634,8 +634,9 @@ class LocalRegisterAllocator:
 
     Mirrors la_* in udewy/bootstrap/backend/common.udewy. Native backends keep
     every local in a frame slot and record each access as a site: the code
-    line that reads or writes the slot, the slot's dense key, the other
-    operand of the move, and whether it is a store. µDewy has no
+    line that reads or writes the slot, the slot's dense key, and the text
+    before and after the operand in the instruction's register form (the line
+    as emitted holds the frame-slot form). µDewy has no
     address-of-local operation, so the recorded sites are every use of a
     slot. At the end of a function the sites become live intervals; a linear
     scan hands the busiest intervals registers and the backend rewrites their
@@ -655,7 +656,7 @@ class LocalRegisterAllocator:
         self.begin_function()
 
     def begin_function(self) -> None:
-        self._sites: list[tuple[int, int, str, bool]] = []
+        self._sites: list[tuple[int, int, str, str]] = []
         self._scores: list[int] = []
         self._alloc_lines: list[int] = []
         self._pinned: list[bool] = []
@@ -682,10 +683,10 @@ class LocalRegisterAllocator:
     def loop_depth(self) -> int:
         return len(self._open_loops)
 
-    def note_site(self, line: int, key: int, other: str, store: bool) -> None:
+    def note_site(self, line: int, key: int, prefix: str, suffix: str) -> None:
         self._ensure_key(key)
         self._scores[key] += 1 << (3 * min(len(self._open_loops), 3))
-        self._sites.append((line, key, other, store))
+        self._sites.append((line, key, prefix, suffix))
 
     def begin_loop(self, line: int) -> None:
         self._open_loops.append(line)
@@ -703,7 +704,7 @@ class LocalRegisterAllocator:
         starts = [-1] * keys
         ends = [-1] * keys
         counts = [0] * keys
-        for line, key, _other, _store in self._sites:
+        for line, key, _prefix, _suffix in self._sites:
             if starts[key] < 0 or line < starts[key]:
                 starts[key] = line
             if line > ends[key]:
@@ -764,12 +765,9 @@ class LocalRegisterAllocator:
                 else:
                     self.assignment[key] = caller_regs[chosen - callee_count]
 
-    def rewrite(self, code: list[str], format_move) -> None:
-        """Rewrite every site of an assigned slot into a register move.
-
-        `format_move(src, dst)` produces the full code line.
-        """
-        for line, key, other, store in self._sites:
+    def rewrite(self, code: list[str]) -> None:
+        """Rewrite every site of an assigned slot into its register form."""
+        for line, key, prefix, suffix in self._sites:
             register = self.assignment[key]
             if register is not None:
-                code[line] = format_move(other, register) if store else format_move(register, other)
+                code[line] = prefix + register + suffix

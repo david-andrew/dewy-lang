@@ -1315,6 +1315,7 @@ The x86_64 backend still follows udewy's logical value-stack model, but it does 
 - When a call has more than 6 arguments, the extra arguments are written into an outbound stack-argument area and the first 6 are placed in `rdi`, `rsi`, `rdx`, `rcx`, `r8`, and `r9`.
 - Call lowering also keeps the machine stack aligned to the ABI-required 16-byte boundary.
 - Busy locals live in `rbx`/`r15` (across calls) or `r8`/`r9`/`r11` (between calls) through the shared local register allocation described in [Backend Architecture](#local-register-allocation); ordinary builds only.
+- The visible value may be *pending* instead of in `rax`: a local that was named but not yet loaded, or the flags of the last comparison. `save_value` moves a pending local straight into its cache register, a comparison against a pending local or an immediate uses it as the `cmpq` operand, and `if`, loop and short-circuit tests branch on the pending flags (`jne`, `jge`, ...) instead of materializing `-1`/`0`; `not` on a pending comparison inverts it. Every other operation materializes the value first. A loop test such as `i <? n` is therefore `movq`, `cmpq`, `jge`.
 
 ## A.2.2 `__alloca__` Alignment
 
@@ -1468,6 +1469,7 @@ The RISC-V backend uses the same basic strategy as x86_64: it preserves udewy's 
 - Calls place the first 8 arguments in `a0`-`a7` and marshal any remaining arguments into an outbound stack area.
 - Call lowering maintains the required 16-byte stack alignment at the actual call instruction.
 - Busy locals live in `s1`, `s5`-`s11` (across calls) or `t2`-`t4` (between calls) through the shared local register allocation; ordinary builds only.
+- The visible value may be *pending*: a local not yet loaded (it then loads straight into its cache register or into `t0` as a right operand), or a comparison whose operands are still in `a0`/`t0`. `if`, loop and short-circuit `and` tests branch on the operands directly (`bge a0, t0, ...`) instead of materializing `-1`/`0`; `not` on a pending comparison inverts it; everything else materializes first.
 
 ## B.2.2 `__alloca__` Alignment
 
@@ -1591,6 +1593,7 @@ The AArch64 backend also keeps the parser-visible stack model, but uses register
 - Calls place the first 8 arguments in `x0`-`x7` and place overflow arguments in the outbound call stack area.
 - Because AArch64 already requires 16-byte stack alignment and the backend spills in 16-byte slots, this path stays naturally aligned.
 - Busy locals live in `x19`, `x24`-`x28` (across calls) or `x11`-`x15` (between calls) through the shared local register allocation; slots beyond the single-instruction offset range stay in memory; ordinary builds only.
+- The visible value may be *pending*: a local not yet loaded (it then loads straight into its cache register or into `x9` as a right operand), or the flags of the last `cmp`. `if`, loop and short-circuit tests branch on the flags (`b.ge`, `b.ne`, ...) instead of `csetm` plus `cbz`; `not` on a pending comparison inverts it; everything else materializes first.
 
 ## C.2.2 `__alloca__` Alignment
 

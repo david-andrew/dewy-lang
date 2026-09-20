@@ -61,6 +61,13 @@ class RiscvBackend(Backend):
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
         self._loop_stack: list[tuple[str, str]] = []  # (start_label, end_label)
         self._locals = LocalRegisterAllocator()
+        # The visible value may be pending rather than in a0: a comparison
+        # whose operands sit in a0 (left) and t0 (right), named by the branch
+        # condition that would make it -1, or a local not yet loaded.
+        # Branches, saves and comparisons consume pending values directly;
+        # every other emitter flushes them first.
+        self._pending_cc: str | None = None
+        self._pending_slot: int | None = None
         
         # Symbol tracking
         self._fn_labels: dict[int, str] = {}
@@ -323,28 +330,33 @@ class RiscvBackend(Backend):
     
     def push_string_ref(self, label_id: int) -> None:
         """Push address of string data onto value stack."""
+        self._flush()
         label = self._string_labels[label_id]
         self._emit(f"la a0, {label}")
         self._emit("addi a0, a0, 8")
 
     def push_global_ref(self, label_id: int) -> None:
         """Push address of global onto value stack."""
+        self._flush()
         label = self._global_labels[label_id]
         self._emit(f"la a0, {label}")
 
     def push_static_ref(self, label_id: int) -> None:
         """Push address of raw static storage onto value stack."""
+        self._flush()
         label = self._static_labels[label_id]
         self._emit(f"la a0, {label}")
     
     def load_global(self, label_id: int) -> None:
         """Load value of global onto value stack."""
+        self._flush()
         label = self._global_labels[label_id]
         self._emit(f"la t0, {label}")
         self._emit("ld a0, 0(t0)")
     
     def store_global(self, label_id: int) -> None:
         """Pop value from stack and store to global."""
+        self._flush()
         label = self._global_labels[label_id]
         self._emit(f"la t0, {label}")
         self._emit("sd a0, 0(t0)")
@@ -392,12 +404,64 @@ class RiscvBackend(Backend):
         return (-slot - self._SAVE_AREA_BYTES) >> 3
 
     def _note_local_access(self, slot: int, other: str, store: bool) -> None:
+        """The register form is a move: `mv REG, other` (store), `mv other, REG` (load)."""
         assert self._current_fn_code is not None
-        self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), other, store)
+        if store:
+            self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), '    mv ', f', {other}')
+        else:
+            self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), f'    mv {other}, ', '')
 
     def _note_clobber(self) -> None:
         assert self._current_fn_code is not None
         self._locals.note_clobber(len(self._current_fn_code))
+
+    _INVERSE_CC = {'eq': 'ne', 'ne': 'eq', 'lt': 'ge', 'ge': 'lt', 'gt': 'le', 'le': 'gt',
+                   'ltu': 'geu', 'geu': 'ltu', 'gtu': 'leu', 'leu': 'gtu'}
+    # How a pending comparison of a0 (left) and t0 (right) becomes 1 or 0.
+    _MATERIALIZE_CC = {
+        'eq': ['sub t1, a0, t0', 'seqz a0, t1'], 'ne': ['sub t1, a0, t0', 'snez a0, t1'],
+        'gt': ['sgt a0, a0, t0'], 'lt': ['slt a0, a0, t0'],
+        'ge': ['slt a0, a0, t0', 'seqz a0, a0'], 'le': ['sgt a0, a0, t0', 'seqz a0, a0'],
+        'gtu': ['sltu a0, t0, a0'], 'ltu': ['sltu a0, a0, t0'],
+        'geu': ['sltu a0, a0, t0', 'seqz a0, a0'], 'leu': ['sltu a0, t0, a0', 'seqz a0, a0'],
+    }
+
+    def _load_pending_slot(self, register: str) -> None:
+        """Load a pending local straight into `register` (its site is recorded)."""
+        slot, self._pending_slot = self._pending_slot, None
+        assert slot is not None
+        self._note_local_access(slot, register, False)
+        self._emit(f"ld {register}, {slot}(s0)")
+
+    def _flush(self) -> None:
+        """Materialize a pending value into a0 as -1 or 0."""
+        if self._pending_cc is not None:
+            cc, self._pending_cc = self._pending_cc, None
+            for instruction in self._MATERIALIZE_CC[cc]:
+                self._emit(instruction)
+            self._emit('neg a0, a0')
+        elif self._pending_slot is not None:
+            self._load_pending_slot('a0')
+
+    def _branch_pending(self, label: str, when_true: bool) -> bool:
+        """Consume a pending comparison as a branch taken when it holds or fails."""
+        if self._pending_cc is None:
+            return False
+        cc, self._pending_cc = self._pending_cc, None
+        if not when_true:
+            cc = self._INVERSE_CC[cc]
+        self._emit(f'b{cc} a0, t0, {label}')
+        return True
+
+    def _operands(self) -> None:
+        """The right operand goes to t0 and the saved left operand to a0."""
+        if self._pending_cc is not None:
+            self._flush()
+        if self._pending_slot is not None:
+            self._load_pending_slot('t0')
+        else:
+            self._emit('mv t0, a0')
+        self._pop_saved_into('a0')
 
     def _allocate_locals(self) -> None:
         """Debug builds retain their existing stack locations (as on x86-64)."""
@@ -405,7 +469,7 @@ class RiscvBackend(Backend):
             return
         assert self._current_fn_code is not None
         self._locals.assign(self._CALLEE_LOCAL_REGS, self._CALLER_LOCAL_REGS)
-        self._locals.rewrite(self._current_fn_code, lambda src, dst: f'    mv {dst}, {src}')
+        self._locals.rewrite(self._current_fn_code)
 
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""
@@ -413,6 +477,8 @@ class RiscvBackend(Backend):
         self._saved_depth = 0
         self._spilled_depth = 0
         self._min_slot_offset = 0
+        self._pending_cc = None
+        self._pending_slot = None
         self._locals.begin_function()
         
         self._current_fn_code = []
@@ -453,6 +519,7 @@ class RiscvBackend(Backend):
     def end_function(self) -> None:
         """End function definition."""
         assert self._current_fn_code is not None
+        self._flush()
         # Sites index the body as emitted; rewrite before the prologue is spliced in.
         self._allocate_locals()
         frame_bytes = self._frame_bytes()
@@ -503,6 +570,7 @@ class RiscvBackend(Backend):
 
     def alloc_local(self) -> int:
         """Allocate a local variable slot."""
+        self._flush()
         slot = self._stack_offset
         self._stack_offset -= 8
         self._note_slot(slot)
@@ -512,11 +580,12 @@ class RiscvBackend(Backend):
 
     def load_local(self, slot: int) -> None:
         """Push local variable value onto the value stack."""
-        self._note_local_access(slot, "a0", False)
-        self._emit(f"ld a0, {slot}(s0)")
+        self._flush()
+        self._pending_slot = slot
 
     def store_local(self, slot: int) -> None:
         """Pop value from stack and store to local variable."""
+        self._flush()
         self._note_local_access(slot, "a0", True)
         self._emit(f"sd a0, {slot}(s0)")
     
@@ -526,27 +595,37 @@ class RiscvBackend(Backend):
     
     def push_const_i64(self, value: int) -> None:
         """Push a 64-bit integer constant onto the value stack."""
+        self._flush()
         self._emit(f"li a0, {wrap_i64(value)}")
     
     def push_void(self) -> None:
         """Push void (zero) onto the value stack."""
+        self._flush()
         self._emit("li a0, 0")
     
     def push_fn_ref(self, label_id: int) -> None:
         """Push address of function onto the value stack."""
+        self._flush()
         label = self._fn_labels[label_id]
         self._emit(f"la a0, {label}")
     
     def pop_value(self) -> None:
-        """Discard the top value on the stack."""
-        pass
+        """Discard the top value; one never materialized costs nothing."""
+        self._pending_cc = None
+        self._pending_slot = None
     
     def save_value(self) -> None:
         """Save the top value to physical stack."""
+        if self._pending_slot is not None and self._spilled_depth == 0 and self._saved_depth < len(self._VALUE_CACHE_REGS):
+            self._load_pending_slot(self._VALUE_CACHE_REGS[self._saved_depth])
+            self._saved_depth += 1
+            return
+        self._flush()
         self._save_reg("a0")
     
     def restore_value(self) -> None:
         """Restore a previously saved value."""
+        self._flush()
         self._pop_saved_into("a0")
     
     # ========================================================================
@@ -555,6 +634,11 @@ class RiscvBackend(Backend):
     
     def unary_op(self, op_kind: t1.Kind) -> None:
         """Apply unary operator to top of stack."""
+        # A pending condition is exactly -1 or 0, so `not` is its inverse.
+        if op_kind == t1.Kind.TK_NOT and self._pending_cc is not None:
+            self._pending_cc = self._INVERSE_CC[self._pending_cc]
+            return
+        self._flush()
         if op_kind == t1.Kind.TK_MINUS:
             self._emit("neg a0, a0")
         elif op_kind == t1.Kind.TK_NOT:
@@ -562,10 +646,7 @@ class RiscvBackend(Backend):
     
     def binary_op(self, op_kind: t1.Kind) -> None:
         """Apply binary operator to top two values on stack."""
-        # Right operand in a0, left on stack
-        self._emit("mv t0, a0")        # right in t0
-        self._pop_saved_into("a0")     # left in a0
-        
+        self._operands()
         if op_kind == t1.Kind.TK_PLUS:
             self._emit("add a0, a0, t0")
         elif op_kind == t1.Kind.TK_MINUS:
@@ -587,27 +668,17 @@ class RiscvBackend(Backend):
         elif op_kind == t1.Kind.TK_XOR:
             self._emit("xor a0, a0, t0")
         elif op_kind == t1.Kind.TK_EQ:
-            self._emit("sub t1, a0, t0")
-            self._emit("seqz a0, t1")
-            self._emit("neg a0, a0")
+            self._pending_cc = "eq"
         elif op_kind == t1.Kind.TK_NOT_EQ:
-            self._emit("sub t1, a0, t0")
-            self._emit("snez a0, t1")
-            self._emit("neg a0, a0")
+            self._pending_cc = "ne"
         elif op_kind == t1.Kind.TK_GT:
-            self._emit("sgt a0, a0, t0")
-            self._emit("neg a0, a0")
+            self._pending_cc = "gt"
         elif op_kind == t1.Kind.TK_LT:
-            self._emit("slt a0, a0, t0")
-            self._emit("neg a0, a0")
+            self._pending_cc = "lt"
         elif op_kind == t1.Kind.TK_GT_EQ:
-            self._emit("slt a0, a0, t0")
-            self._emit("seqz a0, a0")
-            self._emit("neg a0, a0")
+            self._pending_cc = "ge"
         elif op_kind == t1.Kind.TK_LT_EQ:
-            self._emit("sgt a0, a0, t0")
-            self._emit("seqz a0, a0")
-            self._emit("neg a0, a0")
+            self._pending_cc = "le"
     
     # ========================================================================
     # Memory operations
@@ -666,19 +737,8 @@ class RiscvBackend(Backend):
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
-        self._emit("mv t0, a0")
-        self._pop_saved_into("a0")
-        if kind == "gt":
-            self._emit("sltu a0, t0, a0")
-        elif kind == "lt":
-            self._emit("sltu a0, a0, t0")
-        elif kind == "gte":
-            self._emit("sltu a0, a0, t0")
-            self._emit("seqz a0, a0")
-        elif kind == "lte":
-            self._emit("sltu a0, t0, a0")
-            self._emit("seqz a0, a0")
-        self._emit("neg a0, a0")
+        self._operands()
+        self._pending_cc = {"gt": "gtu", "lt": "ltu", "gte": "geu", "lte": "leu"}[kind]
 
     def alloca(self) -> None:
         """Allocate temporary stack storage and return its address."""
@@ -720,6 +780,7 @@ class RiscvBackend(Backend):
     
     def call_direct(self, label_id: int, num_args: int) -> None:
         """Call a function directly by label."""
+        self._flush()
         stack_bytes = self._prepare_call_args(num_args)
         label = self._fn_labels[label_id]
         self._note_clobber()
@@ -729,6 +790,7 @@ class RiscvBackend(Backend):
     
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via pointer."""
+        self._flush()
         stack_bytes = self._prepare_call_args(num_args, "t5")
         self._note_clobber()
         self._emit("jalr ra, t5, 0")
@@ -883,11 +945,14 @@ class RiscvBackend(Backend):
         else_label = self._new_label("else")
         end_label = self._new_label("if_end")
         self._if_stack.append((else_label, end_label, False))
-        
+        if self._branch_pending(else_label, False):
+            return
+        self._flush()
         self._emit("beqz a0, " + else_label)
     
     def begin_else(self) -> None:
         """Begin the else branch."""
+        self._flush()
         else_label, end_label, _ = self._if_stack[-1]
         self._if_stack[-1] = (else_label, end_label, True)
         self._emit(f"j {end_label}")
@@ -895,6 +960,7 @@ class RiscvBackend(Backend):
     
     def end_if(self) -> None:
         """End an if statement."""
+        self._flush()
         else_label, end_label, else_emitted = self._if_stack.pop()
         if not else_emitted:
             self._emit_label(else_label)
@@ -902,6 +968,7 @@ class RiscvBackend(Backend):
     
     def begin_loop(self) -> None:
         """Begin a loop."""
+        self._flush()
         start_label = self._new_label("loop_start")
         end_label = self._new_label("loop_end")
         self._loop_stack.append((start_label, end_label))
@@ -912,14 +979,21 @@ class RiscvBackend(Backend):
     def begin_loop_body(self) -> None:
         """Begin the loop body after condition check."""
         _, end_label = self._loop_stack[-1]
+        if self._branch_pending(end_label, False):
+            return
+        self._flush()
         self._emit(f"beqz a0, {end_label}")
 
     def cond_and_split(self) -> str:
         false_label = self._new_label("cond_and_false")
+        if self._branch_pending(false_label, False):
+            return false_label
+        self._flush()
         self._emit(f"beqz a0, {false_label}")
         return false_label
 
     def cond_and_join(self, false_label: str) -> None:
+        self._flush()
         done_label = self._new_label("cond_and_done")
         self._emit(f"j {done_label}")
         self._emit_label(false_label)
@@ -928,14 +1002,17 @@ class RiscvBackend(Backend):
 
     def cond_or_split(self) -> str:
         done_label = self._new_label("cond_or_done")
+        self._flush()
         self._emit(f"bnez a0, {done_label}")
         return done_label
 
     def cond_or_join(self, done_label: str) -> None:
+        self._flush()
         self._emit_label(done_label)
     
     def end_loop(self) -> None:
         """End a loop."""
+        self._flush()
         start_label, end_label = self._loop_stack.pop()
         self._emit(f"j {start_label}")
         self._emit_label(end_label)
@@ -944,16 +1021,19 @@ class RiscvBackend(Backend):
     
     def emit_break(self) -> None:
         """Emit a break statement."""
+        self._flush()
         _, end_label = self._loop_stack[-1]
         self._emit(f"j {end_label}")
     
     def emit_continue(self) -> None:
         """Emit a continue statement."""
+        self._flush()
         start_label, _ = self._loop_stack[-1]
         self._emit(f"j {start_label}")
     
     def emit_return(self) -> None:
         """Emit a return statement."""
+        self._flush()
         self._emit(f"j {self._current_fn_epilogue}")
     
     # ========================================================================
@@ -990,6 +1070,7 @@ class RiscvBackend(Backend):
     
     def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
         """Emit code for an intrinsic call."""
+        self._flush()
         if name == "__load_u8__":
             self.load_mem(8, signed=False)
         elif name == "__load_u16__":

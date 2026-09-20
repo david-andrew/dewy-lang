@@ -118,11 +118,11 @@ def test_single_use_and_pinned_slots_stay_in_memory():
     assert allocator.assignment == [None, None]
 
 
-def test_rewrite_turns_sites_into_register_moves():
-    allocator = _allocate([(0, 0, '%rax', True), (2, 0, '%rax', False)])
-    code = ['store', 'other', 'load']
-    allocator.rewrite(code, lambda src, dst: f'mov {src} -> {dst}')
-    assert code == ['mov %rax -> S0', 'other', 'mov S0 -> %rax']
+def test_rewrite_turns_sites_into_their_register_form():
+    allocator = _allocate([(0, 0, '    movq %rax, ', ''), (2, 0, '    cmpq $3, ', '')])
+    code = ['    movq %rax, -48(%rbp)', 'other', '    cmpq $3, -48(%rbp)']
+    allocator.rewrite(code)
+    assert code == ['    movq %rax, S0', 'other', '    cmpq $3, S0']
 
 
 # ---------------------------------------------------------------------------

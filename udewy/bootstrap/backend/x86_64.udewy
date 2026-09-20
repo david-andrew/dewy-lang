@@ -53,6 +53,13 @@ let x86_frame_subtract_index:int = 0   # index into current_fn_code to patch
 # expression scratch; %r8/%r9/%r11 are free between calls and syscalls.
 let x86_callee_local_regs:int = 0
 let x86_caller_local_regs:int = 0
+# The visible value may be pending rather than in %rax: the flags of the last
+# comparison (`x86_pending_cc`, the condition that would make it -1) or a
+# local not yet loaded (`x86_pending_slot`). Branches, saves and comparisons
+# consume pending values directly; every other emitter flushes them first.
+let x86_pending_cc:int = 0
+let x86_pending_slot:int = 0
+let x86_has_pending_slot:int = false
 
 # Control-flow stacks. The if stack has 3 parallel Vecs; loop stack has 2.
 let x86_if_else_labels:int = 0
@@ -221,6 +228,7 @@ let x86_new_label = (prefix:int):>int => {
 let x86_mark_location = (path:int line:int column:int):>void => {
     if not be_debug_info { return void }
     if x86_current_fn_code =? 0 { return void }   # nothing is emitted between functions
+    x86_flush()
     let number:int = 0
     if map_has_str(x86_source_files path) {
         number = map_get_str(x86_source_files path)
@@ -262,6 +270,7 @@ let x86_end_debug_function = ():>void => {
 
 let x86_begin_scope = ():>void => {
     if (x86_debug_scope =? 0) or (x86_current_fn_code =? 0) { return void }
+    x86_flush()
     let end_label:int = x86_new_label("dbg_end")
     let node:int = x86_debug_scope_new(x86_debug_label() end_label)
     vec_push(__load__(x86_debug_scope + DS_CHILDREN) node)
@@ -275,6 +284,7 @@ let x86_begin_scope = ():>void => {
 let x86_end_scope = ():>void => {
     let n:int = vec_len(x86_debug_frames)
     if (n =? 0) or (x86_current_fn_code =? 0) { return void }
+    x86_flush()
     let outer:int = vec_get(x86_debug_frames n - 1)
     let end_label:int = vec_get(x86_debug_frames n - 2)
     vec_set_len(x86_debug_frames n - 3)
@@ -1107,6 +1117,7 @@ let x86_intern_static = (size:int):>int => {
 }
 
 let x86_push_string_ref = (label_id:int):>void => {
+    x86_flush()
     let label:int = intmap_get(x86_string_labels label_id)
     let bb:int = bb_new(48)
     bb_push_str(bb "    leaq ")
@@ -1117,6 +1128,7 @@ let x86_push_string_ref = (label_id:int):>void => {
 }
 
 let x86_push_global_ref = (label_id:int):>void => {
+    x86_flush()
     let label:int = intmap_get(x86_global_labels label_id)
     let bb:int = bb_new(48)
     bb_push_str(bb "    leaq ")
@@ -1127,6 +1139,7 @@ let x86_push_global_ref = (label_id:int):>void => {
 }
 
 let x86_push_static_ref = (label_id:int):>void => {
+    x86_flush()
     let label:int = intmap_get(x86_static_labels label_id)
     let bb:int = bb_new(48)
     bb_push_str(bb "    leaq ")
@@ -1137,6 +1150,7 @@ let x86_push_static_ref = (label_id:int):>void => {
 }
 
 let x86_load_global = (label_id:int):>void => {
+    x86_flush()
     let label:int = intmap_get(x86_global_labels label_id)
     let bb:int = bb_new(48)
     bb_push_str(bb "    movq ")
@@ -1147,6 +1161,7 @@ let x86_load_global = (label_id:int):>void => {
 }
 
 let x86_store_global = (label_id:int):>void => {
+    x86_flush()
     let label:int = intmap_get(x86_global_labels label_id)
     let bb:int = bb_new(48)
     bb_push_str(bb "    movq %rax, ")
@@ -1207,6 +1222,8 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
     x86_saved_depth = 0
     x86_spilled_depth = 0
     x86_min_slot_offset = 0
+    x86_pending_cc = 0
+    x86_has_pending_slot = false
     la_begin_function()
 
     let code:int = vec_new(64)
@@ -1261,13 +1278,11 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
         x86_note_slot(slot)
         la_note_alloc(x86_slot_key(slot) vec_len(x86_current_fn_code))
         if i <? 6 {
-            x86_note_local_access(slot x86_arg_reg(i) true)
-            x86_emit_op_r_mem("movq" x86_arg_reg(i) slot "%rbp")
+            x86_emit_slot_store(x86_arg_reg(i) slot)
         } else {
             let caller_off:int = 16 + (i - 6) * 8
             x86_emit_op_mem_r("movq" caller_off "%rbp" "%rax")
-            x86_note_local_access(slot "%rax" true)
-            x86_emit_op_r_mem("movq" "%rax" slot "%rbp")
+            x86_emit_slot_store("%rax" slot)
         }
         x86_stack_offset = x86_stack_offset - 8
         i = i + 1
@@ -1284,6 +1299,7 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
 }
 
 let x86_end_function = ():>void => {
+    x86_flush()
     x86_end_debug_function()
     x86_allocate_locals()
     let fb:int = x86_frame_bytes()
@@ -1309,8 +1325,7 @@ let x86_end_function = ():>void => {
 }
 
 let x86_load_param = (index:int):>void => {
-    let slot:int = vec_get(x86_param_slots index)
-    x86_load_local(slot)
+    x86_load_local(vec_get(x86_param_slots index))
     return void
 }
 
@@ -1318,19 +1333,84 @@ let x86_slot_key = (slot:int):>int => {
     return (0 - slot - X86_FIXED_FRAME_BYTES) >> 3
 }
 
-let x86_note_local_access = (slot:int other:int store:int):>void => {
-    if be_debug_info {return void}
-    la_note_site(vec_len(x86_current_fn_code) x86_slot_key(slot) other store)
+let x86_slot_operand = (slot:int):>int => {
+    let bb:int = bb_new(16)
+    bb_push_int(bb slot)
+    bb_push_str(bb "(%rbp)")
+    return bb_finalize_as_string(bb)
+}
+
+# Emit one instruction that reads or writes a local: `prefix` + operand +
+# `suffix`, where the operand is the frame slot now and the slot's register
+# after allocation. Debug builds keep the frame slot.
+let x86_emit_slot_access = (slot:int prefix:int suffix:int):>void => {
+    if not be_debug_info {
+        la_note_site(vec_len(x86_current_fn_code) x86_slot_key(slot) prefix suffix)
+    }
+    let bb:int = bb_new(str_len(prefix) + str_len(suffix) + 16)
+    bb_push_str(bb prefix)
+    bb_push_int(bb slot)
+    bb_push_str(bb "(%rbp)")
+    bb_push_str(bb suffix)
+    vec_push(x86_current_fn_code bb_finalize_as_string(bb))
     return void
 }
 
-let x86_format_move = (src:int dst:int):>int => {
-    let bb:int = bb_new(32)
-    bb_push_str(bb "    movq ")
-    bb_push_str(bb src)
+let x86_emit_slot_load = (slot:int register:int):>void => {
+    let bb:int = bb_new(16)
     bb_push_str(bb ", ")
-    bb_push_str(bb dst)
-    return bb_finalize_as_string(bb)
+    bb_push_str(bb register)
+    x86_emit_slot_access(slot "    movq " bb_finalize_as_string(bb))
+    return void
+}
+
+let x86_emit_slot_store = (register:int slot:int):>void => {
+    let bb:int = bb_new(16)
+    bb_push_str(bb "    movq ")
+    bb_push_str(bb register)
+    bb_push_str(bb ", ")
+    x86_emit_slot_access(slot bb_finalize_as_string(bb) "")
+    return void
+}
+
+let x86_invert_cc = (cc:int):>int => {
+    if str_eq(cc "e") { return "ne" }
+    if str_eq(cc "ne") { return "e" }
+    if str_eq(cc "l") { return "ge" }
+    if str_eq(cc "ge") { return "l" }
+    if str_eq(cc "g") { return "le" }
+    if str_eq(cc "le") { return "g" }
+    if str_eq(cc "a") { return "be" }
+    if str_eq(cc "be") { return "a" }
+    if str_eq(cc "b") { return "ae" }
+    return "b"
+}
+
+# Materialize a pending value into %rax.
+let x86_flush = ():>void => {
+    if x86_pending_cc not=? 0 {
+        let cc:int = x86_pending_cc
+        x86_pending_cc = 0
+        x86_emit_bool_from_cc(cc)
+    } else if x86_has_pending_slot {
+        x86_has_pending_slot = false
+        x86_emit_slot_load(x86_pending_slot "%rax")
+    }
+    return void
+}
+
+# Consume a pending condition as a branch: jump when the condition holds
+# (`when_true`) or fails. Returns false when no condition is pending.
+let x86_branch_pending = (label:int when_true:int):>int => {
+    if x86_pending_cc =? 0 { return false }
+    let cc:int = x86_pending_cc
+    x86_pending_cc = 0
+    if not when_true { cc = x86_invert_cc(cc) }
+    let bb:int = bb_new(8)
+    bb_push_str(bb "j")
+    bb_push_str(bb cc)
+    x86_emit_jmp(bb_finalize_as_string(bb) label)
+    return true
 }
 
 # Debug builds retain their existing stack locations; frame sizes and
@@ -1338,11 +1418,12 @@ let x86_format_move = (src:int dst:int):>int => {
 let x86_allocate_locals = ():>void => {
     if be_debug_info {return void}
     la_assign(x86_callee_local_regs x86_caller_local_regs)
-    la_rewrite(x86_current_fn_code x86_format_move)
+    la_rewrite(x86_current_fn_code)
     return void
 }
 
 let x86_alloc_local = ():>int => {
+    x86_flush()
     let slot:int = x86_stack_offset
     x86_stack_offset = x86_stack_offset - 8
     x86_note_slot(slot)
@@ -1351,14 +1432,15 @@ let x86_alloc_local = ():>int => {
 }
 
 let x86_load_local = (slot:int):>void => {
-    x86_note_local_access(slot "%rax" false)
-    x86_emit_op_mem_r("movq" slot "%rbp" "%rax")
+    x86_flush()
+    x86_pending_slot = slot
+    x86_has_pending_slot = true
     return void
 }
 
 let x86_store_local = (slot:int):>void => {
-    x86_note_local_access(slot "%rax" true)
-    x86_emit_op_r_mem("movq" "%rax" slot "%rbp")
+    x86_flush()
+    x86_emit_slot_store("%rax" slot)
     return void
 }
 
@@ -1367,6 +1449,7 @@ let x86_store_local = (slot:int):>void => {
 # ----------------------------------------------------------------------------
 
 let x86_push_const_i64 = (value:int):>void => {
+    x86_flush()
     let bb:int = bb_new(32)
     bb_push_str(bb "    movq $")
     bb_push_int(bb value)
@@ -1376,11 +1459,13 @@ let x86_push_const_i64 = (value:int):>void => {
 }
 
 let x86_push_void = ():>void => {
+    x86_flush()
     x86_emit_indented("xorq %rax, %rax")
     return void
 }
 
 let x86_push_fn_ref = (label_id:int):>void => {
+    x86_flush()
     let label:int = intmap_get(x86_fn_labels label_id)
     let bb:int = bb_new(48)
     bb_push_str(bb "    leaq ")
@@ -1390,16 +1475,27 @@ let x86_push_fn_ref = (label_id:int):>void => {
     return void
 }
 
+# A discarded value that was never materialized costs nothing.
 let x86_pop_value = ():>void => {
+    x86_pending_cc = 0
+    x86_has_pending_slot = false
     return void
 }
 
 let x86_save_value = ():>void => {
+    if x86_has_pending_slot and x86_spilled_depth =? 0 and x86_saved_depth <? 3 {
+        x86_has_pending_slot = false
+        x86_emit_slot_load(x86_pending_slot x86_value_cache_reg(x86_saved_depth))
+        x86_saved_depth = x86_saved_depth + 1
+        return void
+    }
+    x86_flush()
     x86_save_reg("%rax")
     return void
 }
 
 let x86_restore_value = ():>void => {
+    x86_flush()
     x86_pop_saved_into("%rax")
     return void
 }
@@ -1409,6 +1505,12 @@ let x86_restore_value = ():>void => {
 # ----------------------------------------------------------------------------
 
 let x86_unary_op = (op_kind:int):>void => {
+    # A pending condition is exactly -1 or 0, so `not` is its inverse.
+    if op_kind =? TK_NOT and x86_pending_cc not=? 0 {
+        x86_pending_cc = x86_invert_cc(x86_pending_cc)
+        return void
+    }
+    x86_flush()
     if op_kind =? TK_MINUS {
         x86_emit_indented("negq %rax")
     } else if op_kind =? TK_NOT {
@@ -1462,9 +1564,18 @@ let x86_emit_signed_mod = ():>void => {
     return void
 }
 
-let x86_emit_set_cc_negq = (cc:int left:int):>void => {
-    x86_emit_op_2("cmpq" "%rax" left)
-    x86_emit_bool_from_cc(cc)
+# Compare `left` with the visible value and leave the condition pending.
+let x86_compare_pending = (cc:int left:int):>void => {
+    if x86_has_pending_slot {
+        x86_has_pending_slot = false
+        let bb:int = bb_new(16)
+        bb_push_str(bb ", ")
+        bb_push_str(bb left)
+        x86_emit_slot_access(x86_pending_slot "    cmpq " bb_finalize_as_string(bb))
+    } else {
+        x86_emit_op_2("cmpq" "%rax" left)
+    }
+    x86_pending_cc = cc
     return void
 }
 
@@ -1482,6 +1593,29 @@ let x86_emit_bool_from_cc = (cc:int):>void => {
 let x86_binary_immediate = (op_kind:int value:int):>void => {
     # µDewy words already use signed 64-bit storage here. Arithmetic immediates
     # sign-extend 32 bits; shifts use only the low six bits of the count.
+    let cc:int = 0
+    if op_kind =? TK_EQ { cc = "e" }
+    else if op_kind =? TK_NOT_EQ { cc = "ne" }
+    else if op_kind =? TK_GT { cc = "g" }
+    else if op_kind =? TK_LT { cc = "l" }
+    else if op_kind =? TK_GT_EQ { cc = "ge" }
+    else if op_kind =? TK_LT_EQ { cc = "le" }
+    if cc and value >=? -2147483648 and value <=? 2147483647 {
+        if x86_has_pending_slot {
+            x86_has_pending_slot = false
+            let bb:int = bb_new(24)
+            bb_push_str(bb "    cmpq $")
+            bb_push_int(bb value)
+            bb_push_str(bb ", ")
+            x86_emit_slot_access(x86_pending_slot bb_finalize_as_string(bb) "")
+        } else {
+            x86_flush()
+            x86_emit_op_imm("cmpq" value "%rax")
+        }
+        x86_pending_cc = cc
+        return void
+    }
+    x86_flush()
     if op_kind =? TK_LEFT_SHIFT {
         x86_emit_op_imm("shlq" value and 63 "%rax")
         return void
@@ -1511,24 +1645,35 @@ let x86_binary_immediate = (op_kind:int value:int):>void => {
             }
             return void
         }
-        let cc:int = 0
-        if op_kind =? TK_EQ { cc = "e" }
-        else if op_kind =? TK_NOT_EQ { cc = "ne" }
-        else if op_kind =? TK_GT { cc = "g" }
-        else if op_kind =? TK_LT { cc = "l" }
-        else if op_kind =? TK_GT_EQ { cc = "ge" }
-        else if op_kind =? TK_LT_EQ { cc = "le" }
-        if cc {
-            x86_emit_op_imm("cmpq" value "%rax")
-            x86_emit_bool_from_cc(cc)
-            return void
-        }
     }
     be_default_binary_immediate(op_kind value)
     return void
 }
 
 let x86_binary_op = (op_kind:int):>void => {
+    let cc:int = 0
+    if op_kind =? TK_EQ { cc = "e" }
+    else if op_kind =? TK_NOT_EQ { cc = "ne" }
+    else if op_kind =? TK_GT { cc = "g" }
+    else if op_kind =? TK_LT { cc = "l" }
+    else if op_kind =? TK_GT_EQ { cc = "ge" }
+    else if op_kind =? TK_LT_EQ { cc = "le" }
+    if x86_pending_cc not=? 0 { x86_flush() }
+    if cc {
+        x86_compare_pending(cc x86_pop_saved_operand(64))
+        return void
+    }
+    if op_kind =? TK_MINUS and x86_has_pending_slot {
+        x86_has_pending_slot = false
+        let left:int = x86_pop_saved_operand(64)
+        let bb:int = bb_new(16)
+        bb_push_str(bb ", ")
+        bb_push_str(bb left)
+        x86_emit_slot_access(x86_pending_slot "    subq " bb_finalize_as_string(bb))
+        x86_emit_op_2("movq" left "%rax")
+        return void
+    }
+    x86_flush()
     # Division and shifts still need the fixed hardware operand registers.
     if op_kind =? TK_IDIV or op_kind =? TK_MOD or op_kind =? TK_LEFT_SHIFT or op_kind =? TK_RIGHT_SHIFT {
         x86_emit_op_2("movq" "%rax" "%rcx")
@@ -1549,12 +1694,6 @@ let x86_binary_op = (op_kind:int):>void => {
     else if op_kind =? TK_AND { x86_emit_op_2("andq" left "%rax") }
     else if op_kind =? TK_OR { x86_emit_op_2("orq" left "%rax") }
     else if op_kind =? TK_XOR { x86_emit_op_2("xorq" left "%rax") }
-    else if op_kind =? TK_EQ { x86_emit_set_cc_negq("e" left) }
-    else if op_kind =? TK_NOT_EQ { x86_emit_set_cc_negq("ne" left) }
-    else if op_kind =? TK_GT { x86_emit_set_cc_negq("g" left) }
-    else if op_kind =? TK_LT { x86_emit_set_cc_negq("l" left) }
-    else if op_kind =? TK_GT_EQ { x86_emit_set_cc_negq("ge" left) }
-    else if op_kind =? TK_LT_EQ { x86_emit_set_cc_negq("le" left) }
     return void
 }
 
@@ -1655,13 +1794,13 @@ let x86_unsigned_mod = ():>void => {
 }
 
 let x86_unsigned_cmp = (kind:int):>void => {
-    let left:int = x86_pop_saved_operand(64)
+    if x86_pending_cc not=? 0 { x86_flush() }
     let cc:int = ""
     if kind =? 0 { cc = "a" }
     else if kind =? 1 { cc = "b" }
     else if kind =? 2 { cc = "ae" }
     else if kind =? 3 { cc = "be" }
-    x86_emit_set_cc_negq(cc left)
+    x86_compare_pending(cc x86_pop_saved_operand(64))
     return void
 }
 
@@ -1690,6 +1829,7 @@ let x86_alloca = ():>void => {
 # ----------------------------------------------------------------------------
 
 let x86_call_direct = (label_id:int num_args:int):>void => {
+    x86_flush()
     let stack_bytes:int = x86_prepare_call_args(num_args 0)
     let label:int = intmap_get(x86_fn_labels label_id)
     let bb:int = bb_new(32 + str_len(label))
@@ -1704,6 +1844,7 @@ let x86_call_direct = (label_id:int num_args:int):>void => {
 }
 
 let x86_call_indirect = (num_args:int):>void => {
+    x86_flush()
     let stack_bytes:int = x86_prepare_call_args(num_args "%r11")
     la_note_clobber(vec_len(x86_current_fn_code))
     x86_emit_indented("call *%r11")
@@ -1862,12 +2003,16 @@ let x86_begin_if = ():>void => {
     vec_push(x86_if_else_labels else_label)
     vec_push(x86_if_end_labels end_label)
     vec_push(x86_if_else_emitted false)
-    x86_emit_indented("testq %rax, %rax")
-    x86_emit_jmp("jz" else_label)
+    if not x86_branch_pending(else_label false) {
+        x86_flush()
+        x86_emit_indented("testq %rax, %rax")
+        x86_emit_jmp("jz" else_label)
+    }
     return void
 }
 
 let x86_begin_else = ():>void => {
+    x86_flush()
     let top:int = vec_len(x86_if_else_labels) - 1
     let else_label:int = vec_get(x86_if_else_labels top)
     let end_label:int = vec_get(x86_if_end_labels top)
@@ -1878,6 +2023,7 @@ let x86_begin_else = ():>void => {
 }
 
 let x86_end_if = ():>void => {
+    x86_flush()
     let top:int = vec_len(x86_if_else_labels) - 1
     let else_label:int = vec_get(x86_if_else_labels top)
     let end_label:int = vec_get(x86_if_end_labels top)
@@ -1891,6 +2037,7 @@ let x86_end_if = ():>void => {
 }
 
 let x86_begin_loop = ():>void => {
+    x86_flush()
     let start:int = x86_new_label("loop_start")
     let end:int = x86_new_label("loop_end")
     vec_push(x86_loop_start_labels start)
@@ -1903,12 +2050,16 @@ let x86_begin_loop = ():>void => {
 let x86_begin_loop_body = ():>void => {
     let top:int = vec_len(x86_loop_end_labels) - 1
     let end:int = vec_get(x86_loop_end_labels top)
-    x86_emit_indented("testq %rax, %rax")
-    x86_emit_jmp("jz" end)
+    if not x86_branch_pending(end false) {
+        x86_flush()
+        x86_emit_indented("testq %rax, %rax")
+        x86_emit_jmp("jz" end)
+    }
     return void
 }
 
 let x86_end_loop = ():>void => {
+    x86_flush()
     let top:int = vec_len(x86_loop_start_labels) - 1
     let start:int = vec_get(x86_loop_start_labels top)
     let end:int = vec_get(x86_loop_end_labels top)
@@ -1921,6 +2072,7 @@ let x86_end_loop = ():>void => {
 }
 
 let x86_emit_break = ():>void => {
+    x86_flush()
     let top:int = vec_len(x86_loop_end_labels) - 1
     let end:int = vec_get(x86_loop_end_labels top)
     x86_emit_jmp("jmp" end)
@@ -1928,6 +2080,7 @@ let x86_emit_break = ():>void => {
 }
 
 let x86_emit_continue = ():>void => {
+    x86_flush()
     let top:int = vec_len(x86_loop_start_labels) - 1
     let start:int = vec_get(x86_loop_start_labels top)
     x86_emit_jmp("jmp" start)
@@ -1936,12 +2089,16 @@ let x86_emit_continue = ():>void => {
 
 let x86_cond_and_split = ():>int => {
     let lbl:int = x86_new_label("cond_and_false")
-    x86_emit_indented("testq %rax, %rax")
-    x86_emit_jmp("jz" lbl)
+    if not x86_branch_pending(lbl false) {
+        x86_flush()
+        x86_emit_indented("testq %rax, %rax")
+        x86_emit_jmp("jz" lbl)
+    }
     return lbl
 }
 
 let x86_cond_and_join = (false_label:int):>void => {
+    x86_flush()
     let done:int = x86_new_label("cond_and_done")
     x86_emit_jmp("jmp" done)
     x86_emit_label_str(false_label)
@@ -1952,17 +2109,26 @@ let x86_cond_and_join = (false_label:int):>void => {
 
 let x86_cond_or_split = ():>int => {
     let done:int = x86_new_label("cond_or_done")
-    x86_emit_indented("testq %rax, %rax")
-    x86_emit_jmp("jnz" done)
+    if x86_pending_cc not=? 0 {
+        # The taken path must carry the true value; movq leaves the flags alone.
+        x86_emit_indented("movq $-1, %rax")
+        x86_branch_pending(done true)
+    } else {
+        x86_flush()
+        x86_emit_indented("testq %rax, %rax")
+        x86_emit_jmp("jnz" done)
+    }
     return done
 }
 
 let x86_cond_or_join = (done_label:int):>void => {
+    x86_flush()
     x86_emit_label_str(done_label)
     return void
 }
 
 let x86_emit_return = ():>void => {
+    x86_flush()
     x86_emit_jmp("jmp" x86_current_fn_epilogue)
     return void
 }
@@ -2032,6 +2198,7 @@ let x86_str_starts_with = (s:int prefix:int):>int => {
 }
 
 let x86_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
+    x86_flush()
     if str_eq(name "__load_u8__")        { x86_load_mem(8 0) }
     else if str_eq(name "__load_u16__")  { x86_load_mem(16 0) }
     else if str_eq(name "__load_u32__")  { x86_load_mem(32 0) }

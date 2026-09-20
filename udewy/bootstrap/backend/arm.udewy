@@ -640,28 +640,33 @@ let arm_emit_adrp_add = (dst:int label:int):>void => {
 }
 
 let arm_push_string_ref = (label_id:int):>void => {
+    arm_flush()
     arm_emit_adrp_add("x0" intmap_get(arm_string_labels label_id))
     arm_emit_indented("add x0, x0, #8")
     return void
 }
 
 let arm_push_global_ref = (label_id:int):>void => {
+    arm_flush()
     arm_emit_adrp_add("x0" intmap_get(arm_global_labels label_id))
     return void
 }
 
 let arm_push_static_ref = (label_id:int):>void => {
+    arm_flush()
     arm_emit_adrp_add("x0" intmap_get(arm_static_labels label_id))
     return void
 }
 
 let arm_load_global = (label_id:int):>void => {
+    arm_flush()
     arm_emit_adrp_add("x9" intmap_get(arm_global_labels label_id))
     arm_emit_indented("ldr x0, [x9]")
     return void
 }
 
 let arm_store_global = (label_id:int):>void => {
+    arm_flush()
     arm_emit_adrp_add("x9" intmap_get(arm_global_labels label_id))
     arm_emit_indented("str x0, [x9]")
     return void
@@ -712,28 +717,97 @@ let arm_declare_extern_function = (name:int num_params:int):>int => {
 # operands); x11-x15 are free between calls and syscalls.
 let arm_callee_local_regs:int = 0
 let arm_caller_local_regs:int = 0
+# The visible value may be pending rather than in x0: the flags of the last
+# comparison (`arm_pending_cc`, the condition that would make it -1) or a
+# local not yet loaded (`arm_pending_slot`). Branches, saves and comparisons
+# consume pending values directly; every other emitter flushes them first.
+let arm_pending_cc:int = 0
+let arm_pending_slot:int = 0
+let arm_has_pending_slot:int = false
+
+let arm_invert_cc = (cc:int):>int => {
+    if str_eq(cc "eq") { return "ne" }
+    if str_eq(cc "ne") { return "eq" }
+    if str_eq(cc "lt") { return "ge" }
+    if str_eq(cc "ge") { return "lt" }
+    if str_eq(cc "gt") { return "le" }
+    if str_eq(cc "le") { return "gt" }
+    if str_eq(cc "hi") { return "ls" }
+    if str_eq(cc "ls") { return "hi" }
+    if str_eq(cc "lo") { return "hs" }
+    return "lo"
+}
+
+# Load a pending local straight into `register` (its site is recorded).
+let arm_load_pending_slot = (register:int):>void => {
+    arm_has_pending_slot = false
+    arm_note_local_access(arm_pending_slot register false)
+    arm_load_frame_slot(register arm_pending_slot)
+    return void
+}
+
+# Materialize a pending value into x0.
+let arm_flush = ():>void => {
+    if arm_pending_cc not=? 0 {
+        let bb:int = bb_new(24)
+        bb_push_str(bb "    csetm x0, ")
+        bb_push_str(bb arm_pending_cc)
+        arm_pending_cc = 0
+        vec_push(arm_current_fn_code bb_finalize_as_string(bb))
+    } else if arm_has_pending_slot {
+        arm_load_pending_slot("x0")
+    }
+    return void
+}
+
+# Consume a pending condition as a branch taken when it holds or fails.
+let arm_branch_pending = (label:int when_true:int):>int => {
+    if arm_pending_cc =? 0 { return false }
+    let cc:int = arm_pending_cc
+    arm_pending_cc = 0
+    if not when_true { cc = arm_invert_cc(cc) }
+    let bb:int = bb_new(32)
+    bb_push_str(bb "    b.")
+    bb_push_str(bb cc)
+    bb_push_str(bb " ")
+    bb_push_str(bb label)
+    vec_push(arm_current_fn_code bb_finalize_as_string(bb))
+    return true
+}
+
+# The right operand goes to x9 and the saved left operand to x0.
+let arm_operands = ():>void => {
+    if arm_pending_cc not=? 0 { arm_flush() }
+    if arm_has_pending_slot { arm_load_pending_slot("x9") }
+    else { arm_emit_indented("mov x9, x0") }
+    arm_pop_saved_into("x0")
+    return void
+}
 
 let arm_slot_key = (slot:int):>int => {
     return (0 - slot - 16) >> 3
 }
 
 # Slots beyond the single-instruction offset range keep their frame homes.
+# The register form of a slot access is a move: `mov REG, other` for a store,
+# `mov other, REG` for a load.
 let arm_note_local_access = (slot:int other:int store:int):>void => {
-    if arm_slot_in_range(slot) {
-        la_note_site(vec_len(arm_current_fn_code) arm_slot_key(slot) other store)
-    } else {
+    if arm_slot_in_range(slot) =? 0 {
         la_pin(arm_slot_key(slot))
+        return void
+    }
+    let bb:int = bb_new(16 + str_len(other))
+    if store {
+        bb_push_str(bb ", ")
+        bb_push_str(bb other)
+        la_note_site(vec_len(arm_current_fn_code) arm_slot_key(slot) "    mov " bb_finalize_as_string(bb))
+    } else {
+        bb_push_str(bb "    mov ")
+        bb_push_str(bb other)
+        bb_push_str(bb ", ")
+        la_note_site(vec_len(arm_current_fn_code) arm_slot_key(slot) bb_finalize_as_string(bb) "")
     }
     return void
-}
-
-let arm_format_move = (src:int dst:int):>int => {
-    let bb:int = bb_new(32)
-    bb_push_str(bb "    mov ")
-    bb_push_str(bb dst)
-    bb_push_str(bb ", ")
-    bb_push_str(bb src)
-    return bb_finalize_as_string(bb)
 }
 
 # Debug builds retain their existing stack locations (as on x86-64).
@@ -755,7 +829,7 @@ let arm_allocate_locals = ():>void => {
         vec_push(arm_caller_local_regs "x15")
     }
     la_assign(arm_callee_local_regs arm_caller_local_regs)
-    la_rewrite(arm_current_fn_code arm_format_move)
+    la_rewrite(arm_current_fn_code)
     return void
 }
 
@@ -764,6 +838,8 @@ let arm_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
     arm_saved_depth = 0
     arm_spilled_depth = 0
     arm_min_slot_offset = 0
+    arm_pending_cc = 0
+    arm_has_pending_slot = false
     la_begin_function()
     let code:int = vec_new(64)
     vec_push(arm_function_ids label_id)
@@ -816,6 +892,7 @@ let arm_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
 }
 
 let arm_end_function = ():>void => {
+    arm_flush()
     # Sites index the body as emitted; rewrite before the prologue is spliced in.
     arm_allocate_locals()
     let local_bytes:int = arm_local_area_bytes()
@@ -867,6 +944,7 @@ let arm_load_param = (index:int):>void => {
 }
 
 let arm_alloc_local = ():>int => {
+    arm_flush()
     let slot:int = arm_stack_offset
     arm_stack_offset = arm_stack_offset - 8
     arm_note_slot(slot)
@@ -875,18 +953,21 @@ let arm_alloc_local = ():>int => {
 }
 
 let arm_load_local = (slot:int):>void => {
-    arm_note_local_access(slot "x0" false)
-    arm_load_frame_slot("x0" slot)
+    arm_flush()
+    arm_pending_slot = slot
+    arm_has_pending_slot = true
     return void
 }
 
 let arm_store_local = (slot:int):>void => {
+    arm_flush()
     arm_note_local_access(slot "x0" true)
     arm_store_frame_slot("x0" slot)
     return void
 }
 
 let arm_push_const_i64 = (value:int):>void => {
+    arm_flush()
     if (value >=? 0) and (value <=? 65535) {
         let bb:int = bb_new(24)
         bb_push_str(bb "    mov x0, #")
@@ -906,16 +987,39 @@ let arm_push_const_i64 = (value:int):>void => {
     return void
 }
 
-let arm_push_void = ():>void => { arm_emit_indented("mov x0, #0")  return void }
+let arm_push_void = ():>void => { arm_flush()  arm_emit_indented("mov x0, #0")  return void }
 let arm_push_fn_ref = (label_id:int):>void => {
+    arm_flush()
     arm_emit_adrp_add("x0" intmap_get(arm_fn_labels label_id))
     return void
 }
-let arm_pop_value = ():>void => { return void }
-let arm_save_value = ():>void => { arm_save_reg("x0")  return void }
-let arm_restore_value = ():>void => { arm_pop_saved_into("x0")  return void }
+# A discarded value that was never materialized costs nothing.
+let arm_pop_value = ():>void => {
+    arm_pending_cc = 0
+    arm_has_pending_slot = false
+    return void
+}
+
+let arm_save_value = ():>void => {
+    if arm_has_pending_slot and arm_spilled_depth =? 0 and arm_saved_depth <? 4 {
+        arm_load_pending_slot(arm_value_cache_reg(arm_saved_depth))
+        arm_saved_depth = arm_saved_depth + 1
+        return void
+    }
+    arm_flush()
+    arm_save_reg("x0")
+    return void
+}
+
+let arm_restore_value = ():>void => { arm_flush()  arm_pop_saved_into("x0")  return void }
 
 let arm_unary_op = (op_kind:int):>void => {
+    # A pending condition is exactly -1 or 0, so `not` is its inverse.
+    if op_kind =? TK_NOT and arm_pending_cc not=? 0 {
+        arm_pending_cc = arm_invert_cc(arm_pending_cc)
+        return void
+    }
+    arm_flush()
     if op_kind =? TK_MINUS { arm_emit_indented("neg x0, x0") }
     else if op_kind =? TK_NOT { arm_emit_indented("mvn x0, x0") }
     return void
@@ -996,18 +1100,15 @@ let arm_emit_signed_mod = ():>void => {
     return void
 }
 
+# Compare the operands and leave the condition pending.
 let arm_emit_cmp_csetm = (cond:int):>void => {
     arm_emit_indented("cmp x0, x9")
-    let bb:int = bb_new(24)
-    bb_push_str(bb "    csetm x0, ")
-    bb_push_str(bb cond)
-    vec_push(arm_current_fn_code bb_finalize_as_string(bb))
+    arm_pending_cc = cond
     return void
 }
 
 let arm_binary_op = (op_kind:int):>void => {
-    arm_emit_indented("mov x9, x0")
-    arm_pop_saved_into("x0")
+    arm_operands()
     if op_kind =? TK_PLUS         { arm_emit_indented("add x0, x0, x9") }
     else if op_kind =? TK_MINUS   { arm_emit_indented("sub x0, x0, x9") }
     else if op_kind =? TK_MUL     { arm_emit_indented("mul x0, x0, x9") }
@@ -1110,16 +1211,11 @@ let arm_unsigned_mod = ():>void => {
 
 # kind: 0=gt, 1=lt, 2=gte, 3=lte
 let arm_unsigned_cmp = (kind:int):>void => {
-    arm_emit_indented("mov x9, x0")
-    arm_pop_saved_into("x0")
-    arm_emit_indented("cmp x0, x9")
-    let bb:int = bb_new(24)
-    bb_push_str(bb "    csetm x0, ")
-    if kind =? 0      { bb_push_str(bb "hi") }
-    else if kind =? 1 { bb_push_str(bb "lo") }
-    else if kind =? 2 { bb_push_str(bb "hs") }
-    else              { bb_push_str(bb "ls") }
-    vec_push(arm_current_fn_code bb_finalize_as_string(bb))
+    arm_operands()
+    if kind =? 0      { arm_emit_cmp_csetm("hi") }
+    else if kind =? 1 { arm_emit_cmp_csetm("lo") }
+    else if kind =? 2 { arm_emit_cmp_csetm("hs") }
+    else              { arm_emit_cmp_csetm("ls") }
     return void
 }
 
@@ -1133,6 +1229,7 @@ let arm_alloca = ():>void => {
 }
 
 let arm_call_direct = (label_id:int num_args:int):>void => {
+    arm_flush()
     let stack_bytes:int = arm_prepare_call_args(num_args 0)
     let label:int = intmap_get(arm_fn_labels label_id)
     let bb:int = bb_new(32 + str_len(label))
@@ -1150,6 +1247,7 @@ let arm_call_direct = (label_id:int num_args:int):>void => {
 }
 
 let arm_call_indirect = (num_args:int):>void => {
+    arm_flush()
     let stack_bytes:int = arm_prepare_call_args(num_args "x9")
     la_note_clobber(vec_len(arm_current_fn_code))
     arm_emit_indented("blr x9")
@@ -1315,6 +1413,8 @@ let arm_begin_if = ():>void => {
     vec_push(arm_if_else_labels el)
     vec_push(arm_if_end_labels en)
     vec_push(arm_if_else_emitted false)
+    if arm_branch_pending(el false) { return void }
+    arm_flush()
     let bb:int = bb_new(32)
     bb_push_str(bb "    cbz x0, ")
     bb_push_str(bb el)
@@ -1323,6 +1423,7 @@ let arm_begin_if = ():>void => {
 }
 
 let arm_begin_else = ():>void => {
+    arm_flush()
     let top:int = vec_len(arm_if_else_labels) - 1
     let el:int = vec_get(arm_if_else_labels top)
     let en:int = vec_get(arm_if_end_labels top)
@@ -1336,6 +1437,7 @@ let arm_begin_else = ():>void => {
 }
 
 let arm_end_if = ():>void => {
+    arm_flush()
     let top:int = vec_len(arm_if_else_labels) - 1
     let el:int = vec_get(arm_if_else_labels top)
     let en:int = vec_get(arm_if_end_labels top)
@@ -1349,6 +1451,7 @@ let arm_end_if = ():>void => {
 }
 
 let arm_begin_loop = ():>void => {
+    arm_flush()
     let s:int = arm_new_label("loop_start")
     let e:int = arm_new_label("loop_end")
     vec_push(arm_loop_start_labels s)
@@ -1360,6 +1463,8 @@ let arm_begin_loop = ():>void => {
 
 let arm_begin_loop_body = ():>void => {
     let top:int = vec_len(arm_loop_end_labels) - 1
+    if arm_branch_pending(vec_get(arm_loop_end_labels top) false) { return void }
+    arm_flush()
     let bb:int = bb_new(32)
     bb_push_str(bb "    cbz x0, ")
     bb_push_str(bb vec_get(arm_loop_end_labels top))
@@ -1368,6 +1473,7 @@ let arm_begin_loop_body = ():>void => {
 }
 
 let arm_end_loop = ():>void => {
+    arm_flush()
     let top:int = vec_len(arm_loop_start_labels) - 1
     let s:int = vec_get(arm_loop_start_labels top)
     let e:int = vec_get(arm_loop_end_labels top)
@@ -1383,6 +1489,7 @@ let arm_end_loop = ():>void => {
 }
 
 let arm_emit_break = ():>void => {
+    arm_flush()
     let top:int = vec_len(arm_loop_end_labels) - 1
     let bb:int = bb_new(16)
     bb_push_str(bb "    b ")
@@ -1392,6 +1499,7 @@ let arm_emit_break = ():>void => {
 }
 
 let arm_emit_continue = ():>void => {
+    arm_flush()
     let top:int = vec_len(arm_loop_start_labels) - 1
     let bb:int = bb_new(16)
     bb_push_str(bb "    b ")
@@ -1402,6 +1510,8 @@ let arm_emit_continue = ():>void => {
 
 let arm_cond_and_split = ():>int => {
     let lbl:int = arm_new_label("cond_and_false")
+    if arm_branch_pending(lbl false) { return lbl }
+    arm_flush()
     let bb:int = bb_new(32)
     bb_push_str(bb "    cbz x0, ")
     bb_push_str(bb lbl)
@@ -1410,6 +1520,7 @@ let arm_cond_and_split = ():>int => {
 }
 
 let arm_cond_and_join = (false_label:int):>void => {
+    arm_flush()
     let done:int = arm_new_label("cond_and_done")
     let bb:int = bb_new(16)
     bb_push_str(bb "    b ")
@@ -1423,6 +1534,13 @@ let arm_cond_and_join = (false_label:int):>void => {
 
 let arm_cond_or_split = ():>int => {
     let done:int = arm_new_label("cond_or_done")
+    if arm_pending_cc not=? 0 {
+        # The taken path must carry the true value; mov leaves the flags alone.
+        arm_emit_indented("mov x0, #-1")
+        arm_branch_pending(done true)
+        return done
+    }
+    arm_flush()
     let bb:int = bb_new(32)
     bb_push_str(bb "    cbnz x0, ")
     bb_push_str(bb done)
@@ -1431,11 +1549,13 @@ let arm_cond_or_split = ():>int => {
 }
 
 let arm_cond_or_join = (done_label:int):>void => {
+    arm_flush()
     arm_emit_label_str(done_label)
     return void
 }
 
 let arm_emit_return = ():>void => {
+    arm_flush()
     let bb:int = bb_new(16)
     bb_push_str(bb "    b ")
     bb_push_str(bb arm_current_fn_epilogue)
@@ -1498,6 +1618,7 @@ let arm_intrinsic_static_arg_indices = (name:int):>int => {
 }
 
 let arm_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
+    arm_flush()
     if str_eq(name "__load_u8__")        { arm_load_mem(8 0) }
     else if str_eq(name "__load_u16__")  { arm_load_mem(16 0) }
     else if str_eq(name "__load_u32__")  { arm_load_mem(32 0) }

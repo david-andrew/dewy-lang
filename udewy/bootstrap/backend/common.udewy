@@ -248,7 +248,8 @@ let be_default_intrinsic_static_arg_indices = (name:int):>int => {
 #
 # Native backends keep every local in a frame slot and record each access as
 # a site: the code line that reads or writes the slot, the slot's dense key,
-# the other operand of the move, and whether it is a store. µDewy has no
+# and the text before and after the operand in the instruction's register
+# form (the line as emitted holds the frame-slot form). µDewy has no
 # address-of-local operation, so the recorded sites are every use of a slot.
 # At the end of a function the sites become live intervals; a linear scan
 # hands the busiest intervals registers and the backend rewrites their sites
@@ -263,7 +264,7 @@ let be_default_intrinsic_static_arg_indices = (name:int):>int => {
 # the callee preserves; a call-free interval prefers a scratch register.
 # ----------------------------------------------------------------------------
 
-let la_sites:int = 0        # flattened (line, key, other, store)
+let la_sites:int = 0        # flattened (line, key, prefix, suffix)
 let la_scores:int = 0       # key -> use weight
 let la_alloc_lines:int = 0  # key -> line index at allocation (-1 unknown)
 let la_pinned:int = 0       # key -> true when the slot must stay in memory
@@ -323,15 +324,15 @@ let la_loop_depth = ():>int => {
     return vec_len(la_open_loops)
 }
 
-let la_note_site = (line:int key:int other:int store:int):>void => {
+let la_note_site = (line:int key:int prefix:int suffix:int):>void => {
     la_ensure_key(key)
     let depth:int = vec_len(la_open_loops)
     if depth >? 3 { depth = 3 }
     vec_set(la_scores key vec_get(la_scores key) + (1 << (3 * depth)))
     vec_push(la_sites line)
     vec_push(la_sites key)
-    vec_push(la_sites other)
-    vec_push(la_sites store)
+    vec_push(la_sites prefix)
+    vec_push(la_sites suffix)
     return void
 }
 
@@ -487,18 +488,19 @@ let la_assign = (callee_regs:int caller_regs:int):>void => {
     return void
 }
 
-# Rewrite every site of an assigned slot into a register move. `format_move`
-# is fn (src:int dst:int):>int producing the full code line.
-let la_rewrite = (code:int format_move:int):>void => {
+# Rewrite every site of an assigned slot into its register form.
+let la_rewrite = (code:int):>void => {
     let i:int = 0
     loop i <? vec_len(la_sites) {
         let register:int = vec_get(la_assignment vec_get(la_sites i + 1))
         if register not=? 0 {
-            let other:int = vec_get(la_sites i + 2)
-            let line:int = 0
-            if vec_get(la_sites i + 3) { line = (@format_move)(other register) }
-            else { line = (@format_move)(register other) }
-            vec_set(code vec_get(la_sites i) line)
+            let prefix:int = vec_get(la_sites i + 2)
+            let suffix:int = vec_get(la_sites i + 3)
+            let bb:int = bb_new(str_len(prefix) + str_len(register) + str_len(suffix))
+            bb_push_str(bb prefix)
+            bb_push_str(bb register)
+            bb_push_str(bb suffix)
+            vec_set(code vec_get(la_sites i) bb_finalize_as_string(bb))
         }
         i = i + 4
     }

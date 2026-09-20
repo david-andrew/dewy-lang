@@ -4274,3 +4274,43 @@ branch on flags instead of materializing a boolean, locals used directly
 as ALU operands instead of through `rax`, and, on the lowering side, not
 copying a record to read one of its fields (Phase 1.1 ownership).
 
+### Pending values in the native µDewy emitters (2026-09-19)
+
+Sampling showed the direct route bound by instruction count rather than by
+frame traffic, so the three register backends now keep the visible value
+*pending* when the consumer can use it in place. A local that is named is
+not loaded until something needs it: `save_value` loads it straight into
+the cache register (one instruction instead of two), a comparison uses it
+as the `cmpq` memory operand (x86-64) or loads it into the operand register
+(`x9`, `t0`). A comparison leaves its condition pending instead of
+materializing `-1`/`0`: `if`, loop tests and short-circuit splits branch on
+it (`jne`/`b.ge`/`bge a0, t0`), `not` inverts it, and only a consumer that
+needs the word (a store, a call argument, arithmetic) materializes it. A
+discarded value that was never materialized costs nothing. The discipline
+is one line at the top of every other emitter (`x86_flush`, `arm_flush`,
+`rv_flush`), mirrored in the hosted backends. The allocator's site record
+became a register-form template (prefix, suffix) so that any instruction
+holding a slot operand, not just moves, is rewritten. A loop test such as
+`loop i <? n` is now `movq %rbx, %r12; cmpq %r15, %r12; jge` (was nine
+instructions), and each arm of the generated tag dispatch is `cmpq $141,
+%r15; jne` (was seven).
+
+Verification as for the allocator: hosted/native assembly identical for
+the seven fixtures on x86-64, AArch64 and RISC-V in both debug modes;
+hosted-built and self-built µDewy compilers byte-identical; the six x86-64
+execution fixtures pass, the AArch64-valid ones pass under qemu with and
+without allocation; Dewy fixtures 96/4 with the direct-built compiler,
+which again rebuilds itself byte-identically. A µDewy `not` on a function
+returning `1` rather than `-1` was the one native-only bug on the way (µDewy
+`not` is bitwise; the hosted compiler's `not` is logical).
+
+Direct-built self-build (x86-64 target, alternating pairs): allocator only
+53.70/52.45 s, allocator plus pending values 47.62/47.10 s; from the 57.36 s
+start of the day about 18% faster, peak memory unchanged at 2.64 GB. The
+self-build's own assembly: 1,962,359 to 1,679,120 instructions (14% fewer);
+boolean materializations 37,266 to 9,867; load-then-cache pairs 209,893 to
+62,983; frame-slot operands 510,938 to 339,984. The C-built compiler still
+builds in about 17 s: the remaining gap is the generated record copies and
+tag dispatches themselves (Phase 1.1 ownership and, on the emitter side,
+folding a pending local into a memory operand's base register).
+
