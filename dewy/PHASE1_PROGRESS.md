@@ -550,3 +550,37 @@ union, string-union and cold-length kernels with result 42. Four additional
 native probes passed: prelude-free scalar views and rejection of scalar,
 dictionary and set owner mutations. This remains above the native build
 target. Artifacts: `../dewy-build-artifacts/phase1-scalar-views-stage6-2026-09-20`.
+
+
+Explicit-copy policy checkpoint: the approved module directive is carried
+through hosted checked-HIR assembly (including direct API use) and native
+module options/snapshots. Both lowering boundaries reject recorded implicit
+runtime-sized copies in marked modules, preserve unmarked dependency policy,
+and allow explicit copies and proven views/moves. Fixed outer layouts are
+checked transitively, including concrete child fields; grapheme counts do
+not bound string bytes. No COW deferral is treated as a proof of no copy.
+The classifier is memoized within the closed compilation. Hosted reporting
+now also records array argument/assignment copies, fixed-array field copies,
+and owned optional/union parameter cells.
+
+This replaces the removed CLI-only implementation, but does not close the
+report-completeness or ownership-parity work. Native mutating by-value
+parameters can still receive a conservative entry copy after the caller has
+prepared owned storage. A function that explicitly copies a read-only input
+into its working local passes both implementations; eliminating redundant
+entry copies remains an ownership optimization, not grounds to suppress a
+copy note.
+
+Validation: 48 copy/view/provenance/native-cache regressions passed, followed
+by 28 hosted policy/classification/provenance checks, 15 copy-bound tests
+(including execution of the native classifier on x86/C), and 38 follow-up
+report/policy checks. Six native policy/import probes and both explicit/fixed
+copy kernels on C passed. The native snapshot kernel preserves an enabled
+directive through serialization, and the native bound classifier includes
+runtime-sized fields carried through a parent or structural type. Two native
+generations built in 66.48s and 64.81s; the latter executes all six view/string/
+copy kernels with result 42. These are correctness timings above target.
+All 71 paired cases passed at that snapshot. The focused five-case follow-up
+also passed against the final hosted report-site changes; the shared manifest
+now has 73 cases.
+Artifacts: `../dewy-build-artifacts/phase1-strict-copy-stage4-2026-09-20`.

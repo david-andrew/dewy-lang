@@ -3,6 +3,7 @@ import p"emit.dewy" as emit
 import p"program.dewy" as program
 import p"statements.dewy" as statements
 import p"layouts.dewy" as layouts
+import p"copy_policy.dewy" as copy_policy
 import p"captures.dewy" as captures
 import p"borrowing.dewy" as borrowing
 import p"moves.dewy" as moves
@@ -39,12 +40,14 @@ OwnedLocal:type = const [value:addr value_type:addr box:addr?=none condition:add
 ScalarProjection:type = const [function:addr read:addr field:string result:addr symbol:string borrowed:bool=false]
 # One dynamic aggregate copy the lowering decided, for `dewy analyze`: what
 # was copied, at which kind of site, and why no borrow or move applied.
-CopyNote:type = const [kind:string type:string site:string reason:string loc:Span source:addr? explicit:bool=false]
+CopyNote:type = const [kind:string type:string site:string reason:string loc:Span source:addr? explicit:bool=false runtime_sized:bool=true]
 State:type = [
     input:emit.Input
     source:SrcFile
     source_index:addr?=none
     copy_notes:array<CopyNote>=[]
+    copy_bound_memo:dict<addr bool>=[]
+    explicit_copy_sources:set<addr>=set[]
     borrow_rejections:dict<addr string>=[]
     # The owned local a `return` is transferring: its reads own the value.
     transferred_binding:addr?=none
@@ -130,7 +133,8 @@ note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state
     let space=name.find(' [')
     if space isnt? none and space >? 0 and space <? name.length and name[0] not=? '[' {name=name[0..space)}
     if name.length >? 48 {name="{name[0..45)}..."}
-    state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index explicit])
+    let dynamic=copy_policy.runtime_sized(type state.type_nodes state.layout_context.brands @state.copy_bound_memo)
+    state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index explicit dynamic])
 }
 copy_kind = (type:addr @state:State):>string? => {
     if owned_string(type state) return 'string'
@@ -180,7 +184,7 @@ owned_reason = (id:addr @state:State):>string => {
     if node is? hir.ExpressedIdentifier {
         let binding=node.binding_id
         if binding isnt? none and binding in? state.borrow_rejections return "`{node.name}` is not borrowed here: {state.borrow_rejections[binding]}"
-        return "`{node.name}` may be used again, and no last-use move applies to this kind of value yet"
+        return "`{node.name}` may be used again, and no proven last-use move applies here"
     }
     if node is? hir.FunctionCall return 'the call result is a borrowed view of its receiver'
     return 'the expression reads storage that belongs to something else'
@@ -4340,8 +4344,8 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     return put(hir.FunctionLiteral[node.loc code_type(id node @state result=if projection is? none none else projection.result) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false):>Result|Error => {
-    let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links debug_names=debug_names]
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[]):>Result|Error => {
+    let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links debug_names=debug_names explicit_copy_sources=explicit_copy_sources]
     # Older seeds and prelude-free kernels retain the six-word allocation
     # ABI. Install retain/drop together with prefix allocation, once per
     # lowering, so every value boundary agrees about descriptor ownership.
@@ -4479,6 +4483,14 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     if state.problem isnt? none return state.problem
     loop function in state.generated {functions.push(function)}
     let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value] emit.Input[state.nodes state.type_nodes input.source_files])
+    loop note in state.copy_notes {
+        if note.explicit or not note.runtime_sized or note.source is? none or note.source not in? state.explicit_copy_sources {continue}
+        $runtime_assert note.source <? state.input.source_files.length
+        return Error[srcfile=state.input.source_files[note.source] title='unproven copy'
+            pointers=[Pointer[note.loc "{note.kind} copied when {note.site}: {note.reason}"]]
+            hint='use `.copy()` for an independent value, or a required read-only view when the source can stay stable'
+            notes=['This module enables `$explicit_copies`; COW sharing does not prove that a logical copy is free.']]
+    }
     return Result[normalized.program normalized.input state.copy_notes]
 }
 

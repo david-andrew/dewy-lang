@@ -1,0 +1,46 @@
+import p"../../semantic/ty.dewy" as types
+import p"../../semantic/type_queries.dewy" as views
+import p"../../semantic/brands.dewy" as brands
+import p"../../semantic/subtyping.dewy" as subtyping
+
+# Fixed outer layouts can contain runtime-sized owned storage. Grapheme
+# counts do not bound string bytes, and a COW handle does not bound the
+# logical copy it defers. Memoization belongs to one closed compilation.
+runtime_sized = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bool> active:set<addr>=set[]):>bool => {
+    let plain=views.structural_base(id nodes)
+    let known=memo.get(plain)
+    if known isnt? none return known
+    if plain in? active return true
+    active.add(plain)
+    let result=inspect(plain nodes registry @memo active)
+    memo[plain]=result
+    return result
+}
+inspect = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<addr bool> active:set<addr>):>bool => {
+    let type=types.node_at(nodes id)
+    if type is? types.Primitive return type.name in? ['string' 'char' 'grapheme']
+    if type is? types.StringType return type.length not=? 0
+    if type is? types.ArrayType {
+        if type.length is? none return true
+        return type.length not=? 0 and runtime_sized(type.element nodes registry @memo active=active)
+    }
+    if type is? types.TypeOr|types.TypeAnd {
+        loop member in type.items {if runtime_sized(member nodes registry @memo active=active) return true}
+    }
+    if type is? types.ObjectType {
+        loop field in type.fields {if runtime_sized(field.value_type nodes registry @memo active=active) return true}
+        # Copy dispatch preserves fields only present in a concrete child,
+        # including those carried by a structural parent.
+        loop entry in registry.entries {
+            let child=types.node_at(nodes entry.value_type)
+            if child isnt? types.ObjectType continue
+            if type.minted {
+                if not subtyping.object_subtype(child type nodes) continue
+            } else if type.brand isnt? none or not subtyping.brand_carries(child type nodes) {continue}
+            loop field in child.fields {
+                if types.object_field(type field.name) is? none and runtime_sized(field.value_type nodes registry @memo active=active) return true
+            }
+        }
+    }
+    return false
+}

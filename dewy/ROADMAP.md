@@ -376,8 +376,10 @@ silently.
    copy of a runtime-length aggregate into a compile error. The compiler's
    own sources are intended to compile under that directive once reporting,
    explicit remedies and acceptance parity are complete. Its approved
-   spelling is `$explicit_copies` (see the decisions below); the initial
-   implementation is still in progress.
+   spelling is `$explicit_copies` (see the decisions below). Both lowerers now
+   enforce the per-module policy on recorded runtime-sized copies, including
+   nested storage, without a CLI-only scan. Reporting coverage and ownership
+   proof parity remain in progress.
 
 The difference from the earlier attempt is the order and the gate: each
 mechanism lands against a measured kernel and the compiler's own sources,

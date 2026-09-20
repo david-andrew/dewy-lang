@@ -455,6 +455,7 @@ class _Lowerer(
         self.current_object_field_ids: set[int] = set()
         self.current_object_field_names: dict[int, str] = {}
         self.current_literal: hir.FunctionLiteral | None = None   # the function being lowered (locals are traced through it)
+        self.copy_bound_memo: dict[int, tuple[ty.Type, bool]] = {}
         self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
         self.owned_array_elements: dict[str, ty.TypeExpr] = {}   # one element contract drives recursive cleanup
@@ -923,6 +924,8 @@ class _Lowerer(
                 parameter_prologue.extend(
                     self._union_prepare_trees(cell, members, literal.loc)
                 )
+                self._note_copy('cell', param.type, f'copied on entry as `{param.name}`',
+                                'the body writes or retains its parameter', literal.loc)
                 parameter_prologue.extend(
                     self._union_write(cell, incoming, members)
                 )
@@ -959,6 +962,8 @@ class _Lowerer(
                     binding_id=param.binding_id,
                 )
             )
+            self._note_copy('cell', param.type, f'copied on entry as `{param.name}`',
+                            'the optional parameter receives its own payload cell', literal.loc)
             parameter_prologue.extend(self._optional_write(cell, incoming, payload))
             parameter_cells[param.name] = (('none', payload), False)
             return replace(
@@ -5406,6 +5411,7 @@ class _Lowerer(
                     arg_prelude, lowered_arg = self._independent_array_value(
                         arg,
                         copy_type,
+                        site='passed to a call',
                     )
                 elif isinstance(expected_type, ty.ArrayType):
                     arg_prelude, lowered_arg = self._extract_array_operand(arg, expected_type)
@@ -5454,6 +5460,7 @@ class _Lowerer(
                     arg_prelude, lowered_arg = self._independent_array_value(
                         arg,
                         copy_type,
+                        site='passed to a call',
                     )
                 elif payload is not None:
                     arg_prelude, lowered_arg = self._materialize_optional(arg, payload, temporary=True)
@@ -6029,4 +6036,6 @@ def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main'
     program = lowerer.lower()
     last_copy_notes[:] = lowerer.copy_notes
     last_move_notes[:] = lowerer.move_notes
+    from .copy_policy import validate
+    validate(lowerer.copy_notes, root.explicit_copy_sources if isinstance(root, hir.Program) else ())
     return program

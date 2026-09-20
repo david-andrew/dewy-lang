@@ -10,7 +10,7 @@ Prototype settings remain attached to the module for the proof/representation
 driver; reading a directive alone never discharges a proof obligation.
 """
 
-Options:type = const [no_prelude:bool=false prototype:bool=false prototype_warnings:bool=true]
+Options:type = const [no_prelude:bool=false prototype:bool=false prototype_warnings:bool=true explicit_copies:bool=false]
 Parsed:type = const [statements:array<addr> options:Options]
 problem = (id:addr title:string message:string source:SrcFile nodes:array<tokens.Token>):>Error => {
     let pointer=Pointer[span=tokens.node_at(nodes id).loc message=message]
@@ -27,9 +27,14 @@ read = (root:parser.Block source:SrcFile nodes:array<tokens.Token> target:target
     let no_prelude:bool?=none
     let prototype=false
     let warnings=true
+    let explicit_copies:bool?=none
     loop id in root.inner {
         let bare=metatag(id nodes)
         if bare =? 'prototype' {prototype=true continue}
+        if bare =? 'explicit_copies' {
+            if explicit_copies isnt? none return problem(id 'duplicate `$explicit_copies` directive' 'this module already sets the directive' source nodes)
+            explicit_copies=true continue
+        }
         # Retain the early bootstrap's bare no-prelude spelling as a shorthand.
         if bare =? 'no_prelude' {
             if no_prelude isnt? none return problem(id 'duplicate `$no_prelude` directive' 'this module already sets the directive' source nodes)
@@ -55,14 +60,16 @@ read = (root:parser.Block source:SrcFile nodes:array<tokens.Token> target:target
             if not found return problem(id "module does not support target `{target}`" "supported: {supported.join(', ')}" source nodes)
             continue
         }
-        if name not in? ['no_prelude' 'prototype' 'prototype_warnings'] {statements.push(id) continue}
+        if name not in? ['no_prelude' 'prototype' 'prototype_warnings' 'explicit_copies'] {statements.push(id) continue}
         if name =? 'no_prelude' and no_prelude isnt? none return problem(id 'duplicate `$no_prelude` directive' 'this module already sets the directive' source nodes)
+        if name =? 'explicit_copies' and explicit_copies isnt? none return problem(id 'duplicate `$explicit_copies` directive' 'this module already sets the directive' source nodes)
         let value=tokens.node_at(nodes node.right)
         if value is? parser.Atom {value=tokens.node_at(nodes value.item)}
         if value isnt? tokens.Bool return problem(node.right "`${name}` must be a boolean literal" 'expected `true` or `false`' source nodes)
         if name =? 'no_prelude' {no_prelude=value.value}
         else if name =? 'prototype' {prototype=value.value}
+        else if name =? 'explicit_copies' {explicit_copies=value.value}
         else {warnings=value.value}
     }
-    return Parsed[statements Options[if no_prelude is? none false else no_prelude prototype warnings]]
+    return Parsed[statements Options[if no_prelude is? none false else no_prelude prototype warnings if explicit_copies is? none false else explicit_copies]]
 }

@@ -851,6 +851,7 @@ class Program(Block):
     Native assembly carries the same information in graph.source_by_item.
     """
     item_sources: tuple[SrcFile, ...]
+    explicit_copy_sources: tuple[SrcFile, ...] = ()
 
 
 @dataclass(slots=True, weakref_slot=True)

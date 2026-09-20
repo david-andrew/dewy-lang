@@ -84,6 +84,38 @@ inspects ordinary by-value input through such views can state `no_effects`.
 The storage proof still has to succeed. A view of a place parameter retains
 its external read effect; binding a local name does not hide that access.
 
+## Requiring Explicit Copies
+
+The file-level `$explicit_copies` directive rejects an implicit copy of
+runtime-sized storage when the compiler cannot prove a borrow or move.
+It applies to that module, including when it is imported.
+`$explicit_copies = false` disables the policy; a file may set it once.
+
+Use `.copy()` when an independent value is intended, or
+`const view = @source` when stable borrowed storage is required. For example,
+a function that needs a mutable working array can copy it explicitly:
+
+```dewy
+$explicit_copies
+changed = (source:array<int64>):>array<int64> => {
+    let working = source.copy()
+    working.push(42)
+    return working
+}
+```
+
+The check includes nested storage and fields added by concrete child types.
+A fixed-size record can contain a runtime-length array; a single grapheme
+can contain arbitrarily many bytes. Copy-on-write sharing does not satisfy
+the requirement by deferring those copies. Fixed-size copies remain allowed
+and appear in `dewy analyze`; this directive is not a no-allocation contract.
+
+The initial implementation uses the lowerer's recorded copy decisions.
+Reporting coverage and some ownership proofs remain in progress. In
+particular, the native compiler still makes conservative entry copies for
+some mutating by-value parameters. Copying an input into an explicit local
+working value avoids that entry-copy requirement.
+
 ## Escaping Places and Identity
 
 Nonescaping place calls have settled semantics. Storing or returning a place, sharing it across concurrent work, and defining lifetime-bearing place types require the provisional ownership and escape design.

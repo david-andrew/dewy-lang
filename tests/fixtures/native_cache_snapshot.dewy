@@ -1,6 +1,7 @@
 from reporting import SrcFile, Span, Error, Warning
 import p"../../dewy/bootstrap/semantic/cache_values.dewy" as codec
 import p"../../dewy/bootstrap/semantic/module_state.dewy" as state
+import p"../../dewy/bootstrap/semantic/module_directives.dewy" as directives
 import p"../../dewy/bootstrap/semantic/context.dewy" as contexts
 import p"../../dewy/bootstrap/semantic/bindings.dewy" as bindings
 import p"../../dewy/bootstrap/semantic/hir.dewy" as hir
@@ -44,7 +45,7 @@ main=():>int64=>{
     session.methods['retained']=contexts.MethodEntry[binding word true]
     session.retained_read_states.add(0)
     session.warnings.push(Warning[message='preserve this note'])
-    let module=state.Module[source.path context 0 ['answer'->binding] prelude=true]
+    let module=state.Module[source.path context 0 ['answer'->binding] prelude=true options=directives.Options[explicit_copies=true]]
     let decision=proofs.Decision[[0->proofs.Unfit[ranges.Interval[-123456789012345678901234567890 none] 'int64']] [1->7] [Warning[message='saved proof note']]]
     let saved=proofs.Prelude[[0] session.hir.length session.hir_edits.length [decision]]
     let original=state.PreludeSnapshot[session [module] [source.path->0] ['answer'->binding] saved]
@@ -52,6 +53,8 @@ main=():>int64=>{
     if encoded is? codec.CacheMiss return 2
     let restored=codec.decode(encoded)
     if restored is? codec.CacheMiss return 3
+    if restored.modules.length not=? 1 return 38
+    if not restored.modules[0].options.explicit_copies return 39
     let copy=restored.session
     if types.primitive('int64' @copy.types) not=? word return 4
     if contexts.syntax_ref(parsed.root context @copy) not=? syntax return 5

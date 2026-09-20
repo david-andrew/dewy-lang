@@ -30,9 +30,10 @@ class ModuleRecord:
     index: int
     entry: bool = False
     prelude: bool = False
+    explicit_copies: bool = False
 
 
-_PRELUDE_CACHE_VERSION = 3
+_PRELUDE_CACHE_VERSION = 4
 
 
 class _ResidentPrelude:
@@ -413,6 +414,7 @@ class ModuleCompiler:
             index,
             entry,
             prelude,
+            explicit_copies=directives.explicit_copies,
         )
         self.records[path] = record
         self.order.append(record)
@@ -697,7 +699,11 @@ class ModuleCompiler:
             )]
             renamed = self._rename(replace(record.root, items=kept), names)
             assert isinstance(renamed, hir.Block)
-            self.finished_roots[id(record)] = renamed
+            self.finished_roots[id(record)] = hir.Program(
+                renamed.loc, renamed.type, renamed.items, renamed.scoped,
+                tuple(record.srcfile for _ in renamed.items),
+                (record.srcfile,) if record.explicit_copies else (),
+            )
             for item in renamed.items:
                 if isinstance(item, hir.Void):
                     continue
@@ -714,6 +720,7 @@ class ModuleCompiler:
             items,
             True,
             tuple(item_sources),
+            tuple(record.srcfile for record in self.order if record.explicit_copies),
         )
         initialization.validate_initialization(root, self.registry, entry.srcfile)
         return root
@@ -781,6 +788,7 @@ def typecheck_program(
         exports,
         sum(not record.prelude for record in compiler.order),
         entry=True,
+        explicit_copies=_directives.explicit_copies,
     )
     compiler.order.append(entry)
     merged = compiler.finish(entry)

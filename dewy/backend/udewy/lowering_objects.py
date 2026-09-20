@@ -13,6 +13,7 @@ from ...reporting import Span
 from ...semantic import builtins, hir, ty
 from ...parser import t0
 from . import borrowing
+from . import copy_policy
 from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, CopyNote, MoveNote, local_binding_key
 from ...semantic.hir_display import type_to_dewy
 
@@ -738,7 +739,8 @@ class _ObjectLowering:
         name = type_to_dewy(type_)
         if len(name) > 48:
             name = name[:45] + '...'
-        self.copy_notes.append(CopyNote(self.srcfile, loc, reason, kind, name, site, explicit))
+        self.copy_notes.append(CopyNote(self.srcfile, loc, reason, kind, name, site, explicit,
+                                        copy_policy.runtime_sized(type_, self.copy_bound_memo)))
 
     def _copy_reason(self, expr: hir.AST) -> str:
         """Why the copied expression could not be borrowed or moved."""
@@ -746,7 +748,7 @@ class _ObjectLowering:
         if isinstance(expr, (hir.Index, hir.MemberAccess, hir.DictEntries, hir.DictLookup)):
             return 'the value stays owned by its container, and nothing borrows it as a read-only view here'
         if isinstance(expr, hir.ExpressedIdentifier):
-            return f'`{expr.name}` may be used again, and no last-use move applies to this kind of value yet'
+            return f'`{expr.name}` may be used again, and no proven last-use move applies here'
         if isinstance(expr, hir.FunctionCall):
             return 'the call result is a borrowed view of its receiver'
         return 'the expression reads storage that belongs to something else'
@@ -939,6 +941,7 @@ class _ObjectLowering:
                     prelude, value = self._independent_array_value(
                         field.value,
                         field_type,
+                        site='stored in a field',
                     )
                 elif self._is_string_valued(field_type):
                     # the object may outlive this frame (returned, pushed, stored)

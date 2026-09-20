@@ -6782,6 +6782,7 @@ encode_Value349=(value:Value349 @out:bytes.Writer):>void=>{
     encode_Value32(value.no_prelude @out)
     encode_Value32(value.prototype @out)
     encode_Value32(value.prototype_warnings @out)
+    encode_Value32(value.explicit_copies @out)
 }
 decode_Value349=(@input:bytes.Reader):>Value349|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -6791,7 +6792,9 @@ decode_Value349=(@input:bytes.Reader):>Value349|CacheMiss=>{
     if field_1 is? CacheMiss return field_1
     let field_2=decode_Value32(@input)
     if field_2 is? CacheMiss return field_2
-    return Value349[no_prelude=field_0 prototype=field_1 prototype_warnings=field_2]
+    let field_3=decode_Value32(@input)
+    if field_3 is? CacheMiss return field_3
+    return Value349[no_prelude=field_0 prototype=field_1 prototype_warnings=field_2 explicit_copies=field_3]
 }
 
 encode_Value350=(value:Value350 @out:bytes.Writer):>void=>{

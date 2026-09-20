@@ -14,10 +14,13 @@ for aliased field stores, raw-exposed record arguments, imported copy-note
 sources, constant-power complexity, prefixed fused quotes, incomplete copy
 reports, and prototype purity checks. Continue the [roadmap](ROADMAP.md) with a short correctness/parity
 closure pass before expanding ownership mechanisms. Copy-site counts complement
-runtime counters and wall time; the C-built executing compiler meets 30 s, but
-the direct-built compiler remains about 45 s. `$explicit_copies` is unfinished;
-the partial CLI-only enforcement has since been removed pending complete
-report coverage, explicit remedies and acceptance parity. Current work is
+runtime counters and wall time. The review's C-built executing compiler met
+30 s; recent direct-route correctness builds are about 65 s and remain above
+target. The partial CLI-only `$explicit_copies` implementation was removed.
+Its replacement now carries per-module policy through checked HIR and native
+snapshots and enforces recorded runtime-sized copies at the lowering API,
+with explicit copy/view remedies. Reporting coverage and ownership proof
+parity remain work in progress; this does not complete Phase 1.1. Current work is
 tracked in [PHASE1_PROGRESS.md](PHASE1_PROGRESS.md). The older checkpoints below are
 historical context, not current restrictions on bootstrap implementation.
 

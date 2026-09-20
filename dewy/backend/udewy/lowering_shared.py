@@ -272,6 +272,7 @@ class CopyNote:
     type_name: str = 'string'
     site: str = 'stored'
     explicit: bool = False
+    runtime_sized: bool = True
 
     @property
     def line(self) -> str:

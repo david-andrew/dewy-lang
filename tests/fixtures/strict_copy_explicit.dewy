@@ -1,0 +1,11 @@
+$explicit_copies
+
+Box:type=[text:string number:int64]
+read=(source:array<Box>):>int64=>{
+    let values=source.copy()
+    if values.length =? 0 return 0
+    let saved=values[0].copy()
+    values[0].number=99
+    return saved.number
+}
+main=():>int64=>read([Box['hello' 42]])

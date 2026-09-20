@@ -1006,6 +1006,10 @@ class _ArrayLowering(_ArraySharing):
             if node.target.binding_id is not None
             else None
         )
+        fresh = self._array_expression_owns_fresh_storage(node.value)
+        if place_cell is not None or self._array_use_representation(node.target) == 'stack_data' or array_type.length is None or not fresh:
+            self._note_copy('array', array_type, f'assigned to `{node.target.name}`',
+                            self._copy_reason(node.value), node.loc)
         if place_cell is not None:
             if array_type.length is None:
                 # The caller owns this place. Finish the copy before releasing
@@ -1064,12 +1068,15 @@ class _ArrayLowering(_ArraySharing):
         array_type: ty.ArrayType,
         *,
         move: bool = False,
+        site: str | None = None,
     ) -> tuple[list[hir.AST], hir.AST]:
         """Produce an independently mutable array value from one expression."""
 
         if self._array_expression_owns_fresh_storage(node):
             self._consume_array_value(node)   # the taker owns this fresh storage
             return self._extract_expression(node)
+        if site is not None:
+            self._note_copy('array', array_type, site, self._copy_reason(node), node.loc)
         return self._clone_array_value(node, array_type, move=move)
 
     def _clone_array_to_raw(

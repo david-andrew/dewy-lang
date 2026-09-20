@@ -1,0 +1,34 @@
+import p"../../dewy/bootstrap/backend/udewy/copy_policy.dewy" as policy
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/semantic/brands.dewy" as brands
+
+main=():>int64=>{
+    let nodes=types.Table[]
+    let word=types.primitive('int64' @nodes)
+    let string=types.primitive('string' @nodes)
+    let fixed=types.array_type(word 4 @nodes)
+    let dynamic=types.array_type(word none @nodes)
+    let empty=types.array_type(string 0 @nodes)
+    let nested=types.array_type(string 1 @nodes)
+    let literal=types.string_literal('hello' @nodes)
+    let base=types.object_type([types.ObjectField['number' word]] none false [] [] @nodes)
+    let parent=types.object_type([types.ObjectField['number' word]] 'Parent' false [] [] @nodes minted=true parent=base)
+    let child=types.object_type([types.ObjectField['number' word] types.ObjectField['text' string]] 'Child' false [] [] @nodes minted=true parent=parent)
+    let registry=brands.Registry[]
+    brands.register(parent @registry nodes)
+    brands.register(child @registry nodes)
+    let memo:dict<addr bool>=[]
+    $runtime_assert not policy.runtime_sized(word nodes registry @memo)
+    $runtime_assert not policy.runtime_sized(literal nodes registry @memo)
+    $runtime_assert not policy.runtime_sized(fixed nodes registry @memo)
+    $runtime_assert not policy.runtime_sized(empty nodes registry @memo)
+    $runtime_assert policy.runtime_sized(string nodes registry @memo)
+    $runtime_assert policy.runtime_sized(dynamic nodes registry @memo)
+    $runtime_assert policy.runtime_sized(nested nodes registry @memo)
+    $runtime_assert policy.runtime_sized(base nodes registry @memo)
+    $runtime_assert policy.runtime_sized(parent nodes registry @memo)
+    $runtime_assert policy.runtime_sized(child nodes registry @memo)
+    # The cached false result is distinct from an absent dictionary entry.
+    $runtime_assert not policy.runtime_sized(fixed nodes registry @memo)
+    return 42
+}

@@ -260,6 +260,7 @@ class ModuleDirectives:
     no_prelude: bool
     prototype: bool
     prototype_warnings: bool
+    explicit_copies: bool = False
 
 
 def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block, ModuleDirectives]:
@@ -288,8 +289,20 @@ def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block
     no_prelude: bool | None = None
     prototype: bool | None = None
     prototype_warnings: bool | None = None
+    explicit_copies: bool | None = None
     items: list[p0.AST] = []
     for item in block.inner:
+        tag = item.left if isinstance(item, p0.BinOp) and isinstance(item.op, t1.Operator) and item.op.symbol == "=" else item
+        if isinstance(tag, p0.Atom) and isinstance(tag.item, t1.Metatag) and tag.item.name == "explicit_copies":
+            if explicit_copies is not None:
+                user_error(srcfile, "duplicate `$explicit_copies` directive", Pointer(span=item.loc, message="this module already sets the directive"))
+            if tag is item:
+                explicit_copies = True
+            elif isinstance(item.right, p0.Atom) and isinstance(item.right.item, t1.Bool):
+                explicit_copies = item.right.item.value
+            else:
+                user_error(srcfile, "`$explicit_copies` must be a boolean literal", Pointer(span=item.loc, message="expected true or false"))
+            continue
         if (
             isinstance(item, p0.BinOp)
             and isinstance(item.op, t1.Operator)
@@ -349,6 +362,7 @@ def _parse_module(srcfile: SrcFile, *, target: str = 'x86_64') -> tuple[p0.Block
         bool(no_prelude),
         bool(prototype),
         prototype_warnings is None or prototype_warnings,
+        bool(explicit_copies),
     )
 
 
