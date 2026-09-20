@@ -1012,7 +1012,14 @@ class _ArrayLowering(_ArraySharing):
         # avoids abandoning the literal's nested arrays/strings. Call results
         # keep their separate temporary-owner protocol.
         move_literal = isinstance(self._copy_source_expression(node.value), hir.ArrayLiteral)
-        if place_cell is not None or self._array_use_representation(node.target) == 'stack_data' or array_type.length is None or not fresh:
+        representation = self._array_use_representation(node.target)
+        if move_literal and array_type.length is None and representation != 'stack_data':
+            # The lifetime promotion below transfers the literal's owned
+            # elements. It is placement plus a move, not an independent
+            # snapshot (even when the elements have runtime-sized storage).
+            self.move_notes.append(MoveNote(self.srcfile, node.loc,
+                f'fresh array elements are moved when assigned to `{node.target.name}`: the replacement outlives the expression buffer', True))
+        elif place_cell is not None or representation == 'stack_data' or array_type.length is None or not fresh:
             self._note_copy('array', array_type, f'assigned to `{node.target.name}`',
                             self._copy_reason(node.value), node.loc)
         if place_cell is not None:

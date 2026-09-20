@@ -115,3 +115,16 @@ def test_implicit_array_assignment_is_reported_and_enforced():
                for note in lower.last_copy_notes)
     with pytest.raises(ReportException, match='unproven copy'):
         codegen(SrcFile(None, '$explicit_copies\n'+source.body))
+
+
+def test_fresh_nested_replacement_reports_a_move_instead_of_a_copy(tmp_path):
+    from pathlib import Path
+    from dewy.backend.udewy import lower
+    from tests.python_misc.test_scalar_projection import execute
+    fixture = Path(__file__).resolve().parents[1] / 'fixtures/strict_copy_fresh_replacement.dewy'
+    output = codegen(SrcFile.from_path(fixture), debug_locations=False)
+    assert any(note.moved and 'fresh array elements' in note.message
+               and note.srcfile.path == fixture for note in lower.last_move_notes)
+    assert not any(note.site == 'assigned to `rows`' and note.srcfile.path == fixture
+                   for note in lower.last_copy_notes)
+    execute(tmp_path, 'fresh_replacement', output)

@@ -682,3 +682,14 @@ allocations), and passes all 12 acceptance/rejection probes. All 16 paired
 effect cases passed, including an unbounded continue-edge rejection.
 Artifacts: `../dewy-build-artifacts/phase1-iterator-effects-stage1-2026-09-20`
 and `../dewy-build-artifacts/phase1-iterator-effects-parity-2026-09-20`.
+
+Fresh replacement report correction: hosted assignment of a fresh nested
+array literal to lasting runtime-length storage already transfers its element
+owners. It now reports that operation as a move, instead of an unproven
+independent copy. This keeps `$explicit_copies` acceptance aligned with native
+for nested string/array replacements and preserves the report entry describing
+why lifetime promotion is needed. Actual snapshot sites retain their copy notes.
+Validation: 23 strict-copy, ownership and array-release tests and all eight
+paired strict-copy cases passed. The new fixture executes on x86 and C through
+hosted lowering and through the existing native compiler.
+Artifacts: `../dewy-build-artifacts/phase1-fresh-replacement-parity-2026-09-20`.
