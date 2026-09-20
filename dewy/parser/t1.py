@@ -347,6 +347,31 @@ class BasedString(Token):
         return closer.idx - start + 1, BasedString(span, digits, opener.base)
 
 
+def normalize_identifier(name: str) -> str:
+    """Canonicalize only the decided digit labels and micro-sign alias.
+
+    Keep the raw token and span unchanged for diagnostics. This deliberately
+    is not NFKC: ASCII/Greek letters and letter decorations remain distinct.
+    Doubled markers have no special escape interpretation.
+    """
+    if '_' not in name and '‾' not in name and 'µ' not in name:
+        return name
+    parts: list[str] = []
+    i = 0
+    while i < len(name):
+        char = name[i]
+        if char in '_‾' and i + 1 < len(name) and '0' <= name[i + 1] <= '9':
+            alphabet = '₀₁₂₃₄₅₆₇₈₉' if char == '_' else '⁰¹²³⁴⁵⁶⁷⁸⁹'
+            i += 1
+            while i < len(name) and '0' <= name[i] <= '9':
+                parts.append(alphabet[ord(name[i]) - ord('0')])
+                i += 1
+        else:
+            parts.append('μ' if char == 'µ' else char)
+            i += 1
+    return ''.join(parts)
+
+
 @dataclass
 class Identifier(Token):
     starts_with = (t0.Identifier, t0.Symbol)
@@ -356,7 +381,7 @@ class Identifier(Token):
     def eat(tokens:list[t0.Token], ctx:Context, start:int) -> tuple[int, Identifier]|None:
         token = tokens[start]
         if isinstance(token, t0.Identifier) and token.src not in keywords and token.src not in word_operators and token.src not in bool_identifiers:
-            return 1, Identifier(token.loc, token.src)
+            return 1, Identifier(token.loc, normalize_identifier(token.src))
         elif isinstance(token, t0.Symbol) and token.src in symbolic_identifiers:
             return 1, Identifier(token.loc, token.src)
         

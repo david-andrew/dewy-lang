@@ -14,7 +14,26 @@ An identifier contains at least one base character. Decorations may appear befor
 
 The current base repertoire contains ASCII Latin letters, the ordinary Greek alphabet, `_`, `‾`, `!`, `°`, and selected mathematical letter symbols such as `ℂ`, `ℕ`, `ℤ`, `ℚ`, and `ℝ`. Decorations include the supported Unicode superscript and subscript letters and digits, prime marks, and `℠`, `™`, `©`, and `®`.
 
-Identifiers are case-sensitive. The exact Unicode repertoire and its normalization/security policy remain provisional; implementations must document the repertoire they accept and must not silently normalize two distinct source spellings into one binding.
+Identifiers are case-sensitive. The micro sign `µ` and Greek mu `μ` name the
+same binding. ASCII and Greek letters remain distinct: `A` is not `Α`.
+
+An underscore followed by decimal digits spells subscript digits; an overline
+`‾` (U+203E) followed by decimal digits spells superscript digits. Adjacent runs
+combine, and the ordinary Unicode spelling names the same binding:
+
+```dewy
+let x_12 = 42       # also x_1_2 or x₁₂
+let x‾12 = 7       # also x¹²; distinct from x₁₂ and x12
+let foo_2_bar = 3  # also foo₂_bar; foo_bar stays unchanged
+```
+
+This rule applies only to digits. Write letter decorations directly (`xᵢ`,
+`xᵀ`); `x_i` remains a different name. Superscripts in identifiers are labels,
+not exponentiation. Normalization does not change string contents or the
+source spans used in diagnostics.
+
+The full Unicode repertoire and additional equivalences remain open. A doubled
+marker as an escape is still a design question; no such escape is implemented.
 
 Reserved operator words such as `and`, `or`, `not`, `in`, `as`, and `transmute` tokenize as operators in their grammatical contexts. A word operator cannot simultaneously be used as an ordinary identifier in that context.
 

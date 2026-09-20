@@ -1,0 +1,25 @@
+# Labels are part of a name, not arithmetic powers. Alternate spellings must
+# resolve identically for declarations, parameters, projections, and mutation.
+Label:type=[x_12:int64]
+sum_labels=(v_1:int64 v‾2:int64):>int64=>v₁+v²
+φ=(ν:int64):>int64=>ν
+main=():>int64=>{
+    let x_12:int64=10
+    x₁₂+=2
+    let box=Label[x_1_2]
+    let µ:int64=3
+    let __dewy_encoded_cebc:int64=99
+    let A:int64=4
+    let Α:int64=5
+    let foo_bar:int64=6
+    let x_i:int64=7
+    let xᵢ:int64=8
+    let _2V_3‾1:int64=9
+    $runtime_assert box.x₁₂=?12
+    $runtime_assert μ=?3 and A=?4 and Α=?5
+    $runtime_assert __dewy_encoded_cebc=?99
+    $runtime_assert foo_bar=?6 and x_i=?7 and xᵢ=?8
+    $runtime_assert ₂V₃¹=?9
+    let handle=@φ
+    return handle(sum_labels(box.x₁₂ 30))
+}

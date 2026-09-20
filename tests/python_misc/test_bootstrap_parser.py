@@ -77,6 +77,7 @@ def read_rows(output):
 
 
 SOURCES = [
+    'x_12 x_1_2 x₁₂ foo_bar foo_2_bar x‾12 x¹² _2V_3‾1 ₂V₃¹ µ μ A Α xᵢ x_i __load_i64__',
     '', 'a 1 true False $tag ;', '[1..3) {a (b)} <T> 0x[ff]',
     '1e10 1p10 1e+10 1.25 1.2p-3 0x1.0x8p10',
     '"a\\nb" r"\\n" "\\u00Af"', '"a{1 + 2}b" t"x${name}"',

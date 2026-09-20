@@ -552,6 +552,11 @@ Decisions were made by David on 2026-09-13.
    Look-alikes normalize to one character (the micro sign and Greek mu are
    the same name), except between ASCII and Greek letters, which stay
    distinct (`A` and `Α` differ). The full repertoire is still open.
+   Implemented 2026-09-20: digit-label normalization and the micro-sign alias
+   in both t1 parsers, preserving raw source spans and ordinary letter names.
+   Emission encodes non-ASCII symbols for µDewy rather than expanding its
+   identifier grammar. The open repertoire and doubled-marker escape remain
+   separate design questions.
 7. **Unit-like nominal types (decided).** A minted nominal type with no
    fields, such as an error type declared as `Overflow = type of error`,
    is spelled the same way whether used as a type or as its single value:

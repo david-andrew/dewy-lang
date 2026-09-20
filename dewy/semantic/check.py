@@ -530,7 +530,7 @@ def _debug_formatter(spelled: str, quoted: bool, declarations: list[hir.AST], *,
     if ':>' in spelled:
         return None   # a function value has no text worth a formatter
     spelled = spelled.replace('>>', '> >')   # nested generics: adjacent closers would tokenize as a shift
-    name = f'__dewy_debug_show_{ctx.binding_registry.next_id}'
+    name = f'__dewy_debug_show_n{ctx.binding_registry.next_id}'
     shown = '_quoted(v)' if quoted else 'v'
     text = (
         f'let {name} = (v:{spelled}):>int64 => {{\n'
@@ -6174,7 +6174,9 @@ def _tcr_unpack(targets: p0.Block, right: p0.AST, loc: Span, *, keyword: str | N
         source = typecheck_and_resolve_inner(right, ctx=ctx)
         source_id = source.binding_id if isinstance(source, hir.ExpressedIdentifier) else None
     else:
-        source_name = f'__dewy_unpack_{ctx.binding_registry.next_id}'
+        # These hidden names are embedded in synthesized source below. Keep
+        # their decimal suffixes stable under identifier label normalization.
+        source_name = f'__dewy_unpack_n{ctx.binding_registry.next_id}'
         hidden = p0.KeywordExpr(right.loc, [
             t1.Keyword(right.loc, 'let'),
             p0.BinOp(right.loc, t1.Operator(right.loc, '='), p0.Atom(right.loc, t1.Identifier(right.loc, source_name)), right),
@@ -6204,7 +6206,7 @@ def _tcr_unpack(targets: p0.Block, right: p0.AST, loc: Span, *, keyword: str | N
         # an entry of a dictionary or set, read once into a hidden binding (its arrays are not spellable)
         assert isinstance(array.type, ty.ArrayType)
         element = hir.Index(target_loc, array.type.element, array, hir.Integer(target_loc, ty.IntegerLiteralType(index), '0d', index), index)
-        name = f'__dewy_entry_{ctx.binding_registry.next_id}'
+        name = f'__dewy_entry_n{ctx.binding_registry.next_id}'
         ctx.declarations[name] = element.type
         statements.append(_complete_binding(_fresh_syntax(ctx), hir.Declare(target_loc, ty.VOID_TYPE, 'let', name, None, element), ctx=ctx))
         return name
@@ -7459,7 +7461,7 @@ def _tcr_loop_capture(block: p0.Block, *, kind: Literal['array', 'set'], expecte
 
     plain_expected = ty.unfold(ty.strip_refinement(expected)) if expected is not None else None
     loc = block.loc
-    name = f'__dewy_capture_{ctx.binding_registry.next_id}'
+    name = f'__dewy_capture_n{ctx.binding_registry.next_id}'
     if kind == 'dict':
         pairs = [value for value in values if isinstance(value, hir.ObjectLiteral) and [f.name for f in value.fields] == [_CAPTURE_KEY, _CAPTURE_VALUE]]
         if len(pairs) != len(values):
@@ -15324,7 +15326,7 @@ def _object_string(type_: ty.TypeExpr, object_type: ty.ObjectType, loc: Span, *,
         return existing
     module_ctx = ctx.module if ctx.module is not None else ctx
     number = len(ctx.object_strings) + 1
-    shape = f'__dewy_shape_{number}'
+    shape = f'__dewy_shape_n{number}'
     alias = ctx.binding_registry.allocate_param(shape, ty.TYPE_TYPE, loc)
     alias.type_value = plain
     module_ctx.declarations.maps[0][shape] = ty.TYPE_TYPE

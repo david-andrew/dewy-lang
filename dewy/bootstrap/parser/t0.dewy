@@ -31,9 +31,11 @@ const digits = set'0123456789'
 const alpha = set'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 const greek = set'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεϵζηθικλμνξοπρςστυφχψω'
 const math = set'ℂℕℤℚℝℙℍ𝔼𝕊𝕋𝔽𝔾ℵℒ'
-const misc = set'_‾!°'
-const subscripts   = set'₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ'                                  # these get normalized to the corresponding _N form, e.g. x₁ to x_1 (excluding ₊₋₌₍₎)
-const superscripts = set'⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿꜝ'  # these get normalized to the corresponding ‾N form, e.g. ¹x to ‾1x (excluding ⁺⁻⁼⁽⁾)
+const misc = set'_‾!°µ'  # t1 canonicalizes the micro sign to Greek mu
+# t1 turns _digits and ‾digits into these Unicode digits. Letter decorations
+# keep their direct spelling; raw token text remains available for diagnostics.
+const subscripts   = set'₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜᵢᵣᵤᵥⱼᵦᵧᵨᵩᵪ'
+const superscripts = set'⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᴬᴭᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴻᴼᴾᴿᵀᵁᵂᵃᵅᵆᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᵠᵡᶿꜝ'
 const misc_decorations = set'℠™©®'
 const primes = set'′″‴⁗'
 

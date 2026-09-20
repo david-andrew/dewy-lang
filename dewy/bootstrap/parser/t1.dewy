@@ -47,6 +47,50 @@ const symbolic_identifiers = set['..' '...' '$' '∞' '∅']
 const word_operators = set['and' 'or' 'xor' 'nand' 'nor' 'xnor' 'not' 'as' 'in' 'transmute' 'of' 'or_throw']
 const escape_map:dict<string string> = ['n'->'\n' '\n'->'' '\r\n'->'' 'r'->'\r' 't'->'\t' 'v'->'\v' 'f'->'\f' 'b'->'\b' 'a'->'\a' '0'->'\0']
 
+# Canonical names are semantic data; source spans and raw spellings stay intact.
+# No general Unicode compatibility folding: A/Α and letter labels stay distinct.
+normalize_identifier = (text:string):>string => {
+    # Ordinary ASCII names, including dunders, need no decoded character array
+    # or output string. Only a marker followed by digits or non-ASCII text can
+    # need normalization. The scalar path below implements the same narrow rule.
+    let bytes = text as array<uint8>
+    let needs_check = false
+    loop i in 0.. and i <? bytes.length {
+        let byte = bytes[i]
+        if byte >=? 128 { needs_check = true; break }
+        if byte =? 95 and i+1 <? bytes.length {
+            let next = bytes[i+1]
+            if next >=? 48 and next <=? 57 { needs_check = true; break }
+        }
+    }
+    if not needs_check return text
+    let scalars = text as array<uint32>
+    let parts:array<string> = []
+    const subs = ['₀' '₁' '₂' '₃' '₄' '₅' '₆' '₇' '₈' '₉']
+    const supers = ['⁰' '¹' '²' '³' '⁴' '⁵' '⁶' '⁷' '⁸' '⁹']
+    let i:addr = 0
+    loop i <? scalars.length {
+        let scalar = scalars[i]
+        if (scalar =? 95 or scalar =? 0x203e) and i+1 <? scalars.length {
+            let next = scalars[i+1]
+            if next >=? 48 and next <=? 57 {
+                i += 1
+                loop i <? scalars.length {
+                    let digit = scalars[i]
+                    if digit <? 48 or digit >? 57 break
+                    parts.push(if scalar =? 95 subs[digit-48] else supers[digit-48])
+                    i += 1
+                }
+                continue
+            }
+        }
+        if scalar =? 0xb5 { parts.push('μ') }
+        else if scalar <? 0x110000 { parts.push(chr(scalar)) }
+        i += 1
+    }
+    return parts.join('')
+}
+
 append_node = (@nodes:array<Token> token:Token):>addr<i => i <? nodes.length> => {
     let id = nodes.length
     nodes.push(token)
@@ -299,7 +343,7 @@ compound_range = (tokens:array<raw.Token> partners:dict<addr addr> start:addr st
             if text in? keywords { output.push(append_node(@nodes Keyword[loc=loc name=text])) }
             else if text in? word_operators { output.push(append_node(@nodes Operator[loc=loc symbol=text])) }
             else if text =? 'true' or text =? 'false' { output.push(append_node(@nodes Bool[loc=loc value=(text =? 'true')])) }
-            else { output.push(append_node(@nodes Identifier[loc=loc name=text])) }
+            else { output.push(append_node(@nodes Identifier[loc=loc name=normalize_identifier(text)])) }
         }
         else if token is? raw.Symbol | raw.ShiftSymbol {
             if text =? ';' { output.push(append_node(@nodes Semicolon[loc=loc])) }

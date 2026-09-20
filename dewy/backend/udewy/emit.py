@@ -27,6 +27,16 @@ from .lowering_shared import (
 
 TAB = '    '
 
+def emit_name(name: str) -> str:
+    """Injectively encode Dewy names outside µDewy's ASCII identifier alphabet.
+
+    Escape the prefix itself too, so a written ASCII name cannot collide with
+    an encoded one. Debug display names retain the original Dewy spelling.
+    """
+    if name.isascii() and name.replace('_', 'a').isalnum() and not name.startswith('__dewy_encoded_'):
+        return name
+    return '__dewy_encoded_' + name.encode('utf-8').hex()
+
 UDEWY_BINOP_DUNDERS = {
     '__add__': '+',
     '__sub__': '-',
@@ -167,7 +177,7 @@ def variable_marker(name: str, binding_id: int | None, ctx: EmitContext) -> str 
     if name in ctx.debug_aliases:
         shown, binding_id = ctx.debug_aliases[name]
     if binding_id is None or shown.startswith('__dewy'):
-        return f'# @var {name} -'
+        return f'# @var {emit_name(name)} -'
     spelled = check.debug_variable_types.get(binding_id)
     if spelled is None:
         return None
@@ -179,7 +189,8 @@ def variable_marker(name: str, binding_id: int | None, ctx: EmitContext) -> str 
     if formatter_name is not None and raw is not None:
         # the slot is the array's data, the formatter takes a descriptor: a thunk builds one
         formatter_name = ctx.raw_array_thunks.setdefault((formatter_name, *raw), f'__dewy_debug_show_raw_{len(ctx.raw_array_thunks)}')
-    return f'# @var {name} {shown if shown != name else "-"} {formatter_name or "-"} {spelled}'
+    emitted = emit_name(name)
+    return f'# @var {emitted} {shown if shown != emitted else "-"} {emit_name(formatter_name) if formatter_name else "-"} {spelled}'
 
 
 def _leaves_block(node: hir.AST) -> bool:
@@ -360,14 +371,14 @@ def _emit_program(program: lower.LoweredProgram, ast: hir.Block, *, debug_locati
             f'    __store_i64__({element_bytes} descriptor + {ARRAY_STRIDE_OFFSET})',
             f'    __store_i64__({ARRAY_MUTABLE} descriptor + {ARRAY_FLAGS_OFFSET})',
             f'    __store_i64__(0 descriptor + {ARRAY_OWNER_OFFSET})',
-            f'    return {formatter_name}(descriptor)',
+            f'    return {emit_name(formatter_name)}(descriptor)',
             '}',
         ]))
         formatters.append(thunk)
     if formatters and debug_locations:
         # the debugger's formatters are called by nothing in the program: a
         # static table keeps them out of the unreachable-function sweep
-        code.append(f'const __dewy_debug_formatters:int64 = __static_words__({" ".join(formatters)})')
+        code.append(f'const __dewy_debug_formatters:int64 = __static_words__({" ".join(map(emit_name, formatters))})')
     # included files are prelude directives: they precede everything else
     directives = [f'$include_bytes(p"{path}") as {name}' for path, name in ctx.include_directives.items()]
     return '\n'.join([*directives, *code]) + '\n'
@@ -447,7 +458,7 @@ def emit_type(t: ty.Type) -> str:
 def emit_arg(arg: hir.Param | hir.BoundParam) -> str:
     if isinstance(arg, hir.BoundParam):
         raise ValueError('INTERNAL ERROR: default parameter reached udewy emission')
-    return f'{arg.name}:{emit_type(arg.type)}'
+    return f'{emit_name(arg.name)}:{emit_type(arg.type)}'
 
 def _contains_return(node: hir.AST) -> bool:
     if isinstance(node, hir.Return):
@@ -469,7 +480,7 @@ def emit_function_decl(name: str, func: hir.FunctionLiteral, ctx: EmitContext) -
             marker = variable_marker(arg.name, arg.binding_id, replace(ctx, source=func.source))
             if marker is not None:
                 code.append(marker + '\n')
-    code.append(f'let {name} = (')
+    code.append(f'let {emit_name(name)} = (')
 
     # build the argument list
     args: list[str] = []
@@ -521,8 +532,8 @@ def _inherited_emitter(cls: type):
 def emit_identifier(ast: hir.ExpressedIdentifier, ctx: EmitContext) -> str:
     # A function value uses the decorative @ spelling in both languages.
     if isinstance(ast.type, (ty.FunctionType, ty.OverloadType)):
-        return f'@{ast.name}'
-    return ast.name
+        return f'@{emit_name(ast.name)}'
+    return emit_name(ast.name)
 
 
 def _unlowered_scope_metatag(ast: hir.ScopeMetatag, ctx: EmitContext) -> str:
@@ -577,12 +588,12 @@ def emit_declare(decl: hir.Declare, ctx: EmitContext) -> str:
             'udewy target does not support local function literals or closures'
         )
     annotation = decl.annotation if decl.annotation is not None else decl.expr.type
-    return f'{decl.decltype} {decl.name}:{emit_type(annotation)} = {emit_ast(decl.expr, ctx)}'
+    return f'{decl.decltype} {emit_name(decl.name)}:{emit_type(annotation)} = {emit_ast(decl.expr, ctx)}'
 
 
 def emit_assign(assign: hir.Assign, ctx: EmitContext) -> str:
     # the target is a place, never a function value: no `@` even for function-typed bindings
-    target = assign.target.name if isinstance(assign.target, hir.ExpressedIdentifier) else emit_ast(assign.target, ctx)
+    target = emit_name(assign.target.name) if isinstance(assign.target, hir.ExpressedIdentifier) else emit_ast(assign.target, ctx)
     return f'{target} {assign.op} {emit_ast(assign.value, ctx)}'
 
 
@@ -708,9 +719,9 @@ def emit_function_call(call: hir.FunctionCall, ctx: EmitContext) -> str:
     args = ' '.join(_emit_call_arg(arg, ctx) for arg in call.pos_args)
     if name is not None:
         if (name in ctx.direct_function_names or name in UDEWY_INTRINSICS) and name not in ctx.local_names:
-            return f'{name}({args})'
+            return f'{emit_name(name)}({args})'
         # an indirect call through a name: udewy requires the `@` spelling
-        return f'(@{name})({args})'
+        return f'(@{emit_name(name)})({args})'
     callee = emit_ast(call.func, ctx)
     if isinstance(call.func, hir.Block) and not call.func.scoped:
         return f'{callee}({args})'

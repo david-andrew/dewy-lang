@@ -107,7 +107,8 @@ length/counter growth through unbounded trip counts. Missing pushes and
 early breaks reject. Ten targeted proof tests and all 21 focused parity
 cases passed. The updated compiler builds using the preceding direct native
 compiler (50.12 seconds); the second-generation build also took 50.12 seconds
-and passed all 21 focused parity cases.
+and passed all 21 focused parity cases. Its fresh full corpus also passed
+all 211 cases against the paired hosted snapshot.
 The wider symbolic range-iterator and proof-boundary work remains pending.
 
 Checkpoint: hosted descriptor-backed array locals now use the existing
@@ -129,3 +130,17 @@ including the string report check. The native lifetime fixture retains zero
 bytes across 100 calls, and all 22 focused parity cases passed against a
 new second-generation compiler. General union copies and strict-copy
 enforcement remain outstanding.
+
+Checkpoint: both parsers canonicalize digit labels (`x_12`, `x_1_2`, and
+`x₁₂`; `x‾12` and `x¹²`) and the micro-sign/mu alias at t1, preserving t0
+source text and spans. Letter labels and ASCII/Greek distinctions remain.
+Hosted synthesized names that round-trip through Dewy source use suffixes
+stable under normalization. Hosted emission encodes non-ASCII names without
+colliding with source-written ASCII names, including calls and debug metadata;
+native lowering does the same for descriptive debug symbols while retaining
+its ordinary binding-id symbols. No µDewy syntax changes. Twenty-one token
+checks, 15 t1 parser parity cases, and 48 hosted execution/synthesis/debug
+checks passed. A rebuilt native compiler passed all 23 focused parity cases
+and both ordinary and debug execution of the identifier fixture (42).
+The direct seed built it in 55.82 seconds. The wider Unicode repertoire and
+doubled-marker escape remain open, and no rule for them was introduced.

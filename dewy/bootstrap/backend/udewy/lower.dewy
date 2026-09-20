@@ -776,7 +776,7 @@ expression_owns = (id:addr @state:State):>bool => {
     }
     return false
 }
-binding_symbol = (id:addr name:string state:State):>string => if state.debug_names "_b{id}_{name}" else "_b{id}"
+binding_symbol = (id:addr name:string state:State):>string => if state.debug_names "_b{id}_{emit.name(name)}" else "_b{id}"
 # A string literal, through the casts contextual typing wraps it in.
 static_literal = (id:addr state:State):>bool => {
     let current=id
@@ -4235,7 +4235,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     # traces, profiles and emitted text identify it. Unique ids stay in front.
     loop [binding id] in named {
         let source_name=state.capture_plan.names.get(binding)
-        if source_name isnt? none and state.debug_names {state.code_symbols[id]="_f{id}_{source_name}"}
+        if source_name isnt? none and state.debug_names {state.code_symbols[id]="_f{id}_{emit.name(source_name)}"}
     }
     loop [binding id] in named {
         let name=state.code_symbols.get(id)
