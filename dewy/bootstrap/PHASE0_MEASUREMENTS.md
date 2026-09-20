@@ -4631,3 +4631,15 @@ non-literal sites), 699 no-move (mostly `push` arguments, which the move
 analysis does not yet treat as a transfer, and records placed in literals
 while the local is still used), 218 unresolved callees (array methods and
 function values), 169 raw-blocked arrays and cells.
+
+### Push and insert are transfer sites (2026-09-20)
+
+A value pushed or inserted into an array becomes an element the array
+owns, so the move analysis now treats the value argument of `push` and
+`insert` as a transfer site: a local at its last use there moves its
+handle into the element instead of being copied and released. Compiler-
+wide copies 2,507 to 2,448; most pushed locals are declared outside the
+loop that pushes them or are used again, so the gain is small. Second
+generation passes the bundle 98/4. The hosted lowering keeps records in
+frame cells and copies at this site, as at the other non-return transfer
+sites (recorded under "Hosted parity for moves").

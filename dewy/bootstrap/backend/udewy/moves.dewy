@@ -96,6 +96,22 @@ walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> @analysis:Analysis):
         walk_transfer(node.value depth nested false nodes @analysis)
         return
     }
+    if node is? hir.FunctionCall {
+        # A pushed or inserted value becomes an element the array owns.
+        let callee=hir.node_at(nodes node.func)
+        if callee is? hir.ArrayMethod and callee.name in? ['push' 'insert'] {
+            walk(node.func depth nested nodes @analysis)
+            loop i in 0.. and i <? node.pos_args.length {
+                if i =? 0 {walk_transfer(node.pos_args[i] depth nested false nodes @analysis)}
+                else {walk(node.pos_args[i] depth nested nodes @analysis)}
+            }
+            loop [name argument] in node.kw_args {
+                if name =? 'value' and node.pos_args.length =? 0 {walk_transfer(argument depth nested false nodes @analysis)}
+                else {walk(argument depth nested nodes @analysis)}
+            }
+            return
+        }
+    }
     if node is? hir.Flow {
         loop arm_id in node.arms {
             let arm=hir.node_at(nodes arm_id)
