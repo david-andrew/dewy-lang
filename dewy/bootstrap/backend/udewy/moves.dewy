@@ -1,0 +1,137 @@
+import p"../../semantic/hir.dewy" as hir
+
+doc"""
+Last-use moves.
+
+An owned local whose last use hands its value to storage that outlives the
+expression (a `return`, a record or array literal, a field, element or
+dictionary store, a binding) moves there: the lowering takes the local's
+handle and empties the local, so its scope-exit release does nothing. A use
+is the last one when no reference to the binding follows it in traversal
+order (a later sibling arm counts as after, conservatively), it is not
+inside a loop the declaration is outside of (the next iteration would read
+the emptied local; a `return` leaves the loop and is exempt), and no nested
+function literal captures the binding. Parameters are not declarations
+here and never move. Mirrors `_compute_moves` in the hosted lowering.
+"""
+
+Use:type = const [id:addr sequence:addr depth:addr nested:bool transfer:bool returned:bool]
+Analysis:type = [uses:dict<addr array<Use>>=[] declared:dict<addr addr>=[] counter:addr=0]
+
+# The expression a transfer site hands over, through the wrappers that keep its storage.
+peel = (id:addr nodes:array<hir.AST>):>addr => {
+    let current=id
+    loop true {
+        let node=hir.node_at(nodes current)
+        if node is? hir.Suppress {current=node.item continue}
+        if node is? hir.Obligation {current=node.value continue}
+        if node is? hir.ValueCast|hir.RepresentationCast {current=node.expr continue}
+        if node is? hir.Block and not node.scoped and node.items.length =? 1 {current=node.items[0] continue}
+        return current
+    }
+}
+
+note_use = (id:addr binding:addr depth:addr nested:bool transfer:bool returned:bool @analysis:Analysis):>void => {
+    analysis.counter+=1
+    let uses=analysis.uses.get(binding default=[])
+    uses.push(Use[id analysis.counter depth nested transfer returned])
+    analysis.uses[binding]=uses
+}
+
+walk_transfer = (id:addr depth:addr nested:bool returned:bool nodes:array<hir.AST> @analysis:Analysis):>void => {
+    let inner=peel(id nodes)
+    let node=hir.node_at(nodes inner)
+    if node is? hir.ExpressedIdentifier {
+        if node.binding_id isnt? none {note_use(inner node.binding_id depth nested true returned @analysis)}
+        return
+    }
+    walk(id depth nested nodes @analysis)
+}
+
+walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> @analysis:Analysis):>void => {
+    let node=hir.node_at(nodes id)
+    if node is? hir.FunctionLiteral {
+        walk(node.body depth true nodes @analysis)
+        return
+    }
+    if node is? hir.Declare {
+        walk_transfer(node.expr depth nested false nodes @analysis)
+        if not nested and node.binding_id isnt? none {
+            analysis.counter+=1
+            analysis.declared[node.binding_id]=depth
+        }
+        return
+    }
+    if node is? hir.ExpressedIdentifier {
+        if node.binding_id isnt? none {note_use(id node.binding_id depth nested false false @analysis)}
+        return
+    }
+    if node is? hir.Return {
+        if node.item isnt? none {walk_transfer(node.item depth nested true nodes @analysis)}
+        return
+    }
+    if node is? hir.ObjectLiteral {
+        loop field in node.fields {walk_transfer(field.value depth nested false nodes @analysis)}
+        return
+    }
+    if node is? hir.ArrayLiteral {
+        loop item in node.items {walk_transfer(item depth nested false nodes @analysis)}
+        return
+    }
+    if node is? hir.MemberAssign|hir.IndexAssign {
+        walk(node.target depth nested nodes @analysis)
+        walk_transfer(node.value depth nested false nodes @analysis)
+        return
+    }
+    if node is? hir.DictStore {
+        walk(node.keys depth nested nodes @analysis)
+        if node.values isnt? none {walk(node.values depth nested nodes @analysis)}
+        walk(node.key depth nested nodes @analysis)
+        if node.value isnt? none {walk_transfer(node.value depth nested false nodes @analysis)}
+        return
+    }
+    if node is? hir.Assign {
+        # The target is written, not read.
+        walk_transfer(node.value depth nested false nodes @analysis)
+        return
+    }
+    if node is? hir.Flow {
+        loop arm_id in node.arms {
+            let arm=hir.node_at(nodes arm_id)
+            let arm_depth:addr=depth
+            if arm is? hir.LoopArm {arm_depth=depth+1}
+            if arm is? hir.IfArm|hir.LoopArm {
+                walk(arm.condition arm_depth nested nodes @analysis)
+                walk(arm.body arm_depth nested nodes @analysis)
+            }
+        }
+        if node.default isnt? none {walk(node.default depth nested nodes @analysis)}
+        return
+    }
+    let children:array<addr>=[]
+    hir.push_children(node @children)
+    loop child in children {walk(child depth nested nodes @analysis)}
+}
+
+# The identifier uses (node ids) of `literal` that move their local.
+compute = (literal:addr nodes:array<hir.AST>):>set<addr> => {
+    let function=hir.node_at(nodes literal)
+    let moves:set<addr>=set[]
+    if function isnt? hir.FunctionLiteral return moves
+    let analysis=Analysis[]
+    walk(function.body 0 false nodes @analysis)
+    loop [binding uses] in analysis.uses {
+        let declared=analysis.declared.get(binding)
+        if declared is? none or uses.length =? 0 continue
+        let nested=false
+        let last:Use=uses[0]
+        loop use in uses {
+            if use.nested {nested=true}
+            if use.sequence >? last.sequence {last=use}
+        }
+        if nested or not last.transfer continue
+        if last.depth >? declared and not last.returned continue
+        moves.add(last.id)
+    }
+    return moves
+}

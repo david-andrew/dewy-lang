@@ -4457,3 +4457,22 @@ reads 8,048, up from the 7,906 before the `get` sites were reported (164
 `looked up with get` notes), so the comparable figure is 7,884 against the
 7,910 baseline.
 
+### Last-use moves for records, cells and arrays (native, 2026-09-20)
+
+`backend/udewy/moves.dewy` computes, per function, the identifier uses
+that move their local: the last use of a declared local (traversal order,
+later sibling arms count as after, no use inside a nested function literal,
+not inside a loop the declaration is outside of unless the site is a
+`return`) at a transfer site (a `return`, a record or array literal, a
+field, element or dictionary store, a binding or assignment), looking
+through casts, obligations and statement blocks. The lowering's
+`owned_value` takes the local's handle at such a use and empties the local
+(`x = 0`, the declaration forced to `let`), and every release helper now
+skips an empty handle, so the scope-exit release of a moved local does
+nothing. The rule mirrors the hosted `_compute_moves` (arrays only there);
+the hosted port for records and cells follows. Compiler-wide copies: 8,048
+to 7,048; `placed in a record literal` 2,529 to 1,787 across kinds. The
+1,517 `packed into a cell` sites that remain are narrowed cell locals
+(`if v is? CacheMiss return v`), where the payload must move out of the
+local's cell rather than the cell handle itself.
+

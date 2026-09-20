@@ -5,6 +5,7 @@ import p"statements.dewy" as statements
 import p"layouts.dewy" as layouts
 import p"captures.dewy" as captures
 import p"borrowing.dewy" as borrowing
+import p"moves.dewy" as moves
 import p"../../semantic/analyze/effects.dewy" as effects
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
@@ -47,6 +48,10 @@ State:type = [
     borrow_rejections:dict<addr string>=[]
     # The owned local a `return` is transferring: its reads own the value.
     transferred_binding:addr?=none
+    # Identifier uses that move their local (moves.compute), and the locals
+    # they empty, which must be declared `let` for the emptying store.
+    moved_uses:set<addr>=set[]
+    moved_bindings:set<addr>=set[]
     nodes:array<hir.AST>=[]
     type_nodes:types.Table=types.Table[]
     symbols:dict<addr string>=[]
@@ -491,7 +496,7 @@ expression = (id:addr @state:State):>addr => {
             }
         }
         # A detached replacement is stored back into the declared local.
-        let decltype=if node.binding_id isnt? none and node.binding_id in? state.mutated_roots 'let' else node.decltype
+        let decltype=if node.binding_id isnt? none and (node.binding_id in? state.mutated_roots or node.binding_id in? state.moved_bindings) 'let' else node.decltype
         return put(hir.Declare[node.loc type decltype symbol(node.name node.binding_id @state) annotation value node.binding_id] @state)
     }
     if node is? hir.Assign {
@@ -853,6 +858,19 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
     if node is? hir.Place or expression_owns(id @state) return value
     # A returned local's block is transferred to the caller, not copied.
     if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and state.transferred_binding isnt? none and node.binding_id =? state.transferred_binding return value
+    # A last use at a transfer site moves the local: take its handle and
+    # empty it, so the scope-exit release finds nothing to release.
+    if node is? hir.ExpressedIdentifier and id in? state.moved_uses {
+        let binding=node.binding_id
+        if binding isnt? none and binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed and releasable(node.value_type @state) {
+            let prefix:array<addr>=[]
+            let taken=snapshot(value @prefix @state)
+            let word_type=types.primitive('int64' @state.type_nodes)
+            prefix.push(assign_value(put(hir.ExpressedIdentifier[node.loc word_type symbol(node.name binding @state) binding] @state) word(0 node @state) node @state))
+            prefix.push(taken)
+            return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+        }
+    }
     # A string literal is static data with owner zero: retain returns it
     # and drop ignores it, so an owning slot may hold the descriptor itself.
     if static_literal(id state) return value
@@ -3939,6 +3957,12 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         hir.push_children(current @pending)
     }
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
+    state.moved_uses=if enabled moves.compute(id state.input.nodes) else set[]
+    state.moved_bindings=set[]
+    loop use in state.moved_uses {
+        let moved=hir.node_at(state.input.nodes use)
+        if moved is? hir.ExpressedIdentifier and moved.binding_id isnt? none {state.moved_bindings.add(moved.binding_id)}
+    }
     state.loop_depth=0 state.loop_levels=none state.loop_kind=none state.loop_prologue=[]
     let frame_start=state.cleanup_frames.length
     state.cleanup_frames.push([])
@@ -5404,7 +5428,11 @@ release_cell_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => 
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms none] @state))
     return sequence(prefix node @state)
 }
+# An emptied handle (a moved local) releases nothing.
 release_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
+    return conditional(intrinsic('__ne__' [pointer word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) release_body_inner(pointer type node @state) node @state)
+}
+release_body_inner = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let array=array_type(type state)
     if array isnt? none {
