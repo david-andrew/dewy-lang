@@ -1785,3 +1785,33 @@ bigint library implements floor division and the numeric reference describes
 the word analysis's truncation; it must not accidentally inherit bigint
 division semantics just because its endpoints are bigints. This existing
 representation inconsistency needs a focused end-to-end follow-up.
+
+## Copy report (Phase 1.1, 2026-09-20)
+
+Every dynamic aggregate copy the lowering decides is recorded as a
+`CopyNote[kind type site reason loc source]` (`backend/udewy/lower.dewy`;
+hosted `CopyNote` in `backend/udewy/lowering_shared.py` with the same
+fields). `note_copy` is called at the funnels: `owned_value`, which takes a
+`site` from its caller (`returned`, `bound to `x``, `assigned to `x``,
+`stored in a field`, `stored in an element`, `placed in a record literal`,
+`placed in an array literal`, `passed to a call`, `donated to a call`,
+`packed into a cell`); the parameter prologue (`copied on entry as `p``,
+reason from the written/rebound/mutated sets); `finish_read` (`read from a
+temporary`); and the index snapshot (`snapshotted before indexing`). The
+reason comes from `owned_reason`: container reads name the missing view,
+identifiers name the missing move or, when the borrow analysis considered
+the binding as an argument and rejected it, its recorded rejection
+(`borrowing.Plan.rejections`, filled where `details` decides an argument is
+not borrowed: opaque callee, global, dirty place, unknown effects, callee
+writes or keeps, conflicting argument). `lower.Result.notes` carries them to
+`invocation/compiler.dewy`, whose `analyze` command prints one `copy:
+path:row: ...` line and an `Info` excerpt per note plus a `copy report:`
+summary, before the representation notes. The hosted compiler prints the
+same lines from `lower.last_copy_notes` (`dewy analyze` in
+`dewy/__main__.py`; record notes at the declare, assign, field-store,
+value-store, parameter-prologue, flow-result and place-overlap sites; array
+notes in `_transfer_array_value`). `tools/copy_report.py` aggregates either
+compiler's output. Fixture `dewy/tests/copy_report.dewy`; tests
+`test_escape_copies.py::test_copy_report_names_kind_site_and_reason` and
+the native command test.
+

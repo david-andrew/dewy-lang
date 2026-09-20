@@ -1,4 +1,4 @@
-from reporting import Error, Pointer, SrcFile
+from reporting import Error, Pointer, Span, SrcFile
 import p"emit.dewy" as emit
 import p"program.dewy" as program
 import p"statements.dewy" as statements
@@ -36,10 +36,15 @@ pending-implementation diagnostic before program emission.
 """
 OwnedLocal:type = const [value:addr value_type:addr box:addr?=none condition:addr?=none]
 ScalarProjection:type = const [function:addr read:addr field:string result:addr symbol:string borrowed:bool=false]
+# One dynamic aggregate copy the lowering decided, for `dewy analyze`: what
+# was copied, at which kind of site, and why no borrow or move applied.
+CopyNote:type = const [kind:string type:string site:string reason:string loc:Span source:addr?]
 State:type = [
     input:emit.Input
     source:SrcFile
     source_index:addr?=none
+    copy_notes:array<CopyNote>=[]
+    borrow_rejections:dict<addr string>=[]
     nodes:array<hir.AST>=[]
     type_nodes:types.Table=types.Table[]
     symbols:dict<addr string>=[]
@@ -109,7 +114,35 @@ State:type = [
     none_cell:string?=none
     problem:Error?=none
 ]
-Result:type = const [program:program.Program input:emit.Input]
+Result:type = const [program:program.Program input:emit.Input notes:array<CopyNote>=[]]
+note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state:State):>void => {
+    # A minted type describes as its name followed by its structure; the name
+    # alone identifies it in a report.
+    let name=types.describe(type state.type_nodes)
+    let space=name.find(' [')
+    if space isnt? none and space >? 0 and space <? name.length and name[0] not=? '[' {name=name[0..space)}
+    if name.length >? 48 {name="{name[0..45)}..."}
+    state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index])
+}
+copy_kind = (type:addr @state:State):>string? => {
+    if owned_string(type state) return none
+    if cell_members(type @state) isnt? none return 'cell'
+    if array_type(type state) isnt? none return 'array'
+    if object_valued(type state) return 'record'
+    return none
+}
+# Why `owned_value` could not borrow or move the expression it copies.
+owned_reason = (id:addr @state:State):>string => {
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Index|hir.MemberAccess|hir.DictEntries|hir.DictLookup return 'the value stays owned by its container, and nothing borrows it as a read-only view here'
+    if node is? hir.ExpressedIdentifier {
+        let binding=node.binding_id
+        if binding isnt? none and binding in? state.borrow_rejections return "`{node.name}` is not borrowed here: {state.borrow_rejections[binding]}"
+        return "`{node.name}` may be used again, and no last-use move applies to this kind of value yet"
+    }
+    if node is? hir.FunctionCall return 'the call result is a borrowed view of its receiver'
+    return 'the expression reads storage that belongs to something else'
+}
 put = (node:hir.AST @state:State):>addr => hir.append_node(@state.nodes node)
 reject = (node:hir.AST detail:string @state:State):>addr => {
     if state.problem is? none {state.problem=Error[srcfile=state.source title='native lowering implementation pending' pointers=[Pointer[node.loc detail]]]}
@@ -254,7 +287,7 @@ expression = (id:addr @state:State):>addr => {
         if object_valued(actual state) and object_valued(node.value_type state) and expression_owns(node.expr @state) return owned_record(expression(node.expr @state) actual node.value_type node @state)
         if temporary_owner(node.expr @state) {
             if cell_members(actual @state) isnt? none return owned_cell_cast(node actual @state)
-            if cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state) actual node.value_type node @state owned=true)
+            if cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state 'packed into a cell') actual node.value_type node @state owned=true)
         }
         if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) actual node.value_type node @state)
         if enum_members(actual state) isnt? none return enum_read(expression(node.expr @state) actual node.value_type node @state)
@@ -329,7 +362,7 @@ expression = (id:addr @state:State):>addr => {
         if target isnt? hir.MemberAccess return reject(node 'a non-record member assignment' @state)
         let prefix:array<addr>=[]
         let pointer=snapshot(field_pointer(target @state writable=true) @prefix @state)
-        let source=snapshot(owned_value(node.value @state) @prefix @state)
+        let source=snapshot(owned_value(node.value @state 'stored in a field') @prefix @state)
         let stored=stored_type(node.target state)
         if object_valued(stored state) {prefix.push(release_record(pointer stored node @state))}
         else if cell_members(stored @state) isnt? none {prefix.push(release_cell(pointer stored node @state))}
@@ -355,6 +388,8 @@ expression = (id:addr @state:State):>addr => {
             # alive across index evaluation. Acquire a private descriptor;
             # shared data detaches if the index writes the original array.
             let type=hir.node_at(state.input.nodes node.array).value_type
+            let kind=copy_kind(type @state)
+            if kind isnt? none {note_copy(kind type 'snapshotted before indexing' 'the index expression may write the array being read' node @state)}
             receiver=ReadOperand[snapshot(copy_value(receiver.value type node @state) @prefix @state) type]
         }
         let descriptor=snapshot(receiver.value @prefix @state)
@@ -372,7 +407,7 @@ expression = (id:addr @state:State):>addr => {
         let stored=stored_type(node.target state)
         let descriptor=detach_array(route stored node @prefix @state)
         let pointer=snapshot(array_element_address(descriptor index target @state) @prefix @state)
-        let replacement=snapshot(owned_value(node.value @state) @prefix @state)
+        let replacement=snapshot(owned_value(node.value @state 'stored in an element') @prefix @state)
         # Raw exposure pins the entire container tree. An untracked pointer
         # can still name the previous record or cell after this replacement.
         let tracked=compare('__ne__' read_word(descriptor layouts.array_descriptor.owner node @state) word(-1 node @state) node @state)
@@ -410,7 +445,7 @@ expression = (id:addr @state:State):>addr => {
         return put(hir.Transmute[node.loc type value] @state)
     }
     if node is? hir.Return and state.cleanup_enabled return cleanup_return(node @state)
-    if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else owned_value(node.item @state)] @state)
+    if node is? hir.Return return put(hir.Return[node.loc type if node.item is? none none else owned_value(node.item @state 'returned')] @state)
     if node is? hir.Declare {
         if compile_time_binding(node state) return put(hir.Void[node.loc type] @state)
         if hir.node_at(state.input.nodes node.expr) is? hir.FunctionLiteral|hir.OverloadedFunction return put(hir.Void[node.loc type] @state)
@@ -422,7 +457,7 @@ expression = (id:addr @state:State):>addr => {
             $runtime_assert call is? hir.FunctionCall
             value=ordinary_call(node.expr call runtime_type(call.value_type call @state) @state projection=projection)
         } else if borrowed_route_local(node @state) {value=expression(node.expr @state) borrowed=true}
-        else {value=owned_value(node.expr @state)}
+        else {value=owned_value(node.expr @state "bound to `{node.name}`")}
         # An addressed optional local is written through its own cell, which
         # must therefore never be the shared static `none` cell.
         if state.none_cell isnt? none and node.binding_id isnt? none and node.binding_id in? state.addressed and node.binding_id not in? state.boxed and not borrowed {
@@ -464,7 +499,7 @@ expression = (id:addr @state:State):>addr => {
         let stored=stored_type(node.target state)
         let target=binding_storage(original stored @state)
         let boxed=original.binding_id isnt? none and original.binding_id in? state.boxed
-        let value=owned_value(node.value @state)
+        let value=owned_value(node.value @state "assigned to `{original.name}`")
         if node.op not=? '=' {
             if node.op.length <? 2 return reject(node 'invalid compound assignment spelling' @state)
             let operator=node.op[0..node.op.length-1)
@@ -726,7 +761,11 @@ read_operand = (id:addr @prefix:array<addr> @state:State):>ReadOperand => {
 }
 finish_read = (value:addr receiver:ReadOperand node:hir.AST @prefix:array<addr> @state:State):>addr => {
     if receiver.owner_type isnt? none {
-        if releasable(node.value_type @state) {value=copy_value(value node.value_type node @state)}
+        if releasable(node.value_type @state) {
+            let kind=copy_kind(node.value_type @state)
+            if kind isnt? none {note_copy(kind node.value_type 'read from a temporary' 'the temporary that holds it is released after the read' node @state)}
+            value=copy_value(value node.value_type node @state)
+        }
         value=snapshot(value @prefix @state)
         prefix.push(release_value(receiver.value receiver.owner_type node @state))
     }
@@ -759,7 +798,19 @@ owned_cell_cast = (node:hir.ValueCast|hir.RepresentationCast actual:addr @state:
     prefix.push(result)
     return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
 }
-owned_value = (id:addr @state:State):>addr => {
+note_parameter_copy = (argument:hir.Param|hir.BoundParam boxed:bool rebound:set<addr> mutated:set<addr> written:set<addr> node:hir.AST @state:State):>void => {
+    let kind=copy_kind(argument.value_type @state)
+    if kind is? none return
+    let binding=argument.binding_id
+    let reason="the body writes the elements of `{argument.name}`"
+    if boxed {reason="`{argument.name}` is captured by a closure"}
+    else if binding isnt? none {
+        if binding in? rebound {reason="the body rebinds `{argument.name}`"}
+        else if binding in? written {reason="the body writes the fields of `{argument.name}`"}
+    }
+    note_copy(kind argument.value_type "copied on entry as `{argument.name}`" reason node @state)
+}
+owned_value = (id:addr @state:State site:string='kept'):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if state.result_projection isnt? none and state.result_projection.read =? id {
         let projection=state.result_projection
@@ -784,14 +835,14 @@ owned_value = (id:addr @state:State):>addr => {
         if receiver.owner_type is? none {value=copy_value(value projection.result member @state)}
         return finish_read(value receiver member @prefix @state)
     }
-    if node is? hir.Suppress return owned_value(node.item @state)
+    if node is? hir.Suppress return owned_value(node.item @state site)
     if node is? hir.ValueCast {
         let source=hir.node_at(state.input.nodes node.expr)
         # A logical record upcast preserves the owned allocation, including
         # its dynamic child fields. Do not abandon a constructor/call result
         # merely because contextual typing inserted a transparent cast.
-        if object_valued(source.value_type state) and object_valued(node.value_type state) return owned_record(owned_value(node.expr @state) source.value_type node.value_type node @state)
-        if cell_members(source.value_type @state) is? none and cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state) source.value_type node.value_type node @state owned=true)
+        if object_valued(source.value_type state) and object_valued(node.value_type state) return owned_record(owned_value(node.expr @state site) source.value_type node.value_type node @state)
+        if cell_members(source.value_type @state) is? none and cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state site) source.value_type node.value_type node @state owned=true)
     }
     let value=expression(id @state)
     if node is? hir.Place or expression_owns(id @state) return value
@@ -799,10 +850,19 @@ owned_value = (id:addr @state:State):>addr => {
     # and drop ignores it, so an owning slot may hold the descriptor itself.
     if static_literal(id state) return value
     if owned_string(node.value_type state) return string_runtime('_native_string_copy' [value] node @state)
-    if cell_members(node.value_type @state) isnt? none return cell_copy(value node.value_type node @state)
+    if cell_members(node.value_type @state) isnt? none {
+        note_copy('cell' node.value_type site owned_reason(id @state) node @state)
+        return cell_copy(value node.value_type node @state)
+    }
     let array=array_type(node.value_type state)
-    if array isnt? none and node isnt? hir.ArrayLiteral return array_copy(value array node @state)
-    if object_valued(node.value_type state) and node isnt? hir.ObjectLiteral return object_copy(value node.value_type node @state shared=shareable_read(id @state))
+    if array isnt? none and node isnt? hir.ArrayLiteral {
+        note_copy('array' node.value_type site owned_reason(id @state) node @state)
+        return array_copy(value array node @state)
+    }
+    if object_valued(node.value_type state) and node isnt? hir.ObjectLiteral {
+        note_copy('record' node.value_type site owned_reason(id @state) node @state)
+        return object_copy(value node.value_type node @state shared=shareable_read(id @state))
+    }
     return value
 }
 # An element slot or an owned, unaddressed local holds a handle to a whole
@@ -924,7 +984,7 @@ array_literal = (node:hir.ArrayLiteral @state:State):>addr => {
     let memory=array_memory(word(node.items.length node @state) layout.size node @state)
     let offset:addr=0
     loop item in node.items {
-        memory.prefix.push(array_store(owned_value(item @state) address(memory.data offset node @state) type.element node @state))
+        memory.prefix.push(array_store(owned_value(item @state 'placed in an array literal') address(memory.data offset node @state) type.element node @state))
         offset+=layout.size
     }
     memory.prefix.push(memory.descriptor)
@@ -958,7 +1018,7 @@ spread_array_literal = (node:hir.ArrayLiteral element:addr stride:addr @state:St
         let destination=word_op('__add__' memory.data word_op('__mul__' cursor stride_word node @state) node @state)
         let advance=put(hir.Assign[node.loc empty cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
         if source is? none {
-            prefix.push(array_store(owned_value(item @state) destination element node @state))
+            prefix.push(array_store(owned_value(item @state 'placed in an array literal') destination element node @state))
             prefix.push(advance)
             continue
         }
@@ -2740,7 +2800,7 @@ representation = (node:hir.RepresentationCast @state:State):>addr => {
         # Packing is itself an ownership boundary. Constructors and calls
         # already own their payload; borrowing reads acquire a copy here.
         # Copying expression(...) indiscriminately leaked fresh payloads.
-        if cell_members(source.value_type @state) is? none return cell_pack(owned_value(node.expr @state) source.value_type node.value_type node @state owned=true)
+        if cell_members(source.value_type @state) is? none return cell_pack(owned_value(node.expr @state 'packed into a cell') source.value_type node.value_type node @state owned=true)
         return cell_pack(expression(node.expr @state) source.value_type node.value_type node @state)
     }
     # Checking may prove one alternative without a syntactic type-test read,
@@ -2912,9 +2972,9 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
     if method.name in? ['truncate' 'reserve'] {names.push('count')}
     loop i in 0.. and i <? call.pos_args.length {
         $runtime_assert i <? names.length
-        arguments[names[i]]=snapshot(owned_value(call.pos_args[i] @state) @prefix @state)
+        arguments[names[i]]=snapshot(owned_value(call.pos_args[i] @state 'passed to a call') @prefix @state)
     }
-    loop [name argument] in call.kw_args {arguments[name]=snapshot(owned_value(argument @state) @prefix @state)}
+    loop [name argument] in call.kw_args {arguments[name]=snapshot(owned_value(argument @state 'passed to a call') @prefix @state)}
     let void_type=types.primitive('void' @state.type_nodes)
     if method.name =? 'push' and state.allocator isnt? none {
         # One generated helper per element type grows the array and stores
@@ -3457,7 +3517,7 @@ object_literal = (node:hir.ObjectLiteral @state:State):>addr => {
         let field=types.object_field(record item.name)
         let offset=layout.offsets.get(item.name)
         $runtime_assert field isnt? none and offset isnt? none
-        let value=owned_value(item.value @state)
+        let value=owned_value(item.value @state 'placed in a record literal')
         if item.binding_id isnt? none {
             let name=symbol(item.name item.binding_id @state)
             let type=runtime_type(field.value_type node @state)
@@ -3727,7 +3787,7 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
     # A donated argument is an owned value the callee takes over: a fresh
     # temporary passes as is, a kept value is copied, and nothing is
     # released here.
-    if argument in? consumed return snapshot(owned_value(argument @state) @prefix @state)
+    if argument in? consumed return snapshot(owned_value(argument @state 'donated to a call') @prefix @state)
     let peeled:addr?=if argument in? borrowed peel_borrowed(argument @state) else none
     if peeled isnt? none return snapshot(expression(peeled @state) @prefix @state)
     let source=hir.node_at(state.input.nodes argument)
@@ -3741,7 +3801,7 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
             if view isnt? none return view
         }
     }
-    let value=snapshot(owned_value(argument @state) @prefix @state)
+    let value=snapshot(owned_value(argument @state 'passed to a call') @prefix @state)
     # A literal argument is static: nothing to release after the call.
     if (argument in? disposable or argument in? borrowed) and source isnt? hir.Place and not static_literal(argument state) and releasable(source.value_type @state) {temporary.push(OwnedLocal[value source.value_type])}
     return value
@@ -3891,7 +3951,10 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             let present_value=put(hir.ExpressedIdentifier[node.loc boolean present] @state)
             if not private {condition=intrinsic('__not__' [present_value] boolean node @state)}
             let supplied=put(hir.ExpressedIdentifier[node.loc type incoming] @state)
-            if private {supplied=copy_value(supplied argument.value_type node @state shared=whole)}
+            if private {
+                note_parameter_copy(argument boxed rebound mutated written node @state)
+                supplied=copy_value(supplied argument.value_type node @state shared=whole)
+            }
             let default=owned_value(argument.value @state)
             let arm=put(hir.IfArm[node.loc type present_value supplied] @state)
             let selected=put(hir.Flow[node.loc type [arm] default] @state)
@@ -3900,6 +3963,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         } else if private {
             let incoming=fresh('incoming' @state)
             arguments.push(hir.Param[incoming type position_only=argument.position_only])
+            note_parameter_copy(argument boxed rebound mutated written node @state)
             let value=copy_value(put(hir.ExpressedIdentifier[node.loc type incoming] @state) argument.value_type node @state shared=whole)
             if boxed {value=box_value(value argument.value_type node @state) type=types.primitive('int64' @state.type_nodes)}
             prologue.push(put(hir.Declare[node.loc void_type 'let' name type value argument.binding_id] @state))
@@ -3976,6 +4040,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.disposable_arguments=borrowed.disposable_arguments
     state.consumed_arguments=borrowed.consumed_arguments
     state.consumed_uses=borrowed.consumed_uses
+    state.borrow_rejections=borrowed.rejections
     state.cleanup_excluded=borrowed.escaping_places
     loop unit in state.capture_plan.functions.values {
         loop binding in unit.captures {state.cleanup_excluded.add(binding)}
@@ -4088,7 +4153,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     if state.problem isnt? none return state.problem
     loop function in state.generated {functions.push(function)}
     let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value] emit.Input[state.nodes state.type_nodes input.source_files])
-    return Result[normalized.program normalized.input]
+    return Result[normalized.program normalized.input state.copy_notes]
 }
 
 # C argv is process-lifetime byte storage. Describe each validated UTF-8
@@ -5462,7 +5527,7 @@ cleanup_return = (node:hir.Return @state:State):>addr => {
     if node.item isnt? none {
         let owner=return_owner(node.item state)
         if owner isnt? none {transferred=owner.value}
-        let value=if owner is? none owned_value(node.item @state) else expression(node.item @state)
+        let value=if owner is? none owned_value(node.item @state 'returned') else expression(node.item @state)
         let type=types.node_at(state.type_nodes hir.node_at(state.nodes value).value_type)
         if types.is_primitive(type 'void') or types.is_primitive(type 'never') {prefix.push(value)}
         else {result=snapshot(value @prefix @state)}

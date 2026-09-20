@@ -952,6 +952,7 @@ class _FlowLowering:
             size, _offsets = self._object_layout(item_type, item)
             cell = hir.ExpressedIdentifier(item.loc, 'int64', self._new_optional_name('flow_object'))
             prelude, source = self._extract_object_pointer(item)
+            self._note_copy('record', item_type, 'kept as a flow result', self._copy_reason(item), item.loc)
             return [*prelude, hir.Declare(item.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._object_allocation(item.loc, size)), *self._object_copy(cell, source, item_type, item.loc)], cell
         if self._is_string_valued(item.type):
             return self._kept_string_value(item)   # the flow's temporary keeps a call's result

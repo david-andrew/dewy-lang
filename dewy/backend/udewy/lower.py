@@ -828,6 +828,15 @@ class _Lowerer(
                         binding_id=param.binding_id,
                     )
                 )
+                if summary is None:
+                    reason = f"the effects of `{param.name}` are unknown"
+                elif summary.escapes:
+                    reason = f"the body keeps `{param.name}` beyond the call"
+                elif summary.rebinds:
+                    reason = f"the body rebinds `{param.name}`"
+                else:
+                    reason = f"the body writes the fields of `{param.name}`"
+                self._note_copy('record', param.type, f'copied on entry as `{param.name}`', reason, literal.loc)
                 parameter_prologue.extend(
                     self._object_copy(cell, incoming, param.type, literal.loc)
                 )
@@ -5673,6 +5682,7 @@ class _Lowerer(
         loc: Span,
     ) -> list[hir.AST]:
         if isinstance(type_, ty.ObjectType):
+            self._note_copy('record', type_, 'stored', self._copy_reason(value), loc)
             return self._object_copy(address, value, type_, loc)
         members = self._field_union_members(type_)
         if members is not None:

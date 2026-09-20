@@ -1,0 +1,24 @@
+Fact = type of [name:string values:array<int64> weight:int64]
+let lookup = (facts:dict<int64 Fact> id:int64):>Fact => {
+    if id in? facts {
+        let f = facts[id]
+        return f
+    }
+    return [name='' values=[] weight=0]
+}
+let first_name = (facts:array<Fact>):>string => {
+    if facts.length >? 0 {
+        const f = facts[0]
+        return f.name
+    }
+    return ''
+}
+let main = ():>int64 => {
+    let facts:dict<int64 Fact> = []
+    facts[1] = [name='a' values=[1 2 3] weight=4]
+    let xs:array<Fact> = [facts[1]]
+    let g = lookup(facts 1)
+    let h = g
+    h.weight = 5
+    return g.weight + h.weight + first_name(xs).length
+}

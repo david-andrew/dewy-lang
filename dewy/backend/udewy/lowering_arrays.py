@@ -2341,6 +2341,9 @@ class _ArrayLowering(_ArraySharing):
         if isinstance(source, hir.ExpressedIdentifier):
             reason = 'it is used again later, or is not a local that owns its storage' if source.binding_id is not None else 'it is not a local'
             self.move_notes.append(MoveNote(self.srcfile, source.loc, f'`{source.name}` is copied when {site}: {reason}', False))
+            self._note_copy('array', array_type, site, f'`{source.name}` {reason}', source.loc)
+        elif not self._array_expression_owns_fresh_storage(source):
+            self._note_copy('array', array_type, site, self._copy_reason(source), source.loc)
         # a literal or call result is a dying temporary: its element strings,
         # cells, and objects change owner rather than being cloned and lost
         fresh = self._array_expression_owns_fresh_storage(source)

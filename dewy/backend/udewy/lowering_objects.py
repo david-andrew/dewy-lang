@@ -12,7 +12,7 @@ from ...utils import dataclass_fields
 from ...reporting import Span
 from ...semantic import builtins, hir, ty
 from ...parser import t0
-from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, MoveNote, local_binding_key
+from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, CopyNote, MoveNote, local_binding_key
 from ...semantic.hir_display import type_to_dewy
 
 
@@ -346,6 +346,7 @@ class _ObjectLowering:
                 self._storage_routes_overlap(route, place)
                 for place in self._call_place_argument_routes(call, position)
             ):
+                self._note_copy('record', arg.type, 'passed to a call', 'another argument of the same call may write it', arg.loc)
                 prelude, value = self._clone_object_value(arg, arg.type)
                 return self._object_statement_temporary(prelude, value, arg.type, arg.loc)
         prelude, value = self._extract_object_pointer(arg)
@@ -719,6 +720,24 @@ class _ObjectLowering:
             self._int64_literal(loc, offset),
             loc,
         )
+
+    def _note_copy(self, kind: str, type_: ty.Type, site: str, reason: str, loc: Span) -> None:
+        """Record one aggregate copy for `dewy analyze` (see CopyNote)."""
+        name = type_to_dewy(type_)
+        if len(name) > 48:
+            name = name[:45] + '...'
+        self.copy_notes.append(CopyNote(self.srcfile, loc, reason, kind, name, site))
+
+    def _copy_reason(self, expr: hir.AST) -> str:
+        """Why the copied expression could not be borrowed or moved."""
+        expr = self._unwrap_transparent(expr)
+        if isinstance(expr, (hir.Index, hir.MemberAccess, hir.DictEntries, hir.DictLookup)):
+            return 'the value stays owned by its container, and nothing borrows it as a read-only view here'
+        if isinstance(expr, hir.ExpressedIdentifier):
+            return f'`{expr.name}` may be used again, and no last-use move applies to this kind of value yet'
+        if isinstance(expr, hir.FunctionCall):
+            return 'the call result is a borrowed view of its receiver'
+        return 'the expression reads storage that belongs to something else'
 
     def _object_copy(
         self,
@@ -1284,6 +1303,7 @@ class _ObjectLowering:
             expr=self._object_allocation(node.loc, size),
         )
         prelude, src = self._extract_object_pointer(node.expr)
+        self._note_copy('record', object_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)
         return [declaration, *prelude, *self._object_copy(cell, src, object_type, node.loc)]
 
     def _lower_object_assign(self, node: hir.Assign) -> list[hir.AST]:
@@ -1320,6 +1340,8 @@ class _ObjectLowering:
             fresh_destination = True
         prelude, src = self._extract_object_pointer(node.value)
         statements.extend(prelude)
+        if not self._object_expression_owns_fresh_storage(node.value):
+            self._note_copy('record', node.target.type, f'assigned to `{node.target.name}`', self._copy_reason(node.value), node.loc)
         statements.extend(self._replace_object_value(dest, src, node.target.type, node.loc,
                                                     fresh=fresh_destination,
                                                     move=self._object_expression_owns_fresh_storage(node.value)))
@@ -1353,6 +1375,8 @@ class _ObjectLowering:
             return self._replace_cell_value(address, value, members, loc, prepared=False)
         if isinstance(field_type, ty.ObjectType):
             prelude, source = self._extract_object_pointer(value)
+            if not self._object_expression_owns_fresh_storage(value):
+                self._note_copy('record', field_type, 'stored in a field', self._copy_reason(value), loc)
             return [*prelude, *self._replace_object_value(address, source, field_type, loc,
                                                         move=self._object_expression_owns_fresh_storage(value))]
         if isinstance(field_type, ty.ArrayType):

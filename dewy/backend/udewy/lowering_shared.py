@@ -257,11 +257,27 @@ class MoveNote:
 
 @dataclass(frozen=True)
 class CopyNote:
-    """One escape copy the lowering made — a string copied into the arena where it is stored — and why."""
+    """One dynamic aggregate copy the lowering decided, and why no borrow or move applied.
+
+    `kind` is 'record', 'array', 'cell' or 'string' (the escape copy of a
+    string into the arena); `site` names the kind of site (bound to `x`,
+    returned, passed to a call, ...). The native compiler reports the same
+    vocabulary (`CopyNote` in bootstrap/backend/udewy/lower.dewy).
+    """
 
     srcfile: SrcFile
     loc: Span
     message: str
+    kind: str = 'string'
+    type_name: str = 'string'
+    site: str = 'stored'
+
+    @property
+    def line(self) -> str:
+        """The machine-readable form `dewy analyze` prints before the excerpt."""
+        if self.kind == 'string':
+            return f'string copied when {self.site}: {self.message}'
+        return f'{self.kind} `{self.type_name}` copied when {self.site}: {self.message}'
 
 
 @dataclass(frozen=True)

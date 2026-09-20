@@ -4347,3 +4347,46 @@ code does (record copies, release dispatch), not in how each operation is
 spelled, so the next step is Phase 1.1 ownership rather than more emitter
 work.
 
+### Phase 1.1, first slice: every copy visible (2026-09-20)
+
+`dewy analyze` now lists every dynamic aggregate copy the lowering decided
+(records, arrays, union cells; strings keep their escape-copy notes) with
+the kind of site and the reason no borrow or move applied, in both
+compilers, as one machine-readable line per copy (`copy: path:row: kind
+`type` copied when site: reason`) followed by the source excerpt, and a
+summary line. `tools/copy_report.py` aggregates the lines by reason, site,
+type or file for either compiler. The native compiler's report on its own
+sources (`dewy/bootstrap/main.dewy`, prelude included) is the Phase 1.1
+budget baseline:
+
+| copies | records | arrays | cells |
+|---|---|---|---|
+| 7,910 | 5,956 | 987 | 967 |
+
+By reason (binding names collapsed):
+
+| copies | reason |
+|---|---|
+| 4,298 | the value may be used again, and no last-use move applies to records or cells |
+| 1,784 | the value stays owned by its container, and nothing borrows it as a read-only view |
+| 1,432 | not borrowed when passed: the callee exposes raw storage or is not known statically |
+| 195 | the expression reads storage that belongs to something else |
+| 73 | read from a temporary that is released after the read |
+| 68 | not borrowed when passed: the callee writes or keeps its parameter |
+| 60 | others (globals, parameters copied on entry, closures) |
+
+By site: 2,529 placed in a record literal, 2,502 passed to a call, 2,024
+kept for a cell or string operation, 362 bound to a local, 125 assigned,
+107 returned, 73 read from a temporary, 70 stored in a field. The most
+copied types are `Span` (1,250), `CacheMiss` (902), `Report`/`Error`
+(1,010) and the checker's lexical context record (408). Three mechanisms
+therefore cover almost everything: last-use moves for records and cells
+(the first row), read-only views of container elements (the second), and
+a borrow analysis that does not reject every callee that transitively
+touches raw storage (the third). The hosted compiler reports the same
+vocabulary; its counts differ where its analysis differs (it copies a
+`const` element read the native compiler borrows, and does not report
+record copies into array literals), which the parity tool does not gate.
+Rendering 7,910 excerpts through the native reporting library takes about
+200 s; the `copy:` lines alone are cheap, so the tool reads those.
+

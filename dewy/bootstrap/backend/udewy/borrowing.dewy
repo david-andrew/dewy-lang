@@ -342,7 +342,9 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
     if not opaque_only {loop id in graph.globals {initial.add(id)}}
     return propagate_ambient(initial (if value_boundaries graph.shared_callers else graph.callers))
 }
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[]]
+# `rejections` explains, per source binding, why its last considered use as
+# an argument was not borrowed (for `dewy analyze`).
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[]]
 
 # Ownership transfer at a value boundary. A parameter whose only use, on
 # every path and outside any loop, pushes it into an array or passes it on
@@ -545,6 +547,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let array_snapshots:set<addr>=set[]
     let result:dict<addr set<addr>>=[]
     let disposable:dict<addr set<addr>>=[]
+    let rejections:dict<addr string>=[]
     let safe_places:set<addr>=set[]
     let unsafe_places:set<addr>=set[]
     let pending:array<addr>=[root]
@@ -606,7 +609,12 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.add(pair.argument)}
                 else {retained.add(pair.argument)}
                 if direct not in? opaque and source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
-                else {rejected.add(pair.argument)}
+                else {
+                    rejected.add(pair.argument)
+                    if source isnt? none {
+                        rejections[source.binding]=if direct in? opaque 'the callee exposes raw storage or is not known statically' else if source.binding in? plan.globals 'it is a global' else if source.binding in? places and direct in? dirty 'it is a place argument of a call that writes' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
+                    }
+                }
                 position+=1
             }
             # A shared expression must be safe at every argument position,
@@ -627,5 +635,5 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             if source isnt? none {escaping.add(source.binding)}
         }
     }
-    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses]
+    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections]
 }

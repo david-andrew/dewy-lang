@@ -318,7 +318,9 @@ silently.
 1. **Every copy visible and budgeted.** Extend the existing kernel gates
    (`tests/python_misc/test_array_sharing.py` and its byte/allocation
    counters). Add a `dewy analyze` mode that lists every dynamic aggregate
-   copy with the reason the analysis could not borrow or move it. Treat
+   copy with the reason the analysis could not borrow or move it (landed
+   2026-09-20 in both compilers, with `tools/copy_report.py`; baseline on
+   the compiler's sources 7,910 copies, see `bootstrap/PHASE0_MEASUREMENTS.md`). Treat
    "unexplained copies on the compiler's own sources" as a CI metric with a
    fixed budget per kernel and per thousand lines. Regressions surface in a
    pull request, not at 25 GB in a self-build.

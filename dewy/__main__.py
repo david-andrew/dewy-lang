@@ -179,38 +179,35 @@ def analyze(argv: list[str]) -> int:
         codegen(srcfile, target=_resolve_target(args.target))   # checks and lowers: both reports come from that
 
     use_color = color_enabled(sys.stdout)
+    # One machine-readable line per copy, then the excerpt; the same shape as
+    # the native compiler's report (tools/copy_report.py reads both).
+    counts: dict[str, int] = {}
     for note in lower.last_copy_notes:
+        counts[note.kind] = counts.get(note.kind, 0) + 1
+        row, _column = note.srcfile.offset_to_row_col(note.loc.start)
+        print(f'copy: {note.srcfile.path}:{row + 1}: {note.line}')
         print(Info(
             srcfile=note.srcfile,
-            title='escape copy',
-            pointer_messages=[Pointer(span=note.loc, message=note.message)],
+            title='copy',
+            pointer_messages=[Pointer(span=note.loc, message=note.line)],
             use_color=use_color,
         ))
         print()
     for note in lower.last_move_notes:
+        if not note.moved:
+            continue
         print(Info(
             srcfile=note.srcfile,
-            title='move' if note.moved else 'copy',
+            title='move',
             pointer_messages=[Pointer(span=note.loc, message=note.message)],
             use_color=use_color,
         ))
         print()
     moves = sum(note.moved for note in lower.last_move_notes)
-    array_copies = sum(not note.moved for note in lower.last_move_notes)
-    copies = len(lower.last_copy_notes)
-    print(Info(
-        srcfile=srcfile,
-        title='copy report',
-        message=(
-            f'{moves} move{"s" if moves != 1 else ""} and {array_copies} cop{"ies" if array_copies != 1 else "y"} of owned arrays; '
-            + (
-                f'{copies} escape cop{"ies" if copies != 1 else "y"} of strings: the strings above are copied into the arena where they are stored; every other stored string is static or already arena-backed'
-                if copies
-                else 'no escape copies of strings: every stored string is static or already arena-backed'
-            )
-        ),
-        use_color=use_color,
-    ))
+    print(
+        f"copy report: {counts.get('record', 0)} record, {counts.get('array', 0)} array and {counts.get('cell', 0)} cell copies; "
+        f"{counts.get('string', 0)} string escape cop{'ies' if counts.get('string', 0) != 1 else 'y'}; {moves} move{'s' if moves != 1 else ''} of owned arrays"
+    )
     print()
     notes = representation.last_notes
     for note in notes:

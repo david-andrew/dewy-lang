@@ -1,4 +1,4 @@
-from reporting import Error
+from reporting import Error, Info, Pointer
 import p"options.dewy" as options
 import p"platform.dewy" as platform
 import p"cache.dewy" as cache
@@ -45,8 +45,23 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
     let compiled=build(request cwd library executable)
     if compiled is? Error return compiled
     if request.command =? 'analyze' {
-        # Representation notes currently retain source spans. Add ownership
-        # and cap decisions here as their lowering passes gain native reports.
+        # Every dynamic aggregate copy the lowering decided, with the reason
+        # no borrow or move applied, then the representation decisions.
+        let counts:dict<string int64>=[]
+        let files=compiled.lowered.input.source_files
+        loop note in compiled.lowered.notes {
+            let source=note.source
+            let message="{note.kind} `{note.type}` copied when {note.site}: {note.reason}"
+            # One machine-readable line per copy (`copy: path:row: ...`), then the excerpt.
+            if source isnt? none and source >=? 0 and source <? files.length {
+                let srcfile=files[source]
+                printl("copy: {srcfile.path}:{srcfile.first_row + srcfile.line_of(note.loc.start)}: {message}")
+                Info[srcfile=srcfile title='copy' pointers=[Pointer[note.loc message]]].render(srcfile)
+            } else {printl("copy: ?:0: {message}")}
+            printl('')
+            counts[note.kind]=counts.get(note.kind default=0)+1
+        }
+        printl("copy report: {counts.get('record' default=0)} record, {counts.get('array' default=0)} array and {counts.get('cell' default=0)} cell copies")
         loop note in compiled.analysis.notes {printl(note.message)}
         printl("{compiled.analysis.notes.length} big integer representation decisions")
         return 0

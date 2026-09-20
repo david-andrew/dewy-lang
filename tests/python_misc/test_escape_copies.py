@@ -56,3 +56,20 @@ def test_object_fields_follow_the_same_rule() -> None:
         'let main = ():>int64 => make("x").path.length + keep("y").path.length\n'
     )
     assert len(copies) == 1 and 'current frame' in copies[0]
+
+
+def test_copy_report_names_kind_site_and_reason(tmp_path):
+    """`dewy analyze` lists every record and array copy with a site and a reason.
+
+    The native compiler prints the same `copy:` lines (see
+    tests/python_misc/test_bootstrap_compiler_command.py).
+    """
+    from pathlib import Path
+    srcfile = SrcFile.from_path(Path(__file__).resolve().parents[2] / 'dewy/tests/copy_report.dewy')
+    codegen(srcfile, target='x86_64')
+    lines = [note.line for note in lower.last_copy_notes]
+    assert any(line.startswith('record `Fact` copied when bound to `f`: the value stays owned by its container') for line in lines)
+    assert any('bound to `h`: `g` may be used again' in line for line in lines)
+    assert any(line.startswith('string copied when stored') for line in lines)
+    kinds = {note.kind for note in lower.last_copy_notes}
+    assert kinds >= {'record', 'string'}
