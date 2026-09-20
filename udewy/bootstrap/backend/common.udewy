@@ -242,3 +242,265 @@ let be_default_scope_hook = ():>void => {
 let be_default_intrinsic_static_arg_indices = (name:int):>int => {
     return 0
 }
+
+# ----------------------------------------------------------------------------
+# Local register allocation (mirrors backend.common.LocalRegisterAllocator).
+#
+# Native backends keep every local in a frame slot and record each access as
+# a site: the code line that reads or writes the slot, the slot's dense key,
+# the other operand of the move, and whether it is a store. µDewy has no
+# address-of-local operation, so the recorded sites are every use of a slot.
+# At the end of a function the sites become live intervals; a linear scan
+# hands the busiest intervals registers and the backend rewrites their sites
+# into register moves. Slots keep their frame homes, so frame sizes and
+# alignment do not change.
+#
+# Intervals are line ranges. A value declared before a loop and touched
+# inside it lives around the whole loop; a slot allocated inside the loop
+# (its `let` is in the body) cannot be read before the body stores it again,
+# so such loops never widen its interval. Clobber lines (calls, syscalls)
+# split the register file: an interval spanning one may only use a register
+# the callee preserves; a call-free interval prefers a scratch register.
+# ----------------------------------------------------------------------------
+
+let la_sites:int = 0        # flattened (line, key, other, store)
+let la_scores:int = 0       # key -> use weight
+let la_alloc_lines:int = 0  # key -> line index at allocation (-1 unknown)
+let la_pinned:int = 0       # key -> true when the slot must stay in memory
+let la_loops:int = 0        # flattened (start line, end line) per finished loop
+let la_open_loops:int = 0   # stack of start lines of loops being emitted
+let la_clobbers:int = 0     # line indices that clobber scratch registers
+let la_assignment:int = 0   # key -> register string or 0, after la_assign
+
+let la_init = ():>void => {
+    if la_sites not=? 0 { return void }
+    la_sites = vec_new(64)
+    la_scores = vec_new(16)
+    la_alloc_lines = vec_new(16)
+    la_pinned = vec_new(16)
+    la_loops = vec_new(8)
+    la_open_loops = vec_new(4)
+    la_clobbers = vec_new(16)
+    la_assignment = vec_new(16)
+    return void
+}
+
+let la_begin_function = ():>void => {
+    la_init()
+    vec_set_len(la_sites 0)
+    vec_set_len(la_scores 0)
+    vec_set_len(la_alloc_lines 0)
+    vec_set_len(la_pinned 0)
+    vec_set_len(la_loops 0)
+    vec_set_len(la_open_loops 0)
+    vec_set_len(la_clobbers 0)
+    vec_set_len(la_assignment 0)
+    return void
+}
+
+let la_ensure_key = (key:int):>void => {
+    loop vec_len(la_scores) <=? key {
+        vec_push(la_scores 0)
+        vec_push(la_alloc_lines (-1))
+        vec_push(la_pinned false)
+    }
+    return void
+}
+
+let la_note_alloc = (key:int line:int):>void => {
+    la_ensure_key(key)
+    if vec_get(la_alloc_lines key) <? 0 { vec_set(la_alloc_lines key line) }
+    return void
+}
+
+let la_pin = (key:int):>void => {
+    la_ensure_key(key)
+    vec_set(la_pinned key true)
+    return void
+}
+
+let la_loop_depth = ():>int => {
+    return vec_len(la_open_loops)
+}
+
+let la_note_site = (line:int key:int other:int store:int):>void => {
+    la_ensure_key(key)
+    let depth:int = vec_len(la_open_loops)
+    if depth >? 3 { depth = 3 }
+    vec_set(la_scores key vec_get(la_scores key) + (1 << (3 * depth)))
+    vec_push(la_sites line)
+    vec_push(la_sites key)
+    vec_push(la_sites other)
+    vec_push(la_sites store)
+    return void
+}
+
+let la_begin_loop = (line:int):>void => {
+    vec_push(la_open_loops line)
+    return void
+}
+
+let la_end_loop = (line:int):>void => {
+    let start:int = vec_get(la_open_loops vec_len(la_open_loops) - 1)
+    vec_pop(la_open_loops)
+    vec_push(la_loops start)
+    vec_push(la_loops line)
+    return void
+}
+
+let la_note_clobber = (line:int):>void => {
+    vec_push(la_clobbers line)
+    return void
+}
+
+# Assign registers: `callee_regs` survive clobber lines, `caller_regs` do not.
+# Fills la_assignment (key -> register or 0).
+let la_assign = (callee_regs:int caller_regs:int):>void => {
+    let keys:int = vec_len(la_scores)
+    vec_set_len(la_assignment 0)
+    let starts:int = vec_new(keys)
+    let ends:int = vec_new(keys)
+    let counts:int = vec_new(keys)
+    let k:int = 0
+    loop k <? keys {
+        vec_push(la_assignment 0)
+        vec_push(starts (-1))
+        vec_push(ends (-1))
+        vec_push(counts 0)
+        k = k + 1
+    }
+    let i:int = 0
+    loop i <? vec_len(la_sites) {
+        let line:int = vec_get(la_sites i)
+        let key:int = vec_get(la_sites i + 1)
+        if vec_get(starts key) <? 0 or line <? vec_get(starts key) { vec_set(starts key line) }
+        if line >? vec_get(ends key) { vec_set(ends key line) }
+        vec_set(counts key vec_get(counts key) + 1)
+        i = i + 4
+    }
+    # Loops finish inner before outer, so one pass in finishing order widens
+    # an interval through every loop that carries it around a back edge.
+    let l:int = 0
+    loop l <? vec_len(la_loops) {
+        let loop_start:int = vec_get(la_loops l)
+        let loop_end:int = vec_get(la_loops l + 1)
+        k = 0
+        loop k <? keys {
+            if vec_get(counts k) >? 0 and vec_get(la_alloc_lines k) <? loop_start {
+                if vec_get(starts k) <=? loop_end and vec_get(ends k) >=? loop_start {
+                    if vec_get(starts k) >? loop_start { vec_set(starts k loop_start) }
+                    if vec_get(ends k) <? loop_end { vec_set(ends k loop_end) }
+                }
+            }
+            k = k + 1
+        }
+        l = l + 2
+    }
+    # Candidates in start order (insertion sort; functions have few locals).
+    let order:int = vec_new(keys)
+    k = 0
+    loop k <? keys {
+        if vec_get(counts k) >=? 2 and not vec_get(la_pinned k) {
+            let pos:int = vec_len(order)
+            vec_push(order k)
+            loop pos >? 0 and vec_get(starts vec_get(order pos - 1)) >? vec_get(starts k) {
+                vec_set(order pos vec_get(order pos - 1))
+                pos = pos - 1
+            }
+            vec_set(order pos k)
+        }
+        k = k + 1
+    }
+    let callee_count:int = vec_len(callee_regs)
+    let caller_count:int = vec_len(caller_regs)
+    let reg_count:int = callee_count + caller_count
+    # Register r (index into callee then caller pools) -> key holding it, or -1.
+    let holders:int = vec_new(reg_count)
+    let r:int = 0
+    loop r <? reg_count {
+        vec_push(holders (-1))
+        r = r + 1
+    }
+    let clobber_cursor:int = 0
+    let o:int = 0
+    loop o <? vec_len(order) {
+        let key:int = vec_get(order o)
+        let start:int = vec_get(starts key)
+        let end:int = vec_get(ends key)
+        # Expire intervals that ended before this one starts.
+        r = 0
+        loop r <? reg_count {
+            let holder:int = vec_get(holders r)
+            if holder >=? 0 and vec_get(ends holder) <? start { vec_set(holders r (-1)) }
+            r = r + 1
+        }
+        # Does a clobber line fall strictly inside the interval?
+        loop clobber_cursor <? vec_len(la_clobbers) and vec_get(la_clobbers clobber_cursor) <? start {
+            clobber_cursor = clobber_cursor + 1
+        }
+        let spans_clobber:int = clobber_cursor <? vec_len(la_clobbers) and vec_get(la_clobbers clobber_cursor) <? end
+        # Eligible registers: scratch first for call-free intervals, then saved.
+        let first:int = 0
+        let last:int = callee_count
+        if not spans_clobber { last = reg_count }
+        let chosen:int = -1
+        r = callee_count
+        if spans_clobber { r = 0 }
+        loop r <? last and chosen <? 0 {
+            if vec_get(holders r) <? 0 { chosen = r }
+            r = r + 1
+        }
+        if chosen <? 0 and not spans_clobber {
+            r = 0
+            loop r <? callee_count and chosen <? 0 {
+                if vec_get(holders r) <? 0 { chosen = r }
+                r = r + 1
+            }
+        }
+        if chosen <? 0 {
+            # Evict the least valuable active interval when this one is busier.
+            let victim:int = -1
+            let victim_score:int = 0
+            r = first
+            loop r <? last {
+                let holder:int = vec_get(holders r)
+                if holder >=? 0 {
+                    if victim <? 0 or vec_get(la_scores holder) <? victim_score {
+                        victim = r
+                        victim_score = vec_get(la_scores holder)
+                    }
+                }
+                r = r + 1
+            }
+            if victim >=? 0 and victim_score <? vec_get(la_scores key) {
+                vec_set(la_assignment vec_get(holders victim) 0)
+                chosen = victim
+            }
+        }
+        if chosen >=? 0 {
+            vec_set(holders chosen key)
+            if chosen <? callee_count { vec_set(la_assignment key vec_get(callee_regs chosen)) }
+            else { vec_set(la_assignment key vec_get(caller_regs chosen - callee_count)) }
+        }
+        o = o + 1
+    }
+    return void
+}
+
+# Rewrite every site of an assigned slot into a register move. `format_move`
+# is fn (src:int dst:int):>int producing the full code line.
+let la_rewrite = (code:int format_move:int):>void => {
+    let i:int = 0
+    loop i <? vec_len(la_sites) {
+        let register:int = vec_get(la_assignment vec_get(la_sites i + 1))
+        if register not=? 0 {
+            let other:int = vec_get(la_sites i + 2)
+            let line:int = 0
+            if vec_get(la_sites i + 3) { line = (@format_move)(other register) }
+            else { line = (@format_move)(register other) }
+            vec_set(code vec_get(la_sites i) line)
+        }
+        i = i + 4
+    }
+    return void
+}

@@ -627,11 +627,59 @@ let rv_declare_extern_function = (name:int num_params:int):>int => {
     return label_id
 }
 
+# Local register allocation (la_* in common.udewy). s1 and s5-s11 are
+# preserved by the ABI and are not expression scratch (s2-s4 cache
+# operands); t2-t4 are free between calls and syscalls.
+let rv_callee_local_regs:int = 0
+let rv_caller_local_regs:int = 0
+
+let rv_slot_key = (slot:int):>int => {
+    return (0 - slot - RV_SAVE_AREA_BYTES) >> 3
+}
+
+let rv_note_local_access = (slot:int other:int store:int):>void => {
+    la_note_site(vec_len(rv_current_fn_code) rv_slot_key(slot) other store)
+    return void
+}
+
+let rv_format_move = (src:int dst:int):>int => {
+    let bb:int = bb_new(32)
+    bb_push_str(bb "    mv ")
+    bb_push_str(bb dst)
+    bb_push_str(bb ", ")
+    bb_push_str(bb src)
+    return bb_finalize_as_string(bb)
+}
+
+# Debug builds retain their existing stack locations (as on x86-64).
+let rv_allocate_locals = ():>void => {
+    if be_debug_info { return void }
+    if rv_callee_local_regs =? 0 {
+        rv_callee_local_regs = vec_new(8)
+        vec_push(rv_callee_local_regs "s1")
+        vec_push(rv_callee_local_regs "s5")
+        vec_push(rv_callee_local_regs "s6")
+        vec_push(rv_callee_local_regs "s7")
+        vec_push(rv_callee_local_regs "s8")
+        vec_push(rv_callee_local_regs "s9")
+        vec_push(rv_callee_local_regs "s10")
+        vec_push(rv_callee_local_regs "s11")
+        rv_caller_local_regs = vec_new(3)
+        vec_push(rv_caller_local_regs "t2")
+        vec_push(rv_caller_local_regs "t3")
+        vec_push(rv_caller_local_regs "t4")
+    }
+    la_assign(rv_callee_local_regs rv_caller_local_regs)
+    la_rewrite(rv_current_fn_code rv_format_move)
+    return void
+}
+
 let rv_begin_function = (label_id:int name:int param_count:int is_main:int):>void => {
     let label:int = intmap_get(rv_fn_labels label_id)
     rv_saved_depth = 0
     rv_spilled_depth = 0
     rv_min_slot_offset = 0
+    la_begin_function()
     let code:int = vec_new(64)
     vec_push(rv_function_ids label_id)
     vec_push(rv_function_codes code)
@@ -654,11 +702,14 @@ let rv_begin_function = (label_id:int name:int param_count:int is_main:int):>voi
         let slot:int = rv_stack_offset
         vec_push(rv_param_slots slot)
         rv_note_slot(slot)
+        la_note_alloc(rv_slot_key(slot) vec_len(rv_current_fn_code))
         if i <? 8 {
+            rv_note_local_access(slot rv_arg_reg(i) true)
             rv_emit_mem("sd" rv_arg_reg(i) slot "s0")
         } else {
             let caller_off:int = (i - 8) * 8
             rv_emit_mem("ld" "t0" caller_off "s0")
+            rv_note_local_access(slot "t0" true)
             rv_emit_mem("sd" "t0" slot "s0")
         }
         rv_stack_offset = rv_stack_offset - 8
@@ -673,6 +724,8 @@ let rv_begin_function = (label_id:int name:int param_count:int is_main:int):>voi
 
 # Reconstruct the prologue: stack adjust + frame pointer setup + save regs.
 let rv_end_function = ():>void => {
+    # Sites index the body as emitted; rewrite before the prologue is spliced in.
+    rv_allocate_locals()
     let fb:int = rv_frame_bytes()
     # Build the prologue lines into a temporary vec.
     let saved:int = rv_current_fn_code
@@ -743,7 +796,7 @@ let rv_end_function = ():>void => {
 }
 
 let rv_load_param = (index:int):>void => {
-    rv_emit_mem("ld" "a0" vec_get(rv_param_slots index) "s0")
+    rv_load_local(vec_get(rv_param_slots index))
     return void
 }
 
@@ -751,11 +804,21 @@ let rv_alloc_local = ():>int => {
     let slot:int = rv_stack_offset
     rv_stack_offset = rv_stack_offset - 8
     rv_note_slot(slot)
+    la_note_alloc(rv_slot_key(slot) vec_len(rv_current_fn_code))
     return slot
 }
 
-let rv_load_local = (slot:int):>void => { rv_emit_mem("ld" "a0" slot "s0")  return void }
-let rv_store_local = (slot:int):>void => { rv_emit_mem("sd" "a0" slot "s0")  return void }
+let rv_load_local = (slot:int):>void => {
+    rv_note_local_access(slot "a0" false)
+    rv_emit_mem("ld" "a0" slot "s0")
+    return void
+}
+
+let rv_store_local = (slot:int):>void => {
+    rv_note_local_access(slot "a0" true)
+    rv_emit_mem("sd" "a0" slot "s0")
+    return void
+}
 
 let rv_push_const_i64 = (value:int):>void => { rv_emit_imm("li" "a0" value)  return void }
 let rv_push_void = ():>void => { rv_emit_indented("li a0, 0")  return void }
@@ -889,6 +952,7 @@ let rv_call_direct = (label_id:int num_args:int):>void => {
     let bb:int = bb_new(32 + str_len(label))
     bb_push_str(bb "    call ")
     bb_push_str(bb label)
+    la_note_clobber(vec_len(rv_current_fn_code))
     vec_push(rv_current_fn_code bb_finalize_as_string(bb))
     if stack_bytes >? 0 {
         rv_emit_3op("addi" "sp" "sp" int_to_str(stack_bytes))
@@ -898,6 +962,7 @@ let rv_call_direct = (label_id:int num_args:int):>void => {
 
 let rv_call_indirect = (num_args:int):>void => {
     let stack_bytes:int = rv_prepare_call_args(num_args "t5")
+    la_note_clobber(vec_len(rv_current_fn_code))
     rv_emit_indented("jalr ra, t5, 0")
     if stack_bytes >? 0 {
         rv_emit_3op("addi" "sp" "sp" int_to_str(stack_bytes))
@@ -908,6 +973,7 @@ let rv_call_indirect = (num_args:int):>void => {
 let rv_max_call_args = ():>int => { return -1 }
 
 let rv_syscall = (num_args:int):>void => {
+    la_note_clobber(vec_len(rv_current_fn_code))
     if num_args =? 1 {
         rv_emit_2op("mv" "a7" "a0")
         rv_emit_indented("ecall")
@@ -1013,6 +1079,7 @@ let rv_call_extern_fp_mixed = (tags:int):>void => {
         ai = ai - 1
     }
     rv_pop_saved_into("t5")
+    la_note_clobber(vec_len(rv_current_fn_code))
     rv_emit_indented("jalr ra, t5, 0")
     return void
 }
@@ -1075,6 +1142,7 @@ let rv_begin_loop = ():>void => {
     let e:int = rv_new_label("loop_end")
     vec_push(rv_loop_start_labels s)
     vec_push(rv_loop_end_labels e)
+    la_begin_loop(vec_len(rv_current_fn_code))
     rv_emit_label_str(s)
     return void
 }
@@ -1099,6 +1167,7 @@ let rv_end_loop = ():>void => {
     bb_push_str(bb s)
     vec_push(rv_current_fn_code bb_finalize_as_string(bb))
     rv_emit_label_str(e)
+    la_end_loop(vec_len(rv_current_fn_code))
     return void
 }
 

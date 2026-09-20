@@ -51,6 +51,16 @@ CORE_INTRINSIC_ARITIES: dict[str, int] = {
 }
 
 
+def wrap_i64(value: int) -> int:
+    """Spell a word constant as the native compiler does.
+
+    µDewy words are 64-bit two's complement; the hosted tokenizer keeps
+    Python integers, so 0xFFFF_FFFF_FFFF_FFFF and -1 must become the same
+    immediate before any backend prints it.
+    """
+    return ((value + (1 << 63)) & ((1 << 64) - 1)) - (1 << 63)
+
+
 @dataclass
 class RunOptions:
     split_wasm: bool = False
@@ -617,3 +627,149 @@ class Backend(ABC):
         Returns:
             Human-readable message about the output
         """
+
+
+class LocalRegisterAllocator:
+    """Live-interval register allocation for frame-slot locals.
+
+    Mirrors la_* in udewy/bootstrap/backend/common.udewy. Native backends keep
+    every local in a frame slot and record each access as a site: the code
+    line that reads or writes the slot, the slot's dense key, the other
+    operand of the move, and whether it is a store. µDewy has no
+    address-of-local operation, so the recorded sites are every use of a
+    slot. At the end of a function the sites become live intervals; a linear
+    scan hands the busiest intervals registers and the backend rewrites their
+    sites into register moves. Slots keep their frame homes, so frame sizes
+    and alignment do not change.
+
+    Intervals are line ranges. A value declared before a loop and touched
+    inside it lives around the whole loop; a slot allocated inside the loop
+    (its `let` is in the body) cannot be read before the body stores it
+    again, so such loops never widen its interval. Clobber lines (calls,
+    syscalls) split the register file: an interval spanning one may only use
+    a register the callee preserves; a call-free interval prefers a scratch
+    register.
+    """
+
+    def __init__(self) -> None:
+        self.begin_function()
+
+    def begin_function(self) -> None:
+        self._sites: list[tuple[int, int, str, bool]] = []
+        self._scores: list[int] = []
+        self._alloc_lines: list[int] = []
+        self._pinned: list[bool] = []
+        self._loops: list[tuple[int, int]] = []
+        self._open_loops: list[int] = []
+        self._clobbers: list[int] = []
+        self.assignment: list[str | None] = []
+
+    def _ensure_key(self, key: int) -> None:
+        while len(self._scores) <= key:
+            self._scores.append(0)
+            self._alloc_lines.append(-1)
+            self._pinned.append(False)
+
+    def note_alloc(self, key: int, line: int) -> None:
+        self._ensure_key(key)
+        if self._alloc_lines[key] < 0:
+            self._alloc_lines[key] = line
+
+    def pin(self, key: int) -> None:
+        self._ensure_key(key)
+        self._pinned[key] = True
+
+    def loop_depth(self) -> int:
+        return len(self._open_loops)
+
+    def note_site(self, line: int, key: int, other: str, store: bool) -> None:
+        self._ensure_key(key)
+        self._scores[key] += 1 << (3 * min(len(self._open_loops), 3))
+        self._sites.append((line, key, other, store))
+
+    def begin_loop(self, line: int) -> None:
+        self._open_loops.append(line)
+
+    def end_loop(self, line: int) -> None:
+        self._loops.append((self._open_loops.pop(), line))
+
+    def note_clobber(self, line: int) -> None:
+        self._clobbers.append(line)
+
+    def assign(self, callee_regs: list[str], caller_regs: list[str]) -> None:
+        """Fill `assignment` (key -> register or None)."""
+        keys = len(self._scores)
+        self.assignment = [None] * keys
+        starts = [-1] * keys
+        ends = [-1] * keys
+        counts = [0] * keys
+        for line, key, _other, _store in self._sites:
+            if starts[key] < 0 or line < starts[key]:
+                starts[key] = line
+            if line > ends[key]:
+                ends[key] = line
+            counts[key] += 1
+        # Loops finish inner before outer, so one pass in finishing order
+        # widens an interval through every loop that carries it around a
+        # back edge.
+        for loop_start, loop_end in self._loops:
+            for k in range(keys):
+                if counts[k] > 0 and self._alloc_lines[k] < loop_start:
+                    if starts[k] <= loop_end and ends[k] >= loop_start:
+                        starts[k] = min(starts[k], loop_start)
+                        ends[k] = max(ends[k], loop_end)
+        order = sorted(
+            (k for k in range(keys) if counts[k] >= 2 and not self._pinned[k]),
+            key=lambda k: starts[k],
+        )
+        callee_count = len(callee_regs)
+        reg_count = callee_count + len(caller_regs)
+        holders = [-1] * reg_count
+        clobber_cursor = 0
+        for key in order:
+            start = starts[key]
+            end = ends[key]
+            for r in range(reg_count):
+                if holders[r] >= 0 and ends[holders[r]] < start:
+                    holders[r] = -1
+            while clobber_cursor < len(self._clobbers) and self._clobbers[clobber_cursor] < start:
+                clobber_cursor += 1
+            spans_clobber = clobber_cursor < len(self._clobbers) and self._clobbers[clobber_cursor] < end
+            last = callee_count if spans_clobber else reg_count
+            chosen = -1
+            for r in range(0 if spans_clobber else callee_count, last):
+                if holders[r] < 0:
+                    chosen = r
+                    break
+            if chosen < 0 and not spans_clobber:
+                for r in range(callee_count):
+                    if holders[r] < 0:
+                        chosen = r
+                        break
+            if chosen < 0:
+                victim = -1
+                victim_score = 0
+                for r in range(last):
+                    holder = holders[r]
+                    if holder >= 0 and (victim < 0 or self._scores[holder] < victim_score):
+                        victim = r
+                        victim_score = self._scores[holder]
+                if victim >= 0 and victim_score < self._scores[key]:
+                    self.assignment[holders[victim]] = None
+                    chosen = victim
+            if chosen >= 0:
+                holders[chosen] = key
+                if chosen < callee_count:
+                    self.assignment[key] = callee_regs[chosen]
+                else:
+                    self.assignment[key] = caller_regs[chosen - callee_count]
+
+    def rewrite(self, code: list[str], format_move) -> None:
+        """Rewrite every site of an assigned slot into a register move.
+
+        `format_move(src, dst)` produces the full code line.
+        """
+        for line, key, other, store in self._sites:
+            register = self.assignment[key]
+            if register is not None:
+                code[line] = format_move(other, register) if store else format_move(register, other)

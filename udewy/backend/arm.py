@@ -8,7 +8,7 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t1
-from .common import Backend, CORE_INTRINSIC_ARITIES, RunOptions
+from .common import Backend, CORE_INTRINSIC_ARITIES, LocalRegisterAllocator, RunOptions, wrap_i64
 from .linux import LINUX_SYSCALL_INTRINSIC_ARITIES, linux_builtin_constants
 
 class ArmBackend(Backend):
@@ -60,6 +60,7 @@ class ArmBackend(Backend):
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []
         self._loop_stack: list[tuple[str, str]] = []
+        self._locals = LocalRegisterAllocator()
         
         # Symbol tracking
         self._fn_labels: dict[int, str] = {}
@@ -416,12 +417,42 @@ class ArmBackend(Backend):
         self._extern_symbols.add(name)
         return label_id
     
+    # Local register allocation: x19 and x24-x28 are preserved by the ABI and
+    # are not expression scratch (x20-x23 cache operands); x11-x15 are free
+    # between calls and syscalls.
+    _CALLEE_LOCAL_REGS = ["x19", "x24", "x25", "x26", "x27", "x28"]
+    _CALLER_LOCAL_REGS = ["x11", "x12", "x13", "x14", "x15"]
+
+    def _slot_key(self, slot: int) -> int:
+        return (-slot - 16) >> 3
+
+    def _note_local_access(self, slot: int, other: str, store: bool) -> None:
+        """Slots beyond the single-instruction offset range keep their frame homes."""
+        assert self._current_fn_code is not None
+        if self._frame_slot_operand(slot) is not None:
+            self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), other, store)
+        else:
+            self._locals.pin(self._slot_key(slot))
+
+    def _note_clobber(self) -> None:
+        assert self._current_fn_code is not None
+        self._locals.note_clobber(len(self._current_fn_code))
+
+    def _allocate_locals(self) -> None:
+        """Debug builds retain their existing stack locations (as on x86-64)."""
+        if self.debug_info:
+            return
+        assert self._current_fn_code is not None
+        self._locals.assign(self._CALLEE_LOCAL_REGS, self._CALLER_LOCAL_REGS)
+        self._locals.rewrite(self._current_fn_code, lambda src, dst: f'    mov {dst}, {src}')
+
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""
         label = self._fn_labels[label_id]
         self._saved_depth = 0
         self._spilled_depth = 0
         self._min_slot_offset = 0
+        self._locals.begin_function()
         
         self._current_fn_code = []
         self._function_code.append((label_id, self._current_fn_code))
@@ -451,13 +482,16 @@ class ArmBackend(Backend):
             slot = self._stack_offset
             self._param_slots.append(slot)
             self._note_slot(slot)
+            self._locals.note_alloc(self._slot_key(slot), len(self._current_fn_code))
             
             if i < 8:
+                self._note_local_access(slot, self._ARG_REGS[i], True)
                 self._store_frame_slot(self._ARG_REGS[i], slot)
             else:
                 # Load from caller's stack frame
                 caller_offset = 96 + (i - 8) * 8
                 self._load_frame_slot("x9", caller_offset)
+                self._note_local_access(slot, "x9", True)
                 self._store_frame_slot("x9", slot)
             
             self._stack_offset -= 8
@@ -467,6 +501,8 @@ class ArmBackend(Backend):
     def end_function(self) -> None:
         """End function definition."""
         assert self._current_fn_code is not None
+        # Sites index the body as emitted; rewrite before the prologue is spliced in.
+        self._allocate_locals()
         local_bytes = self._local_area_bytes()
         self._current_fn_code[self._frame_setup_index:self._frame_setup_index + 1] = (
             self._sp_adjust_instrs("sub", local_bytes)
@@ -490,22 +526,25 @@ class ArmBackend(Backend):
     
     def load_param(self, index: int) -> None:
         """Push parameter value onto the value stack."""
-        slot = self._param_slots[index]
-        self._load_frame_slot("x0", slot)
+        self.load_local(self._param_slots[index])
     
     def alloc_local(self) -> int:
         """Allocate a local variable slot."""
         slot = self._stack_offset
         self._stack_offset -= 8
         self._note_slot(slot)
+        assert self._current_fn_code is not None
+        self._locals.note_alloc(self._slot_key(slot), len(self._current_fn_code))
         return slot
 
     def load_local(self, slot: int) -> None:
         """Push local variable value onto the value stack."""
+        self._note_local_access(slot, "x0", False)
         self._load_frame_slot("x0", slot)
 
     def store_local(self, slot: int) -> None:
         """Pop value from stack and store to local variable."""
+        self._note_local_access(slot, "x0", True)
         self._store_frame_slot("x0", slot)
     
     # ========================================================================
@@ -514,6 +553,7 @@ class ArmBackend(Backend):
     
     def push_const_i64(self, value: int) -> None:
         """Push a 64-bit integer constant onto the value stack."""
+        value = wrap_i64(value)
         if 0 <= value <= 65535:
             self._emit(f"mov x0, #{value}")
         elif -65536 <= value < 0:
@@ -657,12 +697,12 @@ class ArmBackend(Backend):
         self._emit("cmp x9, x10")
         self._emit(f"bne {do_sdiv}")
         self._emit(f"b {done}")
-        self._emit(f"{do_sdiv}:")
+        self._emit_label(do_sdiv)
         self._emit("sdiv x0, x0, x9")
         self._emit(f"b {done}")
-        self._emit(f"{div_zero}:")
+        self._emit_label(div_zero)
         self._emit("mov x0, #-1")
-        self._emit(f"{done}:")
+        self._emit_label(done)
 
     def _emit_signed_mod(self) -> None:
         """x0=lhs, x9=rhs -> lhs % rhs (RISC-V rem semantics)."""
@@ -679,40 +719,36 @@ class ArmBackend(Backend):
         self._emit(f"bne {do_sdiv}")
         self._emit("mov x0, #0")
         self._emit(f"b {done}")
-        self._emit(f"{do_sdiv}:")
+        self._emit_label(do_sdiv)
         self._emit("sdiv x10, x0, x9")
         self._emit("msub x0, x10, x9, x0")
         self._emit(f"b {done}")
-        self._emit(f"{mod_zero}:")
-        self._emit(f"{done}:")
+        self._emit_label(mod_zero)
+        self._emit_label(done)
 
     def _emit_unsigned_udiv(self) -> None:
         """x0=lhs, x9=rhs -> unsigned quotient (RISC-V divu semantics)."""
         div_zero = self._new_label("udiv_zero")
         done = self._new_label("udiv_done")
-        do_udiv = self._new_label("udiv_div")
         self._emit("cmp x9, #0")
         self._emit(f"beq {div_zero}")
-        self._emit(f"{do_udiv}:")
         self._emit("udiv x0, x0, x9")
         self._emit(f"b {done}")
-        self._emit(f"{div_zero}:")
+        self._emit_label(div_zero)
         self._emit("mov x0, #-1")
-        self._emit(f"{done}:")
+        self._emit_label(done)
 
     def _emit_unsigned_mod(self) -> None:
         """x0=lhs, x9=rhs -> unsigned remainder (RISC-V remu semantics)."""
         mod_zero = self._new_label("umod_zero")
         done = self._new_label("umod_done")
-        do_udiv = self._new_label("umod_div")
         self._emit("cmp x9, #0")
         self._emit(f"beq {mod_zero}")
-        self._emit(f"{do_udiv}:")
         self._emit("udiv x10, x0, x9")
         self._emit("msub x0, x10, x9, x0")
         self._emit(f"b {done}")
-        self._emit(f"{mod_zero}:")
-        self._emit(f"{done}:")
+        self._emit_label(mod_zero)
+        self._emit_label(done)
 
     def unsigned_idiv(self) -> None:
         """Unsigned division. Stack: [left right] -> quotient."""
@@ -756,6 +792,7 @@ class ArmBackend(Backend):
         """Call a function directly by label."""
         stack_bytes = self._prepare_call_args(num_args)
         label = self._fn_labels[label_id]
+        self._note_clobber()
         self._emit(f"bl {label}")
         if stack_bytes > 0:
             self._emit(f"add sp, sp, #{stack_bytes}")
@@ -763,6 +800,7 @@ class ArmBackend(Backend):
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via pointer."""
         stack_bytes = self._prepare_call_args(num_args, "x9")
+        self._note_clobber()
         self._emit("blr x9")
         if stack_bytes > 0:
             self._emit(f"add sp, sp, #{stack_bytes}")
@@ -772,6 +810,7 @@ class ArmBackend(Backend):
     
     def syscall(self, num_args: int) -> None:
         """Invoke a syscall using svc #0."""
+        self._note_clobber()
         # Args pushed in order: syscall_num, arg1, arg2, ...
         # Last arg is in x0, rest on stack (syscall_num is deepest)
         # Need: x8=syscall_num, x0-x5=args
@@ -885,6 +924,7 @@ class ArmBackend(Backend):
                 self._pop_saved_into("x0")
 
         self._pop_saved_into("x9")
+        self._note_clobber()
         self._emit("blr x9")
 
     def _mixed_extern_type_tags(self, name: str, intrinsic_data: object | None) -> list[int]:
@@ -936,6 +976,8 @@ class ArmBackend(Backend):
         start_label = self._new_label("loop_start")
         end_label = self._new_label("loop_end")
         self._loop_stack.append((start_label, end_label))
+        assert self._current_fn_code is not None
+        self._locals.begin_loop(len(self._current_fn_code))
         self._emit_label(start_label)
     
     def begin_loop_body(self) -> None:
@@ -968,6 +1010,8 @@ class ArmBackend(Backend):
         start_label, end_label = self._loop_stack.pop()
         self._emit(f"b {start_label}")
         self._emit_label(end_label)
+        assert self._current_fn_code is not None
+        self._locals.end_loop(len(self._current_fn_code))
     
     def emit_break(self) -> None:
         """Emit a break statement."""

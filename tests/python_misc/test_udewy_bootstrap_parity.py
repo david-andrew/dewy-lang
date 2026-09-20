@@ -487,3 +487,37 @@ let main = ():>int => {
                                 env={**environ, 'PYTHONPATH': str(REPO_ROOT)})
         assert result.returncode != 0
         assert 'missing' in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'arm', 'riscv'])
+@pytest.mark.parametrize('debug_info', [True, False])
+@pytest.mark.parametrize('fixture', [
+    'test_local_registers.udewy', 'test_cached_operands.udewy', 'test_immediate_operands.udewy',
+    'test_intrinsic_operands.udewy', 'test_address_displacements.udewy', 'test_alloca_spills.udewy',
+])
+def test_native_target_assembly_matches_between_compilers(bootstrap_binary, tmp_path, target, debug_info, fixture):
+    """Both compilers emit the same instructions for every native register target.
+
+    The comparison is text: both compilers write the assembly before they look
+    for a cross toolchain, so no assembler or emulator is needed. Blank lines
+    are ignored (the native emitter ends its text with one).
+    """
+    source = (REPO_ROOT / 'udewy/tests' / fixture).read_text()
+    texts = []
+    for name, compiler in [('hosted', ['python', '-m', 'udewy']), ('native', [str(bootstrap_binary)])]:
+        work = tmp_path / name
+        work.mkdir()
+        src_path = work / 'smoke.udewy'
+        src_path.write_text(source)
+        env = {**environ, 'PYTHONPATH': str(REPO_ROOT)}
+        subprocess.run(
+            compiler + ['-c', '--target', target] + ([] if debug_info else ['--no-debug-info']) + [str(src_path)],
+            cwd=work, check=False, env=env, capture_output=True,
+        )
+        assembly = work / '__dewycache__' / 'smoke.s'
+        assert assembly.exists(), f'{name} wrote no assembly for {target}'
+        # Debug metadata names the source file; the two compilers work in
+        # different directories.
+        text = assembly.read_text().replace(str(work), '<work>')
+        texts.append([line for line in text.splitlines() if line.strip()])
+    assert texts[0] == texts[1]

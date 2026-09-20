@@ -956,6 +956,37 @@ Each backend implements the parser protocol and provides:
 4. **Imported source provenance** - Optional recognition of backend-owned library modules
 5. **Memory model** - Address space layout and constraints
 
+### Local Register Allocation
+
+The native register backends (x86_64, RISC-V, AArch64) share one allocation
+pass (`LocalRegisterAllocator` in `udewy/backend/common.py`, `la_*` in
+`udewy/bootstrap/backend/common.udewy`). Every local starts life in a frame
+slot; the backend records each access as a *site* (the code line, the slot's
+dense key, the other operand of the move, and whether it is a store), the
+line at which the slot was allocated, the extent of every loop, and every
+*clobber* line (calls, syscalls, and on x86_64 the last parameter store,
+because the incoming argument registers stay live until then). At the end
+of the function the sites become live intervals over line numbers:
+
+- an interval that touches a loop which began after the slot's allocation
+  is widened over the whole loop (the value travels around the back edge);
+  a slot allocated inside the loop body is stored before every read of an
+  iteration, so such loops never widen it;
+- an interval that crosses a clobber may only take a register the callee
+  preserves; a call-free interval prefers a scratch register the emitter
+  never uses, and falls back to a preserved one;
+- when the eligible registers are all held, the busiest interval wins
+  (loop depth weights each access by 8^depth, capped at depth 3);
+- slots with a single site, and slots whose access needs more than one
+  instruction (AArch64 offsets beyond the immediate range), stay in memory.
+
+µDewy has no address-of-local operation, so the recorded sites are every use
+of a slot and no alias analysis is needed. Assigned sites are rewritten into
+register moves; slots keep their frame homes, so frame sizes, alignment and
+calling conventions do not change. Debug builds keep every local in its slot.
+Register budgets: x86_64 `rbx`/`r15` preserved + `r8`/`r9`/`r11` scratch;
+RISC-V `s1`, `s5`-`s11` + `t2`-`t4`; AArch64 `x19`, `x24`-`x28` + `x11`-`x15`.
+
 ### Intrinsic Categories
 
 Intrinsics and backend-provided names fall into tiers. The tiers matter for portability, for self-hosting, and for thinking about what a minimal trusted-base implementation would need to reproduce.
@@ -1283,6 +1314,7 @@ The x86_64 backend still follows udewy's logical value-stack model, but it does 
 - A small prefix of the logical saved-value stack is cached in callee-saved registers before falling back to spill slots on the real stack.
 - When a call has more than 6 arguments, the extra arguments are written into an outbound stack-argument area and the first 6 are placed in `rdi`, `rsi`, `rdx`, `rcx`, `r8`, and `r9`.
 - Call lowering also keeps the machine stack aligned to the ABI-required 16-byte boundary.
+- Busy locals live in `rbx`/`r15` (across calls) or `r8`/`r9`/`r11` (between calls) through the shared local register allocation described in [Backend Architecture](#local-register-allocation); ordinary builds only.
 
 ## A.2.2 `__alloca__` Alignment
 
@@ -1435,6 +1467,7 @@ The RISC-V backend uses the same basic strategy as x86_64: it preserves udewy's 
 - A small prefix of saved values is cached in callee-saved registers before deeper values spill to the real stack.
 - Calls place the first 8 arguments in `a0`-`a7` and marshal any remaining arguments into an outbound stack area.
 - Call lowering maintains the required 16-byte stack alignment at the actual call instruction.
+- Busy locals live in `s1`, `s5`-`s11` (across calls) or `t2`-`t4` (between calls) through the shared local register allocation; ordinary builds only.
 
 ## B.2.2 `__alloca__` Alignment
 
@@ -1557,6 +1590,7 @@ The AArch64 backend also keeps the parser-visible stack model, but uses register
 - A small prefix of saved values is cached in callee-saved registers, with deeper values spilling to stack slots.
 - Calls place the first 8 arguments in `x0`-`x7` and place overflow arguments in the outbound call stack area.
 - Because AArch64 already requires 16-byte stack alignment and the backend spills in 16-byte slots, this path stays naturally aligned.
+- Busy locals live in `x19`, `x24`-`x28` (across calls) or `x11`-`x15` (between calls) through the shared local register allocation; slots beyond the single-instruction offset range stay in memory; ordinary builds only.
 
 ## C.2.2 `__alloca__` Alignment
 

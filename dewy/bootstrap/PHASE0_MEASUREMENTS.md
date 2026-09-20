@@ -4225,3 +4225,52 @@ backend 2.4-2.5 s, peak 2,631,044 KiB. From the 29.3 MB start of the day
 the emitted text is down 41%, peak memory 14%, and the backend's share of
 the build from 2.8 s to 2.4 s.
 
+### Shared local register allocation for the direct route (2026-09-19)
+
+The two-slot whole-function promotion in the x86-64 µDewy backends is
+replaced by one allocation pass shared by every native register backend
+(`LocalRegisterAllocator` in `udewy/backend/common.py`, `la_*` in
+`udewy/bootstrap/backend/common.udewy`; the design is in udewy/README.md
+under Backend Architecture). Backends record slot accesses, allocation
+lines, loop extents and clobber lines; the pass builds line-number live
+intervals (widened over loops that began before the slot was allocated),
+runs a linear scan with a callee-saved pool for call-crossing intervals and
+a scratch pool for call-free ones, evicts quieter intervals for busier ones,
+and the backend rewrites the sites into register moves. Budgets: x86-64
+`rbx`/`r15` + `r8`/`r9`/`r11`; RISC-V `s1`,`s5`-`s11` + `t2`-`t4`; AArch64
+`x19`,`x24`-`x28` + `x11`-`x15`. Debug builds keep every slot in memory.
+One correctness detail found by the fixtures: the incoming argument
+registers stay live through the last parameter store, so that line is a
+clobber (a parameter slot may not take `r8`/`r9` while a later parameter is
+still read from them).
+
+Verification: hosted and native µDewy compilers produce identical assembly
+for the seven backend fixtures on x86-64, AArch64 and RISC-V in both debug
+modes. Three older text drifts surfaced by that check are aligned on the
+way: the native x86-64 spill spelling (`0(%rsp)` vs `(%rsp)`), unused
+division labels in the hosted x86-64 and AArch64 emitters, and word
+constants above 2^63 that the hosted backends printed unwrapped (`li a0,
+18446744073709551615` where the native compiler prints `-1`; now every
+hosted backend spells constants through `wrap_i64`). The hosted-built and
+self-built µDewy compilers
+are byte-identical; the six execution fixtures pass on x86-64, and the four
+that are not x86-specific pass on AArch64 under qemu-aarch64 (RISC-V has no
+emulator here and is verified by text parity only). Dewy fixtures with the
+direct-built compiler: 96/4 as before, and the direct-built compiler
+rebuilds itself byte-identically.
+
+Direct-built self-build (x86-64 target, alternating pairs, same sources):
+old promotion 57.36/57.17 s, allocator 53.52/53.45 s (about 7% faster);
+peak 2.64 GB unchanged; frontend 24.7 to 23.0 s, lowering 13.6 to 12.7 s.
+Sampling the old direct-built compiler shows why the gain is bounded:
+about two thirds of its self-build time sits in two generated helper
+families, the field-by-field copy of one large record type (33%) and the
+release dispatch over ~30 record tags (31%), both straight-line or
+if-chain code where a register-homed local replaces a frame load with a
+register move instruction for instruction. The C-built compiler spends no
+visible time there. The next direct-route levers are therefore fewer
+instructions per operation, not fewer memory operands: conditions that
+branch on flags instead of materializing a boolean, locals used directly
+as ALU operands instead of through `rax`, and, on the lowering side, not
+copying a record to read one of its fields (Phase 1.1 ownership).
+

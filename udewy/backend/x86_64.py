@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .. import t1
 from ..third_party.sdl import desktop_launch
-from .common import Backend, CORE_INTRINSIC_ARITIES, RunOptions
+from .common import Backend, CORE_INTRINSIC_ARITIES, LocalRegisterAllocator, RunOptions, wrap_i64
 from .linux import LINUX_SYSCALL_INTRINSIC_ARITIES, linux_builtin_constants
 
 def _sleb128_bytes(value: int) -> list[int]:
@@ -63,7 +63,10 @@ class X86_64Backend(Backend):
     """
     _ARG_REGS = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
     _VALUE_CACHE_REGS = ["%r12", "%r13", "%r14"]
-    _LOCAL_REGS = ["%rbx", "%r15"]
+    # Local register allocation: %rbx/%r15 are preserved by the ABI and are
+    # not expression scratch; %r8/%r9/%r11 are free between calls and syscalls.
+    _CALLEE_LOCAL_REGS = ["%rbx", "%r15"]
+    _CALLER_LOCAL_REGS = ["%r8", "%r9", "%r11"]
     _REGISTER_SUFFIXES = {64: '', 32: 'd', 16: 'w', 8: 'b'}
     _STORE_OPERATIONS = {64: 'movq', 32: 'movl', 16: 'movw', 8: 'movb'}
     _FIXED_FRAME_BYTES = 48
@@ -93,8 +96,7 @@ class X86_64Backend(Backend):
         self._spilled_depth: int = 0
         self._min_slot_offset: int = 0
         self._frame_subtract_index: int = -1
-        self._local_sites: dict[int, list[tuple[int, str, bool]]] = {}
-        self._local_scores: dict[int, int] = {}
+        self._locals = LocalRegisterAllocator()
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
@@ -440,8 +442,7 @@ class X86_64Backend(Backend):
         self._saved_depth = 0
         self._spilled_depth = 0
         self._min_slot_offset = 0
-        self._local_sites = {}
-        self._local_scores = {}
+        self._locals.begin_function()
         
         self._current_fn_code = []
         self._function_code.append((label_id, self._current_fn_code))
@@ -480,6 +481,7 @@ class X86_64Backend(Backend):
             slot = self._stack_offset
             self._param_slots.append(slot)
             self._note_slot(slot)
+            self._locals.note_alloc(self._slot_key(slot), len(self._current_fn_code))
             
             if i < 6:
                 self._note_local_access(slot, self._ARG_REGS[i], True)
@@ -491,6 +493,10 @@ class X86_64Backend(Backend):
                 self._emit(f"movq %rax, {slot}(%rbp)")
             
             self._stack_offset -= 8
+        # Incoming argument registers stay live through the last parameter
+        # store: an interval that crosses it may not take one of them.
+        if param_count > 0:
+            self._locals.note_clobber(len(self._current_fn_code) - 1)
         
         self._current_fn_epilogue = f".L{label}_epilogue"
     
@@ -498,7 +504,7 @@ class X86_64Backend(Backend):
         """End function definition."""
         assert self._current_fn_code is not None
         self._end_debug_function()
-        self._promote_locals()
+        self._allocate_locals()
         frame_bytes = self._frame_bytes()
         self._current_fn_code[self._frame_subtract_index] = f"    subq ${frame_bytes}, %rsp"
         self._emit_label(self._current_fn_epilogue)
@@ -742,37 +748,34 @@ class X86_64Backend(Backend):
         """Push parameter value onto the value stack."""
         self.load_local(self._param_slots[index])
 
+    def _slot_key(self, slot: int) -> int:
+        return (-slot - self._FIXED_FRAME_BYTES) >> 3
+
     def _note_local_access(self, slot: int, other: str, store: bool) -> None:
         if self.debug_info:
             return
         assert self._current_fn_code is not None
-        self._local_sites.setdefault(slot, []).append((len(self._current_fn_code), other, store))
-        # A bounded loop-depth weight favors hot cursors over one-use
-        # temporaries. Ties favor earlier slots, independently of map order.
-        weight = 1 << (3 * min(len(self._loop_stack), 3))
-        self._local_scores[slot] = self._local_scores.get(slot, 0) + weight
+        self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), other, store)
 
-    def _promote_locals(self) -> None:
-        """Keep two frequently used whole-function locals in saved registers.
+    def _allocate_locals(self) -> None:
+        """Keep busy locals in registers (see LocalRegisterAllocator).
 
-        µDewy exposes no address-of-local operation. Every access to these
-        slots is recorded here, so they need no memory home or alias checks.
-        Both registers are already saved by the ABI prologue and are unused
-        by the expression stack, calls, and intrinsics. Debug builds retain
-        their existing stack locations. Frame size/alignment stay unchanged.
+        Debug builds retain their existing stack locations; frame sizes and
+        __alloca__ alignment do not change either way.
         """
+        if self.debug_info:
+            return
         assert self._current_fn_code is not None
-        selected = sorted(self._local_scores, key=lambda slot: (-self._local_scores[slot], -slot))[:2]
-        for slot, register in zip(selected, self._LOCAL_REGS):
-            for index, other, store in self._local_sites[slot]:
-                source, destination = (other, register) if store else (register, other)
-                self._current_fn_code[index] = f'    movq {source}, {destination}'
+        self._locals.assign(self._CALLEE_LOCAL_REGS, self._CALLER_LOCAL_REGS)
+        self._locals.rewrite(self._current_fn_code, lambda src, dst: f'    movq {src}, {dst}')
     
     def alloc_local(self) -> int:
         """Allocate a local variable slot."""
         slot = self._stack_offset
         self._stack_offset -= 8
         self._note_slot(slot)
+        assert self._current_fn_code is not None
+        self._locals.note_alloc(self._slot_key(slot), len(self._current_fn_code))
         return slot
     
     def load_local(self, slot: int) -> None:
@@ -791,7 +794,7 @@ class X86_64Backend(Backend):
     
     def push_const_i64(self, value: int) -> None:
         """Push a 64-bit integer constant onto the value stack."""
-        self._emit(f"movq ${value}, %rax")
+        self._emit(f"movq ${wrap_i64(value)}, %rax")
     
     def push_void(self) -> None:
         """Push void (zero) onto the value stack."""
@@ -967,13 +970,13 @@ class X86_64Backend(Backend):
         self._emit("cmpq $-1, %rcx")
         self._emit(f"jne {do_idiv}")
         self._emit(f"jmp {done}")
-        self._emit(f"{do_idiv}:")
+        self._emit_label(do_idiv)
         self._emit("cqto")
         self._emit("idivq %rcx")
         self._emit(f"jmp {done}")
-        self._emit(f"{div_zero}:")
+        self._emit_label(div_zero)
         self._emit("movq $-1, %rax")
-        self._emit(f"{done}:")
+        self._emit_label(done)
 
     def _emit_signed_mod(self) -> None:
         """rax=lhs, rcx=rhs -> rax = lhs % rhs (RISC-V rem semantics)."""
@@ -989,43 +992,39 @@ class X86_64Backend(Backend):
         self._emit(f"jne {do_idiv}")
         self._emit("xorq %rax, %rax")
         self._emit(f"jmp {done}")
-        self._emit(f"{do_idiv}:")
+        self._emit_label(do_idiv)
         self._emit("cqto")
         self._emit("idivq %rcx")
         self._emit("movq %rdx, %rax")
         self._emit(f"jmp {done}")
-        self._emit(f"{mod_zero}:")
-        self._emit(f"{done}:")
+        self._emit_label(mod_zero)
+        self._emit_label(done)
 
     def _emit_unsigned_idiv(self) -> None:
         """rax=lhs, rcx=rhs -> unsigned quotient (RISC-V divu semantics)."""
         div_zero = self._new_label("udiv_zero")
         done = self._new_label("udiv_done")
-        do_div = self._new_label("udiv_div")
         self._emit("testq %rcx, %rcx")
         self._emit(f"jz {div_zero}")
-        self._emit(f"{do_div}:")
         self._emit("xorq %rdx, %rdx")
         self._emit("divq %rcx")
         self._emit(f"jmp {done}")
-        self._emit(f"{div_zero}:")
+        self._emit_label(div_zero)
         self._emit("movq $-1, %rax")
-        self._emit(f"{done}:")
+        self._emit_label(done)
 
     def _emit_unsigned_mod(self) -> None:
         """rax=lhs, rcx=rhs -> unsigned remainder (RISC-V remu semantics)."""
         mod_zero = self._new_label("umod_zero")
         done = self._new_label("umod_done")
-        do_div = self._new_label("umod_div")
         self._emit("testq %rcx, %rcx")
         self._emit(f"jz {mod_zero}")
-        self._emit(f"{do_div}:")
         self._emit("xorq %rdx, %rdx")
         self._emit("divq %rcx")
         self._emit("movq %rdx, %rax")
         self._emit(f"jmp {done}")
-        self._emit(f"{mod_zero}:")
-        self._emit(f"{done}:")
+        self._emit_label(mod_zero)
+        self._emit_label(done)
 
     def unsigned_idiv(self) -> None:
         """Unsigned division. Stack: [left right] -> quotient."""
@@ -1077,10 +1076,15 @@ class X86_64Backend(Backend):
     # Calls
     # ========================================================================
     
+    def _note_clobber(self) -> None:
+        assert self._current_fn_code is not None
+        self._locals.note_clobber(len(self._current_fn_code))
+
     def call_direct(self, label_id: int, num_args: int) -> None:
         """Call a function directly by label."""
         stack_bytes = self._prepare_call_args(num_args)
         label = self._fn_labels[label_id]
+        self._note_clobber()
         self._emit(f"call {label}")
         if stack_bytes > 0:
             self._emit(f"addq ${stack_bytes}, %rsp")
@@ -1088,6 +1092,7 @@ class X86_64Backend(Backend):
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via pointer."""
         stack_bytes = self._prepare_call_args(num_args, "%r11")
+        self._note_clobber()
         self._emit("call *%r11")
         if stack_bytes > 0:
             self._emit(f"addq ${stack_bytes}, %rsp")
@@ -1097,6 +1102,7 @@ class X86_64Backend(Backend):
     
     def syscall(self, num_args: int) -> None:
         """Invoke a syscall."""
+        self._note_clobber()
         # Args are on stack: syscall_num, arg1, arg2, ...
         # Need to rearrange into: rax=num, rdi=arg1, rsi=arg2, rdx=arg3, r10=arg4, r8=arg5, r9=arg6
         if num_args == 1:
@@ -1200,6 +1206,7 @@ class X86_64Backend(Backend):
                 self._pop_saved_into("%rax")
 
         self._pop_saved_into("%r11")
+        self._note_clobber()
         self._emit("call *%r11")
 
     def _mixed_extern_type_tags(self, name: str, intrinsic_data: object | None) -> list[int]:
@@ -1252,6 +1259,8 @@ class X86_64Backend(Backend):
         start_label = self._new_label("loop_start")
         end_label = self._new_label("loop_end")
         self._loop_stack.append((start_label, end_label))
+        assert self._current_fn_code is not None
+        self._locals.begin_loop(len(self._current_fn_code))
         self._emit_label(start_label)
     
     def begin_loop_body(self) -> None:
@@ -1287,6 +1296,8 @@ class X86_64Backend(Backend):
         start_label, end_label = self._loop_stack.pop()
         self._emit(f"jmp {start_label}")
         self._emit_label(end_label)
+        assert self._current_fn_code is not None
+        self._locals.end_loop(len(self._current_fn_code))
     
     def emit_break(self) -> None:
         """Emit a break statement."""

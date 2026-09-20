@@ -8,7 +8,7 @@ from os import PathLike
 from pathlib import Path
 
 from .. import t1
-from .common import Backend, CORE_INTRINSIC_ARITIES, RunOptions
+from .common import Backend, CORE_INTRINSIC_ARITIES, LocalRegisterAllocator, RunOptions, wrap_i64
 from .linux import LINUX_SYSCALL_INTRINSIC_ARITIES, linux_builtin_constants
 
 class RiscvBackend(Backend):
@@ -60,6 +60,7 @@ class RiscvBackend(Backend):
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
         self._loop_stack: list[tuple[str, str]] = []  # (start_label, end_label)
+        self._locals = LocalRegisterAllocator()
         
         # Symbol tracking
         self._fn_labels: dict[int, str] = {}
@@ -381,12 +382,38 @@ class RiscvBackend(Backend):
         self._extern_symbols.add(name)
         return label_id
     
+    # Local register allocation: s1 and s5-s11 are preserved by the ABI and
+    # are not expression scratch (s2-s4 cache operands); t2-t4 are free
+    # between calls and syscalls.
+    _CALLEE_LOCAL_REGS = ["s1", "s5", "s6", "s7", "s8", "s9", "s10", "s11"]
+    _CALLER_LOCAL_REGS = ["t2", "t3", "t4"]
+
+    def _slot_key(self, slot: int) -> int:
+        return (-slot - self._SAVE_AREA_BYTES) >> 3
+
+    def _note_local_access(self, slot: int, other: str, store: bool) -> None:
+        assert self._current_fn_code is not None
+        self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), other, store)
+
+    def _note_clobber(self) -> None:
+        assert self._current_fn_code is not None
+        self._locals.note_clobber(len(self._current_fn_code))
+
+    def _allocate_locals(self) -> None:
+        """Debug builds retain their existing stack locations (as on x86-64)."""
+        if self.debug_info:
+            return
+        assert self._current_fn_code is not None
+        self._locals.assign(self._CALLEE_LOCAL_REGS, self._CALLER_LOCAL_REGS)
+        self._locals.rewrite(self._current_fn_code, lambda src, dst: f'    mv {dst}, {src}')
+
     def begin_function(self, label_id: int, name: str, param_count: int, is_main: bool) -> None:
         """Begin function definition."""
         label = self._fn_labels[label_id]
         self._saved_depth = 0
         self._spilled_depth = 0
         self._min_slot_offset = 0
+        self._locals.begin_function()
         
         self._current_fn_code = []
         self._function_code.append((label_id, self._current_fn_code))
@@ -407,13 +434,16 @@ class RiscvBackend(Backend):
             slot = self._stack_offset
             self._param_slots.append(slot)
             self._note_slot(slot)
+            self._locals.note_alloc(self._slot_key(slot), len(self._current_fn_code))
             
             if i < 8:
+                self._note_local_access(slot, self._ARG_REGS[i], True)
                 self._emit(f"sd {self._ARG_REGS[i]}, {slot}(s0)")
             else:
                 # Load from caller's stack frame
                 caller_offset = (i - 8) * 8
                 self._emit(f"ld t0, {caller_offset}(s0)")
+                self._note_local_access(slot, "t0", True)
                 self._emit(f"sd t0, {slot}(s0)")
             
             self._stack_offset -= 8
@@ -423,6 +453,8 @@ class RiscvBackend(Backend):
     def end_function(self) -> None:
         """End function definition."""
         assert self._current_fn_code is not None
+        # Sites index the body as emitted; rewrite before the prologue is spliced in.
+        self._allocate_locals()
         frame_bytes = self._frame_bytes()
         self._current_fn_code[self._frame_setup_index:self._frame_setup_index + 1] = (
             self._sp_adjust_instrs(-frame_bytes)
@@ -467,22 +499,25 @@ class RiscvBackend(Backend):
     
     def load_param(self, index: int) -> None:
         """Push parameter value onto the value stack."""
-        slot = self._param_slots[index]
-        self._emit(f"ld a0, {slot}(s0)")
+        self.load_local(self._param_slots[index])
 
     def alloc_local(self) -> int:
         """Allocate a local variable slot."""
         slot = self._stack_offset
         self._stack_offset -= 8
         self._note_slot(slot)
+        assert self._current_fn_code is not None
+        self._locals.note_alloc(self._slot_key(slot), len(self._current_fn_code))
         return slot
 
     def load_local(self, slot: int) -> None:
         """Push local variable value onto the value stack."""
+        self._note_local_access(slot, "a0", False)
         self._emit(f"ld a0, {slot}(s0)")
 
     def store_local(self, slot: int) -> None:
         """Pop value from stack and store to local variable."""
+        self._note_local_access(slot, "a0", True)
         self._emit(f"sd a0, {slot}(s0)")
     
     # ========================================================================
@@ -491,11 +526,7 @@ class RiscvBackend(Backend):
     
     def push_const_i64(self, value: int) -> None:
         """Push a 64-bit integer constant onto the value stack."""
-        if -2048 <= value <= 2047:
-            self._emit(f"li a0, {value}")
-        else:
-            # Load large constant via lui/addi sequence
-            self._emit(f"li a0, {value}")
+        self._emit(f"li a0, {wrap_i64(value)}")
     
     def push_void(self) -> None:
         """Push void (zero) onto the value stack."""
@@ -691,6 +722,7 @@ class RiscvBackend(Backend):
         """Call a function directly by label."""
         stack_bytes = self._prepare_call_args(num_args)
         label = self._fn_labels[label_id]
+        self._note_clobber()
         self._emit(f"call {label}")
         if stack_bytes > 0:
             self._emit(f"addi sp, sp, {stack_bytes}")
@@ -698,6 +730,7 @@ class RiscvBackend(Backend):
     def call_indirect(self, num_args: int) -> None:
         """Call a function indirectly via pointer."""
         stack_bytes = self._prepare_call_args(num_args, "t5")
+        self._note_clobber()
         self._emit("jalr ra, t5, 0")
         if stack_bytes > 0:
             self._emit(f"addi sp, sp, {stack_bytes}")
@@ -707,6 +740,7 @@ class RiscvBackend(Backend):
     
     def syscall(self, num_args: int) -> None:
         """Invoke a syscall using ecall."""
+        self._note_clobber()
         # Args pushed in order: syscall_num, arg1, arg2, ...
         # Last arg is in a0, rest on stack (syscall_num is deepest)
         # Need: a7=syscall_num, a0-a5=args
@@ -819,6 +853,7 @@ class RiscvBackend(Backend):
                 self._pop_saved_into("a0")
 
         self._pop_saved_into("t5")
+        self._note_clobber()
         self._emit("jalr ra, t5, 0")
 
     def _mixed_extern_type_tags(self, name: str, intrinsic_data: object | None) -> list[int]:
@@ -870,6 +905,8 @@ class RiscvBackend(Backend):
         start_label = self._new_label("loop_start")
         end_label = self._new_label("loop_end")
         self._loop_stack.append((start_label, end_label))
+        assert self._current_fn_code is not None
+        self._locals.begin_loop(len(self._current_fn_code))
         self._emit_label(start_label)
     
     def begin_loop_body(self) -> None:
@@ -902,6 +939,8 @@ class RiscvBackend(Backend):
         start_label, end_label = self._loop_stack.pop()
         self._emit(f"j {start_label}")
         self._emit_label(end_label)
+        assert self._current_fn_code is not None
+        self._locals.end_loop(len(self._current_fn_code))
     
     def emit_break(self) -> None:
         """Emit a break statement."""

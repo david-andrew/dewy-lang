@@ -707,11 +707,64 @@ let arm_declare_extern_function = (name:int num_params:int):>int => {
     return label_id
 }
 
+# Local register allocation (la_* in common.udewy). x19 and x24-x28 are
+# preserved by the ABI and are not expression scratch (x20-x23 cache
+# operands); x11-x15 are free between calls and syscalls.
+let arm_callee_local_regs:int = 0
+let arm_caller_local_regs:int = 0
+
+let arm_slot_key = (slot:int):>int => {
+    return (0 - slot - 16) >> 3
+}
+
+# Slots beyond the single-instruction offset range keep their frame homes.
+let arm_note_local_access = (slot:int other:int store:int):>void => {
+    if arm_slot_in_range(slot) {
+        la_note_site(vec_len(arm_current_fn_code) arm_slot_key(slot) other store)
+    } else {
+        la_pin(arm_slot_key(slot))
+    }
+    return void
+}
+
+let arm_format_move = (src:int dst:int):>int => {
+    let bb:int = bb_new(32)
+    bb_push_str(bb "    mov ")
+    bb_push_str(bb dst)
+    bb_push_str(bb ", ")
+    bb_push_str(bb src)
+    return bb_finalize_as_string(bb)
+}
+
+# Debug builds retain their existing stack locations (as on x86-64).
+let arm_allocate_locals = ():>void => {
+    if be_debug_info { return void }
+    if arm_callee_local_regs =? 0 {
+        arm_callee_local_regs = vec_new(6)
+        vec_push(arm_callee_local_regs "x19")
+        vec_push(arm_callee_local_regs "x24")
+        vec_push(arm_callee_local_regs "x25")
+        vec_push(arm_callee_local_regs "x26")
+        vec_push(arm_callee_local_regs "x27")
+        vec_push(arm_callee_local_regs "x28")
+        arm_caller_local_regs = vec_new(5)
+        vec_push(arm_caller_local_regs "x11")
+        vec_push(arm_caller_local_regs "x12")
+        vec_push(arm_caller_local_regs "x13")
+        vec_push(arm_caller_local_regs "x14")
+        vec_push(arm_caller_local_regs "x15")
+    }
+    la_assign(arm_callee_local_regs arm_caller_local_regs)
+    la_rewrite(arm_current_fn_code arm_format_move)
+    return void
+}
+
 let arm_begin_function = (label_id:int name:int param_count:int is_main:int):>void => {
     let label:int = intmap_get(arm_fn_labels label_id)
     arm_saved_depth = 0
     arm_spilled_depth = 0
     arm_min_slot_offset = 0
+    la_begin_function()
     let code:int = vec_new(64)
     vec_push(arm_function_ids label_id)
     vec_push(arm_function_codes code)
@@ -742,11 +795,14 @@ let arm_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
         let slot:int = arm_stack_offset
         vec_push(arm_param_slots slot)
         arm_note_slot(slot)
+        la_note_alloc(arm_slot_key(slot) vec_len(arm_current_fn_code))
         if i <? 8 {
+            arm_note_local_access(slot arm_arg_reg(i) true)
             arm_store_frame_slot(arm_arg_reg(i) slot)
         } else {
             let caller_off:int = 96 + (i - 8) * 8
             arm_load_frame_slot("x9" caller_off)
+            arm_note_local_access(slot "x9" true)
             arm_store_frame_slot("x9" slot)
         }
         arm_stack_offset = arm_stack_offset - 8
@@ -760,6 +816,8 @@ let arm_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
 }
 
 let arm_end_function = ():>void => {
+    # Sites index the body as emitted; rewrite before the prologue is spliced in.
+    arm_allocate_locals()
     let local_bytes:int = arm_local_area_bytes()
     let saved:int = arm_current_fn_code
     let prologue:int = vec_new(8)
@@ -804,7 +862,7 @@ let arm_end_function = ():>void => {
 }
 
 let arm_load_param = (index:int):>void => {
-    arm_load_frame_slot("x0" vec_get(arm_param_slots index))
+    arm_load_local(vec_get(arm_param_slots index))
     return void
 }
 
@@ -812,11 +870,21 @@ let arm_alloc_local = ():>int => {
     let slot:int = arm_stack_offset
     arm_stack_offset = arm_stack_offset - 8
     arm_note_slot(slot)
+    la_note_alloc(arm_slot_key(slot) vec_len(arm_current_fn_code))
     return slot
 }
 
-let arm_load_local = (slot:int):>void => { arm_load_frame_slot("x0" slot)  return void }
-let arm_store_local = (slot:int):>void => { arm_store_frame_slot("x0" slot)  return void }
+let arm_load_local = (slot:int):>void => {
+    arm_note_local_access(slot "x0" false)
+    arm_load_frame_slot("x0" slot)
+    return void
+}
+
+let arm_store_local = (slot:int):>void => {
+    arm_note_local_access(slot "x0" true)
+    arm_store_frame_slot("x0" slot)
+    return void
+}
 
 let arm_push_const_i64 = (value:int):>void => {
     if (value >=? 0) and (value <=? 65535) {
@@ -1070,6 +1138,7 @@ let arm_call_direct = (label_id:int num_args:int):>void => {
     let bb:int = bb_new(32 + str_len(label))
     bb_push_str(bb "    bl ")
     bb_push_str(bb label)
+    la_note_clobber(vec_len(arm_current_fn_code))
     vec_push(arm_current_fn_code bb_finalize_as_string(bb))
     if stack_bytes >? 0 {
         let bb2:int = bb_new(32)
@@ -1082,6 +1151,7 @@ let arm_call_direct = (label_id:int num_args:int):>void => {
 
 let arm_call_indirect = (num_args:int):>void => {
     let stack_bytes:int = arm_prepare_call_args(num_args "x9")
+    la_note_clobber(vec_len(arm_current_fn_code))
     arm_emit_indented("blr x9")
     if stack_bytes >? 0 {
         let bb:int = bb_new(32)
@@ -1095,6 +1165,7 @@ let arm_call_indirect = (num_args:int):>void => {
 let arm_max_call_args = ():>int => { return -1 }
 
 let arm_syscall = (num_args:int):>void => {
+    la_note_clobber(vec_len(arm_current_fn_code))
     if num_args =? 1 {
         arm_emit_indented("mov x8, x0")
         arm_emit_indented("svc #0")
@@ -1219,6 +1290,7 @@ let arm_call_extern_fp_mixed = (tags:int):>void => {
         ai = ai - 1
     }
     arm_pop_saved_into("x9")
+    la_note_clobber(vec_len(arm_current_fn_code))
     arm_emit_indented("blr x9")
     return void
 }
@@ -1281,6 +1353,7 @@ let arm_begin_loop = ():>void => {
     let e:int = arm_new_label("loop_end")
     vec_push(arm_loop_start_labels s)
     vec_push(arm_loop_end_labels e)
+    la_begin_loop(vec_len(arm_current_fn_code))
     arm_emit_label_str(s)
     return void
 }
@@ -1305,6 +1378,7 @@ let arm_end_loop = ():>void => {
     bb_push_str(bb s)
     vec_push(arm_current_fn_code bb_finalize_as_string(bb))
     arm_emit_label_str(e)
+    la_end_loop(vec_len(arm_current_fn_code))
     return void
 }
 
