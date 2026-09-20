@@ -236,3 +236,19 @@ Validation: 47 hosted assumption/proof checks passed. A fresh native compiler
 built in 60.38s, executed the assumed-index fixture (42), rejected literal,
 guarded and width-derived contradictions, and rejected the superseded spelling.
 Artifacts: `../dewy-build-artifacts/phase1-assume-2026-09-20`.
+
+Checkpoint: copy inventories now include hosted local array snapshots in
+both raw stack and descriptor representations; the view/ownership kernel
+reports four sites in both compilers (two escapes and two independent mutable
+snapshots), with no copy for the read-only local. Native summaries now count
+string copies too. `tools/copy_report.py --max-copies N` provides a static
+site-count gate, and `--json` saves a versioned inventory. The tool rejects
+malformed, partial or summary-inconsistent output before filtering files.
+This verifies report transport, not completeness of all lowering paths;
+additional coverage and compiler-wide budgets remain outstanding.
+
+Validation: 18 hosted reporting/explicit-copy checks passed. Both hosted and
+native inventories passed `--only readonly_array_field_view.dewy --max-copies 4`.
+The native executable was the reviewed-assumption checkpoint, which already
+contains the summary correction. Runtime allocation gates remain distinct
+from these static site budgets.

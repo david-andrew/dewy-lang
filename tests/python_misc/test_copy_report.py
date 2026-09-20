@@ -17,7 +17,32 @@ def test_failed_analysis_with_copy_notes(monkeypatch, capsys):
 def test_quoted_compiler_command(monkeypatch, capsys):
     def run(command, **kwargs):
         assert command == ['/compiler directory/dewy', '--debug', 'analyze', 'source.dewy']
-        return CompletedProcess(command, 0, '', '')
+        return CompletedProcess(command, 0, 'copy report: 0 record, 0 array and 0 cell copies; 0 string copies\n', '')
     monkeypatch.setattr(copy_report.subprocess, 'run', run)
     assert copy_report.main(['--compiler', '"/compiler directory/dewy" --debug', 'source.dewy']) == 0
     assert capsys.readouterr().out.startswith('0 copies:')
+
+
+def test_budget_checks_complete_inventory_before_filtering(monkeypatch, capsys):
+    report = ('copy: source.dewy:1: array copied when binding: source may change\n'
+              'copy: library.dewy:2: string copied when return: caller owns result\n'
+              'copy report: 0 record, 1 array and 0 cell copies; 1 string copies\n')
+    monkeypatch.setattr(copy_report.subprocess, 'run', lambda *args, **kwargs: CompletedProcess(args, 0, report, ''))
+    assert copy_report.main(['source.dewy', '--max-copies', '1']) == 1
+    assert '2 sites > 1' in capsys.readouterr().err
+    assert copy_report.main(['source.dewy', '--only', 'source.dewy', '--max-copies', '1', '--json']) == 0
+    import json
+    data = json.loads(capsys.readouterr().out)
+    assert data['count'] == 1 and data['within_budget']
+    assert data['notes'][0]['kind'] == 'array'
+    # A filtered-away missing entry must not pass the gate either.
+    report = report.replace('copy: library.dewy:2: string copied when return: caller owns result\n', '')
+    assert copy_report.main(['source.dewy', '--only', 'source.dewy', '--max-copies', '1']) == 1
+    assert 'incomplete' in capsys.readouterr().err
+
+
+def test_missing_or_malformed_inventory_fails_closed(monkeypatch, capsys):
+    for report in ('', 'copy: bad\ncopy report: 0 record, 0 array and 0 cell copies; 0 string copies\n'):
+        monkeypatch.setattr(copy_report.subprocess, 'run', lambda *args, **kwargs: CompletedProcess(args, 0, report, ''))
+        assert copy_report.main(['source.dewy', '--max-copies', '100']) == 1
+        assert 'incomplete' in capsys.readouterr().err

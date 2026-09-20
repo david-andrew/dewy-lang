@@ -4168,6 +4168,7 @@ class _Lowerer(
                     and node.expr.type.length is not None
                     else declared_type
                 )
+                self._note_copy('array', copy_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)
                 copy_prelude, copied = self._clone_array_value(
                     node.expr,
                     copy_type,

@@ -63,7 +63,7 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
             printl('')
             counts[note.kind]=counts.get(note.kind default=0)+1
         }
-        printl("copy report: {counts.get('record' default=0)} record, {counts.get('array' default=0)} array and {counts.get('cell' default=0)} cell copies")
+        printl("copy report: {counts.get('record' default=0)} record, {counts.get('array' default=0)} array and {counts.get('cell' default=0)} cell copies; {counts.get('string' default=0)} string copies")
         loop note in compiled.analysis.notes {printl(note.message)}
         printl("{compiled.analysis.notes.length} big integer representation decisions")
         return 0

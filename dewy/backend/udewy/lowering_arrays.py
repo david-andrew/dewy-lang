@@ -866,6 +866,7 @@ class _ArrayLowering(_ArraySharing):
                 raise TypeError(
                     'INTERNAL ERROR: stack-data array copy requires an exact length'
                 )
+            self._note_copy('array', array_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)
             source_is_raw = self._array_use_representation(node.expr) is not None
             prelude, source = self._extract_expression(node.expr)
             element_bytes, _signed = self._array_element_layout(

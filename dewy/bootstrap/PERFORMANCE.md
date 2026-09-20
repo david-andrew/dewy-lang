@@ -657,3 +657,21 @@ survive rebinding, and repeated scopes retain zero storage. The broader lifetime
 UTF-8 materialization, scratch, and static-string cases pass on direct and C
 output routes. These are bounded results; the combined full-build speedup has
 not yet been measured.
+
+### Static copy-site gates
+
+`tools/copy_report.py` checks that the entries agree with the compiler's
+summary before applying a file filter or budget. For example:
+
+```sh
+.venv/bin/python tools/copy_report.py tests/fixtures/readonly_array_field_view.dewy --only readonly_array_field_view.dewy --max-copies 4 --json
+```
+
+Use `--compiler path/to/native/dewy` for the native inventory. The current
+kernel budget is four in each compiler: two escaping views and two snapshots
+needed for independent mutation. Its read-only accessor must allocate no
+bytes in the separate runtime gate. JSON inventories record the compiler,
+filter, site list and budget outcome. These are static sites, not execution
+counts; agreement with a summary does not by itself prove every lowering
+path emits a note. Keep runtime allocation/detachment measurements alongside
+the inventories.

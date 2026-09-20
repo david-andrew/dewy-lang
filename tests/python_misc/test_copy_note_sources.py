@@ -20,3 +20,14 @@ let read=(facts:array<Fact>):>int64=>{
     assert len(notes) == 1
     assert notes[0].srcfile.path.resolve() == dependency.resolve()
     assert 'saved=facts[0]' in notes[0].srcfile.body[notes[0].loc.start:notes[0].loc.stop]
+
+
+def test_array_view_kernel_reports_required_copies_and_stays_within_budget():
+    from pathlib import Path
+    source = Path(__file__).resolve().parents[1] / 'fixtures/readonly_array_field_view.dewy'
+    codegen(SrcFile.from_path(source))
+    notes = [note for note in lower.last_copy_notes if note.srcfile.path == source]
+    # Two escaping views need ownership; source/destination writes require
+    # two independent snapshots. The read-only local itself must stay a view.
+    assert len(notes) == 4
+    assert {note.site for note in notes} == {'returned', 'stored in a field', 'bound to `saved`', 'bound to `changed`'}
