@@ -5256,7 +5256,7 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     source = _assert_source(condition_ast, ctx=ctx)
     # the `, message` tail is greyed out in reports so the condition stands out
     dimmed = Span(condition_ast.loc.stop, message_ast.loc.stop) if message_ast is not None else None
-    if ast.name in ('assert', 'unsafe_assert'):
+    if ast.name in ('assert', 'unsafe_assume'):
         message: str | None = None
         if message_ast is not None:
             checked = typecheck_and_resolve_inner(message_ast, ctx=ctx)
@@ -5268,10 +5268,10 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
                     hint='`$runtime_assert` messages may interpolate values',
                 )
             message = checked.content
-        if ast.name == 'unsafe_assert':
+        if ast.name == 'unsafe_assume':
             from .proofs import fact_term
             if not fact_term(condition):
-                user_error(ctx.srcfile, 'an unsafe assertion needs a pure fact condition', Pointer(span=condition_ast.loc, message='the condition is not evaluated at runtime; use names, literals, trusted measures and supported arithmetic'))
+                user_error(ctx.srcfile, 'an unsafe assumption needs a pure fact condition', Pointer(span=condition_ast.loc, message='the condition is not evaluated at runtime; use names, literals, trusted measures and supported arithmetic'))
             held = _refine_condition_context(ctx, condition, truth=True)
             refinements, bounds, keys = dict(held.refinements), dict(held.length_bounds), dict(held.key_facts)
             ctx.refinements.clear()

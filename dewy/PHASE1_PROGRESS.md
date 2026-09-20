@@ -89,7 +89,7 @@ Design review: `PHASE1_DESIGN_PROPOSALS.md` separates reviewed proof/effect
 direction from outstanding proposals. David approved `$proof` with direct
 statement calls, checked termination/purity and erasure; `:> <P>` is proof-
 only, while ordinary functions use `:> T & <P>` (including `void`). The
-unsafe boundary is `$unsafe_assert cond [, message]`. Positive effect rows
+unsafe boundary is `$unsafe_assume cond [, message]`. Positive effect rows
 are upper bounds, omitted rows are inferred, and `no_effects` is the preferred
 empty-row spelling. Negative guarantees (`no reads<resource>` and `no reads`, rejecting empty
 family arguments) are also approved. Effect identity declarations and
@@ -167,7 +167,7 @@ calls, pure arguments, finite bodies and an acyclic call graph. They erase
 only after validation; callbacks, first-class values, mutation/effects and
 `$prototype` deferral are rejected. Named and keyword-only parameters and
 imported proofs retain their contracts. Native snapshot codecs preserve the
-new metadata. `$unsafe_assert` and source effect rows remain pending.
+new metadata. `$unsafe_assume` and source effect rows remain pending.
 
 The same work fixes general fact-contract rules: dependent arguments are
 checked after substitution (including literals), known order relationships
@@ -196,7 +196,7 @@ native build (59.24s) executes all three with result 42; they are also in
 the focused parity manifest. This fix changes synthesis lookup, not user
 identifier semantics. Artifact: `../dewy-build-artifacts/phase1-synthesis-2026-09-20`.
 
-Checkpoint: initial `$unsafe_assert cond [, message]` support now lands in
+Checkpoint: initial `$unsafe_assume cond [, message]` support now lands in
 both compilers. Pure unknown facts enter the normal mutation-aware state;
 the condition is erased, messages are static, and checked proofs cannot use
 unchecked assumptions. Source audits survive folded conditions, unused
@@ -225,3 +225,14 @@ repeated mixed-alternative snapshots. Native generations built in 60.64s and
 60.14s, both running the lifetime fixture with zero retained bytes and exit
 42. All 41 focused paired cases passed against the second generation.
 Artifacts: `../dewy-build-artifacts/phase1-union-copy-stage2-2026-09-20`.
+
+Naming review: the source form is `$unsafe_assume cond [, message]`, replacing
+the intermediate `$unsafe_assert` spelling. Unknown assumptions are accepted
+and audited; proven-false assumptions are rejected, including contradictions
+from a guard or a declared width. The optional message and all mutation,
+erasure and proof-body restrictions remain unchanged.
+
+Validation: 47 hosted assumption/proof checks passed. A fresh native compiler
+built in 60.38s, executed the assumed-index fixture (42), rejected literal,
+guarded and width-derived contradictions, and rejected the superseded spelling.
+Artifacts: `../dewy-build-artifacts/phase1-assume-2026-09-20`.

@@ -678,7 +678,7 @@ class ModuleCompiler:
         from . import check, unsafe_audit
         # Snapshot source assumptions before pruning unused imports or
         # lowering. Warm prelude records carry the same checked HIR.
-        if any('$unsafe_assert' in record.srcfile.body for record in self.order):
+        if any('$unsafe_assume' in record.srcfile.body for record in self.order):
             unsafe_audit.last_entries[:] = [entry for record in self.order for entry in unsafe_audit.collect(record.root, record.srcfile)]
         check.validate_brand_matches()   # every module is loaded: the brands are a closed world
         names = self._emitted_names(entry)

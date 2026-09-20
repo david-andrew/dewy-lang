@@ -312,7 +312,7 @@ Expected failures remain [error alternatives in the return type](errors-and-forw
 
 ## `unsafe`
 
-`$unsafe_assert condition [, message]` introduces an assumption without a runtime
+`$unsafe_assume condition [, message]` introduces an assumption without a runtime
 check. Both compilers implement an initial subset with pure fact conditions
 and an optional compile-time string literal. It does not turn off unrelated
 checking. Writes and calls invalidate its facts normally, and a checked
@@ -320,15 +320,15 @@ checking. Writes and calls invalidate its facts normally, and a checked
 
 ```dewy
 read_at = (xs:array<int64> i:int64):>int64 => {
-    $unsafe_assert 0 <=? i and i <? xs.length, 'validated by the producer'
+    $unsafe_assume 0 <=? i and i <? xs.length, 'validated by the producer'
     return xs[i]
 }
 ```
 
 The condition is not evaluated at runtime. Its truth is the programmer's
 responsibility; a false assumption can invalidate bounds or representation
-safety. Conditions the compiler already refutes are currently unsupported,
-pending a decision on that edge case.
+safety. Conditions the compiler can prove false are rejected with `assertion refuted`;
+unknown conditions are accepted and audited.
 
 Builds retain source locations, conditions, messages and candidate consuming
 checks in a `.unsafe.json` file beside the generated `.udewy` artifact,

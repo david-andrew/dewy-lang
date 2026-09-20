@@ -12,7 +12,7 @@ the assertion form's argument grammar, `cond [, message]`:
 
 ```dewy
 $assert i <? xs.length
-$unsafe_assert i <? xs.length, 'the external producer validated this index'
+$unsafe_assume i <? xs.length, 'the external producer validated this index'
 ```
 
 `$assert` already implements the checked boundary: proven assertions erase,
@@ -20,14 +20,15 @@ refuted assertions fail, and unknown assertions fail with a different
 explanation. There is no reason to add a synonymous `$prove` directive.
 The proof-engine work should improve the facts `$assert` can establish.
 
-`$unsafe_assert P` introduces that one assumption without a runtime check;
-the name does not make it a checked assertion. Its optional message follows
+`$unsafe_assume P` introduces that one assumption without a runtime check
+or a proof. Its optional message follows
 `$assert`'s compile-time string-literal rule and supplies an audit explanation.
 The directive owns the separating comma, just as `$assert` does. It emits an
 auditable entry naming the proposition, message, source location, and
 obligations it discharges. It neither weakens unrelated checking nor disables
-checking for a block. David selected `$unsafe_assert` in the follow-up review
-on 2026-09-20; it replaces the earlier `$unsafe_assume` proposal.
+checking for a block. David confirmed `$unsafe_assume` in the follow-up review
+on 2026-09-20. It supersedes the intermediate `$unsafe_assert` spelling,
+which suggested a checked assertion rather than an explicit assumption.
 
 Both accept only the liquid proposition language. Their facts refer to the
 current value versions, and are invalidated by the same writes and calls as
@@ -41,9 +42,10 @@ fact-term subset, retain them through optimization in a versioned JSON audit,
 and invalidate their facts normally on mutation. The initial consumer list is
 a conservative inventory of checks in the same function, **not** exact proof
 dependency tracking. That remaining work is part of the audit milestone.
-Conditions known false are currently unsupported; whether the final boundary
-rejects known contradictions or deliberately admits them is awaiting review.
-This limitation does not change the distinction between unknown and refuted.
+David approved rejection of proven-false assumptions on 2026-09-20. Known
+contradictions fail with `assertion refuted`, including contradictions derived
+from incoming facts. Unknown assumptions are accepted and audited; the checker
+does not confuse a missing proof with a proof of falsity.
 
 ## Proof functions — reviewed direction
 

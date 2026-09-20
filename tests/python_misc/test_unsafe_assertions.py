@@ -12,7 +12,7 @@ from tests.python_misc.test_scalar_projection import execute
 
 
 SOURCE = '''read_at=(xs:array<int64> i:int64):>int64=>{
-    $unsafe_assert 0<=?i and i<?xs.length, 'validated by the producer'
+    $unsafe_assume 0<=?i and i<?xs.length, 'validated by the producer'
     return xs[i]
 }
 main=():>int64=>read_at([42] 0)
@@ -41,21 +41,21 @@ def test_assumption_does_not_survive_replacement_or_resize(mutation):
 
 def test_assumption_cannot_erase_an_effectful_condition():
     with pytest.raises(UserError, match='pure fact condition'):
-        codegen(SrcFile(None, 'condition=():>bool=>{printl("effect") return true}\nmain=():>int64=>{$unsafe_assert condition()\nreturn 42}'))
+        codegen(SrcFile(None, 'condition=():>bool=>{printl("effect") return true}\nmain=():>int64=>{$unsafe_assume condition()\nreturn 42}'))
 
 
 def test_assumption_message_must_be_static():
     with pytest.raises(UserError, match='string literal'):
-        codegen(SrcFile(None, 'f=(ok:bool msg:string)=>{$unsafe_assert ok, msg}'))
+        codegen(SrcFile(None, 'f=(ok:bool msg:string)=>{$unsafe_assume ok, msg}'))
 
 
 def test_checked_proof_cannot_use_an_assumption():
     with pytest.raises(UserError, match='unsupported operation in a checked proof'):
-        codegen(SrcFile(None, '$proof\nf=(x:int64):> <x>?0>=>{$unsafe_assert x>?0}'))
+        codegen(SrcFile(None, '$proof\nf=(x:int64):> <x>?0>=>{$unsafe_assume x>?0}'))
 
 
 def test_folded_and_unused_assumptions_are_not_lost():
-    codegen(SrcFile(None, 'unused=()=>{$unsafe_assert true, "explicit assumption"}\nmain=():>int64=>42'))
+    codegen(SrcFile(None, 'unused=()=>{$unsafe_assume true, "explicit assumption"}\nmain=():>int64=>42'))
     assert len(unsafe_audit.last_entries) == 1
     assert unsafe_audit.last_entries[0].condition == 'true'
     codegen(SrcFile(None, 'main=():>int64=>42'))
@@ -80,7 +80,7 @@ def test_test_command_keeps_audit(tmp_path):
     from dewy.__main__ import test as test_command
     from udewy.cache import cache_artifact
     source = tmp_path / 'assumption_test.dewy'
-    source.write_text('$test\nlet checked=()=>{$unsafe_assert true, "external guarantee"}\n')
+    source.write_text('$test\nlet checked=()=>{$unsafe_assume true, "external guarantee"}\n')
     assert test_command([str(source)]) == 0
     path = cache_artifact(source, '.test.udewy').with_suffix('.unsafe.json')
     assert json.loads(path.read_text())['assumptions'][0]['message'] == 'external guarantee'
@@ -91,7 +91,7 @@ def test_cached_prelude_retains_unused_assumptions(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv('DEWY_NO_PRELUDE_CACHE', raising=False)
     prelude = tmp_path / 'prelude.dewy'
-    prelude.write_text('unused=()=>{$unsafe_assert true, "cached guarantee"}\n')
+    prelude.write_text('unused=()=>{$unsafe_assume true, "cached guarantee"}\n')
     monkeypatch.setattr(prelude_config, 'library', tmp_path)
     monkeypatch.setattr(modules, 'prelude_files', lambda target: (prelude,))
     source = SrcFile(None, 'main=():>int64=>42\n')
@@ -103,3 +103,18 @@ def test_cached_prelude_retains_unused_assumptions(tmp_path, monkeypatch):
     modules._resident_preludes.clear()  # exercise the persistent cache too
     codegen(source)
     assert unsafe_audit.render(unsafe_audit.last_entries) == cold
+
+
+@pytest.mark.parametrize('source', [
+    'main=():>int64=>{$unsafe_assume false\nreturn 42}',
+    'f=(x:int64)=>{if x<=?0 {$unsafe_assume x>?0}}',
+    'f=(x:int64)=>{$unsafe_assume x>?int64.max}',
+])
+def test_proven_false_assumptions_are_rejected(source):
+    with pytest.raises(UserError, match='assertion refuted'):
+        codegen(SrcFile(None, source))
+
+
+def test_superseded_unsafe_assert_spelling_is_not_an_assumption():
+    with pytest.raises(UserError):
+        codegen(SrcFile(None, 'main=():>int64=>{$unsafe_assert true\nreturn 42}'))

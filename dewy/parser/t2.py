@@ -193,7 +193,7 @@ class Chain(t1.InedibleToken):
 # condition from the message — so the comma's operator precedence (tighter
 # than the comparisons) never applies to it. `$assert pair =? 1, 2` therefore
 # needs `$assert pair =? (1, 2)`, exactly as a form's argument would elsewhere.
-assertion_directives: set[str] = {'assert', 'unsafe_assert', 'runtime_assert', 'expect', 'fail', 'abstract', 'breakpoint'}   # `$fail [message]` takes no condition; `$abstract type of …` marks a mint; `$breakpoint` stands alone
+assertion_directives: set[str] = {'assert', 'unsafe_assume', 'runtime_assert', 'expect', 'fail', 'abstract', 'breakpoint'}   # `$fail [message]` takes no condition; `$abstract type of …` marks a mint; `$breakpoint` stands alone
 
 @dataclass
 class Directive(t1.InedibleToken):

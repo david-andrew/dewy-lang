@@ -4941,7 +4941,7 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
         record_return(types.primitive('void' @session.types) node.loc env @session)
     }
     if node.name =? 'fail' return assertion_failure(id node none 'fail' env @session)
-    if node.name not in? ['assert' 'unsafe_assert' 'runtime_assert' 'expect'] return pending(id "directive `${node.name}`" env session)
+    if node.name not in? ['assert' 'unsafe_assume' 'runtime_assert' 'expect'] return pending(id "directive `${node.name}`" env session)
     $runtime_assert node.condition isnt? none
     let condition = expression(node.condition env @session expected=types.primitive('bool' @session.types))
     if condition is? Error return condition
@@ -4955,7 +4955,7 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
         dimmed = Span[condition_span.stop message_span.stop]
     }
     let empty = types.primitive('void' @session.types)
-    if node.name in? ['assert' 'unsafe_assert'] {
+    if node.name in? ['assert' 'unsafe_assume'] {
         let message:string? = none
         if node.message isnt? none {
             let checked = expression(node.message env @session)
@@ -4964,8 +4964,8 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
             if literal isnt? hir.String return problem(node.message 'a compile-time assertion message must be a string literal' 'the message cannot depend on runtime values' env session)
             message = literal.content
         }
-        if node.name =? 'unsafe_assert' {
-            if not checked_proofs.fact_term(condition checked_proofs.Input[session.hir session.registry session.sources]) return problem(node.condition 'an unsafe assertion needs a pure fact condition' 'the condition is not evaluated at runtime; use names, literals, trusted measures and supported arithmetic' env session)
+        if node.name =? 'unsafe_assume' {
+            if not checked_proofs.fact_term(condition checked_proofs.Input[session.hir session.registry session.sources]) return problem(node.condition 'an unsafe assumption needs a pure fact condition' 'the condition is not evaluated at runtime; use names, literals, trusted measures and supported arithmetic' env session)
             let held=refined(condition true env @session)
             join_reads([held] env @session)
             let assertion=put(hir.Assert[node.loc empty condition text message dimmed=dimmed unsafe=true] @session)
