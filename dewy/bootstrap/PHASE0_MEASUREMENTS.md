@@ -4436,3 +4436,24 @@ runtime byte counters from here on, not by self-build seconds; profiling
 needs a lower-overhead sampler (20 ms intervals at least, or `perf` when it
 is available) before any single function is called hot again.
 
+### Returns transfer through casts (2026-09-20)
+
+The native return rule already handed an owned local's block to the caller
+without a copy (`return_owner`); it required the returned expression to be
+the bare identifier. It now looks through the wrappers that keep the
+storage (a checked value cast or representation cast of a record into a
+wider record or into a union cell, obligations, statement blocks), and the
+transferred binding's reads inside the returned expression own the value
+(`State.transferred_binding`, honoured by `owned_value`). `return r` into a
+`Fact|none` result now packs the block instead of sharing it and releasing
+the local. On the compiler's sources this removes 24 record copies at
+`packed into a cell` sites (1,601 to 1,577); the remaining ones return a
+*narrowed* local whose storage is itself a union cell
+(`if field_0 is? CacheMiss return field_0`, 902 sites in the value-cache
+decoder alone, 307 `Error` returns in the checker), which needs the cell's
+payload moved out and the cell emptied before its own release, part of the
+general last-use move rule that comes next. The compiler-wide count now
+reads 8,048, up from the 7,906 before the `get` sites were reported (164
+`looked up with get` notes), so the comparable figure is 7,884 against the
+7,910 baseline.
+

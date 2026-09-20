@@ -45,6 +45,8 @@ State:type = [
     source_index:addr?=none
     copy_notes:array<CopyNote>=[]
     borrow_rejections:dict<addr string>=[]
+    # The owned local a `return` is transferring: its reads own the value.
+    transferred_binding:addr?=none
     nodes:array<hir.AST>=[]
     type_nodes:types.Table=types.Table[]
     symbols:dict<addr string>=[]
@@ -836,6 +838,9 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         return finish_read(value receiver member @prefix @state)
     }
     if node is? hir.Suppress return owned_value(node.item @state site)
+    # Proof obligations and statement blocks are transparent to ownership.
+    if node is? hir.Obligation return owned_value(node.value @state site)
+    if node is? hir.Block and not node.scoped and node.items.length =? 1 and state.transferred_binding isnt? none return owned_value(node.items[0] @state site)
     if node is? hir.ValueCast {
         let source=hir.node_at(state.input.nodes node.expr)
         # A logical record upcast preserves the owned allocation, including
@@ -846,6 +851,8 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
     }
     let value=expression(id @state)
     if node is? hir.Place or expression_owns(id @state) return value
+    # A returned local's block is transferred to the caller, not copied.
+    if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and state.transferred_binding isnt? none and node.binding_id =? state.transferred_binding return value
     # A string literal is static data with owner zero: retain returns it
     # and drop ignores it, so an owning slot may hold the descriptor itself.
     if static_literal(id state) return value
@@ -5510,9 +5517,24 @@ cleanup_block = (node:hir.Block @state:State):>addr => {
 # retain their ordinary value boundary. Array length facts describe the same
 # descriptor; only its element representation determines storage/cleanup.
 # Other return paths keep their cleanup.
-return_owner = (id:addr state:State):>OwnedLocal? => {
+# The owned local a returned expression names, through the wrappers that
+# keep its storage: a record cast to a wider record or into a union cell
+# takes the block over instead of copying it.
+return_owner = (id:addr @state:State):>OwnedLocal? => {
     if state.result_projection isnt? none return none
-    let node=hir.node_at(state.input.nodes id)
+    let current=id
+    loop true {
+        let wrapper=hir.node_at(state.input.nodes current)
+        if wrapper is? hir.Suppress {current=wrapper.item continue}
+        if wrapper is? hir.Obligation {current=wrapper.value continue}
+        if wrapper is? hir.Block and not wrapper.scoped and wrapper.items.length =? 1 {current=wrapper.items[0] continue}
+        if wrapper is? hir.ValueCast|hir.RepresentationCast {
+            let inner=hir.node_at(state.input.nodes wrapper.expr)
+            if object_valued(inner.value_type state) and (object_valued(wrapper.value_type state) or cell_members(wrapper.value_type @state) isnt? none) {current=wrapper.expr continue}
+        }
+        break
+    }
+    let node=hir.node_at(state.input.nodes current)
     if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return none
     if node.binding_id not in? state.cleanup_owned or node.binding_id in? state.boxed return none
     loop index in 0.. and index <? state.cleanup_frames.length {
@@ -5522,6 +5544,8 @@ return_owner = (id:addr state:State):>OwnedLocal? => {
             let value=hir.node_at(state.nodes owned.value)
             if value isnt? hir.ExpressedIdentifier or value.binding_id not=? node.binding_id continue
             if owned.value_type =? node.value_type return owned
+            # A narrowed read of the local names the same storage.
+            if types.unfold(types.strip_refinement(owned.value_type state.type_nodes) state.type_nodes) =? types.unfold(types.strip_refinement(node.value_type state.type_nodes) state.type_nodes) return owned
             let stored=array_type(owned.value_type state)
             let returned=array_type(node.value_type state)
             if stored isnt? none and returned isnt? none and stored.element =? returned.element return owned
@@ -5534,9 +5558,14 @@ cleanup_return = (node:hir.Return @state:State):>addr => {
     let result:addr?=none
     let transferred:addr?=none
     if node.item isnt? none {
-        let owner=return_owner(node.item state)
-        if owner isnt? none {transferred=owner.value}
-        let value=if owner is? none owned_value(node.item @state 'returned') else expression(node.item @state)
+        let owner=return_owner(node.item @state)
+        if owner isnt? none {
+            transferred=owner.value
+            let value_node=hir.node_at(state.nodes owner.value)
+            if value_node is? hir.ExpressedIdentifier {state.transferred_binding=value_node.binding_id}
+        }
+        let value=owned_value(node.item @state 'returned')
+        state.transferred_binding=none
         let type=types.node_at(state.type_nodes hir.node_at(state.nodes value).value_type)
         if types.is_primitive(type 'void') or types.is_primitive(type 'never') {prefix.push(value)}
         else {result=snapshot(value @prefix @state)}
