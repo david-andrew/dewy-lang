@@ -5835,11 +5835,14 @@ hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:a
     let source=contexts.add_source(srcfile parsed.nodes @session)
     let lexical=contexts.child(contexts.Context[source module_scope(env.lexical.scope session)] @session)
     loop alias in aliases {
-        let alias_id=bindings.allocate_param(@session.registry alias.name types.primitive('type' @session.types) contexts.node_at(id env.lexical session).loc)
+        # The generated text passes through t1, so bind its canonical name
+        # too. In particular `_0` and `₀` must identify the same alias.
+        let canonical=tokens.normalize_identifier(alias.name)
+        let alias_id=bindings.allocate_param(@session.registry canonical types.primitive('type' @session.types) contexts.node_at(id env.lexical session).loc)
         let alias_binding=bindings.binding_at(session.registry alias_id)
         alias_binding.type_value=alias.value
         bindings.store_binding(@session.registry alias_id alias_binding)
-        bindings.bind(@session.scopes lexical.scope alias.name alias_id)
+        bindings.bind(@session.scopes lexical.scope canonical alias_id)
     }
     let root=contexts.node_at(parsed.root lexical session)
     $runtime_assert root is? parser.Block and root.inner.length =? 1

@@ -185,3 +185,13 @@ These are integration timings, not a claim to meet the under-30s target.
 The wider 211-case paired corpus is running at this checkpoint.
 Artifacts: `../dewy-build-artifacts/phase1-proofs-stage2-2026-09-20` and
 `../dewy-build-artifacts/phase1-proofs-final-2026-09-20`.
+
+
+Full-corpus follow-up: 208/211 paired cases passed. The three failures
+(`place_slots`, `type_values`, `length_terms`) all exposed an identifier
+normalization gap in native generated dispatch helpers: parser-normalized
+`__dewy_brand₀` did not find its raw `__dewy_brand_0` alias. Hidden aliases
+now use the same t1 canonicalization as their generated source. A fresh
+native build (59.24s) executes all three with result 42; they are also in
+the focused parity manifest. This fix changes synthesis lookup, not user
+identifier semantics. Artifact: `../dewy-build-artifacts/phase1-synthesis-2026-09-20`.
