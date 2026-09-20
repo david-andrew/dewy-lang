@@ -1,0 +1,10 @@
+# `untyped` is not reserved. `end` keeps its contextual last-index role.
+main = ():>int64 => {
+    let untyped:int64=40
+    let items=[0 2]
+    let absent:int64|none=none
+    match absent {
+        <none> => return untyped + items[end]
+        value:int64 => return value
+    }
+}

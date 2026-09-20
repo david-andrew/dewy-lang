@@ -106,7 +106,7 @@ def test_place_parameter_writes_must_preserve_the_callers_scalar_contract(write)
 
 def test_affine_assignment_keeps_the_same_length_relation_as_combined_assignment():
     codegen(SrcFile(None, '''
-end = (xs:array<int64>):>addr<i => i <=? xs.length> => {
+limit = (xs:array<int64>):>addr<i => i <=? xs.length> => {
     let i:addr = 0
     loop i <? xs.length { i = i + 1 }
     return i

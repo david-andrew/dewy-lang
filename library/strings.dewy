@@ -135,11 +135,11 @@ let _string_trim_end = (text:string):>string => {
 
 let _string_trim = (text:string):>string => _string_trim_end(_string_trim_start(text))
 
-# Every occurrence of `old` replaced by `new` (an empty `old` leaves the text alone).
-let _string_replace = (text:string old:string new:string):>string => {
+# Every occurrence of `old` replaced by `replacement` (an empty `old` leaves the text alone).
+let _string_replace = (text:string old:string replacement:string):>string => {
     if old.length =? 0 { return text }
     let pieces = _string_split(text old)
-    return pieces.join(new)
+    return pieces.join(replacement)
 }
 
 

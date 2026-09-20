@@ -156,8 +156,8 @@ expression = (id:addr @state:State):>Expression => {
         }
         let prefix=function.prefix
         let callee=node_at(function.value state)
-        let intrinsic=callee is? hir.ExpressedIdentifier and (callee.name in? emit.binary or callee.name in? emit.prefix or callee.name in? emit.intrinsics)
-        if last_prefix isnt? none and not intrinsic {function.value=snapshot(function.value @prefix @state)}
+        let builtin_operation=callee is? hir.ExpressedIdentifier and (callee.name in? emit.binary or callee.name in? emit.prefix or callee.name in? emit.intrinsics)
+        if last_prefix isnt? none and not builtin_operation {function.value=snapshot(function.value @prefix @state)}
         let values:array<addr>=[]
         loop i in 0.. and i <? arguments.length {
             let argument=arguments[i]

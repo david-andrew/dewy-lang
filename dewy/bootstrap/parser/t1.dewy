@@ -42,7 +42,9 @@ TokenStream:type = [nodes:array<Token> roots:array<addr>]
 # classifier currently matches these spellings exactly. Preserve that behavior
 # until the discrepancy is resolved rather than silently changing the language.
 const keywords = set['loop' 'if' 'else' 'match' 'return' 'yield' 'break' 'continue' 'import' 'from' 'let' 'const' 'local_const' 'overload_only']
-# extern/intrinsic/none/void/untyped/end/new remain ordinary identifiers.
+# extern/intrinsic/none/void/end/new retain identifier-shaped tokens for
+# their expression/type/index roles, but semantic/source_names.dewy rejects
+# them as source bindings. `untyped` is not reserved.
 const symbolic_identifiers = set['..' '...' '$' '∞' '∅']
 const word_operators = set['and' 'or' 'xor' 'nand' 'nor' 'xnor' 'not' 'as' 'in' 'transmute' 'of' 'or_throw']
 const escape_map:dict<string string> = ['n'->'\n' '\n'->'' '\r\n'->'' 'r'->'\r' 't'->'\t' 'v'->'\v' 'f'->'\f' 'b'->'\b' 'a'->'\a' '0'->'\0']

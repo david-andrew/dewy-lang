@@ -112,7 +112,7 @@ slice_length = (node:hir.StringSlice state:facts.State snapshot:Snapshot env:val
     $runtime_assert range is? hir.Range
     let bounds=if range.bounds is? none '[]' else range.bounds
     let start=if range.left is? none ranges.exact(0) else snapshot.numbers.get(range.left)
-    let end=if range.right is? none snapshot.lengths.get(node.string) else snapshot.numbers.get(range.right)
+    let limit=if range.right is? none snapshot.lengths.get(node.string) else snapshot.numbers.get(range.right)
     let shift=(if range.right isnt? none and bounds.endswith(']') 1 else 0)-(if bounds.startswith('(') 1 else 0)
     let bound:ranges.Interval?=none
     if range.left isnt? none {
@@ -130,7 +130,7 @@ slice_length = (node:hir.StringSlice state:facts.State snapshot:Snapshot env:val
             bound=ranges.Interval[(if lower is? none none else ranges.shift_endpoint(lower.lower delta)) (if upper is? none or upper.lower is? none none else -upper.lower+delta)]
         }
     }
-    let result=ranges.binary('__sub__' end start ranges.Interval[(-9223372036854775808) 9223372036854775807] bound)
+    let result=ranges.binary('__sub__' limit start ranges.Interval[(-9223372036854775808) 9223372036854775807] bound)
     if result is? none return none
     # Endpoint validation is the driver's responsibility. Once validated,
     # reversed endpoints select an empty string instead of a negative length.

@@ -635,14 +635,14 @@ array_type = (id:addr state:State):>types.ArrayType? => {
     return if type is? types.ArrayType type else none
 }
 word = (value:bigint node:hir.AST @state:State):>addr => put(hir.Integer[node.loc types.primitive('int64' @state.type_nodes) '0d' value] @state)
-intrinsic = (name:string arguments:array<addr> result:addr node:hir.AST @state:State):>addr => {
+intrinsic_call = (name:string arguments:array<addr> result:addr node:hir.AST @state:State):>addr => {
     let params:array<addr>=[]
     loop id in arguments {params.push(hir.node_at(state.nodes id).value_type)}
     let type=types.positional_function(params result @state.type_nodes)
     let function=put(hir.ExpressedIdentifier[node.loc type name] @state)
     return put(hir.FunctionCall[node.loc result function arguments []] @state)
 }
-word_op = (name:string left:addr right:addr node:hir.AST @state:State):>addr => intrinsic(name [left right] types.primitive('int64' @state.type_nodes) node @state)
+word_op = (name:string left:addr right:addr node:hir.AST @state:State):>addr => intrinsic_call(name [left right] types.primitive('int64' @state.type_nodes) node @state)
 address = (base:addr offset:addr node:hir.AST @state:State):>addr => if offset =? 0 base else word_op('__add__' base word(offset node @state) node @state)
 # A provided allocator makes descriptors and element bytes survive the
 # creating frame. The caller copies an ordinary array argument before any
@@ -671,9 +671,9 @@ allocation = (size:addr node:hir.AST @state:State):>addr => {
         if selected is? none return reject(node 'the requested arena allocator has no declaration' @state)
         name=selected
         let specialized=arena_class_helper(size '_arena_alloc_' @state)
-        if specialized isnt? none return intrinsic(specialized [] types.primitive('int64' @state.type_nodes) node @state)
+        if specialized isnt? none return intrinsic_call(specialized [] types.primitive('int64' @state.type_nodes) node @state)
     }
-    return intrinsic(name [size] types.primitive('int64' @state.type_nodes) node @state)
+    return intrinsic_call(name [size] types.primitive('int64' @state.type_nodes) node @state)
 }
 # Records and tagged cells occupy inline storage in fields. Their existing
 # storage is itself the place; scalar values and array handles need a slot.
@@ -922,7 +922,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
                 let shared_none=state.none_cell
                 if shared_none isnt? none {
                     let shared=put(hir.ExpressedIdentifier[node.loc word_type shared_none] @state)
-                    empty_cell=conditional(intrinsic('__ne__' [cell shared] types.primitive('bool' @state.type_nodes) node @state) empty_cell node @state)
+                    empty_cell=conditional(intrinsic_call('__ne__' [cell shared] types.primitive('bool' @state.type_nodes) node @state) empty_cell node @state)
                 }
                 prefix.push(empty_cell)
                 prefix.push(payload)
@@ -963,7 +963,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
                 let shared_none=state.none_cell
                 if shared_none isnt? none {
                     let shared=put(hir.ExpressedIdentifier[node.loc word_type shared_none] @state)
-                    empty_cell=conditional(intrinsic('__ne__' [cell shared] types.primitive('bool' @state.type_nodes) node @state) empty_cell node @state)
+                    empty_cell=conditional(intrinsic_call('__ne__' [cell shared] types.primitive('bool' @state.type_nodes) node @state) empty_cell node @state)
                 }
                 prefix.push(empty_cell)
             } else {
@@ -1062,13 +1062,13 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory 
     let fields:array<addr>=[data length length word(stride node @state) word(layouts.array_flags.mutable + (if state.allocator is? none 0 else layouts.array_flags.arena_descriptor) node @state) word(if state.allocator is? none 0 else 1 node @state)]
     let helper=construction_helper('new_array' 6 node @state)
     if helper isnt? none {
-        let descriptor=snapshot(intrinsic(helper fields types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+        let descriptor=snapshot(intrinsic_call(helper fields types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
         return ArrayMemory[descriptor data prefix]
     }
     let descriptor=snapshot(allocation(word(layouts.array_descriptor.size node @state) node @state) @prefix @state)
     let offset:addr=0
     loop value in fields {
-        prefix.push(intrinsic('__store_i64__' [value address(descriptor offset node @state)] types.primitive('void' @state.type_nodes) node @state))
+        prefix.push(intrinsic_call('__store_i64__' [value address(descriptor offset node @state)] types.primitive('void' @state.type_nodes) node @state))
         offset+=8
     }
     return ArrayMemory[descriptor data prefix]
@@ -1082,23 +1082,23 @@ array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>
     }
     if types.is_primitive(type 'bool') {
         let byte=put(hir.Transmute[node.loc types.primitive('uint8' @state.type_nodes) value] @state)
-        return intrinsic('__store_u8__' [byte pointer] types.primitive('void' @state.type_nodes) node @state)
+        return intrinsic_call('__store_u8__' [byte pointer] types.primitive('void' @state.type_nodes) node @state)
     }
     let layout=views.fixed_integer_layout(element state.type_nodes)
     if layout is? none return reject(node 'array element store representation' @state)
-    return intrinsic("__store_{if layout.signed 'i' else 'u'}{layout.bits}__" [value pointer] types.primitive('void' @state.type_nodes) node @state)
+    return intrinsic_call("__store_{if layout.signed 'i' else 'u'}{layout.bits}__" [value pointer] types.primitive('void' @state.type_nodes) node @state)
 }
 array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(element state.type_nodes) state.type_nodes))
     if type is? types.ObjectType|types.ArrayType|types.MetaType or cell_members(element @state) isnt? none or enum_members(element state) isnt? none or string_type(element state) or unit_type(element state) return read_word(pointer 0 node @state)
     if type is? types.FunctionType return put(hir.Transmute[node.loc runtime_type(element node @state) read_word(pointer 0 node @state)] @state)
     if types.is_primitive(type 'bool') {
-        let byte=intrinsic('__load_i8__' [pointer] types.primitive('int8' @state.type_nodes) node @state)
+        let byte=intrinsic_call('__load_i8__' [pointer] types.primitive('int8' @state.type_nodes) node @state)
         return put(hir.Transmute[node.loc types.primitive('bool' @state.type_nodes) byte] @state)
     }
     let layout=views.fixed_integer_layout(element state.type_nodes)
     if layout is? none return reject(node 'array element load representation' @state)
-    return intrinsic("__load_{if layout.signed 'i' else 'u'}{layout.bits}__" [pointer] runtime_type(element node @state) node @state)
+    return intrinsic_call("__load_{if layout.signed 'i' else 'u'}{layout.bits}__" [pointer] runtime_type(element node @state) node @state)
 }
 array_literal = (node:hir.ArrayLiteral @state:State):>addr => {
     let type=array_type(node.value_type state)
@@ -1151,7 +1151,7 @@ spread_array_literal = (node:hir.ArrayLiteral element:addr stride:addr @state:St
         }
         let index=snapshot(word(0 node @state) @prefix @state)
         let count=read_word(source layouts.array_descriptor.length node @state)
-        let running=intrinsic('__lt__' [index count] bool_type node @state)
+        let running=intrinsic_call('__lt__' [index count] bool_type node @state)
         let origin=word_op('__add__' read_word(source 0 node @state) word_op('__mul__' index stride_word node @state) node @state)
         let value=copy_value(array_load(origin element node @state) element node @state)
         let step=put(hir.Assign[node.loc empty index '=' word_op('__add__' index word(1 node @state) node @state)] @state)
@@ -1215,7 +1215,7 @@ array_copy = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr =
         finish_copy(generated_name parameter body node @state)
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
+    return intrinsic_call(name [value] types.primitive('int64' @state.type_nodes) node @state)
 }
 # A top-level record block carries one header word before its fields: the
 # count of handles sharing it in the low 32 bits and its allocated size in
@@ -1234,7 +1234,7 @@ record_allocation = (layout:layouts.Record node:hir.AST @state:State):>addr => {
     # returns the field block, instead of two lines at every allocation.
     let key="headed:{layout.size}"
     let existing=state.copy_helpers.get(key)
-    if existing isnt? none return intrinsic(existing [] types.primitive('int64' @state.type_nodes) node @state)
+    if existing isnt? none return intrinsic_call(existing [] types.primitive('int64' @state.type_nodes) node @state)
     let generated=fresh('alloc' @state)
     state.copy_helpers[key]=generated
     let word_type=types.primitive('int64' @state.type_nodes)
@@ -1245,7 +1245,7 @@ record_allocation = (layout:layouts.Record node:hir.AST @state:State):>addr => {
     let body=put(hir.Block[node.loc word_type prefix false] @state)
     let signature=types.function_type([] [] none word_type [] @state.type_nodes)
     state.generated.push(program.Function[generated put(hir.FunctionLiteral[node.loc signature [] [] none word_type body source=state.source_index] @state)])
-    return intrinsic(generated [] word_type node @state)
+    return intrinsic_call(generated [] word_type node @state)
 }
 record_share_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     let word_type=types.primitive('int64' @state.type_nodes)
@@ -1257,7 +1257,7 @@ record_share_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     let shared:array<addr>=[store_word(word_op('__add__' current word(1 node @state) node @state) header 0 node @state) source]
     let counted=compare('__ge__' record_count(current node @state) word(1 node @state) node @state)
     let sized=compare('__eq__' record_size(current node @state) word(layout.size node @state) node @state)
-    let condition=intrinsic('__and__' [counted sized] types.primitive('bool' @state.type_nodes) node @state)
+    let condition=intrinsic_call('__and__' [counted sized] types.primitive('bool' @state.type_nodes) node @state)
     let arm=put(hir.IfArm[node.loc word_type condition sequence(shared node @state)] @state)
     prefix.push(put(hir.Flow[node.loc word_type [arm] object_copy(source type node @state)] @state))
     return put(hir.Block[node.loc word_type prefix false] @state)
@@ -1329,7 +1329,7 @@ record_helper = (kind:string value:addr type:addr node:hir.AST @state:State):>ad
         finish_copy(generated parameter body node @state)
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
+    return intrinsic_call(name [value] types.primitive('int64' @state.type_nodes) node @state)
 }
 record_unique = (value:addr type:addr node:hir.AST @state:State):>addr => {
     if state.allocator is? none return value
@@ -1350,7 +1350,7 @@ object_copy = (value:addr type:addr node:hir.AST @state:State shared:bool=false)
         finish_copy(generated_name parameter body node @state)
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
+    return intrinsic_call(name [value] types.primitive('int64' @state.type_nodes) node @state)
 }
 owned_copy = (value:addr type:addr node:hir.AST @state:State shared:bool=false):>addr => {
     if owned_string(type state) return string_runtime('_native_string_copy' [value] node @state)
@@ -1390,7 +1390,7 @@ array_unique = (descriptor:addr element:addr node:hir.AST @state:State):>addr =>
         finish_copy(generated parameter body node @state)
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [descriptor] types.primitive('int64' @state.type_nodes) node @state)
+    return intrinsic_call(name [descriptor] types.primitive('int64' @state.type_nodes) node @state)
 }
 # The private descriptor to mutate: the source itself unless it is shared,
 # in which case one reference moves to an independent copy of the storage.
@@ -1466,7 +1466,7 @@ pin_value = (value:addr type:addr node:hir.AST @state:State):>addr => {
         finish_copy(generated parameter body node @state)
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
+    return intrinsic_call(name [value] types.primitive('int64' @state.type_nodes) node @state)
 }
 # Exposing an array through a stable route may replace its descriptor with
 # a private pinned one, so the route's place must receive that replacement.
@@ -1625,8 +1625,8 @@ write_route = (id:addr @state:State detach:bool=true):>addr => {
 array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let descriptor=snapshot(value @prefix @state)
-    let source=snapshot(intrinsic('__load_i64__' [descriptor] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
-    let length=snapshot(intrinsic('__load_i64__' [address(descriptor layouts.array_descriptor.length node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    let source=snapshot(intrinsic_call('__load_i64__' [descriptor] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    let length=snapshot(intrinsic_call('__load_i64__' [address(descriptor layouts.array_descriptor.length node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
     let memory=array_memory(length layout.size node @state)
@@ -1634,7 +1634,7 @@ array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State)
     let counter=state.runtime_helpers.get('_arena_note_copy')
     if counter isnt? none {
         let symbol=state.symbols.get(counter)
-        if symbol isnt? none {prefix.push(intrinsic(symbol [word_op('__mul__' length word(layout.size node @state) node @state)] types.primitive('void' @state.type_nodes) node @state))}
+        if symbol isnt? none {prefix.push(intrinsic_call(symbol [word_op('__mul__' length word(layout.size node @state) node @state)] types.primitive('void' @state.type_nodes) node @state))}
     }
     if aggregate(type.element state) {
         if state.allocator is? none return reject(node 'owned aggregate array elements need the prelude arena allocator' @state)
@@ -1645,7 +1645,7 @@ array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State)
         let store=array_store(copied word_op('__add__' memory.data offset node @state) type.element node @state)
         let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
         let body=sequence([store increment] node @state)
-        let condition=intrinsic('__lt__' [cursor length] types.primitive('bool' @state.type_nodes) node @state)
+        let condition=intrinsic_call('__lt__' [cursor length] types.primitive('bool' @state.type_nodes) node @state)
         let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
         prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
         prefix.push(memory.descriptor)
@@ -1658,11 +1658,11 @@ array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State)
     # Copy whole words when the element width allows it: the C compiler does
     # not vectorize the byte loop, and detaching a shared word array is hot.
     let width=if layout.size % 8 =? 0 8 else 1
-    let unit=intrinsic("__load_u{width*8}__" [source_pointer] types.primitive("uint{width*8}" @state.type_nodes) node @state)
-    let store=intrinsic("__store_u{width*8}__" [unit into] types.primitive('void' @state.type_nodes) node @state)
+    let unit=intrinsic_call("__load_u{width*8}__" [source_pointer] types.primitive("uint{width*8}" @state.type_nodes) node @state)
+    let store=intrinsic_call("__store_u{width*8}__" [unit into] types.primitive('void' @state.type_nodes) node @state)
     let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__add__' cursor word(width node @state) node @state)] @state)
     let body=put(hir.Block[node.loc types.primitive('void' @state.type_nodes) [store increment] true] @state)
-    let condition=intrinsic('__lt__' [cursor count] types.primitive('bool' @state.type_nodes) node @state)
+    let condition=intrinsic_call('__lt__' [cursor count] types.primitive('bool' @state.type_nodes) node @state)
     let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
     prefix.push(memory.descriptor)
@@ -1785,7 +1785,7 @@ cell_copy = (value:addr type:addr node:hir.AST @state:State):>addr => {
         finish_copy(generated_name parameter body node @state)
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [value] types.primitive('int64' @state.type_nodes) node @state)
+    return intrinsic_call(name [value] types.primitive('int64' @state.type_nodes) node @state)
 }
 cell_write = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => {
     let members=cell_members(type @state)
@@ -1801,7 +1801,7 @@ cell_write = (destination:addr source:addr type:addr node:hir.AST @state:State):
         # An optional has one possible present payload. Its read may retain
         # a more precise length/shape than its stored tag; any nonzero tag
         # still denotes that payload, which must receive an independent copy.
-        let condition=if optional isnt? none intrinsic('__ne__' [tag word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) else intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let condition=if optional isnt? none intrinsic_call('__ne__' [tag word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) else intrinsic_call('__eq__' [tag word(member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
         let copy=owned_copy(payload member node @state shared=true)
         arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition store_word(copy destination 8 node @state)] @state))
     }
@@ -1823,7 +1823,7 @@ cell_private = (value:addr type:addr node:hir.AST @state:State):>addr => {
     fresh_cell.push(cell_write(cell source type node @state))
     fresh_cell.push(cell)
     let allocated=put(hir.Block[node.loc word_type fresh_cell false] @state)
-    let same=intrinsic('__eq__' [source shared] types.primitive('bool' @state.type_nodes) node @state)
+    let same=intrinsic_call('__eq__' [source shared] types.primitive('bool' @state.type_nodes) node @state)
     prefix.push(put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type same allocated] @state)] source] @state))
     return put(hir.Block[node.loc word_type prefix false] @state)
 }
@@ -1838,7 +1838,7 @@ cell_copy_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     let allocated=put(hir.Block[node.loc word_type fresh_cell false] @state)
     let shared_none=state.none_cell
     if shared_none isnt? none and views.optional_payload(type @state.type_nodes) isnt? none {
-        let absent=intrinsic('__eq__' [read_word(source 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let absent=intrinsic_call('__eq__' [read_word(source 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
         let shared=put(hir.ExpressedIdentifier[node.loc word_type shared_none] @state)
         prefix.push(put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type absent shared] @state)] allocated] @state))
     } else {prefix.push(allocated)}
@@ -1903,7 +1903,7 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owne
     let tag=word(member_tag(selected @state) node @state)
     let helper=construction_helper('new_cell' 2 node @state)
     if helper isnt? none {
-        prefix.push(intrinsic(helper [tag word_value] types.primitive('int64' @state.type_nodes) node @state))
+        prefix.push(intrinsic_call(helper [tag word_value] types.primitive('int64' @state.type_nodes) node @state))
         return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
     }
     let cell=snapshot(allocation(word(16 node @state) node @state) @prefix @state)
@@ -1962,7 +1962,7 @@ metatype_test = (operand:addr node:hir.TypeTest @state:State):>addr => {
     let prefix:array<addr>=[]
     let tag=snapshot(operand @prefix @state)
     let result=brand_predicate(tag node.test_type node @state)
-    if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
+    if node.negated {result=intrinsic_call('__not__' [result] boolean node @state)}
     prefix.push(result)
     return put(hir.Block[node.loc boolean prefix false] @state)
 }
@@ -1978,12 +1978,12 @@ brand_predicate = (tag:addr tested:addr node:hir.AST @state:State):>addr => {
         }
         return result
     }
-    if type is? types.TypeNot return intrinsic('__not__' [brand_predicate(tag type.item node @state)] boolean node @state)
+    if type is? types.TypeNot return intrinsic_call('__not__' [brand_predicate(tag type.item node @state)] boolean node @state)
     if type isnt? types.ObjectType or type.brand is? none return reject(node 'a type value tested against an unbranded type' @state)
     let brand=brand_number(type.brand state)
     if brand is? none return reject(node 'the tested type has no runtime brand number' @state)
-    let lower=intrinsic('__ge__' [tag word(brand.first node @state)] boolean node @state)
-    let upper=intrinsic('__lt__' [tag word(brand.end node @state)] boolean node @state)
+    let lower=intrinsic_call('__ge__' [tag word(brand.first node @state)] boolean node @state)
+    let upper=intrinsic_call('__lt__' [tag word(brand.limit node @state)] boolean node @state)
     return put(hir.ShortCircuit[node.loc boolean 'and' lower upper] @state)
 }
 runtime_test = (node:hir.TypeTest @state:State):>addr => {
@@ -2034,11 +2034,11 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
             let result:addr?=none
             loop p in refined_test.propositions {
                 let name=if p.op =? '>=?' '__ge__' else if p.op =? '<=?' '__le__' else if p.op =? 'not=?' '__ne__' else '__eq__'
-                let part=intrinsic(name [source word(p.value node @state)] boolean node @state)
+                let part=intrinsic_call(name [source word(p.value node @state)] boolean node @state)
                 result=if result is? none part else put(hir.ShortCircuit[node.loc boolean 'and' result part] @state)
             }
             $runtime_assert result isnt? none
-            prefix.push(if node.negated intrinsic('__not__' [result] boolean node @state) else result)
+            prefix.push(if node.negated intrinsic_call('__not__' [result] boolean node @state) else result)
             return put(hir.Block[node.loc boolean prefix false] @state)
         }
     }
@@ -2050,11 +2050,11 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
         loop member in set_members {
             let literal=types.node_at(state.type_nodes member)
             $runtime_assert literal is? types.IntegerLiteralType
-            let same=intrinsic('__eq__' [source word(literal.value node @state)] boolean node @state)
+            let same=intrinsic_call('__eq__' [source word(literal.value node @state)] boolean node @state)
             result=if result is? none same else put(hir.ShortCircuit[node.loc boolean 'or' result same] @state)
         }
         $runtime_assert result isnt? none
-        prefix.push(if node.negated intrinsic('__not__' [result] boolean node @state) else result)
+        prefix.push(if node.negated intrinsic_call('__not__' [result] boolean node @state) else result)
         return put(hir.Block[node.loc boolean prefix false] @state)
     }
     # A value whose static type already decides the test (a local narrowed to
@@ -2079,8 +2079,8 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
             let prefix:array<addr>=[]
             let source=snapshot(operand @prefix @state)
             let boolean=types.primitive('bool' @state.type_nodes)
-            let result=if present =? absent put(hir.Bool[node.loc boolean present] @state) else intrinsic(if present '__ne__' else '__eq__' [read_word(source 0 node @state) word(0 node @state)] boolean node @state)
-            if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
+            let result=if present =? absent put(hir.Bool[node.loc boolean present] @state) else intrinsic_call(if present '__ne__' else '__eq__' [read_word(source 0 node @state) word(0 node @state)] boolean node @state)
+            if node.negated {result=intrinsic_call('__not__' [result] boolean node @state)}
             prefix.push(result)
             return put(hir.Block[node.loc boolean prefix false] @state)
         }
@@ -2093,10 +2093,10 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
         let result=put(hir.Bool[node.loc boolean false] @state)
         loop member in enum {
             if not subtyping.is_subtype(member node.test_type state.links @state.type_nodes) continue
-            let matches=intrinsic('__eq__' [tag word(enum_tag(member @state) node @state)] boolean node @state)
+            let matches=intrinsic_call('__eq__' [tag word(enum_tag(member @state) node @state)] boolean node @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)
         }
-        if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
+        if node.negated {result=intrinsic_call('__not__' [result] boolean node @state)}
         prefix.push(result)
         return put(hir.Block[node.loc boolean prefix false] @state)
     }
@@ -2107,7 +2107,7 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
         let prefix:array<addr>=[]
         let source=snapshot(operand @prefix @state)
         let result=integer_predicate(source storage node.test_type node @state)
-        if node.negated {result=intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state)}
+        if node.negated {result=intrinsic_call('__not__' [result] types.primitive('bool' @state.type_nodes) node @state)}
         prefix.push(result)
         return put(hir.Block[node.loc node.value_type prefix false] @state)
     }
@@ -2117,13 +2117,13 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
             let prefix:array<addr>=[]
             let source=snapshot(operand @prefix @state)
             let result=integer_predicate(source actual node.test_type node @state)
-            if node.negated {result=intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state)}
+            if node.negated {result=intrinsic_call('__not__' [result] types.primitive('bool' @state.type_nodes) node @state)}
             prefix.push(result)
             return put(hir.Block[node.loc node.value_type prefix false] @state)
         }
         if string_type(actual state) {
             let result=string_type_test(operand node.test_type node @state)
-            return if node.negated intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state) else result
+            return if node.negated intrinsic_call('__not__' [result] types.primitive('bool' @state.type_nodes) node @state) else result
         }
         return object_test(operand node @state)
     }
@@ -2140,21 +2140,21 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
         # String alternatives share the descriptor representation and tag.
         # Their literal spelling is in the payload, never in that shared tag.
         if string_type(member state) {
-            let active=intrinsic('__eq__' [tag word(tag_number node @state)] boolean node @state)
+            let active=intrinsic_call('__eq__' [tag word(tag_number node @state)] boolean node @state)
             let payload=cell_payload(source types.primitive('string' @state.type_nodes) node @state)
             let matches=string_type_test(payload node.test_type node @state)
             let selected=put(hir.ShortCircuit[node.loc boolean 'and' active matches] @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result selected] @state)
         } else if subtyping.is_subtype(member node.test_type state.links @state.type_nodes) {
-            let matches=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] boolean node @state)
+            let matches=intrinsic_call('__eq__' [tag word(member_tag(member @state) node @state)] boolean node @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)
         } else if views.fixed_integer_layout(views.structural_base(member state.type_nodes) state.type_nodes) isnt? none {
-            let active=intrinsic('__eq__' [tag word(tag_number node @state)] boolean node @state)
+            let active=intrinsic_call('__eq__' [tag word(tag_number node @state)] boolean node @state)
             let matches=integer_predicate(cell_payload(source member node @state) member node.test_type node @state)
             let selected=put(hir.ShortCircuit[node.loc boolean 'and' active matches] @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result selected] @state)
         } else if object_valued(member state) and not type_tests.disjoint(member node.test_type state.links @state.type_nodes) {
-            let active=intrinsic('__eq__' [tag word(tag_number node @state)] boolean node @state)
+            let active=intrinsic_call('__eq__' [tag word(tag_number node @state)] boolean node @state)
             let matches=object_matches(cell_payload(source member node @state) member node.test_type node @state)
             let selected=put(hir.ShortCircuit[node.loc boolean 'and' active matches] @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result selected] @state)
@@ -2162,13 +2162,13 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
             # An abstract `int`/`uint` alternative occupies the 64-bit word
             # (`dict<string int|none>`); every present value fits the word,
             # so a fixed-width test is the presence of that alternative.
-            let active=intrinsic('__eq__' [tag word(tag_number node @state)] boolean node @state)
+            let active=intrinsic_call('__eq__' [tag word(tag_number node @state)] boolean node @state)
             result=put(hir.ShortCircuit[node.loc boolean 'or' result active] @state)
         } else if not type_tests.disjoint(member node.test_type state.links @state.type_nodes) {
             return reject(node 'a runtime test within one union payload alternative' @state)
         }
     }
-    if node.negated {result=intrinsic('__not__' [result] boolean node @state)}
+    if node.negated {result=intrinsic_call('__not__' [result] boolean node @state)}
     prefix.push(result)
     return put(hir.Block[node.loc boolean prefix false] @state)
 }
@@ -2195,7 +2195,7 @@ string_runtime = (helper:string arguments:array<addr> node:hir.AST @state:State 
     if binding is? none return reject(node "native string storage needs {helper}" @state)
     let name=state.symbols.get(binding)
     if name is? none return reject(node "native string helper {helper} is absent" @state)
-    return intrinsic(name arguments types.primitive(if result_void 'void' else 'int64' @state.type_nodes) node @state)
+    return intrinsic_call(name arguments types.primitive(if result_void 'void' else 'int64' @state.type_nodes) node @state)
 }
 string_memory = (data:addr byte_length:addr boundaries:addr length:addr start:addr node:hir.AST @state:State static_storage:bool=false owner:addr?=none):>addr => {
     let prefix:array<addr>=[]
@@ -2204,7 +2204,7 @@ string_memory = (data:addr byte_length:addr boundaries:addr length:addr start:ad
         boundaries=snapshot(boundaries @prefix @state) length=snapshot(length @prefix @state)
     }
     let size=word(layouts.string_descriptor.size node @state)
-    let storage=if static_storage intrinsic('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else if state.shared_string_descriptors string_runtime('_native_string_descriptor' [] node @state) else allocation(size node @state)
+    let storage=if static_storage intrinsic_call('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else if state.shared_string_descriptors string_runtime('_native_string_descriptor' [] node @state) else allocation(size node @state)
     let descriptor=snapshot(storage @prefix @state)
     let control=if static_storage word(0 node @state) else if owner isnt? none owner else string_runtime('_native_string_owner' [data byte_length boundaries word_op('__mul__' word_op('__add__' length word(1 node @state) node @state) word(4 node @state) node @state)] node @state)
     let fields:array<addr>=[data byte_length boundaries length start control]
@@ -2236,15 +2236,15 @@ string_literal = (node:hir.String @state:State):>addr => {
     # All six descriptor words are compile-time stable. The existing µDewy
     # primitive emits the pointer relocations as static data, preserving one
     # descriptor per literal site without rebuilding it on every evaluation.
-    return intrinsic('__static_words__' [data word(bytes.length node @state) boundaries word(node.content.length node @state) word(0 node @state) word(0 node @state)] word_type node @state)
+    return intrinsic_call('__static_words__' [data word(bytes.length node @state) boundaries word(node.content.length node @state) word(0 node @state) word(0 node @state)] word_type node @state)
 }
 string_data = (value:addr node:hir.AST @state:State):>addr => word_op('__add__' read_word(value layouts.string_descriptor.data node @state) read_word(value layouts.string_descriptor.start node @state) node @state)
 string_view = (value:addr first:addr count:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[ensure_segmented(value node @state)]
     let boundaries=snapshot(word_op('__add__' read_word(value layouts.string_descriptor.boundaries node @state) word_op('__mul__' first word(4 node @state) node @state) node @state) @prefix @state)
-    let start=snapshot(intrinsic('__load_u32__' [boundaries] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    let start=snapshot(intrinsic_call('__load_u32__' [boundaries] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let end_pointer=word_op('__add__' boundaries word_op('__mul__' count word(4 node @state) node @state) node @state)
-    let stop=snapshot(intrinsic('__load_u32__' [end_pointer] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    let stop=snapshot(intrinsic_call('__load_u32__' [end_pointer] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     prefix.push(string_memory(read_word(value layouts.string_descriptor.data node @state) word_op('__sub__' stop start node @state) boundaries count start node @state owner=string_runtime('_native_string_view_owner' [value] node @state)))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
@@ -2306,16 +2306,16 @@ string_frame_view = (id:addr @prefix:array<addr> @state:State):>addr? => {
         if range.right isnt? none and bounds in? ['[]' '(]'] {stop=word_op('__add__' stop word(1 node @state) node @state)}
         stop=snapshot(stop @prefix @state)
         count=snapshot(word_op('__sub__' stop first node @state) @prefix @state)
-        let negative=intrinsic('__lt__' [count word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let negative=intrinsic_call('__lt__' [count word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
         let zero=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) count '=' word(0 node @state)] @state)
         prefix.push(conditional(negative zero node @state))
     }
     let hoisted:array<addr>=[]
-    let slot=snapshot(intrinsic('__alloca__' [word(layouts.string_descriptor.size node @state)] word_type node @state) @hoisted @state)
+    let slot=snapshot(intrinsic_call('__alloca__' [word(layouts.string_descriptor.size node @state)] word_type node @state) @hoisted @state)
     loop item in hoisted {state.loop_prologue.push(item)}
     let boundaries=snapshot(word_op('__add__' read_word(value layouts.string_descriptor.boundaries node @state) word_op('__mul__' first word(4 node @state) node @state) node @state) @prefix @state)
-    let start=snapshot(intrinsic('__load_u32__' [boundaries] word_type node @state) @prefix @state)
-    let stop=snapshot(intrinsic('__load_u32__' [word_op('__add__' boundaries word_op('__mul__' count word(4 node @state) node @state) node @state)] word_type node @state) @prefix @state)
+    let start=snapshot(intrinsic_call('__load_u32__' [boundaries] word_type node @state) @prefix @state)
+    let stop=snapshot(intrinsic_call('__load_u32__' [word_op('__add__' boundaries word_op('__mul__' count word(4 node @state) node @state) node @state)] word_type node @state) @prefix @state)
     prefix.push(store_word(read_word(value layouts.string_descriptor.data node @state) slot layouts.string_descriptor.data node @state))
     prefix.push(store_word(word_op('__sub__' stop start node @state) slot layouts.string_descriptor.byte_length node @state))
     prefix.push(store_word(boundaries slot layouts.string_descriptor.boundaries node @state))
@@ -2343,7 +2343,7 @@ string_bounds = (range:hir.Range length:addr node:hir.AST @prefix:array<addr> @s
     if range.right isnt? none and bounds in? ['[]' '(]'] {stop=word_op('__add__' stop word(1 node @state) node @state)}
     stop=snapshot(stop @prefix @state)
     let count=snapshot(word_op('__sub__' stop first node @state) @prefix @state)
-    let negative=intrinsic('__lt__' [count word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    let negative=intrinsic_call('__lt__' [count word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
     let zero=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) count '=' word(0 node @state)] @state)
     prefix.push(conditional(negative zero node @state))
     return StringBounds[first count]
@@ -2387,9 +2387,9 @@ string_span = (id:addr @prefix:array<addr> @state:State):>StringSpan => {
             count=word(1 node @state)
         }
         let boundaries=snapshot(word_op('__add__' source.boundaries word_op('__mul__' first word(4 node @state) node @state) node @state) @prefix @state)
-        let start=snapshot(intrinsic('__load_u32__' [boundaries] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+        let start=snapshot(intrinsic_call('__load_u32__' [boundaries] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
         let stop_pointer=word_op('__add__' boundaries word_op('__mul__' count word(4 node @state) node @state) node @state)
-        let stop=snapshot(intrinsic('__load_u32__' [stop_pointer] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+        let stop=snapshot(intrinsic_call('__load_u32__' [stop_pointer] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
         let length=snapshot(word_op('__sub__' stop start node @state) @prefix @state)
         return StringSpan[source.root source.data boundaries start length count]
     }
@@ -2421,8 +2421,8 @@ string_equal_bytes = (left:addr left_length:addr right:addr right_length:addr no
     let boolean=types.primitive('bool' @state.type_nodes)
     let helper=bytes_equal_helper(node @state)
     if helper isnt? none {
-        let same=intrinsic(helper [left left_length right right_length] boolean node @state)
-        return if negated intrinsic('__not__' [same] boolean node @state) else same
+        let same=intrinsic_call(helper [left left_length right right_length] boolean node @state)
+        return if negated intrinsic_call('__not__' [same] boolean node @state) else same
     }
     return string_equal_bytes_inline(left left_length right right_length node negated @state)
 }
@@ -2455,22 +2455,22 @@ string_equal_bytes_inline = (left:addr left_length:addr right:addr right_length:
     let prefix:array<addr>=[]
     let length=snapshot(left_length @prefix @state)
     let boolean=types.primitive('bool' @state.type_nodes)
-    let same=snapshot(intrinsic('__eq__' [length right_length] boolean node @state) @prefix @state)
+    let same=snapshot(intrinsic_call('__eq__' [length right_length] boolean node @state) @prefix @state)
     let cursor=snapshot(word(0 node @state) @prefix @state)
     let a=snapshot(left @prefix @state)
     let b=snapshot(right @prefix @state)
     let byte_type=types.primitive('uint8' @state.type_nodes)
-    let av=intrinsic('__load_u8__' [word_op('__add__' a cursor node @state)] byte_type node @state)
-    let bv=intrinsic('__load_u8__' [word_op('__add__' b cursor node @state)] byte_type node @state)
-    let comparison=intrinsic('__eq__' [av bv] boolean node @state)
+    let av=intrinsic_call('__load_u8__' [word_op('__add__' a cursor node @state)] byte_type node @state)
+    let bv=intrinsic_call('__load_u8__' [word_op('__add__' b cursor node @state)] byte_type node @state)
+    let comparison=intrinsic_call('__eq__' [av bv] boolean node @state)
     let assign=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) same '=' comparison] @state)
     let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
-    let running=intrinsic('__lt__' [cursor length] boolean node @state)
+    let running=intrinsic_call('__lt__' [cursor length] boolean node @state)
     let condition=put(hir.ShortCircuit[node.loc boolean 'and' same running] @state)
     let body=sequence([assign increment] node @state)
     let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
-    prefix.push(if negated intrinsic('__not__' [same] boolean node @state) else same)
+    prefix.push(if negated intrinsic_call('__not__' [same] boolean node @state) else same)
     return put(hir.Block[node.loc boolean prefix false] @state)
 }
 string_bytes = (value:addr node:hir.AST @state:State):>addr => {
@@ -2522,7 +2522,7 @@ string_scalars = (value:addr node:hir.AST @state:State):>addr => {
     let empty=types.primitive('void' @state.type_nodes)
     let boolean=types.primitive('bool' @state.type_nodes)
     let pointer=word_op('__add__' data cursor node @state)
-    let leading=intrinsic('__load_u8__' [pointer] types.primitive('int64' @state.type_nodes) node @state)
+    let leading=intrinsic_call('__load_u8__' [pointer] types.primitive('int64' @state.type_nodes) node @state)
     let arms:array<addr>=[]
     loop encoding in [Utf8Width[128 1 127] Utf8Width[224 2 31] Utf8Width[240 3 15] Utf8Width[256 4 7]] {
         let limit=encoding.limit
@@ -2530,19 +2530,19 @@ string_scalars = (value:addr node:hir.AST @state:State):>addr => {
         let mask=encoding.mask
         let decoded=word_op('__and__' leading word(mask node @state) node @state)
         loop delta in 1.. and delta <? width {
-            let byte=intrinsic('__load_u8__' [word_op('__add__' pointer word(delta node @state) node @state)] types.primitive('int64' @state.type_nodes) node @state)
+            let byte=intrinsic_call('__load_u8__' [word_op('__add__' pointer word(delta node @state) node @state)] types.primitive('int64' @state.type_nodes) node @state)
             decoded=word_op('__add__' word_op('__lshift__' decoded word(6 node @state) node @state) word_op('__and__' byte word(63 node @state) node @state) node @state)
         }
         let save=put(hir.Assign[node.loc empty scalar '=' decoded] @state)
         let advance=put(hir.Assign[node.loc empty cursor '=' word_op('__add__' cursor word(width node @state) node @state)] @state)
-        let selected=intrinsic('__lt__' [leading word(limit node @state)] boolean node @state)
+        let selected=intrinsic_call('__lt__' [leading word(limit node @state)] boolean node @state)
         arms.push(put(hir.IfArm[node.loc empty selected sequence([save advance] node @state)] @state))
     }
     let decode=put(hir.Flow[node.loc empty arms none] @state)
     let destination=word_op('__add__' memory.data word_op('__mul__' count word(4 node @state) node @state) node @state)
-    let store=intrinsic('__store_u32__' [scalar destination] empty node @state)
+    let store=intrinsic_call('__store_u32__' [scalar destination] empty node @state)
     let advance=put(hir.Assign[node.loc empty count '=' word_op('__add__' count word(1 node @state) node @state)] @state)
-    let running=intrinsic('__lt__' [cursor length] boolean node @state)
+    let running=intrinsic_call('__lt__' [cursor length] boolean node @state)
     let loop_arm=put(hir.LoopArm[node.loc empty running sequence([decode store advance] node @state)] @state)
     prefix.push(put(hir.Flow[node.loc empty [loop_arm] none] @state))
     prefix.push(store_word(count memory.descriptor layouts.array_descriptor.length node @state))
@@ -2556,7 +2556,7 @@ string_scalars = (value:addr node:hir.AST @state:State):>addr => {
 byte_descriptor = (data:addr length:addr node:hir.AST @state:State static_storage:bool=false):>addr => {
     let prefix:array<addr>=[]
     let size=word(layouts.array_descriptor.size node @state)
-    let storage=if static_storage intrinsic('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else allocation(size node @state)
+    let storage=if static_storage intrinsic_call('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else allocation(size node @state)
     let descriptor=snapshot(storage @prefix @state)
     let flags=layouts.array_flags.borrowed_static + if static_storage 0 else layouts.array_flags.arena_descriptor
     let fields:array<addr>=[data length length word(1 node @state) word(flags node @state) word(0 node @state)]
@@ -2588,7 +2588,7 @@ segmented_string_into = (data:addr length:addr node:hir.AST optional:bool @state
     data=snapshot(data @prefix @state) length=snapshot(length @prefix @state)
     # Reject oversized inputs through the helper without overflowing the
     # table's capacity arithmetic or allocating an unusable giant table.
-    let fits=intrinsic('__le__' [length word(uint32.max node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    let fits=intrinsic_call('__le__' [length word(uint32.max node @state)] types.primitive('bool' @state.type_nodes) node @state)
     let word_type=types.primitive('int64' @state.type_nodes)
     let capacity_arm=put(hir.IfArm[node.loc word_type fits word_op('__add__' length word(1 node @state) node @state)] @state)
     let capacity=put(hir.Flow[node.loc word_type [capacity_arm] word(0 node @state)] @state)
@@ -2597,7 +2597,7 @@ segmented_string_into = (data:addr length:addr node:hir.AST optional:bool @state
     let bytes=snapshot(byte_descriptor(data length node @state) @prefix @state)
     let checked=snapshot(string_runtime('_utf8_boundaries_into' [bytes boundaries] node @state) @prefix @state)
     prefix.push(release_block(bytes word(layouts.array_descriptor.size node @state) node @state))
-    let valid=intrinsic('__ne__' [read_word(checked 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    let valid=intrinsic_call('__ne__' [read_word(checked 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
     let success:array<addr>=[]
     let count=snapshot(read_word(checked 8 node @state) @success @state)
     let owner=string_runtime('_native_string_owner' [data length boundaries size] node @state)
@@ -2632,7 +2632,7 @@ segmented_string_into = (data:addr length:addr node:hir.AST optional:bool @state
     let shared_none=state.none_cell
     if shared_none isnt? none {
         let shared=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) shared_none] @state)
-        checked_block=conditional(intrinsic('__ne__' [checked shared] types.primitive('bool' @state.type_nodes) node @state) checked_block node @state)
+        checked_block=conditional(intrinsic_call('__ne__' [checked shared] types.primitive('bool' @state.type_nodes) node @state) checked_block node @state)
     }
     prefix.push(checked_block)
     prefix.push(output)
@@ -2669,7 +2669,7 @@ ensure_segmented = (value:addr node:hir.AST @state:State):>addr => {
         state.generated.push(program.Function[generated literal])
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [value] empty node @state)
+    return intrinsic_call(name [value] empty node @state)
 }
 ensure_segmented_body = (value:addr node:hir.AST @state:State):>addr => {
     let word_type=types.primitive('int64' @state.type_nodes)
@@ -2685,23 +2685,23 @@ ensure_segmented_body = (value:addr node:hir.AST @state:State):>addr => {
     let bytes=snapshot(byte_descriptor(read_word(value layouts.string_descriptor.data node @state) length node @state) @compute @state)
     let checked=snapshot(string_runtime('_utf8_boundaries_into' [bytes table] node @state) @compute @state)
     compute.push(release_block(bytes word(layouts.array_descriptor.size node @state) node @state))
-    let valid=intrinsic('__ne__' [read_word(checked 0 node @state) word(0 node @state)] boolean node @state)
+    let valid=intrinsic_call('__ne__' [read_word(checked 0 node @state) word(0 node @state)] boolean node @state)
     let count=snapshot(put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type valid read_word(checked 8 node @state)] @state)] word(0 node @state)] @state) @compute @state)
     let checked_block=release_block(checked word(16 node @state) node @state)
     let shared_none=state.none_cell
     if shared_none isnt? none {
         let shared=put(hir.ExpressedIdentifier[node.loc word_type shared_none] @state)
-        checked_block=conditional(intrinsic('__ne__' [checked shared] boolean node @state) checked_block node @state)
+        checked_block=conditional(intrinsic_call('__ne__' [checked shared] boolean node @state) checked_block node @state)
     }
     compute.push(checked_block)
     compute.push(store_word(table value layouts.string_descriptor.boundaries node @state))
     compute.push(store_word(count value layouts.string_descriptor.grapheme_length node @state))
     let record:array<addr>=[store_word(table owner 24 node @state) store_word(size owner 32 node @state) store_word(count owner 40 node @state)]
-    compute.push(conditional(intrinsic('__ne__' [owner word(0 node @state)] boolean node @state) sequence(record node @state) node @state))
-    let known=put(hir.ShortCircuit[node.loc boolean 'and' intrinsic('__ne__' [owner word(0 node @state)] boolean node @state) intrinsic('__ne__' [read_word(owner 24 node @state) word(0 node @state)] boolean node @state)] @state)
+    compute.push(conditional(intrinsic_call('__ne__' [owner word(0 node @state)] boolean node @state) sequence(record node @state) node @state))
+    let known=put(hir.ShortCircuit[node.loc boolean 'and' intrinsic_call('__ne__' [owner word(0 node @state)] boolean node @state) intrinsic_call('__ne__' [read_word(owner 24 node @state) word(0 node @state)] boolean node @state)] @state)
     let arm=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) known sequence(adopt node @state)] @state)
     body.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] sequence(compute node @state)] @state))
-    let pending=intrinsic('__eq__' [read_word(value layouts.string_descriptor.boundaries node @state) word(0 node @state)] boolean node @state)
+    let pending=intrinsic_call('__eq__' [read_word(value layouts.string_descriptor.boundaries node @state) word(0 node @state)] boolean node @state)
     return conditional(pending sequence(body node @state) node @state)
 }
 
@@ -2715,12 +2715,12 @@ segmented_string = (data:addr length:addr node:hir.AST optional:bool @state:Stat
     let prefix:array<addr>=[]
     data=snapshot(data @prefix @state) length=snapshot(length @prefix @state)
     let bytes=snapshot(byte_descriptor(data length node @state) @prefix @state)
-    let checked=snapshot(intrinsic(name [bytes] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    let checked=snapshot(intrinsic_call(name [bytes] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     # The helper borrows the byte view for this call. Its optional offsets
     # are owned scratch storage, independent of the final uint32 table.
     prefix.push(release_block(bytes word(layouts.array_descriptor.size node @state) node @state))
-    let valid=intrinsic('__ne__' [read_word(checked 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
-    let fits=intrinsic('__le__' [length word(uint32.max node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    let valid=intrinsic_call('__ne__' [read_word(checked 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    let fits=intrinsic_call('__le__' [length word(uint32.max node @state)] types.primitive('bool' @state.type_nodes) node @state)
     valid=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'and' fits valid] @state)
     let success:array<addr>=[]
     let offsets=snapshot(read_word(checked 8 node @state) @success @state)
@@ -2730,9 +2730,9 @@ segmented_string = (data:addr length:addr node:hir.AST optional:bool @state:Stat
     let source=word_op('__add__' read_word(offsets 0 node @state) word_op('__mul__' cursor word(8 node @state) node @state) node @state)
     let target=word_op('__add__' boundaries word_op('__mul__' cursor word(4 node @state) node @state) node @state)
     let narrowed=put(hir.Transmute[node.loc types.primitive('uint32' @state.type_nodes) read_word(source 0 node @state)] @state)
-    let write=intrinsic('__store_u32__' [narrowed target] types.primitive('void' @state.type_nodes) node @state)
+    let write=intrinsic_call('__store_u32__' [narrowed target] types.primitive('void' @state.type_nodes) node @state)
     let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
-    let condition=intrinsic('__lt__' [cursor count] types.primitive('bool' @state.type_nodes) node @state)
+    let condition=intrinsic_call('__lt__' [cursor count] types.primitive('bool' @state.type_nodes) node @state)
     let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition sequence([write increment] node @state)] @state)
     success.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
     let result=string_memory(data length boundaries word_op('__sub__' count word(1 node @state) node @state) word(0 node @state) node @state)
@@ -2743,7 +2743,7 @@ segmented_string = (data:addr length:addr node:hir.AST optional:bool @state:Stat
         success.push(store_word(result cell 8 node @state))
         success.push(store_word(word(member_tag(types.primitive('string' @state.type_nodes) @state) node @state) cell 0 node @state))
         prefix.push(conditional(valid sequence(success node @state) node @state))
-        prefix.push(conditional(intrinsic('__not__' [valid] types.primitive('bool' @state.type_nodes) node @state) release_block(data length node @state) node @state))
+        prefix.push(conditional(intrinsic_call('__not__' [valid] types.primitive('bool' @state.type_nodes) node @state) release_block(data length node @state) node @state))
         prefix.push(cell)
     } else {
         # Both inputs of concatenation are already valid strings. A failed
@@ -2791,32 +2791,32 @@ integer_text = (value:addr type:addr node:hir.AST @prefix:array<addr> @state:Sta
     let uint=types.primitive('uint64' @state.type_nodes)
     let boolean=types.primitive('bool' @state.type_nodes)
     let actual=snapshot(value @prefix @state)
-    let negative=snapshot(if layout.signed intrinsic('__lt__' [actual put(hir.Integer[node.loc hir.node_at(state.nodes actual).value_type '0d' 0] @state)] boolean node @state) else put(hir.Bool[node.loc boolean false] @state) @prefix @state)
+    let negative=snapshot(if layout.signed intrinsic_call('__lt__' [actual put(hir.Integer[node.loc hir.node_at(state.nodes actual).value_type '0d' 0] @state)] boolean node @state) else put(hir.Bool[node.loc boolean false] @state) @prefix @state)
     let magnitude=snapshot(put(hir.Transmute[node.loc uint actual] @state) @prefix @state)
     let zero=put(hir.Integer[node.loc uint '0d' 0] @state)
     # Unsigned subtraction also represents abs(int64.min), whose magnitude
     # does not fit a signed word. No signed negation or division overflows.
-    let negate=intrinsic('__sub__' [zero magnitude] uint node @state)
+    let negate=intrinsic_call('__sub__' [zero magnitude] uint node @state)
     prefix.push(conditional(negative put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) magnitude '=' negate] @state) node @state))
     # Formatting consumes these bytes inside this expression; they never
     # escape into the materialized string. Reserve fixed frame scratch.
-    let buffer=snapshot(intrinsic('__alloca__' [word(21 node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
+    let buffer=snapshot(intrinsic_call('__alloca__' [word(21 node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let cursor=snapshot(word(21 node @state) @prefix @state)
     let body:array<addr>=[]
     body.push(put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__sub__' cursor word(1 node @state) node @state)] @state))
     let ten=put(hir.Integer[node.loc uint '0d' 10] @state)
-    let digit=intrinsic('__mod__' [magnitude ten] uint node @state)
-    let ascii=intrinsic('__add__' [digit put(hir.Integer[node.loc uint '0d' 48] @state)] uint node @state)
+    let digit=intrinsic_call('__mod__' [magnitude ten] uint node @state)
+    let ascii=intrinsic_call('__add__' [digit put(hir.Integer[node.loc uint '0d' 48] @state)] uint node @state)
     let byte=put(hir.Transmute[node.loc types.primitive('uint8' @state.type_nodes) ascii] @state)
-    body.push(intrinsic('__store_u8__' [byte word_op('__add__' buffer cursor node @state)] types.primitive('void' @state.type_nodes) node @state))
-    body.push(put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) magnitude '=' intrinsic('__floordiv__' [magnitude ten] uint node @state)] @state))
-    let more=intrinsic('__ne__' [magnitude zero] boolean node @state)
-    let first=intrinsic('__eq__' [cursor word(21 node @state)] boolean node @state)
+    body.push(intrinsic_call('__store_u8__' [byte word_op('__add__' buffer cursor node @state)] types.primitive('void' @state.type_nodes) node @state))
+    body.push(put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) magnitude '=' intrinsic_call('__floordiv__' [magnitude ten] uint node @state)] @state))
+    let more=intrinsic_call('__ne__' [magnitude zero] boolean node @state)
+    let first=intrinsic_call('__eq__' [cursor word(21 node @state)] boolean node @state)
     let condition=put(hir.ShortCircuit[node.loc boolean 'or' first more] @state)
     let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition sequence(body node @state)] @state)
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
     let sign:array<addr>=[put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' word_op('__sub__' cursor word(1 node @state) node @state)] @state)]
-    sign.push(intrinsic('__store_u8__' [put(hir.Integer[node.loc types.primitive('uint8' @state.type_nodes) '0d' 45] @state) word_op('__add__' buffer cursor node @state)] types.primitive('void' @state.type_nodes) node @state))
+    sign.push(intrinsic_call('__store_u8__' [put(hir.Integer[node.loc types.primitive('uint8' @state.type_nodes) '0d' 45] @state) word_op('__add__' buffer cursor node @state)] types.primitive('void' @state.type_nodes) node @state))
     prefix.push(conditional(negative sequence(sign node @state) node @state))
     return TextBytes[snapshot(word_op('__add__' buffer cursor node @state) @prefix @state) snapshot(word_op('__sub__' word(21 node @state) cursor node @state) @prefix @state)]
 }
@@ -2872,8 +2872,8 @@ string_join = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr 
     let length=read_word(piece layouts.string_descriptor.byte_length call @state)
     let empty=types.primitive('void' @state.type_nodes)
     let increment=put(hir.Assign[call.loc empty cursor '=' word_op('__add__' cursor word(1 call @state) call @state)] @state)
-    let running=intrinsic('__lt__' [cursor count] types.primitive('bool' @state.type_nodes) call @state)
-    let separated=intrinsic('__gt__' [cursor word(0 call @state)] types.primitive('bool' @state.type_nodes) call @state)
+    let running=intrinsic_call('__lt__' [cursor count] types.primitive('bool' @state.type_nodes) call @state)
+    let separated=intrinsic_call('__gt__' [cursor word(0 call @state)] types.primitive('bool' @state.type_nodes) call @state)
     let sum=put(hir.Assign[call.loc empty total '=' word_op('__add__' total length call @state)] @state)
     let gap=put(hir.Assign[call.loc empty total '=' word_op('__add__' total separator_length call @state)] @state)
     let measure=put(hir.LoopArm[call.loc empty running sequence([sum conditional(separated gap call @state) increment] call @state)] @state)
@@ -2958,8 +2958,8 @@ representation = (node:hir.RepresentationCast @state:State):>addr => {
 # Receiver and written arguments are captured before a mutation starts.
 # A growable array keeps its descriptor identity while replacing its data;
 # shrinking preserves capacity. Only live bytes are copied during growth.
-read_word = (descriptor:addr offset:addr node:hir.AST @state:State):>addr => intrinsic('__load_i64__' [address(descriptor offset node @state)] types.primitive('int64' @state.type_nodes) node @state)
-store_word = (value:addr descriptor:addr offset:addr node:hir.AST @state:State):>addr => intrinsic('__store_i64__' [value address(descriptor offset node @state)] types.primitive('void' @state.type_nodes) node @state)
+read_word = (descriptor:addr offset:addr node:hir.AST @state:State):>addr => intrinsic_call('__load_i64__' [address(descriptor offset node @state)] types.primitive('int64' @state.type_nodes) node @state)
+store_word = (value:addr descriptor:addr offset:addr node:hir.AST @state:State):>addr => intrinsic_call('__store_i64__' [value address(descriptor offset node @state)] types.primitive('void' @state.type_nodes) node @state)
 sequence = (items:array<addr> node:hir.AST @state:State):>addr => put(hir.Block[node.loc types.primitive('void' @state.type_nodes) items false] @state)
 conditional = (condition:addr body:addr node:hir.AST @state:State):>addr => {
     let arm=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
@@ -2969,12 +2969,12 @@ counted_bytes = (source:addr target:addr start:addr stop:addr node:hir.AST @stat
     let prefix:array<addr>=[]
     let cursor=snapshot(start @prefix @state)
     let offset=if backwards word_op('__sub__' cursor word(1 node @state) node @state) else cursor
-    let byte=intrinsic('__load_u8__' [word_op('__add__' source offset node @state)] types.primitive('uint8' @state.type_nodes) node @state)
-    let store=intrinsic('__store_u8__' [byte word_op('__add__' target offset node @state)] types.primitive('void' @state.type_nodes) node @state)
+    let byte=intrinsic_call('__load_u8__' [word_op('__add__' source offset node @state)] types.primitive('uint8' @state.type_nodes) node @state)
+    let store=intrinsic_call('__store_u8__' [byte word_op('__add__' target offset node @state)] types.primitive('void' @state.type_nodes) node @state)
     let step=word_op(if backwards '__sub__' else '__add__' cursor word(1 node @state) node @state)
     let increment=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) cursor '=' step] @state)
     let body=sequence([store increment] node @state)
-    let condition=intrinsic(if backwards '__gt__' else '__lt__' [cursor stop] types.primitive('bool' @state.type_nodes) node @state)
+    let condition=intrinsic_call(if backwards '__gt__' else '__lt__' [cursor stop] types.primitive('bool' @state.type_nodes) node @state)
     let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
     return sequence(prefix node @state)
@@ -2998,7 +2998,7 @@ array_reserve = (descriptor:addr required:addr stride:addr node:hir.AST @state:S
         state.generated.push(program.Function[generated literal])
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [descriptor required] empty node @state)
+    return intrinsic_call(name [descriptor required] empty node @state)
 }
 array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @state:State):>addr => {
     if state.allocator is? none return reject(node 'array growth needs the prelude arena allocator' @state)
@@ -3008,9 +3008,9 @@ array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @st
     let next=snapshot(word_op('__mul__' capacity word(2 node @state) node @state) @body @state)
     # Grow from a small floor: arrays built by pushes otherwise reallocate
     # at one, two and four elements before reaching a useful size.
-    let tiny=intrinsic('__lt__' [next word(8 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+    let tiny=intrinsic_call('__lt__' [next word(8 node @state)] types.primitive('bool' @state.type_nodes) node @state)
     body.push(conditional(tiny put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) next '=' word(8 node @state)] @state) node @state))
-    let insufficient=intrinsic('__lt__' [next required] types.primitive('bool' @state.type_nodes) node @state)
+    let insufficient=intrinsic_call('__lt__' [next required] types.primitive('bool' @state.type_nodes) node @state)
     let choose=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) next '=' required] @state)
     body.push(conditional(insufficient choose node @state))
     let data=snapshot(allocation(word_op('__mul__' next word(stride node @state) node @state) node @state) @body @state)
@@ -3022,8 +3022,8 @@ array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @st
     if stride in? [1 2 4 8] {
         let cursor=snapshot(word(0 node @state) @body @state)
         let offset=word_op('__mul__' cursor word(stride node @state) node @state)
-        let value=intrinsic("__load_u{stride*8}__" [word_op('__add__' source offset node @state)] types.primitive("uint{stride*8}" @state.type_nodes) node @state)
-        let stored=intrinsic("__store_u{stride*8}__" [value word_op('__add__' data offset node @state)] types.primitive('void' @state.type_nodes) node @state)
+        let value=intrinsic_call("__load_u{stride*8}__" [word_op('__add__' source offset node @state)] types.primitive("uint{stride*8}" @state.type_nodes) node @state)
+        let stored=intrinsic_call("__store_u{stride*8}__" [value word_op('__add__' data offset node @state)] types.primitive('void' @state.type_nodes) node @state)
         body.push(while_loop(compare('__lt__' cursor length node @state) [stored set_local(cursor word_op('__add__' cursor word(1 node @state) node @state) node @state)] node @state))
     } else {body.push(counted_bytes(source data word(0 node @state) word_op('__mul__' length word(stride node @state) node @state) node @state))}
     # Descriptor ownership describes the data buffer independently of the
@@ -3032,8 +3032,8 @@ array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @st
     if release isnt? none {
         let name=state.symbols.get(release)
         if name is? none return reject(node 'the arena release helper is absent from the lowered graph' @state)
-        let owned=intrinsic('__eq__' [read_word(descriptor layouts.array_descriptor.owner node @state) word(1 node @state)] types.primitive('bool' @state.type_nodes) node @state)
-        let freed=intrinsic(name [source word_op('__mul__' capacity word(stride node @state) node @state)] types.primitive('void' @state.type_nodes) node @state)
+        let owned=intrinsic_call('__eq__' [read_word(descriptor layouts.array_descriptor.owner node @state) word(1 node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let freed=intrinsic_call(name [source word_op('__mul__' capacity word(stride node @state) node @state)] types.primitive('void' @state.type_nodes) node @state)
         body.push(conditional(owned freed node @state))
     }
     body.push(store_word(data descriptor layouts.array_descriptor.data node @state))
@@ -3041,7 +3041,7 @@ array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @st
     let pinned=compare('__lt__' read_word(descriptor layouts.array_descriptor.owner node @state) word(0 node @state) node @state)
     let next_owner=put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) pinned word(-1 node @state)] @state)] word(1 node @state)] @state)
     body.push(store_word(next_owner descriptor layouts.array_descriptor.owner node @state))
-    let condition=intrinsic('__lt__' [capacity required] types.primitive('bool' @state.type_nodes) node @state)
+    let condition=intrinsic_call('__lt__' [capacity required] types.primitive('bool' @state.type_nodes) node @state)
     prefix.push(conditional(condition sequence(body node @state) node @state))
     return sequence(prefix node @state)
 }
@@ -3110,7 +3110,7 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
         # the element, instead of five lines at every push site.
         $runtime_assert 'value' in? arguments
         let helper=push_helper(type.element layout.size call @state)
-        prefix.push(intrinsic(helper [descriptor arguments['value']] void_type call @state))
+        prefix.push(intrinsic_call(helper [descriptor arguments['value']] void_type call @state))
         prefix.push(put(hir.Void[call.loc void_type] @state))
         return put(hir.Block[call.loc runtime_type(call.value_type call @state) prefix false] @state)
     }
@@ -3124,7 +3124,7 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
     else if method.name =? 'clear' {new_length=word(0 call @state) prefix.push(array_trim(descriptor new_length type.element call @state))}
     else if method.name =? 'truncate' {
         $runtime_assert 'count' in? arguments
-        let condition=intrinsic('__lt__' [arguments['count'] length] types.primitive('bool' @state.type_nodes) call @state)
+        let condition=intrinsic_call('__lt__' [arguments['count'] length] types.primitive('bool' @state.type_nodes) call @state)
         let store=array_trim(descriptor arguments['count'] type.element call @state)
         prefix.push(conditional(condition store call @state))
     } else if method.name =? 'push' or method.name =? 'insert' {
@@ -3179,9 +3179,9 @@ sort_key = (value:addr type:addr mask:addr node:hir.AST @state:State):>addr => {
     let key=put(hir.Transmute[node.loc unsigned wide] @state)
     if layout.signed {
         let sign=put(hir.Transmute[node.loc unsigned word(-9223372036854775808 node @state)] @state)
-        key=intrinsic('__xor__' [key sign] unsigned node @state)
+        key=intrinsic_call('__xor__' [key sign] unsigned node @state)
     }
-    return intrinsic('__xor__' [key mask] unsigned node @state)
+    return intrinsic_call('__xor__' [key mask] unsigned node @state)
 }
 array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr => {
     let type=array_type(hir.node_at(state.input.nodes method.array).value_type state)
@@ -3238,7 +3238,7 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
     building.push(store_word(put(hir.Transmute[call.loc types.primitive('int64' @state.type_nodes) normalized] @state) record 0 call @state))
     building.push(array_store(element address(record 8 call @state) type.element call @state))
     building.push(assign_value(index word_op('__add__' index word(1 call @state) call @state) call @state))
-    prefix.push(loop_while(intrinsic('__lt__' [index length] boolean call @state) building call @state))
+    prefix.push(loop_while(intrinsic_call('__lt__' [index length] boolean call @state) building call @state))
 
     let outer=snapshot(word(1 call @state) @prefix @state)
     let inserting:array<addr>=[]
@@ -3250,8 +3250,8 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
     let before=sort_record(records previous call @state)
     let current=sort_record(records inner call @state)
     let before_key=put(hir.Transmute[call.loc unsigned read_word(before 0 call @state)] @state)
-    let comparison=intrinsic('__gt__' [before_key put(hir.Transmute[call.loc unsigned held_key] @state)] boolean call @state)
-    let condition=put(hir.ShortCircuit[call.loc boolean 'and' intrinsic('__gt__' [inner word(0 call @state)] boolean call @state) comparison] @state)
+    let comparison=intrinsic_call('__gt__' [before_key put(hir.Transmute[call.loc unsigned held_key] @state)] boolean call @state)
+    let condition=put(hir.ShortCircuit[call.loc boolean 'and' intrinsic_call('__gt__' [inner word(0 call @state)] boolean call @state) comparison] @state)
     let moving:array<addr>=[
         store_word(read_word(before 0 call @state) current 0 call @state)
         store_word(read_word(before 8 call @state) current 8 call @state)
@@ -3261,11 +3261,11 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
     inserting.push(store_word(held_key current 0 call @state))
     inserting.push(store_word(held_element current 8 call @state))
     inserting.push(assign_value(outer word_op('__add__' outer word(1 call @state) call @state) call @state))
-    prefix.push(loop_while(intrinsic('__lt__' [outer length] boolean call @state) inserting call @state))
+    prefix.push(loop_while(intrinsic_call('__lt__' [outer length] boolean call @state) inserting call @state))
 
     prefix.push(assign_value(index word(0 call @state) call @state))
     let restored=array_load(address(record 8 call @state) type.element call @state)
-    prefix.push(loop_while(intrinsic('__lt__' [index length] boolean call @state) [
+    prefix.push(loop_while(intrinsic_call('__lt__' [index length] boolean call @state) [
         array_store(restored element_pointer type.element call @state)
         assign_value(index word_op('__add__' index word(1 call @state) call @state) call @state)
     ] call @state))
@@ -3275,7 +3275,7 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
     if state.allocator isnt? none and release isnt? none {
         let name=state.symbols.get(release)
         if name is? none return reject(call 'the arena release helper is absent from the lowered graph' @state)
-        prefix.push(intrinsic(name [records size] types.primitive('void' @state.type_nodes) call @state))
+        prefix.push(intrinsic_call(name [records size] types.primitive('void' @state.type_nodes) call @state))
     }
     return sequence(prefix call @state)
 }
@@ -3577,7 +3577,7 @@ record_operation = (operation:RecordOperation arguments:array<addr> type:addr no
         state.generated.push(program.Function[generated literal])
     }
     $runtime_assert name isnt? none
-    return intrinsic(name arguments empty node @state)
+    return intrinsic_call(name arguments empty node @state)
 }
 object_fields = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => record_operation('copy_fields' [destination source] type node @state)
 object_fields_body = (destination:addr source:addr type:addr node:hir.AST @state:State):>addr => {
@@ -3621,7 +3621,7 @@ object_write_body = (destination:addr source:addr type:addr node:hir.AST @state:
         if not subtyping.is_subtype(entry.value_type storage state.links @state.type_nodes) continue
         let brand=brand_number(entry.name state)
         $runtime_assert brand isnt? none
-        let condition=intrinsic('__eq__' [tag word(brand.first node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let condition=intrinsic_call('__eq__' [tag word(brand.first node @state)] types.primitive('bool' @state.type_nodes) node @state)
         let body=object_fields(destination source entry.value_type node @state)
         arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state))
     }
@@ -3731,12 +3731,12 @@ integer_predicate = (value:addr actual:addr tested:addr node:hir.AST @state:Stat
         }
         return result
     }
-    if type is? types.TypeNot return intrinsic('__not__' [integer_predicate(value actual type.item node @state)] boolean node @state)
+    if type is? types.TypeNot return intrinsic_call('__not__' [integer_predicate(value actual type.item node @state)] boolean node @state)
     if type is? types.IntegerLiteralType {
         let layout=views.fixed_integer_layout(views.structural_base(actual state.type_nodes) state.type_nodes)
         $runtime_assert layout isnt? none
         if not subtyping.integer_fits(type.value layout.name) return put(hir.Bool[node.loc boolean false] @state)
-        return intrinsic('__eq__' [value word(type.value node @state)] boolean node @state)
+        return intrinsic_call('__eq__' [value word(type.value node @state)] boolean node @state)
     }
     let decided=type_tests.decide(actual tested state.links @state.type_nodes)
     if decided isnt? none return put(hir.Bool[node.loc boolean decided] @state)
@@ -3758,7 +3758,7 @@ object_predicate = (tag:addr actual:addr tested:addr node:hir.AST @state:State):
         }
         return result
     }
-    if type is? types.TypeNot return intrinsic('__not__' [object_predicate(tag actual type.item node @state)] boolean node @state)
+    if type is? types.TypeNot return intrinsic_call('__not__' [object_predicate(tag actual type.item node @state)] boolean node @state)
     let decided=type_tests.decide(actual tested state.links @state.type_nodes)
     if decided isnt? none return put(hir.Bool[node.loc boolean decided] @state)
     let record=object_type(tested state)
@@ -3766,8 +3766,8 @@ object_predicate = (tag:addr actual:addr tested:addr node:hir.AST @state:State):
     if record.brand is? none return reject(node 'a structural runtime record test' @state)
     let brand=brand_number(record.brand state)
     if brand is? none return reject(node 'the tested type has no runtime brand number' @state)
-    let lower=intrinsic('__ge__' [tag word(brand.first node @state)] boolean node @state)
-    let upper=intrinsic('__lt__' [tag word(brand.end node @state)] boolean node @state)
+    let lower=intrinsic_call('__ge__' [tag word(brand.first node @state)] boolean node @state)
+    let upper=intrinsic_call('__lt__' [tag word(brand.limit node @state)] boolean node @state)
     return put(hir.ShortCircuit[node.loc boolean 'and' lower upper] @state)
 }
 object_matches = (value:addr actual:addr tested:addr node:hir.AST @state:State):>addr => {
@@ -3790,7 +3790,7 @@ object_matches = (value:addr actual:addr tested:addr node:hir.AST @state:State):
 object_test = (operand:addr node:hir.TypeTest @state:State):>addr => {
     let actual=hir.node_at(state.input.nodes node.value).value_type
     let result=object_matches(operand actual node.test_type node @state)
-    return if node.negated intrinsic('__not__' [result] types.primitive('bool' @state.type_nodes) node @state) else result
+    return if node.negated intrinsic_call('__not__' [result] types.primitive('bool' @state.type_nodes) node @state) else result
 }
 
 # Function defaults are callee expressions. The ABI passes an ordinary value
@@ -4130,7 +4130,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             arguments.push(hir.Param[incoming type])
             arguments.push(hir.Param[present boolean])
             let present_value=put(hir.ExpressedIdentifier[node.loc boolean present] @state)
-            if not private {condition=intrinsic('__not__' [present_value] boolean node @state)}
+            if not private {condition=intrinsic_call('__not__' [present_value] boolean node @state)}
             let supplied=put(hir.ExpressedIdentifier[node.loc type incoming] @state)
             if private {
                 note_parameter_copy(argument boxed rebound mutated written node @state)
@@ -4255,7 +4255,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         let name=fresh('none_cell' @state)
         globals.push(put(hir.Declare[block.loc void_type 'let' name word_type put(hir.Integer[block.loc word_type '0d' 0] @state)] @state))
         let target=put(hir.ExpressedIdentifier[block.loc word_type name] @state)
-        let cell=intrinsic('__static_words__' [word(0 block @state) word(0 block @state)] word_type block @state)
+        let cell=intrinsic_call('__static_words__' [word(0 block @state) word(0 block @state)] word_type block @state)
         startup.push(put(hir.Assign[block.loc void_type target '=' cell] @state))
         state.none_cell=name
     }
@@ -4355,8 +4355,8 @@ command_line = (entry:hir.FunctionLiteral @state:State):>CommandLine => {
     let offset=word_op('__mul__' cursor word(8 entry @state) entry @state)
     let data=snapshot(read_word(word_op('__add__' argv offset entry @state) 0 entry @state) @body @state)
     let length=snapshot(word(0 entry @state) @body @state)
-    let byte=intrinsic('__load_u8__' [word_op('__add__' data length entry @state)] types.primitive('uint8' @state.type_nodes) entry @state)
-    let more=intrinsic('__ne__' [byte put(hir.Integer[entry.loc types.primitive('uint8' @state.type_nodes) '0d' 0] @state)] boolean entry @state)
+    let byte=intrinsic_call('__load_u8__' [word_op('__add__' data length entry @state)] types.primitive('uint8' @state.type_nodes) entry @state)
+    let more=intrinsic_call('__ne__' [byte put(hir.Integer[entry.loc types.primitive('uint8' @state.type_nodes) '0d' 0] @state)] boolean entry @state)
     let next=put(hir.Assign[entry.loc empty length '=' word_op('__add__' length word(1 entry @state) entry @state)] @state)
     let scan=put(hir.LoopArm[entry.loc empty more sequence([next] entry @state)] @state)
     body.push(put(hir.Flow[entry.loc empty [scan] none] @state))
@@ -4364,16 +4364,16 @@ command_line = (entry:hir.FunctionLiteral @state:State):>CommandLine => {
     let owned_data=snapshot(allocation(length entry @state) @body @state)
     body.push(counted_bytes(data owned_data word(0 entry @state) length entry @state))
     let decoded=snapshot(segmented_string(owned_data length entry true @state) @body @state)
-    let failed=intrinsic('__eq__' [read_word(decoded 0 entry @state) word(0 entry @state)] boolean entry @state)
+    let failed=intrinsic_call('__eq__' [read_word(decoded 0 entry @state) word(0 entry @state)] boolean entry @state)
     let exit=state.runtime_helpers.get('exit')
     if exit is? none return CommandLine[[] reject(entry 'command-line decoding needs the prelude exit helper' @state)]
     let name=state.symbols.get(exit)
     if name is? none return CommandLine[[] reject(entry 'the command-line exit helper is absent from the graph' @state)]
-    body.push(conditional(failed intrinsic(name [word(1 entry @state)] types.primitive('never' @state.type_nodes) entry @state) entry @state))
+    body.push(conditional(failed intrinsic_call(name [word(1 entry @state)] types.primitive('never' @state.type_nodes) entry @state) entry @state))
     body.push(store_word(read_word(decoded 8 entry @state) word_op('__add__' output.data offset entry @state) 0 entry @state))
     body.push(release_block(decoded word(16 entry @state) entry @state))
     body.push(put(hir.Assign[entry.loc empty cursor '=' word_op('__add__' cursor word(1 entry @state) entry @state)] @state))
-    let condition=intrinsic('__lt__' [cursor argc] boolean entry @state)
+    let condition=intrinsic_call('__lt__' [cursor argc] boolean entry @state)
     let iteration=put(hir.LoopArm[entry.loc empty condition sequence(body entry @state)] @state)
     prefix.push(put(hir.Flow[entry.loc empty [iteration] none] @state))
     return CommandLine[prefix output.descriptor]
@@ -4396,13 +4396,13 @@ scalar_string = (ordinal:addr node:hir.AST @prefix:array<addr> @state:State):>ad
     let bool_type=types.primitive('bool' @state.type_nodes)
     let byte_type=types.primitive('uint8' @state.type_nodes)
     let u32_type=types.primitive('uint32' @state.type_nodes)
-    let data=snapshot(intrinsic('__static_alloca__' [word(4 node @state)] word_type node @state) @prefix @state)
-    let boundaries=snapshot(intrinsic('__static_alloca__' [word(8 node @state)] word_type node @state) @prefix @state)
-    prefix.push(intrinsic('__store_u32__' [put(hir.Transmute[node.loc u32_type word(0 node @state)] @state) boundaries] void_type node @state))
+    let data=snapshot(intrinsic_call('__static_alloca__' [word(4 node @state)] word_type node @state) @prefix @state)
+    let boundaries=snapshot(intrinsic_call('__static_alloca__' [word(8 node @state)] word_type node @state) @prefix @state)
+    prefix.push(intrinsic_call('__store_u32__' [put(hir.Transmute[node.loc u32_type word(0 node @state)] @state) boundaries] void_type node @state))
     let descriptor=snapshot(string_memory(data word(0 node @state) boundaries word(1 node @state) word(0 node @state) node @state static_storage=true) @prefix @state)
     let steps:array<addr>=[]
     let scalar=snapshot(ordinal @steps @state)
-    steps.push(conditional(intrinsic('__ge__' [scalar word(0xD800 node @state)] bool_type node @state) put(hir.Assign[node.loc void_type scalar '=' word_op('__add__' scalar word(0x800 node @state) node @state)] @state) node @state))
+    steps.push(conditional(intrinsic_call('__ge__' [scalar word(0xD800 node @state)] bool_type node @state) put(hir.Assign[node.loc void_type scalar '=' word_op('__add__' scalar word(0x800 node @state) node @state)] @state) node @state))
     let length=snapshot(word(1 node @state) @steps @state)
     # UTF-8 encoding by scalar magnitude: a leading byte plus continuation
     # bytes of six bits each.
@@ -4414,28 +4414,28 @@ scalar_string = (ordinal:addr node:hir.AST @prefix:array<addr> @state:State):>ad
     let cont0=word_op('__add__' word(0x80 node @state) word_op('__and__' scalar mask node @state) node @state)
     let cont6=word_op('__add__' word(0x80 node @state) word_op('__and__' word_op('__rshift__' scalar word(6 node @state) node @state) mask node @state) node @state)
     let cont12=word_op('__add__' word(0x80 node @state) word_op('__and__' word_op('__rshift__' scalar word(12 node @state) node @state) mask node @state) node @state)
-    let one=sequence([intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type scalar] @state) b0] void_type node @state)] node @state)
+    let one=sequence([intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type scalar] @state) b0] void_type node @state)] node @state)
     let two=sequence([
-        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type word_op('__add__' word(0xC0 node @state) word_op('__rshift__' scalar word(6 node @state) node @state) node @state)] @state) b0] void_type node @state)
-        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont0] @state) b1] void_type node @state)
+        intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type word_op('__add__' word(0xC0 node @state) word_op('__rshift__' scalar word(6 node @state) node @state) node @state)] @state) b0] void_type node @state)
+        intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type cont0] @state) b1] void_type node @state)
         put(hir.Assign[node.loc void_type length '=' word(2 node @state)] @state)] node @state)
     let three=sequence([
-        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type word_op('__add__' word(0xE0 node @state) word_op('__rshift__' scalar word(12 node @state) node @state) node @state)] @state) b0] void_type node @state)
-        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont6] @state) b1] void_type node @state)
-        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont0] @state) b2] void_type node @state)
+        intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type word_op('__add__' word(0xE0 node @state) word_op('__rshift__' scalar word(12 node @state) node @state) node @state)] @state) b0] void_type node @state)
+        intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type cont6] @state) b1] void_type node @state)
+        intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type cont0] @state) b2] void_type node @state)
         put(hir.Assign[node.loc void_type length '=' word(3 node @state)] @state)] node @state)
     let four=sequence([
-        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type word_op('__add__' word(0xF0 node @state) word_op('__rshift__' scalar word(18 node @state) node @state) node @state)] @state) b0] void_type node @state)
-        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont12] @state) b1] void_type node @state)
-        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont6] @state) b2] void_type node @state)
-        intrinsic('__store_u8__' [put(hir.Transmute[node.loc byte_type cont0] @state) b3] void_type node @state)
+        intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type word_op('__add__' word(0xF0 node @state) word_op('__rshift__' scalar word(18 node @state) node @state) node @state)] @state) b0] void_type node @state)
+        intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type cont12] @state) b1] void_type node @state)
+        intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type cont6] @state) b2] void_type node @state)
+        intrinsic_call('__store_u8__' [put(hir.Transmute[node.loc byte_type cont0] @state) b3] void_type node @state)
         put(hir.Assign[node.loc void_type length '=' word(4 node @state)] @state)] node @state)
     let arms=[
-        put(hir.IfArm[node.loc void_type intrinsic('__lt__' [scalar word(0x80 node @state)] bool_type node @state) one] @state)
-        put(hir.IfArm[node.loc void_type intrinsic('__lt__' [scalar word(0x800 node @state)] bool_type node @state) two] @state)
-        put(hir.IfArm[node.loc void_type intrinsic('__lt__' [scalar word(0x10000 node @state)] bool_type node @state) three] @state)]
+        put(hir.IfArm[node.loc void_type intrinsic_call('__lt__' [scalar word(0x80 node @state)] bool_type node @state) one] @state)
+        put(hir.IfArm[node.loc void_type intrinsic_call('__lt__' [scalar word(0x800 node @state)] bool_type node @state) two] @state)
+        put(hir.IfArm[node.loc void_type intrinsic_call('__lt__' [scalar word(0x10000 node @state)] bool_type node @state) three] @state)]
     steps.push(put(hir.Flow[node.loc void_type arms four] @state))
-    steps.push(intrinsic('__store_u32__' [put(hir.Transmute[node.loc u32_type length] @state) word_op('__add__' boundaries word(4 node @state) node @state)] void_type node @state))
+    steps.push(intrinsic_call('__store_u32__' [put(hir.Transmute[node.loc u32_type length] @state) word_op('__add__' boundaries word(4 node @state) node @state)] void_type node @state))
     steps.push(store_word(length descriptor layouts.string_descriptor.byte_length node @state))
     steps.push(descriptor)
     return put(hir.Block[node.loc word_type steps false] @state)
@@ -4467,7 +4467,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
         if boxed return IteratorStep[prefix reject(node 'captured optional iterator targets' @state)]
         if string_type(source.value_type state) return IteratorStep[prefix reject(node 'optional string iterator targets' @state)]
         target_type=types.primitive('int64' @state.type_nodes)
-        initial=intrinsic('__static_alloca__' [word(16 node @state)] target_type node @state)
+        initial=intrinsic_call('__static_alloca__' [word(16 node @state)] target_type node @state)
     }
     if boxed {initial=box_value(initial target.value_type node @state) target_type=types.primitive('int64' @state.type_nodes)}
     prefix.push(put(hir.Declare[node.loc void_type 'let' target_name target_type initial target.binding_id] @state))
@@ -4546,7 +4546,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
         } else return IteratorStep[prefix reject(node 'this iterator sequence representation' @state)]
     }
     let increment=put(hir.Assign[node.loc void_type cursor '=' word_op('__add__' cursor word(1 node @state) node @state)] @state)
-    let available=if length is? none put(hir.Bool[node.loc bool_type true] @state) else intrinsic('__lt__' [cursor length] bool_type node @state)
+    let available=if length is? none put(hir.Bool[node.loc bool_type true] @state) else intrinsic_call('__lt__' [cursor length] bool_type node @state)
     let store=if boxed array_store(value into target.value_type node @state) else put(hir.Assign[node.loc void_type into '=' value] @state)
     if optional_target {
         $runtime_assert payload isnt? none
@@ -4566,7 +4566,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
     if optional_target {no=put(hir.Block[node.loc bool_type [store_word(word(0 node @state) into 0 node @state) put(hir.Bool[node.loc bool_type false] @state)] false] @state)}
     if wide_more isnt? none and wide_last isnt? none {
         if optional_target return IteratorStep[prefix reject(node 'optional targets over word-sized range counts' @state)]
-        let next=intrinsic('__ne__' [cursor wide_last] bool_type node @state)
+        let next=intrinsic_call('__ne__' [cursor wide_last] bool_type node @state)
         let update=put(hir.Assign[node.loc void_type wide_more '=' next] @state)
         let body=put(hir.Block[node.loc bool_type [increment update store yes] false] @state)
         let arm=put(hir.IfArm[node.loc bool_type wide_more body] @state)
@@ -4638,7 +4638,7 @@ loop_checkpoint = (node:hir.AST @state:State):>addr => {
     let bottom=types.primitive('never' @state.type_nodes)
     let stop=put(hir.Break[node.loc bottom] @state)
     let next=put(hir.Continue[node.loc bottom] @state)
-    let stopping=intrinsic('__eq__' [kind word(1 node @state)] boolean node @state)
+    let stopping=intrinsic_call('__eq__' [kind word(1 node @state)] boolean node @state)
     let stopped=sequence([loop_assignment(kind word(0 node @state) node @state) stop] node @state)
     let continued=sequence([loop_assignment(kind word(0 node @state) node @state) next] node @state)
     let arm=put(hir.IfArm[node.loc bottom stopping stopped] @state)
@@ -4655,8 +4655,8 @@ loop_checkpoint = (node:hir.AST @state:State):>addr => {
     propagate.push(loop_assignment(levels word_op('__sub__' levels word(1 node @state) node @state) node @state))
     propagate.push(stop)
     return sequence([
-        conditional(intrinsic('__eq__' [levels word(1 node @state)] boolean node @state) sequence(target node @state) node @state)
-        conditional(intrinsic('__gt__' [levels word(1 node @state)] boolean node @state) sequence(propagate node @state) node @state)
+        conditional(intrinsic_call('__eq__' [levels word(1 node @state)] boolean node @state) sequence(target node @state) node @state)
+        conditional(intrinsic_call('__gt__' [levels word(1 node @state)] boolean node @state) sequence(propagate node @state) node @state)
     ] node @state)
 }
 lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
@@ -4709,7 +4709,7 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
         let entered=snapshot(put(hir.Bool[node.loc boolean false] @state) @prefix @state)
         let mark=put(hir.Assign[node.loc void_type entered '=' put(hir.Bool[node.loc boolean true] @state)] @state)
         body=sequence([mark body] node @state)
-        let skipped=intrinsic('__not__' [entered] boolean node @state)
+        let skipped=intrinsic_call('__not__' [entered] boolean node @state)
         else_guard=put(hir.Flow[node.loc void_type [put(hir.IfArm[node.loc void_type skipped fallback] @state)] none] @state)
         fallback=none
     }
@@ -4777,8 +4777,8 @@ iterator_condition = (node:hir.AST @state:State):>IteratorStep => {
             let right=stack.pop
             let left=stack.pop
             if token is? 'xor'|'xnor' {
-                let value=intrinsic('__xor__' [left right] boolean node @state)
-                stack.push(if token =? 'xnor' intrinsic('__not__' [value] boolean node @state) else value)
+                let value=intrinsic_call('__xor__' [left right] boolean node @state)
+                stack.push(if token =? 'xnor' intrinsic_call('__not__' [value] boolean node @state) else value)
             } else {stack.push(put(hir.ShortCircuit[node.loc boolean token left right] @state))}
         }
     }
@@ -4861,7 +4861,7 @@ enum_read = (value:addr stored:addr view:addr node:hir.AST @state:State):>addr =
             $runtime_assert prior is? hir.IfArm
             arms.push(fallback)
         }
-        let condition=intrinsic('__eq__' [tag word(enum_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let condition=intrinsic_call('__eq__' [tag word(enum_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
         fallback=put(hir.IfArm[node.loc type condition literal] @state)
     }
     if fallback is? none return reject(node 'an empty literal enum read view' @state)
@@ -4888,10 +4888,10 @@ string_type_test = (value:addr tested:addr node:hir.AST @state:State):>addr => {
             matches=string_equal_values(source literal node false @state)
         } else if type is? types.StringType {
             if type.length is? none {matches=put(hir.Bool[node.loc boolean true] @state)}
-            else {matches=intrinsic('__eq__' [read_word(source layouts.string_descriptor.grapheme_length node @state) word(type.length node @state)] boolean node @state)}
+            else {matches=intrinsic_call('__eq__' [read_word(source layouts.string_descriptor.grapheme_length node @state) word(type.length node @state)] boolean node @state)}
         } else if types.is_primitive(type 'string') {matches=put(hir.Bool[node.loc boolean true] @state)}
         else if types.is_primitive(type 'char') or types.is_primitive(type 'grapheme') {
-            matches=intrinsic('__eq__' [read_word(source layouts.string_descriptor.grapheme_length node @state) word(1 node @state)] boolean node @state)
+            matches=intrinsic_call('__eq__' [read_word(source layouts.string_descriptor.grapheme_length node @state) word(1 node @state)] boolean node @state)
         }
         if matches isnt? none {result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)}
     }
@@ -4931,7 +4931,7 @@ forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
         else if enum_members(actual state) isnt? none {value=enum_read(value actual node.value_type node @state)}
         else if cell_members(node.value_type @state) isnt? none {value=cell_pack(value actual node.value_type node @state)}
         else {value=read_value(value actual node.value_type node @state)}
-        let condition=intrinsic('__eq__' [tag word(member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let condition=intrinsic_call('__eq__' [tag word(member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
         arms.push(put(hir.IfArm[node.loc output condition value] @state))
     }
     if arms.length =? 0 return reject(node 'a forwarded field has no reachable member' @state)
@@ -5020,9 +5020,9 @@ while_loop = (condition:addr body:array<addr> node:hir.AST @state:State):>addr =
     let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition sequence(body node @state)] @state)
     return put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state)
 }
-compare = (name:string left:addr right:addr node:hir.AST @state:State):>addr => intrinsic(name [left right] types.primitive('bool' @state.type_nodes) node @state)
+compare = (name:string left:addr right:addr node:hir.AST @state:State):>addr => intrinsic_call(name [left right] types.primitive('bool' @state.type_nodes) node @state)
 uword = (value:bigint node:hir.AST @state:State):>addr => put(hir.Integer[node.loc types.primitive('uint64' @state.type_nodes) '0d' value] @state)
-uword_op = (name:string left:addr right:addr node:hir.AST @state:State):>addr => intrinsic(name [left right] types.primitive('uint64' @state.type_nodes) node @state)
+uword_op = (name:string left:addr right:addr node:hir.AST @state:State):>addr => intrinsic_call(name [left right] types.primitive('uint64' @state.type_nodes) node @state)
 dict_hash = (key:addr type:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let hash:addr=0
@@ -5032,7 +5032,7 @@ dict_hash = (key:addr type:addr node:hir.AST @state:State):>addr => {
         let data=snapshot(string_data(key node @state) @prefix @state)
         let length=snapshot(read_word(key layouts.string_descriptor.byte_length node @state) @prefix @state)
         let cursor=snapshot(word(0 node @state) @prefix @state)
-        let byte=intrinsic('__load_u8__' [word_op('__add__' data cursor node @state)] types.primitive('uint8' @state.type_nodes) node @state)
+        let byte=intrinsic_call('__load_u8__' [word_op('__add__' data cursor node @state)] types.primitive('uint8' @state.type_nodes) node @state)
         let widened=put(hir.Transmute[node.loc unsigned byte] @state)
         let mixed=uword_op('__mul__' uword_op('__xor__' hash widened node @state) uword(1099511628211 node @state) node @state)
         prefix.push(while_loop(compare('__lt__' cursor length node @state) [set_local(hash mixed node @state) set_local(cursor word_op('__add__' cursor word(1 node @state) node @state) node @state)] node @state))
@@ -5074,7 +5074,7 @@ dict_rebuild = (parts:DictParts room:addr node:hir.AST @state:State):>addr => {
         state.generated.push(program.Function[generated literal])
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [parts.pointer] empty node @state)
+    return intrinsic_call(name [parts.pointer] empty node @state)
 }
 dict_rebuild_body = (parts:DictParts room:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
@@ -5174,7 +5174,7 @@ dict_probe = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @state:S
     }
     $runtime_assert name isnt? none
     let hash=snapshot(dict_hash(key parts.key node @state) @prefix @state)
-    let slot=snapshot(intrinsic(name [parts.pointer key hash] word_type node @state) @prefix @state)
+    let slot=snapshot(intrinsic_call(name [parts.pointer key hash] word_type node @state) @prefix @state)
     let position=snapshot(dict_element(dict_field(parts 'indices' node @state) slot word_type node @state) @prefix @state)
     let found=snapshot(compare('__ge__' position word(0 node @state) node @state) @prefix @state)
     prefix.push(conditional(compare('__lt__' position word(0 node @state) node @state) set_local(position word(-1 node @state) node @state) node @state))
@@ -5452,7 +5452,7 @@ algebra_entries = (source:DictParts other:DictParts destination:DictParts mode:s
     let wanted:addr?=none
     if mode not=? 'all' {
         let probe=dict_probe(other key node @body @state)
-        wanted=if mode =? 'present' probe.found else intrinsic('__not__' [probe.found] types.primitive('bool' @state.type_nodes) node @state)
+        wanted=if mode =? 'present' probe.found else intrinsic_call('__not__' [probe.found] types.primitive('bool' @state.type_nodes) node @state)
     }
     let insert:array<addr>=[]
     let copied=snapshot(copy_stored(key source.key node @state) @insert @state)
@@ -5497,10 +5497,10 @@ release_block = (pointer:addr size:addr node:hir.AST @state:State):>addr => {
     let binding=state.runtime_helpers.get('_arena_release')
     if state.allocator is? none or binding is? none return sequence([] node @state)
     let specialized=arena_class_helper(size '_arena_release_' @state)
-    if specialized isnt? none return intrinsic(specialized [pointer] types.primitive('void' @state.type_nodes) node @state)
+    if specialized isnt? none return intrinsic_call(specialized [pointer] types.primitive('void' @state.type_nodes) node @state)
     let name=state.symbols.get(binding)
     $runtime_assert name isnt? none
-    return intrinsic(name [pointer size] types.primitive('void' @state.type_nodes) node @state)
+    return intrinsic_call(name [pointer size] types.primitive('void' @state.type_nodes) node @state)
 }
 release_value = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     if not releasable(type @state) return sequence([] node @state)
@@ -5520,7 +5520,7 @@ release_value = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
         state.generated.push(program.Function[generated literal])
     }
     $runtime_assert name isnt? none
-    return intrinsic(name [pointer] types.primitive('void' @state.type_nodes) node @state)
+    return intrinsic_call(name [pointer] types.primitive('void' @state.type_nodes) node @state)
 }
 release_record_fields = (pointer:addr type:addr node:hir.AST @state:State):>addr => record_operation('release_fields' [pointer] type node @state)
 release_record_fields_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
@@ -5551,7 +5551,7 @@ release_record_body = (pointer:addr type:addr node:hir.AST @state:State):>addr =
         if not subtyping.is_subtype(entry.value_type storage state.links @state.type_nodes) continue
         let number=brand_number(entry.name state)
         $runtime_assert number isnt? none
-        let condition=intrinsic('__eq__' [tag word(number.first node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let condition=intrinsic_call('__eq__' [tag word(number.first node @state)] types.primitive('bool' @state.type_nodes) node @state)
         arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition release_record_fields(pointer entry.value_type node @state)] @state))
     }
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms release_record_fields(pointer type node @state)] @state))
@@ -5568,7 +5568,7 @@ release_cell_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => 
     let optional=views.optional_payload(type @state.type_nodes)
     loop member in members {
         if not releasable(member @state) continue
-        let condition=intrinsic(if optional isnt? none '__ne__' else '__eq__' [tag word(if optional isnt? none 0 else member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
+        let condition=intrinsic_call(if optional isnt? none '__ne__' else '__eq__' [tag word(if optional isnt? none 0 else member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
         arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition release_value(payload member node @state)] @state))
     }
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms none] @state))
@@ -5576,7 +5576,7 @@ release_cell_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => 
 }
 # An emptied handle (a moved local) releases nothing.
 release_body = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
-    return conditional(intrinsic('__ne__' [pointer word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) release_body_inner(pointer type node @state) node @state)
+    return conditional(intrinsic_call('__ne__' [pointer word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) release_body_inner(pointer type node @state) node @state)
 }
 release_body_inner = (pointer:addr type:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
@@ -5591,14 +5591,14 @@ release_body_inner = (pointer:addr type:addr node:hir.AST @state:State):>addr =>
             let length=snapshot(read_word(pointer layouts.array_descriptor.length node @state) @owned @state)
             let index=snapshot(word(0 node @state) @owned @state)
             let element=array_load(word_op('__add__' data word_op('__mul__' index word(8 node @state) node @state) node @state) array.element node @state)
-            owned.push(loop_while(intrinsic('__lt__' [index length] types.primitive('bool' @state.type_nodes) node @state) [release_value(element array.element node @state) assign_value(index word_op('__add__' index word(1 node @state) node @state) node @state)] node @state))
+            owned.push(loop_while(intrinsic_call('__lt__' [index length] types.primitive('bool' @state.type_nodes) node @state) [release_value(element array.element node @state) assign_value(index word_op('__add__' index word(1 node @state) node @state) node @state)] node @state))
         }
         let size=word_op('__mul__' read_word(pointer layouts.array_descriptor.capacity node @state) read_word(pointer layouts.array_descriptor.stride node @state) node @state)
         owned.push(release_block(data size node @state))
-        last.push(conditional(intrinsic('__ne__' [owner word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) sequence(owned node @state) node @state))
+        last.push(conditional(intrinsic_call('__ne__' [owner word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) sequence(owned node @state) node @state))
         let flags=read_word(pointer layouts.array_descriptor.flags node @state)
         let arena=word_op('__and__' flags word(layouts.array_flags.arena_descriptor node @state) node @state)
-        last.push(conditional(intrinsic('__ne__' [arena word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) release_block(pointer word(layouts.array_descriptor.size node @state) node @state) node @state))
+        last.push(conditional(intrinsic_call('__ne__' [arena word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state) release_block(pointer word(layouts.array_descriptor.size node @state) node @state) node @state))
         let arm=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) compare('__gt__' owner word(1 node @state) node @state) store_word(word_op('__sub__' owner word(1 node @state) node @state) pointer layouts.array_descriptor.owner node @state)] @state)
         prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] sequence(last node @state)] @state))
         return conditional(compare('__ge__' read_word(pointer layouts.array_descriptor.owner node @state) word(0 node @state) node @state) sequence(prefix node @state) node @state)
@@ -5622,7 +5622,7 @@ release_body_inner = (pointer:addr type:addr node:hir.AST @state:State):>addr =>
         let shared_none=state.none_cell
         if shared_none isnt? none {
             let shared=put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) shared_none] @state)
-            block=conditional(intrinsic('__ne__' [pointer shared] types.primitive('bool' @state.type_nodes) node @state) block node @state)
+            block=conditional(intrinsic_call('__ne__' [pointer shared] types.primitive('bool' @state.type_nodes) node @state) block node @state)
         }
         prefix.push(block)
     }

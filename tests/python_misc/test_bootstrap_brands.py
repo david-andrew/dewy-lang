@@ -28,7 +28,7 @@ main = ():>int64 => {{
     let other = types.object_type([] 'Other' false [] [] @nodes minted=true parent=structure)
     loop id in [root left right grand other] {{ brands.register(id @registry nodes) }}
     let numbered = brands.numbered(registry)
-    loop entry in numbered {{ printl("{{entry.name}}:{{entry.first}}:{{entry.end}}") }}
+    loop entry in numbered {{ printl("{{entry.name}}:{{entry.first}}:{{entry.limit}}") }}
     printl('--order--')
     printl(brands.children('Root' registry).join(','))
     printl(brands.descendants('Root' registry).join(','))
@@ -47,11 +47,11 @@ main = ():>int64 => {{
     $runtime_assert updated.length =? 6 and before.length =? numbered.length
     loop i in 0.. and i <? before.length and i <? numbered.length {{
         $runtime_assert before[i].name =? numbered[i].name
-        $runtime_assert before[i].first =? numbered[i].first and before[i].end =? numbered[i].end
+        $runtime_assert before[i].first =? numbered[i].first and before[i].limit =? numbered[i].limit
     }}
     loop entry in updated {{
-        if entry.name =? 'Root' {{$runtime_assert entry.first =? 1 and entry.end =? 6}}
-        if entry.name =? 'Other' {{$runtime_assert entry.first =? 6 and entry.end =? 7}}
+        if entry.name =? 'Root' {{$runtime_assert entry.first =? 1 and entry.limit =? 6}}
+        if entry.name =? 'Other' {{$runtime_assert entry.first =? 6 and entry.limit =? 7}}
     }}
     return 0
 }}

@@ -132,9 +132,9 @@ slice_bounds = (id:addr env:values.Environment @registry:bindings.Registry):>Win
             return Window[facts.Term[sequence 'length'] offset.binding_id 0]
         }
     }
-    let end = binding_term(right env @registry)
-    if end is? none or end.projection not=? 'value' return none
-    return Window[end offset.binding_id (if bounds.endswith(']') 1 else 0)]
+    let limit = binding_term(right env @registry)
+    if limit is? none or limit.projection not=? 'value' return none
+    return Window[limit offset.binding_id (if bounds.endswith(']') 1 else 0)]
 }
 
 Direction:type = 'upper' | 'lower'
@@ -182,9 +182,9 @@ call_facts = (id:addr subject:string env:values.Environment @registry:bindings.R
                             let range = hir.node_at(env.nodes node.range)
                             $runtime_assert range is? hir.Range
                             if range.left is? none and range.right isnt? none {
-                                let end = binding_term(range.right env @registry)
-                                if end isnt? none and end.projection =? 'value' {
-                                    term = end
+                                let limit = binding_term(range.right env @registry)
+                                if limit isnt? none and limit.projection =? 'value' {
+                                    term = limit
                                     adjust = if range.bounds is? none or range.bounds.endswith(']') 1 else 0
                                 }
                             }

@@ -31,7 +31,7 @@ materialize = (node:hir.RuntimeFailure helpers:dict<string addr> index:lines.Ind
     let location=lines.locate(index span.start)
     let line=location.row
     let begin=location.begin
-    let limit=location.end
+    let limit=location.limit
     let stop=if span.stop <? limit span.stop else limit
     let dim=if node.dimmed is? none stop else if node.dimmed.stop <? limit node.dimmed.stop else limit
     # Source geometry is already expressed in Dewy graphemes, the same units

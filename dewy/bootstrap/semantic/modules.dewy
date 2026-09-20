@@ -1,4 +1,5 @@
 from reporting import SrcFile, Error
+import p"source_names.dewy" as source_names
 import p"../paths.dewy" as paths
 import p"../timing.dewy" as timing
 import p"../parser/p0.dewy" as parser
@@ -293,6 +294,8 @@ load_source = (path:string @engine:Engine):>addr|Error => {
     let parsed = parser.parse(source)
     timing.finish('parse' parse_started)
     if parsed is? Error return parsed
+    let reserved=source_names.validate(parsed.root source parsed.nodes)
+    if reserved isnt? none return reserved
     let prepare_started=timing.start(engine.timings)
     let prepared=tests.prepare(source parsed run_tests=engine.test_mode and engine.loading.length =? 1 and not engine.prelude_loading)
     timing.finish('prepare' prepare_started)

@@ -96,12 +96,12 @@ first_uncovered = (values:Values domain:Values):>bigint? => {
         let probe=if interval.lower isnt? none interval.lower else if interval.upper is? none 0 else if interval.upper <? 0 interval.upper else 0
         loop interval.upper is? none or probe <=? interval.upper {
             if not contains(values ranges.exact(probe)) return probe
-            let end:bigint?=none
+            let limit:bigint?=none
             loop cover in values {
-                if contains([cover] ranges.exact(probe)) {end=cover.upper break}
+                if contains([cover] ranges.exact(probe)) {limit=cover.upper break}
             }
-            if end is? none break
-            probe=end+1
+            if limit is? none break
+            probe=limit+1
         }
     }
     return none

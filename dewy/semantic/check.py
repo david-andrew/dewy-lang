@@ -403,6 +403,8 @@ def _typecheck_module(
 
     if block is None:
         block, _ = _parse_module(srcfile)
+    from . import source_names
+    source_names.validate(block, srcfile)
     block, tests = _extract_tests(block, srcfile=srcfile)
     if test:
         runner, srcfile = _synthesize_test_runner(tests, block, srcfile=srcfile)

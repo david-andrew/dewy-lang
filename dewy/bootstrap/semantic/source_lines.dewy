@@ -3,7 +3,7 @@
 # Offsets are graphemes, matching SrcFile and HIR spans. A CRLF is one
 # grapheme; a lone CR remains source content, exactly as in reporting.dewy.
 Index:type = const [starts:array<addr> ends:array<addr>]
-Location:type = const [row:addr begin:addr end:addr]
+Location:type = const [row:addr begin:addr limit:addr]
 
 build = (body:string):>Index => {
     let starts:array<addr>=[0]

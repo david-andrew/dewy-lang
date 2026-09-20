@@ -90,11 +90,11 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
         let range=hir.node_at(data.env.nodes node.range)
         $runtime_assert range is? hir.Range
         if range.left is? none and range.right isnt? none {
-            let end=data.snapshot.terms.get(range.right)
-            if end isnt? none and end.term.projection =? 'value' and end.shift =? 0 {
+            let limit=data.snapshot.terms.get(range.right)
+            if limit isnt? none and limit.term.projection =? 'value' and limit.shift =? 0 {
                 let extra:bigint=if range.bounds is? none or range.bounds.endswith(']') 1 else 0
-                facts.put(@state facts.order(end.term facts.Term[subject 'length']) ranges.Interval[extra none])
-                facts.put(@state facts.order(facts.Term[subject 'length'] end.term) ranges.Interval[-extra none])
+                facts.put(@state facts.order(limit.term facts.Term[subject 'length']) ranges.Interval[extra none])
+                facts.put(@state facts.order(facts.Term[subject 'length'] limit.term) ranges.Interval[-extra none])
             }
         }
         return

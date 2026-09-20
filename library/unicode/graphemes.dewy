@@ -8,7 +8,7 @@ $include_bytes(p"indic_conjunct_break.bin") as indic_table
 $include_bytes(p"extended_pictographic.bin") as pictographic_table
 
 const GCB=[other=0 cr=1 lf=2 control=3 l=4 v=5 t=6 lv=7 lvt=8 extend=9 zwj=10 spacing_mark=11 prepend=12 regional_indicator=13]
-const INCB=[none=0 consonant=1 extend=2 linker=3]
+const INCB=[other=0 consonant=1 extend=2 linker=3]
 
 word = (table:array<uint8> offset:int64):>int64 => {
     $runtime_assert table.length >=? 4
@@ -99,7 +99,7 @@ let segment = (bytes:array<uint8> @result:array<int64> destination:int64):>int64
         # avoiding binary searches, this keeps ordinary compiler text out of
         # the generic table argument-copy path.
         let current:int64=GCB.other
-        let indic:int64=INCB.none
+        let indic:int64=INCB.other
         let pictographic:bool=false
         if scalar <? 128 {
             if scalar =? 13 {current=GCB.cr}

@@ -1,4 +1,5 @@
 from reporting import Error, Span, Warning, Pointer, SrcFile
+import p"source_names.dewy" as source_names
 import p"source_views.dewy" as source_views
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
@@ -2188,6 +2189,10 @@ block = (id:addr env:Environment @session:contexts.Session scoped:bool=false exp
 # instantiations append their callees first; the original result type is not
 # changed by the added void declarations.
 module = (id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let source=source_views.srcfile(env.lexical session)
+    $runtime_assert env.lexical.source <? session.sources.length
+    let reserved=source_names.validate(id source session.sources[env.lexical.source].nodes)
+    if reserved isnt? none return reserved
     let first=session.read_states.length
     let result=module_inner(id env @session)
     contexts.release_read_states(first @session)

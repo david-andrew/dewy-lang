@@ -23,7 +23,7 @@ CASES = [
     'let uint8=[max=7]\nuint8.max',
     'let _string_startswith=(text:string prefix:string):>bool=>text.length >=? prefix.length\n"abc".startswith("a")',
     'let _string_trim=(text:string):>string=>text\n"abc".trim',
-    'let _string_replace=(text:string old:string new:string):>string=>new\n"abc".replace(old="a" new="b")',
+    'let _string_replace=(text:string old:string replacement:string):>string=>replacement\n"abc".replace(old="a" replacement="b")',
     (source_values.ROOT / 'library/strings.dewy').read_text(),
     (source_values.ROOT / 'library/arrays.dewy').read_text(),
 ]

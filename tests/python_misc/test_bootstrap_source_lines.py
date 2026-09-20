@@ -43,7 +43,7 @@ compare=(body:string starts:array<addr> ends:array<addr>):>bool=>{{
         let located=lines.locate(index offset)
         if located.row not=? source.line_of(offset) return false
         if located.begin not=? source.line_start(located.row) return false
-        if located.end not=? source.line_end(located.row) return false
+        if located.limit not=? source.line_end(located.row) return false
     }}
     return true
 }}
@@ -56,7 +56,7 @@ main=():>int64=>{{
     let before:int64=_arena_allocated_bytes
     loop i in 0..3999 {{
         let located=lines.locate(index body.length)
-        if located.row not=? 2000 or located.begin not=? body.length or located.end not=? body.length return 2
+        if located.row not=? 2000 or located.begin not=? body.length or located.limit not=? body.length return 2
     }}
     # Source indexing must not be rebuilt, or copied in proportion to source
     # size, for each report. Cumulative payload allocation catches both costs.

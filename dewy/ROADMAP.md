@@ -522,6 +522,10 @@ Decisions were made by David on 2026-09-13.
    `myarray[... new]` at the end, following NumPy exactly. `untyped` was
    only an internal inference marker (`ty.INFERRED_TYPE` still uses the
    string internally) and is not reserved as surface syntax.
+   Implemented 2026-09-20: both compilers reject the six reserved names in
+   source bindings, including parameters, fields, methods and import aliases.
+   Existing value/type/index roles remain valid; `new` axis insertion is
+   still separate implementation work.
 4. **Brackets for parametric types (decided).** Whether `array<int>`
    should become `array[int]` or `array(int)`. Dewy's comparison operators
    are `<?` and `>?`, so the usual less-than ambiguity does not arise; the

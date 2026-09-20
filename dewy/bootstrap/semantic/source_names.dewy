@@ -1,0 +1,78 @@
+from reporting import Error, Pointer, SrcFile
+import p"../parser/p0.dewy" as parser
+import p"../parser/t1.dewy" as tokens
+import p"syntax.dewy" as syntax
+
+# Reservation is a source-binding rule. Keeping these identifier-shaped
+# preserves their existing value/type/index syntax and synthesized `end`.
+const RESERVED:set<string>=set['extern' 'intrinsic' 'none' 'void' 'end' 'new']
+bound = (id:addr source:SrcFile nodes:array<tokens.Token> pattern:bool=false):>Error? => {
+    let name=syntax.identifier(id nodes)
+    if name isnt? none and name in? RESERVED return Error[srcfile=source title="`{name}` is reserved" pointers=[Pointer[span=tokens.node_at(nodes id).loc message='choose another binding name']]]
+    let node=tokens.node_at(nodes id)
+    if pattern and node is? parser.Block and node.delims =? '<>' return none
+    let children:array<addr>=[]
+    if node is? parser.Block {children=node.inner}
+    else if node is? parser.Flat {children=node.items}
+    else if node is? parser.Prefix {children=[node.item]}
+    else if node is? parser.BinOp {
+        let op=syntax.symbol(node.op nodes)
+        if op in? [':' '=' ':=' '::' 'of' ':>'] {children=[node.left]}
+        else if op in? ['.' 'EllipsisJuxtapose'] {children=[node.right]}
+        else if op =? 'TypeParamJuxtapose' {children=[node.left node.right]}
+    }
+    loop child in children {
+        let error=bound(child source nodes pattern=pattern)
+        if error isnt? none return error
+    }
+    return none
+}
+imported = (id:addr source:SrcFile nodes:array<tokens.Token>):>Error? => {
+    let node=tokens.node_at(nodes id)
+    if node is? parser.Block|parser.Flat {
+        let children=if node is? parser.Block node.inner else node.items
+        loop child in children {
+            let error=imported(child source nodes)
+            if error isnt? none return error
+        }
+        return none
+    }
+    return bound(if node is? parser.BinOp and syntax.is_operator(node.op 'as' nodes) node.right else id source nodes)
+}
+validate = (root:addr source:SrcFile nodes:array<tokens.Token>):>Error? => {
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    let match_arms:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=tokens.node_at(nodes id)
+        let error:Error?=none
+        if node is? parser.BinOp {
+            let op=syntax.symbol(node.op nodes)
+            if op in? [':' '=' ':=' '::' 'in' '=>'] {error=bound(node.left source nodes pattern=op =? '=>' and id in? match_arms)}
+        }
+        if node is? parser.KeywordExpr and node.parts.length >? 0 {
+            let first=tokens.node_at(nodes node.parts[0])
+            if first is? tokens.Keyword {
+                if first.name =? 'match' and node.parts.length =? 3 {
+                    let clauses=tokens.node_at(nodes node.parts[2])
+                    if clauses is? parser.Block {loop arm in clauses.inner {match_arms.add(arm)}}
+                }
+                if first.name in? ['let' 'const' 'local_const'] and node.parts.length =? 2 {error=bound(node.parts[1] source nodes)}
+                else if first.name =? 'from' and node.parts.length =? 4 {error=imported(node.parts[3] source nodes)}
+                else if first.name =? 'import' {
+                    if node.parts.length =? 4 {error=imported(node.parts[1] source nodes)}
+                    else if node.parts.length =? 2 {
+                        let path=tokens.node_at(nodes node.parts[1])
+                        if path is? parser.BinOp and syntax.is_operator(path.op 'as' nodes) {error=bound(path.right source nodes)}
+                    }
+                }
+            }
+        }
+        if error isnt? none return error
+        loop child in parser.children_of(node) {pending.push(child)}
+    }
+    return none
+}

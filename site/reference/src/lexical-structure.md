@@ -37,6 +37,15 @@ marker as an escape is still a design question; no such escape is implemented.
 
 Reserved operator words such as `and`, `or`, `not`, `in`, `as`, and `transmute` tokenize as operators in their grammatical contexts. A word operator cannot simultaneously be used as an ordinary identifier in that context.
 
+The names `extern`, `intrinsic`, `none`, `void`, `end`, and `new` are reserved.
+They cannot name variables, parameters, fields, methods, loop bindings, type
+aliases, or import aliases. Their existing expression and type roles remain:
+`none` is the absence value/type, `void` is a no-value result, and `xs[end]`
+uses the last valid index. `<none>` in a match arm tests the type and does not
+introduce a binding. `untyped` is not reserved; the compiler's internal
+inference marker does not reserve a source name. Reserving `new` does not yet
+implement the planned singleton-axis indexing operation.
+
 ## Whitespace and Juxtaposition
 
 Whitespace separates tokens. Dewy does not generally use commas to separate arguments, parameters, or array elements.

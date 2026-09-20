@@ -23,7 +23,9 @@ from typing import Literal, Generator
 keywords: set[str] = {
     'loop', 'if', 'else', 'match', 'return', 'yield', 'break', 'continue',
     'import', 'from', 'let', 'const', 'local_const', 'overload_only',
-    # 'extern', 'intrinsic', 'none', 'void', 'untyped', 'end', 'new' #TBD if these are keywords or just special identifiers
+    # extern/intrinsic/none/void/end/new are reserved source bindings. They
+    # keep Identifier token shapes for their expression/type/index roles;
+    # semantic/source_names.py enforces reservation. `untyped` is not reserved.
 }
 
 # tokenized as symbols, but are treated as identifiers (rather than operators)

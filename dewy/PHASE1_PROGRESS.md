@@ -301,3 +301,21 @@ changing the language or its runtime representation.
 
 Validation: 12 hosted nominal checks, x86/C execution, and execution with the
 second-generation effect-contract compiler returned the expected result (42).
+
+Checkpoint: the six reviewed names (`extern`, `intrinsic`, `none`, `void`,
+`end`, `new`) are now reserved in source bindings in both compilers. The
+check covers declarations, parameters, fields, methods, loop/unpack targets,
+generic binders and import aliases. It distinguishes binding patterns from
+match type patterns, so `<none>` remains valid; synthesized last-index bindings
+also retain their existing role. `untyped` remains available to users.
+Compiler/library locals and fields now use ordinary names (`limit`,
+`intrinsic_call`, `replacement`, etc.). This changes the string replacement
+keyword argument from `new` to `replacement`; positional calls are unchanged.
+It reserves `new` without implementing the later axis-insertion feature.
+
+Validation: all 104 reserved-name checks passed, including a Dewy validator
+harness over 96 binding forms and x86/C execution. The related text/source-line
+and fact regressions passed (108 checks); dependent-index and brand tests also
+passed. Native generations built in 62.55s and 62.79s, both running the role
+fixture with result 42. All 52 focused hosted/native paired cases passed.
+Artifacts: `../dewy-build-artifacts/phase1-reserved-stage2-2026-09-20`.

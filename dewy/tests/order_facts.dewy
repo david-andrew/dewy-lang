@@ -13,9 +13,9 @@ let remaining = (src:string):>uint64 => {
     return total
 }
 
-let width = (start:int64 end:int64):>uint64 => {
-    if 0 <=? start <=? end {
-        let w:uint64 = end - start                # at least 0, and both are nonnegative so no overflow
+let width = (start:int64 limit:int64):>uint64 => {
+    if 0 <=? start <=? limit {
+        let w:uint64 = limit - start                # at least 0, and both are nonnegative so no overflow
         return w
     }
     return 0

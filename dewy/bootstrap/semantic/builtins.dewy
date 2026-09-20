@@ -56,7 +56,7 @@ bitwise_overload = (@nodes:types.Table callable_overload:bool=false):>addr => {
     }
     return types.overload_type(methods @nodes)
 }
-intrinsic = (params:array<addr> ret:addr @nodes:types.Table):>addr => {
+intrinsic_call = (params:array<addr> ret:addr @nodes:types.Table):>addr => {
     let positional:array<types.PosOrKwArg> = []
     loop param in params { positional.push(types.PosOrKwArg[none param]) }
     return types.function_type(positional [] none ret [] @nodes)
@@ -132,7 +132,7 @@ const word_intrinsic_arities:dict<string addr> = [
 word_intrinsic = (arity:addr word:addr @nodes:types.Table):>addr => {
     let args:array<addr> = []
     loop i in 0.. and i <? arity { args.push(word) }
-    return intrinsic(args word @nodes)
+    return intrinsic_call(args word @nodes)
 }
 
 intrinsic_types = (@nodes:types.Table):>dict<string addr> => {
@@ -149,18 +149,18 @@ intrinsic_types = (@nodes:types.Table):>dict<string addr> => {
         let type_prefix = if signed 'int' else 'uint'
         loop bits in [8 16 32 64] {
             let value = types.primitive("{type_prefix}{bits}" @nodes)
-            result["__load_{prefix}{bits}__"] = intrinsic([any] value @nodes)
-            result["__store_{prefix}{bits}__"] = intrinsic([value any] nothing @nodes)
+            result["__load_{prefix}{bits}__"] = intrinsic_call([any] value @nodes)
+            result["__store_{prefix}{bits}__"] = intrinsic_call([value any] nothing @nodes)
         }
     }
-    result['__load__'] = intrinsic([any] word @nodes)
-    result['__store__'] = intrinsic([word any] nothing @nodes)
-    result['__alloca__'] = intrinsic([word] word @nodes)
-    result['__static_alloca__'] = intrinsic([word] word @nodes)
-    result['__breakpoint__'] = intrinsic([] nothing @nodes)
+    result['__load__'] = intrinsic_call([any] word @nodes)
+    result['__store__'] = intrinsic_call([word any] nothing @nodes)
+    result['__alloca__'] = intrinsic_call([word] word @nodes)
+    result['__static_alloca__'] = intrinsic_call([word] word @nodes)
+    result['__breakpoint__'] = intrinsic_call([] nothing @nodes)
     result['__signed_shr__'] = types.function_type([types.PosOrKwArg['left' word] types.PosOrKwArg['right' integer]] [] none word [] @nodes)
-    loop name in ['__unsigned_idiv__' '__unsigned_mod__'] { result[name] = intrinsic([unsigned unsigned] unsigned @nodes) }
-    loop name in ['__unsigned_lt__' '__unsigned_gt__' '__unsigned_lte__' '__unsigned_gte__'] { result[name] = intrinsic([unsigned unsigned] boolean @nodes) }
+    loop name in ['__unsigned_idiv__' '__unsigned_mod__'] { result[name] = intrinsic_call([unsigned unsigned] unsigned @nodes) }
+    loop name in ['__unsigned_lt__' '__unsigned_gt__' '__unsigned_lte__' '__unsigned_gte__'] { result[name] = intrinsic_call([unsigned unsigned] boolean @nodes) }
     result['__static_words__'] = types.function_type([types.PosOrKwArg[none any]] [] 'words' word [] @nodes)
     loop name in word_intrinsic_arities.keys {
         if name not in? word_intrinsic_arities continue
@@ -172,7 +172,7 @@ intrinsic_types = (@nodes:types.Table):>dict<string addr> => {
     }
     # A preceding syscall exits; this asserts no continuation and lowers to
     # an infinite loop that will never execute.
-    result['__unreachable__'] = intrinsic([] never @nodes)
+    result['__unreachable__'] = intrinsic_call([] never @nodes)
     return result
 }
 

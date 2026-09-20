@@ -46,7 +46,6 @@ CASES = [
     'let f=(s:string):>string=>s[..end-1]\nf("abc")',
     'let f=(xs:array<int64>):>int64=>xs[end]\nf([1 2])',
     'let xs=[1 2 3]\nlet ys=[0 1]\nxs[ys[end]]',
-    'let end:int64=9\nlet xs=[1 2]\nxs[end]; end',
     'A:type=[x:int64=1]\nB:type=[x:int64=2]\nlet fresh=<T>(unused:T):>T=>T[]\nfresh(A[]); fresh(B[])',
 
     'let identity=<T>(value:T):>T=>value\nidentity(7)',

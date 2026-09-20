@@ -14,7 +14,7 @@ and type-arena indices.
 
 Brand:type = const [name:string value_type:addr parent:string? abstract:bool]
 Registry:type = [entries:array<Brand>=[]]
-NumberedBrand:type = const [name:string first:addr end:addr]
+NumberedBrand:type = const [name:string first:addr limit:addr]
 
 lookup = (name:string registry:Registry):>Brand? => {
     loop entry in registry.entries { if entry.name =? name return entry }
