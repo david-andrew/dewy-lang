@@ -4463,11 +4463,10 @@ class _StringLowering:
         node: hir.StringIndex,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         prelude, string = self._extract_expression(node.string)
-        if node.constant_index is None:
-            index_prelude, index = self._extract_expression(node.index)
-            prelude.extend(index_prelude)
-        else:
-            index = self._int64_literal(node.loc, node.constant_index)
+        index_prelude, index = self._extract_index_value(node.index, node.constant_index)
+        prelude.extend(index_prelude)
+        if isinstance(index, int):
+            index = self._int64_literal(node.loc, index)
         view_prelude, view = self._string_view(
             string,
             index,

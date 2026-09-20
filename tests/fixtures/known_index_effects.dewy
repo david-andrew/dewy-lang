@@ -1,0 +1,28 @@
+# A singleton result fact proves the index value, not that its evaluation
+# can be erased. Every index call below must run exactly once and in order.
+Box:type=[value:int64]
+index=(@visits:int64):>int64<v=>v=?0>=>{visits+=1 return 0}
+rhs=(@visits:int64):>int64=>{
+    $runtime_assert visits=?2
+    return 42
+}
+update=(@value:int64):>void=>{value=43}
+main=():>int64=>{
+    let visits:int64=0
+    let values:array<int64 length=1>=[1]
+    let first=values[index(@visits)]
+    $runtime_assert first=?1 and visits=?1
+    values[index(@visits)]=rhs(@visits)
+    $runtime_assert visits=?2 and values[0]=?42
+    update(@values[index(@visits)])
+    $runtime_assert visits=?3 and values[0]=?43
+    let boxes:array<Box length=1>=[Box[1]]
+    boxes[index(@visits)].value=44
+    $runtime_assert visits=?4 and boxes[0].value=?44
+    let text:string='ab'
+    let letter=text[index(@visits)]
+    $runtime_assert visits=?5 and letter=?'a'
+    boxes[index(@visits)]=Box[45]
+    $runtime_assert visits=?6 and boxes[0].value=?45
+    return 42
+}

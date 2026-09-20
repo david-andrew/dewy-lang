@@ -550,8 +550,13 @@ let f = ():>uint16 => {
 }
 """))
 
-    assert '__store_u16__(42 values + (i * 2))' in emitted
-    assert 'result = __load_u16__(values + (i * 2))' in emitted
+    # Index evaluation is held before later operands. The selected address
+    # must still scale a uint16 element by two, without a descriptor load.
+    store = re.search(r'__store_u16__\(42 values \+ \((\w+) \* 2\)\)', emitted)
+    load = re.search(r'result = __load_u16__\(values \+ \((\w+) \* 2\)\)', emitted)
+    assert store is not None and load is not None
+    for index in (store[1], load[1]):
+        assert f'let {index}:int64 = i' in emitted
     assert 'loop i <? 3' in emitted
     assert '__load_i64__(values' not in emitted
 

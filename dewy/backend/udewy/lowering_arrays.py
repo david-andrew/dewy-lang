@@ -44,6 +44,19 @@ from .lowering_sharing import _ArraySharing
 
 
 class _ArrayLowering(_ArraySharing):
+    def _extract_index_value(self, node: hir.AST, known: int | None) -> tuple[list[hir.AST], int | hir.AST]:
+        """Bounds evidence determines a value, not whether evaluation can erase.
+
+        A call returning a singleton integer may still mutate, fail, or not
+        return. Evaluate every nonliteral index exactly once, before later
+        store/call operands or repeated address calculations.
+        """
+        if isinstance(node, hir.Integer):
+            return [], node.value if known is None else known
+        prelude, value = self._extract_expression(node)
+        held = self._name('index', node.loc)
+        return [*prelude, self._declare(held, value, node.loc)], held
+
     def _extract_array_operand(self, node: hir.AST, target: ty.ArrayType) -> tuple[list[hir.AST], hir.AST]:
         """Read a descriptor when several length alternatives share an element type.
 

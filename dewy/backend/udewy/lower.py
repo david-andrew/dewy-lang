@@ -4282,12 +4282,7 @@ class _Lowerer(
             stack_data = (
                 self._array_use_representation(node.target.array) == 'stack_data'
             )
-            index_prelude: list[hir.AST] = []
-            index: int | hir.AST = node.target.constant_index
-            if index is None:
-                index_prelude, index = self._extract_expression(
-                    node.target.index
-                )
+            index_prelude, index = self._extract_index_value(node.target.index, node.target.constant_index)
             value_prelude, value = self._array_storage_value(
                 node.value,
                 node.target.type,
@@ -5247,10 +5242,8 @@ class _Lowerer(
                 prelude, array = self._extract_expression(static_bytes)
             else:
                 prelude, array = self._extract_expression(node.array)
-            index: int | hir.AST = node.constant_index
-            if index is None:
-                index_prelude, index = self._extract_expression(node.index)
-                prelude.extend(index_prelude)
+            index_prelude, index = self._extract_index_value(node.index, node.constant_index)
+            prelude.extend(index_prelude)
             address = (
                 self._pointer_element_address(
                     array,

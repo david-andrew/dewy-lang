@@ -142,10 +142,8 @@ class _PlaceLowering:
 
         raw_representation = self._array_use_representation(target.array)
         prelude, array = self._extract_write_route(target.array)
-        index: int | hir.AST = target.constant_index
-        if index is None:
-            index_prelude, index = self._extract_expression(target.index)
-            prelude.extend(index_prelude)
+        index_prelude, index = self._extract_index_value(target.index, target.constant_index)
+        prelude.extend(index_prelude)
         address = (
             self._pointer_element_address(
                 array,

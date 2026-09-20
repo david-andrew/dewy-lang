@@ -64,10 +64,8 @@ class _ArraySharing:
         """Evaluate a nested place once, detaching enclosing array buffers."""
         if isinstance(node, hir.Index) and self._array_use_representation(node.array) is None:
             prelude, array = self._extract_write_route(node.array)
-            index = node.constant_index
-            if index is None:
-                before, index = self._extract_expression(node.index)
-                prelude.extend(before)
+            before, index = self._extract_index_value(node.index, node.constant_index)
+            prelude.extend(before)
             prelude.extend(self._ensure_unique_array(array, node.type, node.loc))
             address = self._array_element_address(array, index, node.type, node.loc)
             return prelude, self._array_load(address, node.type, node.loc)
