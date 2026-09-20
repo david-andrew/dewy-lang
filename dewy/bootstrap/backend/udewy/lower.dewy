@@ -854,6 +854,36 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         if object_valued(source.value_type state) and object_valued(node.value_type state) return owned_record(owned_value(node.expr @state site) source.value_type node.value_type node @state)
         if cell_members(source.value_type @state) is? none and cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state site) source.value_type node.value_type node @state owned=true)
     }
+    # A narrowed read of a moved cell local moves its payload out: the cell
+    # is emptied (tag none) and its block freed at scope exit as usual.
+    if node is? hir.ValueCast|hir.RepresentationCast {
+        let inner=hir.node_at(state.input.nodes node.expr)
+        if inner is? hir.ExpressedIdentifier and node.expr in? state.moved_uses and cell_members(inner.value_type @state) isnt? none {
+            let binding=inner.binding_id
+            if binding isnt? none and binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed {
+                let prefix:array<addr>=[]
+                let cell=snapshot(expression(node.expr @state) @prefix @state)
+                let payload=snapshot(read_value(cell inner.value_type node.value_type node @state) @prefix @state)
+                # A read that hands back the cell itself moves the whole
+                # handle: empty the local. Otherwise the payload left the
+                # cell: empty the cell (never the shared static `none`).
+                let word_type=types.primitive('int64' @state.type_nodes)
+                let boolean=types.primitive('bool' @state.type_nodes)
+                let local=put(hir.ExpressedIdentifier[node.loc word_type symbol(inner.name binding @state) binding] @state)
+                let empty_local=assign_value(local word(0 node @state) node @state)
+                let empty_cell=store_word(word(0 node @state) cell 0 node @state)
+                let shared_none=state.none_cell
+                if shared_none isnt? none {
+                    let shared=put(hir.ExpressedIdentifier[node.loc word_type shared_none] @state)
+                    empty_cell=conditional(intrinsic('__ne__' [cell shared] boolean node @state) empty_cell node @state)
+                }
+                let same=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) intrinsic('__eq__' [payload cell] boolean node @state) empty_local] @state)
+                prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [same] empty_cell] @state))
+                prefix.push(payload)
+                return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+            }
+        }
+    }
     let value=expression(id @state)
     if node is? hir.Place or expression_owns(id @state) return value
     # A returned local's block is transferred to the caller, not copied.

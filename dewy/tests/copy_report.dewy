@@ -24,6 +24,7 @@ let main = ():>int64 => {
     let picked = pick(true)
     if picked is? none { return 4 }
     if pick2().weight not=? 2 { return 5 }
+    if pick3(facts) is? none { return 6 }
     return g.weight + h.weight + first_name(xs).length
 }
 let maybe = (facts:dict<int64 Fact> id:int64):>Fact? => facts.get(id)
@@ -35,4 +36,9 @@ let pick = (flag:bool):>Fact|none => {
 let pick2 = ():>Fact => {
     let r:Fact = [name='y' values=[8] weight=2]
     return r
+}
+let pick3 = (facts:dict<int64 Fact>):>Fact|none => {
+    let v = maybe(facts 1)
+    if v is? Fact { return v }
+    return none
 }

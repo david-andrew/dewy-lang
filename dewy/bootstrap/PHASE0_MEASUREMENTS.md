@@ -4476,3 +4476,21 @@ to 7,048; `placed in a record literal` 2,529 to 1,787 across kinds. The
 (`if v is? CacheMiss return v`), where the payload must move out of the
 local's cell rather than the cell handle itself.
 
+Two refinements the same day. A `return` leaves every path, so a returned
+local always moves whatever the text after the return does with it (the
+decoder's `if field_0 is? CacheMiss return field_0` followed by a use of
+`field_0` in the success path). And a narrowed read of a moved cell local
+(`return field_0` as `CacheMiss` out of `Value1|CacheMiss`) moves the
+payload out of the local's cell: when the read hands back a different
+handle the cell is emptied (tag `none`, never the shared static `none`
+cell), and when the read hands back the cell itself the local is emptied
+instead; the first version emptied the cell in both cases and broke
+`or_throw` propagation and the value-cache decoder (`native_or_throw`,
+`native_cache_snapshot`) until the fixture suite caught it. Compiler-wide
+copies: 7,048 to 5,708 (`packed into a cell` 1,517 to 197); against the
+7,910 baseline, with the 164 `get` sites that were not reported then, the
+comparable figure is 5,544, 30% fewer. Remaining by reason: 1,968 no move
+(mostly values placed in record literals while the local is still used),
+1,804 container reads without a view, 1,413 borrow rejections by the
+opaque-callee rule.
+

@@ -10,8 +10,9 @@ handle and empties the local, so its scope-exit release does nothing. A use
 is the last one when no reference to the binding follows it in traversal
 order (a later sibling arm counts as after, conservatively), it is not
 inside a loop the declaration is outside of (the next iteration would read
-the emptied local; a `return` leaves the loop and is exempt), and no nested
-function literal captures the binding. Parameters are not declarations
+the emptied local), and no nested function literal captures the binding.
+A `return` leaves every path, so a local returned there always moves,
+whatever the text after the return does with it. Parameters are not declarations
 here and never move. Mirrors `_compute_moves` in the hosted lowering.
 """
 
@@ -129,8 +130,12 @@ compute = (literal:addr nodes:array<hir.AST>):>set<addr> => {
             if use.nested {nested=true}
             if use.sequence >? last.sequence {last=use}
         }
-        if nested or not last.transfer continue
-        if last.depth >? declared and not last.returned continue
+        if nested continue
+        # A `return` leaves every path: a returned local is always at its
+        # last use there, whatever follows the return in the text.
+        loop use in uses {if use.returned {moves.add(use.id)}}
+        if not last.transfer or last.returned continue
+        if last.depth >? declared continue
         moves.add(last.id)
     }
     return moves
