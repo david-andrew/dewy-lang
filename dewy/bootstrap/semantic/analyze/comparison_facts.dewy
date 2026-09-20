@@ -53,6 +53,10 @@ ordered = (@state:facts.State smaller:Operand larger:Operand strict:bool):>void 
 narrow = (@state:facts.State op:propositions.Operator subject:Operand other:Operand context:relations.Context):>bool => {
     if subject.term is? none or other.interval is? none return true
     let previous=relations.interval_of(subject.term state context)
+    # A projected field may have a declared interval even before its route
+    # has a state entry. Retain that observed bound when excluding a value:
+    # a nonnegative field unequal to zero is strictly positive.
+    if subject.interval isnt? none {previous=ranges.intersect(previous subject.interval)}
     let constraint=ranges.constraint(op other.interval true)
     let narrowed:ranges.Interval?=previous
     if constraint isnt? none {narrowed=ranges.intersect(previous constraint)}

@@ -770,6 +770,9 @@ class _BoundsValidator:
         self.srcfile = srcfile
         self.unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None
         self.checked_functions: set[int] = set()
+        # Bound finite-loop exploration across nested loops. Exhausting the
+        # budget falls back to widening, never to an assumed proof.
+        self.finite_loop_budget = 64
         self.call_writes: dict[int, set[int]] = {}
         self.predicate_bindings = predicate_effects.BindingQueries()
         self.declared_intervals: dict[int, tuple[ty.Type, Interval | None]] = {}
@@ -1864,7 +1867,52 @@ class _BoundsValidator:
                     self._seed_binding_refinement(iterator.target.binding_id, element, body_state, iterator.loc)
             return body_state
 
+        count = iterator.count
+        if isinstance(iterator.iterable.type, ty.ArrayType):
+            # A changing array does not have a statically fixed trip count.
+            if iterated is not None and iterated not in self.assigned:
+                length = self._length_interval(iterator.iterable, state)
+                count = length.lower if length is not None and length.lower == length.upper else None
+            elif not isinstance(_strip_casts(iterator.iterable), hir.ArrayLiteral):
+                count = None
+        if count == 0:
+            return dict(state)
+        if count is not None and 0 < count <= 8 and count <= self.finite_loop_budget:
+            return self._finite_iterator_loop(iterator, body, state, enter, target_ids, count, validate=validate)
         return self._iterate_loop(body, state, enter, target_ids, validate=validate)
+
+    def _finite_iterator_loop(self, iterator, body, state, enter, target_ids, count, *, validate):
+        """Compose a bounded number of transfers instead of widening to infinity.
+
+        This is abstract execution, not source unrolling. Validate once from
+        the union of every reachable body entry, so a safe first iteration
+        cannot conceal an invalid later one. Breaks and continues contribute
+        to exits and backedges respectively, including conditional ones.
+        """
+        self.finite_loop_budget -= count
+        current = dict(state)
+        entries = []
+        exits = []
+        for step in range(count):
+            entry = enter(current)
+            if isinstance(iterator.iterable, hir.Range) and iterator.target.binding_id is not None:
+                entry[iterator.target.binding_id] = Interval.exact(iterator.first + step * iterator.step)
+            entries.append(entry)
+            transfer = self._loop_transfer(body, entry, validate=False)
+            exits.extend(transfer.breaks.get(0, []))
+            backedges = [*([transfer.normal] if transfer.normal is not None else []), *transfer.continues.get(0, [])]
+            if not backedges:
+                break
+            current = self._join_states(backedges)
+            for binding in target_ids:
+                current.pop(binding, None)
+        else:
+            exits.append(current)
+        self._loop_transfer(body, self._join_states(entries), validate=validate)
+        for exit_state in exits:
+            for binding in target_ids:
+                exit_state.pop(binding, None)
+        return self._join_states(exits) if exits else dict(state)
 
     def _iterate_loop(
         self,
@@ -4192,11 +4240,9 @@ class _BoundsValidator:
             return refined
         name = condition.integer_operation or condition.func.name
         left, right = condition.pos_args
-        decided = self._decide_comparison(
-            name,
-            self._eval(left, refined, validate=False),
-            self._eval(right, refined, validate=False),
-        )
+        left_observed = self._eval(left, refined, validate=False)
+        right_observed = self._eval(right, refined, validate=False)
+        decided = self._decide_comparison(name, left_observed, right_observed)
         if decided is not None and decided != truth:
             return None  # the operand intervals settle the comparison: this path is impossible
         # `i <? xs.length` holding, or `i >=? xs.length` failing, is the same index fact
@@ -4258,16 +4304,18 @@ class _BoundsValidator:
                 if side_binding is not None and other_interval is not None and other_interval.lower == 0 and other_interval.upper == 0:
                     refined[_nonzero_key(side_binding)] = Interval.exact(1)
         if left_binding is not None and right_interval is not None:
+            previous = self._binding_interval(refined, left_binding)
+            if left_observed is not None:
+                previous = previous.intersect(left_observed)
             constraint = self._comparison_constraint(name, right_interval, truth)
             if constraint is not None:
-                previous = self._binding_interval(refined, left_binding)
                 narrowed = previous.intersect(constraint)
                 if narrowed.is_empty:
                     return None
                 refined[left_binding] = narrowed
             elif _is_inequality(name, truth) and right_interval.lower is not None and right_interval.lower == right_interval.upper:
                 # `x not =? c` (or a failed `x =? c`) excludes `c`: it tightens a bound it sits on
-                excluded = _exclude_value(_known_interval(refined, left_binding, self.max_length), right_interval.lower)
+                excluded = _exclude_value(previous, right_interval.lower)
                 if excluded is None:
                     return None
                 refined[left_binding] = excluded
@@ -4280,21 +4328,24 @@ class _BoundsValidator:
             '__gt__': '__lt__',
             '__ge__': '__le__',
             '__eq__': '__eq__',
+            '__ne__': '__ne__',
         }.get(name)
         if (
             right_binding is not None
             and left_interval is not None
             and inverse is not None
         ):
+            previous = self._binding_interval(refined, right_binding)
+            if right_observed is not None:
+                previous = previous.intersect(right_observed)
             constraint = self._comparison_constraint(inverse, left_interval, truth)
             if constraint is not None:
-                previous = self._binding_interval(refined, right_binding)
                 narrowed = previous.intersect(constraint)
                 if narrowed.is_empty:
                     return None
                 refined[right_binding] = narrowed
             elif _is_inequality(inverse, truth) and left_interval.lower is not None and left_interval.lower == left_interval.upper:
-                excluded = _exclude_value(_known_interval(refined, right_binding, self.max_length), left_interval.lower)
+                excluded = _exclude_value(previous, left_interval.lower)
                 if excluded is None:
                     return None
                 refined[right_binding] = excluded

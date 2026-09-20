@@ -1,0 +1,13 @@
+Entry:type=const[level:addr]
+let prior=(entry:Entry):>addr=>{
+    if entry.level=?0 return 0
+    return entry.level-1
+}
+let reversed=(entry:Entry):>addr=>{
+    if 0 not=?entry.level return entry.level-1
+    return 0
+}
+let main=():>int64=>{
+    if prior(Entry[0]) not=?0 or reversed(Entry[0]) not=?0 return 1
+    return if prior(Entry[43])=?42 and reversed(Entry[43])=?42 42 else 2
+}

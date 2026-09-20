@@ -56,6 +56,11 @@ let main=():>int64=>{{
     $runtime_assert strict isnt? none
     let gap=facts.lookup(strict facts.order(facts.Term[1] facts.Term[2]))
     $runtime_assert gap isnt? none and gap.lower =? 1
+    let unseen=facts.State[]
+    let positive=comparisons.refine(unseen 'not=?' comparisons.Operand[ranges.Interval[0 5] facts.Term[8]] comparisons.Operand[interval=ranges.exact(0)] true relations.Context[facts.Context[cap=100]])
+    $runtime_assert positive isnt? none
+    let bounded=facts.lookup(positive facts.value(facts.Term[8]))
+    $runtime_assert bounded isnt? none and bounded.lower =? 1 and bounded.upper =? 5
     return 0
 }}
 '''

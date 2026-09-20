@@ -49,6 +49,9 @@ Checker:type = [
     # `$prototype`: unproven sites become runtime checks instead of errors.
     prototype:bool=false deferred_sites:dict<addr prototype.Deferred>=[]
     result_obligations:dict<addr array<addr>>=[]
+    # Nested finite-loop exploration shares a budget. On exhaustion the
+    # ordinary widening path remains sound, though less precise.
+    finite_loop_budget:bigint=64
 ]
 # Construct the same declared-width environment for every invocation. Tests
 # and module drivers must not quietly use different loop-widening contracts.
@@ -770,6 +773,53 @@ remove_targets = (@state:facts.State iterators:array<addr> @checker:Checker):>vo
         if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {stores.forget(@state target.binding_id @checker.data)}
     }
 }
+finite_iterator_loop = (arm:hir.LoopArm iterator:hir.IteratorExpression iterators:array<addr> count:bigint state:facts.State @checker:Checker validate:bool):>Transfer => {
+    checker.finite_loop_budget-=count
+    let current:facts.State?=state
+    let entries:array<facts.State>=[]
+    let exits:array<facts.State>=[]
+    let output=Transfer[none]
+    let step:bigint=0
+    loop step <? count and current isnt? none {
+        checker.data.snapshot=intervals.Snapshot[]
+        let entry=enter_iterators(iterators current @checker)
+        let target=node_at(iterator.target checker)
+        if node_at(iterator.iterable checker) is? hir.Range and target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
+            facts.set_value(@entry facts.Term[target.binding_id] ranges.exact(iterator.first+step*iterator.step))
+        }
+        entries.push(entry)
+        let body=analyze(arm.body entry @checker false)
+        let backedges:array<facts.State>=[]
+        if body.normal isnt? none {backedges.push(body.normal)}
+        loop exit in body.breaks {
+            if exit.levels >? 0 {output.breaks.push(Exit[exit.levels-1 exit.state])}
+            else {exits.push(exit.state)}
+        }
+        loop exit in body.continues {
+            if exit.levels >? 0 {output.continues.push(Exit[exit.levels-1 exit.state])}
+            else {backedges.push(exit.state)}
+        }
+        current=joined(backedges checker)
+        if current isnt? none {
+            let next=current
+            remove_targets(@next iterators @checker)
+            current=next
+        }
+        step+=1
+    }
+    if current isnt? none {exits.push(current)}
+    # Prove the body once from every reachable entry, never just iteration 0.
+    checker.data.snapshot=intervals.Snapshot[]
+    let entry=joined(entries checker)
+    if entry isnt? none {analyze(arm.body entry @checker validate);}
+    loop i in 0.. and i <? exits.length {
+        let exit=exits[i]
+        remove_targets(@exit iterators @checker)
+        exits[i]=exit
+    }
+    output.normal=joined(exits checker)
+    return output
+}
 loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool):>Transfer => {
     let iterators=iterators_of(arm.condition checker)
     let incoming=state
@@ -778,6 +828,24 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool):>
         $runtime_assert iterator is? hir.IteratorExpression
         evaluate(iterator.iterable @incoming @checker validate)
         if iterators.length =? 1 and iterator.count =? 0 return Transfer[incoming]
+    }
+    if iterators.length =? 1 {
+        let iterator=node_at(iterators[0] checker)
+        $runtime_assert iterator is? hir.IteratorExpression
+        let count=iterator.count
+        let iterable=node_at(iterator.iterable checker)
+        let type=types.node_at(checker.data.env.types types.strip_refinement(iterable.value_type checker.data.env.types))
+        if type is? types.ArrayType {
+            let sequence=terms.sequence_id(iterator.iterable checker.data.env @checker.data.registry)
+            if sequence isnt? none and sequence not in? checker.assigned {
+                let length=intervals.length(iterator.iterable incoming checker.data.snapshot checker.data.env @checker.data.registry)
+                count=if length isnt? none and ranges.same_endpoint(length.lower length.upper) length.lower else none
+            } else if iterable isnt? hir.ArrayLiteral {count=none}
+        }
+        if count =? 0 return Transfer[incoming]
+        if count isnt? none and count >? 0 and count <=? 8 and count <=? checker.finite_loop_budget {
+            return finite_iterator_loop(arm iterator iterators count incoming @checker validate)
+        }
     }
     let head=incoming
     # Widening prevents an accumulator from retaining the entry interval

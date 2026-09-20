@@ -45,6 +45,18 @@ spellings use the same insertion and mutation rules. Hosted tests cover
 execution and rejection of const mutation; the native compiler executes
 the shared fixture with its expected result 42.
 
+Checkpoint: both bounds analyzers compose transfers for small, statically
+finite loops before falling back to widening. A shared exploration budget
+bounds nested work; every reachable body entry participates in validation,
+and break/continue exits are retained. This closes `nat_types` without
+changing its expected result. It also carries exact array growth through
+small fixed loops; general symbolic loop induction remains outstanding.
+Comparison narrowing now retains observed field bounds when excluding a
+value, so a nonnegative field unequal to zero is positive in either operand
+order. Targeted checks passed, and a second-generation native compiler passed
+all 11 cases in `tests/fixtures/phase1_parity_cases.json` against the hosted
+compiler. The broader 211-case corpus check is in progress.
+
 Each implementation batch needs acceptance/rejection and independent
 execution outcomes, with hosted/native agreement. Ownership batches also
 need second-generation native execution. Run complete build/fixed-point
