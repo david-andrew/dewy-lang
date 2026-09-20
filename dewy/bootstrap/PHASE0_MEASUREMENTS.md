@@ -4494,3 +4494,12 @@ comparable figure is 5,544, 30% fewer. Remaining by reason: 1,968 no move
 1,804 container reads without a view, 1,413 borrow rejections by the
 opaque-callee rule.
 
+Two corrections after the hosted gate: a narrowed record read of a cell
+local moves the payload and empties the *cell* whether or not the checker
+spelled a cast (the checker narrows an identifier's type in place, so the
+plain identifier move had emptied the local and leaked the cell block, 16
+bytes per call, caught by the arena live-bytes case of
+`test_native_scalar_lowering`); and the owned-value funnel no longer looks
+through proof obligations, which had let an unresolved obligation bypass
+the legalization that rejects it. The compiler-wide count is 5,736.
+
