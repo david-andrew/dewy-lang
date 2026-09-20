@@ -13,6 +13,7 @@ on the compiler's own sources (`dewy/bootstrap/main.dewy`) are recorded in
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 import sys
 from argparse import ArgumentParser
@@ -30,14 +31,17 @@ def main(argv: list[str]) -> int:
     parser.add_argument('--only', default=None, help='keep copies whose file path contains this text')
     parser.add_argument('--top', type=int, default=25)
     args = parser.parse_args(argv)
-    command = args.compiler.split() if args.compiler else [sys.executable, '-m', 'dewy']
+    command = shlex.split(args.compiler) if args.compiler else [sys.executable, '-m', 'dewy']
     result = subprocess.run([*command, 'analyze', args.file], capture_output=True, text=True, cwd=Path(__file__).resolve().parent.parent)
+    # A failed analysis may already have printed some copy notes. It is not
+    # a complete inventory and must never pass a copy-budget gate.
+    if result.returncode != 0:
+        sys.stderr.write(result.stdout)
+        sys.stderr.write(result.stderr)
+        return result.returncode
     notes = [m.groupdict() for m in map(LINE.match, result.stdout.splitlines()) if m]
     if args.only:
         notes = [note for note in notes if args.only in note['file']]
-    if not notes and result.returncode != 0:
-        sys.stderr.write(result.stderr)
-        return result.returncode
     kinds = Counter(note['kind'] for note in notes)
     print(f"{len(notes)} copies: " + ', '.join(f'{kinds[k]} {k}' for k in ('record', 'array', 'cell', 'string') if kinds[k]))
     groups = Counter()

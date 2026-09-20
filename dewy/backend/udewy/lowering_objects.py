@@ -342,6 +342,15 @@ class _ObjectLowering:
         the argument first. Distinct fields of a record do not overlap.
         """
         if isinstance(arg.type, ty.ObjectType):
+            # A raw pointer can reach this value without appearing as an
+            # argument or a parameter effect of this call. Preserve the
+            # value boundary even if the callee only reads its parameter.
+            root = borrowing.root_binding(arg)
+            if root is not None and root in self.borrow_plan.exposed_bindings:
+                self._note_copy('record', arg.type, 'passed to a call',
+                                'its storage has been exposed to raw operations', arg.loc)
+                prelude, value = self._clone_object_value(arg, arg.type)
+                return self._object_statement_temporary(prelude, value, arg.type, arg.loc)
             route = self._storage_field_route(arg)
             if route is not None and any(
                 self._storage_routes_overlap(route, place)

@@ -121,6 +121,9 @@ root_binding = (id:addr nodes:array<hir.AST>):>addr? => {
     if node is? hir.ExpressedIdentifier return node.binding_id
     if node is? hir.MemberAccess return root_binding(node.value nodes)
     if node is? hir.Index return root_binding(node.array nodes)
+    if node is? hir.DictLookup return root_binding(node.values nodes)
+    if node is? hir.Obligation return root_binding(node.value nodes)
+    if node is? hir.Suppress return root_binding(node.item nodes)
     if node is? hir.ValueCast|hir.RepresentationCast|hir.Transmute return root_binding(node.expr nodes)
     if node is? hir.Block and not node.scoped and node.items.length =? 1 return root_binding(node.items[0] nodes)
     return none

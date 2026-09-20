@@ -679,6 +679,16 @@ class _Lowerer(
         return raw
 
     def _lower_function(self, function: _FunctionDef, *, projection: tuple[str, ty.Type, str] | None = None) -> LoweredFunction:
+        # Spans in an imported function are relative to its defining file,
+        # including copy/move notes and errors raised while lowering parameters.
+        previous_source = self.srcfile
+        self.srcfile = function.literal.source or previous_source
+        try:
+            return self._lower_function_in_source(function, projection=projection)
+        finally:
+            self.srcfile = previous_source
+
+    def _lower_function_in_source(self, function: _FunctionDef, *, projection: tuple[str, ty.Type, str] | None = None) -> LoweredFunction:
         literal = function.literal
         if projection is not None:
             _field, field_type, _symbol = projection

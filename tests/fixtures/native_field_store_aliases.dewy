@@ -1,0 +1,14 @@
+# A place parameter and a global can name the same inline field. Keep the
+# RHS value alive before releasing the old field, regardless of binding ids.
+Inner:type=[text:string values:array<int64>]
+Outer:type=[inner:Inner]
+let global:Outer=Outer[Inner['abc'+'def' [11 22 33]]]
+let assign=(@target:Outer):>void=>{target.inner=global.inner}
+let main=():>int64=>{
+    assign(@global)
+    let scratch:array<Inner>=[]
+    loop i in 0..99 {scratch.push(Inner['xyz'+'uvw' [99 88 77]])}
+    if global.inner.text not=?'abcdef' return 1
+    if global.inner.values.length not=?3 return 2
+    return if global.inner.values[0]=?11 42 else 3
+}

@@ -149,8 +149,8 @@ exposed_roots = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table)
     let exposed:set<addr>=set[]
     let expose = (id:addr @exposed:set<addr>):>void => {
         if word_value(hir.node_at(nodes id).value_type type_nodes) return void
-        let source=route(id nodes)
-        if source isnt? none {exposed.add(source.binding)}
+        let binding=captures.root_binding(id nodes)
+        if binding isnt? none {exposed.add(binding)}
     }
     loop [id function] in plan.functions {
         let literal=hir.node_at(nodes id)
@@ -640,11 +640,11 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 # the call-graph rule: a callee's value share of a borrowed
                 # array made the caller detach on every later write.
                 let raw_blocked=direct in? opaque and not record_value(pair.argument nodes type_nodes)
-                if not raw_blocked and source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
+                if not raw_blocked and source isnt? none and source.binding not in? exposed and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
                 else {
                     rejected.add(pair.argument)
                     if source isnt? none {
-                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? plan.globals 'it is a global' else if source.binding in? places and direct in? dirty 'it is a place argument of a call that writes' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
+                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? exposed 'its storage has been exposed to raw operations' else if source.binding in? plan.globals 'it is a global' else if source.binding in? places and direct in? dirty 'it is a place argument of a call that writes' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
                     }
                 }
                 position+=1

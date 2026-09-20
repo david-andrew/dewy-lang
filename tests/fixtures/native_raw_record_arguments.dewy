@@ -1,0 +1,14 @@
+# Parameter effects alone cannot rule out writes through an already exposed
+# pointer. A value argument keeps its pre-call value across that raw write.
+Record:type=[value:int64]
+let pointer:int64=0
+let read=(snapshot:Record):>int64=>{
+    __store_i64__(99 pointer)
+    return snapshot.value
+}
+let main=():>int64=>{
+    let record=Record[42]
+    pointer=record transmute int64
+    let result=read(record)
+    return if result=?42 and record.value=?99 42 else 1
+}

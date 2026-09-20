@@ -57,6 +57,7 @@ class Plan:
     functions: dict[int, Function] = field(default_factory=dict)      # id(literal) -> Function
     globals: set[int] = field(default_factory=set)
     named: dict[int, hir.FunctionLiteral] = field(default_factory=dict)   # binding id -> literal it names
+    exposed_bindings: set[int] = field(default_factory=set)
     stable_bindings: set[int] = field(default_factory=set)
     stable_parameters: dict[int, ParameterEffects] = field(default_factory=dict)
     array_snapshots: set[int] = field(default_factory=set)             # id(Index) whose index may write the array
@@ -111,6 +112,8 @@ def root_binding(node: hir.AST) -> int | None:
         return root_binding(node.value)
     if isinstance(node, hir.Index):
         return root_binding(node.array)
+    if isinstance(node, hir.DictLookup):
+        return root_binding(node.values)
     if isinstance(node, (hir.ValueCast, hir.RepresentationCast, hir.Transmute)):
         return root_binding(node.expr)
     return None
@@ -212,9 +215,9 @@ def exposed_roots(plan: Plan, source_bindings: set[int]) -> set[int]:
     def expose(node: hir.AST) -> None:
         if _word_value(node.type):
             return
-        found = route(node)
-        if found is not None:
-            exposed.add(found.binding)
+        binding = root_binding(node)
+        if binding is not None:
+            exposed.add(binding)
 
     for function in plan.functions.values():
         for node in _walk_function(function.literal):
@@ -315,6 +318,7 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
     for function in plan.functions.values():
         places |= function.places
     exposed = exposed_roots(plan, source_bindings)
+    plan.exposed_bindings = exposed
     for function in plan.functions.values():
         for binding in function.locals:
             if binding not in function.writes and binding not in places and binding not in plan.globals and binding not in captured and binding not in exposed:

@@ -404,20 +404,11 @@ expression = (id:addr @state:State):>addr => {
         let prefix:array<addr>=[]
         let pointer=snapshot(field_pointer(target @state writable=true) @prefix @state)
         let stored=stored_type(node.target state)
-        # An inline record or cell field copies straight from a view of
-        # other storage: the old contents are released first, so the view
-        # must not be rooted in the record being written.
-        let viewed=peel_statement(node.value @state)
-        if inline_place(stored @state) and view_source(viewed @state) {
-            let source_route=borrowing.route(viewed state.input.nodes)
-            let target_route=borrowing.route(node.target state.input.nodes)
-            if source_route isnt? none and target_route isnt? none and source_route.binding not=? target_route.binding {
-                if object_valued(stored state) {prefix.push(release_record(pointer stored node @state))}
-                else {prefix.push(release_cell(pointer stored node @state))}
-                prefix.push(field_write(pointer expression(node.value @state) stored node @state))
-                return sequence(prefix node @state)
-            }
-        }
+        # The RHS must be evaluated and retained before releasing the old
+        # field. Distinct binding ids are not a disjointness proof: a place
+        # parameter can alias a global, and index evaluation can read or
+        # change the target. Literal construction has no old field to release;
+        # assignment keeps this snapshot until a lifetime/alias proof applies.
         let source=snapshot(owned_value(node.value @state 'stored in a field') @prefix @state)
         if object_valued(stored state) {prefix.push(release_record(pointer stored node @state))}
         else if cell_members(stored @state) isnt? none {prefix.push(release_cell(pointer stored node @state))}
