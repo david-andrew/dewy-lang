@@ -340,7 +340,12 @@ aggregate construction, explicit copies and implicit aggregate value
 boundaries. Required local views and read-only input inspection avoid those
 obligations. Proven nonescaping scalar places use reusable frame slots in
 native lowering; unresolved callback escape paths still need storage
-permission. Lowering's full placement/move proofs are not yet shared with
+permission. Numeric range iterators use allocation-free word counters when
+their finite extent fits or the bounds checker proves every advancing edge
+stays within the word range. A guard alone does not establish that proof:
+an unbounded `continue` path can defeat it. The loop body retains its own
+effects, including allocation and external writes.
+Lowering's full placement/move proofs are not yet shared with
 this checker, so it can require permission even for a boundary the backend
 later removes. Unsupported operations and unconstrained callbacks remain
 unknown, and cannot satisfy a closed row or an unproved exclusion. This

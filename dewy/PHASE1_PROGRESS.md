@@ -665,3 +665,20 @@ passes all 14 acceptance/rejection probes. All seven paired index cases passed,
 including invalidation by replacement, shifting and effectful index evaluation.
 Artifacts: `../dewy-build-artifacts/phase1-indexed-routes-stage1-2026-09-20`
 and `../dewy-build-artifacts/phase1-indexed-routes-parity-2026-09-20`.
+
+Iterator allocation contracts now consume the existing bounds proof. Public
+effect validation runs after bounds checking, and accepts private numeric
+range counters when their finite extent fits a word or every advancing edge
+is proved to fit. Unbounded continue paths cannot borrow the parser's guard
+hint as evidence. Counter reads and direct scalar arguments use that same
+proof; loop-body allocation, external reads/writes and unknown behavior keep
+their ordinary effects. This permits natural counted loops under `no_effects`
+and `no allocates` without requiring a hand-written scalar while loop.
+
+Validation: 13 iterator checks and the 36 allocation checks passed, alongside
+144 existing effect/proof/unsafe tests. A native generation built in 66.62s,
+executes the iterator allocation-counter kernel on x86 and C (42, no arena
+allocations), and passes all 12 acceptance/rejection probes. All 16 paired
+effect cases passed, including an unbounded continue-edge rejection.
+Artifacts: `../dewy-build-artifacts/phase1-iterator-effects-stage1-2026-09-20`
+and `../dewy-build-artifacts/phase1-iterator-effects-parity-2026-09-20`.

@@ -1,0 +1,8 @@
+# A bounded normal exit cannot justify the unbounded continue edge.
+f=(skip:bool):>void & no allocates=>{
+    loop i in 0.. {
+        if skip continue
+        if i>=?3 break
+    }
+}
+main=():>int64=>{f(true) return 0}

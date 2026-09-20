@@ -15,10 +15,28 @@ scalar = (id:addr nodes:types.Table):>bool => {
     if node is? types.IntegerLiteralType return node.value >=? -9223372036854775808 and node.value <? 18446744073709551616
     return node is? types.Primitive and node.name in? ['void' 'never' 'none' 'bool' 'true' 'false' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64']
 }
-Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects]
+Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[]]
 Call:type = const [target:addr subjects:dict<string rows.Subject?>]
-Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[]]
+Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[]]
 Location:type = const [known:bool subject:rows.Subject?=none]
+word_iterator = (id:addr node:hir.IteratorExpression input:Input):>bool => {
+    if hir.node_at(input.nodes node.iterable) isnt? hir.Range return false
+    let target=hir.node_at(input.nodes node.target)
+    let type=types.node_at(input.types types.strip_refinement(target.value_type input.types))
+    if type isnt? types.Primitive or type.name not in? ['int' 'uint' 'int64' 'uint64'] return false
+    if id in? input.word_iterators return true
+    if node.count is? none return false
+    let values:array<bigint>=[node.first node.step node.count]
+    if node.last isnt? none {values.push(node.last)}
+    loop value in values {if value <? -9223372036854775808 or value >? 9223372036854775807 return false}
+    return true
+}
+word_value = (node:hir.AST input:Input scan:Scan):>bool => {
+    if scalar(node.value_type input.types) return true
+    if node isnt? hir.ExpressedIdentifier or node.binding_id is? none or node.binding_id not in? scan.words return false
+    let type=types.node_at(input.types types.strip_refinement(node.value_type input.types))
+    return type is? types.Primitive and type.name in? ['int' 'uint']
+}
 location = (id:addr input:Input scan:Scan):>Location => {
     let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes)
     let root=hir.node_at(input.nodes path.root)
@@ -95,7 +113,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
             }
         }
         let scalar_operation=callee is? hir.ExpressedIdentifier and builtin and callee.name in? SCALAR_OPERATIONS and scalar(node.value_type input.types)
-        loop arg in node.pos_args {if not scalar(hir.node_at(input.nodes arg).value_type input.types) {scalar_operation=false}}
+        loop arg in node.pos_args {if not word_value(hir.node_at(input.nodes arg) input scan) {scalar_operation=false}}
         if targets isnt? none {
             loop target in targets {
                 let value=hir.node_at(input.nodes target)
@@ -144,7 +162,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
             }
             else {
                 visit(arg input @scan)
-                if not scalar(value.value_type input.types) and types.node_at(input.types value.value_type) isnt? types.CallableType {storage(@scan)}
+                if not word_value(value input scan) and types.node_at(input.types value.value_type) isnt? types.CallableType {storage(@scan)}
             }
         }
         return
@@ -170,13 +188,18 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         return
     }
     if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {unknown(@scan) return}
-    if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.ValueCast|hir.RepresentationCast|hir.Spread {
+    if node is? hir.IteratorExpression {
+        if not word_iterator(id node input) {unknown(@scan)}
+        loop child in hir.children(hir.node_at(input.nodes node.iterable)) {visit(child input @scan)}
+        return
+    }
+    if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.ValueCast|hir.RepresentationCast|hir.Spread|hir.MultiIteratorExpression {
         loop child in hir.children(node) {visit(child input @scan)}
         return
     }
     unknown(@scan)
 }
-validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
+validate = (root:addr source:SrcFile session:contexts.Session word_iterators:set<addr>=set[]):>Error? => {
     if not session.types.effect_contracts return none
     let constrained:array<addr>=[]
     let pending:array<addr>=[root]
@@ -194,7 +217,7 @@ validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
     }
     if constrained.length =? 0 return none
     let analysis=access.collect(root session.hir)
-    let input=Input[session.hir session.types session.registry analysis access.analyze_effects(root session.hir session.types)]
+    let input=Input[session.hir session.types session.registry analysis access.analyze_effects(root session.hir session.types) word_iterators]
     let local:dict<addr rows.Contract>=[]
     let calls:dict<addr array<Call>>=[]
     let edges:dict<addr set<addr>>=[]
@@ -212,9 +235,17 @@ validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
         }
         let pending:array<addr>=[node.body]
         loop pending.length >? 0 {
-            let body=hir.node_at(session.hir pending.pop)
+            let child=pending.pop
+            let body=hir.node_at(session.hir child)
             if body is? hir.FunctionLiteral continue
             if body is? hir.Declare and body.binding_id isnt? none {scan.private.add(body.binding_id)}
+            if body is? hir.IteratorExpression {
+                let target=hir.node_at(session.hir body.target)
+                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
+                    scan.private.add(target.binding_id)
+                    if word_iterator(child body input) {scan.words.add(target.binding_id)}
+                }
+            }
             loop child in hir.children(body) {pending.push(child)}
         }
         visit(node.body input @scan)

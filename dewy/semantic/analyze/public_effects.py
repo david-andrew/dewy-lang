@@ -29,6 +29,19 @@ def scalar(type_):
     }
 
 
+def word_iterator(node):
+    """The counter/flags fit frame words; no runtime-sized storage is needed.
+
+    Bounds validation has already certified `guarded` on every advancing
+    edge. Finite ranges carry their exact extent directly in checked HIR.
+    """
+    if not isinstance(node.iterable, hir.Range) or ty.strip_refinement(node.target.type) not in ('int', 'uint', 'int64', 'uint64'):
+        return False
+    return (node.count is None and node.guarded) or node.count is not None and all(
+        value is None or ty.integer_literal_fits(value, 'int64')
+        for value in (node.first, node.step, node.last, node.count))
+
+
 def validate(root, registry, srcfile):
     # Do not add a second whole-program fixed point to unannotated programs.
     constrained = [node for node in hir.walk(root) if isinstance(node, hir.FunctionLiteral)
@@ -45,6 +58,7 @@ def validate(root, registry, srcfile):
         params = _literal_params(literal)
         private = {p.binding_id for p in params if not p.place}
         places = {p.binding_id: str(index) for index, p in enumerate(params) if p.place}
+        word_bindings = set()
         pending = [literal.body]
         while pending:
             node = pending.pop()
@@ -52,6 +66,10 @@ def validate(root, registry, srcfile):
                 continue
             if isinstance(node, hir.Declare):
                 private.add(node.binding_id)
+            if isinstance(node, hir.IteratorExpression):
+                private.add(node.target.binding_id)
+                if word_iterator(node):
+                    word_bindings.add(node.target.binding_id)
             pending.extend(hir.children(node))
         summary = rows.Contract(rows.Row())
         dependencies = []
@@ -68,6 +86,11 @@ def validate(root, registry, srcfile):
             # Until placement/move evidence is available here, an aggregate
             # value boundary conservatively needs allocation permission.
             contribute(rows.Contract(rows.Row((rows.Atom('allocates'),))))
+
+        def word_value(node):
+            return scalar(node.type) or (isinstance(node, hir.ExpressedIdentifier)
+                                        and node.binding_id in word_bindings
+                                        and ty.strip_refinement(node.type) in ('int', 'uint'))
 
         def location(node):
             path = bindings.access_path(node, unwrap=_unwrap)
@@ -131,7 +154,7 @@ def validate(root, registry, srcfile):
                             dependencies.append((id(target), supplied))
                 elif (isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None
                       and node.func.name in SCALAR_OPERATIONS and scalar(node.type)
-                      and all(scalar(arg.type) for arg in node.pos_args)):
+                      and all(word_value(arg) for arg in node.pos_args)):
                     pass
                 elif isinstance(node.func.type, ty.FunctionType):
                     supplied = call_subjects(node, node.func.type)
@@ -167,7 +190,7 @@ def validate(root, registry, srcfile):
                                 storage()
                     else:
                         visit(argument)
-                        if not scalar(argument.type) and not isinstance(argument.type, (ty.FunctionType, ty.OverloadType)):
+                        if not word_value(argument) and not isinstance(argument.type, (ty.FunctionType, ty.OverloadType)):
                             storage()  # logical aggregate transfer not proved
                 return
             if isinstance(node, hir.Declare):
@@ -194,9 +217,16 @@ def validate(root, registry, srcfile):
             if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and not scalar(node.type):
                 unknown()
                 return
+            if isinstance(node, hir.IteratorExpression):
+                if not word_iterator(node):
+                    unknown()
+                for child in hir.children(node.iterable):
+                    visit(child)
+                return
             if isinstance(node, (hir.Block, hir.Suppress, hir.Return, hir.Flow, hir.IfArm, hir.LoopArm,
                                  hir.ShortCircuit, hir.Obligation, hir.TypeTest, hir.ArrayLength,
-                                 hir.StringLength, hir.ValueCast, hir.RepresentationCast, hir.Spread)):
+                                 hir.StringLength, hir.ValueCast, hir.RepresentationCast, hir.Spread,
+                                 hir.MultiIteratorExpression)):
                 for child in hir.children(node):
                     visit(child)
                 return

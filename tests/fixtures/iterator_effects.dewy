@@ -1,0 +1,24 @@
+# Counter storage is a consequence of the checked bounds proof. Written
+# allocation exclusions must not force a counter loop to be spelled as while.
+count=(limit:int64):>int64 & no_effects=>{
+    let result:int64=0
+    loop i in 0.. and i <? limit {result+=1}
+    return result
+}
+fixed=():>int64 & no_effects=>{
+    let result:int64=0
+    loop i in [0..6) and j in [0..7) {result+=1}
+    return result
+}
+bump=(@value:int64):>void & reads<value> & mutates<value> & no allocates=>{
+    loop i in [0..6) {value+=1}
+}
+main=():>int64=>{
+    let before:int64=_arena_allocated_bytes
+    if count(42) not=?42 or fixed() not=?6 return 1
+    let result:int64=36
+    bump(@result)
+    if result not=?42 return 2
+    if _arena_allocated_bytes not=?before return 3
+    return result
+}
