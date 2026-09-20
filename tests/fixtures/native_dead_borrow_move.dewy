@@ -1,0 +1,11 @@
+Box:type=[value:int64]
+main=():>int64=>{
+    let source:array<Box>=[Box[42]]
+    let snapshot=source[0]
+    let answer:int64=snapshot.value
+    let before:int64=_arena_allocated_bytes
+    let taken=source
+    if _arena_allocated_bytes not=?before return 1
+    taken[0].value=99
+    return answer
+}

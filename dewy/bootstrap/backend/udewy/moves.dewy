@@ -131,7 +131,27 @@ walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> @analysis:Analysis):
 }
 
 # The identifier uses (node ids) of `literal` that move their local.
-compute = (literal:addr nodes:array<hir.AST>):>set<addr> => {
+# A storage borrow extends its owner's liveness through every use of the
+# borrowed binding, including further borrows of that binding. Keep this
+# dependency separate from ordinary value reads: copying a scalar field does
+# not keep its former owner alive.
+borrow_live_after = (binding:addr sequence:addr borrows:dict<addr set<addr>> analysis:Analysis):>bool => {
+    let pending:array<addr>=[binding]
+    let visited:set<addr>=set[]
+    loop pending.length >? 0 {
+        let owner=pending.pop
+        if owner in? visited continue
+        visited.add(owner)
+        loop borrower in borrows.get(owner set[]) {
+            loop use in analysis.uses.get(borrower []) {
+                if use.sequence >? sequence or use.nested return true
+            }
+            pending.push(borrower)
+        }
+    }
+    return false
+}
+compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[]):>set<addr> => {
     let function=hir.node_at(nodes literal)
     let moves:set<addr>=set[]
     if function isnt? hir.FunctionLiteral return moves
@@ -152,6 +172,7 @@ compute = (literal:addr nodes:array<hir.AST>):>set<addr> => {
         loop use in uses {if use.returned {moves.add(use.id)}}
         if not last.transfer or last.returned continue
         if last.depth >? declared continue
+        if borrow_live_after(binding last.sequence borrows analysis) continue
         moves.add(last.id)
     }
     return moves

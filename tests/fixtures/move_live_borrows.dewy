@@ -1,0 +1,60 @@
+# A borrowed value extends its owner's lifetime beyond the owner's last
+# spelled read. Moving the owner while the view lives must not make writes
+# through the new owner observable through that ordinary value snapshot.
+Box:type=[value:int64]
+Nested:type=[items:array<Box length=1>]
+first=(values:array<Box length=1>):>Box=>values[0]
+array_owner=():>int64=>{
+    let source:array<Box>=[Box[42]]
+    let snapshot=source[0]
+    let taken=source
+    taken[0].value=99
+    return snapshot.value
+}
+field_owner=():>int64=>{
+    let source=Nested[[Box[42]]]
+    let snapshot=source.items
+    let taken=source
+    taken.items[0].value=99
+    return snapshot[0].value
+}
+transitive=():>int64=>{
+    let source:array<Nested>=[Nested[[Box[42]]]]
+    let outer=source[0]
+    let inner=outer.items
+    let snapshot=inner[0]
+    let taken=source
+    taken[0].items[0].value=99
+    return snapshot.value
+}
+getter_owner=():>int64=>{
+    let source:array<Box length=1>=[Box[42]]
+    let snapshot=first(source)
+    let taken=source
+    taken[0].value=99
+    return snapshot.value
+}
+# The same boundary can transfer into a record instead of another local.
+stored_owner=():>int64=>{
+    let source:array<Box>=[Box[42]]
+    let snapshot=source[0]
+    let taken=Nested[source]
+    taken.items[0].value=99
+    return snapshot.value
+}
+exercise=():>int64=>{
+    if array_owner() not=?42 return 1
+    if field_owner() not=?42 return 2
+    if transitive() not=?42 return 3
+    if getter_owner() not=?42 return 4
+    if stored_owner() not=?42 return 5
+    return 42
+}
+main=():>int64=>{
+    let initial=exercise()
+    if initial not=?42 return initial
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 6}
+    if _arena_live_bytes not=?before return 7
+    return 42
+}

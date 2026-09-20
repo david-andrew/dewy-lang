@@ -3567,6 +3567,7 @@ class _Lowerer(
         uses: dict[int, list[tuple[int, int, bool, int | None]]] = {}   # binding id -> (sequence, loop depth, in nested literal, transfer node id)
         counter = 0
         returned: set[int] = set()
+        borrow_dependents: dict[int, set[int]] = {}
         # An owned string call/copy has an arena or static descriptor; frame
         # interpolation/view descriptors cannot be handed to a container.
         # Until string view dependencies participate in liveness, transfer
@@ -3594,6 +3595,12 @@ class _Lowerer(
                 walk(node.body, depth, True, {})
                 return
             if isinstance(node, hir.Declare):
+                if not nested and node.binding_id is not None:
+                    declared = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
+                    if isinstance(declared, (ty.ArrayType, ty.ObjectType)) and self._borrowed_route_local(node, declared):
+                        source = borrowing.route(node.expr)
+                        if source is not None:
+                            borrow_dependents.setdefault(source.binding, set()).add(node.binding_id)
                 movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node) or node.binding_id in strings
                 walk(node.expr, depth, nested, transfer(node.expr, string_only=True))
                 if movable and node.binding_id is not None and not nested:
@@ -3656,6 +3663,21 @@ class _Lowerer(
                                     walk(item, depth, nested, {})
 
         walk(literal.body, 0, False, {})
+
+        def borrow_live_after(binding: int, sequence: int) -> bool:
+            pending = [binding]
+            visited: set[int] = set()
+            while pending:
+                owner = pending.pop()
+                if owner in visited:
+                    continue
+                visited.add(owner)
+                for borrower in borrow_dependents.get(owner, ()):
+                    if any(seq > sequence or nested for seq, _depth, nested, _transfer in uses.get(borrower, ())):
+                        return True
+                    pending.append(borrower)
+            return False
+
         moves: set[int] = set()
         for binding_id, (_declared_at, declared_depth) in owned.items():
             references = uses.get(binding_id, [])
@@ -3674,6 +3696,8 @@ class _Lowerer(
                 continue
             site_in_loop = depth > declared_depth
             if site_in_loop:
+                continue
+            if borrow_live_after(binding_id, _sequence):
                 continue
             moves.add(transfer)
         return moves

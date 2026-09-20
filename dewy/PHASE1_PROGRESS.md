@@ -416,3 +416,22 @@ bytes over 100 calls. A measured element replacement allocates zero bytes;
 disabling moves provides a positive allocating control. The existing second-
 generation native compiler also executes the shared fixture with result 42.
 No native lowering changed in this batch, so no new self-build was needed.
+
+Borrow/move correctness checkpoint: an inferred local view now extends its
+owner's liveness through that view's reads, transitively through further
+views. Native borrowed getter results use the same dependency rule. Previously,
+moving an array after its last spelled read could allow a destination write to
+change a live snapshot of one of its records (99 instead of the required 42).
+Both move planners now retain the owner when a later dependent read needs it.
+Once the borrowed read is finished, the move remains available; direct whole-
+value returns still transfer at function exit.
+
+Validation: 69 ownership/borrow/native-lowering regressions passed, including
+x86/C execution; two focused hosted borrow tests also passed. The native
+expired-borrow kernel confirms zero allocation for the later transfer on both
+backends. Native generations built in 63.80s and 62.84s; both execute the live
+borrow and string-move fixtures with result 42. All 60 expanded paired cases
+passed against the second generation. These are correctness integration
+builds, still above the under-30s native target. A fresh broader corpus run is
+starting against this fixed snapshot.
+Artifacts: `../dewy-build-artifacts/phase1-move-borrows-stage2-2026-09-20`.

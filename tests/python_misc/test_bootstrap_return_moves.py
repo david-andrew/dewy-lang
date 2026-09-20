@@ -25,3 +25,18 @@ def test_native_owned_returns(tmp_path):
         assert result.returncode == 42, (target, result.returncode, result.stdout, result.stderr)
     check_getter_locals(binary, tmp_path)
     check_native_projection(binary, tmp_path)
+    check_move_borrows(binary, tmp_path)
+    check_move_borrows(binary, tmp_path, 'native_dead_borrow_move')
+
+
+def check_move_borrows(binary, tmp_path, fixture='move_live_borrows'):
+    source = tmp_path / f'{fixture}.dewy'
+    source.write_text(ARENA + (ROOT / f'tests/fixtures/{fixture}.dewy').read_text())
+    lowered = subprocess.run([binary, source], capture_output=True, text=True, timeout=60)
+    assert lowered.returncode == 0, lowered.stdout + lowered.stderr
+    output = source.with_suffix('.udewy')
+    output.write_text(lowered.stdout)
+    for target in ['x86_64', 'c']:
+        assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+        result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=15)
+        assert result.returncode == 42, (target, result.returncode, result.stdout, result.stderr)
