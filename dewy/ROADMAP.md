@@ -15,7 +15,8 @@ How this relates to the other documents:
   verified, published, installable native pair reached on 2026-09-14 and
   the remaining hosted-parity gaps. The C-accelerated fixed point is complete;
   full language parity and practical compile-time performance remain Phase 0
-  work. A full bootstrap without C acceleration remains unverified.
+  work. The direct x86-64 route reached a verified fixed point on 2026-09-18;
+  that checkpoint is not a certification of subsequent source changes.
 - [`semantic/*.md`](semantic/) are the design notes for individual areas.
   Where this document says a design is open, the note is where the options
   live.
@@ -136,6 +137,24 @@ Exit criteria that the later phases depend on:
 
 ### Immediate work order
 
+**Review checkpoint (2026-09-20):** keep the order below, with a short
+correctness/parity closure pass before expanding Phase 1.1. Recent borrow
+elision crossed value boundaries through aliased places and raw-exposed
+records; regression fixes and the review are recorded in
+[`bootstrap/REVIEW_2026_09_20.md`](bootstrap/REVIEW_2026_09_20.md).
+Finish the corpus expectation for `nat_types`, use explicit fixture outcomes
+(including arguments and expected failures), and verify ownership changes
+with a second-generation compiler as well as hosted/native comparisons.
+Do not mistake agreement between implementations or a fixed point for an
+independent correctness oracle.
+
+Complete copy-report coverage and module attribution before enforcing
+`$explicit_copies` across the compiler. Its approved explicit remedies must
+work before diagnostics prescribe them. Strict-mode acceptance must agree
+between compilers even when their optimization choices differ. Continue
+targeted alias/effect and move work in this checkpoint; broader lifecycle
+and proof-engine work follows the Phase 0 gates rather than replacing them.
+
 1. Establish a bidirectional semantic parity inventory and isolated
    regressions for acceptance, rejection, and execution. A first unsupported
    construct must not conceal the rest of a corpus bundle. Use
@@ -159,10 +178,17 @@ not a guarantee that the target will be achieved within a week. This
 milestone consolidates the performance work below and selected parts of
 Phase 1.1, rather than spreading it across ordinary feature development.
 
-**Status (2026-09-16):** paused at 18.2-18.5 s cold (from 41 s), target
-met, stretch goal not; slices, numbers and the remaining levers are recorded
-in `bootstrap/PHASE0_MEASUREMENTS.md`. Resume when a phase-1.1 ownership
-result or a backend change makes a whole category of work disappear.
+**Status (reviewed 2026-09-20):** the campaign paused at 18.2-18.5 s cold
+using a C-built executing compiler and direct output; later source grew this
+to about 20 s. The direct-built executing compiler remains around 44.6-44.7 s
+for the same kind of full build. The accelerated route meets 30 s; the
+no-C route does not yet. Track these as separate benchmark rows, with an
+explicit seed provenance, and retain the under-10-second stretch goal.
+Slices, numbers and the remaining levers are recorded in
+`bootstrap/PHASE0_MEASUREMENTS.md`. Resume measured batches that remove
+repeated work or improve generated code, including Phase 1.1 where justified.
+Static copy-site counts supplement elapsed time and runtime allocation/copy
+counters; a lower site count alone is not evidence of a faster compiler.
 
 **Acceptance target (revised 2026-09-15):** the native compiler builds the
 Dewy compiler from source into an executable in **under 30 seconds** on a
@@ -317,10 +343,13 @@ silently.
 
 1. **Every copy visible and budgeted.** Extend the existing kernel gates
    (`tests/python_misc/test_array_sharing.py` and its byte/allocation
-   counters). Add a `dewy analyze` mode that lists every dynamic aggregate
-   copy with the reason the analysis could not borrow or move it (landed
-   2026-09-20 in both compilers, with `tools/copy_report.py`; baseline on
-   the compiler's sources 7,910 copies, see `bootstrap/PHASE0_MEASUREMENTS.md`). Treat
+   counters). `dewy analyze` reports aggregate copy sites with the reason
+   the analysis could not borrow or move them (landed 2026-09-20 in both
+   compilers, with `tools/copy_report.py`; the initial native baseline was
+   7,910 sites, see `bootstrap/PHASE0_MEASUREMENTS.md`). Report completeness
+   and hosted/native coverage still need verification. These are static
+   sites, not execution counts or bytes; a hot loop and a cold branch each
+   contribute one site. Treat
    "unexplained copies on the compiler's own sources" as a CI metric with a
    fixed budget per kernel and per thousand lines. Regressions surface in a
    pull request, not at 25 GB in a self-build.
@@ -338,16 +367,17 @@ silently.
    becomes the opt-in strategy the design wants for types that choose it.
 4. **A fast path that never waits on inference.** The compiler makes the
    `addr`-handle-into-arena idiom the bootstrap already uses cheap first.
-   Whether a read-only borrow spelling should exist as an explicit escape
-   hatch is an open surface question (`semantic/user_managed_storage.md`)
-   and needs David's decision; without it, a failed proof leaves only a
-   hidden copy or a rewrite.
+   Implement the approved `const node = @arena[id]` escape hatch below,
+   with a conflicting write diagnosed at that write. It must use the same
+   alias/lifetime rules as inferred views, not bypass a failed proof.
 5. **Explicit fallback policy (decided 2026-09-13).** When a borrow or move
    cannot be proven, the default is a copy accompanied by an analysis note,
    never a silent copy. A module-level opt-in directive turns any unproven
    copy of a runtime-length aggregate into a compile error. The compiler's
-   own sources compile under that directive. The directive's spelling is
-   not chosen yet (surface change; needs approval before landing).
+   own sources are intended to compile under that directive once reporting,
+   explicit remedies and acceptance parity are complete. Its approved
+   spelling is `$explicit_copies` (see the decisions below); the initial
+   implementation is still in progress.
 
 The difference from the earlier attempt is the order and the gate: each
 mechanism lands against a measured kernel and the compiler's own sources,
