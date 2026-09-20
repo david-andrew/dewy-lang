@@ -41,10 +41,9 @@ forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<str
     }
     loop route in data.registry.routes_by_root.get(subject []) {
         if bindings.path_starts_with(route.path prefix) {
-            facts.forget(@state facts.Term[route.id])
-            facts.forget(@state facts.Term[route.id 'length'])
-            intervals.forget(@data.snapshot route.id)
-            if route.id in? data.member_calls {data.member_calls.pop(route.id); }
+            # Element evidence can itself be rooted at a projected sequence.
+            # Invalidating its parent must remove that derived evidence too.
+            forget(@state route.id @data)
         }
     }
 }

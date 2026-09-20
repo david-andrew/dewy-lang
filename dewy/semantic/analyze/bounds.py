@@ -3188,6 +3188,15 @@ class _BoundsValidator:
         if binding_id is not None:
             state.pop(binding_id, None)
             _drop_index_facts(state, index_id=binding_id)
+            # An indexed child may be replaced or relocated by this write.
+            # Keep ordinary sibling/length evidence, but invalidate indexed
+            # descendants conservatively even for a dynamic write index.
+            for route_id in self.registry.routes_under(binding_id):
+                if any(part.startswith('[') for part in self.registry.route_paths[route_id]):
+                    state.pop(route_id, None)
+                    self._invalidate_length(route_id, state)
+                    _drop_index_facts(state, index_id=route_id)
+                    self._drop_route_facts(state, route_id)
         if isinstance(node, hir.MemberAccess):
             self._forget_container_value(node.value, state)
         elif isinstance(node, hir.Index):
@@ -3195,11 +3204,19 @@ class _BoundsValidator:
 
     def _drop_route_facts(self, state: State, root_id: int, prefix: tuple[str, ...] = ()) -> None:
         """Member routes under a reassigned binding or field lose their length and index facts."""
-        for route_id in self.registry.routes_under(root_id, prefix):
+        pending = self.registry.routes_under(root_id, prefix)
+        seen = set()
+        while pending:
+            route_id = pending.pop()
+            if route_id in seen:
+                continue
+            seen.add(route_id)
+            pending.extend(self.registry.routes_under(route_id))
             state.pop(route_id, None)
             state.pop(_length_key(route_id), None)
             _drop_index_facts(state, array_id=route_id)
             _drop_index_facts(state, index_id=route_id)
+            self.member_facts.pop(route_id, None)
 
     def _report_unfit(self, node: hir.AST, interval: Interval | None, word: str) -> None:
         if self.unfit is not None:

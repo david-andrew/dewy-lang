@@ -1,0 +1,8 @@
+clear_row=(@row:array<int64>):>void=>{row.clear()}
+read=(rows:array<array<int64>>):>int64=>{
+    if rows.length=?0 return 0
+    if rows[0].length=?0 return 0
+    clear_row(@rows[0])
+    return rows[0][0]
+}
+main=():>int64=>read([[42]])

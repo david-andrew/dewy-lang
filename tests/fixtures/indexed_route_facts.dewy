@@ -1,0 +1,32 @@
+# An indexed sequence has its own length facts; the guard need not be
+# rewritten using a named row view to retain those facts.
+number=(rows:array<array<int64>>):>int64=>{
+    if rows.length=?0 return 0
+    if rows[0].length=?0 return 0
+    return rows[0][0]
+}
+Table:type=[rows:array<array<int64>>]
+field=(table:Table):>int64=>{
+    if table.rows.length=?0 return 0
+    if table.rows[0].length=?0 return 0
+    return table.rows[0][0]
+}
+text=(rows:array<string>):>int64=>{
+    if rows.length=?0 return 0
+    if rows[0].length=?0 return 0
+    return if rows[0][0]=?'a' 42 else 0
+}
+deep=(values:array<array<array<int64>>>):>int64=>{
+    if values.length=?0 return 0
+    if values[0].length=?0 return 0
+    if values[0][0].length=?0 return 0
+    return values[0][0][0]
+}
+main=():>int64=>{
+    if number([[42]]) not=?42 return 1
+    if field([[[42]]]) not=?42 return 2
+    if text(['abc']) not=?42 return 3
+    if deep([[[42]]]) not=?42 return 4
+    if number([[]]) not=?0 return 5
+    return 42
+}

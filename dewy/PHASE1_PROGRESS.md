@@ -648,3 +648,20 @@ fixture's local views do not constitute a fix for that proof gap.
 Final integration check: all 82 paired Phase 1 cases passed, including the
 nested-array lifetime kernel and both bounded/unbounded strict-copy argument
 cases. Results: `../dewy-build-artifacts/phase1-owned-parameters-final-parity-2026-09-20`.
+
+Indexed-fact checkpoint: field routes now also admit constant index selectors.
+A guard on `rows[0].length` can justify `rows[0][0]` without a named local
+view, including records containing rows, string elements and deeper nesting.
+An index expression is still evaluated normally; known index values do not
+erase its effects. A component write conservatively drops indexed evidence
+for the root, including writes through places and element relocation. Recursive
+invalidation removes element evidence rooted at the projected sequence too.
+Dynamic index identities and finer disjoint-index preservation remain pending.
+
+Validation: 31 hosted index/container/order tests, 64 proof/loop/refinement
+regressions, and two native registry/fact-transfer unit tests passed. The native
+compiler built in 66.26 seconds, executes the indexed-read kernel on x86 and C (42), and
+passes all 14 acceptance/rejection probes. All seven paired index cases passed,
+including invalidation by replacement, shifting and effectful index evaluation.
+Artifacts: `../dewy-build-artifacts/phase1-indexed-routes-stage1-2026-09-20`
+and `../dewy-build-artifacts/phase1-indexed-routes-parity-2026-09-20`.

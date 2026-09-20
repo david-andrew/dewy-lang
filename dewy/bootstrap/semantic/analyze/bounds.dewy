@@ -119,6 +119,16 @@ install = (@state:facts.State subject:addr value:addr annotation:addr? loc:Span 
 # and length evidence remains useful.
 forget_value = (id:addr @state:facts.State @checker:Checker):>void => {
     let path=bindings.access_path(id checker.data.env.nodes facts=true)
+    let root=node_at(path.root checker)
+    if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
+        # Any component write may replace/move an indexed child. Keep pure
+        # field routes, but discard indexed descendants and their evidence.
+        loop route in checker.data.registry.routes_by_root.get(root.binding_id []) {
+            let indexed=false
+            loop part in route.path {if part.startswith('[') {indexed=true break}}
+            if indexed {stores.forget(@state route.id @checker.data)}
+        }
+    }
     let ids:array<addr>=[path.root]
     loop step in path.steps {ids.push(step)}
     loop value in ids {

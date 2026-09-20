@@ -250,8 +250,16 @@ array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
     let path = access_path(id nodes facts=true)
     let root = hir.node_at(nodes path.root)
     if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return none
-    let fields = member_fields(path nodes)
-    if fields is? none return none
+    # Constant indices denote repeatable storage. Dynamic indices need a
+    # value-versioned identity and remain untracked by this initial rule.
+    # Brackets distinguish these components from ordinary member names.
+    let fields:array<string>=[]
+    loop id in path.steps {
+        let step=hir.node_at(nodes id)
+        if step is? hir.MemberAccess {fields.push(step.name)}
+        else if step is? hir.Index and step.constant_index isnt? none {fields.push("[{step.constant_index}]")}
+        else return none
+    }
     if fields.length =? 0 return root.binding_id
     if not has_binding(registry root.binding_id) return none
     let node = hir.node_at(nodes id)

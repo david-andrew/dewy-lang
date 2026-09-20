@@ -209,14 +209,25 @@ def field_route(node: hir.AST, fields: tuple[str, ...]) -> hir.AST | None:
 
 
 def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = True) -> int | None:
-    """The fact id of a named sequence or its pure member-access route.
+    """The fact id of a named sequence and stable field/constant-index route.
 
     Use ``create=False`` for reads that only consume an existing route fact.
+    Bracketed components cannot collide with field names. A dynamic index
+    needs an identity tied to its current value; it is not stable here yet.
     """
     path = access_path(node, unwrap=_unwrap_fact_route)
-    root_id, fields = path.binding_id, path.fields
-    if root_id is None or fields is None:
+    root_id = path.binding_id
+    if root_id is None:
         return None
+    names = []
+    for step in path.steps:
+        if isinstance(step, hir.Index):
+            if step.constant_index is None:
+                return None
+            names.append(f'[{step.constant_index}]')
+        else:
+            names.append(step.name)
+    fields = tuple(names)
     if not fields:
         return root_id
     if root_id not in registry.by_id:
