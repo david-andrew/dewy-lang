@@ -48,11 +48,16 @@ class _ArrayLowering(_ArraySharing):
         """Bounds evidence determines a value, not whether evaluation can erase.
 
         A call returning a singleton integer may still mutate, fail, or not
-        return. Evaluate every nonliteral index exactly once, before later
-        store/call operands or repeated address calculations.
+        return. Preserve that evaluation exactly once, before later
+        store/call operands or repeated address calculations. Only literal
+        and scalar-name reads can use the proven value directly.
         """
+        if known is not None and isinstance(node, (hir.Integer, hir.ExpressedIdentifier)):
+            # Scalar name reads have no evaluation effects. In particular,
+            # the contextual `end` name may exist only as this proven value.
+            return [], known
         if isinstance(node, hir.Integer):
-            return [], node.value if known is None else known
+            return [], node.value
         prelude, value = self._extract_expression(node)
         held = self._name('index', node.loc)
         return [*prelude, self._declare(held, value, node.loc)], held
