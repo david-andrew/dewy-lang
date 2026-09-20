@@ -1,0 +1,17 @@
+# Allocation permission describes logical storage work, including COW copies.
+snapshot = (xs:array<int64>):>array<int64> & allocates => xs.copy()
+inspect = (xs:array<int64>):>int64 & no allocates => {
+    const view=@xs
+    return view.length
+}
+# The callback row is inferred and forwarded without becoming a value type.
+let apply = <E:Effect>(f:():>array<int64> & E):>array<int64> & E => f()
+make = ():>array<int64> & allocates => [41 1]
+main = ():>int64 => {
+    let original=apply(@make)
+    let saved=snapshot(original)
+    if inspect(original) not=? 2 return 1
+    if original.length not=? 2 or saved.length not=? 2 return 2
+    original[0]=99
+    return saved[0]+saved[1]
+}

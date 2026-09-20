@@ -320,6 +320,33 @@ Effects propagate through calls. A caller may preserve a refinement or borrow st
 
 Expected failures remain [error alternatives in the return type](errors-and-forwarding.md), not members of the effect set. A contract may contain both a returned error union and effects, but `|` combines the returned alternatives while the effect syntax describes evaluation behavior separately.
 
+Allocation contracts use bare `allocates` and `no allocates`:
+
+```dewy
+snapshot = (xs:array<int64>):>array<int64> & allocates => xs.copy()
+inspect = (xs:array<int64>):>int64 & no allocates => xs.length
+```
+
+The positive row permits allocation and bounds other effects; the exclusion
+forbids allocation while leaving other behavior inferred. Neither permits
+an unrelated external read or mutation. `allocates<>` and
+`allocates<Resource>` are rejected: resource markers do not select an
+allocator. Normal row subtyping and `<E:Effect>` forwarding apply.
+
+The measurement rule counts logical storage work remaining after proven
+borrows, moves and static/stack placement. Deferring a copy through COW does
+not establish `no allocates`. The current checker conservatively counts
+aggregate construction, explicit copies and implicit aggregate value
+boundaries. Required local views and read-only input inspection avoid those
+obligations. Proven nonescaping scalar places use reusable frame slots in
+native lowering; unresolved callback escape paths still need storage
+permission. Lowering's full placement/move proofs are not yet shared with
+this checker, so it can require permission even for a boundary the backend
+later removes. Unsupported operations and unconstrained callbacks remain
+unknown, and cannot satisfy a closed row or an unproved exclusion. This
+initial allocation vocabulary does not settle allocation-failure policy or
+promise that the underlying allocator cannot fail.
+
 ## `unsafe`
 
 `$unsafe_assume condition [, message]` introduces an assumption without a runtime
@@ -350,7 +377,7 @@ assumptions produces an empty report instead of leaving a stale one.
 
 ## Provisional Boundary
 
-The complete proposition grammar and qualifier inference still need work. The initial `$proof` statement boundary below is implemented. Both compilers now check explicit `no_effects` / `Effect<>` contracts for an initial conservative subset: scalar computation, private scalar mutation, read-only value access, direct calls, and explicitly constrained callbacks. Calls and signature substitution preserve these contracts; unknown storage operations or callback behavior cannot count as pure. Inferring rows into all callable types and integrating named effects and row parameters remain in progress. The broader reviewed effect rules are: positive rows are upper bounds, omitted rows are inferred, `no_effects` is the explicit empty row, and `no reads<resource>` excludes one effect while `no reads` excludes the family. Empty family forms such as `reads<>` are rejected by the design; `Effect<>` is the desugared empty row. Error-value propagation has its own settled core and provisional surface details; see [Errors and Forwarding](errors-and-forwarding.md) and [Design Maturity](design-status.md).
+The complete proposition grammar and qualifier inference still need work. The initial `$proof` statement boundary below is implemented. Both compilers now check explicit `no_effects` / `Effect<>` contracts for an initial conservative subset: scalar computation, private scalar mutation, read-only value access, direct calls, and explicitly constrained callbacks. Calls and signature substitution preserve these contracts; unknown storage operations or callback behavior cannot count as pure. Named nominal/place effects, kind-checked row parameters and the initial allocation vocabulary are implemented. Full inferred callable rows and sharing backend storage proofs remain in progress. The broader reviewed effect rules are: positive rows are upper bounds, omitted rows are inferred, `no_effects` is the explicit empty row, and `no reads<resource>` excludes one effect while `no reads` excludes the family. Empty family forms such as `reads<>` are rejected by the design; `Effect<>` is the desugared empty row. Error-value propagation has its own settled core and provisional surface details; see [Errors and Forwarding](errors-and-forwarding.md) and [Design Maturity](design-status.md).
 
 
 ### Checked proof statements

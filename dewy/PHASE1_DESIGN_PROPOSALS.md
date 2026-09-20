@@ -271,10 +271,10 @@ negative row arguments yet. A future builtin `resource` base type could make res
 more explicit; ordinary nominal mints suffice for this first implementation.
 The allocation rule remains open to refinement from practical experience.
 
-### Allocation permission spelling — awaiting review
+### Allocation permission spelling — approved initial rules
 
-The measurement rule above is approved, but its public family spelling and
-resource granularity are not yet specified. Proposed initial surface:
+David approved bare `allocates` and `no allocates`, initially without resource
+arguments, on 2026-09-20. The approved measurement rule above remains unchanged:
 
 ```dewy
 # Permit allocation; other behavior must still meet the rest of the row.

@@ -1,0 +1,3 @@
+# A returned logical copy is not free merely because COW may defer its bytes.
+snapshot = (xs:array<int64>):>array<int64> & no allocates => xs.copy()
+main = ():>int64 => snapshot([42]).length

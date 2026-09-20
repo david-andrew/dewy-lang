@@ -95,6 +95,9 @@ State:type = [
     # slot for an aggregate. Replacing a record/array through @ must replace
     # that slot rather than merely mutate the old object's contents.
     boxed:set<addr>=set[]
+    # Nonescaping scalar places use one slot in the function frame, reused
+    # on loop iterations. Their addresses cannot outlive this invocation.
+    frame_boxes:dict<addr addr>=[]
     addressed:set<addr>=set[]
     place_parameters:set<addr>=set[]
     union_tags:dict<string addr>=[]
@@ -539,7 +542,7 @@ expression = (id:addr @state:State):>addr => {
         }
         let annotation=runtime_type(if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
         if node.binding_id isnt? none and node.binding_id in? state.boxed {
-            value=box_value(value if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state)
+            value=box_value(value if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation node @state binding=node.binding_id)
             annotation=types.primitive('int64' @state.type_nodes)
         }
         if not borrowed and state.cleanup_enabled and node.binding_id isnt? none and node.binding_id not in? state.cleanup_excluded and state.cleanup_frames.length >? 0 {
@@ -695,10 +698,11 @@ binding_storage = (node:hir.ExpressedIdentifier stored:addr @state:State):>addr 
     let type=if node.binding_id isnt? none and node.binding_id in? state.boxed types.primitive('int64' @state.type_nodes) else runtime_type(stored node @state)
     return put(hir.ExpressedIdentifier[node.loc type symbol(node.name node.binding_id @state) node.binding_id] @state)
 }
-box_value = (value:addr stored:addr node:hir.AST @state:State):>addr => {
+box_value = (value:addr stored:addr node:hir.AST @state:State binding:addr?=none):>addr => {
     let prefix:array<addr>=[]
     let initial=snapshot(value @prefix @state)
-    let pointer=snapshot(allocation(word(8 node @state) node @state) @prefix @state)
+    let slot=if binding is? none none else state.frame_boxes.get(binding)
+    let pointer=if slot isnt? none slot else snapshot(allocation(word(8 node @state) node @state) @prefix @state)
     prefix.push(array_store(initial pointer stored node @state))
     prefix.push(pointer)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
@@ -4217,6 +4221,17 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         hir.push_children(current @pending)
     }
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
+    state.frame_boxes=[]
+    loop binding in capture.locals {
+        if binding not in? state.boxed or binding in? excluded or binding in? state.place_parameters continue
+        let stored=state.storage_types.get(binding)
+        if stored is? none or not borrowing.word_value(stored state.type_nodes) continue
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let name=fresh('place_slot' @state)
+        let slot=intrinsic_call('__alloca__' [word(8 node @state)] word_type node @state)
+        prologue.push(put(hir.Declare[node.loc void_type 'const' name word_type slot] @state))
+        state.frame_boxes[binding]=put(hir.ExpressedIdentifier[node.loc word_type name] @state)
+    }
     state.view_writes=[]
     if local_declarations.length >? 0 {
         let has_view=false
@@ -4288,20 +4303,20 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             let default=owned_value(argument.value @state)
             let arm=put(hir.IfArm[node.loc type present_value supplied] @state)
             let selected=put(hir.Flow[node.loc type [arm] default] @state)
-            if boxed {selected=box_value(selected argument.value_type node @state) type=types.primitive('int64' @state.type_nodes)}
+            if boxed {selected=box_value(selected argument.value_type node @state binding=argument.binding_id) type=types.primitive('int64' @state.type_nodes)}
             prologue.push(put(hir.Declare[node.loc void_type 'let' name type selected argument.binding_id] @state))
         } else if private {
             let incoming=fresh('incoming' @state)
             arguments.push(hir.Param[incoming type position_only=argument.position_only])
             note_parameter_copy(argument boxed rebound mutated written node @state)
             let value=copy_value(put(hir.ExpressedIdentifier[node.loc type incoming] @state) argument.value_type node @state shared=whole)
-            if boxed {value=box_value(value argument.value_type node @state) type=types.primitive('int64' @state.type_nodes)}
+            if boxed {value=box_value(value argument.value_type node @state binding=argument.binding_id) type=types.primitive('int64' @state.type_nodes)}
             prologue.push(put(hir.Declare[node.loc void_type 'let' name type value argument.binding_id] @state))
         } else {arguments.push(hir.Param[name type argument.binding_id argument.position_only false])}
         # A missing default is owned here; an explicit read-only argument is
         # still owned by its caller. Boxed/rebound parameters own their local
         # copy on both paths. The condition is the existing ABI presence bit.
-        if enabled and (private or argument is? hir.BoundParam) and (boxed or releasable(argument.value_type @state)) and (argument.binding_id is? none or argument.binding_id not in? excluded) {
+        if enabled and (private or argument is? hir.BoundParam) and (boxed or releasable(argument.value_type @state)) and (argument.binding_id is? none or argument.binding_id not in? excluded and argument.binding_id not in? state.frame_boxes) {
             let value=put(hir.ExpressedIdentifier[node.loc type name argument.binding_id] @state)
             let box:addr?=none
             if boxed {box=value value=array_load(value argument.value_type node @state)}

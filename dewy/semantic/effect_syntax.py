@@ -6,7 +6,7 @@ from ..reporting import Pointer
 from . import effect_rows as rows, ty
 from .errors import user_error
 
-FAMILIES = frozenset({'reads', 'mutates'})
+FAMILIES = frozenset({'reads', 'mutates', 'allocates'})
 
 
 def unparen(ast):
@@ -117,7 +117,15 @@ def contract(ast, parameters, ctx):
             permitted = rows.union(permitted or rows.Row(), rows.Row())
             continue
         if family not in FAMILIES:
-            fail(term, 'unknown effect family', 'the initial named families are `reads` and `mutates`')
+            fail(term, 'unknown effect family', 'the initial families are `reads`, `mutates` and `allocates`')
+        if family == 'allocates':
+            if arguments is not None:
+                fail(term, 'allocation effect does not take resources', 'write `allocates` or `no allocates` without `<...>`')
+            if negative:
+                excluded.append(rows.Atom(family))
+            else:
+                permitted = rows.union(permitted or rows.Row(), rows.Row((rows.Atom(family),)))
+            continue
         if arguments == []:
             fail(term, 'empty effect family application', f'use `no {family}` or `no_effects`; `<>` does not mean a family exclusion')
         if arguments is None:

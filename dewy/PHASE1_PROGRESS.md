@@ -584,3 +584,30 @@ All 71 paired cases passed at that snapshot. The focused five-case follow-up
 also passed against the final hosted report-site changes; the shared manifest
 now has 73 cases.
 Artifacts: `../dewy-build-artifacts/phase1-strict-copy-stage4-2026-09-20`.
+
+
+Allocation-contract checkpoint: David approved bare `allocates` and
+`no allocates`. Both parsers/kind checkers represent them as the ordinary
+subjectless allocation atom and reject resource arguments, including empty
+`<>`. Public checking now distinguishes logical copies, aggregate
+construction and implicit value boundaries from entirely unknown behavior.
+Permission does not authorize external reads/writes, and propagates through
+calls, defaults, recursion and row-parameter substitution. COW deferral is
+not evidence of no allocation. Storage boundaries remain conservative until
+backend placement/move evidence is available; failure policy remains open.
+
+Native lowering now places proven nonescaping scalar places in one frame
+slot per local/parameter, reused across loops. This removes a hidden arena
+allocation on private scalar mutation paths accepted as effect-free. The
+public check uses the same escape summaries: a private place sent through an
+unresolved callback or forwarding helper conservatively requires allocation
+permission. Captured/escaping slots retain their existing storage protocol.
+
+Validation: 97 existing hosted public-row/generic checks passed, as did 80
+allocation/place/row regressions and the final 36 allocation checks. All 33
+native acceptance/rejection probes passed, including private places through
+callbacks, and both new kernels execute on x86 and C. The native generation
+built with the frame-slot change executes the allocation, scalar-place and
+strict-copy kernels (42); the final generation built in 65.03s. All 77 paired
+Phase 1 cases passed. The build timing remains above target.
+Artifacts: `../dewy-build-artifacts/phase1-allocation-effects-stage4-2026-09-20`.

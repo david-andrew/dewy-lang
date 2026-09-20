@@ -36,6 +36,7 @@ def validate(root, registry, srcfile):
     if not constrained:
         return
     analysis = _EffectAnalyzer(root)
+    storage_effects = analysis.solve()
     local = {}
     calls = {}
     dependents = {}
@@ -61,6 +62,12 @@ def validate(root, registry, srcfile):
 
         def unknown():
             contribute(rows.Contract())
+
+        def storage():
+            # A logical storage obligation, including copies deferred by COW.
+            # Until placement/move evidence is available here, an aggregate
+            # value boundary conservatively needs allocation permission.
+            contribute(rows.Contract(rows.Row((rows.Atom('allocates'),))))
 
         def location(node):
             path = bindings.access_path(node, unwrap=_unwrap)
@@ -143,40 +150,60 @@ def validate(root, registry, srcfile):
                         for step in path.steps:
                             if isinstance(step, hir.Index):
                                 visit(step.index)
+                        # The native frame-slot proof uses the same escape
+                        # summaries. An unresolved callback may obey its
+                        # public row, but currently provides no such storage
+                        # proof, including through a forwarding helper.
+                        if location(argument.target) is None and scalar(argument.target.type):
+                            parameter_summaries = []
+                            if targets is not None:
+                                for target in targets:
+                                    parameter = next((parameter for supplied, parameter in
+                                                      analysis._pair_arguments(node, target) or ()
+                                                      if supplied is argument), None)
+                                    parameter_summaries.append(None if parameter is None else
+                                                              storage_effects.for_param_binding(parameter.binding_id))
+                            if not parameter_summaries or any(item is None or item.escapes for item in parameter_summaries):
+                                storage()
                     else:
                         visit(argument)
                         if not scalar(argument.type) and not isinstance(argument.type, (ty.FunctionType, ty.OverloadType)):
-                            unknown()  # logical aggregate transfer not proved
+                            storage()  # logical aggregate transfer not proved
                 return
             if isinstance(node, hir.Declare):
                 # A required view cannot silently allocate a replacement;
                 # lowering must prove the storage demand or reject it.
                 if not node.view and not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)):
-                    unknown()  # no promise about an implicit aggregate copy yet
+                    storage()
                 visit(node.expr)
                 return
             if isinstance(node, hir.Assign):
                 if not scalar(node.target.type):
-                    unknown()
-                else:
-                    access(node.target, 'mutates')
-                    if node.op != '=':
-                        access(node.target, 'reads')
+                    storage()
+                access(node.target, 'mutates')
+                if node.op != '=':
+                    access(node.target, 'reads')
                 visit(node.value)
+                return
+            if isinstance(node, (hir.CopyValue, hir.ArrayLiteral, hir.ObjectLiteral)):
+                if not scalar(node.type):
+                    storage()
+                for child in hir.children(node):
+                    visit(child)
                 return
             if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and not scalar(node.type):
                 unknown()
                 return
             if isinstance(node, (hir.Block, hir.Suppress, hir.Return, hir.Flow, hir.IfArm, hir.LoopArm,
                                  hir.ShortCircuit, hir.Obligation, hir.TypeTest, hir.ArrayLength,
-                                 hir.StringLength, hir.ValueCast, hir.RepresentationCast)):
+                                 hir.StringLength, hir.ValueCast, hir.RepresentationCast, hir.Spread)):
                 for child in hir.children(node):
                     visit(child)
                 return
             unknown()
 
         if not scalar(literal.rettype):
-            unknown()  # escaping aggregate storage not modeled yet
+            storage()  # independent return storage; no placement proof yet
         visit(literal.body)
         for param in params:
             if isinstance(param, hir.BoundParam):

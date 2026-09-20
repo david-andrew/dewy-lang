@@ -1,0 +1,3 @@
+# Allocation permission does not authorize reads of someone else's storage.
+snapshot = (@xs:array<int64>):>array<int64> & allocates => xs.copy()
+main = ():>int64 => {let xs=[42] return snapshot(@xs).length}

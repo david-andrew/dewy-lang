@@ -1,0 +1,29 @@
+# A private scalar place has a frame slot, not an arena allocation. Reuse
+# that slot across loop iterations; never let __alloca__ grow in the loop.
+set_answer = (@value:int64):>void & mutates<value> => {value=42}
+set_small = (@value:int8):>void & mutates<value> => {value=-7}
+set_flag = (@value:bool):>void & mutates<value> => {value=true}
+through_value = (value:int64=0):>int64 & no_effects => {
+    set_answer(@value)
+    return value
+}
+private_work = ():>int64 & no allocates => {
+    let i:int64=0
+    loop i <? 1000 {
+        i+=1
+        let small:int8=0
+        set_small(@small)
+        if small not=? -7 return 1
+        let flag:bool=false
+        set_flag(@flag)
+        if not flag return 2
+    }
+    return through_value()
+}
+main = ():>int64 => {
+    let before:int64=_arena_allocated_bytes
+    let result=private_work()
+    let allocated:int64=_arena_allocated_bytes-before
+    $runtime_assert allocated=?0
+    return result
+}

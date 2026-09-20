@@ -475,8 +475,10 @@ negative guarantees. Unknown operations cannot satisfy an empty row or an
 unproved exclusion. Separately kind-checked `<E:Effect>` parameters now infer
 and substitute callback rows in both compilers, including mixed type/row
 signatures and distinct cached instances. Complete inference into callable
-types, scoped polymorphic place subjects and allocation/failure coverage remain
-in progress. The reviewed rules are in `PHASE1_DESIGN_PROPOSALS.md`.
+types and scoped polymorphic place subjects remain in progress. Bare
+`allocates` / `no allocates` now classify logical copies and aggregate
+construction; sharing placement/move proofs with the public checker and
+covering further storage operations and failure remain in progress. The reviewed rules are in `PHASE1_DESIGN_PROPOSALS.md`.
 Effect polymorphism, allocation and failure as effects, and the
 `noreturn`/escape set are prerequisites for compile-time purity (Phase 2),
 the resource-exhaustion policy (`semantic/resource_exhaustion.md`), and the

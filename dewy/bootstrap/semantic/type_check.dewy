@@ -1287,7 +1287,14 @@ effect_contract = (id:addr parameters:array<types.PosOrKwArg> keyword_parameters
             if permitted is? none {permitted=effect_rows.Row[]}
             continue
         }
-        if family is? none or family not in? ['reads' 'mutates'] return contexts.problem(term 'unknown effect family' 'the initial named families are `reads` and `mutates`' context session)
+        if family is? none or family not in? ['reads' 'mutates' 'allocates'] return contexts.problem(term 'unknown effect family' 'the initial families are `reads`, `mutates` and `allocates`' context session)
+        if family =? 'allocates' {
+            if arguments isnt? none return contexts.problem(term 'allocation effect does not take resources' 'write `allocates` or `no allocates` without `<...>`' context session)
+            let atom=effect_rows.Atom[family]
+            if negative {excluded.push(atom)}
+            else {permitted=effect_rows.add(if permitted is? none effect_rows.Row[] else permitted atom)}
+            continue
+        }
         if arguments isnt? none and arguments.length =? 0 return contexts.problem(term 'empty effect family application' "use `no {family}` or `no_effects`; `<>` does not mean a family exclusion" context session)
         if arguments is? none {
             if not negative return contexts.problem(term 'positive effect needs a resource' "write `{family}<Resource>`" context session)

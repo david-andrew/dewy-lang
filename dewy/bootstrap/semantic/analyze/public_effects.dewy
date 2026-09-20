@@ -15,7 +15,7 @@ scalar = (id:addr nodes:types.Table):>bool => {
     if node is? types.IntegerLiteralType return node.value >=? -9223372036854775808 and node.value <? 18446744073709551616
     return node is? types.Primitive and node.name in? ['void' 'never' 'none' 'bool' 'true' 'false' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64']
 }
-Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis]
+Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects]
 Call:type = const [target:addr subjects:dict<string rows.Subject?>]
 Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[]]
 Location:type = const [known:bool subject:rows.Subject?=none]
@@ -35,6 +35,9 @@ location = (id:addr input:Input scan:Scan):>Location => {
 }
 contribute = (contract:rows.Contract @scan:Scan):>void => {scan.summary=rows.join(scan.summary contract)}
 unknown = (@scan:Scan):>void => {contribute(rows.Contract[] @scan)}
+# Logical storage work includes copies even when COW defers the actual copy.
+# Without placement/move evidence, aggregate boundaries need permission.
+storage = (@scan:Scan):>void => {contribute(rows.Contract[rows.Row[[rows.Atom['allocates']]]] @scan)}
 # Taking an address evaluates its index expressions, without reading the value
 # at the address. Read/write effects come from the callee after substitution.
 indices = (id:addr input:Input @scan:Scan):>void => {
@@ -115,10 +118,33 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         loop arg in node.kw_args.values {arguments.push(arg)}
         loop arg in arguments {
             let value=hir.node_at(input.nodes arg)
-            if value is? hir.Place {indices(value.target input @scan)}
+            if value is? hir.Place {
+                indices(value.target input @scan)
+                let target=location(value.target input scan)
+                if target.known and target.subject is? none and scalar(hir.node_at(input.nodes value.target).value_type input.types) {
+                    # Match lowering's escape proof for a private frame slot.
+                    # Public callback permissions alone do not yet supply it.
+                    let safe=targets isnt? none and targets.length >? 0
+                    if targets isnt? none {
+                        loop target_id in targets {
+                            let target_node=hir.node_at(input.nodes target_id)
+                            $runtime_assert target_node is? hir.FunctionLiteral
+                            let pairs=access.pair_arguments(node target_node)
+                            let summary:access.ParameterEffects?=none
+                            if pairs isnt? none {
+                                loop pair in pairs {
+                                    if pair.argument =? arg and pair.parameter isnt? none {summary=input.storage_effects.by_param_binding.get(pair.parameter)}
+                                }
+                            }
+                            if summary is? none or summary.escapes.length >? 0 {safe=false}
+                        }
+                    }
+                    if not safe {storage(@scan)}
+                }
+            }
             else {
                 visit(arg input @scan)
-                if not scalar(value.value_type input.types) and types.node_at(input.types value.value_type) isnt? types.CallableType {unknown(@scan)}
+                if not scalar(value.value_type input.types) and types.node_at(input.types value.value_type) isnt? types.CallableType {storage(@scan)}
             }
         }
         return
@@ -126,22 +152,25 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     if node is? hir.Declare {
         let value=hir.node_at(input.nodes node.expr)
         # A required view has no copy fallback: lowering proves or rejects it.
-        if not node.view and not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {unknown(@scan)}
+        if not node.view and not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {storage(@scan)}
         visit(node.expr input @scan)
         return
     }
     if node is? hir.Assign {
         let target=hir.node_at(input.nodes node.target)
-        if not scalar(target.value_type input.types) {unknown(@scan)}
-        else {
-            record_access(node.target 'mutates' input @scan)
-            if node.op not=? '=' {record_access(node.target 'reads' input @scan)}
-        }
+        if not scalar(target.value_type input.types) {storage(@scan)}
+        record_access(node.target 'mutates' input @scan)
+        if node.op not=? '=' {record_access(node.target 'reads' input @scan)}
         visit(node.value input @scan)
         return
     }
+    if node is? hir.CopyValue|hir.ArrayLiteral|hir.ObjectLiteral {
+        if not scalar(node.value_type input.types) {storage(@scan)}
+        loop child in hir.children(node) {visit(child input @scan)}
+        return
+    }
     if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {unknown(@scan) return}
-    if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.ValueCast|hir.RepresentationCast {
+    if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.ValueCast|hir.RepresentationCast|hir.Spread {
         loop child in hir.children(node) {visit(child input @scan)}
         return
     }
@@ -165,7 +194,7 @@ validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
     }
     if constrained.length =? 0 return none
     let analysis=access.collect(root session.hir)
-    let input=Input[session.hir session.types session.registry analysis]
+    let input=Input[session.hir session.types session.registry analysis access.analyze_effects(root session.hir session.types)]
     let local:dict<addr rows.Contract>=[]
     let calls:dict<addr array<Call>>=[]
     let edges:dict<addr set<addr>>=[]
@@ -173,7 +202,7 @@ validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
         let scan=Scan[]
-        if not scalar(node.rettype session.types) {unknown(@scan)}
+        if not scalar(node.rettype session.types) {storage(@scan)}
         let params=access.literal_params(node)
         loop index in 0.. and index <? params.length {
             let param=params[index]
