@@ -319,3 +319,10 @@ and fact regressions passed (108 checks); dependent-index and brand tests also
 passed. Native generations built in 62.55s and 62.79s, both running the role
 fixture with result 42. All 52 focused hosted/native paired cases passed.
 Artifacts: `../dewy-build-artifacts/phase1-reserved-stage2-2026-09-20`.
+
+Effect-cache follow-up: a typed snapshot now explicitly exercises nonempty
+public permissions, a parameter-route exclusion, a symbolic row binder, an
+empty row and an omitted row. Decode preserves each contract and re-interns
+the signature at its original id. Three cache checks passed, including x86/C
+execution and regeneration freshness. This verifies the IR/cache foundation;
+it does not claim source support for named rows or row generics yet.
