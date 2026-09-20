@@ -270,3 +270,32 @@ callback-relative place subjects escaping their signature, and no inferred
 negative row arguments yet. A future builtin `resource` base type could make resource mints
 more explicit; ordinary nominal mints suffice for this first implementation.
 The allocation rule remains open to refinement from practical experience.
+
+### Allocation permission spelling — awaiting review
+
+The measurement rule above is approved, but its public family spelling and
+resource granularity are not yet specified. Proposed initial surface:
+
+```dewy
+# Permit allocation; other behavior must still meet the rest of the row.
+snapshot = (xs:array<int64>):> array<int64> & allocates => xs.copy()
+# Exclude allocation while leaving other effects inferred.
+inspect = (xs:array<int64>):> int64 & no allocates => xs.length
+```
+
+`allocates` is initially an unparameterized may-effect for compiler-managed
+storage. `no allocates` excludes it. Reject `allocates<>` and
+`allocates<SomeResource>` for now: no reviewed allocator/resource mapping yet
+justifies pretending that a user-minted marker selects the compiler's arena.
+This does not change the required subjects of `reads<Resource>` or
+`mutates<place>`, and introduces no builtin resource type.
+
+The positive spelling permits an allocation rather than requiring one.
+Borrowed reads, proven moves and static/stack placement remove the corresponding
+storage obligation; logical copies still count when COW merely postpones them.
+A result's fixed size alone does not establish stack placement or independence
+from the caller. Unclassified storage operations remain unknown, not pure.
+The example describes the allocation portion of its contract; a future
+separately checked failure effect may also need permission depending on the
+allocator's settled failure policy. This spelling proposal neither grants a
+no-failure guarantee nor settles that policy.
