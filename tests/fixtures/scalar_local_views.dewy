@@ -1,0 +1,35 @@
+# A view is a storage/lifetime demand, independent of whether its current
+# representation is a word or a pointer. Preserve word width and signedness.
+inspect=(value:uint64):>bool & no_effects=>{
+    const view=@value
+    return view >? 9223372036854775807
+}
+main=():>int64=>{
+    let large:uint64=18446744073709551615
+    $runtime_assert inspect(large)
+    let negative:int8=-42
+    const signed=@negative
+    $runtime_assert signed <? 0
+    let ready:bool=true
+    const flag=@ready
+    $runtime_assert flag
+    let positive:int64<v=>v>?0>=42
+    const refined=@positive
+    $runtime_assert refined=?42
+    let bytes:array<uint8 length=1>=[42]
+    const byte=@bytes[0]
+    $runtime_assert byte=?42
+    let fields=[answer=42]
+    const answer=@fields.answer
+    $runtime_assert answer=?42
+    let words:dict<string int64>=['answer' -> 42]
+    const dictionary=@words
+    $runtime_assert dictionary['answer']=?42
+    let numbers:set<int64>=set[42]
+    const members=@numbers
+    $runtime_assert 42 in? members
+    let parts:array<string>=['forty' 'two']
+    const text_parts=@parts
+    $runtime_assert text_parts.join('-')=?'forty-two'
+    return 42
+}

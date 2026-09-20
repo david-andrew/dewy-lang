@@ -1270,7 +1270,8 @@ class _ObjectLowering:
         matches the read. The local then aliases the container's storage and
         owns nothing, so no copy and no release.
         """
-        if not self._has_arena() or self.lowering_module_startup or node.binding_id is None:
+        value_type = ty.unfold(ty.strip_refinement(value_type))
+        if (not self._has_arena() and not node.view) or self.lowering_module_startup or node.binding_id is None:
             return False
         expr = borrowing.unwrap(node.expr)
         if not isinstance(expr, (hir.Index, hir.MemberAccess, hir.DictLookup)) and not (

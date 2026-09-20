@@ -4163,11 +4163,11 @@ class _Lowerer(
                 if not self._borrowed_route_local(node, declared_type):
                     self._required_view_error(node)
                 if not isinstance(declared_type, (ty.ArrayType, ty.ObjectType)):
-                    # A tagged cell/string handle is borrowed as a whole.
-                    # It acquires neither an independent cell nor cleanup;
+                    # Stable scalar reads and aggregate handles keep their
+                    # runtime representation. Neither owns new storage;
                     # later ordinary value boundaries retain their copies.
                     prelude, value = self._extract_expression(node.expr)
-                    return [*prelude, replace(node, decltype='let', annotation='int64', expr=value)]
+                    return [*prelude, replace(node, decltype='let', annotation=self._lower_runtime_value_type(declared_type), expr=value)]
             if isinstance(declared_type, ty.TypeOr) and ty.string_valued(declared_type):
                 node = replace(node, annotation='int64')   # one string handle
             members = ty.runtime_union_members(declared_type)

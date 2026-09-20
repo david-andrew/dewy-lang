@@ -53,7 +53,7 @@ A `const` binding does not provide a mutable place.
 ## Local Read-Only Views
 
 Inside a function, `const name = @route` demands a read-only view of an
-existing record, array, string, or union value. The compiler must prove that the storage stays
+existing stored value. The compiler must prove that the storage stays
 valid and stable; it cannot silently replace this request with a copy.
 
 ```dewy
@@ -71,8 +71,10 @@ an independent value; this does not create a first-class reference.
 
 The initial implementation requires the owner to remain stable throughout the
 function, which is more conservative than the eventual lifetime analysis.
-It supports bindings, fields, and array elements, including tagged union
-cells. Mutable local places (`let cursor = @xs[i]`) and scalar views remain
+It supports bindings, fields, and array elements, including scalars, records,
+arrays, strings, unions, dictionaries and sets. Scalar views retain the
+source width and signedness; they make the same stability demand as a view
+of aggregate storage. Mutable local places (`let cursor = @xs[i]`) remain
 pending.
 The explicit `@` form is an escape hatch while inference improves; ordinary
 read-only locals already borrow when the compiler can prove it safe.

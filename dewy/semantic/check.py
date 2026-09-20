@@ -1446,11 +1446,7 @@ def _declaration_initializer(right: p0.AST, keyword: str, *, ctx: Context,
             not_implemented(ctx.srcfile, right.loc, 'mutable local places')
         if ctx.function_scope_depth == 0:
             user_error(ctx.srcfile, 'a local view needs a function scope', Pointer(span=right.loc))
-        shape = ty.unfold(ty.strip_refinement(expr.type))
         target = _unwrap_write_path(expr)
-        if not (isinstance(shape, (ty.ArrayType, ty.ObjectType, ty.TypeOr))
-                or ty.optional_payload(shape) is not None or ty.string_valued(shape)):
-            not_implemented(ctx.srcfile, right.loc, 'local views of this value type')
         if not isinstance(target, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index, hir.DictLookup)) or _member_root_binding(target, ctx=ctx) is None:
             user_error(ctx.srcfile, 'a local view needs a stored value', Pointer(span=right.loc, message='select a named binding, field, or element'))
     return expr, used[0]

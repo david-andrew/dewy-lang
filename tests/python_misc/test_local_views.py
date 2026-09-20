@@ -25,7 +25,7 @@ def test_local_view_reports_conflicting_write():
 
 @pytest.mark.parametrize('code,diagnostic', [
     ('const x=@Box[42]', 'stored value'),
-    ('const x=@42', 'local views of this value type'),
+    ('const x=@42', 'stored value'),
     ('let x=@boxes[0]', 'mutable local places'),
     ('const x=@boxes[0] touch(@boxes)', 'cannot prove required local view'),
     ('const x=@boxes[0] boxes.push(Box[7])', 'cannot prove required local view'),

@@ -530,5 +530,23 @@ comparison regressions passed on both targets. Cold ASCII and Unicode
 length/shape queries allocate zero bytes and later indexing remains valid.
 Two generations execute all three new kernels with result 42. Their builds
 took 62.89s and 67.40s (the latter shared the machine with another integration
-job), above the native target. The expanded 67-case paired run is in progress.
+job), above the native target. The expanded paired run passed all 67 cases.
 Artifacts: `../dewy-build-artifacts/phase1-string-count-stage3-2026-09-20`.
+
+
+Scalar-view checkpoint: the frontend now recognizes a view demand by its
+stored route rather than an aggregate-kind whitelist. Both lowerers retain
+word width and signedness; native storage matching ignores proven array
+lengths and fact qualifiers that leave the representation unchanged.
+Dictionary/set reads and array joins no longer incorrectly require an
+owning local slot solely for read-side cache maintenance. Stores, removals,
+place exposure and source instability still reject a required view. Native
+rejections now report relevant binding/storage proof failures.
+
+Validation: 31 initial hosted local/union/scalar checks passed; all 12
+expanded scalar/container checks also passed, including x86/C execution.
+The final native compiler built in 63.25s and runs the scalar/container,
+union, string-union and cold-length kernels with result 42. Four additional
+native probes passed: prelude-free scalar views and rejection of scalar,
+dictionary and set owner mutations. This remains above the native build
+target. Artifacts: `../dewy-build-artifacts/phase1-scalar-views-stage6-2026-09-20`.

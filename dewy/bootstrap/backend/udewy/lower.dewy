@@ -3496,9 +3496,20 @@ required_view_error = (node:hir.Declare @state:State):>addr => {
             if conflict {pointers.push(Pointer[current.loc 'this write or mutable place conflicts with the required view']) break}
         }
     }
+    let notes:array<string>=['The initial local-view proof requires storage to remain stable throughout this function.']
+    let value=hir.node_at(state.input.nodes node.expr)
+    let stored=types.unfold(types.strip_refinement(stored_type(node.expr state) state.type_nodes) state.type_nodes)
+    let read=types.unfold(types.strip_refinement(value.value_type state.type_nodes) state.type_nodes)
+    if not borrow_storage_matches(stored read state.type_nodes) {notes.push("Stored type: {types.describe(stored state.type_nodes)}; read type: {types.describe(read state.type_nodes)}.")}
+    if node.binding_id isnt? none {
+        if node.binding_id in? state.boxed {notes.push('The view binding has an exposed address.')}
+        if node.binding_id not in? state.stable_bindings {notes.push('The view binding is written, captured, or exposed.')}
+        if node.binding_id in? state.mutated_roots {notes.push('The view binding is used as mutable storage.')}
+    }
+    if owner isnt? none and not borrowing.stable_owner(owner state.stable_bindings state.stable_parameters) {notes.push('The source owner is not proven read-only and nonescaping.')}
     pointers.push(Pointer[node.loc "`{node.name}` requires stable borrowed storage"])
     if state.problem is? none {
-        state.problem=Error[srcfile=state.source title='cannot prove required local view' pointers=pointers hint='use `.copy()` for an independent value, or keep the owner stable' notes=['The initial local-view proof requires storage to remain stable throughout this function.']]
+        state.problem=Error[srcfile=state.source title='cannot prove required local view' pointers=pointers hint='use `.copy()` for an independent value, or keep the owner stable' notes=notes]
     }
     return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
 }
@@ -3509,8 +3520,18 @@ required_view_error = (node:hir.Declare @state:State):>addr => {
 # owner must be stable (never written, rebound, captured or exposed as a
 # place), and the read must keep the stored representation. Escapes through
 # returns, stores and ordinary arguments still copy from the view as usual.
+# Every native array is a descriptor. An observed length changes its facts,
+# not its element encoding or the handle borrowed by a local declaration.
+borrow_storage_matches = (stored:addr read:addr nodes:types.Table):>bool => {
+    let source=types.unfold(types.strip_refinement(stored nodes) nodes)
+    let target=types.unfold(types.strip_refinement(read nodes) nodes)
+    if types.same_type(source target nodes) return true
+    let a=types.node_at(nodes source)
+    let b=types.node_at(nodes target)
+    return a is? types.ArrayType and b is? types.ArrayType and types.same_type(a.element b.element nodes)
+}
 borrowed_route_local = (node:hir.Declare @state:State):>bool => {
-    if state.allocator is? none return false
+    if state.allocator is? none and not node.view return false
     let expr=hir.node_at(state.input.nodes node.expr)
     if expr isnt? hir.Index|hir.MemberAccess|hir.DictLookup and not (node.view and expr is? hir.ExpressedIdentifier) return false
     # A dictionary lookup hands out the stored record's block; other value
@@ -3523,8 +3544,11 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     if node.binding_id in? state.boxed return false
     if node.binding_id not in? state.stable_bindings return false
     if node.binding_id in? state.mutated_roots return false
-    if node.annotation isnt? none and node.annotation not=? expr.value_type return false
-    if stored_type(node.expr state) not=? expr.value_type return false
+    # Checked facts restrict values without changing the storage being read.
+    # Do not confuse a refined word/aggregate with a representation conversion.
+    let read_type=types.unfold(types.strip_refinement(expr.value_type state.type_nodes) state.type_nodes)
+    if node.annotation isnt? none and not borrow_storage_matches(node.annotation read_type state.type_nodes) return false
+    if not borrow_storage_matches(stored_type(node.expr state) read_type state.type_nodes) return false
     if node.expr in? state.array_snapshots return false
     let route=borrowing.route(node.expr state.input.nodes)
     if route is? none or route.binding in? state.boxed return false
@@ -4160,11 +4184,14 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             let target=hir.node_at(state.input.nodes current.target)
             if target is? hir.MemberAccess {mark_mutated(target.value @mutated state)}
         }
-        if current is? hir.DictStore|hir.DictRemove|hir.DictLookup|hir.DictContains {
+        if current is? hir.DictStore|hir.DictRemove {
             let keys=hir.node_at(state.input.nodes current.keys)
             if keys is? hir.MemberAccess {mark_mutated(keys.value @mutated state)}
         }
-        if current is? hir.DictEntries|hir.DictView|hir.DictMethod {mark_mutated(current.dictionary @mutated state)}
+        # Read-only dictionary operations may maintain the shared index,
+        # but never replace the dictionary handle. They do not need an owned
+        # binding slot; dict_parts deliberately uses detach=false for reads.
+        if current is? hir.DictMethod {mark_mutated(current.dictionary @mutated state)}
         if current is? hir.Place {mark_mutated(current.target @mutated state)}
         if current is? hir.Transmute {mark_mutated(current.expr @mutated state)}
         # Installed failure reporting uses raw I/O internally. It does not
@@ -4177,7 +4204,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         if current is? hir.Transmute and (aggregate(current.value_type state) or aggregate(hir.node_at(state.input.nodes current.expr).value_type state)) {enabled=false}
         if current is? hir.FunctionCall {
             let callee=hir.node_at(state.input.nodes current.func)
-            if callee is? hir.ArrayMethod {mark_mutated(callee.array @mutated state)}
+            if callee is? hir.ArrayMethod and callee.name not=? 'join' {mark_mutated(callee.array @mutated state)}
             if callee is? hir.ExpressedIdentifier and (callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') or callee.name in? ['__load__' '__store__']) {
                 loop argument in current.pos_args {if aggregate(hir.node_at(state.input.nodes argument).value_type state) {enabled=false}}
                 loop argument in current.pos_args {mark_mutated(argument @mutated state)}
