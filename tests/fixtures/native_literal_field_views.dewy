@@ -7,7 +7,13 @@ Span:type=[start:int64 stop:int64]
 Named:type=[label:string count:int64]
 Node:type=[loc:Span value:int64]
 Entry:type=[name:Named loc:Span]
+Holder:type=[maybe:Span|none loc:Span other:Span]
 let allocated=():>int64=>_arena_allocated_bytes
+let restore=(@holder:Holder source:Node):>void=>{
+    holder.loc=source.loc
+    holder.maybe=source.loc
+    holder.other=holder.loc
+}
 let live=():>int64=>_arena_live_bytes
 let build=(source:Node i:int64):>Node=>Node[source.loc i]
 let fresh=(i:int64):>Node=>Node[Span[3 9] i]
@@ -41,5 +47,13 @@ let main=():>int64=>{
     if dropped.name.count not=? 2 or first.name.count not=? 1 return 6
     if copied.name.label not=? 'beta' or copied.name.count not=? 2 or copied.loc.stop not=? 4 return 4
     if probe.value not=? 0 or second.value not=? 1 or third.loc.stop not=? 9 return 5
+    let holder=Holder[none Span[0 0] Span[0 0]]
+    let boxed=Holder[template.loc template.loc Span[7 8]]
+    if boxed.maybe is? none or boxed.loc.stop not=? 9 or boxed.other.start not=? 7 return 7
+    restore(@holder template)
+    let start=live()
+    loop i in 0.. and i <? 64 {restore(@holder template)}
+    if holder.loc.start not=? 3 or holder.other.stop not=? 9 or holder.maybe is? none return 8
+    if live() not=? start return 9
     return 42
 }

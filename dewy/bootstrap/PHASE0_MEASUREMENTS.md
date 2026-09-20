@@ -4643,3 +4643,16 @@ loop that pushes them or are used again, so the gain is small. Second
 generation passes the bundle 98/4. The hosted lowering keeps records in
 frame cells and copies at this site, as at the other non-return transfer
 sites (recorded under "Hosted parity for moves").
+
+### Inline cell fields and field stores from views (2026-09-20)
+
+The same temporary that record literal fields paid for also stood behind
+cell-typed literal fields (`cell_write` copies the payload it stores, so
+the copied temporary cell was a second copy released at once) and behind
+every store into an inline record or cell field (`r.loc = node.loc`: an
+owned copy, written inline, released). Literal fields of either inline
+kind now write from a view source, and a field store writes from a view
+when the source route and the target route have different roots (the old
+field contents are released before the write, so a source inside the
+written record keeps the owned copy). Compiler-wide copies 2,448 to 2,127
+(cells 715 to 427). Second generation passes the bundle 98/4.

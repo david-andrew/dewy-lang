@@ -403,8 +403,22 @@ expression = (id:addr @state:State):>addr => {
         if target isnt? hir.MemberAccess return reject(node 'a non-record member assignment' @state)
         let prefix:array<addr>=[]
         let pointer=snapshot(field_pointer(target @state writable=true) @prefix @state)
-        let source=snapshot(owned_value(node.value @state 'stored in a field') @prefix @state)
         let stored=stored_type(node.target state)
+        # An inline record or cell field copies straight from a view of
+        # other storage: the old contents are released first, so the view
+        # must not be rooted in the record being written.
+        let viewed=peel_statement(node.value @state)
+        if inline_place(stored @state) and view_source(viewed @state) {
+            let source_route=borrowing.route(viewed state.input.nodes)
+            let target_route=borrowing.route(node.target state.input.nodes)
+            if source_route isnt? none and target_route isnt? none and source_route.binding not=? target_route.binding {
+                if object_valued(stored state) {prefix.push(release_record(pointer stored node @state))}
+                else {prefix.push(release_cell(pointer stored node @state))}
+                prefix.push(field_write(pointer expression(node.value @state) stored node @state))
+                return sequence(prefix node @state)
+            }
+        }
+        let source=snapshot(owned_value(node.value @state 'stored in a field') @prefix @state)
         if object_valued(stored state) {prefix.push(release_record(pointer stored node @state))}
         else if cell_members(stored @state) isnt? none {prefix.push(release_cell(pointer stored node @state))}
         else if releasable(stored @state) {prefix.push(release_value(field_read(pointer stored node @state) stored node @state))}
@@ -3624,6 +3638,12 @@ object_copy_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     prefix.push(destination)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+# A read of existing storage (a field, an element, a local) that owns no
+# fresh storage: an inline record or cell write copies from it directly.
+view_source = (id:addr @state:State):>bool => {
+    let node=hir.node_at(state.input.nodes id)
+    return node is? hir.MemberAccess|hir.Index|hir.ExpressedIdentifier and not expression_owns(id @state)
+}
 # Every literal field binds its name for the fields after it. Only a field
 # some later field actually reads needs a local of its own.
 field_binding_referenced = (literal:hir.ObjectLiteral binding:addr? @state:State):>bool => {
@@ -3665,7 +3685,7 @@ object_literal = (node:hir.ObjectLiteral @state:State):>addr => {
         # a local) is read at the write; only a source that owns fresh
         # storage needs the owned value, which is released after the write.
         let source=peel_statement(item.value @state)
-        if not field_binding_referenced(node item.binding_id @state) and object_valued(field.value_type state) and not expression_owns(source @state) and hir.node_at(state.input.nodes source) is? hir.MemberAccess|hir.Index|hir.ExpressedIdentifier {
+        if not field_binding_referenced(node item.binding_id @state) and inline_place(field.value_type @state) and view_source(source @state) {
             prefix.push(field_write(address(destination offset node @state) expression(item.value @state) field.value_type node @state))
             continue
         }
