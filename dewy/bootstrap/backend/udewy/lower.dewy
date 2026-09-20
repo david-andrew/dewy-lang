@@ -132,7 +132,7 @@ note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state
     state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index explicit])
 }
 copy_kind = (type:addr @state:State):>string? => {
-    if owned_string(type state) return none
+    if owned_string(type state) return 'string'
     if cell_members(type @state) isnt? none return 'cell'
     if array_type(type state) isnt? none return 'array'
     if object_valued(type state) return 'record'
@@ -976,7 +976,10 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
     # A string literal is static data with owner zero: retain returns it
     # and drop ignores it, so an owning slot may hold the descriptor itself.
     if static_literal(id state) return value
-    if owned_string(node.value_type state) return string_runtime('_native_string_copy' [value] node @state)
+    if owned_string(node.value_type state) {
+        note_copy('string' node.value_type site owned_reason(id @state) node @state)
+        return string_runtime('_native_string_copy' [value] node @state)
+    }
     if cell_members(node.value_type @state) isnt? none {
         note_copy('cell' node.value_type site owned_reason(id @state) node @state)
         return cell_copy(value node.value_type node @state)

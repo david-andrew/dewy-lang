@@ -873,6 +873,7 @@ class _OptionalLowering:
         *,
         prepared: bool = True,
         fresh: bool = False,
+        reported: bool = False,
     ) -> list[hir.AST]:
         """Store one value into a union cell, tagging it by member index.
 
@@ -886,16 +887,16 @@ class _OptionalLowering:
             # Write an explicit snapshot straight into its destination. Going
             # through a second temporary would copy the same payload twice.
             self._note_copy('cell', value.type, 'explicit copy', 'requested with `.copy()`', value.loc, explicit=True)
-            return self._union_write(cell, value.value, members, prepared=prepared, fresh=fresh)
+            return self._union_write(cell, value.value, members, prepared=prepared, fresh=fresh, reported=True)
         if isinstance(value, hir.ValueCast):
-            return self._union_write(cell, value.expr, members, prepared=prepared, fresh=fresh)
+            return self._union_write(cell, value.expr, members, prepared=prepared, fresh=fresh, reported=reported)
         if (
             isinstance(value, hir.RepresentationCast)
             and ty.runtime_union_members(value.type) == members
         ):
             # Checking wraps member values in a conversion to the union type;
             # the tag-and-payload store below is that conversion.
-            return self._union_write(cell, value.expr, members, prepared=prepared, fresh=fresh)
+            return self._union_write(cell, value.expr, members, prepared=prepared, fresh=fresh, reported=reported)
         if (
             fresh
             and prepared
@@ -947,6 +948,8 @@ class _OptionalLowering:
             # Parent-family reads have already built a borrowed child-tagged
             # view. Copy its active child's tree, not the obsolete parent tag.
             source_tags = possible if self._union_family_conversions(stored_members, possible) else stored_members
+            if not reported:
+                self._note_copy('cell', value.type, 'stored in a union', self._copy_reason(value), value.loc)
             return [*prelude, *self._union_retag(cell, source_word, source_tags, members, value.loc, prepared=prepared)]
         if self._field_union_members(value.type) == members:
             # Same-union copy: tag, payload word, and the active aggregate
@@ -971,6 +974,8 @@ class _OptionalLowering:
                         self._store_i64_field(cell, 8, self._load_i64_field(source_word, 8, value.loc), value.loc),
                         self._store_i64_field(source_word, 8, self._int64_literal(value.loc, 0), value.loc)]
             cleanup = self._discarded_call_result(value, source_word) or []
+            if not reported:
+                self._note_copy('cell', value.type, 'stored in a union', self._copy_reason(value), value.loc)
             return [*prelude, *self._union_copy_cell(cell, source_word, members, value.loc, prepared=prepared), *cleanup]
         source_members = self._field_union_members(value.type)
         if source_members is not None:
@@ -985,6 +990,8 @@ class _OptionalLowering:
                 if isinstance(source, hir.ExpressedIdentifier)
                 else source
             )
+            if not reported:
+                self._note_copy('cell', value.type, 'converted to a union', self._copy_reason(value), value.loc)
             return [
                 *prelude,
                 *self._union_retag(cell, source_word, source_members, members, value.loc, prepared=prepared),

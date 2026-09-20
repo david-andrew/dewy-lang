@@ -5,7 +5,7 @@ from dewy.reporting import SrcFile
 
 def _copies(source: str) -> list[str]:
     codegen(SrcFile(None, source))
-    return [note.message for note in lower.last_copy_notes]
+    return [note.message for note in lower.last_copy_notes if note.kind == 'string']
 
 
 def test_static_literals_are_shared_but_temporary_views_and_owned_elements_are_copied() -> None:
@@ -75,3 +75,21 @@ def test_copy_report_names_kind_site_and_reason(tmp_path):
     assert any(line.startswith('string copied when stored') for line in lines)
     kinds = {note.kind for note in lower.last_copy_notes}
     assert kinds >= {'record', 'string'}
+
+
+def test_union_snapshots_and_retagging_are_in_the_inventory():
+    from pathlib import Path
+    source = SrcFile.from_path(Path(__file__).resolve().parents[1] / 'fixtures/copy_report_coverage.dewy')
+    codegen(source)
+    notes = [note for note in lower.last_copy_notes if note.srcfile.path == source.path]
+    assert any(note.kind == 'cell' and note.site == 'stored in a union' for note in notes)
+    assert any(note.kind == 'cell' and note.site == 'converted to a union' for note in notes)
+    assert any(note.kind == 'string' for note in notes)
+    assert all(note.message and not note.explicit for note in notes)
+
+
+def test_explicit_union_copy_is_not_reported_again_as_implicit():
+    codegen(SrcFile(None, 'Box:type=[value:int64]\nf=(value:Box|none):>Box|none=>value.copy()\nmain=():>int64=>{let value=f(Box[42]) if value is? Box return value.value return 0}'))
+    explicit = [note for note in lower.last_copy_notes if note.explicit]
+    assert len(explicit) == 1 and explicit[0].kind == 'cell'
+    assert not any(note.loc == explicit[0].loc and not note.explicit for note in lower.last_copy_notes)

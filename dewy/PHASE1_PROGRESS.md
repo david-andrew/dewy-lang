@@ -375,5 +375,19 @@ acceptance/rejection probes passed. Two cache checks passed (108.63s), verifying
 row binder kinds/identities, binding values and instantiated row arguments
 survive an x86/C snapshot round trip, plus generated-code freshness. Native
 generations built in 60.74s and 60.09s and both executed the row-generic fixture
-with result 42. The expanded 58-case hosted/native parity run is in progress.
+with result 42. All 58 expanded hosted/native paired parity cases passed.
 Artifacts: `../dewy-build-artifacts/phase1-row-generics-stage2-2026-09-20`.
+
+Copy-inventory follow-up: hosted same-union snapshots and union conversions
+now report the copy that lowering emits; an explicit union `.copy()` does not
+also become an implicit-copy note at the same site. Native ownership copies
+of strings, including copies selected through the shared copy-kind helper,
+now appear in the inventory. Recursive fields remain covered by their enclosing
+aggregate-copy decision rather than counting each generated helper separately.
+This closes specific reporting gaps; it does not claim the whole inventory
+or `$explicit_copies` implementation is complete.
+
+Validation: 24 hosted copy/report/source-provenance regressions passed. Native
+generations built in 60.39s and 60.20s and executed the coverage fixture with
+result 42. Native `analyze` reports both cell and string sites in that fixture.
+Artifacts: `../dewy-build-artifacts/phase1-copy-coverage-stage2-2026-09-20`.

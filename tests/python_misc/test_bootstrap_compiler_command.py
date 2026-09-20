@@ -80,6 +80,11 @@ def test_native_compiler_command(tmp_path):
     assert 'record `Fact` copied when returned: `f` may be used again' in result.stdout
     assert 'record `Fact` copied when bound to `h`: `g` may be used again' in result.stdout
     assert 'copy report: ' in result.stdout
+    coverage = invoke('analyze', str(ROOT / 'tests/fixtures/copy_report_coverage.dewy'))
+    assert coverage.returncode == 0, coverage.stdout + coverage.stderr
+    entries = [line for line in coverage.stdout.splitlines() if line.startswith('copy: ') and 'copy_report_coverage.dewy:' in line]
+    assert any(': string ' in line for line in entries)
+    assert any(': cell ' in line for line in entries)
 
     # HIR carries source indices across module assembly and normalization.
     # Both the imported function and entry retain their own debug locations;

@@ -1,0 +1,18 @@
+# Copies through tagged storage and string ownership must appear in budgets.
+Box:type=[value:int64]
+snapshot=(value:Box|none):>Box|none=>{
+    let saved=value
+    value=none
+    return saved
+}
+widen=(value:Box|none):>Box|int64|none=>value
+keep=(text:string):>array<string>=>[text]
+main=():>int64=>{
+    let original:Box|none=Box[42]
+    let copied=snapshot(original)
+    let wider=widen(copied)
+    let strings=keep('retained')
+    $runtime_assert strings.length=?1
+    if wider is? Box return wider.value
+    return 0
+}
