@@ -327,7 +327,7 @@ expression = (id:addr @state:State):>addr => {
         # A dying fresh result already is independent. Otherwise retain the
         # receiver before any surrounding operation can mutate its source.
         if expression_owns(node.value @state) return owned_value(node.value @state 'explicit copy')
-        let kind=copy_kind(node.value_type @state)
+        let kind=if owned_string(node.value_type state) 'string' else copy_kind(node.value_type @state)
         if kind isnt? none {note_copy(kind node.value_type 'explicit copy' 'requested with `.copy()`' node @state explicit=true)}
         return copy_value(expression(node.value @state) node.value_type node @state)
     }

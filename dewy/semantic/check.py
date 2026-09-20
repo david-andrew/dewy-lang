@@ -8675,7 +8675,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     if name == 'copy':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         plain = ty.unfold(ty.strip_refinement(value.type))
-        if isinstance(plain, (ty.ArrayType, ty.ObjectType)) and not (
+        if (isinstance(plain, (ty.ArrayType, ty.ObjectType)) or _is_string_type(plain)) and not (
             isinstance(plain, ty.ObjectType) and (plain.field(name) is not None or plain.method(name) is not None)
         ):
             signature = ty.FunctionType([], [], None, value.type)

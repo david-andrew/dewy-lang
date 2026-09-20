@@ -11,7 +11,7 @@ from udewy.frontend import EntryPointOptions, entry_point
 from test_bootstrap_lowering import ROOT
 
 
-@pytest.mark.parametrize("fixture", ["explicit_aggregate_copy", "explicit_copy_lifetimes"])
+@pytest.mark.parametrize("fixture", ["explicit_aggregate_copy", "explicit_copy_lifetimes", "explicit_string_copy"])
 def test_explicit_aggregate_copy(tmp_path, fixture):
     source = ROOT / f'tests/fixtures/{fixture}.dewy'
     output = tmp_path / 'copy.udewy'
@@ -26,10 +26,14 @@ def test_copy_rejects_arguments():
         codegen(SrcFile(None, 'main=():>int64=>{let xs:array<int64>=[1] let ys=xs.copy(2) return 0}'))
 
 
-def test_copy_keeps_explicit_intent_in_report():
+@pytest.mark.parametrize('kind,source', [
+    ('array', 'main=():>int64=>{let xs:array<int64>=[1] let ys=xs.copy() return xs.length+ys.length}'),
+    ('string', 'snapshot=(s:string):>string=>s.copy() main=():>int64=>snapshot("{42}").length'),
+])
+def test_copy_keeps_explicit_intent_in_report(kind, source):
     from dewy.backend.udewy import lower
-    codegen(SrcFile(None, 'main=():>int64=>{let xs:array<int64>=[1] let ys=xs.copy() return xs.length+ys.length}'))
-    assert any(note.explicit and note.kind == 'array' for note in lower.last_copy_notes)
+    codegen(SrcFile(None, source))
+    assert any(note.explicit and note.kind == kind for note in lower.last_copy_notes)
 
 
 def test_copy_does_not_share_length_facts():

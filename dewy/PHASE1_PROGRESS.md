@@ -106,7 +106,8 @@ between matching increments. This proves parallel-array length equality and
 length/counter growth through unbounded trip counts. Missing pushes and
 early breaks reject. Ten targeted proof tests and all 21 focused parity
 cases passed. The updated compiler builds using the preceding direct native
-compiler (50.12 seconds); second-generation timing remains to be measured.
+compiler (50.12 seconds); the second-generation build also took 50.12 seconds
+and passed all 21 focused parity cases.
 The wider symbolic range-iterator and proof-boundary work remains pending.
 
 Checkpoint: hosted descriptor-backed array locals now use the existing
@@ -117,3 +118,14 @@ storing it in a returned record still acquires independent storage. Twenty-
 one ownership gates passed, with the escape kernel checked separately on
 both direct and C backends. The shared native parity fixture also passed.
 Explicit local `@` demands and mutable local places are still outstanding.
+
+Checkpoint: explicit string `.copy()` now participates in both checkers and
+lowerers. Returning a copy, storing it in a record or array, copying a fresh
+result, and discarding a copy all retain the normal owner-word lifetime
+rules. Copy notes distinguish explicit string copies; static strings and
+fresh owned results can still avoid a physical clone. Twenty-six hosted
+string/ownership checks passed, followed by all eight explicit-copy tests
+including the string report check. The native lifetime fixture retains zero
+bytes across 100 calls, and all 22 focused parity cases passed against a
+new second-generation compiler. General union copies and strict-copy
+enforcement remain outstanding.

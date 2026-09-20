@@ -2725,6 +2725,8 @@ class _StringLowering:
 
         def fresh(expr: hir.AST) -> bool:
             expr = self._unwrap_transparent(expr)
+            if isinstance(expr, hir.CopyValue):
+                return True
             if self._is_string_valued(expr.type) and self._string_storage(expr) == 'element':
                 return True   # a retained container read receives its own copy
             if isinstance(expr, (hir.String, hir.NoneValue)) or isinstance(expr.type, ty.StringLiteralType):
@@ -2826,7 +2828,9 @@ class _StringLowering:
             if id(expr) in seen:
                 return
             seen.add(id(expr))
-            if isinstance(expr, (hir.String, hir.NoneValue)) or isinstance(expr.type, ty.StringLiteralType):
+            if isinstance(expr, hir.CopyValue):
+                found.add(('call', id(expr)))
+            elif isinstance(expr, (hir.String, hir.NoneValue)) or isinstance(expr.type, ty.StringLiteralType):
                 found.add(('static', None))   # `none` owns nothing
             elif isinstance(expr, (hir.ValueCast, hir.RepresentationCast)):
                 if self._is_string_valued(expr.expr.type) or ty.optional_payload(expr.expr.type) is not None or ty.runtime_union_members(expr.expr.type) is not None:
@@ -2838,7 +2842,7 @@ class _StringLowering:
             elif isinstance(expr, hir.InterpolatedString):
                 found.add(('fresh', None))
             elif isinstance(expr, hir.FunctionCall):
-                found.add(('call', id(expr)) if self._is_named_string_call(expr) else ('unknown', None))
+                found.add(('call', id(expr)) if self._is_owned_string_result(expr) else ('unknown', None))
             elif isinstance(expr, hir.Flow):
                 for arm in expr.arms:
                     visit(arm.body, viewed)
@@ -2880,9 +2884,11 @@ class _StringLowering:
         visit(item, False)
         return found
 
-    def _is_named_string_call(self, node: hir.AST) -> bool:
-        """A call of a named Dewy function returning a string: its result is caller-owned (static, fresh, or a view)."""
+    def _is_owned_string_result(self, node: hir.AST) -> bool:
+        """A string call or explicit copy with a caller-owned result."""
         node = self._unwrap_transparent(node)
+        if isinstance(node, hir.CopyValue):
+            return self._is_string_valued(node.type) and self._has_arena()
         return (
             isinstance(node, hir.FunctionCall)
             and isinstance(node.func, hir.ExpressedIdentifier)
@@ -2921,7 +2927,7 @@ class _StringLowering:
             return self._escaping_string_value(node)
         self._consume_string_value(node)
         prelude, value = self._extract_expression(node)
-        if not self._is_named_string_call(node) or not self.statement_temporaries:
+        if not self._is_owned_string_result(node) or not self.statement_temporaries:
             return prelude, value
         statements = list(prelude)
         if isinstance(value, hir.ExpressedIdentifier):
@@ -3008,6 +3014,8 @@ class _StringLowering:
         or a call result (copied into this frame) is frame-backed.
         """
         visiting = set() if visiting is None else visiting
+        if isinstance(node, hir.CopyValue):
+            return 'arena'
         node = self._unwrap_transparent(node)
         if isinstance(node, hir.ValueCast):
             return self._string_storage(node.expr, visiting=visiting)
@@ -3083,7 +3091,7 @@ class _StringLowering:
             return 'caller' if storages <= {'static', 'arena', 'caller'} else 'frame'
         return 'frame'
 
-    def _escaping_string_value(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
+    def _escaping_string_value(self, node: hir.AST, *, explicit: bool = False) -> tuple[list[hir.AST], hir.AST]:
         """A string stored where it outlives the evaluation that made it (a growable array's element).
 
         A materialized string — an interpolation, a call result copied into
@@ -3095,16 +3103,16 @@ class _StringLowering:
         copied too, since its storage belongs to the caller. Each copy made is
         a `CopyNote` for `dewy analyze`.
         """
-        if self._is_named_string_call(node):
+        if self._is_owned_string_result(node):
             self._consume_string_value(node)   # the container takes the result over: not a temporary
         prelude, value = self._extract_expression(node)
         storage = self._string_storage(node)
         if storage == 'static' or not self._has_arena():
             return prelude, value
-        fresh = isinstance(self._unwrap_transparent(node), (hir.FunctionCall, hir.RepresentationCast))
+        fresh = isinstance(self._unwrap_transparent(node), (hir.FunctionCall, hir.RepresentationCast, hir.CopyValue))
         if storage == 'arena' and fresh:
             return prelude, value   # a join or a decode nobody else holds: the container takes it over
-        if self._is_named_string_call(node):
+        if self._is_owned_string_result(node):
             # a named function's result is the caller's: fresh data is taken over as
             # it is; a view of another string's bytes (a parameter's, an owning local's) is copied
             statements = list(prelude)
@@ -3121,7 +3129,10 @@ class _StringLowering:
             'element': 'this string is owned by the container or object it was read from, so storing it elsewhere copies it into the arena',
             'arena': 'this string may be held elsewhere (a local a return reaches), so storing it copies it into the arena',
         }
-        self.copy_notes.append(CopyNote(self.srcfile, node.loc, reasons[storage]))
+        if explicit:
+            self._note_copy('string', node.type, 'explicit copy', 'requested with `.copy()`', node.loc, explicit=True)
+        else:
+            self.copy_notes.append(CopyNote(self.srcfile, node.loc, reasons[storage]))
         loc = node.loc
         statements = list(prelude)
         if isinstance(value, hir.ExpressedIdentifier):

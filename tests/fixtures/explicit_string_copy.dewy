@@ -1,0 +1,25 @@
+Box:type=[text:string]
+copy_return=(value:string):>string=>value.copy()
+length=(value:string):>int64=>value.length
+exercise=(source:string):>void=>{
+    let copy=source.copy()
+    let twice=copy_return(source).copy()
+    let boxed=Box[source.copy()]
+    let array:array<string>=[source.copy()]
+    source.copy();
+    $runtime_assert length(source.copy())=?source.length
+    $runtime_assert copy=?source and twice=?source and boxed.text=?source
+    $runtime_assert array[0]=?source
+    let literal='literal'.copy()
+    $runtime_assert literal=?'literal'
+}
+main=():>int64=>{
+    let source="value {42}"
+    exercise(source)
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {exercise(source)}
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    $runtime_assert retained=?0
+    return 42
+}

@@ -3002,7 +3002,7 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
         if name =? 'copy' return copy_method(receiver loc @session)
         return problem(id 'object has no such member' name env session)
     }
-    if type is? types.ArrayType and name =? 'copy' return copy_method(receiver loc @session)
+    if name =? 'copy' and (type is? types.ArrayType or views.string_valued(value.value_type session.types)) return copy_method(receiver loc @session)
     if type is? types.ArrayType and name in? array_methods.names return array_method(receiver type name id env @session)
     if views.string_valued(value.value_type session.types) and name in? STRING_METHODS return string_method(receiver name id env @session)
     if type is? types.TypeOr {

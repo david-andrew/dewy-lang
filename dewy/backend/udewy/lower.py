@@ -4030,8 +4030,16 @@ class _Lowerer(
         node = self._unwrap_transparent(node)
         while isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and self._is_string_valued(node.type):
             node = self._unwrap_transparent(node.expr)   # `xs as string` is a call inside a cast
-        if isinstance(node, hir.FunctionCall):
+        if isinstance(node, (hir.FunctionCall, hir.CopyValue)):
             self.consumed_string_values.add(id(node))
+
+    def _string_result_temporary(self, node: hir.AST, value: hir.AST, prelude: list[hir.AST]) -> tuple[list[hir.AST], hir.AST]:
+        """Keep an owned string result alive through its consuming statement."""
+        if id(node) in self.consumed_string_values or self.lowering_module_startup:
+            return prelude, value
+        temp = self._new_string_temp(node.loc, 'int64', 'temp')
+        self.statement_temporaries.append(('string', temp))
+        return [*prelude, hir.Assign(node.loc, ty.VOID_TYPE, temp, '=', value)], replace(temp, type=node.type)
 
     def _lower_statement_inner(self, node: hir.AST) -> list[hir.AST]:
         if isinstance(node, hir.Suppress):
@@ -4807,6 +4815,9 @@ class _Lowerer(
     def _extract_expression_inner(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         if isinstance(node, hir.CopyValue):
             plain = ty.unfold(ty.strip_refinement(node.type))
+            if self._is_string_valued(plain):
+                prelude, value = self._escaping_string_value(node.value, explicit=True)
+                return self._string_result_temporary(node, value, prelude)
             if isinstance(plain, ty.ObjectType):
                 if self._object_expression_owns_fresh_storage(node.value):
                     return self._extract_expression(node.value)
@@ -5449,12 +5460,10 @@ class _Lowerer(
             if self._is_named_array_call(node) and id(node) not in self.consumed_string_values and not self.lowering_module_startup and not place_postlude:
                 # a runtime-length array result nothing keeps (`text.split" ".length`, `g(f(x))`): a temporary of this statement
                 return self._array_result_temporary(node, call, prelude)
-            if self._is_named_string_call(node) and id(node) not in self.consumed_string_values and not self.lowering_module_startup and not place_postlude:
+            if self._is_owned_string_result(node) and id(node) not in self.consumed_string_values and not self.lowering_module_startup and not place_postlude:
                 # a string result nothing keeps (an argument, a receiver, a part): a
                 # temporary of this statement, given back after it by its owner word
-                temp = hir.ExpressedIdentifier(node.loc, 'int64', self._new_string_temp(node.loc, 'int64', 'temp').name)
-                self.statement_temporaries.append(('string', temp))   # declared at the statement's top (`_with_temporaries_released`)
-                return [*prelude, hir.Assign(node.loc, ty.VOID_TYPE, temp, '=', call)], replace(temp, type=node.type)
+                return self._string_result_temporary(node, call, prelude)
             if self._is_eager_bool_logical_call(call):
                 eager_args: list[hir.AST] = []
                 for arg in call.pos_args:

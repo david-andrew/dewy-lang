@@ -23,7 +23,7 @@ a[0] = 9          # snapshot is still the old value
 
 `let` versus `const` is the mutability knob: `const` cannot be rebound and cannot take indexed or field writes. A `const` snapshot of a `let` value does not change when the `let` is written later.
 
-Arrays, records, dictionaries, and sets support an explicit `.copy()`:
+Arrays, records, dictionaries, sets, and strings support an explicit `.copy()`:
 
 ```dewy
 let snapshot = original.copy()
@@ -35,7 +35,9 @@ particular allocation or an eager byte-for-byte clone: a dying fresh result
 can transfer its storage, and the provisional copy-on-write implementation
 can share storage until a write. Checked IR and copy reports retain the
 explicit intent. A record's own `copy` field or method takes precedence over
-the synthesized operation. Explicit string and union copies, lifecycle-hook
+the synthesized operation. Strings retain their contents independently of
+the receiver's storage lifetime; unused temporary copies are released at the
+end of their consuming statement. General union copies, lifecycle-hook
 dispatch, and `$explicit_copies` enforcement are still pending.
 
 Slices and nested elements are values too. `A[1]` on a multidimensional array, and `nested[1]` on an `array<array<T>>`, both produce a value. `A[1 0] = 9` mutates `A`. `row = A[1]  row[0] = 9` does not.
