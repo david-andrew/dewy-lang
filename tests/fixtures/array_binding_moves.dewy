@@ -1,0 +1,33 @@
+make=(value:int64):>array<int64>=>[value]
+Box:type=[value:int64]
+make_boxes=():>array<Box>=>[Box[42]]
+exercise=():>int64=>{
+    let first=make(42)
+    let second:array<int64>=first
+    second.push(1)
+    if second[0] not=?42 return 1
+    let copied=second.copy()
+    let third:array<int64>=copied
+    third[0]=99
+    if second[0] not=?42 return 2
+    # A later named read keeps the source independent.
+    let fourth:array<int64>=second
+    fourth[0]=0
+    if second[0] not=?42 return 3
+    # So does a later read through an inferred record view.
+    let boxes=make_boxes()
+    if boxes.length <? 1 return 4
+    let snapshot=boxes[0]
+    let taken:array<Box>=boxes
+    taken[0].value=99
+    if snapshot.value not=?42 return 5
+    return 42
+}
+main=():>int64=>{
+    let result=exercise()
+    if result not=?42 return result
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 6}
+    if _arena_live_bytes not=?before return 7
+    return 42
+}

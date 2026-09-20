@@ -435,3 +435,21 @@ passed against the second generation. These are correctness integration
 builds, still above the under-30s native target. A fresh broader corpus run is
 starting against this fixed snapshot.
 Artifacts: `../dewy-build-artifacts/phase1-move-borrows-stage2-2026-09-20`.
+
+Hosted array-binding checkpoint: descriptor-backed locals can now take a
+last-use array value, including an explicit `.copy()` result. Live borrowed
+views, later named reads, loop backedges and exposed raw/unknown aliases keep
+copies conservative. A heap descriptor transfers directly (including its
+existing COW reference), with the source slot cleared; moving it no longer
+allocates a second descriptor. Frame-backed storage retains the checked
+adopt-or-copy path. Cleanup now releases an arena descriptor independently of
+whether it still owns the buffer, fixing a 64-byte-per-iteration leak exposed
+by the new transfer kernel.
+
+Validation: 82 move, explicit-copy, sharing, ownership, provenance and lifetime
+checks passed, including x86/C execution. The new binding kernel retains zero
+bytes over 100 calls and executes with result 42 in the existing second native
+generation. A COW-backed local transfer allocates zero bytes on both hosted
+backends; disabling moves gives an allocating positive control. This batch
+changes hosted lowering only; the native implementation already moves these
+bindings. The broader paired run remains pinned to the preceding snapshot.

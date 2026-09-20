@@ -239,8 +239,10 @@ class _ArraySharing:
                 self._store_i64_field(descriptor, ARRAY_OWNER_OFFSET, one, loc), *original]
         release = self._if(self._array_is_shared(descriptor, owner, loc),
                            [self._if(self._int64_comparison('__gt__', self._load_i64_field(owner, 0, loc), one, loc), retained, loc, last)], loc, original)
-        return [self._declare(owner, self._load_i64_field(descriptor, ARRAY_OWNER_OFFSET, loc), loc),
-                self._if(self._int64_comparison('__ne__', owner, self._int64_literal(loc, -1), loc), [release], loc)]
+        return [self._if(self._int64_comparison('__ne__', descriptor, self._int64_literal(loc, 0), loc), [
+            self._declare(owner, self._load_i64_field(descriptor, ARRAY_OWNER_OFFSET, loc), loc),
+            self._if(self._int64_comparison('__ne__', owner, self._int64_literal(loc, -1), loc), [release], loc),
+        ], loc)]
 
     def _pin_aggregate_call(self, value, type_, loc):
         """Raw storage exposure ends COW eligibility for the exposed tree.

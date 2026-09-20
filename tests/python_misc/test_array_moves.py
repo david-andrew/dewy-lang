@@ -46,3 +46,44 @@ def test_a_return_inside_a_loop_is_a_move() -> None:
     )
     # a return leaves the function whatever follows it in the text: both returns move
     assert notes.count(('xs', True)) == 2 and notes.count(('xs', False)) == 0
+
+
+def test_owned_descriptor_moves_into_another_binding(tmp_path):
+    from tests.python_misc.test_scalar_projection import execute
+    source = SrcFile.from_path(REPO_ROOT / 'tests/fixtures/array_binding_moves.dewy')
+    code = codegen(source, debug_locations=False)
+    notes = [note.message for note in lower.last_move_notes if note.moved and note.srcfile.path == source.path]
+    assert any('`first` is moved when bound to `second`' in note for note in notes)
+    assert any('`copied` is moved when bound to `third`' in note for note in notes)
+    assert not any('`boxes` is moved when bound to `taken`' in note for note in notes)
+    execute(tmp_path, 'array-binding-moves', code)
+
+
+def test_heap_descriptor_transfer_allocates_nothing(tmp_path, monkeypatch):
+    from tests.python_misc.test_scalar_projection import execute
+    source = SrcFile(None, '''
+make=():>array<int64>=>[42]
+exercise=():>int64=>{
+    let first=make()
+    let shared=first.copy()
+    let before:int64=_arena_allocated_bytes
+    let second:array<int64>=first
+    let allocated:int64=_arena_allocated_bytes-before
+    second.push(1)
+    second[0]=99
+    if shared.length <? 1 return -1
+    if shared[0] not=?42 return -2
+    return allocated
+}
+main=():>int64=>{
+    printl(exercise())
+    return 42
+}
+''')
+    optimized = codegen(source, debug_locations=False)
+    with monkeypatch.context() as patch:
+        patch.setattr(lower._Lowerer, '_compute_moves', lambda *args: set())
+        baseline = codegen(source, debug_locations=False)
+    for fast, slow in zip(execute(tmp_path, 'array-moved', optimized), execute(tmp_path, 'array-copied', baseline)):
+        assert int(fast.stdout) == 0
+        assert int(slow.stdout) > 0

@@ -1239,12 +1239,14 @@ class _ArrayLowering(_ArraySharing):
             ),
             self._int64_literal(loc, 1), 'int64', loc,
         )
-        statements.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, arena_descriptor, hir.Block(loc, ty.VOID_TYPE, [
+        release_descriptor = hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, arena_descriptor, hir.Block(loc, ty.VOID_TYPE, [
             self._arena_release_call(word, self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc),
-        ], True))], None))
+        ], True))], None)
         buffer = hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, hir.Block(loc, ty.VOID_TYPE, statements, True))], None)
-        # the descriptor is released inside `buffer`: read nothing from it after
-        return [*elements, buffer]
+        # Moving the data empties its former descriptor (owner/length zero),
+        # but does not change who owns the descriptor's allocation. Release
+        # that allocation independently, last, without reading it afterward.
+        return [*elements, buffer, release_descriptor]
 
     def _synthesize_value_releases(self) -> list:
         """Share ownership dispatch; no allocation here escapes a helper frame."""
@@ -2319,7 +2321,7 @@ class _ArrayLowering(_ArraySharing):
                 self._store_i64_field(fresh, offset, self._load_i64_field(local, offset, loc), loc)
                 for offset in (ARRAY_DATA_OFFSET, ARRAY_LENGTH_OFFSET, ARRAY_CAPACITY_OFFSET, ARRAY_STRIDE_OFFSET, ARRAY_FLAGS_OFFSET, ARRAY_OWNER_OFFSET)
             ]
-            adopt = hir.Block(loc, ty.VOID_TYPE, [
+            adopt_storage = hir.Block(loc, ty.VOID_TYPE, [
                 hir.Declare(loc, ty.VOID_TYPE, 'let', fresh.name, 'int64', self._arena_allocation(self._int64_literal(loc, ARRAY_DESCRIPTOR_SIZE), loc)),
                 *copy_words,
                 self._store_i64_field(
@@ -2337,9 +2339,24 @@ class _ArrayLowering(_ArraySharing):
             )
             clone = hir.Block(loc, ty.VOID_TYPE, [*clone_prelude, hir.Assign(loc, ty.VOID_TYPE, moved, '=', replace(cloned, type='int64') if isinstance(cloned, hir.ExpressedIdentifier) else cloned)], True)
             owned = self._typed_equality(self._load_i64_field(local, ARRAY_OWNER_OFFSET, loc), self._int64_literal(loc, 1), 'int64', loc)
+            transfer = hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, adopt_storage)], clone)
+            if not adopt:
+                # The heap descriptor is already independently owned. Move
+                # that reference too, including its share of a COW buffer;
+                # allocating another descriptor would only move the same words.
+                # An adopted record field uses a temporary handle and cannot
+                # clear the original field this way, so it keeps the path above.
+                allocated = self._int64_comparison('__ne__', self._int64_binary('__and__',
+                    self._load_i64_field(local, ARRAY_FLAGS_OFFSET, loc),
+                    self._int64_literal(loc, ARRAY_ARENA_DESCRIPTOR), loc), self._int64_literal(loc, 0), loc)
+                take = hir.Block(loc, ty.VOID_TYPE, [
+                    hir.Assign(loc, ty.VOID_TYPE, moved, '=', local),
+                    hir.Assign(loc, ty.VOID_TYPE, local, '=', self._int64_literal(loc, 0)),
+                ], True)
+                transfer = hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, allocated, take)], transfer)
             return [
                 hir.Declare(loc, ty.VOID_TYPE, 'let', moved.name, 'int64', self._int64_literal(loc, 0)),
-                hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, owned, adopt)], clone),
+                transfer,
             ], moved
         if isinstance(source, hir.ExpressedIdentifier):
             reason = 'it is used again later, or is not a local that owns its storage' if source.binding_id is not None else 'it is not a local'

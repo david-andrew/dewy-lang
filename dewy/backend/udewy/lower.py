@@ -3509,7 +3509,7 @@ class _Lowerer(
         if not (isinstance(declared, ty.ArrayType) and declared.length is None):
             return None
         source = self._copy_source_expression(node.expr)
-        if not isinstance(source, (hir.ArrayLiteral, hir.FunctionCall, hir.ExpressedIdentifier)):
+        if not isinstance(source, (hir.ArrayLiteral, hir.FunctionCall, hir.CopyValue, hir.ExpressedIdentifier)):
             return None
         return node if self._array_representation(node) == 'descriptor' else None
 
@@ -3602,7 +3602,10 @@ class _Lowerer(
                         if source is not None:
                             borrow_dependents.setdefault(source.binding, set()).add(node.binding_id)
                 movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node) or node.binding_id in strings
-                walk(node.expr, depth, nested, transfer(node.expr, string_only=True))
+                # A descriptor-backed destination can take the source's
+                # ownership. Fixed raw buffers still require their own layout.
+                array_destination = self._owned_array_declaration(node) is not None
+                walk(node.expr, depth, nested, transfer(node.expr, string_only=not array_destination))
                 if movable and node.binding_id is not None and not nested:
                     counter += 1
                     owned[node.binding_id] = (counter, depth)
@@ -3681,6 +3684,8 @@ class _Lowerer(
         moves: set[int] = set()
         for binding_id, (_declared_at, declared_depth) in owned.items():
             references = uses.get(binding_id, [])
+            if binding_id in self.borrow_plan.exposed_bindings:
+                continue  # raw/unknown aliases cannot be justified by named uses
             if not references or any(nested for _seq, _depth, nested, _transfer in references):
                 continue
             if binding_id in strings and len(references) != 1:
@@ -4201,11 +4206,12 @@ class _Lowerer(
                     and node.expr.type.length is not None
                     else declared_type
                 )
-                self._note_copy('array', copy_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)
-                copy_prelude, copied = self._clone_array_value(
-                    node.expr,
-                    copy_type,
-                )
+                source = self._copy_source_expression(node.expr)
+                if declared_type.length is None and isinstance(source, hir.ExpressedIdentifier) and id(source) in self.moved_uses:
+                    copy_prelude, copied = self._transfer_array_value(node.expr, source, declared_type, site=f'bound to `{node.name}`')
+                else:
+                    self._note_copy('array', copy_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)
+                    copy_prelude, copied = self._clone_array_value(node.expr, copy_type)
                 self._note_owned_array(node, declared_type)
                 return [
                     *copy_prelude,
