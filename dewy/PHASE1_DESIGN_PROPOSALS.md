@@ -299,3 +299,55 @@ The example describes the allocation portion of its contract; a future
 separately checked failure effect may also need permission depending on the
 allocator's settled failure policy. This spelling proposal neither grants a
 no-failure guarantee nor settles that policy.
+
+## Lifecycle call protocol — proposed, not approved or implemented
+
+The metatag names `$__drop__`, `$__copy__`, `$__move__`, inferred moves, and
+internal nonescaping places were approved in the roadmap. Their exact call
+signatures and interaction with member cleanup were not. This proposal fills
+that boundary without adding an uninitialized-place syntax.
+
+Proposed member shape (illustrative helpers, not currently executable):
+
+```dewy
+Handle = type of [
+    token:uint64
+    $__drop__
+    release = ():>void => release_token(token)
+    $__copy__
+    duplicate = ():>Handle => Handle[retain_token(token)]
+    $__move__
+    transfer = ():>Handle => Handle[token]
+]
+```
+
+- One tagged member per operation, on a nominal mint. The ordinary member
+  name is descriptive; the metatag selects its compiler role. Tagged members
+  are compiler-invoked only, not manually callable or first-class values.
+- Each hook has no explicit arguments. Its implicit receiver is passed by an
+  internal nonescaping place; invoking a hook never copies the source first.
+  The copy receiver is read-only. Drop/move receivers may consume or update
+  their own fields, subject to the normal ownership checks.
+- Drop returns `void`. It runs while all remaining fields are live, before
+  automatic cleanup of those fields in reverse declaration order. A field
+  already moved out is skipped. The hook is not a replacement for recursive
+  field cleanup, so adding one cannot silently leak strings or containers.
+- Copy returns the same nominal type, as an independently initialized value.
+  Returning/constructing that result does not recursively call this hook.
+  Ordinary copies of its component values still use their own hooks.
+- Move also returns the same nominal type. The old binding is consumed:
+  its drop hook does not run. Remaining fields not transferred into the
+  result still receive their ordinary cleanup. Without a move hook, transfer
+  of representation and ownership is synthesized.
+- A drop hook without a copy hook keeps the approved move-only rule. View
+  selection, conflicting-write diagnostics and last-use transfers remain
+  compiler decisions; this adds no explicit move operator.
+
+The outstanding effect boundary is separate: hooks must not make permitted
+copy elision observable through arbitrary I/O or unrelated state changes, and
+a drop must not replace an in-progress return or error. The current public
+resource rows do not yet prove that a raw address denotes a particular owned
+resource. This proposal does **not** silently authorize arbitrary raw calls
+inside hooks or equate user-minted resources with allocator ownership.
+That boundary needs a follow-up design/implementation decision before useful
+resource-owning hooks can be declared complete.
