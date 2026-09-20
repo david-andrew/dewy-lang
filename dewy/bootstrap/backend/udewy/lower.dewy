@@ -3624,6 +3624,30 @@ object_copy_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     prefix.push(destination)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+# Every literal field binds its name for the fields after it. Only a field
+# some later field actually reads needs a local of its own.
+field_binding_referenced = (literal:hir.ObjectLiteral binding:addr? @state:State):>bool => {
+    if binding is? none return false
+    let pending:array<addr>=[]
+    loop item in literal.fields {pending.push(item.value)}
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let node=hir.node_at(state.input.nodes id)
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id =? binding return true
+        hir.push_children(node @pending)
+    }
+    return false
+}
+# The expression under the statement wrappers that keep its storage.
+peel_statement = (id:addr @state:State):>addr => {
+    let current=id
+    loop true {
+        let node=hir.node_at(state.input.nodes current)
+        if node is? hir.Suppress {current=node.item continue}
+        if node is? hir.Block and not node.scoped and node.items.length =? 1 {current=node.items[0] continue}
+        return current
+    }
+}
 object_literal = (node:hir.ObjectLiteral @state:State):>addr => {
     let layout=object_layout(node.value_type node @state)
     let record=object_type(node.value_type state)
@@ -3635,6 +3659,16 @@ object_literal = (node:hir.ObjectLiteral @state:State):>addr => {
         let field=types.object_field(record item.name)
         let offset=layout.offsets.get(item.name)
         $runtime_assert field isnt? none and offset isnt? none
+        # A record field is inline storage: the write copies the source's
+        # fields (retaining what they own) straight into the literal's block.
+        # A source that is a view of existing storage (a field, an element,
+        # a local) is read at the write; only a source that owns fresh
+        # storage needs the owned value, which is released after the write.
+        let source=peel_statement(item.value @state)
+        if not field_binding_referenced(node item.binding_id @state) and object_valued(field.value_type state) and not expression_owns(source @state) and hir.node_at(state.input.nodes source) is? hir.MemberAccess|hir.Index|hir.ExpressedIdentifier {
+            prefix.push(field_write(address(destination offset node @state) expression(item.value @state) field.value_type node @state))
+            continue
+        }
         let value=owned_value(item.value @state 'placed in a record literal')
         if item.binding_id isnt? none {
             let name=symbol(item.name item.binding_id @state)

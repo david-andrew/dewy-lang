@@ -1,0 +1,45 @@
+# A record field of record type is inline storage. Placing a field, element
+# or local of that type into a literal copies its fields straight into the
+# literal's block (retaining what they own), with no temporary block for
+# the source: N literals with such a field cost N allocations, and a string
+# owned by the copied record outlives the source.
+Span:type=[start:int64 stop:int64]
+Named:type=[label:string count:int64]
+Node:type=[loc:Span value:int64]
+Entry:type=[name:Named loc:Span]
+let allocated=():>int64=>_arena_allocated_bytes
+let live=():>int64=>_arena_live_bytes
+let build=(source:Node i:int64):>Node=>Node[source.loc i]
+let fresh=(i:int64):>Node=>Node[Span[3 9] i]
+let label=(items:array<Entry> i:addr):>Entry|none=>{
+    if i >=? items.length return none
+    return Entry[items[i].name items[i].loc]
+}
+let main=():>int64=>{
+    let template=Node[Span[3 9] 0]
+    let probe=build(template 0)
+    let one=allocated()
+    let second=build(template 1)
+    let view_cost=allocated()-one
+    let two=allocated()
+    let third=fresh(2)
+    let fresh_cost=allocated()-two
+    # A field read from a view costs no block of its own; a fresh nested
+    # literal needs one for the nested record.
+    if view_cost >=? fresh_cost return 1
+    let nodes:array<Node>=[]
+    loop i in 0.. and i <? 256 {nodes.push(build(template i))}
+    loop i in 0.. and i <? nodes.length {
+        let node=nodes[i]
+        if node.loc.start not=? 3 or node.loc.stop not=? 9 or node.value not=? i return 2
+    }
+    let entries:array<Entry>=[Entry[Named['alpha' 1] Span[1 2]] Entry[Named['beta' 2] Span[3 4]]]
+    let copied=label(entries 1)
+    if copied is? none return 3
+    let dropped=entries.pop
+    let first=entries.pop
+    if dropped.name.count not=? 2 or first.name.count not=? 1 return 6
+    if copied.name.label not=? 'beta' or copied.name.count not=? 2 or copied.loc.stop not=? 4 return 4
+    if probe.value not=? 0 or second.value not=? 1 or third.loc.stop not=? 9 return 5
+    return 42
+}

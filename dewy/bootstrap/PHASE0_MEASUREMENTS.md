@@ -4577,3 +4577,34 @@ later family-sized allocations checked) fails with the previous compiler
 generation passes the bundle 97/4. Cost: 8 record copies. Lesson recorded
 in the protocol: a lowering slice is verified only when the fixture bundle
 passes with the second generation, not just the first.
+
+### Record literal fields written from views (2026-09-20)
+
+The largest container-read copy was the smallest record: 793 of the 1,201
+`placed in a record literal` container reads were `[start:int64
+stop:int64]`, the `Span` every `hir.X[node.loc ...]` constructor carries.
+A record-typed field is inline storage, and `object_literal` built each
+such field by copying the source into a fresh block (`owned_value`),
+writing that block's fields into the literal, and releasing it: an
+allocation, two field copies and a free for a two-word value. The literal
+now writes the fields straight from the source when the source is a view
+of existing storage (a field, element or local read that does not own
+fresh storage, under the statement wrappers) and no later field of the
+same literal reads the field's binding (every literal field binds its name
+for the fields after it; `field_binding_referenced` checks whether any
+does). `object_write` already copies fields with the retains they need, so
+the write is the same helper the owned path used, minus the temporary.
+
+Compiler-wide copies: 4,526 to 3,311 (records 3,126 to 1,911; `placed in
+a record literal` container reads 1,201 to 0 for record sources). The
+borrow report also now names two more reasons instead of the generic
+no-move message: `the callee is not resolved statically` (363: method
+calls and function values the plan cannot pair) and `it is passed as a
+rest argument`, so the no-move bucket fell from 1,998 to 1,328 by
+attribution alone. Fixture `native_literal_field_views`: a literal whose
+record field comes from a parameter's field allocates 32 bytes against 56
+for the same literal with a fresh nested literal (before: 56 and 56), and
+a record with a string field placed into a literal from an array element
+keeps its string after the elements are popped. Second generation passes
+the bundle 98/4. The hosted lowering builds records in frame cells and
+never reported this site, so the reports converge.

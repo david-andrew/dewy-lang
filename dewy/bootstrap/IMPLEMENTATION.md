@@ -527,7 +527,11 @@ the native fixed point is not grounds for retiring them yet.
   memory intrinsic, a system call or a non-scalar transmute
   (`effects.raw_callee`), and every other callee is a value boundary that
   decides for itself, so a raw operation deeper in the call graph no longer
-  disqualifies the argument. A place parameter that no caller ever binds to a global route
+  disqualifies the argument. A record-typed literal field whose source is
+  a view (a field, element or local read that owns no fresh storage) is
+  written straight from that view by `object_write` when no later field of
+  the literal reads the field's binding (`object_literal`,
+  `field_binding_referenced`), instead of through a copied temporary. A place parameter that no caller ever binds to a global route
   is stable regardless of global writes below it. `let x = route` of a
   stable root is a view, as is a getter call read transiently (field, test,
   index), and wrapper getters whose body returns another getter's call are
@@ -1809,8 +1813,8 @@ identifiers name the missing move or, when the borrow analysis considered
 the binding as an argument and rejected it, its recorded rejection
 (`borrowing.Plan.rejections`, filled where `details` decides an argument is
 not borrowed: raw-exposing callee for an array or cell argument, global,
-dirty place, unknown effects, callee writes or keeps, conflicting
-argument). `lower.Result.notes` carries them to
+dirty place, unresolved callee, unpaired arguments, rest argument, unknown
+effects, callee writes or keeps, conflicting argument). `lower.Result.notes` carries them to
 `invocation/compiler.dewy`, whose `analyze` command prints one `copy:
 path:row: ...` line and an `Info` excerpt per note plus a `copy report:`
 summary, before the representation notes. The hosted compiler prints the

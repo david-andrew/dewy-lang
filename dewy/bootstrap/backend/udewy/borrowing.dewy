@@ -581,7 +581,13 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         let direct=captures.resolve(node.func node.selected_method_index plan nodes)
         let targets:array<addr> | none = if direct is? none indirect.get(node.func) else [direct]
         if targets is? none {
-            loop argument in arguments(node) {if hir.node_at(nodes argument) is? hir.Place {unsafe_places.add(argument)}}
+            loop argument in arguments(node) {
+                if hir.node_at(nodes argument) is? hir.Place {unsafe_places.add(argument)}
+                else {
+                    let source=route(peel_argument(argument nodes type_nodes) nodes)
+                    if source isnt? none and source.binding not in? rejections {rejections[source.binding]='the callee is not resolved statically'}
+                }
+            }
             continue
         }
         let allowed_all:set<addr>=set[]
@@ -593,7 +599,13 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             $runtime_assert literal is? hir.FunctionLiteral
             let pairs=effects.pair_arguments(node literal)
             if pairs is? none {
-                loop argument in arguments(node) {if hir.node_at(nodes argument) is? hir.Place {unsafe_places.add(argument)}}
+                loop argument in arguments(node) {
+                    if hir.node_at(nodes argument) is? hir.Place {unsafe_places.add(argument)}
+                    else {
+                        let source=route(peel_argument(argument nodes type_nodes) nodes)
+                        if source isnt? none and source.binding not in? rejections {rejections[source.binding]='the arguments could not be paired with the parameters'}
+                    }
+                }
                 allowed_all.clear temporary_all.clear
                 break
             }
@@ -629,7 +641,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 else {
                     rejected.add(pair.argument)
                     if source isnt? none {
-                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? plan.globals 'it is a global' else if source.binding in? places and direct in? dirty 'it is a place argument of a call that writes' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
+                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? plan.globals 'it is a global' else if source.binding in? places and direct in? dirty 'it is a place argument of a call that writes' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
                     }
                 }
                 position+=1

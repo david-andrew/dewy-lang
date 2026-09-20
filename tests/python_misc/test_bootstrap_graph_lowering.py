@@ -26,6 +26,7 @@ REFINED_TAG_CASES = [
     (ROOT / 'tests/fixtures/native_optional_flow_join.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_owned_union_temporaries.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_narrowed_payload_layouts.dewy').read_text(),
+    (ROOT / 'tests/fixtures/native_literal_field_views.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_read_temporaries.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_iterator_temporaries.dewy').read_text(),
     (ROOT / 'tests/fixtures/native_static_strings.dewy').read_text(),
