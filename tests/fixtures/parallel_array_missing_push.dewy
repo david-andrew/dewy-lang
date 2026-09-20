@@ -1,0 +1,9 @@
+# One branch breaks the candidate invariant. Entry equality is insufficient.
+parallel=(count:int64):>int64=>{
+    let xs:array<int64>=[]
+    let ys:array<int64>=[]
+    loop i in [0..count) {xs.push(1) if i not=? 50 {ys.push(2)}}
+    loop j in [0..xs.length) {$runtime_assert ys[j]=?2}
+    return 42
+}
+main=():>int64=>parallel(100)

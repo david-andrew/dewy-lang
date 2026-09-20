@@ -661,6 +661,36 @@ class _LoopTransfer:
     continues: dict[int, list[State]]
 
 
+def _seed_loop_equalities(state: State, assigned: set[int], registry: sb.BindingRegistry) -> State:
+    """Offer a bounded set of equality qualifiers to the loop fixed point.
+
+    Exact entry values establish the candidates; every backedge must preserve
+    them. A star per value group uses linear space rather than all pairs.
+    Once intervals widen, these relations can still connect two changing
+    lengths, or a length and a loop counter. This adds no assumed invariant.
+    """
+    result = dict(state)
+    representatives: dict[int, int] = {}
+    remaining = 64
+    for term, interval in state.items():
+        if not (term >= 0 or _is_length_key(term)):
+            continue
+        binding_id = term if term >= 0 else -term - 1
+        binding = registry.by_id.get(binding_id)
+        root = binding.route_root if binding is not None and binding.route_root is not None else binding_id
+        if root not in assigned or interval.lower is None or interval.lower != interval.upper:
+            continue
+        if remaining == 0:
+            break
+        remaining -= 1
+        other = representatives.setdefault(interval.lower, term)
+        if other != term:
+            equality = Interval(0, None, capped=interval.capped or state[other].capped)
+            result[_order_key(term, other)] = equality
+            result[_order_key(other, term)] = equality
+    return result
+
+
 def _maximum_lower(left: int | None, right: int | None) -> int | None:
     if left is None:
         return right
@@ -1795,6 +1825,7 @@ class _BoundsValidator:
         *,
         validate: bool,
     ) -> State:
+        state = _seed_loop_equalities(state, self.assigned, self.registry)
         head = dict(state)
         for _ in range(8):
             true_state = self._refine(head, condition, truth=True)
@@ -1931,6 +1962,7 @@ class _BoundsValidator:
         analyzed from the entry state only and its growth across iterations
         would be invisible.
         """
+        state = _seed_loop_equalities(state, self.assigned, self.registry)
         head = dict(state)
         for _ in range(8):
             transfer = self._loop_transfer(body, enter(head), validate=False)
@@ -3628,15 +3660,20 @@ class _BoundsValidator:
         return constant.lower if op == '+=' else -constant.lower
 
     def _shifted_facts(self, state: State, term: int, shift: int) -> dict[int, Interval]:
-        """The order and remainder facts on `term` after a constant shift,
-        each gap moved by the constant (dropped when it would go negative)."""
+        """Substitute a constant shift into both sides of an order relation.
+
+        Negative gaps are useful evidence too: increasing the other term
+        later can restore equality. Remainders retain their existing bounded
+        offset rule, separate from this two-term affine transfer.
+        """
         shifted: dict[int, Interval] = {}
         for key, interval in state.items():
             if interval.lower is None:
                 continue
             order = _decode_order_fact(key)
-            if order is not None and order[0] == term and interval.lower - shift >= 0:
-                shifted[key] = Interval(interval.lower - shift, None)
+            if order is not None and term in order:
+                coefficient = int(order[1] == term) - int(order[0] == term)
+                shifted[key] = Interval(interval.lower + coefficient * shift, None, capped=interval.capped)
                 continue
             remainder = _decode_remainder_fact(key)
             if remainder is not None and remainder[2] == term and interval.lower - shift >= 0:

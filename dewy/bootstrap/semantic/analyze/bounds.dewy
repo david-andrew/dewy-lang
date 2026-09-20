@@ -847,6 +847,15 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool):>
             return finite_iterator_loop(arm iterator iterators count incoming @checker validate)
         }
     }
+    let changing:set<addr>=set[]
+    loop entry in incoming.values {
+        let fact=entry.fact
+        if fact isnt? facts.Value continue
+        let route=bindings.route_at(checker.data.registry fact.term.binding_id)
+        let root=if route is? none fact.term.binding_id else route.root
+        if root in? checker.assigned {changing.push(fact.term.binding_id)}
+    }
+    incoming=facts.seed_loop_equalities(incoming changing)
     let head=incoming
     # Widening prevents an accumulator from retaining the entry interval
     # forever. Narrowing then recovers bounds imposed by a while guard.

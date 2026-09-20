@@ -1,0 +1,10 @@
+# A length and a counter start equal and advance together. The proof must
+# survive the intermediate state between the push and the increment.
+build=(count:int64<n=>n>=?0 and n<=?1000>):>int64=>{
+    let values:array<int64>=[]
+    let i:int64=0
+    loop i <? count {values.push(7) i+=1}
+    if count >? 0 {$runtime_assert values[count-1]=?7}
+    return 42
+}
+main=():>int64=>build(100)

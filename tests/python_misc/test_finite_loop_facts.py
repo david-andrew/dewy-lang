@@ -12,10 +12,11 @@ from test_bootstrap_lowering import ROOT
 
 ERRORS = [(ROOT / 'tests/fixtures' / f'{name}.dewy').read_text() for name in (
     'finite_loop_late_index', 'finite_loop_early_break', 'finite_loop_late_narrowing',
+    'parallel_array_missing_push', 'loop_length_early_break',
 )]
 
 
-@pytest.mark.parametrize('name', ['finite_loop_facts', 'nonzero_field_bounds'])
+@pytest.mark.parametrize('name', ['finite_loop_facts', 'nonzero_field_bounds', 'parallel_array_invariant', 'loop_length_counter_invariant'])
 def test_finite_loop_facts(tmp_path, name):
     source = ROOT / 'tests/fixtures' / f'{name}.dewy'
     output = tmp_path / 'finite-loops.udewy'

@@ -300,16 +300,49 @@ widen = (previous:State current:State context:Context):>State => {
     return result
 }
 
-# Preserve the same affine relations as the hosted pass. Other relations
-# are forgotten by the assignment, then this set is restored. In particular,
-# a weakening that makes the known gap negative supplies no bound to retain.
+# Exact entry values suggest equality qualifiers, never assumptions. The
+# loop fixed point keeps only those preserved by every backedge. A star per
+# value group is linear in size; a shared vocabulary limit bounds the work.
+EqualityCandidate:type = const [number:bigint term:Term capped:bool]
+seed_loop_equalities = (state:State changing:set<addr>):>State => {
+    let result=state
+    let representatives:array<EqualityCandidate>=[]
+    let remaining:addr=64
+    loop entry in state.values {
+        let fact=entry.fact
+        if fact isnt? Value or fact.term.binding_id not in? changing or entry.interval.lower is? none or not ranges.same_endpoint(entry.interval.lower entry.interval.upper) continue
+        if remaining =? 0 break
+        remaining-=1
+        let exact=entry.interval.lower
+        let other:EqualityCandidate?=none
+        loop candidate in representatives {if candidate.number =? exact {other=candidate break}}
+        if other is? none {representatives.push(EqualityCandidate[exact fact.term entry.interval.capped]) continue}
+        if same_term(other.term fact.term) continue
+        let capped=entry.interval.capped or other.capped
+        put(@result order(fact.term other.term) ranges.Interval[0 none capped])
+        put(@result order(other.term fact.term) ranges.Interval[0 none capped])
+    }
+    return result
+}
+
+# Substitute a scalar's constant shift into either side of an order fact.
+# Negative gaps remain evidence; a later shift of the other term can restore
+# equality. Remainders retain their separate, bounded-offset transfer rule.
 shifted = (state:State term:Term shift:bigint):>State => {
     let result=State[]
     loop entry in state.values {
         if entry.interval.lower is? none continue
         let fact = entry.fact
         let eligible:bool = false
-        if fact is? Order { eligible = same_term(fact.smaller term) }
+        if fact is? Order {
+            let smaller=same_term(fact.smaller term)
+            let larger=same_term(fact.larger term)
+            if smaller or larger {
+                let adjustment=if smaller =? larger 0 else if larger shift else -shift
+                put(@result fact ranges.Interval[entry.interval.lower+adjustment none entry.interval.capped])
+            }
+            continue
+        }
         if fact is? Remainder { eligible = term.projection =? 'value' and fact.offset =? term.binding_id }
         let gap = entry.interval.lower - shift
         if eligible and gap >=? 0 { put(@result fact ranges.Interval[gap none]) }

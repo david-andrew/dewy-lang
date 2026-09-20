@@ -1,0 +1,9 @@
+# A break before the matching increment must retain the shorter length.
+build=(count:int64<n=>n>=?0 and n<=?1000>):>int64=>{
+    let values:array<int64>=[]
+    let i:int64=0
+    loop i <? count {if i=?50 break values.push(7) i+=1}
+    if count >? 0 {$runtime_assert values[count-1]=?7}
+    return 42
+}
+main=():>int64=>build(100)

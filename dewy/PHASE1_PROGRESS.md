@@ -83,7 +83,7 @@ second-generation compiler built in 48.63 seconds; the C-built seed's first
 generation took 21.71 seconds. This remains above the direct-route target.
 Hosted copy/report gates passed 11 tests. All 14 focused parity cases
 passed against the second-generation native compiler, including independent
-expected panic diagnostics; the full corpus run is in progress.
+expected panic diagnostics; the fresh full 211-case corpus also passed against that compiler.
 
 Design review: `PHASE1_DESIGN_PROPOSALS.md` contains proposed proof and effect
 surfaces. David requested approval before implementation. These proposals
@@ -96,3 +96,15 @@ expression. Coefficient multiplication and parenthesized calls retain their
 distinct precedences. Hosted parser/semantic/ownership gates passed 67 tests;
 a rebuilt native compiler rejects the ambiguous-union fixture and runs the
 precedence fixture with result 42.
+
+Checkpoint: loop analysis now proposes a bounded equality vocabulary from
+exact entry values of changing bindings and their field/length routes. The
+ordinary loop fixed point must preserve each candidate on every backedge;
+branch and early-break exits still join their actual facts. Constant scalar
+shifts transform both sides of order relations, preserving negative gaps
+between matching increments. This proves parallel-array length equality and
+length/counter growth through unbounded trip counts. Missing pushes and
+early breaks reject. Ten targeted proof tests and all 21 focused parity
+cases passed. The updated compiler builds using the preceding direct native
+compiler (50.12 seconds); second-generation timing remains to be measured.
+The wider symbolic range-iterator and proof-boundary work remains pending.
