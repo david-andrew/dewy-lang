@@ -34,7 +34,7 @@ No unchecked external proof certificates.
 
 ## Proof functions — revised proposal, awaiting review
 
-Use `$proof`, with the conclusion in a fact-only return annotation:
+Use `$proof`, with the conclusion in the existing fact-only return notation:
 
 ```dewy
 $proof
@@ -44,8 +44,9 @@ ordered = (a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):> <a <=? c> => {
 }
 ```
 
-This extends the existing `<predicate>` fact notation to a complete return
-contract. It means “establish this fact,” rather than “produce a Boolean that
+The compiler already recognizes `:> <facts>` as a return contract carrying
+facts about parameters and no runtime value. Reuse it here. It means
+“establish this fact,” rather than “produce a Boolean that
 might be false.” The parameter annotations supply the preconditions; the
 body supplies the checked argument; the return annotation names exactly what
 the caller gains. There is no `$proves` statement hidden in the body.
@@ -79,17 +80,17 @@ vacuously true. Branches and calls to other checked proof functions can
 structure a larger argument. A future richer proof language can produce the
 same checked conclusion representation.
 
-A spelling requiring less new type syntax would be `:> void & <P>`. I favor
-`:> <P>` for proof functions because the returned information is the fact
-itself; the `void` is only a representation detail. This fact-only contract
-is a proposed extension, not something the compiler already supports.
-Initially it is restricted to `$proof` functions; ordinary result-bearing
-functions retain their existing refined return types. General first-class
-proof values and effectful functions returning standalone facts are outside
-this proposal.
+The existing implementation represents this as a refined `void` result and
+checks obligations at explicit returns and fallthrough. That is a useful
+foundation, not a new syntax requirement. The new part is `$proof`'s checked
+termination/purity and erasure, together with the relational proof machinery
+needed for its conclusions. Ordinary functions may still use their existing
+fact-only or value-bearing return contracts; they are not erased merely
+because their result carries facts. General first-class proof values are
+outside this proposal.
 
-Review needed: approve `$proof` and the fact-only `:> <P>` return contract,
-including erasure and the initial terminating/pure subset? David rejected
+Review needed: approve `$proof` using `:> <P>`, including erasure and the
+initial terminating/pure subset? David rejected
 the earlier `$lemma`/body-`$proves` shape; neither will be implemented.
 
 ## Effect contracts
