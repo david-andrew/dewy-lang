@@ -1,0 +1,57 @@
+# Token/AST arenas store unions. Borrow the active cell, then narrow it;
+# no independent cell or payload is needed merely to inspect a node.
+Word:type=[text:string]
+Number:type=[value:int64]
+Token:type=Word|Number
+inspect=(tokens:array<Token length=1>):>int64 & no_effects=>{
+    const token=@tokens[0]
+    if token is? Number return token.value
+    const text=@token.text
+    return text.length
+}
+take=(tokens:array<Token length=1>):>Token=>{
+    const token=@tokens[0]
+    return token
+}
+optional=(value:Word|none):>int64 & no_effects=>{
+    const view=@value
+    if view is? none return 0
+    return view.text.length
+}
+move_owner=():>int64=>{
+    let tokens:array<Token length=1>=[Number[42]]
+    const snapshot=@tokens[0]
+    let taken=tokens
+    taken[0]=Number[99]
+    if snapshot is? Number return snapshot.value
+    return 1
+}
+lifetime=(value:int64):>int64=>{
+    let tokens:array<Token length=1>=[Word["value:{value}"]]
+    const view=@tokens[0]
+    const alias:Token=@view
+    let saved=alias.copy()
+    if saved isnt? Word return 1
+    return saved.text.length
+}
+main=():>int64=>{
+    let words:array<Token length=1>=[Word['forty-two']]
+    let numbers:array<Token length=1>=[Number[42]]
+    inspect(words); inspect(numbers);
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..100) {
+        $runtime_assert inspect(words)=?9 and inspect(numbers)=?42
+    }
+    $runtime_assert _arena_allocated_bytes-before=?0
+    $runtime_assert optional(Word['hello'])=?5 and optional(none)=?0
+    $runtime_assert move_owner()=?42
+    let escaped=take(words)
+    words[0]=Number[99]
+    if escaped isnt? Word return 2
+    $runtime_assert escaped.text=?'forty-two'
+    lifetime(42);
+    let retained:int64=_arena_live_bytes
+    loop i in [0..100) {$runtime_assert lifetime(i)>?0}
+    $runtime_assert _arena_live_bytes-retained=?0
+    return 42
+}

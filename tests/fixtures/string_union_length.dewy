@@ -1,0 +1,14 @@
+# Closed string unions can use an enum word; open ones use a descriptor.
+# Both have the same member semantics and evaluate a receiver only once.
+Choice:type='a'|'bb'|'é'
+length=(value:Choice):>int64 & no_effects=>value.length
+selected=(@calls:int64):>Choice=>{calls+=1 return 'bb'}
+main=():>int64=>{
+    $runtime_assert length('a')=?1
+    $runtime_assert length('bb')=?2
+    $runtime_assert length('é')=?1
+    let calls:int64=0
+    let count=selected(@calls).length
+    $runtime_assert calls=?1 and count=?2
+    return 42
+}

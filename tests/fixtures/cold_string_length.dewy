@@ -1,0 +1,33 @@
+# A pure length/shape query must not allocate a lazy boundary table, even on
+# the first read. Indexing later still builds a correct table when needed.
+join=(left:string right:string):>string=>left+right
+length=(text:string):>int64 & no_effects=>text.length
+single=(text:string):>bool & no_effects=>text is? grapheme
+measure=(left:string right:string expected:int64):>void=>{
+    let text=join(left right)
+    let before:int64=_arena_allocated_bytes
+    let count=length(text)
+    let repeated=length(text)
+    let allocated:int64=_arena_allocated_bytes-before
+    $runtime_assert count=?expected and repeated=?expected
+    $runtime_assert allocated=?0
+    if text.length >? 0 {
+        let first=text[0]
+        $runtime_assert first.length=?1
+        $runtime_assert text.length=?expected
+    }
+}
+main=():>int64=>{
+    measure('ab' 'cd' 4)
+    measure('e' '́' 1)
+    measure('🇺' '🇸' 1)
+    measure('👩‍' '👩‍👧‍👦' 1)
+    measure('\r' '\n' 1)
+    measure('' '' 0)
+    let text=join('e' '́')
+    let before:int64=_arena_allocated_bytes
+    let matched=single(text)
+    let allocated:int64=_arena_allocated_bytes-before
+    $runtime_assert matched and allocated=?0
+    return 42
+}

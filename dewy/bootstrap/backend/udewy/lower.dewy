@@ -357,8 +357,13 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.StringLength {
         let prefix:array<addr>=[]
         let receiver=read_operand(node.string @prefix @state)
-        let source=snapshot(receiver.value @prefix @state)
-        prefix.push(ensure_segmented(source node @state))
+        # A closed string-literal union is an enum word. Decode its active
+        # literal before reading descriptor fields; the enum itself owns no
+        # string storage. Open string alternatives already use descriptors.
+        let stored=hir.node_at(state.input.nodes node.string).value_type
+        let value=if enum_members(stored state) is? none receiver.value else enum_read(receiver.value stored types.primitive('string' @state.type_nodes) node @state)
+        let source=snapshot(value @prefix @state)
+        prefix.push(ensure_length(source node @state))
         return finish_read(read_word(source layouts.string_descriptor.grapheme_length node @state) ReadOperand[source receiver.owner_type] node @prefix @state)
     }
     if node is? hir.StringIndex return string_index(node @state)
@@ -2372,13 +2377,13 @@ string_slice = (node:hir.StringSlice @state:State):>addr => {
 # whole comparison finishes preserves the left value across right-hand calls
 # that replace its source. Bounds still execute once, in source order.
 StringSpan:type = const [root:addr data:addr boundaries:addr start:addr byte_length:addr length:addr]
-string_span = (id:addr @prefix:array<addr> @state:State):>StringSpan => {
+string_span = (id:addr @prefix:array<addr> @state:State offsets:bool=false):>StringSpan => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.ValueCast|hir.RepresentationCast and owned_string(node.value_type state) and owned_string(hir.node_at(state.input.nodes node.expr).value_type state) {
-        return string_span(node.expr @prefix @state)
+        return string_span(node.expr @prefix @state offsets=offsets)
     }
     if node is? hir.StringSlice|hir.StringIndex {
-        let source=string_span(node.string @prefix @state)
+        let source=string_span(node.string @prefix @state offsets=true)
         let first:addr=0
         let count:addr=0
         if node is? hir.StringSlice {
@@ -2401,6 +2406,7 @@ string_span = (id:addr @prefix:array<addr> @state:State):>StringSpan => {
         return StringSpan[source.root source.data boundaries start length count]
     }
     let root=snapshot(owned_value(id @state) @prefix @state)
+    if offsets {prefix.push(ensure_segmented(root node @state))}
     return StringSpan[root read_word(root layouts.string_descriptor.data node @state) read_word(root layouts.string_descriptor.boundaries node @state) read_word(root layouts.string_descriptor.start node @state) read_word(root layouts.string_descriptor.byte_length node @state) read_word(root layouts.string_descriptor.grapheme_length node @state)]
 }
 string_equal = (node:hir.StringEqual @state:State):>addr => {
@@ -2560,12 +2566,12 @@ string_scalars = (value:addr node:hir.AST @state:State):>addr => {
 # Raw literal bytes and compiler-created borrowed byte views use the same
 # descriptor as arrays. A later value copy makes independently mutable
 # storage; merely describing embedded data must not allocate a second copy.
-byte_descriptor = (data:addr length:addr node:hir.AST @state:State static_storage:bool=false):>addr => {
+byte_descriptor = (data:addr length:addr node:hir.AST @state:State static_storage:bool=false frame_storage:bool=false):>addr => {
     let prefix:array<addr>=[]
     let size=word(layouts.array_descriptor.size node @state)
-    let storage=if static_storage intrinsic_call('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else allocation(size node @state)
+    let storage=if static_storage intrinsic_call('__static_alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else if frame_storage intrinsic_call('__alloca__' [size] types.primitive('int64' @state.type_nodes) node @state) else allocation(size node @state)
     let descriptor=snapshot(storage @prefix @state)
-    let flags=layouts.array_flags.borrowed_static + if static_storage 0 else layouts.array_flags.arena_descriptor
+    let flags=layouts.array_flags.borrowed_static + if static_storage or frame_storage 0 else layouts.array_flags.arena_descriptor
     let fields:array<addr>=[data length length word(1 node @state) word(flags node @state) word(0 node @state)]
     let offset:addr=0
     loop field in fields {prefix.push(store_word(field descriptor offset node @state)) offset+=8}
@@ -2647,11 +2653,11 @@ segmented_string_into = (data:addr length:addr node:hir.AST optional:bool @state
 }
 
 # Joined strings are valid UTF-8 by construction, so their grapheme table
-# is built only when a consumer needs graphemes (length, index, slice,
-# iteration, shape tests). Until then the descriptor's boundaries word is
-# zero and its grapheme length is -1; `ensure_segmented` fills both, and
-# records the table in the shared control block so other handles adopt it.
-lazy_strings = (state:State):>bool => state.allocator isnt? none and state.shared_string_descriptors and '_utf8_boundaries_into' in? state.runtime_helpers
+# is built only when a consumer needs offsets (index, slice, iteration).
+# Length/shape reads count without allocating that table. Initially boundaries
+# are zero and length is -1; the count and table are independently cached in
+# the descriptor and backing control so other handles can adopt them.
+lazy_strings = (state:State):>bool => state.allocator isnt? none and state.shared_string_descriptors and '_utf8_boundaries_into' in? state.runtime_helpers and '_utf8_grapheme_scan' in? state.runtime_helpers
 lazy_string = (data:addr length:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     data=snapshot(data @prefix @state) length=snapshot(length @prefix @state)
@@ -2659,6 +2665,52 @@ lazy_string = (data:addr length:addr node:hir.AST @state:State):>addr => {
     prefix.push(string_memory(data length word(0 node @state) word(-1 node @state) word(0 node @state) node @state owner=owner))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+# A scalar query must not allocate a boundary table as a hidden consequence
+# of lazy string construction. Share the same UTF-8/UAX #29 scanner, supplying
+# nonescaping frame descriptors and a scalar result rather than an optional
+# cell. The ordinary segmentation path still constructs offsets on demand.
+ensure_length = (value:addr node:hir.AST @state:State):>addr => {
+    if not lazy_strings(state) return sequence([] node @state)
+    let key='string:count'
+    let name=state.copy_helpers.get(key)
+    let empty=types.primitive('void' @state.type_nodes)
+    if name is? none {
+        let generated=fresh('count_string' @state)
+        name=generated state.copy_helpers[key]=generated
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let parameter=fresh('counted' @state)
+        let source=put(hir.ExpressedIdentifier[node.loc word_type parameter] @state)
+        let body=ensure_length_body(source node @state)
+        let signature=types.function_type([types.PosOrKwArg[parameter word_type]] [] none empty [] @state.type_nodes)
+        let literal=put(hir.FunctionLiteral[node.loc signature [hir.Param[parameter word_type]] [] none empty body source=state.source_index] @state)
+        state.generated.push(program.Function[generated literal])
+    }
+    $runtime_assert name isnt? none
+    return intrinsic_call(name [value] empty node @state)
+}
+ensure_length_body = (value:addr node:hir.AST @state:State):>addr => {
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let body:array<addr>=[]
+    let owner=snapshot(read_word(value layouts.string_descriptor.owner node @state) @body @state)
+    let compute:array<addr>=[]
+    let bytes=snapshot(byte_descriptor(string_data(value node @state) read_word(value layouts.string_descriptor.byte_length node @state) node @state frame_storage=true) @compute @state)
+    let scratch=snapshot(byte_descriptor(word(0 node @state) word(0 node @state) node @state frame_storage=true) @compute @state)
+    compute.push(store_word(word(8 node @state) scratch layouts.array_descriptor.stride node @state))
+    let slot=snapshot(intrinsic_call('__alloca__' [word(8 node @state)] word_type node @state) @compute @state)
+    compute.push(store_word(scratch slot 0 node @state))
+    let checked=snapshot(string_runtime('_utf8_grapheme_scan' [bytes slot word(-1 node @state)] node @state) @compute @state)
+    # Preserve the previous internal invalid-UTF-8 fallback. Ordinary typed
+    # strings are valid; this path does not establish a new failure policy.
+    let count=snapshot(put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type compare('__ge__' checked word(0 node @state) node @state) checked] @state)] word(0 node @state)] @state) @compute @state)
+    compute.push(store_word(count value layouts.string_descriptor.grapheme_length node @state))
+    compute.push(conditional(compare('__ne__' owner word(0 node @state) node @state) store_word(count owner 40 node @state) node @state))
+    let known=put(hir.ShortCircuit[node.loc boolean 'and' compare('__ne__' owner word(0 node @state) node @state) compare('__ge__' read_word(owner 40 node @state) word(0 node @state) node @state)] @state)
+    let adopt=store_word(read_word(owner 40 node @state) value layouts.string_descriptor.grapheme_length node @state)
+    body.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) known adopt] @state)] sequence(compute node @state)] @state))
+    return conditional(compare('__lt__' read_word(value layouts.string_descriptor.grapheme_length node @state) word(0 node @state) node @state) sequence(body node @state) node @state)
+}
+
 ensure_segmented = (value:addr node:hir.AST @state:State):>addr => {
     if not lazy_strings(state) return sequence([] node @state)
     let key='string:segment'
@@ -3464,7 +3516,9 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     # A dictionary lookup hands out the stored record's block; other value
     # kinds are rebuilt by the lookup and must be owned.
     if expr is? hir.DictLookup and not object_valued(expr.value_type state) return false
-    if not releasable(expr.value_type @state) return false
+    # An explicit string/union view may use an immediate enum word. A
+    # stable read then needs no owning storage or release in either form.
+    if not node.view and not releasable(expr.value_type @state) return false
     if node.binding_id is? none return false
     if node.binding_id in? state.boxed return false
     if node.binding_id not in? state.stable_bindings return false
@@ -4941,7 +4995,7 @@ enum_read = (value:addr stored:addr view:addr node:hir.AST @state:State):>addr =
 string_type_test = (value:addr tested:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
     let source=snapshot(value @prefix @state)
-    prefix.push(ensure_segmented(source node @state))
+    let needs_length=false
     let boolean=types.primitive('bool' @state.type_nodes)
     let result=put(hir.Bool[node.loc boolean false] @state)
     loop member in type_tests.members(tested state.type_nodes) {
@@ -4952,13 +5006,15 @@ string_type_test = (value:addr tested:addr node:hir.AST @state:State):>addr => {
             matches=string_equal_values(source literal node false @state)
         } else if type is? types.StringType {
             if type.length is? none {matches=put(hir.Bool[node.loc boolean true] @state)}
-            else {matches=intrinsic_call('__eq__' [read_word(source layouts.string_descriptor.grapheme_length node @state) word(type.length node @state)] boolean node @state)}
+            else {needs_length=true matches=intrinsic_call('__eq__' [read_word(source layouts.string_descriptor.grapheme_length node @state) word(type.length node @state)] boolean node @state)}
         } else if types.is_primitive(type 'string') {matches=put(hir.Bool[node.loc boolean true] @state)}
         else if types.is_primitive(type 'char') or types.is_primitive(type 'grapheme') {
+            needs_length=true
             matches=intrinsic_call('__eq__' [read_word(source layouts.string_descriptor.grapheme_length node @state) word(1 node @state)] boolean node @state)
         }
         if matches isnt? none {result=put(hir.ShortCircuit[node.loc boolean 'or' result matches] @state)}
     }
+    if needs_length {prefix.push(ensure_length(source node @state))}
     prefix.push(result)
     return put(hir.Block[node.loc boolean prefix false] @state)
 }

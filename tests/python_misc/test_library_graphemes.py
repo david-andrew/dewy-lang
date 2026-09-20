@@ -25,7 +25,7 @@ def test_grapheme_runtime_tables_match_generated_data():
         assert (ROOT / 'library/unicode' / name).read_bytes() == content
 
 
-@pytest.mark.parametrize(('mode', 'target'), [('library', 'x86_64'), ('packed', 'x86_64'), ('packed', 'c'), ('runtime', 'x86_64'), ('runtime', 'c')])
+@pytest.mark.parametrize(('mode', 'target'), [('library', 'x86_64'), ('packed', 'x86_64'), ('packed', 'c'), ('runtime', 'x86_64'), ('runtime', 'c'), ('count', 'x86_64'), ('count', 'c')])
 def test_dewy_utf8_grapheme_boundaries(tmp_path, mode, target):
     texts = ['', 'ASCII', 'e\u0301', '👩‍👩‍👧‍👦', '🇺🇸🇨🇦🇫', '\r\n', 'क्\u200dष']
     for line in (ROOT / 'tests/data/GraphemeBreakTest-16.0.0.txt').read_text().splitlines():
@@ -36,6 +36,8 @@ def test_dewy_utf8_grapheme_boundaries(tmp_path, mode, target):
     texts.extend(chr(left) + chr(right) for left in range(128) for right in range(128))
     cases = [text.encode('utf8') for text in texts]
     expected = [','.join(map(str, grapheme_boundary_byte_offsets(text))) for text in texts]
+    if mode == 'count':
+        expected = [str(len(grapheme_boundary_byte_offsets(text)) - 1) for text in texts]
     invalid = [b'\x80', b'\xc0\xaf', b'\xc1\xbf', b'\xc2', b'\xe0\x80\x80', b'\xed\xa0\x80', b'\xf0\x80\x80\x80', b'\xf4\x90\x80\x80', b'\xf5\x80\x80\x80', b'\xe2\x82', b'\xc2A', b'\xff']
     cases.extend(invalid)
     expected.extend(['invalid'] * len(invalid))
@@ -74,6 +76,14 @@ def test_dewy_utf8_grapheme_boundaries(tmp_path, mode, target):
             i+=1
         }
         _arena_release(storage size)
+        """
+    if mode == 'count':
+        segment = """
+        let scratch:array<int64>=[]
+        let count=segmentation.scan(bytes @scratch (-1))
+        $runtime_assert scratch.length =? 0
+        if count <? 0 {printl('invalid') continue}
+        let parts:array<string>=["{count}"]
         """
     source = tmp_path / 'graphemes.dewy'
     source.write_text(f'''

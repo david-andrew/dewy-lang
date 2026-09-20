@@ -490,7 +490,8 @@ let _arena_release = (block:int64 size:int64):>void => {
 
 # Native immutable strings use a private descriptor and shared byte/boundary
 # backing. This is an implementation ownership boundary, not a source alias.
-# The 40-byte control stores refs, data, data size, boundaries, boundary size.
+# The control stores refs, data, data size, boundaries, boundary size and a
+# cached grapheme count, in the 64-byte arena class.
 # A descriptor's owner word (offset 40) is zero for immortal literals. Views
 # retain the original control even when their boundary/data pointers shift.
 let _native_string_owner = (data:int64 size:int64 boundaries:int64 boundary_size:int64):>int64 => {
@@ -500,6 +501,7 @@ let _native_string_owner = (data:int64 size:int64 boundaries:int64 boundary_size
     __store_i64__(size owner+16)
     __store_i64__(boundaries owner+24)
     __store_i64__(boundary_size owner+32)
+    __store_i64__((-1) owner+40)  # unknown until counted or segmented
     return owner
 }
 let _native_string_view_owner = (value:int64):>int64 => {

@@ -43,9 +43,11 @@ property = (table:array<uint8> scalar:int64):>int64 => {
 # A zero destination collects public word offsets. The native string runtime
 # supplies space for (byte_length+1) uint32 offsets instead, so segmentation
 # writes the final table without a growable word array and a narrowing copy.
-# Both consumers run the same validation and UAX #29 state machine.
-let segment = (bytes:array<uint8> @result:array<int64> destination:int64):>int64|none => {
-    if destination =? 0 {result.push(0)} else {__store_u32__(0 destination)}
+# A negative destination counts without writing either sink. The scanner
+# returns -1 for malformed UTF-8, avoiding an allocated optional result on
+# the count-only runtime path. Public wrappers retain their optional APIs.
+let scan = (bytes:array<uint8> @result:array<int64> destination:int64):>int64 => {
+    if destination =? 0 {result.push(0)} else if destination >? 0 {__store_u32__(0 destination)}
     let boundaries:int64=1
     let offset:int64=0
     let previous:int64=GCB.other
@@ -64,7 +66,7 @@ let segment = (bytes:array<uint8> @result:array<int64> destination:int64):>int64
             loop offset <? bytes.length and bytes[offset] >=? 0x20 and bytes[offset] <? 0x7f {
                 if offset >? 0 {
                     if destination =? 0 {result.push(offset)}
-                    else {__store_u32__(offset transmute uint32 destination+boundaries*4)}
+                    else if destination >? 0 {__store_u32__(offset transmute uint32 destination+boundaries*4)}
                     boundaries+=1
                 }
                 offset+=1
@@ -82,18 +84,18 @@ let segment = (bytes:array<uint8> @result:array<int64> destination:int64):>int64
         if first >=? 0xc2 and first <=? 0xdf {scalar=first and 0x1f count=2 minimum=0x80}
         else if first >=? 0xe0 and first <=? 0xef {scalar=first and 0x0f count=3 minimum=0x800}
         else if first >=? 0xf0 and first <=? 0xf4 {scalar=first and 0x07 count=4 minimum=0x10000}
-        else if first >=? 0x80 return none
-        if count >? bytes.length-offset return none
+        else if first >=? 0x80 return -1
+        if count >? bytes.length-offset return -1
         let index:int64=1
         loop index <? count {
             let position:int64=offset+index
             $runtime_assert position >=? 0 and position <? bytes.length
             let next=bytes[position] as int64
-            if next <? 0x80 or next >? 0xbf return none
+            if next <? 0x80 or next >? 0xbf return -1
             scalar=(scalar<<6)+(next and 0x3f)
             index+=1
         }
-        if scalar <? minimum or scalar >? 0x10ffff or scalar >=? 0xd800 and scalar <=? 0xdfff return none
+        if scalar <? minimum or scalar >? 0x10ffff or scalar >=? 0xd800 and scalar <=? 0xdfff return -1
         # ASCII has no Indic or pictographic properties. Resolve its four
         # grapheme classes directly; CR/LF still follows GB3 below. Besides
         # avoiding binary searches, this keeps ordinary compiler text out of
@@ -123,7 +125,7 @@ let segment = (bytes:array<uint8> @result:array<int64> destination:int64):>int64
         else if previous =? GCB.regional_indicator and current =? GCB.regional_indicator and regional_run % 2 =? 1 {boundary=false}
         if offset >? 0 and boundary {
             if destination =? 0 {result.push(offset)}
-            else {__store_u32__(offset transmute uint32 destination+boundaries*4)}
+            else if destination >? 0 {__store_u32__(offset transmute uint32 destination+boundaries*4)}
             boundaries+=1
         }
 
@@ -138,10 +140,16 @@ let segment = (bytes:array<uint8> @result:array<int64> destination:int64):>int64
     }
     if offset >? 0 {
         if destination =? 0 {result.push(offset)}
-        else {__store_u32__(offset transmute uint32 destination+boundaries*4)}
+        else if destination >? 0 {__store_u32__(offset transmute uint32 destination+boundaries*4)}
         boundaries+=1
     }
     return boundaries-1
+}
+
+let segment = (bytes:array<uint8> @result:array<int64> destination:int64):>int64|none => {
+    let count=scan(bytes @result destination)
+    if count <? 0 return none
+    return count
 }
 
 let boundaries = (bytes:array<uint8>):>array<int64>|none => {

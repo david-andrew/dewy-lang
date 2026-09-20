@@ -13,7 +13,7 @@ def test_native_string_descriptor_sharing(tmp_path):
         'native_string_descriptor_sharing', 'native_string_lifetimes',
         'native_string_scratch', 'native_string_materialization',
         'native_static_strings', 'native_string_boundary_storage', 'native_word_memory_arguments',
-        'native_string_span_comparisons',
+        'native_string_span_comparisons', 'cold_string_length', 'string_union_length',
     )]
     # A long literal crosses the uint32 offset table's low-byte boundary.
     # Its embedded NUL and multi-scalar graphemes also check static byte order,

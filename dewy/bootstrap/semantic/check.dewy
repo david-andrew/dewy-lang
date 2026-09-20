@@ -2100,7 +2100,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         if env.return_collector is? none return problem(id 'a local view needs a function scope' 'bind the view inside its owning function' env session)
         let target=node_at(value session)
         let shape=types.node_at(session.types types.unfold(types.strip_refinement(target.value_type session.types) session.types))
-        if shape isnt? types.ArrayType|types.ObjectType return pending(id 'local views of this value type' env session)
+        if shape isnt? types.ArrayType|types.ObjectType|types.TypeOr and not views.string_valued(target.value_type session.types) return pending(id 'local views of this value type' env session)
         if target isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index|hir.DictLookup return problem(id 'a local view needs a stored value' 'select a named binding, field, or element' env session)
     }
     if annotation is? none and explicit {
@@ -3160,7 +3160,7 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
             let result = if type.length is? none word else types.integer_literal(type.length @session.types)
             return put(hir.ArrayLength[loc result receiver] @session)
         }
-        if type is? types.StringType|types.StringLiteralType or types.is_primitive(type 'string') {
+        if views.string_valued(value.value_type session.types) {
             let length:addr? = none
             if type is? types.StringType { length = type.length }
             if type is? types.StringLiteralType { length = type.value.length }

@@ -500,3 +500,35 @@ run passed 63/64 cases and caught that `end` regression; it was fixed rather
 than changing the fixture's expected result. All 64 cases passed on the final focused rerun. Hosted follow-up gates
 passed 94 and 74 checks, covering the changed
 diagnostics, width-aware addressing, effectful indices and local views.
+
+The full paired corpus at the local-view/index checkpoint passed 211/211
+cases. This run preceded the following union and lazy-string changes.
+
+Union-view checkpoint: required local views now support tagged unions,
+optionals, strings and string-literal enums. They retain the source owner
+through dependent views and allocate neither replacement cells nor string
+handles. Pure inspection of ordinary by-value input can declare
+`no_effects`; a view does not hide a place parameter's external read.
+Native `.length` also accepts closed string-literal unions by decoding the
+active enum before reading its descriptor.
+
+A cold native string length or grapheme-type query now counts without
+allocating a boundary table. The shared Unicode scanner has a count-only
+sink, with a scalar invalid-input result; existing public segmentation
+wrappers preserve their optional results. Compiler-created frame views call
+that scanner directly through an imported binding, avoiding a by-value
+wrapper's conservative copy. Length and boundary-table caches are separate.
+Index/slice comparisons now explicitly request offsets instead of depending
+on an earlier length read to have materialized them. General runtime
+refinement-predicate tests remain pending; the shape kernel uses `grapheme`.
+
+Validation: the union batch passed 103 hosted effect/row/view checks and
+65/65 paired cases at its earlier snapshot. The completed string batch
+passed 16 hosted checks, including count-only Unicode conformance and all
+ASCII pairs on x86 and C. Native descriptor/lifetime/scratch/Unicode/string
+comparison regressions passed on both targets. Cold ASCII and Unicode
+length/shape queries allocate zero bytes and later indexing remains valid.
+Two generations execute all three new kernels with result 42. Their builds
+took 62.89s and 67.40s (the latter shared the machine with another integration
+job), above the native target. The expanded 67-case paired run is in progress.
+Artifacts: `../dewy-build-artifacts/phase1-string-count-stage3-2026-09-20`.

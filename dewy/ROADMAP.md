@@ -423,10 +423,10 @@ in both lowerings and the parity tool is the gate.
   sharp edges (`semantic/resource_exhaustion.md`).
 
 Progress on 2026-09-20: explicit `const name = @route` demands are implemented
-for local records and arrays in both compilers. They use the existing stable
+for local records, arrays, strings and unions in both compilers. They use the existing stable
 storage proof, retain owner liveness through dependent views, and report
 conflicting writes instead of copying. The initial proof requires stability
-throughout the function. Mutable local places, other value kinds and finer
+throughout the function. Mutable local places, scalar views and finer
 lifetime analysis remain pending.
 
 ### 1.2 The proof engine

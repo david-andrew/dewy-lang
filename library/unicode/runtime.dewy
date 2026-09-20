@@ -9,3 +9,9 @@ let _utf8_boundaries = (bytes:array<uint8>):>array<int64>|none => _graphemes.bou
 # The supplied buffer is the final native string boundary table. Keep the
 # word-array entry above for older bootstrap seeds and the public library API.
 let _utf8_boundaries_into = (bytes:array<uint8> destination:int64):>int64|none => _graphemes.write_boundaries(bytes destination)
+
+# Compiler-private scanner entry: preserve the original function identity so
+# native lowering can pass its frame views directly, without an intervening
+# by-value wrapper. The caller supplies a disjoint scratch sink and selects
+# negative destination mode for allocation-free scalar counting.
+from p"graphemes.dewy" import scan as _utf8_grapheme_scan

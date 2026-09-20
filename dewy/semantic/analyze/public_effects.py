@@ -149,7 +149,9 @@ def validate(root, registry, srcfile):
                             unknown()  # logical aggregate transfer not proved
                 return
             if isinstance(node, hir.Declare):
-                if not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)):
+                # A required view cannot silently allocate a replacement;
+                # lowering must prove the storage demand or reject it.
+                if not node.view and not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)):
                     unknown()  # no promise about an implicit aggregate copy yet
                 visit(node.expr)
                 return

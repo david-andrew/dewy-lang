@@ -125,7 +125,8 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     }
     if node is? hir.Declare {
         let value=hir.node_at(input.nodes node.expr)
-        if not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {unknown(@scan)}
+        # A required view has no copy fallback: lowering proves or rejects it.
+        if not node.view and not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {unknown(@scan)}
         visit(node.expr input @scan)
         return
     }
