@@ -4608,3 +4608,26 @@ a record with a string field placed into a literal from an array element
 keeps its string after the elements are popped. Second generation passes
 the bundle 98/4. The hosted lowering builds records in frame cells and
 never reported this site, so the reports converge.
+
+### Call arguments borrow through relative casts (2026-09-20)
+
+An instrumented compiler classified the `passed to a call` copies the
+report could not explain: 818 value casts and 26 representation casts
+whose argument was never considered for borrowing, because the borrow
+plan's `peel_argument` and the lowering's `peel_borrowed` looked through
+string casts only. Most were the checker's implicit upcasts, a narrowed
+`hir.FunctionCall` local passed where `hir.AST` is expected. A record read
+as a relative is the same block under another static type (the family's
+layouts share their parent fields; only the block size differs, which
+matters to a release, not to a read), so both peelers now look through a
+value cast between record types, and the borrowed argument passes the
+child's handle to the callee's read-only parameter.
+
+Compiler-wide copies: 3,311 to 2,507 (records 1,911 to 1,107); the
+generic no-move reason 1,328 to 699. Fixtures 98/4 with the first
+generation and 98/4 with the second. Remaining: 890
+container reads without a view (cells and arrays, plus records at
+non-literal sites), 699 no-move (mostly `push` arguments, which the move
+analysis does not yet treat as a transfer, and records placed in literals
+while the local is still used), 218 unresolved callees (array methods and
+function values), 169 raw-blocked arrays and cells.

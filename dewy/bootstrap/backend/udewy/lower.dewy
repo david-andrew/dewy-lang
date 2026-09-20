@@ -3907,8 +3907,11 @@ peel_borrowed = (id:addr @state:State):>addr? => {
         if node is? hir.Block and not node.scoped and node.items.length =? 1 {current=node.items[0] continue}
         if node is? hir.ValueCast|hir.RepresentationCast {
             let inner=hir.node_at(state.input.nodes node.expr)
-            if not (owned_string(node.value_type state) and owned_string(inner.value_type state)) return none
-            current=node.expr continue
+            if owned_string(node.value_type state) and owned_string(inner.value_type state) {current=node.expr continue}
+            # A record read as a relative is the same block; the borrowing
+            # callee reads the fields both layouts share.
+            if node is? hir.ValueCast and object_valued(node.value_type state) and object_valued(inner.value_type state) {current=node.expr continue}
+            return none
         }
         return current
     }

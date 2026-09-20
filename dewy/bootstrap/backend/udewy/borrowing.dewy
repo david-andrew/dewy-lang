@@ -47,6 +47,9 @@ peel_argument = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>addr => {
             let outer_plain=types.unfold(types.strip_refinement(node.value_type type_nodes) type_nodes)
             let inner_plain=types.unfold(types.strip_refinement(inner.value_type type_nodes) type_nodes)
             if views.string_valued(outer_plain type_nodes) and views.string_valued(inner_plain type_nodes) {current=node.expr continue}
+            # A record read as a relative (a child passed where its parent
+            # is expected) is the same block under another static type.
+            if node is? hir.ValueCast and record_value(current nodes type_nodes) and record_value(node.expr nodes type_nodes) {current=node.expr continue}
         }
         return current
     }

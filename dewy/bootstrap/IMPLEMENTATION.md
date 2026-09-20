@@ -531,7 +531,10 @@ the native fixed point is not grounds for retiring them yet.
   a view (a field, element or local read that owns no fresh storage) is
   written straight from that view by `object_write` when no later field of
   the literal reads the field's binding (`object_literal`,
-  `field_binding_referenced`), instead of through a copied temporary. A place parameter that no caller ever binds to a global route
+  `field_binding_referenced`), instead of through a copied temporary.
+  Argument borrowing looks through a value cast between record types
+  (`peel_argument`, `peel_borrowed`): a child passed where its parent is
+  expected is the same block. A place parameter that no caller ever binds to a global route
   is stable regardless of global writes below it. `let x = route` of a
   stable root is a view, as is a getter call read transiently (field, test,
   index), and wrapper getters whose body returns another getter's call are
