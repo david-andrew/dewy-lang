@@ -1,0 +1,50 @@
+# The @ forms demand the same stable-storage proof as inferred views.
+# They are an escape hatch while inference improves, not a new value model.
+Box:type=[value:int64 items:array<int64>]
+read=(boxes:array<Box length=1>):>int64=>{
+    const box=@boxes[0]
+    const items=@box.items
+    if items.length <? 1 return 1
+    return box.value+items[0]
+}
+# Returning a view's value still crosses an ordinary value boundary.
+take=(box:Box):>array<int64>=>{
+    const items=@box.items
+    return items
+}
+move_owner=():>int64=>{
+    let boxes:array<Box>=[Box[20 [22]]]
+    const saved=@(boxes[0])
+    let taken=boxes
+    taken[0].value=99
+    if saved.items.length <? 1 return 1
+    return saved.value+saved.items[0]
+}
+whole=(box:Box):>int64=>{
+    const view=@box
+    const again:Box=@view
+    return again.value
+}
+raw=():>int64=>{
+    let source=[20 22]
+    const view=@source
+    return view[0]+view[1]
+}
+answer=():>int64=>42
+main=():>int64=>{
+    let boxes:array<Box length=1>=[Box[20 [22]]]
+    read(boxes);
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..100) {$runtime_assert read(boxes)=?42}
+    $runtime_assert _arena_allocated_bytes-before=?0
+    let escaped=take(Box[0 [42]])
+    if escaped.length <? 1 return 2
+    escaped[0]=41
+    $runtime_assert escaped[0]=?41
+    $runtime_assert whole(Box[42 []])=?42
+    $runtime_assert move_owner()=?42 and raw()=?42
+    # An existing function handle is not a storage-view demand.
+    const f=@answer
+    $runtime_assert f()=?42
+    return 42
+}

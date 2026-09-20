@@ -236,6 +236,9 @@ class Declare(AST):
     annotation: ty.Type | None        # explicit `:T` on the binding, if any; AST.type is still void
     expr: AST
     binding_id: int | None = field(default=None, kw_only=True)
+    # A source `const name = @route` requires a proven view; never copy it
+    # silently when the storage/lifetime proof is unavailable.
+    view: bool = field(default=False, kw_only=True)
 
 @dataclass(slots=True, weakref_slot=True)
 class ExpressedIdentifier(AST):

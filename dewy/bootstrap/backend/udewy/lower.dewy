@@ -85,6 +85,7 @@ State:type = [
     stable_bindings:set<addr>=set[]
     stable_parameters:dict<addr effects.ParameterEffects>=[]
     array_snapshots:set<addr>=set[]
+    view_writes:array<addr>=[]
     disposable_arguments:dict<addr set<addr>>=[]
     code_symbols:dict<addr string>=[]
     # A place is an address of the binding's storage, including the handle
@@ -511,7 +512,10 @@ expression = (id:addr @state:State):>addr => {
             $runtime_assert call is? hir.FunctionCall
             value=ordinary_call(node.expr call runtime_type(call.value_type call @state) @state projection=projection)
         } else if borrowed_route_local(node @state) {value=expression(node.expr @state) borrowed=true}
-        else {value=owned_value(node.expr @state "bound to `{node.name}`")}
+        else {
+            if node.view return required_view_error(node @state)
+            value=owned_value(node.expr @state "bound to `{node.name}`")
+        }
         # An addressed optional local is written through its own cell, which
         # must therefore never be the shared static `none` cell.
         if state.none_cell isnt? none and node.binding_id isnt? none and node.binding_id in? state.addressed and node.binding_id not in? state.boxed and not borrowed {
@@ -3426,6 +3430,27 @@ scalar_getter_projection = (node:hir.MemberAccess @state:State):>ScalarProjectio
     return projection
 }
 
+required_view_error = (node:hir.Declare @state:State):>addr => {
+    let pointers:array<Pointer>=[]
+    let owner=borrowing.route(node.expr state.input.nodes)
+    if owner isnt? none {
+        loop write in state.view_writes {
+            let current=hir.node_at(state.input.nodes write)
+            let conflict=false
+            loop target in captures.write_targets(current state.input.nodes) {
+                let written=borrowing.route(target state.input.nodes)
+                if written isnt? none and borrowing.overlap(owner written) {conflict=true}
+            }
+            if conflict {pointers.push(Pointer[current.loc 'this write or mutable place conflicts with the required view']) break}
+        }
+    }
+    pointers.push(Pointer[node.loc "`{node.name}` requires stable borrowed storage"])
+    if state.problem is? none {
+        state.problem=Error[srcfile=state.source title='cannot prove required local view' pointers=pointers hint='use `.copy()` for an independent value, or keep the owner stable' notes=['The initial local-view proof requires storage to remain stable throughout this function.']]
+    }
+    return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
+}
+
 # A local initialized from a field or element route of storage that stays
 # read-only for the whole function is itself a view of that storage: no copy
 # on declaration and no release at scope exit. Both the local and the route's
@@ -3435,7 +3460,7 @@ scalar_getter_projection = (node:hir.MemberAccess @state:State):>ScalarProjectio
 borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     if state.allocator is? none return false
     let expr=hir.node_at(state.input.nodes node.expr)
-    if expr isnt? hir.Index|hir.MemberAccess|hir.DictLookup return false
+    if expr isnt? hir.Index|hir.MemberAccess|hir.DictLookup and not (node.view and expr is? hir.ExpressedIdentifier) return false
     # A dictionary lookup hands out the stored record's block; other value
     # kinds are rebuilt by the lookup and must be owned.
     if expr is? hir.DictLookup and not object_valued(expr.value_type state) return false
@@ -4107,6 +4132,20 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         hir.push_children(current @pending)
     }
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
+    state.view_writes=[]
+    if local_declarations.length >? 0 {
+        let has_view=false
+        loop declaration_id in local_declarations {
+            let declaration=hir.node_at(state.input.nodes declaration_id)
+            if declaration is? hir.Declare and declaration.view {has_view=true}
+        }
+        if has_view {
+            loop child in visited {
+                let current=hir.node_at(state.input.nodes child)
+                if captures.write_targets(current state.input.nodes).length >? 0 {state.view_writes.push(child)}
+            }
+        }
+    }
     # Borrow selection precedes moves. A borrowed field/element/getter is
     # still a use of its owner's storage after the owner's last spelled read.
     # Moving that owner into a mutable destination while the view lives would

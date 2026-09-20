@@ -471,3 +471,32 @@ The direct API test covers both global initialization and a bare top-level
 copy with an imported erased proof. Hosted and native CLI inventories both
 attribute the global snapshot to dependency.dewy, and the scoped hosted gate
 counts its one copy. Strict-copy enforcement remains pending.
+
+Explicit-view checkpoint: both compilers recognize `const name = @route`
+for local record and array storage. The declaration retains a view demand
+through HIR rewriting and native snapshot serialization; a failed borrow
+proof reports the conflicting write where available, rather than falling
+back to a copy. Whole-binding views participate in the same transitive owner
+liveness used by inferred field/element views. Returning or storing a view's
+value still creates an independent value. Mutable local places, other value
+kinds, and more precise lifetime intervals remain pending; this first subset
+requires function-wide owner stability.
+
+Validation: 83 initial ownership regressions passed, as did 20 local-view,
+HIR traversal and native snapshot checks (including x86/C round trips).
+The view kernel allocates zero bytes across 100 reads, and its escaped values
+remain independent. Eight native acceptance/rejection probes passed. Native
+generations built in 61.79s and 63.42s, with the latter executing both the
+explicit-view and index-evaluation kernels (42). These remain correctness
+integration timings above the native performance target.
+Artifacts: `../dewy-build-artifacts/phase1-local-views-stage2-2026-09-20`.
+
+The index-evaluation kernel exposed a hosted lowering bug predating local
+views: a singleton index fact erased evaluation of an effectful expression.
+Array reads/stores, nested places and string indexing now evaluate it once
+before subsequent operands. Literal and scalar-name reads can still use the
+proven value directly, including the contextual `end` binding. A first paired
+run passed 63/64 cases and caught that `end` regression; it was fixed rather
+than changing the fixture's expected result. All 64 cases passed on the final focused rerun. Hosted follow-up gates
+passed 94 and 74 checks, covering the changed
+diagnostics, width-aware addressing, effectful indices and local views.

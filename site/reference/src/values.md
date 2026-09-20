@@ -50,6 +50,32 @@ Two mutable place arguments in one call must be proven disjoint. Sibling object 
 
 A `const` binding does not provide a mutable place.
 
+## Local Read-Only Views
+
+Inside a function, `const name = @route` demands a read-only view of an
+existing record or array. The compiler must prove that the storage stays
+valid and stable; it cannot silently replace this request with a copy.
+
+```dewy
+Box:type = [value:int64]
+read = (boxes:array<Box length=1>):>int64 => {
+    const box = @boxes[0]
+    return box.value
+}
+```
+
+A conflicting write is diagnosed at that write. Use `.copy()` when an
+independent snapshot is intended. Reading a view through an ordinary value
+boundary, such as returning it or storing it in another record, still supplies
+an independent value; this does not create a first-class reference.
+
+The initial implementation requires the owner to remain stable throughout the
+function, which is more conservative than the eventual lifetime analysis.
+It supports record and array bindings, fields, and elements. Mutable local
+places (`let cursor = @xs[i]`) and views of other value types remain pending.
+The explicit `@` form is an escape hatch while inference improves; ordinary
+read-only locals already borrow when the compiler can prove it safe.
+
 ## Escaping Places and Identity
 
 Nonescaping place calls have settled semantics. Storing or returning a place, sharing it across concurrent work, and defining lifetime-bearing place types require the provisional ownership and escape design.

@@ -422,6 +422,13 @@ in both lowerings and the parity tool is the gate.
   landing: the balance of safety and ergonomics, without blind spots or
   sharp edges (`semantic/resource_exhaustion.md`).
 
+Progress on 2026-09-20: explicit `const name = @route` demands are implemented
+for local records and arrays in both compilers. They use the existing stable
+storage proof, retain owner liveness through dependent views, and report
+conflicting writes instead of copying. The initial proof requires stability
+throughout the function. Mutable local places, other value kinds and finer
+lifetime analysis remain pending.
+
 ### 1.2 The proof engine
 
 Today the refinement system is an interval analysis plus a growing set of

@@ -104,6 +104,9 @@ class Context:
     grown_array_names: frozenset[str] = frozenset()  # names some `.push`/`.pop`/... targets
     target: str = 'x86_64'  # backend target: `$target`
     allow_place_expression: bool = False
+    # Declaration-local probe: only this leading @ can request a local view.
+    # Nested @ arguments retain their ordinary mutable-place checking.
+    view_probe: tuple[int, list[bool]] | None = None
     proof_literals: dict[int, p0.BinOp] = field(default_factory=dict)
     proof_markers: dict[int, p0.AST] = field(default_factory=dict)
     # TODO: etc stuff
@@ -863,6 +866,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                     refinements=dict(ctx.refinements),
                     length_bounds=dict(ctx.length_bounds),
                     key_facts=dict(ctx.key_facts),
+                    view_probe=(ctx.view_probe[0], list(ctx.view_probe[1])) if ctx.view_probe is not None else None,
                     catcher=Catcher(list(ctx.catcher.returns), ctx.catcher.expected) if ctx.catcher is not None else None)
                 try:
                     passes.append((typecheck_and_resolve_inner(candidate, ctx=fork, type_block=type_block, expected=expected), fork))
@@ -898,6 +902,9 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                     Pointer(span=ast.loc, message=f'{len(passes)} readings of this expression typecheck; unable to choose between them'),
                     hint='add explicit operators or parenthesis to disambiguate')
             result, fork = passes[0]
+            if ctx.view_probe is not None:
+                assert fork.view_probe is not None
+                ctx.view_probe[1][:] = fork.view_probe[1]
             # merge the winning candidate's effects back into the enclosing context
             ctx.declarations.maps[0].update(fork.declarations.maps[0])
             ctx.binding_scopes.maps[0].update(fork.binding_scopes.maps[0])
@@ -1414,6 +1421,40 @@ def _widen_inferred_let_value(expr: hir.AST, *, ctx: Context) -> hir.AST:
     return expr
 
 
+def _local_view_prefix(ast: p0.AST) -> p0.Prefix | None:
+    """Find @ on the receiver spine, not inside a call's arguments/index."""
+    if isinstance(ast, p0.Prefix) and isinstance(ast.op, t1.Operator) and ast.op.symbol == '@':
+        return ast
+    if isinstance(ast, p0.Block) and ast.kind == '()' and len(ast.inner) == 1:
+        return _local_view_prefix(ast.inner[0])
+    if isinstance(ast, p0.BinOp) and (
+        isinstance(ast.op, t1.Operator) and ast.op.symbol == '.'
+        or isinstance(ast.op, (t2.Juxtapose, t2.QJuxtapose))
+    ):
+        return _local_view_prefix(ast.left)
+    return None
+
+
+def _declaration_initializer(right: p0.AST, keyword: str, *, ctx: Context,
+                             expected: ty.Type | None = None) -> tuple[hir.AST, bool]:
+    prefix = _local_view_prefix(right)
+    used = [False]
+    checking = replace(ctx, view_probe=(id(prefix), used)) if prefix is not None else ctx
+    expr = typecheck_and_resolve_inner(right, ctx=checking, expected=expected)
+    if used[0]:
+        if keyword not in {'const', 'local_const'}:
+            not_implemented(ctx.srcfile, right.loc, 'mutable local places')
+        if ctx.function_scope_depth == 0:
+            user_error(ctx.srcfile, 'a local view needs a function scope', Pointer(span=right.loc))
+        shape = ty.unfold(ty.strip_refinement(expr.type))
+        target = _unwrap_write_path(expr)
+        if not isinstance(shape, (ty.ArrayType, ty.ObjectType)):
+            not_implemented(ctx.srcfile, right.loc, 'local views of this value type')
+        if not isinstance(target, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index, hir.DictLookup)) or _member_root_binding(target, ctx=ctx) is None:
+            user_error(ctx.srcfile, 'a local view needs a stored value', Pointer(span=right.loc, message='select a named binding, field, or element'))
+    return expr, used[0]
+
+
 def _tcr_annotated_declaration(
     ast: p0.AST,
     keyword: str,
@@ -1460,11 +1501,7 @@ def _tcr_annotated_declaration(
         and right.kind == '[]'
         else annotation
     )
-    expr = typecheck_and_resolve_inner(
-        right,
-        ctx=ctx,
-        expected=expression_expected,
-    )
+    expr, view = _declaration_initializer(right, keyword, ctx=ctx, expected=expression_expected)
     expr = check_against(expr, refined_annotation or annotation, ctx=ctx)
     optional_annotation_payload = ty.optional_payload(annotation)
     runtime_array = (
@@ -1492,7 +1529,7 @@ def _tcr_annotated_declaration(
     )
     declaration = _complete_binding(
         ast,
-        hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, refined_annotation or annotation, expr),
+        hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, refined_annotation or annotation, expr, view=view),
         ctx=ctx,
     )
     if runtime_array and declaration.binding_id is not None:
@@ -1572,7 +1609,7 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
                 expr = hir.GenericFunction(right.loc, signature, name, hir.GenericSource(right, params, ctx))
                 ctx.declarations[name] = signature
                 return _complete_binding(ast, hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, None, expr), ctx=ctx)
-            expr = typecheck_and_resolve_inner(right, ctx=ctx)
+            expr, view = _declaration_initializer(right, keyword, ctx=ctx)
             expr = _unit_inhabitant(expr, None, ctx=ctx) or expr   # `let w = Whitespace`
             if isinstance(expr, hir.TypeValue) and isinstance(right, p0.Atom):
                 # a type read by name is a value only where it converts to its
@@ -1596,7 +1633,7 @@ def tcr_declare(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=Non
 
             declaration = _complete_binding(
                 ast,
-                hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, grown_annotation, expr),
+                hir.Declare(ast.loc, ty.VOID_TYPE, keyword, name, grown_annotation, expr, view=view),
                 ctx=ctx,
             )
             if grown_annotation is not None and declaration.binding_id is not None:
@@ -11264,6 +11301,13 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
             if isinstance(handle.type, (ty.FunctionType, ty.OverloadType)):
                 # `@name` selects the function value instead of calling it
                 return handle
+        if ctx.view_probe is not None and ctx.view_probe[0] == id(prefix):
+            # Address selection for a read-only local must not apply the
+            # mutable argument barrier or invalidate the owner's facts.
+            target = typecheck_and_resolve_inner(handle_ast, ctx=replace(ctx, view_probe=None))
+            if not isinstance(target.type, (ty.FunctionType, ty.OverloadType)):
+                ctx.view_probe[1][0] = True
+            return target
         if not ctx.allow_place_expression:
             type_error(
                 ctx.srcfile,

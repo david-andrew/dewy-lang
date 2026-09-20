@@ -1273,7 +1273,9 @@ class _ObjectLowering:
         if not self._has_arena() or self.lowering_module_startup or node.binding_id is None:
             return False
         expr = borrowing.unwrap(node.expr)
-        if not isinstance(expr, (hir.Index, hir.MemberAccess, hir.DictLookup)):
+        if not isinstance(expr, (hir.Index, hir.MemberAccess, hir.DictLookup)) and not (
+            node.view and isinstance(expr, hir.ExpressedIdentifier)
+        ):
             return False
         if isinstance(expr, hir.DictLookup) and not isinstance(value_type, ty.ObjectType):
             return False  # only record lookups expose the stored value's block

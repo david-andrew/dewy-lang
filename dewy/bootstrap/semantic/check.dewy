@@ -64,7 +64,7 @@ are separate work still needed by the compiler invocation.
 # context; a function starts a new one, even when it captures outer values.
 LabelScope:type = const [labels:dict<string addr>=[]]
 Control:type = const [scopes:array<LabelScope>=[] loops:array<addr?>=[] outer_labels:set<string>=set[]]
-Environment:type = const [lexical:contexts.Context state:addr return_type:addr?=none control:Control=Control[] return_collector:addr?=none]
+Environment:type = const [lexical:contexts.Context state:addr return_type:addr?=none control:Control=Control[] return_collector:addr?=none view_probe:addr?=none]
 label_scope = (name:string control:Control):>addr? => {
     let index=control.scopes.length
     loop index >? 0 {
@@ -1438,6 +1438,13 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
                 return target.function
             }
             if types.node_at(session.types target.value_type) is? types.CallableType return value
+            if env.view_probe isnt? none {
+                $runtime_assert env.view_probe <? session.local_view_probes.length
+                if session.local_view_probes[env.view_probe].prefix =? id {
+                    session.local_view_probes[env.view_probe].used=true
+                    return value
+                }
+            }
             if not allow_place return problem(id 'a place can only be used as a function argument' 'pass it directly to an `@` parameter' env session)
             return place(value id env @session)
         }
@@ -1971,6 +1978,19 @@ right_of = (id:addr env:Environment session:contexts.Session):>addr => {
     let node=contexts.node_at(id env.lexical session)
     return if node is? parser.BinOp node.right else id
 }
+# Only a leading @ on the receiver spine is a local-view request. An @
+# inside an index or call argument still uses the ordinary place barrier.
+local_view_prefix = (id:addr env:Environment session:contexts.Session):>addr? => {
+    let node=contexts.node_at(id env.lexical session)
+    if node is? parser.Prefix and source_views.is_operator(node.op '@' env.lexical session) return id
+    if node is? parser.Block and node.delims =? '()' and node.inner.length =? 1 return local_view_prefix(node.inner[0] env session)
+    if node is? parser.BinOp {
+        let op=contexts.node_at(node.op env.lexical session)
+        if op is? post.Juxtapose or source_views.is_operator(node.op '.' env.lexical session) return local_view_prefix(node.left env session)
+    }
+    return none
+}
+
 declaration = (id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {
     let node = contexts.node_at(id env.lexical session)
     if node isnt? parser.BinOp return problem(id 'declaration needs a value' 'expected a named assignment' env session)
@@ -2060,8 +2080,29 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         return put(hir.Assign[node.loc types.primitive('void' @session.types) target '=' value] @session)
     }
     let rhs = contexts.node_at(node.right env.lexical session)
-    let value = if rhs is? parser.BinOp and source_views.is_operator(rhs.op '=>' env.lexical session) function_literal(node.right rhs env @session name=name expected_signature=annotation) else expression(node.right env @session expected=annotation)
+    let prefix=local_view_prefix(node.right env session)
+    let checking=env
+    let probe=session.local_view_probes.length
+    if prefix isnt? none {
+        session.local_view_probes.push(contexts.LocalViewProbe[prefix])
+        checking=Environment[env.lexical env.state env.return_type env.control env.return_collector probe]
+    }
+    let value = if rhs is? parser.BinOp and source_views.is_operator(rhs.op '=>' env.lexical session) function_literal(node.right rhs env @session name=name expected_signature=annotation) else expression(node.right checking @session expected=annotation)
     if value is? Error return value
+    let view=false
+    if prefix isnt? none {
+        $runtime_assert probe <? session.local_view_probes.length
+        view=session.local_view_probes[probe].used
+        session.local_view_probes.truncate(probe)
+    }
+    if view {
+        if not constant return pending(id 'mutable local places' env session)
+        if env.return_collector is? none return problem(id 'a local view needs a function scope' 'bind the view inside its owning function' env session)
+        let target=node_at(value session)
+        let shape=types.node_at(session.types types.unfold(types.strip_refinement(target.value_type session.types) session.types))
+        if shape isnt? types.ArrayType|types.ObjectType return pending(id 'local views of this value type' env session)
+        if target isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index|hir.DictLookup return problem(id 'a local view needs a stored value' 'select a named binding, field, or element' env session)
+    }
     if annotation is? none and explicit {
         let inhabitant=unit_inhabitant(value none node.right env @session)
         if inhabitant is? Error return inhabitant
@@ -2104,7 +2145,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     bindings.bind(@session.scopes env.lexical.scope name binding_id)
     container_state.seed(binding_id value env.state @session)
     container_state.seed_fields(binding_id value env.state @session)
-    let declared = put(hir.Declare[node.loc types.primitive('void' @session.types) if constant 'const' else 'let' name annotation value binding_id] @session)
+    let declared = put(hir.Declare[node.loc types.primitive('void' @session.types) if constant 'const' else 'let' name annotation value binding_id view] @session)
     binding.declaration = declared
     if checked is? hir.FunctionLiteral | hir.GenericFunction {
         binding.function = value binding.kind = 'function'
@@ -3642,7 +3683,7 @@ array_method = (receiver:addr read:types.ArrayType name:string id:addr env:Envir
                 binding.value_type = declared binding.store_type = declared
                 bindings.store_binding(@session.registry binding.id binding)
                 $runtime_assert declaration_id <? session.hir.length
-                contexts.replace_hir(declaration_id hir.Declare[declaration.loc declaration.value_type declaration.decltype declaration.name declared declaration.expr declaration.binding_id] @session)
+                contexts.replace_hir(declaration_id hir.Declare[declaration.loc declaration.value_type declaration.decltype declaration.name declared declaration.expr declaration.binding_id declaration.view] @session)
             }
         }
         let shape = types.node_at(session.types types.strip_refinement(declared session.types))

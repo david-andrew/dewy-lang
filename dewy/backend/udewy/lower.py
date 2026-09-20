@@ -3557,6 +3557,31 @@ class _Lowerer(
             return False
         return isinstance(self._copy_source_expression(node.expr), (hir.ExpressedIdentifier, hir.Index, hir.MemberAccess, hir.DictLookup))
 
+    def _required_view_error(self, node: hir.Declare) -> NoReturn:
+        from ...semantic.errors import user_error
+        owner = borrowing.route(node.expr)
+        pointers = []
+        if owner is not None and self.current_literal is not None:
+            pending = [self.current_literal.body]
+            while pending:
+                item = pending.pop()
+                if isinstance(item, hir.FunctionLiteral):
+                    continue
+                for target in borrowing.write_targets(item):
+                    written = borrowing.route(target)
+                    if written is not None and borrowing.overlap(owner, written):
+                        pointers.append(Pointer(span=item.loc, message='this write or mutable place conflicts with the required view'))
+                        break
+                if pointers:
+                    break
+                pending.extend(reversed(tuple(hir.children(item))))
+        user_error(
+            self.srcfile, 'cannot prove required local view',
+            *pointers, Pointer(span=node.loc, message=f'`{node.name}` requires stable borrowed storage'),
+            hint='use `.copy()` for an independent value, or keep the owner stable',
+            notes=['The initial local-view proof requires storage to remain stable throughout this function.'],
+        )
+
     def _compute_moves(self, literal: hir.FunctionLiteral) -> set[int]:
         """Find transfer sites that can consume an owned local.
 
@@ -4134,6 +4159,8 @@ class _Lowerer(
             return statements
         if isinstance(node, hir.Declare):
             declared_type = node.annotation or node.expr.type
+            if node.view and not self._borrowed_route_local(node, declared_type):
+                self._required_view_error(node)
             if isinstance(declared_type, ty.TypeOr) and ty.string_valued(declared_type):
                 node = replace(node, annotation='int64')   # one string handle
             members = ty.runtime_union_members(declared_type)
@@ -4207,6 +4234,12 @@ class _Lowerer(
                 prelude, value = self._extract_array_operand(node.expr, declared_type)
                 return [*prelude, replace(node, decltype='let', annotation='int64', expr=value)]
             if self._array_representation(node) == 'stack_data':
+                if node.view:
+                    # A fixed raw-data alias group keeps the same address
+                    # representation at both the declaration and every use.
+                    # Only its original owner releases element storage.
+                    prelude, value = self._extract_expression(node.expr)
+                    return [*prelude, replace(node, decltype='let', annotation='int64', expr=value)]
                 self._note_owned_raw_array(node, declared_type)
                 return self._lower_stack_array_declare(node)
             if (

@@ -91,12 +91,12 @@ let main = ():>void => { let values = [1 2] mutate(@values) }
 ''')
 
 
-def test_place_cannot_escape_an_immediate_call() -> None:
+def test_place_cannot_escape_without_a_local_view_binding() -> None:
     with pytest.raises(
         TypeCheckError,
         match='a place can only be used as a function argument',
     ):
-        _check('let values = [1 2]\nlet escaped = @values')
+        _check('let values = [1 2]\n@values')
 
 
 def test_place_parameters_cannot_have_defaults() -> None:
