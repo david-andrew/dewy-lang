@@ -349,7 +349,41 @@ silently.
 
 The difference from the earlier attempt is the order and the gate: each
 mechanism lands against a measured kernel and the compiler's own sources,
-with copy-on-write as a measured floor rather than a cliff.
+with copy-on-write as a measured floor rather than a cliff. The hosted and
+native compilers stay in behavioral parity throughout: each mechanism lands
+in both lowerings and the parity tool is the gate.
+
+**Decisions of 2026-09-19 (David):**
+
+- *Unproven copies.* The module-level directive is `$explicit_copies`; under
+  it an aggregate copy the analysis cannot justify is an error whose
+  diagnostic names the reason and the explicit forms: `.copy()` to keep the
+  copy, or a read-only view. Without the directive the copy lands with an
+  analysis note.
+- *Read-only views.* A `const` binding of a place (`const node = arena[id]`)
+  is a view whenever the analysis proves the source is not written while the
+  binding lives; otherwise it copies (with a note, or an error under the
+  directive). The explicit form `const node = @arena[id]` demands the view,
+  so a conflicting write is reported at the write instead of the binding
+  copying; `let cursor = @xs[i]` is a mutable place, as `@` already means
+  for arguments. The `@` forms are a stop-gap that should be needed less as
+  the analysis improves, and the documentation must say so.
+- *Lifecycle hooks.* Metatagged members of the mint: `$__drop__`,
+  `$__copy__`, `$__move__`. A type opts in by declaring them. Declaring
+  `$__drop__` without `$__copy__` makes the type move-only (no synthesized
+  copy; `b = a` without a move is an error). Types declaring no hooks keep
+  the synthesized memberwise copy, move and release. Hooks are invoked with
+  internal nonescaping places, never by passing the value by copy.
+- *Explicit moves.* No `move` operator or keyword for now; moves are inferred
+  at last use and reported by `dewy analyze`. If explicit assertion of a
+  last use turns out to be needed it should be a meta-level form (a
+  directive), not an operator; to be revisited.
+- *Allocation failure.* Tentative: a process-level failure report by default
+  on the same channel as `$prototype` panics (its own exit code), and a
+  module-level `$fallible_allocation` under which allocating operations
+  carry `OutOfMemory` in their result type. Needs more thought before
+  landing: the balance of safety and ergonomics, without blind spots or
+  sharp edges (`semantic/resource_exhaustion.md`).
 
 ### 1.2 The proof engine
 
@@ -453,11 +487,30 @@ Decisions were made by David on 2026-09-13.
 6. **Unicode identifiers (partly decided, low priority).** Which non-ASCII
    characters may appear in identifiers (the hosted `t0` stage lists
    candidate additions), and which visually or semantically equivalent
-   spellings name the same binding. Decided: subscript digits are distinct
-   from plain digits, so `x₁` and `x1` are different names, but `x₁` and
-   `x_1` are the same name. Open: the repertoire itself, superscripts, and
-   whether look-alike letters such as the micro sign and Greek mu fold
-   together.
+   spellings name the same binding. Direction (2026-09-19, open to
+   adjustment): an underscore followed by a run of digits spells those
+   digits as subscripts, and the overline `‾` (U+203E) followed by a run
+   of digits spells superscripts; digits only, never letters, and
+   adjacent runs combine:
+
+   ```
+   x_12       == x_1_2 == x₁₂
+   foo_bar    stays foo_bar
+   foo_2      == foo₂
+   foo_2_bar  == foo₂_bar
+   x‾12       == x¹²
+   ```
+
+   So `x₁` and `x1` are different names, `x₁` and `x_1` the same, and
+   `x_12` and `x_1_2` normalize to the same identifier (accepted with some
+   apprehension, since it merges names other languages keep distinct; the
+   display form is indistinguishable, which is the point). Letter
+   subscripts and superscripts (`xᵢ`, `xₙ`, `xᵀ`, `λ̂`) are written as the
+   Unicode characters directly. A doubled `__`/`‾‾` as an escape from the
+   rule is a possibility with trade-offs against dunder names; open.
+   Look-alikes normalize to one character (the micro sign and Greek mu are
+   the same name), except between ASCII and Greek letters, which stay
+   distinct (`A` and `Α` differ). The full repertoire is still open.
 7. **Unit-like nominal types (decided).** A minted nominal type with no
    fields, such as an error type declared as `Overflow = type of error`,
    is spelled the same way whether used as a type or as its single value:
