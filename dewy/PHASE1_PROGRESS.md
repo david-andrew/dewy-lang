@@ -85,9 +85,15 @@ Hosted copy/report gates passed 11 tests. All 14 focused parity cases
 passed against the second-generation native compiler, including independent
 expected panic diagnostics; the fresh full 211-case corpus also passed against that compiler.
 
-Design review: `PHASE1_DESIGN_PROPOSALS.md` contains proposed proof and effect
-surfaces. David requested approval before implementation. These proposals
-are not language rules and do not mark 1.2 or 1.3 complete.
+Design review: `PHASE1_DESIGN_PROPOSALS.md` separates reviewed proof/effect
+direction from outstanding proposals. David approved `$proof` with direct
+statement calls, checked termination/purity and erasure; `:> <P>` is proof-
+only, while ordinary functions use `:> T & <P>` (including `void`). The
+unsafe boundary is `$unsafe_assert cond [, message]`. Positive effect rows
+are upper bounds, omitted rows are inferred, and `no_effects` is the preferred
+empty-row spelling. Negative effect guarantees, effect identity declarations,
+and effect-parameter syntax still have details to review. Implementation is
+pending; approval does not mark 1.2 or 1.3 complete.
 
 Checkpoint: callable/numeric unions at juxtaposition now reject with the
 explicit pipe-call and multiplication forms in both compilers, without

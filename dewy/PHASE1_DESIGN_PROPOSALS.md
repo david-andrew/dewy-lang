@@ -7,11 +7,12 @@ unchanged.
 
 ## Checked and unchecked local facts
 
-Use the existing static assertion and the proposed unsafe metatag:
+Use the existing static assertion and the reviewed unsafe metatag. Both use
+the assertion form's argument grammar, `cond [, message]`:
 
 ```dewy
 $assert i <? xs.length
-$unsafe_assume i <? xs.length
+$unsafe_assert i <? xs.length, 'the external producer validated this index'
 ```
 
 `$assert` already implements the checked boundary: proven assertions erase,
@@ -19,11 +20,14 @@ refuted assertions fail, and unknown assertions fail with a different
 explanation. There is no reason to add a synonymous `$prove` directive.
 The proof-engine work should improve the facts `$assert` can establish.
 
-`$unsafe_assume P` introduces that one assumption without a runtime check.
-It emits an auditable entry naming the proposition, source location, and
+`$unsafe_assert P` introduces that one assumption without a runtime check;
+the name does not make it a checked assertion. Its optional message follows
+`$assert`'s compile-time string-literal rule and supplies an audit explanation.
+The directive owns the separating comma, just as `$assert` does. It emits an
+auditable entry naming the proposition, message, source location, and
 obligations it discharges. It neither weakens unrelated checking nor disables
-checking for a block. David confirmed that these boundaries should be
-metatags, and proposed this more explicit spelling on 2026-09-20.
+checking for a block. David selected `$unsafe_assert` in the follow-up review
+on 2026-09-20; it replaces the earlier `$unsafe_assume` proposal.
 
 Both accept only the liquid proposition language. Their facts refer to the
 current value versions, and are invalidated by the same writes and calls as
@@ -32,9 +36,9 @@ that remains true after a value changes. A false assumption can invalidate
 bounds or representation safety; its audit entry must survive optimization.
 No unchecked external proof certificates.
 
-## Proof functions — revised proposal, awaiting review
+## Proof functions — reviewed direction
 
-Use `$proof`, with the conclusion in the existing fact-only return notation:
+Use `$proof`, with the conclusion in a fact-only return annotation:
 
 ```dewy
 $proof
@@ -44,8 +48,7 @@ ordered = (a:int64 b:int64<v => a <=? v> c:int64<v => b <=? v>):> <a <=? c> => {
 }
 ```
 
-The compiler already recognizes `:> <facts>` as a return contract carrying
-facts about parameters and no runtime value. Reuse it here. It means
+Reserve `:> <P>` for `$proof`. It means
 “establish this fact,” rather than “produce a Boolean that
 might be false.” The parameter annotations supply the preconditions; the
 body supplies the checked argument; the return annotation names exactly what
@@ -58,12 +61,22 @@ conclusion. The return fact can mention parameters and trusted measures,
 not proof-local names or mutable globals. Conjunctions use the existing
 proposition language, e.g. `:> <P and Q>`.
 
-An invocation has ordinary function shape:
+An invocation has function-call spelling but is a statement, not a value.
+Only a direct call whose target resolves to a known `$proof` declaration is
+allowed, including a statically resolved imported declaration:
 
 ```dewy
 ordered(low middle high)
 # low <=? high is now available to the caller's checker.
+
+let x = ordered(low middle high)  # error: a proof call is not a value
+let callback = @ordered          # error: no first-class proof functions
 ```
+
+Passing `ordered` as a callback, storing it, or invoking it through a
+function-valued parameter is likewise invalid. Ordinary function-handle and
+implicit-call rules do not turn a proof declaration into a value. These are
+call-site rules, not merely limitations on how proof values are represented.
 
 The call checks the preconditions, substitutes the arguments into the
 conclusion, and associates the resulting fact with their current value
@@ -80,18 +93,25 @@ vacuously true. Branches and calls to other checked proof functions can
 structure a larger argument. A future richer proof language can produce the
 same checked conclusion representation.
 
-The existing implementation represents this as a refined `void` result and
-checks obligations at explicit returns and fallthrough. That is a useful
-foundation, not a new syntax requirement. The new part is `$proof`'s checked
-termination/purity and erasure, together with the relational proof machinery
-needed for its conclusions. Ordinary functions may still use their existing
-fact-only or value-bearing return contracts; they are not erased merely
-because their result carries facts. General first-class proof values are
-outside this proposal.
+Ordinary functions keep `:> T` and `:> T & <P>`. In particular,
+`:> void & <P>` is a real runtime function which returns nothing and
+establishes a fact. It need not be a pure, terminating proof and is not
+erased on that account. It owes the fact on each normal return; its ordinary
+effects and possible nonreturning behavior remain part of the call.
 
-Review needed: approve `$proof` using `:> <P>`, including erasure and the
-initial terminating/pure subset? David rejected
-the earlier `$lemma`/body-`$proves` shape; neither will be implemented.
+Implementation change required: the current compiler also accepts bare
+`:> <P>` on ordinary functions and represents it as refined `void`. Tighten
+that syntax to `$proof` only and migrate ordinary uses to `:> void & <P>`.
+This restriction concerns fact blocks, not ordinary type blocks such as a
+function-handle result `:> <(x:int64):>int64>`.
+The existing exit-obligation machinery can be shared, but proof declarations
+and proof-call statements must remain distinguishable in checked IR from
+ordinary `void` functions. Do not infer proof status from a refined `void`
+result or erase an ordinary call merely because it has the same fact.
+
+David approved this direction with these restrictions on 2026-09-20.
+General first-class proof values remain out of scope. The earlier
+`$lemma`/body-`$proves` shape is discarded.
 
 ## Effect contracts
 
@@ -113,12 +133,11 @@ assert the same authority just by choosing the same name.
 Proposed semantics for the first implementation:
 
 - No written row means infer, preserving existing source compatibility.
-- A written row is an upper bound: inferred behavior must be a subset.
-  For the explicit empty row I recommend `& Effects<never>`, replacing the
-  earlier empty-parameter spelling. `never` denotes an empty set of possible
-  effects; `none` ordinarily denotes an inhabitant, not the empty set. This
-  uses the bottom concept in the effect kind, not a runtime `never` result.
-  The exact spelling remains subject to David's review.
+- A written positive row is an upper bound: inferred behavior must be a
+  subset. Listing an effect permits it; it does not require it to occur.
+- David selected `& no_effects` for the explicit empty row, with `Effect<>`
+  as its desugared spelling. It permits no effects. This replaces the
+  earlier `Effects<never>` / `Effects<none>` alternatives.
 - Start with reads, writes/mutation, allocation, escape, and possible
   process failure. Returning an error alternative is not an effect.
 - Function subtyping permits fewer effects than the caller allows.
@@ -132,7 +151,47 @@ Proposed semantics for the first implementation:
   for “this call never returns.” Likewise, an error return and a process
   failure must remain distinct.
 
-Still to review: `Effects<never>` versus `Effects<none>`, and how effect
+### Negative guarantees — proposed details for review
+
+David proposed `no effectname`, e.g. `no reads<filesystem>`. Treat this as
+an exclusion constraint on the inferred row, not the complement of an
+effect set. It promises absence without granting every other effect:
+
+```dewy
+pure = (...):> Result & no_effects => ...
+local_work = (...):> Result & no reads<filesystem> => ...
+```
+
+`local_work` may have other effects, which are inferred and propagated. The
+checker must establish absence of filesystem reads through its whole call
+graph, including callbacks. An unknown indirect call cannot satisfy an
+exclusion without a compatible signature contract. Resource aliasing must
+not let a filesystem read evade the constraint under a different name.
+
+Recommended initial surface rules, still awaiting review:
+
+| Annotation | Meaning |
+| --- | --- |
+| `no_effects` | The complete row is empty. |
+| `reads<filesystem>` | Permit this read effect within the written positive upper bound. |
+| `no reads<filesystem>` | Forbid this read effect; infer the rest if no positive bound is written. |
+| `no reads` | Forbid the whole read family; infer other effect families. |
+| `reads<>`, `no reads<>` | Reject with a diagnostic suggesting `no reads` or `no_effects`. |
+
+Positive bounds and exclusions are checked together: the inferred row must
+fit the bound and avoid every excluded effect. A row containing only
+exclusions remains open to inferred effects outside those exclusions. This
+does not weaken the earlier closed-upper-bound rule for positive rows.
+
+Rejecting the empty family spelling avoids a trap: if `reads<>` denotes an
+empty set, then excluding that set with `no reads<>` forbids nothing. It
+cannot mean “no reads.” Bare `reads` is a family, not an implicitly
+parameterized positive row; require subjects in positive `reads<...>` forms.
+The internal empty row `Effect<>` is distinct from instantiating an effect
+family with no subjects. Future effect-polymorphic elaboration may produce
+empty rows without exposing this ambiguous source shorthand.
+
+Still to review: the negative-guarantee details above, and how effect
 identities and effect parameters should be introduced. Allocation
 failure policy remains separately tentative; this proposal does not choose
 `$fallible_allocation`, error identities, or an exit code on its behalf.
