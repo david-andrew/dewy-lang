@@ -138,6 +138,40 @@ copy_kind = (type:addr @state:State):>string? => {
     if object_valued(type state) return 'record'
     return none
 }
+# A payload packed into a cell keeps the layout of the member it was packed
+# as, and a moved-out payload is released with the layout of the type that
+# receives it. Moving is safe only when every member the read may come from
+# has the receiving record's layout; a parent member read as a child, or a
+# child member read as its parent, keeps the ordinary copy.
+payload_movable = (stored:addr read:addr node:hir.AST @state:State):>bool => {
+    let members=cell_members(stored @state)
+    if members is? none return false
+    # Array, string and word payloads are handles of one shape each.
+    if not object_valued(read state) return true
+    let size=object_layout(read node @state).size
+    loop member in members {
+        if not object_valued(member state) continue
+        if type_tests.disjoint(member read state.links @state.type_nodes) continue
+        if object_layout(member node @state).size not=? size return false
+    }
+    return true
+}
+# Whether reading a cell local as a narrower cell hands back the local's own
+# cell (`read_value` retags into a fresh cell only when a record member of
+# the stored union must split into the read's children).
+cell_read_keeps_handle = (stored:addr read:addr @state:State):>bool => {
+    if stored =? read return true
+    let original=cell_members(stored @state)
+    let narrowed=cell_members(read @state)
+    if original is? none or narrowed is? none return false
+    let tags:set<addr>=set[]
+    loop target in narrowed {tags.add(member_tag(target @state))}
+    loop member in original {
+        if member_tag(member @state) in? tags continue
+        if object_valued(member state) and not type_tests.disjoint(member read state.links @state.type_nodes) return false
+    }
+    return true
+}
 # Why `owned_value` could not borrow or move the expression it copies.
 owned_reason = (id:addr @state:State):>string => {
     let node=hir.node_at(state.input.nodes id)
@@ -857,11 +891,13 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
     }
     # A record read out of a moved cell local moves the payload out: the
     # cell is emptied (tag none, never the shared static `none` cell) and
-    # its block is freed at scope exit as usual. A cell-to-cell narrowing may
-    # hand back the same cell, so it keeps the ordinary copy.
+    # its block is freed at scope exit as usual. Only the local's own cell
+    # can be emptied: a read that narrows the stored type first (a parent
+    # record to a child union, a cell to a narrower cell) builds a temporary
+    # cell around a copy, and that copy is still the ordinary owned value.
     if node is? hir.ValueCast|hir.RepresentationCast and object_valued(node.value_type state) {
         let inner=hir.node_at(state.input.nodes node.expr)
-        if inner is? hir.ExpressedIdentifier and node.expr in? state.moved_uses and cell_members(inner.value_type @state) isnt? none {
+        if inner is? hir.ExpressedIdentifier and node.expr in? state.moved_uses and cell_members(inner.value_type @state) isnt? none and stored_type(node.expr state) =? inner.value_type and payload_movable(inner.value_type node.value_type node @state) {
             let binding=inner.binding_id
             if binding isnt? none and binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed {
                 let prefix:array<addr>=[]
@@ -888,12 +924,23 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
     # empty it, so the scope-exit release finds nothing to release.
     if node is? hir.ExpressedIdentifier and id in? state.moved_uses {
         let binding=node.binding_id
-        if binding isnt? none and binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed and releasable(node.value_type @state) {
+        let stored=stored_type(id state)
+        # A narrowed read of a cell local moves only when the read is the
+        # cell's own payload with its packed layout (see `payload_movable`).
+        let narrowed=cell_members(stored @state) isnt? none and cell_members(node.value_type @state) is? none
+        # Otherwise the whole handle moves, so the read must hand back the
+        # local's own block: a cell narrowed to a narrower cell may be a
+        # temporary, and a record read as a differently sized relative
+        # would be released with the wrong layout.
+        let movable=if narrowed payload_movable(stored node.value_type node @state)
+            else if cell_members(stored @state) isnt? none cell_read_keeps_handle(stored node.value_type @state)
+            else if object_valued(stored state) and object_valued(node.value_type state) object_layout(stored node @state).size =? object_layout(node.value_type node @state).size
+            else true
+        if movable and binding isnt? none and binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed and releasable(node.value_type @state) {
             let prefix:array<addr>=[]
             let taken=snapshot(value @prefix @state)
             let word_type=types.primitive('int64' @state.type_nodes)
-            let stored=stored_type(id state)
-            if cell_members(stored @state) isnt? none and cell_members(node.value_type @state) is? none {
+            if narrowed {
                 # The read narrowed the local's cell to its payload: the
                 # payload moves and the cell is emptied (never the shared
                 # static `none` cell); the cell's block is freed as usual.

@@ -103,6 +103,11 @@ def effect_program():
         binding = 1000 + index
         body = [store(read(binding))] if index == 31 else [call(2001 + index, [place(read(binding))])]
         function(2000 + index, [param(binding)], body)
+    # Raw memory operations and aggregate transmutes expose their operands:
+    # the escape lands on the parameter summary, not on a call-graph bit.
+    raw = hir.ExpressedIdentifier(LOC, CALLABLE, '__store_i64__')
+    function(126, [param(28)], [hir.FunctionCall(LOC, 'void', raw, [read(28), number()], {})])
+    function(127, [param(29)], [hir.Transmute(LOC, 'int64', read(29))])
     return hir.Block(LOC, 'void', declarations, True)
 
 

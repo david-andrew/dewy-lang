@@ -42,6 +42,23 @@ Pairing:type = [target:addr pairs:array<ArgumentPair>]
 
 writes = (summary:ParameterEffects):>bool => summary.mutates.length >? 0 or summary.rebinds.length >? 0
 read_only = (summary:ParameterEffects):>bool => not writes(summary) and summary.escapes.length =? 0
+# A word carries no storage: passing it to a raw operation exposes nothing.
+word_type = (id:addr type_nodes:types.Table):>bool => {
+    let type=types.node_at(type_nodes types.unfold(types.strip_refinement(id type_nodes) type_nodes))
+    if type is? types.IntegerLiteralType return type.value >=? -9223372036854775808 and type.value <=? 18446744073709551615
+    return type is? types.Primitive and type.name in? ['int' 'uint' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64' 'bool' 'true' 'false' 'none']
+}
+# Raw memory operations and system calls may read or write through any
+# storage they receive, and have no prologue of their own to copy it. An
+# aggregate handed to one escapes: its summary then says so, and a caller
+# borrowing against that summary sees the exposure at this boundary rather
+# than through a whole-call-graph bit. Every other callee, resolved or not,
+# is a value boundary that decides for itself.
+raw_callee = (call:hir.FunctionCall nodes:array<hir.AST>):>bool => {
+    let function = hir.node_at(nodes unwrap(call.func nodes))
+    if function isnt? hir.ExpressedIdentifier or function.binding_id isnt? none return false
+    return function.name.startswith('__load_') or function.name.startswith('__store_') or function.name.startswith('__syscall') or function.name in? ['__load__' '__store__']
+}
 
 add_route = (@routes:array<Route> route:Route):>bool => {
     let steps = route.steps
@@ -315,6 +332,17 @@ visit = (id:addr @params:dict<addr ParameterEffects> @analysis:Analysis nodes:ar
         if node.binding_id is? none return false
         return record(node.binding_id 'read' Route[[]] @params)
     }
+    if node is? hir.Transmute {
+        # Reinterpreting scalar bits exposes nothing. A pointer or aggregate
+        # transmute hands the storage itself to whatever consumes the result.
+        if word_type(node.value_type type_nodes) and word_type(hir.node_at(nodes node.expr).value_type type_nodes) return visit(node.expr @params @analysis nodes type_nodes)
+        let resolved = resolve_route(node.expr params nodes)
+        if resolved is? none return visit(node.expr @params @analysis nodes type_nodes)
+        let changed = record(resolved.binding_id 'read' resolved.route @params)
+        if record(resolved.binding_id 'escape' resolved.route @params) { changed = true }
+        if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }
+        return changed
+    }
     return visit_all(hir.children(node) @params @analysis nodes type_nodes)
 }
 
@@ -331,6 +359,7 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> @analysi
         return changed
     }
     let changed = visit(call.func @params @analysis nodes type_nodes)
+    let raw = raw_callee(call nodes)
     let pairings:array<Pairing> = []
     let known=false
     let paired=false
@@ -338,6 +367,10 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> @analysi
         let node = hir.node_at(nodes argument)
         if node isnt? hir.Place {
             if visit_route(argument 'read' [] @params @analysis nodes type_nodes) { changed = true }
+            if raw and not word_type(node.value_type type_nodes) {
+                let resolved = resolve_route(argument params nodes)
+                if resolved isnt? none and record(resolved.binding_id 'escape' resolved.route @params) { changed = true }
+            }
             continue
         }
         # A value boundary only reads its argument. Resolve/pair the callee

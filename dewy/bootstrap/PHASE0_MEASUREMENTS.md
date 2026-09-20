@@ -4517,3 +4517,63 @@ sites (literal fields, stores, cell payloads) stay copies there for now;
 the reports of the two compilers agree on the fixture at every site except
 the array-element spelling.
 
+
+### Raw exposure is an effect; record arguments borrow into raw-using callees (2026-09-20)
+
+The largest remaining borrow rejection (1,413 copies, `the callee exposes
+raw storage or is not known statically`) came from a call-graph bit: any
+callee whose transitive call graph contained a raw memory intrinsic, a
+system call, an aggregate transmute or an unknown callee received every
+aggregate argument by copy. In the compiler's sources that is nearly every
+callee (strings, dictionaries and I/O bottom out in raw operations), so
+the bit said nothing about the argument. The fact the bit approximated now
+lives in the effect analysis, in both compilers: an aggregate parameter
+route handed to a raw memory intrinsic or a system call, or reinterpreted
+by a non-scalar transmute, is an *escape* of that route
+(`effects.raw_callee`, `_word_type`); the parameter's summary is then not
+read-only and the boundary copies. Every other callee, resolved or not, is
+a value boundary that decides for itself, so nothing deeper in the call
+graph needs to propagate. Native argument borrowing drops the call-graph
+bit for record arguments (`borrowing.record_value`); arrays and cells keep
+it, because the earlier experiment of borrowing arrays into callees that
+took value shares of them made the caller detach on every later write.
+The hosted compiler already borrowed read-only record parameters in the
+callee prologue on the summary alone; it gains the raw-exposure escapes.
+
+Compiler-wide copies: 5,736 to 4,526 (records 4,336 to 3,126; arrays and
+cells unchanged), the opaque-callee reason 1,413 to 171 (all arrays and
+cells now). Fixtures 96/4 (the known four) with the first generation;
+effects tests in both compilers cover a word operand (no escape), an
+aggregate raw operand and an aggregate transmute (escapes), and the
+native-versus-hosted effect fixed point includes both new cases.
+
+**The second generation was already broken.** Running the fixture bundle
+with the *second*-generation compiler (the compiler's own code lowered by
+the new rules, `/tmp/cr-chain-src.sh SRC TAG`) failed four programs
+(`native_pair_checks`, `native_shared_descriptors`,
+`native_donated_arguments` with `internal compiler error: no HIR traversal
+for AST#13560`, a core dump) at HEAD before this slice, and bisection over
+the day's commits put it at the cell-payload move of "a returned local
+always moves" (1d842d88): the branch that moves a record out of a moved
+cell local through a checker-spelled cast. Its three sites in the
+compiler (`validation.dewy` `session.hir[id]=node`, `path_values.dewy`
+`unwrap`, `loop_syntax.dewy`) all read a local whose *stored* type is the
+abstract parent record `hir.AST`, narrowed in place to a child union: the
+narrowed read wraps a *copy* of the record, made with the child's layout,
+in a temporary cell, and the move handed that child-sized block to storage
+that releases it with the family's size, a wrong arena size class that
+corrupted later allocations. The fix keeps the move to the local's own
+cell: the payload moves only when the binding's stored type is that very
+cell (`stored_type = inner.value_type`) and every record member the read
+may come from has the receiving record's layout size (`payload_movable`);
+a whole-handle move of a cell local requires that the narrowing hands back
+the same cell (`cell_read_keeps_handle`, no retag), and of a record local
+that stored and read layouts have one size. Array, string and word
+payloads move as before. Fixture `native_narrowed_payload_layouts` (a
+family with a small and a large child, the small one read through the
+child union and stored back as the parent, 200 rounds, live bytes and
+later family-sized allocations checked) fails with the previous compiler
+(exit 2) and passes with this one in both generations; the second
+generation passes the bundle 97/4. Cost: 8 record copies. Lesson recorded
+in the protocol: a lowering slice is verified only when the fixture bundle
+passes with the second generation, not just the first.

@@ -157,6 +157,34 @@ let apply = (f:<(x:array<int64 length=2>):>int64> items:array<int64 length=2>):>
     assert items_summary.reads == {ROOT}
 
 
+def test_raw_memory_operand_escapes_its_parameter() -> None:
+    # A raw memory intrinsic has no prologue of its own: an aggregate handed
+    # to it may be read or written through any alias, so it escapes. A word
+    # operand carries no storage.
+    root, effects = _analyze('''
+let peek = (values:array<uint8> destination:int64):>uint8 => {
+    __store_u8__(99 destination)
+    return values.length transmute uint8
+}
+let expose = (values:array<uint8>):>int64 => __load_i64__(values transmute int64)
+''')
+    peek = _function(root, 'peek')
+    assert _param_effects(effects, peek, 0).read_only
+    assert _param_effects(effects, peek, 1).escapes == set()
+    expose = _param_effects(effects, _function(root, 'expose'))
+    assert expose.escapes == {ROOT}
+    assert not expose.read_only
+
+
+def test_scalar_transmute_exposes_nothing() -> None:
+    root, effects = _analyze('''
+let bits = (value:float64 items:array<int64 length=2>):>int64 => (value transmute int64) + items[0]
+''')
+    bits = _function(root, 'bits')
+    assert _param_effects(effects, bits, 0).read_only
+    assert _param_effects(effects, bits, 1).read_only
+
+
 def test_recursive_place_forwarding_reaches_fixed_point() -> None:
     root, effects = _analyze('''
 let drain = (@items:array<int64 length=2> n:int64):>void => {

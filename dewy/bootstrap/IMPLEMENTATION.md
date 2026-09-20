@@ -521,7 +521,13 @@ the native fixed point is not grounds for retiring them yet.
   borrowing likewise requires the receiving parameter and the argument's
   root to be unexposed was tried and reverted: sharing a borrowed array
   through the callee's value copies made the caller detach on every later
-  write, so argument borrowing keeps the call-graph rule. A place parameter that no caller ever binds to a global route
+  write, so array and cell arguments keep the call-graph rule. Record
+  arguments (2026-09-20) borrow on the callee's own summary instead: the
+  effect analysis records an escape when a parameter route reaches a raw
+  memory intrinsic, a system call or a non-scalar transmute
+  (`effects.raw_callee`), and every other callee is a value boundary that
+  decides for itself, so a raw operation deeper in the call graph no longer
+  disqualifies the argument. A place parameter that no caller ever binds to a global route
   is stable regardless of global writes below it. `let x = route` of a
   stable root is a view, as is a getter call read transiently (field, test,
   index), and wrapper getters whose body returns another getter's call are
@@ -1802,8 +1808,9 @@ reason comes from `owned_reason`: container reads name the missing view,
 identifiers name the missing move or, when the borrow analysis considered
 the binding as an argument and rejected it, its recorded rejection
 (`borrowing.Plan.rejections`, filled where `details` decides an argument is
-not borrowed: opaque callee, global, dirty place, unknown effects, callee
-writes or keeps, conflicting argument). `lower.Result.notes` carries them to
+not borrowed: raw-exposing callee for an array or cell argument, global,
+dirty place, unknown effects, callee writes or keeps, conflicting
+argument). `lower.Result.notes` carries them to
 `invocation/compiler.dewy`, whose `analyze` command prints one `copy:
 path:row: ...` line and an `Info` excerpt per note plus a `copy report:`
 summary, before the representation notes. The hosted compiler prints the

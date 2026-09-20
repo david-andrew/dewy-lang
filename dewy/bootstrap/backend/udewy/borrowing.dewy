@@ -113,6 +113,10 @@ conflicts = (call:hir.FunctionCall position:addr source:Route nodes:array<hir.AS
     return false
 }
 
+record_value = (id:addr nodes:array<hir.AST> type_nodes:types.Table):>bool => {
+    let type=hir.node_at(nodes id).value_type
+    return types.node_at(type_nodes views.structural_base(type type_nodes)) is? types.ObjectType
+}
 # A place parameter can refer to caller storage that also has a global name.
 # Conservatively exclude callees with ambient writes/unknown callbacks. The
 # semantic parameter summaries alone cannot establish that global boundary.
@@ -615,11 +619,17 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
                 if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.add(pair.argument)}
                 else {retained.add(pair.argument)}
-                if direct not in? opaque and source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
+                # A record borrows on the callee's own summary: raw exposure
+                # of its parameter is an escape there (effects.raw_callee),
+                # and each deeper boundary decides for itself. Arrays keep
+                # the call-graph rule: a callee's value share of a borrowed
+                # array made the caller detach on every later write.
+                let raw_blocked=direct in? opaque and not record_value(pair.argument nodes type_nodes)
+                if not raw_blocked and source isnt? none and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
                 else {
                     rejected.add(pair.argument)
                     if source isnt? none {
-                        rejections[source.binding]=if direct in? opaque 'the callee exposes raw storage or is not known statically' else if source.binding in? plan.globals 'it is a global' else if source.binding in? places and direct in? dirty 'it is a place argument of a call that writes' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
+                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? plan.globals 'it is a global' else if source.binding in? places and direct in? dirty 'it is a place argument of a call that writes' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
                     }
                 }
                 position+=1

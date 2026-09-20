@@ -12,7 +12,10 @@ the call boundary itself decides whether to copy or borrow using the callee's
 own summary — so only `@` place arguments translate the callee's write and
 escape effects back onto the caller's storage. Unresolved or indirect calls
 are conservative: a place argument to an unknown callee is treated as read,
-mutated, rebound, and escaped.
+mutated, rebound, and escaped. Raw memory intrinsics and system calls have
+no boundary of their own, so an aggregate parameter route handed to one (or
+reinterpreted by a non-scalar transmute) escapes; every other callee is a
+value boundary that decides for itself.
 
 The first consumer is the udewy lowering pass, which uses these summaries to
 decide when a value-semantic call boundary may borrow the caller's storage
@@ -522,6 +525,23 @@ class _EffectAnalyzer:
             if node.binding_id in params:
                 params[node.binding_id].add_read(ROOT)
             return
+        if isinstance(node, hir.Transmute):
+            # Reinterpreting scalar bits exposes nothing. A pointer or
+            # aggregate transmute hands the storage itself to whatever
+            # consumes the result.
+            if _word_type(node.type) and _word_type(node.expr.type):
+                self._visit(node.expr, params)
+                return
+            resolved = self._resolve_route(node.expr, params)
+            if resolved is None:
+                self._visit(node.expr, params)
+                return
+            binding_id, route, inner = resolved
+            params[binding_id].add_read(route)
+            params[binding_id].add_escape(route)
+            for expr in inner:
+                self._visit(expr, params)
+            return
         if isinstance(node, hir.Place):
             # A place outside a call argument has no defined consumer yet;
             # assume the worst for its parameter root.
@@ -558,6 +578,7 @@ class _EffectAnalyzer:
                 self._visit(argument, params)
             return
         self._visit(call.func, params)
+        raw = self._raw_callee(call)
         arguments = [*call.pos_args, *call.kw_args.values()]
         # Only a place can carry the callee's effects back to this function's
         # parameters. Ordinary arguments still evaluate, but target resolution
@@ -580,10 +601,26 @@ class _EffectAnalyzer:
                     # Value semantics: the boundary reads the argument; the
                     # callee acts on its own copy or a boundary-managed borrow.
                     params[binding_id].add_read(route)
+                    if raw and not _word_type(argument.type):
+                        params[binding_id].add_escape(route)
                     for expr in inner:
                         self._visit(expr, params)
                 else:
                     self._visit(argument, params)
+
+    @staticmethod
+    def _raw_callee(call: hir.FunctionCall) -> bool:
+        """Raw memory operations and system calls may read or write through
+        any storage they receive, and have no prologue of their own to copy
+        it. An aggregate handed to one escapes: its summary then says so, and
+        a caller borrowing against that summary sees the exposure at this
+        boundary rather than through a whole-call-graph bit. Every other
+        callee, resolved or not, is a value boundary that decides for itself."""
+        function = _unwrap(call.func)
+        if not isinstance(function, hir.ExpressedIdentifier) or function.binding_id is not None:
+            return False
+        name = function.name
+        return name.startswith(('__load_', '__store_', '__syscall')) or name in ('__load__', '__store__')
 
     def _visit_place_argument(
         self,
@@ -624,6 +661,17 @@ class _EffectAnalyzer:
             self.transfers.setdefault(id(target), set()).add(
                 (self.current_literal, binding_id, parameter.binding_id, route)
             )
+
+
+_WORD_NAMES = frozenset(['int', 'uint', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64', 'float32', 'float64', 'bool', 'true', 'false', 'none'])
+
+
+def _word_type(type_: ty.Type) -> bool:
+    """A word carries no storage: passing it to a raw operation exposes nothing."""
+    plain = ty.unfold(ty.strip_refinement(type_))
+    if isinstance(plain, ty.IntegerLiteralType):
+        return -9223372036854775808 <= plain.value <= 18446744073709551615
+    return isinstance(plain, str) and plain in _WORD_NAMES
 
 
 def analyze_effects(root: hir.AST) -> ProgramEffects:
