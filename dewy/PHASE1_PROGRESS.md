@@ -55,7 +55,12 @@ Comparison narrowing now retains observed field bounds when excluding a
 value, so a nonnegative field unequal to zero is positive in either operand
 order. Targeted checks passed, and a second-generation native compiler passed
 all 11 cases in `tests/fixtures/phase1_parity_cases.json` against the hosted
-compiler. The broader 211-case corpus check is in progress.
+compiler. The broader corpus passed 210/211 cases and exposed a native `$prototype`
+builtin-identity mismatch: registered builtin arithmetic was mistaken for a
+user-defined function. The corrected native compiler runs `prototype_panic`
+with the expected panic status 102 and still rejects the shadowed-intrinsic
+regression. Both cases are now in the focused manifest. A fresh full paired
+run remains required at the next integration checkpoint.
 
 Each implementation batch needs acceptance/rejection and independent
 execution outcomes, with hosted/native agreement. Ownership batches also

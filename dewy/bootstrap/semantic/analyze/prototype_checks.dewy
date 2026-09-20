@@ -1,5 +1,6 @@
 from reporting import Error, Span, Pointer
 import p"../hir.dewy" as hir
+import p"../bindings.dewy" as bindings
 import p"../ty.dewy" as types
 import p"../context.dewy" as contexts
 import p"../type_queries.dewy" as views
@@ -34,7 +35,11 @@ simple = (id:addr session:contexts.Session):>bool => {
         let func=hir.node_at(session.hir node.func)
         # Only intrinsic operations are known effect-free by their spelling.
         # A user binding with the same name may change state on every call.
-        if func isnt? hir.ExpressedIdentifier or func.binding_id isnt? none or func.name not in? pure_calls return false
+        if func isnt? hir.ExpressedIdentifier or func.name not in? pure_calls return false
+        if func.binding_id isnt? none {
+            if not bindings.has_binding(session.registry func.binding_id) return false
+            if not bindings.binding_at(session.registry func.binding_id).builtin return false
+        }
         loop argument in node.pos_args {if not simple(argument session) return false}
         return true
     }
