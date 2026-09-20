@@ -1,0 +1,15 @@
+let fill=(@values:set<int64>):>void=>{
+    values.push(11)
+    values.push(31)
+    values.push(11)
+}
+let main=():>int64=>{
+    let values:set<int64>=set[]
+    fill(@values)
+    if values.length not=?2 return 1
+    let result:int64=0
+    loop value in values {result+=value}
+    values.push(9)
+    let removed=values.pop(9)
+    return if removed=?9 and values.length=?2 result else 2
+}

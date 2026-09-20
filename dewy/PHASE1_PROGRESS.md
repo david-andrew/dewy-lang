@@ -39,6 +39,12 @@ explicit remedies, source provenance, and acceptance-parity tests. Existing
 
 ## Validation discipline
 
+Checkpoint: uniform set insertion is implemented in both checkers as
+`set.push(value)`, with the old `add` spelling retained as an alias. Both
+spellings use the same insertion and mutation rules. Hosted tests cover
+execution and rejection of const mutation; the native compiler executes
+the shared fixture with its expected result 42.
+
 Each implementation batch needs acceptance/rejection and independent
 execution outcomes, with hosted/native agreement. Ownership batches also
 need second-generation native execution. Run complete build/fixed-point

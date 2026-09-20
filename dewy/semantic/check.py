@@ -8696,11 +8696,11 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             _forget_positions(dictionary, ctx=ctx)
             _invalidate_dict_lengths(dictionary, ctx=ctx)
             return hir.DictView(binop.loc, view_type, dictionary, name)
-    if name in {'get', 'pop', 'clear', 'add'}:
+    if name in {'get', 'pop', 'clear', 'add', 'push'}:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         found_dict = _dict_value(value)
         dict_methods = {'get', 'pop', 'clear'}
-        set_methods = {'add', 'pop', 'clear'}
+        set_methods = {'add', 'push', 'pop', 'clear'}
         if found_dict is not None and name in (set_methods if found_dict[2] is None else dict_methods):
             dictionary, key_type, value_type = found_dict
             if name in ('pop', 'clear') and value_type is not None:
@@ -8737,7 +8737,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                     None,
                     key_type,
                 )
-            elif name == 'add':
+            elif name in {'add', 'push'}:
                 signature = ty.FunctionType([ty.PosOrKwArg('key', key_type)], [], None, ty.VOID_TYPE)
             else:
                 signature = ty.FunctionType([], [], None, ty.VOID_TYPE)
@@ -8750,7 +8750,9 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                         Pointer(span=binop.left.loc, message=f'`{root.name}` {reason}'),
                     )
                 _refuse_immutable_write(dictionary, binop.left.loc, 'mutate a dictionary member', ctx=ctx)
-            return hir.DictMethod(binop.loc, signature, dictionary, name)
+            # One insertion operation in HIR; `push` is the uniform public
+            # spelling. Keep `add` as a compatibility alias for existing code.
+            return hir.DictMethod(binop.loc, signature, dictionary, 'add' if name == 'push' else name)
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         value = _through_refinement(value)   # `xs[0].length` on an `array<nonemptystring>` element

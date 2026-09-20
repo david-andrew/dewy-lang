@@ -4355,7 +4355,7 @@ container_member = (receiver:addr entry:views.EntryTypes name:string id:addr env
         let type = if name =? 'keys' views.set_type(entry.key @session.types) else types.array_type(if entry.value is? none entry.key else entry.value none @session.types)
         return put(hir.DictView[loc type receiver name] @session)
     }
-    if (name =? 'get' and not is_set) or name in? ['pop' 'clear'] or (name =? 'add' and is_set) {
+    if (name =? 'get' and not is_set) or name in? ['pop' 'clear'] or (name in? ['add' 'push'] and is_set) {
         if name not=? 'get' {
             let target = writable_container(receiver id env @session)
             if target is? Error return target
@@ -4366,7 +4366,10 @@ container_member = (receiver:addr entry:views.EntryTypes name:string id:addr env
             if declared isnt? none and total is? none { total = views.total_dict_key(declared session.types) }
             if total isnt? none and name in? ['pop' 'clear'] return problem(id 'cannot remove keys from a total dictionary' 'its type promises every key remains present' env session)
         }
-        return put(hir.DictMethod[loc container_methods.signature(name entry @session.types) receiver name] @session)
+        # `push` is uniform across containers. `add` remains a compatibility
+        # alias, and both lower to the same insertion operation and effects.
+        let operation=if name =? 'push' 'add' else name
+        return put(hir.DictMethod[loc container_methods.signature(operation entry @session.types) receiver operation] @session)
     }
     return problem(id 'unknown container member' name env session)
 }
