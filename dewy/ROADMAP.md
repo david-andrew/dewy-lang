@@ -582,6 +582,9 @@ Decisions were made by David on 2026-09-13.
    Decision: the shared spelling is the language rule and the name is
    usable in both roles. Whether the implementation represents the type
    and its inhabitant as one object or two is internal.
+   Verified 2026-09-20: both compilers execute ordinary and error sentinels
+   in unions, preserve identity through namespace/selective imports and type
+   aliases, and distinguish independent empty mints with the same spelling.
 8. **Container method names (decided).** Dewy collapses names that mean
    the same thing across container types (`length`, `pop`); the open item
    was whether sets should keep `add` or use `push` like arrays. Decision:

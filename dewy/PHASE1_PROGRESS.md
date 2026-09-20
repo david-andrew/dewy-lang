@@ -291,3 +291,13 @@ acceptance/rejection probes and all 48 paired cases passed. Integration builds
 were 64.11s and 69.42s, with other checks running concurrently; these are not
 isolated performance measurements or a new fixed-point certification.
 Artifacts: `../dewy-build-artifacts/phase1-effects-stage2-2026-09-20`.
+
+Checkpoint: verified the settled unit-like nominal value rule across both
+backends and compilers. The execution fixture returns ordinary/error sentinels
+through unions, tests their types, passes their sole values as arguments and
+preserves identity through imported aliases. A separate empty mint with the
+same name remains distinct. This closes the Phase 1.4 verification item without
+changing the language or its runtime representation.
+
+Validation: 12 hosted nominal checks, x86/C execution, and execution with the
+second-generation effect-contract compiler returned the expected result (42).

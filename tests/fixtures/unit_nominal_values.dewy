@@ -1,0 +1,23 @@
+from p"unit_nominal_markers.dewy" import Alias
+import p"unit_nominal_markers.dewy" as markers
+
+# Equal spelling and zero fields do not merge independent mints.
+Marker = type of any
+choose = (mode:int64):>markers.Marker | markers.Failure | int64 => {
+    if mode =? 0 return markers.Marker
+    if mode =? 1 return markers.Failure
+    return 42
+}
+accept = (value:markers.Marker):>int64 => 42
+main = ():>int64 => {
+    let first=choose(0)
+    if first isnt? markers.Marker return 1
+    if first is? Marker return 2
+    if first isnt? Alias return 3
+    let second=choose(1)
+    if second isnt? markers.Failure return 4
+    if second isnt? error return 5
+    if second is? markers.Marker return 6
+    if choose(2) not=? 42 return 7
+    return accept(Alias)
+}
