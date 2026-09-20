@@ -1156,7 +1156,6 @@ class _Lowerer(
         # the analyses look at the nodes the lowering will see: the transformed body
         analysis_literal = replace(literal, body=transformed_body)
         self.current_literal = analysis_literal
-        self.moved_uses = self._compute_moves(analysis_literal)
         # These analyses inspect the same transformed body. Build its binding
         # initializer index once and pass it explicitly; no cached tree query
         # needs to survive a later rewrite.
@@ -1165,6 +1164,7 @@ class _Lowerer(
         self.loop_string_escapes = self._loop_string_escapes(analysis_literal, self.local_initializers)
         self.array_element_targets = self._array_element_string_targets(analysis_literal)
         self.owning_string_bindings = self._owning_string_locals(analysis_literal, self.local_initializers)
+        self.moved_uses = self._compute_moves(analysis_literal)
         self.owned_strings = set()
         self.owned_raw_arrays = {}
         self.owned_cells = {}
@@ -3549,7 +3549,7 @@ class _Lowerer(
         return isinstance(self._copy_source_expression(node.expr), (hir.ExpressedIdentifier, hir.Index, hir.MemberAccess, hir.DictLookup))
 
     def _compute_moves(self, literal: hir.FunctionLiteral) -> set[int]:
-        """The move rule: the last use of an owned array local at a transfer site is a move.
+        """Find transfer sites that can consume an owned local.
 
         Transfer sites are `return xs` and `xs` stored into a runtime-length
         array field (an object literal's field, a member assignment). A use is
@@ -3559,11 +3559,29 @@ class _Lowerer(
         declaration is outside of (the next iteration would use it again —
         a `return` is exempt, it leaves the loop), and no nested function
         literal captures the binding. The lowering then adopts the arena
-        storage instead of cloning it (`_adopt_or_clone`).
+        storage instead of cloning it (`_adopt_or_clone`). Record returns
+        adopt their owned fields. Single-use string locals with independent
+        descriptors also transfer into bindings, records and array storage.
         """
         owned: dict[int, tuple[int, int]] = {}   # binding id -> (sequence, loop depth) of its declaration
         uses: dict[int, list[tuple[int, int, bool, int | None]]] = {}   # binding id -> (sequence, loop depth, in nested literal, transfer node id)
         counter = 0
+        returned: set[int] = set()
+        # An owned string call/copy has an arena or static descriptor; frame
+        # interpolation/view descriptors cannot be handed to a container.
+        # Until string view dependencies participate in liveness, transfer
+        # only a single-use binding: an earlier call might have kept a view.
+        strings = {
+            binding for binding in self.owning_string_bindings
+            if self.local_initializers.get(binding)
+            and all(self._is_owned_string_result(value) for value in self.local_initializers[binding])
+        }
+
+        def transfer(node: hir.AST, *, string_only: bool = False) -> dict[int, int]:
+            source = self._copy_source_expression(node)
+            if isinstance(source, hir.ExpressedIdentifier) and (not string_only or source.binding_id in strings):
+                return {id(source): id(source)}
+            return {}
 
         def note_use(binding_id: int, depth: int, nested: bool, transfer: int | None) -> None:
             nonlocal counter
@@ -3576,8 +3594,8 @@ class _Lowerer(
                 walk(node.body, depth, True, {})
                 return
             if isinstance(node, hir.Declare):
-                movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node)
-                walk(node.expr, depth, nested, {})
+                movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node) or node.binding_id in strings
+                walk(node.expr, depth, nested, transfer(node.expr, string_only=True))
                 if movable and node.binding_id is not None and not nested:
                     counter += 1
                     owned[node.binding_id] = (counter, depth)
@@ -3588,22 +3606,33 @@ class _Lowerer(
                 return
             if isinstance(node, hir.Return) and node.item is not None:
                 source = self._copy_source_expression(node.item)
-                walk(node.item, depth, nested, {id(source): id(source)} if isinstance(source, hir.ExpressedIdentifier) else {})
+                if isinstance(source, hir.ExpressedIdentifier):
+                    returned.add(id(source))
+                walk(node.item, depth, nested, transfer(node.item))
                 return
             if isinstance(node, hir.ObjectLiteral):
                 for field_ in node.fields:
                     expected = node.type.field(field_.name) if isinstance(node.type, ty.ObjectType) else None
                     field_type = expected.type if expected is not None else field_.value.type
-                    source = self._copy_source_expression(field_.value)
-                    transfer = {id(source): id(source)} if isinstance(field_type, ty.ArrayType) and field_type.length is None and isinstance(source, hir.ExpressedIdentifier) else {}
-                    walk(field_.value, depth, nested, transfer)
+                    site = transfer(field_.value, string_only=not (isinstance(field_type, ty.ArrayType) and field_type.length is None))
+                    walk(field_.value, depth, nested, site)
                 return
-            if isinstance(node, hir.MemberAssign):
+            if isinstance(node, (hir.MemberAssign, hir.IndexAssign)):
                 walk(node.target, depth, nested, {})
-                source = self._copy_source_expression(node.value)
                 field_type = node.target.type
-                transfer = {id(source): id(source)} if isinstance(field_type, ty.ArrayType) and field_type.length is None and isinstance(source, hir.ExpressedIdentifier) else {}
-                walk(node.value, depth, nested, transfer)
+                site = transfer(node.value, string_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None))
+                walk(node.value, depth, nested, site)
+                return
+            if isinstance(node, hir.ArrayLiteral):
+                for item in node.items:
+                    walk(item, depth, nested, transfer(item, string_only=True))
+                return
+            if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod) and node.func.name in ('push', 'insert'):
+                walk(node.func, depth, nested, {})
+                for index, argument in enumerate(node.pos_args):
+                    walk(argument, depth, nested, transfer(argument, string_only=True) if index == 0 else {})
+                for name, argument in node.kw_args.items():
+                    walk(argument, depth, nested, transfer(argument, string_only=True) if name == 'value' and not node.pos_args else {})
                 return
             if isinstance(node, hir.Flow):
                 for arm in node.arms:
@@ -3632,10 +3661,12 @@ class _Lowerer(
             references = uses.get(binding_id, [])
             if not references or any(nested for _seq, _depth, nested, _transfer in references):
                 continue
+            if binding_id in strings and len(references) != 1:
+                continue
             # A `return` leaves every path: a returned local is at its last
             # use there whatever the text after the return does with it.
             for _sequence, _depth, _nested, transfer in references:
-                if transfer is not None and self._transfer_is_return(transfer, literal):
+                if transfer in returned:
                     moves.add(transfer)
             last = max(references, key=lambda use: use[0])
             _sequence, depth, _nested, transfer = last
@@ -3646,28 +3677,6 @@ class _Lowerer(
                 continue
             moves.add(transfer)
         return moves
-
-    def _transfer_is_return(self, transfer_id: int, literal: hir.FunctionLiteral) -> bool:
-        """Whether the identifier with this id is the item of a `return` (a return leaves any loop)."""
-        found = False
-
-        def walk(node: object) -> None:
-            nonlocal found
-            if found or not isinstance(node, hir.AST):
-                return
-            if isinstance(node, hir.Return) and node.item is not None and id(self._copy_source_expression(node.item)) == transfer_id:
-                found = True
-                return
-            for field_ in fields(node):
-                value = getattr(node, field_.name)
-                for child in (value if isinstance(value, (list, tuple)) else [value]):
-                    if isinstance(child, hir.AST):
-                        walk(child)
-                    elif isinstance(child, hir.ObjectField):
-                        walk(child.value)
-
-        walk(literal.body)
-        return found
 
     def _insert_releases(self, body: hir.AST, exit_statements: list[hir.AST] = ()) -> hir.AST:
         """Drop-at-scope-exit for owned array locals, over a lowered function body.
@@ -4215,7 +4224,10 @@ class _Lowerer(
                     node,
                     decltype=(
                         'let'
-                        if isinstance(node.expr.type, ty.ArrayType)
+                        # Ownership transfer may clear a source-const slot
+                        # after its final read. Source mutation was already
+                        # checked; the runtime owner word is internal state.
+                        if isinstance(node.expr.type, ty.ArrayType) or node.name in self.owned_strings
                         else node.decltype
                     ),
                     annotation=annotation,

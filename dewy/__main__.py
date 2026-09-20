@@ -218,7 +218,7 @@ def analyze(argv: list[str]) -> int:
     moves = sum(note.moved for note in lower.last_move_notes)
     print(
         f"copy report: {counts.get('record', 0)} record, {counts.get('array', 0)} array and {counts.get('cell', 0)} cell copies; "
-        f"{counts.get('string', 0)} string escape cop{'ies' if counts.get('string', 0) != 1 else 'y'}; {moves} move{'s' if moves != 1 else ''} of owned arrays"
+        f"{counts.get('string', 0)} string escape cop{'ies' if counts.get('string', 0) != 1 else 'y'}; {moves} move{'s' if moves != 1 else ''} of owned values"
     )
     print()
     notes = representation.last_notes

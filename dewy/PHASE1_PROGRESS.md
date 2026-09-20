@@ -400,3 +400,19 @@ validated before filtering. Nine tool regressions passed, and the real
 hosted/native ownership kernel each reports four sites in 39 lines. Its
 stable regression budget remains four sites; density (102.564 sites/kloc)
 is supplementary and says nothing about runtime bytes or frequency.
+
+Hosted string-move checkpoint: a single-use local holding an explicit string
+snapshot or an owned call result can transfer into a binding, record, array
+literal, push, or element/field store. Earlier views and loop backedges stay
+conservative; frame descriptors never enter this path. The source slot is
+cleared before normal cleanup, including for source-const bindings. Returned
+views still retain independent bytes, with a conditional copy note. Move
+collection also records returns during its first traversal instead of
+rescanning the function for every transfer candidate.
+
+Validation: 32 hosted move/copy/report regressions passed, including x86/C
+execution, const storage, earlier views, repeated loop uses and zero retained
+bytes over 100 calls. A measured element replacement allocates zero bytes;
+disabling moves provides a positive allocating control. The existing second-
+generation native compiler also executes the shared fixture with result 42.
+No native lowering changed in this batch, so no new self-build was needed.

@@ -33,6 +33,7 @@ from .lowering_shared import (
     STRING_OWNER_OFFSET,
     STRING_START_OFFSET,
     CopyNote,
+    MoveNote,
     LoopRegion,
     StringResultBound,
     replace_changed,
@@ -3103,6 +3104,24 @@ class _StringLowering:
         copied too, since its storage belongs to the caller. Each copy made is
         a `CopyNote` for `dewy analyze`.
         """
+        source = self._copy_source_expression(node)
+        if (not explicit and isinstance(source, hir.ExpressedIdentifier)
+                and id(source) in self.moved_uses and source.name in self.owned_strings):
+            # Last use of an owning local. Snapshot before clearing its slot
+            # so normal scope cleanup remains correct on every branch.
+            # A returned view still needs independent bytes; COW sharing alone
+            # does not establish a borrow or eliminate a logical copy.
+            prelude, value = self._extract_expression(node)
+            taken = self._new_string_temp(node.loc, 'int64', 'moved')
+            statements = [*prelude, hir.Declare(node.loc, ty.VOID_TYPE, 'let', taken.name, 'int64', value),
+                          hir.Assign(node.loc, ty.VOID_TYPE, replace(source, type='int64'), '=', self._int64_literal(node.loc, 0))]
+            keep, result = self._copy_if_view(taken, node.loc)
+            if any(not isinstance(self._unwrap_transparent(value), hir.CopyValue)
+                   for value in self.local_initializers.get(source.binding_id, [])):
+                self._note_copy('string', node.type, 'retained if a returned view',
+                                'the returned descriptor may borrow bytes whose owner can expire', node.loc)
+            self.move_notes.append(MoveNote(self.srcfile, node.loc, f'`{source.name}` is moved into owned storage at its only use; a returned view still retains independent bytes', True))
+            return [*statements, *keep], result
         if self._is_owned_string_result(node):
             self._consume_string_value(node)   # the container takes the result over: not a temporary
         prelude, value = self._extract_expression(node)

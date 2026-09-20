@@ -106,5 +106,7 @@ def test_hosted_summary_includes_moves(monkeypatch, capsys):
     report = ('copy: source.dewy:1: string copied when returned: caller owns result\n'
               'copy report: 0 record, 0 array and 0 cell copies; 1 string escape copy; 2 moves of owned arrays\n')
     monkeypatch.setattr(copy_report.subprocess, 'run', lambda *args, **kwargs: CompletedProcess(args, 0, report, ''))
-    assert copy_report.main(['source.dewy', '--max-copies', '1']) == 0
-    assert capsys.readouterr().out.startswith('1 copies: 1 string')
+    for category in ['arrays', 'values']:
+        report = report.replace('owned arrays', f'owned {category}')
+        assert copy_report.main(['source.dewy', '--max-copies', '1']) == 0
+        assert capsys.readouterr().out.startswith('1 copies: 1 string')

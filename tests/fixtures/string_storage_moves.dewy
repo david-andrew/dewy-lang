@@ -1,0 +1,40 @@
+# A local snapshot transfers into its next owner. Keeping the source live,
+# reusing it on a loop backedge, or keeping a view must preserve independence.
+Box:type=[text:string]
+keep=(value:string):>string=>value
+exercise=(source:string):>void=>{
+    let first=source.copy()
+    let box=Box[first]
+    $runtime_assert box.text=?source
+    let second=source.copy()
+    let array:array<string>=[second]
+    $runtime_assert array[0]=?source
+    let third=source.copy()
+    array.push(third)
+    $runtime_assert array[1]=?source
+    let fourth=source.copy()
+    let rebound=fourth
+    $runtime_assert rebound=?source
+    let live=source.copy()
+    array.push(live)
+    $runtime_assert live=?source
+    let repeated=source.copy()
+    loop i in [0..2) {array.push(repeated)}
+    $runtime_assert array[3]=?source and array[4]=?source
+    let owner=source.copy()
+    let viewed=keep(owner)
+    let container=Box[owner]
+    container.text='replacement'
+    $runtime_assert viewed=?source
+    const immutable=source.copy()
+    let immutable_box=Box[immutable]
+    $runtime_assert immutable_box.text=?source
+}
+main=():>int64=>{
+    let source="value {42}"
+    exercise(source)
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {exercise(source)}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

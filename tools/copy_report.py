@@ -81,9 +81,9 @@ def main(argv: list[str]) -> int:
         sys.stderr.write('copy inventory is incomplete: malformed entries or missing/duplicate summary\n')
         return 1
     notes = [match.groupdict() for match in parsed]
-    # Hosted reports also describe array moves; native reports end after
+    # Hosted reports also describe moves; native reports end after
     # strings. Accept both complete formats, without allowing repeated kinds.
-    summary = re.fullmatch(r'copy report: (\d+) record, (\d+) array and (\d+) cell copies; (\d+) string (?:escape )?cop(?:y|ies)(?:; \d+ moves? of owned arrays)?', summaries[0])
+    summary = re.fullmatch(r'copy report: (\d+) record, (\d+) array and (\d+) cell copies; (\d+) string (?:escape )?cop(?:y|ies)(?:; \d+ moves? of owned (?:arrays|values))?', summaries[0])
     if summary is None:
         sys.stderr.write('copy inventory is incomplete: malformed summary\n')
         return 1
