@@ -353,4 +353,27 @@ malformed rows, and use of `no` outside contracts). The final native generation
 built in 59.49s and executed the imported-resource/place fixture with result
 42. This is a correctness checkpoint, not the sub-30s performance target.
 Artifacts: `../dewy-build-artifacts/phase1-named-effects-stage3-2026-09-20`.
-The expanded 55-case paired parity run is in progress.
+All 55 expanded hosted/native paired parity cases passed.
+
+Row-generic checkpoint: `<E:Effect>` is kind-checked separately from ordinary
+type parameters in both compilers. Callback contracts determine row arguments;
+repeated constraints join, mixed `<T E:Effect>` signatures substitute both
+kinds, and instance/cache identity includes the inferred row. Effect binders
+cannot enter value types or runtime expressions. Unknown callback behavior
+stays unknown. Static function handles require neither an external read nor
+an aggregate transfer at a higher-order call.
+
+The initial inference intentionally leaves underdetermined decompositions,
+effect-polymorphic type aliases, negative row arguments, and callback-relative
+place subjects pending. The last case needs subject scope preserved rather
+than interpreting a callback's slot number as the enclosing function's slot.
+These are conservative rejections/lost precision, not new source semantics.
+
+Validation: 111 focused hosted row/contract/generic regressions passed,
+including x86/C execution of mixed type/row generics. Nine native source
+acceptance/rejection probes passed. Two cache checks passed (108.63s), verifying
+row binder kinds/identities, binding values and instantiated row arguments
+survive an x86/C snapshot round trip, plus generated-code freshness. Native
+generations built in 60.74s and 60.09s and both executed the row-generic fixture
+with result 42. The expanded 58-case hosted/native parity run is in progress.
+Artifacts: `../dewy-build-artifacts/phase1-row-generics-stage2-2026-09-20`.

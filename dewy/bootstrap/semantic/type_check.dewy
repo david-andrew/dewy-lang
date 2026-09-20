@@ -138,6 +138,7 @@ resolve_name = (name:string id:addr context:contexts.Context @session:contexts.S
     let binding_id = lookup(name context session)
     if binding_id isnt? none {
         let binding = bindings.binding_at(session.registry binding_id)
+        if binding.kind =? 'effect' return contexts.problem(id 'an effect row is not a value type' 'use this parameter in a function effect contract' context session)
         let value = binding.type_value
         if value is? none and binding_id in? session.pending_aliases {
             let resolved = resolve_alias(binding_id @session)
@@ -993,19 +994,25 @@ generic_parameters = (parameters:parser.Block context:contexts.Context @session:
         let node = contexts.node_at(item context session)
         let name = source_views.identifier(item context session)
         let bound = types.primitive('any' @session.types)
+        let effect=node is? parser.BinOp and source_views.is_operator(node.op ':' context session) and source_views.identifier(node.right context session) =? 'Effect'
+        if node is? parser.BinOp and effect {name=source_views.identifier(node.left context session)}
         if node is? parser.BinOp and source_views.is_operator(node.op 'of' context session) {
             name = source_views.identifier(node.left context session)
             let resolved = resolve(node.right inner @session)
             if resolved is? Error return resolved
             bound = resolved
         }
-        if name is? none return contexts.problem(item 'invalid generic type parameter' 'expected `T` or `T of Bound`' context session)
+        if name is? none return contexts.problem(item 'invalid generic type parameter' 'expected `T`, `T of Bound`, or `E:Effect`' context session)
         if name in? names return contexts.problem(item "duplicate generic type parameter `{name}`" 'this parameter name is repeated' context session)
         names.add(name)
-        params.push(types.GenericParam[name bound])
+        let identity=if effect "{name}@{contexts.source_at(context session).srcfile.path}:{node.loc.start}" else ''
+        params.push(types.GenericParam[name bound if effect 'effect' else 'type' identity])
         let binding_id = bindings.allocate_param(@session.registry name types.primitive('type' @session.types) node.loc)
         let binding = bindings.binding_at(session.registry binding_id)
-        binding.type_value = types.type_variable(name bound @session.types)
+        if effect {
+            binding.kind='effect'
+            binding.effect_value=effect_rows.Row[variables=[identity]]
+        } else {binding.type_value = types.type_variable(name bound @session.types)}
         bindings.store_binding(@session.registry binding_id binding)
         bindings.bind(@session.scopes inner.scope name binding_id)
     }
@@ -1016,6 +1023,9 @@ generic_alias = (parameters:parser.Block body:addr context:contexts.Context @ses
     if parameters.inner.length =? 0 return contexts.problem(body 'generic type alias requires at least one parameter' 'this parameter list is empty' context session)
     let declared = generic_parameters(parameters context @session)
     if declared is? Error return declared
+    loop parameter in declared.params {
+        if parameter.kind =? 'effect' return contexts.problem(body 'effect parameters currently belong to functions' 'effect-polymorphic type aliases are not implemented yet' context session)
+    }
     let resolved = resolve(body declared.context @session)
     if resolved is? Error return resolved
     return types.GenericTypeAlias[declared.params resolved]
@@ -1266,6 +1276,12 @@ effect_contract = (id:addr parameters:array<types.PosOrKwArg> keyword_parameters
         let parsed=effect_syntax.application(value context session)
         let family=parsed.name
         let arguments=parsed.arguments
+        let bound_row=effect_syntax.row_binding(value context session)
+        if bound_row isnt? none {
+            if negative return contexts.problem(term 'cannot exclude a row parameter' 'exclude a named effect family or resource instead' context session)
+            permitted=effect_rows.merge(if permitted is? none effect_rows.Row[] else permitted bound_row)
+            continue
+        }
         if (family =? 'no_effects' and arguments is? none) or (family =? 'Effect' and arguments isnt? none and arguments.length =? 0) {
             if negative return contexts.problem(term 'cannot exclude an empty effect row' 'use `no_effects` directly, or `no reads` to exclude a family' context session)
             if permitted is? none {permitted=effect_rows.Row[]}

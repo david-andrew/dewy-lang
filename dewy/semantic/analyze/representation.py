@@ -303,7 +303,7 @@ class _RepresentationPass:
         ]
         if not big_positions:
             return None
-        new_arguments = dict(type_arguments)
+        new_arguments = ty.TypeArguments(type_arguments)
         for position in big_positions:
             params = generic.type.pos_or_kw
             parameter_type = params[position].type if position < len(params) else None
@@ -320,7 +320,7 @@ class _RepresentationPass:
         from .. import check   # the instantiation is the checker's
 
         source = generic.source
-        key = tuple((param.name, repr(new_arguments[param.name])) for param in source.params)
+        key = check._instantiation_key(new_arguments, source.params)
         instance = source.instances.get(key)
         if instance is None:
             before = len(ctx.generic_instances)

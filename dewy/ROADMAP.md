@@ -464,8 +464,11 @@ row separate from those access summaries: both compilers check `no_effects`
 place-parameter routes, and `no reads<Resource>` / `no reads` exclusions.
 Direct calls translate place subjects; constrained callbacks retain open
 negative guarantees. Unknown operations cannot satisfy an empty row or an
-unproved exclusion. Row-polymorphic source signatures, complete inference
-into callable types and allocation/failure coverage remain in progress. The reviewed rules are in `PHASE1_DESIGN_PROPOSALS.md`.
+unproved exclusion. Separately kind-checked `<E:Effect>` parameters now infer
+and substitute callback rows in both compilers, including mixed type/row
+signatures and distinct cached instances. Complete inference into callable
+types, scoped polymorphic place subjects and allocation/failure coverage remain
+in progress. The reviewed rules are in `PHASE1_DESIGN_PROPOSALS.md`.
 Effect polymorphism, allocation and failure as effects, and the
 `noreturn`/escape set are prerequisites for compile-time purity (Phase 2),
 the resource-exhaustion policy (`semantic/resource_exhaustion.md`), and the

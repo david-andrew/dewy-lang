@@ -52,7 +52,7 @@ QuantityType = type of Type & [number:addr dimension:addr]
 # callable relation, since the callee may write through them.
 PosOrKwArg:type = const [name:string? value_type:addr required:bool=true place:bool=false]
 KwOnlyArg:type = const [name:string value_type:addr required:bool place:bool=false]
-GenericParam:type = const [name:string bound:addr]
+GenericParam:type = const [name:string bound:addr kind:'type'|'effect'='type' identity:string='']
 # An alias is a compile-time constructor, not an atom in the value-type
 # hierarchy. Its body and bounds refer into the ordinary type arena.
 GenericTypeAlias:type = const [params:array<GenericParam> body:addr]
@@ -437,7 +437,7 @@ function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr
         slots.push("K{_quoted(p.name)}:{p.value_type}:{p.required}:{p.place}")
     }
     loop p in params {
-        slots.push("G{_quoted(p.name)}:{p.bound}")
+        slots.push("G{_quoted(p.name)}:{p.bound}:{p.kind}:{_quoted(p.identity)}")
     }
     let rest_key = if rest is? none 'none' else _quoted(rest)
     let effect_key=effect_rows.identity(effects)
@@ -450,7 +450,7 @@ function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr
         shapes.push("P{name}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}")
     }
     loop p in kw { shapes.push("K{_quoted(p.name)}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}") }
-    loop p in params { shapes.push("G{_quoted(p.name)}:{shapes_key([p.bound] nodes)}") }
+    loop p in params { shapes.push("G{_quoted(p.name)}:{shapes_key([p.bound] nodes)}:{p.kind}:{_quoted(p.identity)}") }
     let shape = "F{shapes.join(';')}:R{rest_key}:T{shapes_key([ret] nodes)}:E{effect_key}"
     return intern(@nodes FunctionType[key=key shape=shape pos_or_kw=pos kw_only=kw rest=rest ret=ret type_params=params effects=effects])
 }
@@ -647,49 +647,54 @@ module_field = (node:ModuleType name:string):>ModuleField? => {
 # Substitute free names, respecting generic binders inside a nested callable.
 # Instantiating the outer method is a separate operation: it removes that
 # method's binder before substitution rather than accidentally shadowing it.
-substitute = (id:addr bindings:dict<string addr> @nodes:Table):>addr => {
+substitute = (id:addr bindings:dict<string addr> @nodes:Table effects:dict<string effect_rows.Row>=[]):>addr => {
     let node = node_at(nodes id)
     if node is? Primitive | TypeVariable return bindings.get(node.name default=id)
-    if node is? TypeNot return negate(substitute(node.item bindings @nodes) @nodes)
-    if node is? RefinedType return refined_type(substitute(node.base bindings @nodes) node.propositions @nodes)
+    if node is? TypeNot return negate(substitute(node.item bindings @nodes effects=effects) @nodes)
+    if node is? RefinedType return refined_type(substitute(node.base bindings @nodes effects=effects) node.propositions @nodes)
     if node is? PathType return id
     if node is? ObjectType {
         let fields:array<ObjectField> = []
-        loop f in node.fields { fields.push(ObjectField[f.name substitute(f.value_type bindings @nodes) f.mutable f.default f.refinement]) }
+        loop f in node.fields { fields.push(ObjectField[f.name substitute(f.value_type bindings @nodes effects=effects) f.mutable f.default f.refinement]) }
         return object_type(fields node.brand node.immutable node.methods node.constructors @nodes minted=node.minted parent=node.parent abstract=node.abstract)
     }
-    if node is? ArrayType return array_type(substitute(node.element bindings @nodes) node.length @nodes)
-    if node is? QuantityType return quantity_type(substitute(node.number bindings @nodes) node.dimension @nodes)
+    if node is? ArrayType return array_type(substitute(node.element bindings @nodes effects=effects) node.length @nodes)
+    if node is? QuantityType return quantity_type(substitute(node.number bindings @nodes effects=effects) node.dimension @nodes)
     if node is? TypeAnd | TypeOr | SequenceType | OverloadType {
         let original = if node is? OverloadType node.methods else node.items
         let items:array<addr> = []
-        loop child in original { items.push(substitute(child bindings @nodes)) }
+        loop child in original { items.push(substitute(child bindings @nodes effects=effects)) }
         if node is? TypeAnd return intersect(items @nodes)
         if node is? TypeOr return union(items @nodes)
         if node is? SequenceType return sequence(items @nodes)
         return overload_type(items @nodes)
     }
     if node is? TypeParameterize {
-        let head = substitute(node.head bindings @nodes)
+        let head = substitute(node.head bindings @nodes effects=effects)
         let args:array<addr> = []
-        loop arg in node.args { args.push(substitute(arg bindings @nodes)) }
+        loop arg in node.args { args.push(substitute(arg bindings @nodes effects=effects)) }
         return parameterize(head args @nodes)
     }
-    if node is? FunctionType return substitute_function(node bindings false @nodes)
+    if node is? FunctionType return substitute_function(node bindings false @nodes effects=effects)
     return id
 }
 
-substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:bool @nodes:Table):>addr => {
+substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:bool @nodes:Table effects:dict<string effect_rows.Row>=[]):>addr => {
     let inner = bindings
     let params = node.type_params
     if instantiate { params = [] }
-    else { loop param in params { if param.name in? inner { inner.pop(param.name); } } }
+    else {
+        loop param in params {
+            if param.name in? inner {inner.pop(param.name);}
+            if param.kind =? 'effect' and param.identity in? effects {effects.pop(param.identity);}
+        }
+    }
     let pos:array<PosOrKwArg> = []
     let kw:array<KwOnlyArg> = []
-    loop p in node.pos_or_kw { pos.push(PosOrKwArg[p.name substitute(p.value_type inner @nodes) p.required p.place]) }
-    loop p in node.kw_only { kw.push(KwOnlyArg[p.name substitute(p.value_type inner @nodes) p.required p.place]) }
-    let ret = substitute(node.ret inner @nodes)
-    return function_type(pos kw node.rest ret params @nodes effects=node.effects)
+    loop p in node.pos_or_kw { pos.push(PosOrKwArg[p.name substitute(p.value_type inner @nodes effects=effects) p.required p.place]) }
+    loop p in node.kw_only { kw.push(KwOnlyArg[p.name substitute(p.value_type inner @nodes effects=effects) p.required p.place]) }
+    let ret = substitute(node.ret inner @nodes effects=effects)
+    return function_type(pos kw node.rest ret params @nodes effects=effect_rows.replace_variables(node.effects effects))
 }
 
 # De Morgan's laws put not only on atoms. A type constructor is itself an atom

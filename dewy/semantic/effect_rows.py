@@ -228,3 +228,37 @@ def bind_receiver(contract: Contract | None, parameter_count: int) -> Contract |
     if contract.allowed is not None and any(atom.subject is not None and atom.subject.kind == 'parameter' and atom.subject.key == '0' for atom in contract.allowed.atoms):
         bound = Contract(union(bound.allowed, Row(unknown=True)), bound.excluded)
     return bound
+
+
+def replace_variables(contract: Contract | None, bindings: dict[str, Row]) -> Contract | None:
+    if contract is None:
+        return None
+    return Contract(substitute(contract.allowed, bindings) if contract.allowed is not None else None, contract.excluded)
+
+
+def infer(formal: Contract | None, actual: Contract | None, variables: set[str], bindings: dict[str, Row]) -> bool:
+    """Infer one row remainder per callback bound, joining repeated uses.
+
+    Two unknown remainders in one bound have no unique decomposition. Leave
+    that case unresolved rather than choosing arbitrary permissions. Open
+    callback rows contribute unknown, never an empty row; their exclusions
+    continue to participate in the final callable-subtyping check.
+    """
+    if formal is None or formal.allowed is None:
+        return implies(actual, formal)
+    free = [key for key in formal.allowed.variables if key in variables]
+    if not free:
+        return implies(actual, formal)
+    if len(free) != 1:
+        return False
+    supplied = actual.allowed if actual is not None and actual.allowed is not None else Row(unknown=True)
+    fixed = Row(formal.allowed.atoms, tuple(key for key in formal.allowed.variables if key not in variables), formal.allowed.unknown)
+    remainder = Row(tuple(atom for atom in supplied.atoms if not any(covers(old, atom) for old in fixed.atoms)),
+                    tuple(key for key in supplied.variables if key not in fixed.variables), supplied.unknown)
+    if any(atom.subject is not None and atom.subject.kind == 'parameter' for atom in remainder.atoms):
+        # Callback-relative places cannot escape into the enclosing signature
+        # as if they were that signature's parameter slots.
+        return False
+    key = free[0]
+    bindings[key] = union(bindings.get(key, Row()), remainder)
+    return True

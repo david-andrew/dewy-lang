@@ -6951,6 +6951,8 @@ def _generic_type_alias(
             'generic type alias requires at least one parameter',
             Pointer(span=parameters.loc, message='this parameter list is empty'),
         )
+    if any(param.kind == 'effect' for param in params):
+        user_error(ctx.srcfile, 'effect parameters currently belong to functions', Pointer(span=parameters.loc, message='effect-polymorphic type aliases are not implemented yet'))
     return ty.GenericTypeAlias(params, ast_to_type(body, ctx=alias_ctx))
 
 
@@ -6964,7 +6966,13 @@ def _declare_generic_parameters(parameters: p0.Block, *, ctx: Context) -> tuple[
     params: list[ty.GenericParam] = []
     names: set[str] = set()
     for item in parameters.inner:
-        if isinstance(item, p0.Atom) and isinstance(
+        effect = (isinstance(item, p0.BinOp) and _operator_symbol(item.op) == ':'
+                  and effect_syntax.name(item.right) == 'Effect' and effect_syntax.name(item.left) is not None)
+        if effect:
+            name = effect_syntax.name(item.left)
+            bound = ty.TOP_TYPE
+            loc = item.left.loc
+        elif isinstance(item, p0.Atom) and isinstance(
             item.item,
             t1.Identifier,
         ):
@@ -6987,7 +6995,7 @@ def _declare_generic_parameters(parameters: p0.Block, *, ctx: Context) -> tuple[
                 'invalid generic type parameter',
                 Pointer(
                     span=item.loc,
-                    message='expected `T` or `T of Bound`',
+                    message='expected `T`, `T of Bound`, or `E:Effect`',
                 ),
             )
         if name in names:
@@ -6997,14 +7005,19 @@ def _declare_generic_parameters(parameters: p0.Block, *, ctx: Context) -> tuple[
                 Pointer(span=loc, message='this parameter name is repeated'),
             )
         names.add(name)
-        param = ty.GenericParam(name, bound)
+        identity = f'{name}@{ctx.srcfile.path}:{loc.start}' if effect else ''
+        param = ty.GenericParam(name, bound, 'effect' if effect else 'type', identity)
         params.append(param)
         binding = alias_ctx.binding_registry.allocate_param(
             name,
             ty.TYPE_TYPE,
             loc,
         )
-        binding.type_value = ty.TypeVariable(name, bound)
+        if effect:
+            binding.kind = 'effect'
+            binding.effect_value = effect_rows.Row(variables=(identity,))
+        else:
+            binding.type_value = ty.TypeVariable(name, bound)
         alias_ctx.declarations[name] = ty.TYPE_TYPE
         alias_ctx.binding_scopes[name] = binding
     return params, alias_ctx
@@ -7054,8 +7067,18 @@ def _generic_signature(fn_ast: p0.BinOp, *, ctx: Context) -> tuple[ty.FunctionTy
     return replace(signature, type_params=params, effects=effect_syntax.contract(rettype_ast, all_params, generic_ctx)), params
 
 
+def _generic_argument_display(arguments, param):
+    if param.kind == 'effect':
+        return effect_rows.display(effect_rows.Contract(arguments.effects[param.identity]), {}).removeprefix(' & ')
+    return type_to_dewy(arguments[param.name])
+
+
+def _instantiation_key(arguments, params):
+    return tuple((param.name, effect_rows.identity(effect_rows.Contract(arguments.effects[param.identity])) if param.kind == 'effect' else repr(arguments[param.name])) for param in params)
+
+
 def _instantiation_name(name: str, bindings: dict[str, ty.TypeExpr], params: list[ty.GenericParam]) -> str:
-    rendered = '_'.join(type_to_dewy(bindings[param.name]) for param in params)
+    rendered = '_'.join(_generic_argument_display(bindings, param) for param in params)
     cleaned = ''.join(ch if ch.isalnum() else '_' for ch in rendered).strip('_')
     while '__' in cleaned:
         cleaned = cleaned.replace('__', '_')
@@ -7109,9 +7132,9 @@ def _instantiate_generic_call(
             f'cannot infer the type parameters of `{generic.name}` from this call',
             Pointer(span=left.loc, message='the arguments do not determine every type parameter'),
         )
-    bindings = {name: _widen_type_argument(value, loc=left.loc, ctx=ctx) for name, value in bindings.items()}
+    bindings = ty.TypeArguments({name: _widen_type_argument(value, loc=left.loc, ctx=ctx) for name, value in bindings.items()}, effects=bindings.effects)
     source = generic.source
-    key = tuple((param.name, repr(bindings[param.name])) for param in source.params)
+    key = _instantiation_key(bindings, source.params)
     instance = source.instances.get(key)
     if instance is None:
         instance = _instantiate_generic_function(generic, bindings, ctx=ctx, call_loc=left.loc)
@@ -7146,7 +7169,11 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
     )
     for param in source.params:
         alias = instance_ctx.binding_registry.allocate_param(param.name, ty.TYPE_TYPE, generic.loc)
-        alias.type_value = bindings[param.name]
+        if param.kind == 'effect':
+            alias.kind = 'effect'
+            alias.effect_value = bindings.effects[param.identity]
+        else:
+            alias.type_value = bindings[param.name]
         instance_ctx.declarations[param.name] = ty.TYPE_TYPE
         instance_ctx.binding_scopes[param.name] = alias
     assert isinstance(generic.type, ty.FunctionType)
@@ -7156,10 +7183,10 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
     if name in taken:
         # two object types with the same fields spell the same (their methods differ)
         name = next(f'{name}_{ordinal}' for ordinal in count(2) if f'{name}_{ordinal}' not in taken)
-    key = tuple((param.name, repr(bindings[param.name])) for param in source.params)
+    key = _instantiation_key(bindings, source.params)
     binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'function', generic.loc)
     binding.type = instance_type
-    binding.generic_instance = (generic, dict(bindings), ctx)
+    binding.generic_instance = (generic, ty.TypeArguments(bindings), ctx)
     source.instances[key] = binding  # registered first, so a recursive call finds it
     # the instance is visible under its own name in the defining scope (recursion, other instances)
     defining.declarations.maps[0][name] = instance_type
@@ -7185,7 +7212,7 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
             raise
         report = error.report
         reason = next((pointer.message for pointer in report.pointer_messages), None)
-        arguments = ', '.join(f'`{param.name}` = `{type_to_dewy(bindings[param.name])}`' for param in source.params)
+        arguments = ', '.join(f'`{param.name}` = `{_generic_argument_display(bindings, param)}`' for param in source.params)
         raise type(error)(Error(
             srcfile=ctx.srcfile,
             title=report.title,
@@ -12649,7 +12676,7 @@ def _void_facts_annotation(ast: p0.AST, *, ctx: Context) -> ty.RefinedType | Non
 
 def _function_result_type(ast: p0.AST, *, ctx: Context, proof: bool = False) -> ty.Type:
     """A signature and a literal interpret their result annotation alike."""
-    value, _ = effect_syntax.split(ast)
+    value, _ = effect_syntax.split(ast, ctx)
     if value is None:
         user_error(ctx.srcfile, 'a function result needs a value type before its effects', Pointer(span=ast.loc, message='write `:> T & effects`'))
     ast = value
@@ -14253,6 +14280,8 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
         case p0.Atom(item=t1.Identifier(name=name)):
             binding = ctx.binding_scopes.get(name)
             if binding is not None:
+                if binding.kind == 'effect':
+                    user_error(ctx.srcfile, 'an effect row is not a value type', Pointer(span=ast.loc, message='use this parameter in a function effect contract'))
                 if binding.type_value is not None:
                     if isinstance(binding.type_value, ty.GenericTypeAlias):
                         type_error(
@@ -17056,6 +17085,8 @@ def tcr_identifier(
     if id.name in ctx.declarations:
         binding = ctx.binding_scopes.get(id.name)
         declared_type = ctx.declarations[id.name]
+        if binding is not None and binding.kind == 'effect':
+            user_error(ctx.srcfile, 'an effect row is not a runtime value', Pointer(span=id.loc, message='use this parameter in a function effect contract'))
         if binding is not None and ty.is_user_nominal(binding.type_value):
             # the canonical inhabitant of a unit-like error type is spelled with its name
             assert isinstance(binding.type_value, str)

@@ -29,23 +29,29 @@ def application(ast):
     return name(ast), None
 
 
-def is_effect(ast):
+def row_binding(ast, ctx):
+    identifier = name(ast)
+    binding = ctx.binding_scopes.get(identifier) if identifier is not None else None
+    return binding.effect_value if binding is not None and binding.kind == 'effect' else None
+
+
+def is_effect(ast, ctx):
     ast = unparen(ast)
     if isinstance(ast, p0.Prefix) and ast.op.symbol == 'no':
         return True
     head, _ = application(ast)
-    return head in FAMILIES | {'no_effects', 'Effect'}
+    return head in FAMILIES | {'no_effects', 'Effect'} or row_binding(ast, ctx) is not None
 
 
-def split(ast):
+def split(ast, ctx):
     """Keep value intersections intact, collecting only effect-kind terms."""
     ast = unparen(ast)
     if isinstance(ast, p0.BinOp) and isinstance(ast.op, t1.Operator) and ast.op.symbol == '&':
-        left, before = split(ast.left)
-        right, after = split(ast.right)
+        left, before = split(ast.left, ctx)
+        right, after = split(ast.right, ctx)
         value = right if left is None else left if right is None else replace(ast, left=left, right=right)
         return value, [*before, *after]
-    return (None, [ast]) if is_effect(ast) else (ast, [])
+    return (None, [ast]) if is_effect(ast, ctx) else (ast, [])
 
 
 def route(ast):
@@ -64,7 +70,7 @@ def route(ast):
 def contract(ast, parameters, ctx):
     from .check import ast_to_type
 
-    _, terms = split(ast)
+    _, terms = split(ast, ctx)
     if not terms:
         return None
 
@@ -99,6 +105,12 @@ def contract(ast, parameters, ctx):
         negative = isinstance(term, p0.Prefix) and term.op.symbol == 'no'
         value = unparen(term.item) if negative else term
         family, arguments = application(value)
+        bound_row = row_binding(value, ctx)
+        if bound_row is not None:
+            if negative:
+                fail(term, 'cannot exclude a row parameter', 'exclude a named effect family or resource instead')
+            permitted = rows.union(permitted or rows.Row(), bound_row)
+            continue
         if family == 'no_effects' and arguments is None or family == 'Effect' and arguments == []:
             if negative:
                 fail(term, 'cannot exclude an empty effect row', 'use `no_effects` directly, or `no reads` to exclude a family')

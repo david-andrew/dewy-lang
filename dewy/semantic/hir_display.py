@@ -168,7 +168,7 @@ def _function_type_to_dewy(t: ty.FunctionType) -> str:
     parts: list[str] = []
     if t.type_params:
         gens = ' '.join(
-            p.name if p.bound == ty.TOP_TYPE else f'{p.name} of {type_to_dewy(p.bound)}'
+            f'{p.name}:Effect' if p.kind == 'effect' else p.name if p.bound == ty.TOP_TYPE else f'{p.name} of {type_to_dewy(p.bound)}'
             for p in t.type_params
         )
         parts.append(f'<{gens}>')

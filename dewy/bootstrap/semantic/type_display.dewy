@@ -124,7 +124,7 @@ atom = (id:addr nodes:types.Table):>string => {
 generic_params = (params:array<types.GenericParam> nodes:types.Table):>string => {
     let generics:array<string> = []
     loop param in params {
-        generics.push(if types.is_primitive(types.node_at(nodes param.bound) 'any') param.name else "{param.name} of {type_to_dewy(param.bound nodes)}")
+        generics.push(if param.kind =? 'effect' "{param.name}:Effect" else if types.is_primitive(types.node_at(nodes param.bound) 'any') param.name else "{param.name} of {type_to_dewy(param.bound nodes)}")
     }
     return generics.join(' ')
 }

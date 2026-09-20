@@ -2,7 +2,7 @@ from reporting import Error
 import p"effect_rows.dewy" as rows
 import p"source_views.dewy" as views
 import p"context.dewy" as contexts
-import p"ty.dewy" as types
+import p"bindings.dewy" as bindings
 import p"../parser/p0.dewy" as parser
 
 # Effect subjects carry resolved nominal identities or signature slots. They
@@ -17,10 +17,18 @@ application = (id:addr context:contexts.Context session:contexts.Session):>Appli
     }
     return Application[views.identifier(id context session)]
 }
+row_binding = (id:addr context:contexts.Context session:contexts.Session):>rows.Row? => {
+    let name=views.identifier(views.unparen(id context session) context session)
+    if name is? none return none
+    let found=bindings.lookup(session.scopes context.scope name)
+    if found is? none return none
+    let binding=bindings.binding_at(session.registry found)
+    return if binding.kind =? 'effect' binding.effect_value else none
+}
 is_effect = (id:addr context:contexts.Context session:contexts.Session):>bool => {
     let node=contexts.node_at(views.unparen(id context session) context session)
     if node is? parser.Prefix and views.is_operator(node.op 'no' context session) return true
-    return application(id context session).name in? ['reads' 'mutates' 'no_effects' 'Effect']
+    return application(id context session).name in? ['reads' 'mutates' 'no_effects' 'Effect'] or row_binding(id context session) isnt? none
 }
 Split:type = const [value:addr? terms:array<addr>=[]]
 split = (id:addr context:contexts.Context @session:contexts.Session):>Split => {

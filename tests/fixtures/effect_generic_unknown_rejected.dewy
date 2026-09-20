@@ -1,0 +1,4 @@
+let apply = <E:Effect>(f:():>int64 & E):>int64 & E => f()
+# Omitted callback contracts remain unknown during row inference.
+answer = ():>int64 => 42
+main = ():>int64 & no_effects => apply(@answer)

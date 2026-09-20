@@ -130,8 +130,28 @@ Current checking covers scalar computation, read-only value access, place
 reads and scalar place writes, direct calls, and constrained callbacks.
 Unmodeled operations and allocations remain unknown and cannot satisfy an
 empty row or negative promise. In particular COW deferral is not proof of no
-allocation. Effect-row generics, complete inferred callable rows, and the full
-allocation/failure vocabulary are still being implemented.
+allocation. Complete inferred callable rows and the full allocation/failure
+vocabulary are still being implemented.
+
+Effect rows have their own generic kind:
+
+```dewy
+let apply = <E:Effect>(f:():>int64 & E):>int64 & E => f()
+```
+
+The callback's contract determines `E`; repeated callback constraints combine
+by union. Ordinary types and rows may coexist in a generic parameter list,
+but an effect parameter cannot be an argument type, return value type, or
+runtime value. Omitted callback contracts infer unknown effects, not purity.
+Generic instances retain their row arguments in cache identity.
+
+The initial inference supports one free row remainder in each callback bound.
+Two unconstrained remainders cannot be split uniquely. Callback-relative place
+subjects are not inferred into an outer row: their slots belong to the callback,
+not the enclosing signature. Such routes need an explicit scoped representation
+before this case can be supported. Negative-only callback rows conservatively
+infer an unknown row; their exclusions are not yet inferred as row arguments.
+Effect-polymorphic type aliases are also pending.
 
 ## Calls and Pipes
 

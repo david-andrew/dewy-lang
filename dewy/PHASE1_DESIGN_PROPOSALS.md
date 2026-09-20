@@ -263,7 +263,10 @@ failure behavior or the resource-exhaustion policy.
 David approved these starting rules on 2026-09-20. Both compilers now have
 a separate public row representation and check explicit empty rows, named
 resource contracts and negative source rows for a conservative initial subset.
-Effect-row generic parameters remain to be integrated. A future builtin
-`resource` base type could make resource mints
+Effect-row generic parameters now support callback-row inference and
+substitution in both compilers. The initial conservative limits are documented
+in the reference: no arbitrary split between multiple row remainders, no
+callback-relative place subjects escaping their signature, and no inferred
+negative row arguments yet. A future builtin `resource` base type could make resource mints
 more explicit; ordinary nominal mints suffice for this first implementation.
 The allocation rule remains open to refinement from practical experience.

@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from ..reporting import Span
-from . import hir, ty
+from . import effect_rows, hir, ty
 
-BindingKind = Literal['value', 'function', 'overload', 'param']
+BindingKind = Literal['value', 'function', 'overload', 'param', 'effect']
 
 
 @dataclass
@@ -26,6 +26,7 @@ class Binding:
     Unlike a value parameter's copied local, every write remains constrained
     by the caller's storage type, including scalar refinements."""
     type_value: ty.TypeAliasValue | None = None
+    effect_value: effect_rows.Row | None = None
     declaration: hir.Declare | None = None
     function: hir.FunctionLiteral | None = None
     literal_path_parameter: str | None = None

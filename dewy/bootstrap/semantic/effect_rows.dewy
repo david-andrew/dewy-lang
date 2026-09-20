@@ -237,3 +237,34 @@ bind_receiver = (contract:Contract? count:addr):>Contract? => {
     }
     return bound
 }
+
+replace_variables = (contract:Contract? arguments:dict<string Row>):>Contract? => {
+    if contract is? none return none
+    return Contract[if contract.allowed is? none none else substitute(contract.allowed arguments) contract.excluded]
+}
+infer = (formal:Contract? actual:Contract? variables:set<string> @arguments:dict<string Row>):>bool => {
+    if formal is? none or formal.allowed is? none return implies(actual formal)
+    let free:array<string>=[]
+    let fixed:array<string>=[]
+    loop key in formal.allowed.variables {
+        if key in? variables {free.push(key)} else {fixed.push(key)}
+    }
+    if free.length =? 0 return implies(actual formal)
+    # More than one free remainder has no unique decomposition.
+    if free.length not=? 1 return false
+    let supplied=if actual is? none or actual.allowed is? none Row[unknown=true] else actual.allowed
+    let atoms:array<Atom>=[]
+    loop atom in supplied.atoms {
+        let covered=false
+        loop old in formal.allowed.atoms {if covers(old atom) {covered=true break}}
+        if not covered {atoms.push(atom)}
+    }
+    let remaining:array<string>=[]
+    loop key in supplied.variables {if key not in? fixed {remaining.push(key)}}
+    loop atom in atoms {
+        if atom.subject isnt? none and atom.subject.kind =? 'parameter' return false
+    }
+    let key=free[0]
+    arguments[key]=merge(arguments.get(key Row[]) Row[atoms remaining supplied.unknown])
+    return true
+}

@@ -75,6 +75,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     let node=hir.node_at(input.nodes id)
     if node is? hir.FunctionLiteral return
     if node is? hir.Void|hir.NoneValue|hir.Bool|hir.Integer|hir.String|hir.Break|hir.Continue|hir.ScopeMetatag|hir.TypeValue return
+    if node is? hir.ExpressedIdentifier and access.flatten_callable(id set[] input.analysis input.nodes) isnt? none return
     if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index {record_access(id 'reads' input @scan) return}
     if node is? hir.Assert and not node.runtime and not node.expect return
     if node is? hir.FunctionCall {
@@ -117,7 +118,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
             if value is? hir.Place {indices(value.target input @scan)}
             else {
                 visit(arg input @scan)
-                if not scalar(value.value_type input.types) {unknown(@scan)}
+                if not scalar(value.value_type input.types) and types.node_at(input.types value.value_type) isnt? types.CallableType {unknown(@scan)}
             }
         }
         return

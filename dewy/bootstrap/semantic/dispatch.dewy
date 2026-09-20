@@ -1,3 +1,4 @@
+import p"effect_rows.dewy" as effect_rows
 import p"ty.dewy" as types
 import p"subtyping.dewy" as subtyping
 
@@ -52,7 +53,7 @@ compile_time_number = (type:addr nodes:types.Table):>bool => {
     return node is? types.IntegerLiteralType|types.RationalLiteralType
 }
 ShapeMatch:type = [pairs:array<ArgumentPair>]
-Inference:type = [bindings:dict<string addr>=[] contextual:set<string>=set[]]
+Inference:type = [bindings:dict<string addr>=[] contextual:set<string>=set[] effects:dict<string effect_rows.Row>=[] effect_variables:set<string>=set[]]
 Candidate:type = const [index:addr method:addr]
 DispatchResult:type = [method:addr method_index:addr promote_pos:array<addr?>]
 DispatchError:type = [message:string]
@@ -326,6 +327,11 @@ match_parameter = (formal:addr actual:addr variables:set<string> @inference:Infe
         loop i in 0.. and i <? p.pos_or_kw.length {
             if not match_parameter(p.pos_or_kw[i].value_type a.pos_or_kw[i].value_type variables @inference system @nodes) return false
         }
+        if p.kw_only.length not=? a.kw_only.length return false
+        loop i in 0.. and i <? p.kw_only.length {
+            if p.kw_only[i].name not=? a.kw_only[i].name or not match_parameter(p.kw_only[i].value_type a.kw_only[i].value_type variables @inference system @nodes) return false
+        }
+        if not effect_rows.infer(p.effects a.effects inference.effect_variables @inference.effects) return false
         return match_parameter(p.ret a.ret variables @inference system @nodes)
     }
     if p is? types.TypeOr and a isnt? types.TypeOr {
@@ -344,8 +350,11 @@ infer_type_args = (method:types.FunctionType pos:array<addr> kw:dict<string addr
     let shape = match_shape(method pos kw)
     if shape is? none return none
     let variables:set<string> = set[]
-    loop param in method.type_params { variables.add(param.name) }
     let inference = Inference[]
+    loop param in method.type_params {
+        if param.kind =? 'effect' {inference.effect_variables.add(param.identity)}
+        else {variables.add(param.name)}
+    }
     let ret_name = variable_name(method.ret variables nodes)
     if expected isnt? none and ret_name isnt? none {
         inference.bindings[ret_name] = expected
@@ -356,6 +365,10 @@ infer_type_args = (method:types.FunctionType pos:array<addr> kw:dict<string addr
         if not match_parameter(pair.formal actual variables @inference system @nodes) return none
     }
     loop param in method.type_params {
+        if param.kind =? 'effect' {
+            if param.identity not in? inference.effects return none
+            continue
+        }
         let actual = inference.bindings.get(param.name)
         if actual is? none return none
         if not subtyping.is_subtype(actual param.bound system.links @nodes) return none
@@ -369,7 +382,7 @@ try_instantiate_for_call = (id:addr pos:array<addr> kw:dict<string addr> expecte
     if method.type_params.length >? 0 {
         let inference = infer_type_args(method pos kw expected system @nodes)
         if inference is? none return none
-        concrete = types.substitute_function(method inference.bindings true @nodes)
+        concrete = types.substitute_function(method inference.bindings true @nodes effects=inference.effects)
     }
     if call_accepted_concrete(method_at(nodes concrete) pos kw system @nodes) return concrete
     return none

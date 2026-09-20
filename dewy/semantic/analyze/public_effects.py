@@ -104,6 +104,8 @@ def validate(root, registry, srcfile):
             if isinstance(node, (hir.Void, hir.NoneValue, hir.Bool, hir.Integer, hir.String,
                                  hir.Break, hir.Continue, hir.ScopeMetatag, hir.TypeValue)):
                 return
+            if isinstance(node, hir.ExpressedIdentifier) and analysis._flatten_callable(node, frozenset()) is not None:
+                return  # a statically known function handle has no storage read
             if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
                 access(node, 'reads')
                 return
@@ -143,7 +145,7 @@ def validate(root, registry, srcfile):
                                 visit(step.index)
                     else:
                         visit(argument)
-                        if not scalar(argument.type):
+                        if not scalar(argument.type) and not isinstance(argument.type, (ty.FunctionType, ty.OverloadType)):
                             unknown()  # logical aggregate transfer not proved
                 return
             if isinstance(node, hir.Declare):

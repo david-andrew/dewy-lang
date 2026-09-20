@@ -184,14 +184,30 @@ class KwOnlyArg:
 
 @dataclass(slots=True, weakref_slot=True)
 class GenericParam:
-    """A generic type variable declared on a FunctionType (e.g. T in `<T of number>`).
+    """A type or effect-row binder in a function's generic signature.
 
-    Part of the function-type representation, not a TypeExpr by itself and not
-    TypeParameterize (which is applying args like `array<int>`).
-    Bound at call sites via infer_type_args / instantiate_method.
+    The bound applies only to type parameters. Effect parameters have a stable
+    lexical identity and bind into TypeArguments.effects, never a TypeExpr.
+    Neither this binder nor an effect row is a runtime value.
     """
     name: str
     bound: TypeExpr = TOP_TYPE
+    kind: Literal['type', 'effect'] = 'type'
+    identity: str = ''
+
+
+class TypeArguments(dict[str, 'TypeExpr']):
+    """Type and row substitutions share an inference result, not a kind.
+
+    The mapping contains only value types. Rows live in a separate table keyed
+    by their binder identity, so no consumer can mistake a row for a TypeExpr.
+    """
+    def __init__(self, values=(), *, effects=None):
+        super().__init__(values)
+        self.effects = dict(getattr(values, 'effects', {}) if effects is None else effects)
+
+    def copy(self):
+        return TypeArguments(self)
 
 
 @dataclass(slots=True, weakref_slot=True)
@@ -2086,8 +2102,9 @@ class TypeSystem:
         # a refined argument (`nat64`, a length) binds a type parameter by its base
         pos_types = [strip_refinement(t) for t in pos_types]
         kw_types = {name: strip_refinement(t) for name, t in (kw_types or {}).items()}
-        type_vars = {gp.name for gp in m.type_params}
-        bindings: dict[str, TypeExpr] = {}
+        type_vars = {gp.name for gp in m.type_params if gp.kind == 'type'}
+        effect_vars = {gp.identity for gp in m.type_params if gp.kind == 'effect'}
+        bindings = TypeArguments()
         contextual_type_vars: set[str] = set()
 
         def bind_type_var(name: str, actual: TypeExpr) -> bool:
@@ -2164,8 +2181,12 @@ class TypeSystem:
             if isinstance(param_t, FunctionType) and isinstance(arg_t, FunctionType) and not param_t.type_params:
                 if len(param_t.pos_or_kw) != len(arg_t.pos_or_kw):
                     return False
+                if [p.name for p in param_t.kw_only] != [p.name for p in arg_t.kw_only]:
+                    return False
+                if not effect_rows.infer(param_t.effects, arg_t.effects, effect_vars, bindings.effects):
+                    return False
                 return all(
-                    match_param(pp.type, ap.type) for pp, ap in zip(param_t.pos_or_kw, arg_t.pos_or_kw)
+                    match_param(pp.type, ap.type) for pp, ap in zip([*param_t.pos_or_kw, *param_t.kw_only], [*arg_t.pos_or_kw, *arg_t.kw_only])
                 ) and match_param(param_t.ret, arg_t.ret)
             if isinstance(param_t, TypeOr) and not isinstance(arg_t, TypeOr):
                 # `T | none` against `int64`: bind through the variable member
@@ -2219,6 +2240,10 @@ class TypeSystem:
                 return None
 
         for gp in m.type_params:
+            if gp.kind == 'effect':
+                if gp.identity not in bindings.effects:
+                    return None
+                continue
             if gp.name not in bindings:
                 return None
             if not self.is_subtype(bindings[gp.name], gp.bound):
@@ -2792,7 +2817,8 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
         return SequenceType([substitute_type(x, bindings) for x in t.items])
     if isinstance(t, FunctionType):
         nested_shadow = {gp.name for gp in t.type_params}
-        inner = {k: v for k, v in bindings.items() if k not in nested_shadow}
+        inner = TypeArguments({k: v for k, v in bindings.items() if k not in nested_shadow},
+                              effects={k: v for k, v in getattr(bindings, 'effects', {}).items() if k not in {gp.identity for gp in t.type_params if gp.kind == 'effect'}})
         return FunctionType(
             [
                 PosOrKwArg(
@@ -2815,7 +2841,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
             t.rest,
             substitute_type(t.ret, inner),
             list(t.type_params),
-            t.effects,
+            effect_rows.replace_variables(t.effects, inner.effects),
         )
     if isinstance(t, OverloadType):
         methods: list[FunctionType] = []
@@ -2853,7 +2879,7 @@ def instantiate_method(m: FunctionType, type_args: dict[str, TypeExpr]) -> Funct
         m.rest,
         substitute_type(m.ret, type_args),
         [],
-        m.effects,
+        effect_rows.replace_variables(m.effects, getattr(type_args, 'effects', {})),
     )
 
 

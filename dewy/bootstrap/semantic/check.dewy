@@ -559,6 +559,7 @@ identifier = (name:string id:addr env:Environment @session:contexts.Session):>ad
     let binding_id = declarations.lookup(name env.lexical session)
     if binding_id isnt? none {
         let binding = bindings.binding_at(session.registry binding_id)
+        if binding.kind =? 'effect' return problem(id 'an effect row is not a runtime value' 'use this parameter in a function effect contract' env session)
         if binding.replacement isnt? none return match_read(binding.replacement env @session)
         let value = binding.type_value
         if value is? none and binding_id in? session.pending_aliases {
@@ -4848,6 +4849,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
     if inference is? none return problem(id 'cannot infer generic type parameters' 'the arguments do not determine every type parameter' env session)
     let arguments:dict<string addr> = []
     loop param in generic.source.params {
+        if param.kind =? 'effect' continue
         let inferred = inference.bindings.get(param.name)
         $runtime_assert inferred isnt? none
         let type = types.node_at(session.types inferred)
@@ -4872,6 +4874,12 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
             # equality is sufficient for assignment, not for checking a body.
             if prior is? none or prior not=? actual { matches = false break }
         }
+        if matches {
+            loop [key actual] in inference.effects {
+                let prior=instance.effect_arguments.get(key)
+                if prior is? none or effect_rows.identity(effect_rows.Contract[prior]) not=? effect_rows.identity(effect_rows.Contract[actual]) {matches=false break}
+            }
+        }
         if matches { cached = binding_id break }
     }
     if cached isnt? none {
@@ -4890,7 +4898,17 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
         bindings.store_binding(@session.registry parameter_id parameter)
         bindings.bind(@session.scopes lexical.scope name parameter_id)
     }
-    let resolved = types.substitute_function(signature arguments true @session.types)
+    loop parameter in source.params {
+        if parameter.kind not=? 'effect' {continue}
+        $runtime_assert parameter.identity in? inference.effects
+        let parameter_id=bindings.allocate_param(@session.registry parameter.name types.primitive('type' @session.types) generic.loc)
+        let binding=bindings.binding_at(session.registry parameter_id)
+        binding.kind='effect'
+        binding.effect_value=inference.effects[parameter.identity]
+        bindings.store_binding(@session.registry parameter_id binding)
+        bindings.bind(@session.scopes lexical.scope parameter.name parameter_id)
+    }
+    let resolved = types.substitute_function(signature arguments true @session.types effects=inference.effects)
     let name = "{generic.name}__instance_{session.registry.next_id}"
     let binding_id = bindings.allocate(@session.registry none name 'function' generic.loc)
     let binding = bindings.binding_at(session.registry binding_id)
@@ -4898,7 +4916,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
     bindings.store_binding(@session.registry binding_id binding)
     # Register before checking: a recursive call with these same types must
     # refer to this declaration, rather than instantiate another body.
-    session.registry.generic_instances[binding_id] = bindings.GenericInstance[callee.binding_id arguments contexts.syntax_ref(id env.lexical @session)]
+    session.registry.generic_instances[binding_id] = bindings.GenericInstance[callee.binding_id arguments contexts.syntax_ref(id env.lexical @session) inference.effects]
     let literal = contexts.node_at(reference.node lexical session)
     $runtime_assert literal is? parser.BinOp
     let defining = Environment[lexical source.context]

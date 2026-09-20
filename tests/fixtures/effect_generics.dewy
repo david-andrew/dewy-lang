@@ -1,0 +1,17 @@
+Filesystem = type of any
+Database = type of any
+
+# Row parameters are compile-time arguments, distinct from ordinary types.
+let apply = <E:Effect>(f:():>int64 & E):>int64 & E => f()
+let twice = <E:Effect>(first:():>int64 & E second:():>int64 & E):>int64 & E => first()+second()
+let identity = <T E:Effect>(f:(x:T):>T & E x:T):>T & E => f(x)
+answer = ():>int64 & no_effects => 42
+first = ():>int64 & reads<Filesystem> => 20
+let second = ():>int64 & mutates<Database> => 22
+increment = (x:int64):>int64 & no_effects => x+1
+pure = ():>int64 & no_effects => apply(@answer)
+main = ():>int64 => {
+    $runtime_assert pure() =? 42
+    $runtime_assert twice(@first @second) =? 42
+    return identity(@increment 41)
+}
