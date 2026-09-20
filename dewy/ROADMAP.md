@@ -370,10 +370,15 @@ in both lowerings and the parity tool is the gate.
   the analysis improves, and the documentation must say so.
 - *Lifecycle hooks.* Metatagged members of the mint: `$__drop__`,
   `$__copy__`, `$__move__`. A type opts in by declaring them. Declaring
-  `$__drop__` without `$__copy__` makes the type move-only (no synthesized
-  copy; `b = a` without a move is an error). Types declaring no hooks keep
-  the synthesized memberwise copy, move and release. Hooks are invoked with
-  internal nonescaping places, never by passing the value by copy.
+  `$__drop__` without `$__copy__` makes the type move-only: no synthesized
+  copy. `b = a` on such a type is a move at a last use, a view when the two
+  names never both write (the compiler decides this from the effect
+  summaries, with no annotation), and an error only when the program needs
+  two independent resources, reported at the second write with `$__copy__`
+  as the fix. Types declaring no hooks keep the synthesized memberwise
+  copy, move and release. Hooks are invoked with internal nonescaping
+  places, never by passing the value by copy. The intent throughout: the
+  compiler infers sharing; the programmer is not asked to fight for it.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a
   last use turns out to be needed it should be a meta-level form (a
@@ -508,6 +513,10 @@ Decisions were made by David on 2026-09-13.
    subscripts and superscripts (`xᵢ`, `xₙ`, `xᵀ`, `λ̂`) are written as the
    Unicode characters directly. A doubled `__`/`‾‾` as an escape from the
    rule is a possibility with trade-offs against dunder names; open.
+   Domain notations put superscripts in the power position legitimately
+   (the robotics twist `₂V₃¹`, spelled `_2V_3‾1`); the style guide should
+   say a superscript in an identifier is a label, not an exponent, rather
+   than discourage the form.
    Look-alikes normalize to one character (the micro sign and Greek mu are
    the same name), except between ASCII and Greek letters, which stay
    distinct (`A` and `Α` differ). The full repertoire is still open.
