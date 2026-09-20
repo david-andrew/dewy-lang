@@ -326,3 +326,31 @@ empty row and an omitted row. Decode preserves each contract and re-interns
 the signature at its original id. Three cache checks passed, including x86/C
 execution and regeneration freshness. This verifies the IR/cache foundation;
 it does not claim source support for named rows or row generics yet.
+
+Named-effect checkpoint: both source checkers now resolve nominal resource
+identities, caller-owned place slots and stored-field routes. Positive
+`reads<Resource>` / `mutates<Resource>` rows are closed upper bounds;
+`no reads<Resource>` and whole-family `no reads` retain open negative
+guarantees. Empty family applications diagnose the distinction. Signature
+display preserves rows, including exclusions. The new `no` prefix is confined
+to effect contracts; old compiler/test locals named `no` are `false_value`.
+
+Public analysis now substitutes place routes at direct and callback calls,
+checks scalar place reads/writes, and preserves shared negative guarantees
+across call-graph propagation. Taking an address does not itself read its
+contents. Private scalar storage disappears at a call boundary, while unknown
+operations and unproved aggregate transfers remain conservative. Recursive
+routes widen only positively; truncating a negative route would be unsound.
+Hidden method receivers shift effect slots, and binding a receiver does not
+silently erase its possible effects. Row generics and full allocation/failure
+modeling are still outstanding.
+
+Validation: 85 focused row/contract checks passed, including x86/C execution;
+21 method/function-value regressions passed. Three related native-analysis
+harnesses also passed. Native source gates passed all 42 initial cases and
+12 additional boundary cases (position-only parameters, method-slot identity,
+malformed rows, and use of `no` outside contracts). The final native generation
+built in 59.49s and executed the imported-resource/place fixture with result
+42. This is a correctness checkpoint, not the sub-30s performance target.
+Artifacts: `../dewy-build-artifacts/phase1-named-effects-stage3-2026-09-20`.
+The expanded 55-case paired parity run is in progress.

@@ -267,7 +267,7 @@ binary_ops: set[str] = {
     'as', 'in', 'transmute', 'of',
 }
 prefix_ops: set[str] = {
-    '@', '~', 'not', '`',
+    '@', '~', 'not', 'no', '`',
     '+', '-',   # `*`, `/`, `//` have no prefix form: `(* 2)` is a partial operator; `x^/2` is an opchain compound (design, not yet built)
     'type of',   # one token (see `make_type_of_operators`): minting is a prefix, bound-`of` stays infix
 }

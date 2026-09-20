@@ -1,5 +1,6 @@
 from reporting import Error, Span, Warning, Pointer, SrcFile
 import p"source_names.dewy" as source_names
+import p"effect_rows.dewy" as effect_rows
 import p"source_views.dewy" as source_views
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
@@ -1423,6 +1424,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
     }
     if node is? parser.Prefix {
         let op = source_views.symbol(node.op env.lexical session)
+        if op =? 'no' return problem(id '`no` is only an effect exclusion' 'write it in a function result contract' env session)
         if op =? '@' {
             let value = expression(node.item env @session call_target=true)
             if value is? Error return value
@@ -2303,7 +2305,18 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     # Abstract integers keep mathematical arithmetic until bounds analysis
     # chooses their representation. Selecting a word here would silently
     # give an `int` function wrapping arithmetic before its proofs run.
-    let effect_contract=if result_id is? none none else declarations.function_effects(result_id lexical session).effects
+    let effect_parameters=parameters
+    let syntax=contexts.node_at(parameter_id lexical session)
+    let source_parameters:array<addr>=if syntax is? parser.Block and syntax.delims =? '()' syntax.inner else [parameter_id]
+    loop index in 0.. and index <? effect_parameters.length and index <? source_parameters.length {
+        let parameter=effect_parameters[index]
+        if parameter.name isnt? none continue
+        let parsed=declarations.parameter_source(source_parameters[index] lexical session)
+        if parsed is? Error return parsed
+        effect_parameters[index]=types.PosOrKwArg[parsed.name parameter.value_type parameter.required parameter.place]
+    }
+    let effect_contract=if result_id is? none none else declarations.effect_contract(result_id effect_parameters args.kw_only lexical @session)
+    if effect_contract is? Error return effect_contract
     return types.function_type(parameters args.kw_only none result generic @session.types effects=effect_contract)
 }
 predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error? => {
@@ -2532,7 +2545,10 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         if predicate isnt? none {returns=predicate}
     }
     let slots:array<types.PosOrKwArg>=[]
-    if method isnt? none and method.receiver_type isnt? none {slots.push(types.PosOrKwArg['__dewy_receiver' method.receiver_type true method.place_self])}
+    if method isnt? none and method.receiver_type isnt? none {
+        slots.push(types.PosOrKwArg['__dewy_receiver' method.receiver_type true method.place_self])
+        effect_contract=effect_rows.prepend_parameter(effect_contract shape.pos_or_kw.length+shape.kw_only.length)
+    }
     loop slot in shape.pos_or_kw {slots.push(slot)}
     let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types effects=effect_contract)
     let value=put(hir.FunctionLiteral[literal.loc function_type parameters keyword_parameters none returns body source=env.lexical.source proof=is_proof_literal(literal env session)] @session)
@@ -3160,7 +3176,7 @@ string_method = (receiver:addr name:string id:addr env:Environment @session:cont
     if signature isnt? types.FunctionType or signature.pos_or_kw.length =? 0 return problem(id 'string method has no receiver parameter' name env session)
     let parameters:array<types.PosOrKwArg>=[]
     loop i in 1.. and i <? signature.pos_or_kw.length {parameters.push(signature.pos_or_kw[i])}
-    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=signature.effects)
+    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=effect_rows.bind_receiver(signature.effects signature.pos_or_kw.length+signature.kw_only.length))
     let loc=contexts.node_at(id env.lexical session).loc
     let function=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding_id] @session)
     return put(hir.BoundMethod[loc exposed function receiver] @session)
@@ -5456,7 +5472,8 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let parameters:array<types.PosOrKwArg>=[]
         if instance {parameters.push(types.PosOrKwArg['__dewy_receiver' type_id true mutates])}
         loop parameter in signature.pos_or_kw {parameters.push(parameter)}
-        let full=types.function_type(parameters signature.kw_only signature.rest signature.ret [] @session.types effects=signature.effects)
+        let effects=if instance effect_rows.prepend_parameter(signature.effects signature.pos_or_kw.length+signature.kw_only.length) else signature.effects
+        let full=types.function_type(parameters signature.kw_only signature.rest signature.ret [] @session.types effects=effects)
         let ordinal:addr=0
         loop earlier in type.methods {
             if earlier.literal =? spec.literal break
@@ -5522,7 +5539,8 @@ method_value = (entry:contexts.MethodEntry receiver:addr? loc:Span @session:cont
         if index >? 0 or entry.receiver_type is? none {parameters.push(slot)}
         index += 1
     }
-    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=signature.effects)
+    let effects=if entry.receiver_type is? none signature.effects else effect_rows.bind_receiver(signature.effects signature.pos_or_kw.length+signature.kw_only.length)
+    let exposed=types.function_type(parameters signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=effects)
     let function=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding.id] @session)
     return put(hir.BoundMethod[loc exposed function if entry.receiver_type is? none none else receiver] @session)
 }

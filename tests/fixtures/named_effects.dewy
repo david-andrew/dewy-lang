@@ -1,0 +1,26 @@
+from p"effect_resources.dewy" import Alias
+import p"effect_resources.dewy" as resources
+
+# Forwarding a typed callback keeps its upper bound or negative guarantee.
+forward = (f:():>int64 & reads<Alias>):>int64 & reads<resources.Filesystem> => f()
+quiet = (f:():>int64 & no reads<Alias>):>int64 & no reads<resources.Filesystem> => f()
+answer = ():>int64 & no_effects => 42
+
+# By-value locals belong to this invocation. Passing one as a place to a
+# scalar setter does not turn it into externally observable mutable state.
+set_answer = (@value:int64):>void & mutates<value> => {value=42}
+private_answer = ():>int64 & no_effects => {
+    let value:int64=0
+    set_answer(@value)
+    return value
+}
+read_value = (@value:int64):>int64 & reads<value> => value
+read_field = (@record:[value:int64]):>int64 & reads<record.value> => read_value(@record.value)
+
+main = ():>int64 => {
+    $runtime_assert forward(@answer) =? 42
+    $runtime_assert quiet(@answer) =? 42
+    $runtime_assert private_answer() =? 42
+    let record=[value=42]
+    return read_field(@record)
+}

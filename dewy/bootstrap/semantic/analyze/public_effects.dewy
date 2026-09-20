@@ -16,16 +16,66 @@ scalar = (id:addr nodes:types.Table):>bool => {
     return node is? types.Primitive and node.name in? ['void' 'never' 'none' 'bool' 'true' 'false' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64']
 }
 Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis]
-Scan:type = [private:set<addr>=set[] unknown:bool=false dependencies:set<addr>=set[]]
+Call:type = const [target:addr subjects:dict<string rows.Subject?>]
+Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[]]
+Location:type = const [known:bool subject:rows.Subject?=none]
+location = (id:addr input:Input scan:Scan):>Location => {
+    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes)
+    let root=hir.node_at(input.nodes path.root)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return Location[false]
+    if root.binding_id in? scan.places {
+        let fields:array<string>=[]
+        loop step in path.steps {
+            let node=hir.node_at(input.nodes step)
+            if node is? hir.MemberAccess {fields.push(node.name)} else {fields.push('[]')}
+        }
+        return Location[true rows.Subject['parameter' scan.places[root.binding_id] fields]]
+    }
+    return Location[root.binding_id in? scan.private]
+}
+contribute = (contract:rows.Contract @scan:Scan):>void => {scan.summary=rows.join(scan.summary contract)}
+unknown = (@scan:Scan):>void => {contribute(rows.Contract[] @scan)}
+# Taking an address evaluates its index expressions, without reading the value
+# at the address. Read/write effects come from the callee after substitution.
+indices = (id:addr input:Input @scan:Scan):>void => {
+    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes)
+    loop step in path.steps {
+        let node=hir.node_at(input.nodes step)
+        if node is? hir.Index {visit(node.index input @scan)}
+    }
+}
+record_access = (id:addr family:string input:Input @scan:Scan):>void => {
+    let target=location(id input scan)
+    if not target.known {unknown(@scan)}
+    else if target.subject isnt? none {contribute(rows.Contract[rows.Row[[rows.Atom[family target.subject]]]] @scan)}
+    indices(id input @scan)
+    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes)
+    if hir.node_at(input.nodes path.root) isnt? hir.ExpressedIdentifier {visit(path.root input @scan)}
+}
+call_subjects = (call:hir.FunctionCall signature:types.FunctionType input:Input scan:Scan):>dict<string rows.Subject?> | none => {
+    let supplied:dict<string rows.Subject?>=[]
+    let params=signature.pos_or_kw
+    loop parameter in signature.kw_only {params.push(types.PosOrKwArg[parameter.name parameter.value_type parameter.required parameter.place])}
+    loop index in 0.. and index <? params.length {
+        let parameter=params[index]
+        if not parameter.place continue
+        let argument:addr?=none
+        if index <? call.pos_args.length {argument=call.pos_args[index]}
+        else if parameter.name isnt? none {argument=call.kw_args.get(parameter.name)}
+        if argument is? none return none
+        let value=hir.node_at(input.nodes argument)
+        if value isnt? hir.Place return none
+        let target=location(value.target input scan)
+        if not target.known return none
+        supplied["{index}"]=target.subject
+    }
+    return supplied
+}
 visit = (id:addr input:Input @scan:Scan):>void => {
-    if scan.unknown return
     let node=hir.node_at(input.nodes id)
     if node is? hir.FunctionLiteral return
     if node is? hir.Void|hir.NoneValue|hir.Bool|hir.Integer|hir.String|hir.Break|hir.Continue|hir.ScopeMetatag|hir.TypeValue return
-    if node is? hir.ExpressedIdentifier {
-        if node.binding_id is? none or node.binding_id not in? scan.private {scan.unknown=true}
-        return
-    }
+    if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index {record_access(id 'reads' input @scan) return}
     if node is? hir.Assert and not node.runtime and not node.expect return
     if node is? hir.FunctionCall {
         if node.proof return
@@ -42,32 +92,58 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         }
         let scalar_operation=callee is? hir.ExpressedIdentifier and builtin and callee.name in? SCALAR_OPERATIONS and scalar(node.value_type input.types)
         loop arg in node.pos_args {if not scalar(hir.node_at(input.nodes arg).value_type input.types) {scalar_operation=false}}
-        if targets isnt? none {loop target in targets {scan.dependencies.add(target)}}
+        if targets isnt? none {
+            loop target in targets {
+                let value=hir.node_at(input.nodes target)
+                let shape=types.node_at(input.types value.value_type)
+                if shape isnt? types.FunctionType {unknown(@scan) continue}
+                let supplied=call_subjects(node shape input scan)
+                if supplied is? none {unknown(@scan)}
+                else {scan.calls.push(Call[target supplied])}
+            }
+        }
         else if scalar_operation {}
-        else if signature is? types.FunctionType and rows.implies(signature.effects rows.Contract[rows.Row[]]) {visit(node.func input @scan)}
-        else {scan.unknown=true}
-        loop arg in node.pos_args {visit(arg input @scan)}
-        loop arg in node.kw_args.values {visit(arg input @scan)}
+        else if signature is? types.FunctionType {
+            let supplied=call_subjects(node signature input scan)
+            if supplied is? none {unknown(@scan)}
+            else {contribute(rows.instantiate(if signature.effects is? none rows.Contract[] else signature.effects supplied) @scan)}
+            visit(node.func input @scan)
+        }
+        else {unknown(@scan)}
+        let arguments=node.pos_args
+        loop arg in node.kw_args.values {arguments.push(arg)}
+        loop arg in arguments {
+            let value=hir.node_at(input.nodes arg)
+            if value is? hir.Place {indices(value.target input @scan)}
+            else {
+                visit(arg input @scan)
+                if not scalar(value.value_type input.types) {unknown(@scan)}
+            }
+        }
         return
     }
     if node is? hir.Declare {
         let value=hir.node_at(input.nodes node.expr)
-        if not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {scan.unknown=true}
-        else {visit(node.expr input @scan)}
+        if not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {unknown(@scan)}
+        visit(node.expr input @scan)
         return
     }
     if node is? hir.Assign {
         let target=hir.node_at(input.nodes node.target)
-        if target isnt? hir.ExpressedIdentifier or target.binding_id is? none or target.binding_id not in? scan.private or not scalar(target.value_type input.types) {scan.unknown=true}
-        else {visit(node.value input @scan)}
+        if not scalar(target.value_type input.types) {unknown(@scan)}
+        else {
+            record_access(node.target 'mutates' input @scan)
+            if node.op not=? '=' {record_access(node.target 'reads' input @scan)}
+        }
+        visit(node.value input @scan)
         return
     }
-    if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {scan.unknown=true return}
-    if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.MemberAccess|hir.Index|hir.ValueCast|hir.RepresentationCast {
+    if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {unknown(@scan) return}
+    if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.ValueCast|hir.RepresentationCast {
         loop child in hir.children(node) {visit(child input @scan)}
         return
     }
-    scan.unknown=true
+    unknown(@scan)
 }
 validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
     if not session.types.effect_contracts return none
@@ -88,16 +164,21 @@ validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
     if constrained.length =? 0 return none
     let analysis=access.collect(root session.hir)
     let input=Input[session.hir session.types session.registry analysis]
-    let unknown:set<addr>=set[]
+    let local:dict<addr rows.Contract>=[]
+    let calls:dict<addr array<Call>>=[]
     let edges:dict<addr set<addr>>=[]
     loop id in analysis.literals {
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
-        let scan=Scan[unknown=not scalar(node.rettype session.types)]
-        let params=node.pos_or_kw_args
-        loop param in node.kw_only_args {params.push(param)}
-        if node.rest_args isnt? none {params.push(node.rest_args)}
-        loop param in params {if not param.place and param.binding_id isnt? none {scan.private.add(param.binding_id)}}
+        let scan=Scan[]
+        if not scalar(node.rettype session.types) {unknown(@scan)}
+        let params=access.literal_params(node)
+        loop index in 0.. and index <? params.length {
+            let param=params[index]
+            if param.binding_id is? none continue
+            if param.place {scan.places[param.binding_id]="{index}"}
+            else {scan.private.add(param.binding_id)}
+        }
         let pending:array<addr>=[node.body]
         loop pending.length >? 0 {
             let body=hir.node_at(session.hir pending.pop)
@@ -107,20 +188,33 @@ validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
         }
         visit(node.body input @scan)
         loop param in params {if param is? hir.BoundParam {visit(param.value input @scan)}}
-        if scan.unknown {unknown.add(id)}
-        loop target in scan.dependencies {
-            let callers=edges.get(target set[])
+        local[id]=scan.summary
+        calls[id]=scan.calls
+        loop call in scan.calls {
+            let callers=edges.get(call.target set[])
             callers.add(id)
-            edges[target]=callers
+            edges[call.target]=callers
         }
     }
-    pending=[]
-    loop id in unknown {pending.push(id)}
+    # Possible behaviors grow to a fixed point. This does not imply that a
+    # recursive pure function terminates ($proof has a separate boundary).
+    let summaries=local
+    pending=analysis.literals
+    let queued:set<addr>=set[]
+    loop id in pending {queued.add(id)}
     loop pending.length >? 0 {
-        let target=pending.pop
-        let callers=edges.get(target set[])
-        loop caller in callers {
-            if caller not in? unknown {unknown.add(caller) pending.push(caller)}
+        let id=pending.pop
+        queued.pop(id default=id);
+        $runtime_assert id in? local and id in? calls and id in? summaries
+        let updated=local[id]
+        loop call in calls[id] {
+            $runtime_assert call.target in? summaries
+            updated=rows.join(updated rows.instantiate(summaries[call.target] call.subjects))
+        }
+        if rows.identity(updated) =? rows.identity(summaries[id]) continue
+        summaries[id]=updated
+        loop caller in edges.get(id set[]) {
+            if caller not in? queued {pending.push(caller) queued.add(caller)}
         }
     }
     loop id in constrained {
@@ -128,13 +222,14 @@ validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
         $runtime_assert node is? hir.FunctionLiteral
         let signature=types.node_at(session.types node.value_type)
         $runtime_assert signature is? types.FunctionType and signature.effects isnt? none
-        if not rows.satisfies(rows.Row[unknown=id in? unknown] signature.effects) {
+        $runtime_assert id in? summaries
+        if not rows.implies(summaries[id] signature.effects) {
             let src=source
             if node.source isnt? none {
                 $runtime_assert node.source <? session.sources.length
                 src=session.sources[node.source].srcfile
             }
-            return Error[srcfile=src title='function does not satisfy its effect contract' pointers=[Pointer[span=node.loc message='cannot establish `no_effects`: an operation or callee may have effects']] hint='omit the row to infer conservatively, or remove the operation requiring effects']
+            return Error[srcfile=src title='function does not satisfy its effect contract' pointers=[Pointer[span=node.loc message='an operation or callee may exceed the permitted effects or violate an exclusion']] hint='omit the row to infer conservatively, or remove the operation requiring effects']
         }
     }
     return none

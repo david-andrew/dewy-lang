@@ -40,11 +40,11 @@ main=():>int64=>{{
     let nodes:array<hir.AST>=[]
     let a=hir.append_node(@nodes hir.ExpressedIdentifier[span 0 'a' 1])
     let b=hir.append_node(@nodes hir.ExpressedIdentifier[span 0 'b' 2])
-    let no=hir.append_node(@nodes hir.Bool[span 0 false])
-    let write=hir.append_node(@nodes hir.Assign[span 0 a '=' no])
+    let false_value=hir.append_node(@nodes hir.Bool[span 0 false])
+    let write=hir.append_node(@nodes hir.Assign[span 0 a '=' false_value])
     let later=hir.append_node(@nodes hir.Block[span 0 [write b] true])
     let chain=hir.append_node(@nodes hir.ShortCircuit[span 0 'and' a later])
-    let impossible=hir.append_node(@nodes hir.ShortCircuit[span 0 'and' a no])
+    let impossible=hir.append_node(@nodes hir.ShortCircuit[span 0 'and' a false_value])
     let context=paths.Context[nodes facts.Context[cap=100]]
     let state:facts.State=facts.State[]
     let visited=false

@@ -1,0 +1,4 @@
+import p"effect_resources.dewy" as resources
+# Equal spellings in different scopes do not grant the same authority.
+Filesystem = type of any
+wrong = (f:():>int64 & reads<resources.Filesystem>):>int64 & reads<Filesystem> => f()

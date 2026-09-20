@@ -460,11 +460,12 @@ qualifier/invariant work remains broader than these completed fixtures.
 The transitive parameter effect analysis exists
 (`semantic/analyze/effects.py`). Initial source contracts now keep the public
 row separate from those access summaries: both compilers check `no_effects`
-(and `Effect<>`) for scalar computation, read-only value access, direct calls
-and explicitly constrained callbacks. Unknown operations cannot satisfy an
-empty row. Named positive/negative rows, row-polymorphic source signatures,
-complete inference into callable types and allocation/failure coverage remain
-in progress. The reviewed rules are in `PHASE1_DESIGN_PROPOSALS.md`.
+(and `Effect<>`), nominal `reads<Resource>` / `mutates<Resource>` permissions,
+place-parameter routes, and `no reads<Resource>` / `no reads` exclusions.
+Direct calls translate place subjects; constrained callbacks retain open
+negative guarantees. Unknown operations cannot satisfy an empty row or an
+unproved exclusion. Row-polymorphic source signatures, complete inference
+into callable types and allocation/failure coverage remain in progress. The reviewed rules are in `PHASE1_DESIGN_PROPOSALS.md`.
 Effect polymorphism, allocation and failure as effects, and the
 `noreturn`/escape set are prerequisites for compile-time purity (Phase 2),
 the resource-exhaustion policy (`semantic/resource_exhaustion.md`), and the

@@ -15,7 +15,7 @@ from itertools import count
 from typing import Callable, Literal, NoReturn, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
-from . import builtins, hir, ty, effect_rows
+from . import builtins, hir, ty, effect_rows, effect_syntax
 from .analyze import predicate_effects
 from .hir import children as hir_children
 from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, user_warning, not_implemented, require_valued
@@ -1247,7 +1247,7 @@ def _conversion_method_call(value: hir.AST, target: ty.Type, loc: Span, *, ctx: 
     method = unfolded.method('__as__')
     if method is not None and method.static:
         return tcr_function_call(function, p0.Block(loc, [], '()', None), ctx=ctx)   # reads nothing of the value
-    bound = hir.BoundMethod(loc, replace(function_type, pos_or_kw=function_type.pos_or_kw[1:]), function, receiver)
+    bound = hir.BoundMethod(loc, replace(function_type, pos_or_kw=function_type.pos_or_kw[1:], effects=effect_rows.bind_receiver(function_type.effects, len(function_type.pos_or_kw) + len(function_type.kw_only))), function, receiver)
     return tcr_function_call(bound, p0.Block(loc, [], '()', None), ctx=ctx)
 
 
@@ -7051,7 +7051,7 @@ def _generic_signature(fn_ast: p0.BinOp, *, ctx: Context) -> tuple[ty.FunctionTy
     if any(p.type == ty.INFERRED_TYPE for p in all_params):
         user_error(ctx.srcfile, 'a generic function needs every parameter type declared', Pointer(span=params_block.loc, message='annotate each parameter'))
     signature = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
-    return replace(signature, type_params=params, effects=_function_effects(rettype_ast)[1]), params
+    return replace(signature, type_params=params, effects=effect_syntax.contract(rettype_ast, all_params, generic_ctx)), params
 
 
 def _instantiation_name(name: str, bindings: dict[str, ty.TypeExpr], params: list[ty.GenericParam]) -> str:
@@ -7961,7 +7961,7 @@ def _string_method(receiver: hir.AST, name: str, binop: p0.BinOp, *, ctx: Contex
             Pointer(span=binop.right.loc, message='string methods are implemented in the prelude\'s `strings.dewy`'),
         )
     function = hir.ExpressedIdentifier(binop.right.loc, binding.type, binding.name, binding_id=binding.id)
-    bound_type = replace(binding.type, pos_or_kw=binding.type.pos_or_kw[1:])
+    bound_type = replace(binding.type, pos_or_kw=binding.type.pos_or_kw[1:], effects=effect_rows.bind_receiver(binding.type.effects, len(binding.type.pos_or_kw) + len(binding.type.kw_only)))
     return hir.BoundMethod(binop.loc, bound_type, function, receiver)
 
 
@@ -8912,7 +8912,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             function = hir.ExpressedIdentifier(binop.right.loc, function_binding.type, function_binding.name, binding_id=function_binding.id)
             if method.static:
                 return hir.BoundMethod(binop.loc, function_binding.type, function, None)   # needs no receiver; still only ever called
-            bound_type = replace(function_binding.type, pos_or_kw=function_binding.type.pos_or_kw[1:])
+            bound_type = replace(function_binding.type, pos_or_kw=function_binding.type.pos_or_kw[1:], effects=effect_rows.bind_receiver(function_binding.type.effects, len(function_binding.type.pos_or_kw) + len(function_binding.type.kw_only)))
             return hir.BoundMethod(binop.loc, bound_type, function, value)
         user_error(
             ctx.srcfile,
@@ -9100,7 +9100,7 @@ def _metatype_member(value: hir.AST, name: str, binop: p0.BinOp, *, ctx: Context
         dispatcher = _brand_dispatcher(metatype.family, name, binop.loc, ctx=ctx)
         assert isinstance(dispatcher.type, ty.FunctionType)
         function = hir.ExpressedIdentifier(binop.right.loc, dispatcher.type, dispatcher.name, binding_id=dispatcher.id)
-        bound_type = replace(dispatcher.type, pos_or_kw=dispatcher.type.pos_or_kw[1:])
+        bound_type = replace(dispatcher.type, pos_or_kw=dispatcher.type.pos_or_kw[1:], effects=effect_rows.bind_receiver(dispatcher.type.effects, len(dispatcher.type.pos_or_kw) + len(dispatcher.type.kw_only)))
         return hir.BoundMethod(binop.loc, bound_type, function, value)   # the type value is the first argument
     type_error(
         ctx.srcfile,
@@ -11211,6 +11211,8 @@ def tcr_prefix(prefix: p0.Prefix, *, ctx: Context, expected: ty.Type | None = No
     """Typecheck a prefix operator through its builtin dunder."""
     if not isinstance(prefix.op, t1.Operator):
         not_implemented(ctx.srcfile, prefix.op.loc, 'broadcast prefix operator')
+    if prefix.op.symbol == 'no':
+        user_error(ctx.srcfile, '`no` is only an effect exclusion', Pointer(span=prefix.loc, message='write it in a function result contract'))
     if prefix.op.symbol == 'type of':
         user_error(
             ctx.srcfile,
@@ -12645,33 +12647,12 @@ def _void_facts_annotation(ast: p0.AST, *, ctx: Context) -> ty.RefinedType | Non
     return None   # `:> <(x:int64):>int64>` is a type in a type block, as before
 
 
-def _function_effects(ast: p0.AST) -> tuple[p0.AST, effect_rows.Contract | None]:
-    """Split the reviewed empty row from the value-result annotation.
-
-    Only the result boundary interprets this syntax; effects never enter a
-    value union/intersection. Other row forms will use this same boundary.
-    """
-    if isinstance(ast, p0.Block) and ast.kind == '()' and len(ast.inner) == 1:
-        return _function_effects(ast.inner[0])
-    if not isinstance(ast, p0.BinOp) or _operator_symbol(ast.op) != '&':
-        return ast, None
-    right = ast.right
-    while isinstance(right, p0.Block) and right.kind == '()' and len(right.inner) == 1:
-        right = right.inner[0]
-    empty = isinstance(right, p0.Atom) and isinstance(right.item, t1.Identifier) and right.item.name == 'no_effects'
-    empty |= (isinstance(right, p0.BinOp) and isinstance(right.op, t2.TypeParamJuxtapose)
-              and isinstance(right.left, p0.Atom) and isinstance(right.left.item, t1.Identifier)
-              and right.left.item.name == 'Effect' and isinstance(right.right, p0.Block)
-              and right.right.kind == '<>' and not right.right.inner)
-    if empty:
-        result, _ = _function_effects(ast.left)
-        return result, effect_rows.Contract(effect_rows.Row())
-    return ast, None
-
-
 def _function_result_type(ast: p0.AST, *, ctx: Context, proof: bool = False) -> ty.Type:
     """A signature and a literal interpret their result annotation alike."""
-    ast, _ = _function_effects(ast)
+    value, _ = effect_syntax.split(ast)
+    if value is None:
+        user_error(ctx.srcfile, 'a function result needs a value type before its effects', Pointer(span=ast.loc, message='write `:> T & effects`'))
+    ast = value
     facts = _void_facts_annotation(ast, ctx=ctx)
     if facts is not None and not proof:
         user_error(ctx.srcfile, 'a bare fact return is only for `$proof`', Pointer(span=ast.loc, message='an ordinary procedure uses `:> void & <P>`'))
@@ -12694,7 +12675,7 @@ def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     params = [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args is not None else [])]
     if any(p.type == ty.INFERRED_TYPE for p in params):
         return None
-    return replace(typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype), effects=_function_effects(signature.right)[1])
+    return replace(typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype), effects=effect_syntax.contract(signature.right, params, ctx))
 
 
 def _discarded_expressed_sites(body: hir.AST) -> list[hir.AST]:
@@ -12744,13 +12725,14 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     if bare_facts is not None and not is_proof:
         user_error(ctx.srcfile, 'a bare fact return is only for `$proof`', Pointer(span=signature.loc, message='an ordinary procedure uses `:> void & <P>`'))
     effect_contract: effect_rows.Contract | None = None
+    effect_source: p0.AST | None = None
     rettype: ty.Type = ty.INFERRED_TYPE
     rettype_loc: Span | None = None
     
     # if the return type was annotated, capture it
     void_facts: ty.RefinedType | None = None
     if isinstance(signature, p0.BinOp) and signature.op.symbol == ':>':
-        _, effect_contract = _function_effects(signature.right)
+        effect_source = signature.right
         declared = _function_result_type(signature.right, ctx=ctx, proof=is_proof)
         if isinstance(declared, ty.RefinedType) and declared.base == ty.VOID_TYPE:
             # A runtime procedure with `void & <facts>` has no expressed
@@ -12766,6 +12748,8 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     # collect function signature parameters
     pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature, ctx=ctx)
     pos_or_kw_args, kw_only_args = _contextual_parameter_types(pos_or_kw_args, kw_only_args, expected)
+    if effect_source is not None:
+        effect_contract = effect_syntax.contract(effect_source, [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args else [])], ctx)
     body_ast = binop.right
     if pos_or_kw_args and pos_or_kw_args[0].name == t2.PARTIAL_OPERATOR_PARAMETER:
         # `(<? n)`: a partial operator's parameter takes the name of the slot it
@@ -13249,14 +13233,15 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
         and isinstance(item.left.left, p0.Atom)
         and isinstance(item.left.left.item, t1.Identifier)
     ):
+        parameters = _function_type_args(item.left.right, ctx=ctx)
         return ty.ObjectField(
             item.left.left.item.name,
             ty.FunctionType(
-                _function_type_args(item.left.right, ctx=ctx),
+                parameters,
                 [],
                 None,
                 _function_result_type(item.right, ctx=ctx),
-                effects=_function_effects(item.right)[1],
+                effects=effect_syntax.contract(item.right, parameters, ctx),
             ),
             mutable,
         )
@@ -14543,12 +14528,13 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             return ast_to_type(inner, ctx=ctx)
 
         case p0.BinOp(op=t1.Operator(symbol=':>')):
+            parameters = _function_type_args(ast.left, ctx=ctx)
             return ty.FunctionType(
-                _function_type_args(ast.left, ctx=ctx),
+                parameters,
                 [],
                 None,
                 _function_result_type(ast.right, ctx=ctx),
-                effects=_function_effects(ast.right)[1],
+                effects=effect_syntax.contract(ast.right, parameters, ctx),
             )
 
         case p0.BinOp(op=t1.Operator(symbol='*')):
@@ -14654,6 +14640,9 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 return ty.TypeAnd([left] + right.items)
             return ty.TypeAnd([left, right])
         
+        case p0.Prefix(op=t1.Operator(symbol='no')):
+            user_error(ctx.srcfile, '`no` is only an effect exclusion', Pointer(span=ast.loc, message='write it in a function result contract'))
+
         case p0.Prefix(op=t1.Operator(symbol='not'|'~')):
             item = ast_to_type(ast.item, ctx=ctx)
             return ty.TypeNot(item)
@@ -15727,7 +15716,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         constructor = _brand_constructor(metatype.family, left.loc, ctx=ctx)
         assert isinstance(constructor.type, ty.FunctionType)
         function = hir.ExpressedIdentifier(left.loc, constructor.type, constructor.name, binding_id=constructor.id)
-        bound = hir.BoundMethod(left.loc, replace(constructor.type, pos_or_kw=constructor.type.pos_or_kw[1:]), function, left)
+        bound = hir.BoundMethod(left.loc, replace(constructor.type, pos_or_kw=constructor.type.pos_or_kw[1:], effects=effect_rows.bind_receiver(constructor.type.effects, len(constructor.type.pos_or_kw) + len(constructor.type.kw_only))), function, left)
         return tcr_function_call(bound, right, ctx=ctx, expected=expected)
 
     if receiver is None:
@@ -15747,7 +15736,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
     contextual_method = methods[0] if len(methods) == 1 and not methods[0].type_params else None
     if receiver is not None and contextual_method is not None:
         # the arguments written at the call site do not include `self`
-        contextual_method = replace(contextual_method, pos_or_kw=contextual_method.pos_or_kw[1:])
+        contextual_method = replace(contextual_method, pos_or_kw=contextual_method.pos_or_kw[1:], effects=effect_rows.bind_receiver(contextual_method.effects, len(contextual_method.pos_or_kw) + len(contextual_method.kw_only)))
     pos_args, kw_args, argument_order = parse_call_arguments(
         right,
         ctx=ctx,

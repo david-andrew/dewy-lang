@@ -7,10 +7,10 @@ allocation/escape behavior has a checked model; unknown never means pure.
 """
 from collections import deque
 
-from .. import effect_rows as rows, hir, ty
+from .. import bindings, effect_rows as rows, hir, ty
 from ..errors import user_error
 from ...reporting import Pointer
-from .effects import _EffectAnalyzer, _literal_params
+from .effects import _EffectAnalyzer, _literal_params, _unwrap
 
 SCALAR_OPERATIONS = frozenset({
     '__add__', '__sub__', '__mul__', '__div__', '__floordiv__', '__mod__',
@@ -36,12 +36,14 @@ def validate(root, registry, srcfile):
     if not constrained:
         return
     analysis = _EffectAnalyzer(root)
-    summaries = {}
-    edges = {}
+    local = {}
+    calls = {}
+    dependents = {}
     for literal in analysis.literals:
         key = id(literal)
         params = _literal_params(literal)
         private = {p.binding_id for p in params if not p.place}
+        places = {p.binding_id: str(index) for index, p in enumerate(params) if p.place}
         pending = [literal.body]
         while pending:
             node = pending.pop()
@@ -50,21 +52,60 @@ def validate(root, registry, srcfile):
             if isinstance(node, hir.Declare):
                 private.add(node.binding_id)
             pending.extend(hir.children(node))
-        unknown = None
-        dependencies = set()
+        summary = rows.Contract(rows.Row())
+        dependencies = []
+
+        def contribute(contract):
+            nonlocal summary
+            summary = rows.join(summary, contract)
+
+        def unknown():
+            contribute(rows.Contract())
+
+        def location(node):
+            path = bindings.access_path(node, unwrap=_unwrap)
+            if path.binding_id in places:
+                fields = tuple(step.name if isinstance(step, hir.MemberAccess) else '[]' for step in path.steps)
+                return rows.Subject('parameter', places[path.binding_id], fields)
+            if path.binding_id in private:
+                return None
+            return False  # unresolved external storage; distinct from private
+
+        def access(node, family):
+            subject = location(node)
+            if subject is False:
+                unknown()
+            elif subject is not None:
+                contribute(rows.Contract(rows.Row((rows.Atom(family, subject),))))
+            path = bindings.access_path(node, unwrap=_unwrap)
+            for step in path.steps:
+                if isinstance(step, hir.Index):
+                    visit(step.index)
+            if not isinstance(path.root, hir.ExpressedIdentifier):
+                visit(path.root)
+
+        def call_subjects(node, signature):
+            supplied = {}
+            for index, param in enumerate([*signature.pos_or_kw, *signature.kw_only]):
+                if not param.place:
+                    continue
+                argument = node.pos_args[index] if index < len(node.pos_args) else node.kw_args.get(param.name)
+                if not isinstance(argument, hir.Place):
+                    return None
+                subject = location(argument.target)
+                if subject is False:
+                    return None
+                supplied[str(index)] = subject
+            return supplied
 
         def visit(node):
-            nonlocal unknown
-            if unknown is not None:
-                return
             if isinstance(node, hir.FunctionLiteral):
                 return  # its body is checked at its own call boundary
             if isinstance(node, (hir.Void, hir.NoneValue, hir.Bool, hir.Integer, hir.String,
                                  hir.Break, hir.Continue, hir.ScopeMetatag, hir.TypeValue)):
                 return
-            if isinstance(node, hir.ExpressedIdentifier):
-                if node.binding_id not in private:
-                    unknown = node
+            if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
+                access(node, 'reads')
                 return
             if isinstance(node, hir.Assert) and not node.runtime and not node.expect:
                 return  # fact checking owns its purity/erasure boundary
@@ -73,62 +114,93 @@ def validate(root, registry, srcfile):
                     return
                 targets = analysis._direct_targets(node)
                 if targets is not None:
-                    dependencies.update(id(target) for target in targets)
+                    for target in targets:
+                        supplied = call_subjects(node, target.type)
+                        if supplied is None:
+                            unknown()
+                        else:
+                            dependencies.append((id(target), supplied))
                 elif (isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None
                       and node.func.name in SCALAR_OPERATIONS and scalar(node.type)
                       and all(scalar(arg.type) for arg in node.pos_args)):
                     pass
-                elif isinstance(node.func.type, ty.FunctionType) and rows.implies(node.func.type.effects, rows.Contract(rows.Row())):
+                elif isinstance(node.func.type, ty.FunctionType):
+                    supplied = call_subjects(node, node.func.type)
+                    if supplied is None:
+                        unknown()
+                    else:
+                        contribute(rows.instantiate(node.func.type.effects or rows.Contract(), supplied))
                     visit(node.func)
                 else:
-                    unknown = node
+                    unknown()
                 for argument in [*node.pos_args, *node.kw_args.values()]:
-                    visit(argument)
+                    if isinstance(argument, hir.Place):
+                        # Address formation evaluates indices, not the value
+                        # at the address. The callee supplies reads/writes.
+                        path = bindings.access_path(argument.target, unwrap=_unwrap)
+                        for step in path.steps:
+                            if isinstance(step, hir.Index):
+                                visit(step.index)
+                    else:
+                        visit(argument)
+                        if not scalar(argument.type):
+                            unknown()  # logical aggregate transfer not proved
                 return
             if isinstance(node, hir.Declare):
                 if not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)):
-                    unknown = node  # no promise about an implicit aggregate copy yet
-                else:
-                    visit(node.expr)
+                    unknown()  # no promise about an implicit aggregate copy yet
+                visit(node.expr)
                 return
             if isinstance(node, hir.Assign):
-                if node.target.binding_id not in private or not scalar(node.target.type):
-                    unknown = node
+                if not scalar(node.target.type):
+                    unknown()
                 else:
-                    visit(node.value)
+                    access(node.target, 'mutates')
+                    if node.op != '=':
+                        access(node.target, 'reads')
+                visit(node.value)
                 return
             if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and not scalar(node.type):
-                unknown = node
+                unknown()
                 return
             if isinstance(node, (hir.Block, hir.Suppress, hir.Return, hir.Flow, hir.IfArm, hir.LoopArm,
                                  hir.ShortCircuit, hir.Obligation, hir.TypeTest, hir.ArrayLength,
-                                 hir.StringLength, hir.MemberAccess, hir.Index, hir.ValueCast,
-                                 hir.RepresentationCast)):
+                                 hir.StringLength, hir.ValueCast, hir.RepresentationCast)):
                 for child in hir.children(node):
                     visit(child)
                 return
-            unknown = node
+            unknown()
 
         if not scalar(literal.rettype):
-            unknown = literal  # escaping aggregate storage not modeled yet
+            unknown()  # escaping aggregate storage not modeled yet
         visit(literal.body)
         for param in params:
             if isinstance(param, hir.BoundParam):
                 visit(param.value)
-        summaries[key] = rows.Row(unknown=unknown is not None)
-        for target in dependencies:
-            edges.setdefault(target, set()).add(key)
-    # Recursive calls may be effect-free without being terminating. That is
-    # intentionally independent of the stricter $proof termination boundary.
-    pending = deque(key for key, row in summaries.items() if row.unknown)
+        local[key] = summary
+        calls[key] = dependencies
+        for target, _ in dependencies:
+            dependents.setdefault(target, set()).add(key)
+
+    # Least fixed point of possible behaviors, independent of termination.
+    # Calls translate parameter slots into the caller's storage routes. Deep
+    # recursive routes widen positively; negative guarantees never widen.
+    summaries = dict(local)
+    pending = deque(local)
+    queued = set(local)
     while pending:
-        target = pending.popleft()
-        for caller in edges.get(target, ()):
-            if not summaries[caller].unknown:
-                summaries[caller] = rows.Row(unknown=True)
+        key = pending.popleft()
+        queued.remove(key)
+        updated = rows.join(local[key], *(rows.instantiate(summaries[target], supplied) for target, supplied in calls[key]))
+        if rows.identity(updated) == rows.identity(summaries[key]):
+            continue
+        summaries[key] = updated
+        for caller in dependents.get(key, ()):
+            if caller not in queued:
                 pending.append(caller)
+                queued.add(caller)
     for literal in constrained:
-        if not rows.satisfies(summaries[id(literal)], literal.type.effects):
+        if not rows.implies(summaries[id(literal)], literal.type.effects):
             user_error(literal.source or srcfile, 'function does not satisfy its effect contract',
-                       Pointer(span=literal.loc, message='cannot establish `no_effects`: an operation or callee may have effects'),
+                       Pointer(span=literal.loc, message='an operation or callee may exceed the permitted effects or violate an exclusion'),
                        hint='omit the row to infer conservatively, or remove the operation requiring effects')

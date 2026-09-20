@@ -40,7 +40,7 @@ bool_identifiers: set[str] = {
 
 # tokenized as identifiers, but are treated as operators (rather than identifiers)
 word_operators: set[str] = {
-    'and', 'or', 'xor', 'nand', 'nor', 'xnor', 'not',
+    'and', 'or', 'xor', 'nand', 'nor', 'xnor', 'not', 'no',
     'as', 'in', 'transmute', 'of',
     'or_throw',  # postfix: propagate exception alternatives out of the function
 }

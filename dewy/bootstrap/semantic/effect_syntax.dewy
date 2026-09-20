@@ -1,0 +1,65 @@
+from reporting import Error
+import p"effect_rows.dewy" as rows
+import p"source_views.dewy" as views
+import p"context.dewy" as contexts
+import p"ty.dewy" as types
+import p"../parser/p0.dewy" as parser
+
+# Effect subjects carry resolved nominal identities or signature slots. They
+# never become value types; equal source spellings grant no shared authority.
+Application:type = const [name:string? arguments:array<addr> | none=none]
+application = (id:addr context:contexts.Context session:contexts.Session):>Application => {
+    id=views.unparen(id context session)
+    let node=contexts.node_at(id context session)
+    if node is? parser.BinOp and views.is_operator(node.op 'TypeParamJuxtapose' context session) {
+        let block=contexts.node_at(node.right context session)
+        if block is? parser.Block and block.delims =? '<>' return Application[views.identifier(node.left context session) block.inner]
+    }
+    return Application[views.identifier(id context session)]
+}
+is_effect = (id:addr context:contexts.Context session:contexts.Session):>bool => {
+    let node=contexts.node_at(views.unparen(id context session) context session)
+    if node is? parser.Prefix and views.is_operator(node.op 'no' context session) return true
+    return application(id context session).name in? ['reads' 'mutates' 'no_effects' 'Effect']
+}
+Split:type = const [value:addr? terms:array<addr>=[]]
+split = (id:addr context:contexts.Context @session:contexts.Session):>Split => {
+    id=views.unparen(id context session)
+    let node=contexts.node_at(id context session)
+    if node is? parser.BinOp and views.is_operator(node.op '&' context session) {
+        let left=split(node.left context @session)
+        let right=split(node.right context @session)
+        let terms=left.terms
+        loop term in right.terms {terms.push(term)}
+        if left.value is? none return Split[right.value terms]
+        if right.value is? none return Split[left.value terms]
+        if left.value =? node.left and right.value =? node.right return Split[id terms]
+        # Preserve ordinary type/fact intersection checking. Only mixed rows
+        # need a synthetic node; original source spans remain diagnostic sites.
+        $runtime_assert context.source <? session.sources.length
+        let source=session.sources[context.source]
+        let nodes=source.nodes
+        let value=nodes.length
+        nodes.push(parser.BinOp[loc=node.loc op=node.op left=left.value right=right.value])
+        session.sources[context.source]=contexts.Source[source.srcfile nodes]
+        return Split[value terms]
+    }
+    return if is_effect(id context session) Split[none [id]] else Split[id]
+}
+Route:type = const [root:string fields:array<string>=[]]
+route = (id:addr context:contexts.Context session:contexts.Session):>Route? => {
+    id=views.unparen(id context session)
+    let name=views.identifier(id context session)
+    if name isnt? none return Route[name]
+    let node=contexts.node_at(id context session)
+    if node is? parser.BinOp and views.is_operator(node.op '.' context session) {
+        let prefix=route(node.left context session)
+        let field=views.identifier(node.right context session)
+        if prefix isnt? none and field isnt? none {
+            let fields=prefix.fields
+            fields.push(field)
+            return Route[prefix.root fields]
+        }
+    }
+    return none
+}

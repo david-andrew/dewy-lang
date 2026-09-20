@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ..parser import p0, t0, t2
-from . import builtins, hir, ty
+from . import builtins, effect_rows, hir, ty
 
 # ---------------------------------------------------------------------------
 # type → Dewy
@@ -194,7 +194,7 @@ def _function_type_to_dewy(t: ty.FunctionType) -> str:
         signature = args[0]
     else:
         signature = f'({" ".join(args)})'
-    effect = ' & no_effects' if t.effects is not None and t.effects.allowed is not None and not t.effects.allowed.atoms and not t.effects.allowed.variables and not t.effects.allowed.unknown else ''
+    effect = effect_rows.display(t.effects, {str(i): arg.name for i, arg in enumerate([*t.pos_or_kw, *t.kw_only]) if arg.name is not None})
     parts.append(f'{signature}:>{type_to_dewy(t.ret)}{effect}')
     return f'<{"".join(parts)}>'
 

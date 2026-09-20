@@ -156,3 +156,84 @@ sorted_keys = (values:array<string>):>array<string> => {
     }
     return output
 }
+
+atom_display = (atom:Atom parameters:dict<string string>):>string => {
+    if atom.subject is? none return atom.family
+    let subject=atom.subject
+    let name=if subject.kind =? 'parameter' parameters.get(subject.key "parameter#{subject.key}") else subject.key
+    loop field in subject.route {name+=".{field}"}
+    return "{atom.family}<{name}>"
+}
+display = (contract:Contract? parameters:dict<string string>):>string => {
+    if contract is? none return ''
+    let terms:array<string>=[]
+    if contract.allowed isnt? none {
+        let row=contract.allowed
+        loop atom in row.atoms {terms.push(atom_display(atom parameters))}
+        loop variable in row.variables {terms.push(variable)}
+        if row.unknown {terms.push('<unknown effects>')}
+        if terms.length =? 0 {terms.push('no_effects')}
+    }
+    loop atom in contract.excluded {terms.push("no {atom_display(atom parameters)}")}
+    return if terms.length =? 0 '' else ' & ' + terms.join(' & ')
+}
+
+# Sequence/branch union preserves only exclusions guaranteed by every part.
+# In particular a negative-only callback remains open, with its guarantee.
+join = (left:Contract right:Contract):>Contract => {
+    let allowed:Row?=none
+    if left.allowed isnt? none and right.allowed isnt? none {allowed=merge(left.allowed right.allowed)}
+    let candidates=left.excluded
+    loop atom in right.excluded {candidates.push(atom)}
+    let excluded:array<Atom>=[]
+    loop atom in candidates {
+        let required=Contract[excluded=[atom]]
+        if implies(left required) and implies(right required) and atom not in? excluded {excluded.push(atom)}
+    }
+    return Contract[allowed excluded]
+}
+instantiate = (contract:Contract subjects:dict<string Subject?>):>Contract => {
+    let allowed:Row?=none
+    if contract.allowed isnt? none {
+        let supplied=substitute(contract.allowed [] subjects)
+        let widened=Row[variables=supplied.variables unknown=supplied.unknown]
+        loop atom in supplied.atoms {
+            let subject=atom.subject
+            if subject isnt? none and subject.route.length >? 8 {
+                let route=subject.route
+                route.truncate(8)
+                subject=Subject[subject.kind subject.key route]
+            }
+            widened=add(widened Atom[atom.family subject])
+        }
+        allowed=widened
+    }
+    let excluded:array<Atom>=[]
+    loop atom in substitute(Row[contract.excluded] [] subjects).atoms {
+        # Truncation strengthens an exclusion, unlike a positive permission.
+        if atom.subject is? none or atom.subject.route.length <=? 8 {excluded.push(atom)}
+    }
+    return Contract[allowed excluded]
+}
+
+prepend_parameter = (contract:Contract? count:addr):>Contract? => {
+    if contract is? none return none
+    let subjects:dict<string Subject?>=[]
+    loop i in 0.. and i <? count {subjects["{i}"]=Subject['parameter' "{i+1}"]}
+    return instantiate(contract subjects)
+}
+bind_receiver = (contract:Contract? count:addr):>Contract? => {
+    if contract is? none return none
+    let subjects:dict<string Subject?>=['0' -> none]
+    loop i in 1.. and i <? count {subjects["{i}"]=Subject['parameter' "{i-1}"]}
+    let bound=instantiate(contract subjects)
+    if contract.allowed isnt? none {
+        loop atom in contract.allowed.atoms {
+            if atom.subject isnt? none and atom.subject.kind =? 'parameter' and atom.subject.key =? '0' {
+                $runtime_assert bound.allowed isnt? none
+                return Contract[merge(bound.allowed Row[unknown=true]) bound.excluded]
+            }
+        }
+    }
+    return bound
+}

@@ -101,6 +101,38 @@ count = ():>uint64 => {
 
 Expected failures appear as direct [error alternatives](errors-and-forwarding.md) in the return contract. Public functions should normally declare a stable set of returned errors even where an unexposed helper could infer them.
 
+## Effect Contracts
+
+Effects describe what evaluation may do, independently of the returned value
+or error alternatives. Attach the row to the result with `&`:
+
+```dewy
+Filesystem = type of any
+forward = (f:():>int64 & reads<Filesystem>):>int64 & reads<Filesystem> => f()
+read_value = (@value:int64):>int64 & reads<value> => value
+set_value = (@value:int64):>void & mutates<value> => {value=42}
+```
+
+Named resources use nominal type identity. Aliases and imports preserve that
+identity; another mint with the same name does not. A place subject identifies
+a parameter's caller-owned storage, optionally followed by stored fields.
+Ordinary by-value reads and private scalar assignments have no external
+read/write effects. Compound assignment requires both reading and mutation.
+
+A positive row is an upper bound on all effects. `no_effects` (also spelled
+`Effect<>`) is the empty bound. `no reads<Filesystem>` excludes that read;
+`no reads` excludes the entire read family. Without a positive bound, negative
+clauses leave other effects open. Callback calls preserve these guarantees.
+`reads<>` and `no reads<>` are rejected to avoid confusing an empty subject set
+with a family-wide exclusion.
+
+Current checking covers scalar computation, read-only value access, place
+reads and scalar place writes, direct calls, and constrained callbacks.
+Unmodeled operations and allocations remain unknown and cannot satisfy an
+empty row or negative promise. In particular COW deferral is not proof of no
+allocation. Effect-row generics, complete inferred callable rows, and the full
+allocation/failure vocabulary are still being implemented.
+
 ## Calls and Pipes
 
 Parenthesized or juxtaposed arguments call a callable expression. `|>` supplies values to the callable on its right; `<|` supplies right-hand values to the callable on its left according to their associativity. The callable operand of a pipe is an ordinary expression, not a call position: a named function is written `@name` (`3 |> @square`), and a function literal or any other function-valued expression pipes as written.

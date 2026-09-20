@@ -1,3 +1,4 @@
+import p"effect_rows.dewy" as effect_rows
 import p"ty.dewy" as types
 import p"propositions.dewy" as facts
 import p"type_queries.dewy" as views
@@ -151,11 +152,13 @@ function_to_dewy = (node:types.FunctionType nodes:types.Table):>string => {
         signature = args[0]
     }
     let prefix = if node.type_params.length =? 0 '' else "<{generic_params(node.type_params nodes)}>"
-    let effect:string=''
-    if node.effects isnt? none and node.effects.allowed isnt? none {
-        let row=node.effects.allowed
-        if row.atoms.length =? 0 and row.variables.length =? 0 and not row.unknown {effect=' & no_effects'}
+    let parameters:dict<string string>=[]
+    loop i in 0.. and i <? node.pos_or_kw.length {
+        let arg=node.pos_or_kw[i]
+        if arg.name isnt? none {parameters["{i}"]=arg.name}
     }
+    loop i in 0.. and i <? node.kw_only.length {parameters["{node.pos_or_kw.length+i}"]=node.kw_only[i].name}
+    let effect=effect_rows.display(node.effects parameters)
     return "<{prefix}{signature}:>{type_to_dewy(node.ret nodes)}{effect}>"
 }
 

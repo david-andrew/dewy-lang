@@ -36,8 +36,8 @@ measure=(cached:bool graph:subtyping.Graph):>int64=>{
     let before:int64=_arena_allocated_bytes
     loop i in 0.. and i <? 128 {
         let yes=if cached subtyping.nominal_subtype('int8' 'number' graph) else reachable('int8' 'number' graph.edges)
-        let no=if cached subtyping.nominal_subtype('int8' 'string' graph) else reachable('int8' 'string' graph.edges)
-        if not yes or no return -1
+        let false_value=if cached subtyping.nominal_subtype('int8' 'string' graph) else reachable('int8' 'string' graph.edges)
+        if not yes or false_value return -1
     }
     return _arena_allocated_bytes-before
 }

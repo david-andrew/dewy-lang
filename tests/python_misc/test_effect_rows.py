@@ -111,6 +111,24 @@ main=():>int64=>{{
     $runtime_assert rows.identity(none) not=? rows.identity(rows.Contract[rows.Row[]])
     $runtime_assert rows.implies(rows.Contract[rows.Row[]] none)
     $runtime_assert not rows.implies(none rows.Contract[rows.Row[]])
+    let no_reads=rows.Contract[excluded=[rows.Atom['reads']]]
+    let no_fs=rows.Contract[excluded=[rows.Atom['reads' rows.Subject['resource' 'fs']]]]
+    let sequence=rows.join(no_reads no_fs)
+    $runtime_assert rows.implies(sequence no_fs)
+    $runtime_assert not rows.implies(sequence no_reads)
+    $runtime_assert not rows.implies(rows.join(no_fs rows.Contract[]) no_fs)
+    $runtime_assert rows.implies(rows.join(no_fs rows.Contract[rows.Row[]]) no_fs)
+    let no_field=rows.Contract[excluded=[rows.Atom['reads' rows.Subject['parameter' '0' ['field']]]]]
+    let private_negative=rows.instantiate(no_field ['0' -> none])
+    $runtime_assert private_negative.excluded.length =? 0
+    $runtime_assert not rows.implies(private_negative no_reads)
+    let deep=rows.Subject['parameter' '1' ['a' 'a' 'a' 'a' 'a' 'a' 'a' 'a']]
+    let both=rows.Contract[rows.Row[no_field.excluded] no_field.excluded]
+    let widened=rows.instantiate(both ['0' -> deep])
+    $runtime_assert widened.excluded.length =? 0
+    $runtime_assert widened.allowed isnt? none and widened.allowed.atoms.length =? 1
+    let widened_atom=widened.allowed.atoms[0]
+    $runtime_assert widened_atom.subject isnt? none and widened_atom.subject.route.length =? 8
     return 42
 }}''')
     source.path.write_text(source.body)
@@ -128,3 +146,28 @@ def test_contract_subtyping_respects_open_negative_guarantees():
     assert not implies(Contract(Row((READ_DB,))), no_reads)
     assert identity(None) != identity(Contract(Row()))
     assert identity(Contract(union(Row((READ_DB,)), Row((READ_FS,))))) == identity(Contract(union(Row((READ_FS,)), Row((READ_DB,)))))
+
+
+def test_sequencing_preserves_only_shared_negative_guarantees():
+    from dewy.semantic.effect_rows import join
+    no_reads = Contract(excluded=(Atom('reads'),))
+    no_fs = Contract(excluded=(READ_FS,))
+    assert implies(join(no_reads, no_fs), no_fs)
+    assert not implies(join(no_reads, no_fs), no_reads)
+    assert implies(join(no_fs, Contract(Row((READ_DB,)))), no_fs)
+    assert not implies(join(no_fs, Contract(Row((READ_FS,)))), no_fs)
+    assert not implies(join(no_fs, Contract()), no_fs)
+    assert implies(join(no_fs, Contract(Row())), no_fs)
+    assert not implies(join(no_fs, Contract(Row())), Contract(Row()))
+
+
+def test_call_translation_does_not_strengthen_exclusions():
+    from dewy.semantic.effect_rows import instantiate
+    excludes_field = Contract(excluded=(Atom('reads', FIELD),))
+    private = instantiate(excludes_field, {'slot:0': None})
+    assert private.excluded == ()
+    assert not implies(private, Contract(excluded=(Atom('reads'),)))
+    deep = Subject('parameter', 'caller:1', ('child',) * 8)
+    mapped = instantiate(Contract(Row((Atom('reads', FIELD),)), excludes_field.excluded), {'slot:0': deep})
+    assert len(mapped.allowed.atoms[0].subject.route) == 8
+    assert mapped.excluded == ()

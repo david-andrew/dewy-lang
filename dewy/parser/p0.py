@@ -127,7 +127,7 @@ operator_groups: list[tuple[Associativity, Sequence[str|type[t1.Token]]]] = [
     (Associativity.fail, [t2.EllipsisJuxtapose]),  # A...  ...B
     (Associativity.postfix, ['`']), #TODO/Note: at the moment, prefix vs postfix precedence of (`) is backed into the algorithm, and wouldn't listen to the ordering in the table...
     (Associativity.prefix, ['`']),
-    (Associativity.prefix, ['~']),   # word-`not` sits with the word connectives, below the comparisons
+    (Associativity.prefix, ['~', 'no']),   # word-`not` sits with the word connectives, below the comparisons
     (Associativity.postfix, ['?']),
     (Associativity.right,  ['^']),
     (Associativity.left, [t2.MultiplyJuxtapose]),  # x(y) (x)y

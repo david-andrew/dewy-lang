@@ -36,7 +36,7 @@ main=():>int64=>{{
     let object=hir.append_node(@nodes hir.ExpressedIdentifier[span record 'object' 3])
     let seven=hir.append_node(@nodes hir.Integer[span word '0d' 7])
     let literal=hir.append_node(@nodes hir.ObjectLiteral[span record [hir.ObjectField[span 'count' seven]]])
-    let no=hir.append_node(@nodes hir.Bool[span boolean false])
+    let false_value=hir.append_node(@nodes hir.Bool[span boolean false])
     let yes=hir.append_node(@nodes hir.Bool[span boolean true])
     let registry=bindings.Registry[]
     bindings.store_binding(@registry 1 bindings.Binding[1 'i' 'value' span value_type=word])
@@ -69,7 +69,7 @@ main=():>int64=>{{
     $runtime_assert obligations.check(hir.Obligation[span word i positive 'positive argument'] state assigned src context @data) is? none
     # A conditional promise is vacuous on an impossible result path; it is
     # still refuted when that result is possible and the promise is false.
-    $runtime_assert obligations.check(hir.Obligation[span boolean no conditional 'conditional result'] state assigned src context @data) is? none
+    $runtime_assert obligations.check(hir.Obligation[span boolean false_value conditional 'conditional result'] state assigned src context @data) is? none
     let failed=obligations.check(hir.Obligation[span boolean yes conditional 'conditional result'] state assigned src context @data)
     $runtime_assert failed isnt? none and failed.title =? 'refinement refuted'
     let unknown=types.refined_type(word [props.Proposition['self' '=?' 5]] @type_nodes)

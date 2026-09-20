@@ -336,7 +336,7 @@ ARENA_CASES = [
     ('let main=():>int64=>{let d:dict<int64 int64>=[1->42] return d[1]}', 42),
     ('let main=():>int64=>{let d:dict<int64 int64>=[] d[1]=40 d[1]=42 return d[1]}', 42),
     ('let main=():>int64=>{let d:dict<string int64>=["answer"->42] let key:string="answer" if key in? d return d[key] return 0}', 42),
-    ('let main=():>int64=>{let d:dict<int64 int64>=[1->42] let yes=d.get(1) let no=d.get(2) if yes isnt? none and no is? none return yes return 0}', 42),
+    ('let main=():>int64=>{let d:dict<int64 int64>=[1->42] let yes=d.get(1) let false_value=d.get(2) if yes isnt? none and false_value is? none return yes return 0}', 42),
     ('let main=():>int64=>{let d:dict<int64 int64>=[] return d.get(8 default=42)}', 42),
     ('let main=():>int64=>{let d:dict<int64 int64>=[] loop i in 0..70 {d[i]=i+1} if 41 in? d return d[41] return 0}', 42),
     ('let main=():>int64=>{let d:dict<int64 int64>=[1->19 2->23 3->99] d.pop(3); return d.pop(1)+d.pop(2)}', 42),

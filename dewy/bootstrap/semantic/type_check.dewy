@@ -1,4 +1,5 @@
 from reporting import Error
+import p"effect_syntax.dewy" as effect_syntax
 import p"effect_rows.dewy" as effect_rows
 import p"source_views.dewy" as source_views
 import p"../targets.dewy" as targets
@@ -437,7 +438,9 @@ function_args = (id:addr context:contexts.Context @session:contexts.Session lite
                 if parameters is? Error return parameters
                 let result=function_result(parsed.callable_result inner @session)
                 if result is? Error return result
-                declared=types.function_type(parameters.pos_or_kw parameters.kw_only none result [] @session.types effects=function_effects(parsed.callable_result inner session).effects)
+                let effects=effect_contract(parsed.callable_result parameters.pos_or_kw parameters.kw_only inner @session)
+                if effects is? Error return effects
+                declared=types.function_type(parameters.pos_or_kw parameters.kw_only none result [] @session.types effects=effects)
             } else {declared=resolve(parsed.annotation inner @session)}
             if declared is? Error return declared
             let stored=value_type(declared parsed.annotation inner @session)
@@ -489,27 +492,10 @@ value_type = (value:addr id:addr context:contexts.Context @session:contexts.Sess
 
 # A fact-only result is void with promises; a type enclosed in angle
 # brackets is still an ordinary result type, e.g. :> <(x:int64):>int64>.
-EffectResult:type = const [value:addr effects:effect_rows.Contract?=none]
-function_effects = (id:addr context:contexts.Context session:contexts.Session):>EffectResult => {
-    let current=source_views.unparen(id context session)
-    let node=contexts.node_at(current context session)
-    if node is? parser.BinOp and source_views.is_operator(node.op '&' context session) {
-        let right=source_views.unparen(node.right context session)
-        let empty=source_views.identifier(right context session) =? 'no_effects'
-        let item=contexts.node_at(right context session)
-        if item is? parser.BinOp and source_views.is_operator(item.op 'TypeParamJuxtapose' context session) and source_views.identifier(item.left context session) =? 'Effect' {
-            let block=contexts.node_at(item.right context session)
-            if block is? parser.Block and block.delims =? '<>' and block.inner.length =? 0 {empty=true}
-        }
-        if empty {
-            let result=function_effects(node.left context session)
-            return EffectResult[result.value effect_rows.Contract[effect_rows.Row[]]]
-        }
-    }
-    return EffectResult[current]
-}
 function_result = (id:addr context:contexts.Context @session:contexts.Session proof:bool=false):>addr|Error => {
-    id=function_effects(id context session).value
+    let split=effect_syntax.split(id context @session)
+    if split.value is? none return contexts.problem(id 'a function result needs a value type' 'write a result type before the effect row' context session)
+    id=split.value
     let node = contexts.node_at(id context session)
     if node is? parser.Block and node.delims =? '<>' and node.inner.length >? 0 {
         let promises:array<facts.Proposition> = []
@@ -603,7 +589,9 @@ field = (id:addr context:contexts.Context @session:contexts.Session):>types.Obje
                 if args is? Error return args
                 let ret = function_result(row.right context @session)
                 if ret is? Error return ret
-                return types.ObjectField[name types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types effects=function_effects(row.right context session).effects) mutable default]
+                let effects=effect_contract(row.right args.pos_or_kw args.kw_only context @session)
+                if effects is? Error return effects
+                return types.ObjectField[name types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types effects=effects) mutable default]
             }
         }
     }
@@ -738,6 +726,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
     }
     if node is? parser.Prefix {
         let op = source_views.symbol(node.op context session)
+        if op =? 'no' return contexts.problem(id '`no` is only an effect exclusion' 'write it in a function result contract' context session)
         if op =? 'type of' return contexts.problem(id '`type of` mints only in an alias declaration' 'a fresh type needs a name to be referred to by' context session)
         if op =? '~' or op =? 'not' {
             let inner = resolve(node.item context @session)
@@ -777,7 +766,9 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
             if args is? Error return args
             let ret = function_result(node.right context @session)
             if ret is? Error return ret
-            return types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types effects=function_effects(node.right context session).effects)
+            let effects=effect_contract(node.right args.pos_or_kw args.kw_only context @session)
+            if effects is? Error return effects
+            return types.function_type(args.pos_or_kw args.kw_only none ret [] @session.types effects=effects)
         }
         if op =? '|' or op =? 'or' {
             let left = bool_arm(node.left context @session)
@@ -1235,4 +1226,65 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
         subtyping.add_link(@session.links subtyping.Link[name nominal_parent])
     }
     return minted
+}
+
+effect_subject = (id:addr parameters:array<types.PosOrKwArg> context:contexts.Context @session:contexts.Session):>effect_rows.Subject|Error => {
+    let path=effect_syntax.route(id context session)
+    if path isnt? none {
+        loop index in 0.. and index <? parameters.length {
+            let parameter=parameters[index]
+            if parameter.name not=? path.root continue
+            if not parameter.place return contexts.problem(id 'effect subject is not caller-owned storage' 'use a place parameter or a nominal resource identity' context session)
+            let current=parameter.value_type
+            loop field in path.fields {
+                let node=types.node_at(session.types types.unfold(types.strip_refinement(current session.types) session.types))
+                let member:addr?=none
+                if node is? types.ObjectType {loop item in node.fields {if item.name =? field {member=item.value_type break}}}
+                if member is? none return contexts.problem(id 'invalid effect resource route' "`{field}` is not a stored field of this place" context session)
+                current=member
+            }
+            return effect_rows.Subject['parameter' "{index}" path.fields]
+        }
+    }
+    let resolved=resolve(id context @session)
+    if resolved is? Error return resolved
+    let resource=types.node_at(session.types types.unfold(resolved session.types))
+    if resource isnt? types.ObjectType or not resource.minted or resource.brand is? none return contexts.problem(id 'effect resource needs a nominal identity' 'declare a marker with `Resource = type of any`, or name a place parameter' context session)
+    return effect_rows.Subject['resource' resource.brand]
+}
+effect_contract = (id:addr parameters:array<types.PosOrKwArg> keyword_parameters:array<types.KwOnlyArg> context:contexts.Context @session:contexts.Session):>effect_rows.Contract?|Error => {
+    let terms=effect_syntax.split(id context @session).terms
+    if terms.length =? 0 return none
+    loop parameter in keyword_parameters {parameters.push(types.PosOrKwArg[parameter.name parameter.value_type parameter.required parameter.place])}
+    let permitted:effect_rows.Row?=none
+    let excluded:array<effect_rows.Atom>=[]
+    loop term in terms {
+        let node=contexts.node_at(term context session)
+        let negative=node is? parser.Prefix and source_views.is_operator(node.op 'no' context session)
+        let value=term
+        if node is? parser.Prefix and negative {value=node.item}
+        let parsed=effect_syntax.application(value context session)
+        let family=parsed.name
+        let arguments=parsed.arguments
+        if (family =? 'no_effects' and arguments is? none) or (family =? 'Effect' and arguments isnt? none and arguments.length =? 0) {
+            if negative return contexts.problem(term 'cannot exclude an empty effect row' 'use `no_effects` directly, or `no reads` to exclude a family' context session)
+            if permitted is? none {permitted=effect_rows.Row[]}
+            continue
+        }
+        if family is? none or family not in? ['reads' 'mutates'] return contexts.problem(term 'unknown effect family' 'the initial named families are `reads` and `mutates`' context session)
+        if arguments isnt? none and arguments.length =? 0 return contexts.problem(term 'empty effect family application' "use `no {family}` or `no_effects`; `<>` does not mean a family exclusion" context session)
+        if arguments is? none {
+            if not negative return contexts.problem(term 'positive effect needs a resource' "write `{family}<Resource>`" context session)
+            excluded.push(effect_rows.Atom[family])
+            continue
+        }
+        loop argument in arguments {
+            let target=effect_subject(argument parameters context @session)
+            if target is? Error return target
+            let atom=effect_rows.Atom[family target]
+            if negative {excluded.push(atom)}
+            else {permitted=effect_rows.add(if permitted is? none effect_rows.Row[] else permitted atom)}
+        }
+    }
+    return effect_rows.Contract[permitted excluded]
 }

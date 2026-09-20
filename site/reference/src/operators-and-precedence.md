@@ -19,6 +19,8 @@ English Boolean operators short-circuit according to their truth rules. Explicit
 
 Most infix operations have a combined-assignment spelling such as `+=`. Combined assignment has assignment precedence, not the precedence of its inner operation.
 
+`no` is a prefix used only in function effect contracts, such as `:> int64 & no reads<Filesystem>`. It is not Boolean negation.
+
 ## Juxtaposition
 
 Adjacent expressions can form several operations:
@@ -42,7 +44,7 @@ The following table is ordered from highest to lowest. “Fail” means an ungro
 | left             | member `.`, call juxtaposition, index juxtaposition  |
 | fail             | type-parameter juxtaposition, ellipsis juxtaposition |
 | postfix / prefix | `` ` ``                                              |
-| prefix           | `~`                                                  |
+| prefix           | `~`, `no`                                            |
 | postfix          | `?`                                                  |
 | right            | `^`                                                  |
 | left             | multiplication juxtaposition                         |

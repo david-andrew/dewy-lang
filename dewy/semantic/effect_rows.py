@@ -155,3 +155,76 @@ def identity(contract: Contract | None) -> str:
     return json.dumps((None if allowed is None else (
         [atom_key(atom) for atom in allowed.atoms], allowed.variables, allowed.unknown),
         sorted({json.dumps(atom_key(atom)) for atom in contract.excluded})), separators=(',', ':'))
+
+
+def display(contract: Contract | None, parameter_names: dict[str, str]) -> str:
+    """Diagnostic spelling; nominal keys use the same display as minted types."""
+    if contract is None:
+        return ''
+
+    def atom_text(atom):
+        if atom.subject is None:
+            return atom.family
+        subject = atom.subject
+        name = parameter_names.get(subject.key, f'parameter#{subject.key}') if subject.kind == 'parameter' else subject.key
+        return f'{atom.family}<{".".join((name, *subject.route))}>'
+
+    terms = []
+    if contract.allowed is not None:
+        row = union(contract.allowed)
+        terms.extend(atom_text(atom) for atom in row.atoms)
+        terms.extend(row.variables)
+        if row.unknown:
+            terms.append('<unknown effects>')
+        if not terms:
+            terms.append('no_effects')
+    terms.extend(f'no {atom_text(atom)}' for atom in contract.excluded)
+    return ''.join(f' & {term}' for term in terms)
+
+
+def join(*contracts: Contract) -> Contract:
+    """Effects of a sequence or alternatives, retaining shared exclusions.
+
+    An open negative callback must not become an unqualified unknown row.
+    A guarantee survives only when every participating operation implies it.
+    """
+    allowed = union(*(item.allowed for item in contracts)) if all(item.allowed is not None for item in contracts) else None
+    candidates = dict.fromkeys(atom for item in contracts for atom in item.excluded)
+    excluded = tuple(atom for atom in candidates if all(implies(item, Contract(excluded=(atom,))) for item in contracts))
+    return Contract(allowed, excluded)
+
+
+def instantiate(contract: Contract, subjects: dict[str, Subject | None], *, max_depth: int = 8) -> Contract:
+    """Translate a call boundary, widening deep positive routes only.
+
+    Truncating an exclusion would strengthen it, so deep exclusions drop.
+    Likewise an exclusion of private storage disappears, not its subject:
+    losing just the subject would accidentally forbid an entire family.
+    """
+    def bounded(atom):
+        subject = atom.subject
+        if subject is not None and len(subject.route) > max_depth:
+            return Atom(atom.family, Subject(subject.kind, subject.key, subject.route[:max_depth]))
+        return atom
+
+    allowed = substitute(contract.allowed, {}, subjects) if contract.allowed is not None else None
+    if allowed is not None:
+        allowed = union(Row(tuple(bounded(atom) for atom in allowed.atoms), allowed.variables, allowed.unknown))
+    excluded = substitute(Row(contract.excluded), {}, subjects).atoms
+    return Contract(allowed, tuple(atom for atom in excluded if atom.subject is None or len(atom.subject.route) <= max_depth))
+
+
+def bind_receiver(contract: Contract | None, parameter_count: int) -> Contract | None:
+    """Expose a method without its hidden receiver slot.
+
+    Receiver effects become unknown until bound-receiver subjects are modeled;
+    removing the slot must never turn those effects into an empty guarantee.
+    """
+    if contract is None:
+        return None
+    subjects = {str(i): Subject('parameter', str(i - 1)) for i in range(1, parameter_count)}
+    subjects['0'] = None
+    bound = instantiate(contract, subjects)
+    if contract.allowed is not None and any(atom.subject is not None and atom.subject.kind == 'parameter' and atom.subject.key == '0' for atom in contract.allowed.atoms):
+        bound = Contract(union(bound.allowed, Row(unknown=True)), bound.excluded)
+    return bound

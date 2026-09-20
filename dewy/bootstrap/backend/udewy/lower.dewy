@@ -2837,8 +2837,8 @@ interpolated_string = (node:hir.InterpolatedString @state:State):>addr => {
         } else if types.is_primitive(plain 'bool') {
             let word_type=types.primitive('int64' @state.type_nodes)
             let yes=put(hir.String[node.loc word_type 'true'] @state)
-            let no=put(hir.String[node.loc word_type 'false'] @state)
-            let pointer=put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type value yes] @state)] no] @state)
+            let false_value=put(hir.String[node.loc word_type 'false'] @state)
+            let pointer=put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type value yes] @state)] false_value] @state)
             let length=put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type value word(4 node @state)] @state)] word(5 node @state)] @state)
             part=TextBytes[snapshot(pointer @prefix @state) snapshot(length @prefix @state)]
         } else {part=integer_text(value original.value_type original @prefix @state)}
@@ -4562,15 +4562,15 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
         store=sequence(writes node @state)
     }
     let yes=put(hir.Bool[node.loc bool_type true] @state)
-    let no=put(hir.Bool[node.loc bool_type false] @state)
-    if optional_target {no=put(hir.Block[node.loc bool_type [store_word(word(0 node @state) into 0 node @state) put(hir.Bool[node.loc bool_type false] @state)] false] @state)}
+    let false_value=put(hir.Bool[node.loc bool_type false] @state)
+    if optional_target {false_value=put(hir.Block[node.loc bool_type [store_word(word(0 node @state) into 0 node @state) put(hir.Bool[node.loc bool_type false] @state)] false] @state)}
     if wide_more isnt? none and wide_last isnt? none {
         if optional_target return IteratorStep[prefix reject(node 'optional targets over word-sized range counts' @state)]
         let next=intrinsic_call('__ne__' [cursor wide_last] bool_type node @state)
         let update=put(hir.Assign[node.loc void_type wide_more '=' next] @state)
         let body=put(hir.Block[node.loc bool_type [increment update store yes] false] @state)
         let arm=put(hir.IfArm[node.loc bool_type wide_more body] @state)
-        return IteratorStep[prefix put(hir.Flow[node.loc bool_type [arm] no] @state)]
+        return IteratorStep[prefix put(hir.Flow[node.loc bool_type [arm] false_value] @state)]
     }
     let stores:array<addr>=[]
     if view_owner isnt? none {stores.push(string_runtime('_native_string_release' [view_owner] node @state result_void=true))}
@@ -4579,7 +4579,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
     stores.push(yes)
     let body=put(hir.Block[node.loc bool_type stores false] @state)
     let arm=put(hir.IfArm[node.loc bool_type available body] @state)
-    let condition=put(hir.Flow[node.loc bool_type [arm] no] @state)
+    let condition=put(hir.Flow[node.loc bool_type [arm] false_value] @state)
     return IteratorStep[prefix put(hir.Block[node.loc bool_type [increment condition] false] @state)]
 }
 # Nested defaults retain lazy setup for later loop arms and the existing
