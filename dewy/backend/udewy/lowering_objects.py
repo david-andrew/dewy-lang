@@ -12,6 +12,7 @@ from ...utils import dataclass_fields
 from ...reporting import Span
 from ...semantic import builtins, hir, ty
 from ...parser import t0
+from . import borrowing
 from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, CopyNote, MoveNote, local_binding_key
 from ...semantic.hir_display import type_to_dewy
 
@@ -1248,11 +1249,43 @@ class _ObjectLowering:
         )
         return prelude, result
 
+    def _borrowed_route_local(self, node: hir.Declare, object_type: ty.ObjectType) -> bool:
+        """`let x = a[i]` / `a.f` / `d[k]` binds the storage it reads when both stay stable.
+
+        The native rule (`borrowed_route_local` in lower.dewy): the declared
+        binding is never written, captured, exposed or a place; the read is an
+        element, field or dictionary lookup whose owner is stable for the
+        route; no index expression may write the receiver; the annotation
+        matches the read. The local then aliases the container's storage and
+        owns nothing, so no copy and no release.
+        """
+        if not self._has_arena() or self.lowering_module_startup or node.binding_id is None:
+            return False
+        expr = borrowing.unwrap(node.expr)
+        if not isinstance(expr, (hir.Index, hir.MemberAccess, hir.DictLookup)):
+            return False
+        if node.binding_id not in self.borrow_plan.stable_bindings:
+            return False
+        if node.annotation is not None and ty.strip_refinement(node.annotation) != ty.strip_refinement(expr.type):
+            return False
+        if ty.unfold(ty.strip_refinement(expr.type)) != object_type:
+            return False
+        if id(expr) in self.borrow_plan.array_snapshots:
+            return False
+        source = borrowing.route(expr)
+        if source is None:
+            return False
+        return borrowing.stable_owner(source, self.borrow_plan)
+
     def _lower_object_declare(
         self,
         node: hir.Declare,
         object_type: ty.ObjectType,
     ) -> list[hir.AST]:
+        if self._borrowed_route_local(node, object_type):
+            prelude, pointer = self._extract_object_pointer(node.expr)
+            self.borrowed_fields[local_binding_key(node)] = set()
+            return [*prelude, replace(node, decltype='let', annotation='int64', expr=pointer)]
         flow = self._unwrap_transparent(node.expr)
         leading: list[hir.AST] = []
         if isinstance(flow, hir.Block):
@@ -1523,6 +1556,8 @@ class _ObjectLowering:
         moved = isinstance(returned, hir.ExpressedIdentifier) and id(returned) in self.moved_uses
         if moved:
             self.move_notes.append(MoveNote(self.srcfile, returned.loc, f'`{returned.name}` is moved when returned: this is its last use, so its arrays are adopted rather than copied', True))
+        elif not self._object_expression_owns_fresh_storage(item):
+            self._note_copy('record', object_type, 'returned', self._copy_reason(item), item.loc)
         prelude, source = self._extract_object_pointer(item)
         if self._frame_record_call(item) and isinstance(item.type, ty.ObjectType):
             # A child-returning call cannot write directly into the parent's

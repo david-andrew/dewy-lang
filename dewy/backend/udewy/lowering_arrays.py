@@ -1575,6 +1575,8 @@ class _ArrayLowering(_ArraySharing):
         if isinstance(element_type, ty.ObjectType):
             # a fresh value (a call's result, a literal) dies here: its members move
             fresh = isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral))
+            if not fresh:
+                self._note_copy('record', element_type, 'stored in an element', self._copy_reason(node), node.loc)
             return self._clone_object_value(node, element_type, arena=True, move=fresh)
         if self._is_optional_element(element_type):
             return self._optional_element_value(node, element_type)
@@ -2815,6 +2817,7 @@ class _ArrayLowering(_ArraySharing):
             # a copy of a borrowed value (`[p.span]`, `xs[i] = seg`)
             if isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral)):
                 return self._clone_object_value(node, element_type, arena=True, move=True)
+            self._note_copy('record', element_type, 'stored in an element', self._copy_reason(node), node.loc)
             if self._has_arena():
                 return self._clone_object_value(node, element_type, arena=True)
             return self._independent_object_value(node, element_type)
@@ -2854,6 +2857,8 @@ class _ArrayLowering(_ArraySharing):
             # element handles use the array-element release protocol. That
             # protocol returns record roots to the arena; storing alloca
             # roots here would put expired frame addresses on its free list.
+            if not isinstance(self._copy_source_expression(source_value), (hir.FunctionCall, hir.ObjectLiteral)):
+                self._note_copy('record', element_type, 'placed in an array literal', self._copy_reason(source_value), source_value.loc)
             prelude, copied = self._clone_object_value(
                 replace(source_value, type='int64'),
                 element_type,

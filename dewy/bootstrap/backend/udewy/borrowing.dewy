@@ -23,6 +23,8 @@ route = (id:addr nodes:array<hir.AST>):>Route? => {
         # Unknown indices may alias; only fields above the index distinguish
         # storage. Do not infer that two different index expressions differ.
         if node is? hir.Index {reverse.clear current=node.array continue}
+        # A dictionary value lives in the dictionary's value array.
+        if node is? hir.DictLookup {reverse.clear current=node.values continue}
         if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return none
         let fields:array<string>=[]
         loop reverse.length >? 0 {fields.push(reverse.pop)}
@@ -564,6 +566,11 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             # cannot establish disjoint storage from another written route.
             if source isnt? none and source.binding in? places {source=none}
             if expression_conflicts(node.index source nodes plan dirty) {array_snapshots.add(id)}
+        }
+        if node is? hir.DictLookup {
+            let source=route(node.values nodes)
+            if source isnt? none and source.binding in? places {source=none}
+            if expression_conflicts(node.key source nodes plan dirty) {array_snapshots.add(id)}
         }
         if node isnt? hir.FunctionCall continue
         let callee=hir.node_at(nodes node.func)

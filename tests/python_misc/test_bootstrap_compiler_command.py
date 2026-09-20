@@ -77,7 +77,7 @@ def test_native_compiler_command(tmp_path):
     # the same `copy:` lines the hosted compiler prints.
     result = invoke('analyze', str(ROOT / 'dewy/tests/copy_report.dewy'))
     assert result.returncode == 0, result.stdout + result.stderr
-    assert 'record `Fact` copied when bound to `f`: the value stays owned by its container' in result.stdout
+    assert 'record `Fact` copied when returned: `f` may be used again' in result.stdout
     assert 'record `Fact` copied when bound to `h`: `g` may be used again' in result.stdout
     assert 'copy report: ' in result.stdout
 

@@ -68,7 +68,9 @@ def test_copy_report_names_kind_site_and_reason(tmp_path):
     srcfile = SrcFile.from_path(Path(__file__).resolve().parents[2] / 'dewy/tests/copy_report.dewy')
     codegen(srcfile, target='x86_64')
     lines = [note.line for note in lower.last_copy_notes]
-    assert any(line.startswith('record `Fact` copied when bound to `f`: the value stays owned by its container') for line in lines)
+    # `let f = facts[id]` borrows the dictionary's storage; the copy is at the return
+    assert any(line.startswith('record `Fact` copied when returned') for line in lines)
+    assert not any('bound to `f`' in line for line in lines)
     assert any('bound to `h`: `g` may be used again' in line for line in lines)
     assert any(line.startswith('string copied when stored') for line in lines)
     kinds = {note.kind for note in lower.last_copy_notes}

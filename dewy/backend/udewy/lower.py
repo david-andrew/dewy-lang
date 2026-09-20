@@ -52,6 +52,7 @@ from .lowering_iterators import _IteratorLowering
 from .lowering_objects import _ObjectLowering
 from .lowering_optionals import _OptionalLowering
 from .lowering_places import _PlaceLowering
+from . import borrowing
 from .lowering_shared import (
     STRING_BYTE_LENGTH_OFFSET,
     STRING_DESCRIPTOR_SIZE,
@@ -515,6 +516,9 @@ class _Lowerer(
         self._classify_array_representations()
         self._analyze_string_results()
         self._check_captures()
+        # Scope borrows need the captured-binding set discovery just collected.
+        captured = {binding.semantic_id for uses in self.captures.values() for _use, binding in uses if binding.semantic_id is not None}
+        self.borrow_plan = borrowing.analyze(self.root, captured, self.program_effects, set(self.binding_by_semantic_id))
         self.user_main_takes_argv = any(
             isinstance(item, hir.Declare)
             and item.name == self.entry_name
@@ -4093,7 +4097,8 @@ class _Lowerer(
                     *self._optional_write(cell, node.expr, payload),
                 ]
             if isinstance(declared_type, ty.ObjectType):
-                self._note_owned_object(node, declared_type)
+                if not self._borrowed_route_local(node, declared_type):
+                    self._note_owned_object(node, declared_type)
                 return self._lower_object_declare(node, declared_type)
             if self._array_representation(node) == 'stack_data':
                 self._note_owned_raw_array(node, declared_type)

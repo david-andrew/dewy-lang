@@ -3303,7 +3303,10 @@ scalar_getter_projection = (node:hir.MemberAccess @state:State):>ScalarProjectio
 borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     if state.allocator is? none return false
     let expr=hir.node_at(state.input.nodes node.expr)
-    if expr isnt? hir.Index|hir.MemberAccess return false
+    if expr isnt? hir.Index|hir.MemberAccess|hir.DictLookup return false
+    # A dictionary lookup hands out the stored record's block; other value
+    # kinds are rebuilt by the lookup and must be owned.
+    if expr is? hir.DictLookup and not object_valued(expr.value_type state) return false
     if not releasable(expr.value_type @state) return false
     if node.binding_id is? none return false
     if node.binding_id in? state.boxed return false

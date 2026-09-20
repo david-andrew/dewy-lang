@@ -4390,3 +4390,25 @@ record copies into array literals), which the parity tool does not gate.
 Rendering 7,910 excerpts through the native reporting library takes about
 200 s; the `copy:` lines alone are cheap, so the tool reads those.
 
+### Phase 1.1, second slice: scope borrows in both compilers (2026-09-20)
+
+The native compiler's scope-borrow rule (`borrowed_route_local`: a local
+bound from an element or field read aliases the container's storage when
+the local is never written, captured, exposed or a place, and the owner is
+stable for the route) is ported to the hosted compiler as
+`backend/udewy/borrowing.py` (routes, `write_targets`, exposed roots,
+stable bindings and parameters, array snapshots, `stable_owner`), used by
+`_lower_object_declare`; a borrowed local is not registered as owned, so
+it is neither copied nor released. The hosted port omits the native
+ambient call graph, so it accepts no place parameters and treats every
+user call inside an index expression as a conflict. Both compilers now
+also borrow proven dictionary lookups (`d[k]`) of record values (other
+value kinds are rebuilt by the lookup and stay owned; borrowing those
+crashed two fixtures until the restriction). On the fixture both compilers
+report the same copies at the same sites. On the compiler's own sources
+the change removes only four copies (7,910 to 7,906): the compiler reads
+its dictionaries through `.get`, whose optional result is built by copy,
+and returns the result (`find_binding`), so the next slice is views
+through `get` and through a call that returns a view of a read-only
+parameter.
+
