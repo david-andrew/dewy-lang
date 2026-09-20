@@ -8681,6 +8681,21 @@ def _bind_array_method(
     return hir.ArrayMethod(loc, signatures[name], value, name)
 
 
+def _builtin_copy_available(type_: ty.Type) -> bool:
+    """A union copies its active value, without masking user-defined members.
+
+    Do not inspect fields recursively: their storage ownership is already the
+    ordinary copy operation's responsibility, including recursive records.
+    """
+    plain = ty.unfold(ty.strip_refinement(type_))
+    if isinstance(plain, ty.TypeOr):
+        return all(_builtin_copy_available(member) for member in plain.items)
+    if isinstance(plain, ty.ObjectType):
+        return plain.field('copy') is None and plain.method('copy') is None
+    return (isinstance(plain, (str, ty.ArrayType, ty.IntegerLiteralType, ty.StringLiteralType, ty.StringType))
+            or _is_string_type(plain))
+
+
 def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     if not (
         isinstance(binop.right, p0.Atom)
@@ -8733,9 +8748,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     if name == 'copy':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         plain = ty.unfold(ty.strip_refinement(value.type))
-        if (isinstance(plain, (ty.ArrayType, ty.ObjectType)) or _is_string_type(plain)) and not (
-            isinstance(plain, ty.ObjectType) and (plain.field(name) is not None or plain.method(name) is not None)
-        ):
+        if (isinstance(plain, (ty.ArrayType, ty.ObjectType, ty.TypeOr)) or _is_string_type(plain)) and _builtin_copy_available(plain):
             signature = ty.FunctionType([], [], None, value.type)
             return hir.CopyMethod(binop.loc, signature, value)
     if name in _ARRAY_METHOD_NAMES:

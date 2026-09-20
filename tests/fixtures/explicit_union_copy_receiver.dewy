@@ -1,0 +1,12 @@
+Box:type=[value:int64]
+produce=(@count:int64):>Box|none=>{count+=1 return Box[42]}
+A:type=type of [copy:int64]
+B:type=type of [copy:int64]
+member=(value:A|B):>int64=>value.copy
+main=():>int64=>{
+    let calls:int64=0
+    let value=produce(@calls).copy()
+    $runtime_assert calls=?1 and value isnt? none
+    $runtime_assert member(A[42])=?42 and member(B[42])=?42
+    return value.value
+}

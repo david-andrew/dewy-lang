@@ -4527,7 +4527,7 @@ class _Lowerer(
             return None
         if isinstance(source.type, ty.ObjectType) and self._frame_record_call(source):
             return self._release_object_members(value, source.type, source.loc)
-        if not isinstance(source, hir.FunctionCall) or not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral)):
+        if not isinstance(source, hir.CopyValue) and (not isinstance(source, hir.FunctionCall) or not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
             return None
         members = self._field_union_members(source.type)
         if members is not None:
@@ -4818,6 +4818,20 @@ class _Lowerer(
             if self._is_string_valued(plain):
                 prelude, value = self._escaping_string_value(node.value, explicit=True)
                 return self._string_result_temporary(node, value, prelude)
+            members = self._field_union_members(plain)
+            if members is not None:
+                self._note_copy('cell', node.type, 'explicit copy', 'requested with `.copy()`', node.loc, explicit=True)
+                prepared = ty.optional_payload(plain) is None
+                cell = hir.ExpressedIdentifier(node.loc, 'int64', self._new_optional_name('copy'))
+                allocation = self._union_cell_allocation(members, node.loc) if prepared else self._optional_allocation(node.loc)
+                statements = [hir.Declare(node.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', allocation)]
+                if prepared:
+                    statements.extend(self._union_prepare_trees(cell, members, node.loc))
+                statements.extend(self._union_write(cell, node.value, members, prepared=prepared))
+                return statements, cell
+            if isinstance(plain, ty.TypeOr):
+                # Singleton enums are words; copying preserves their tags.
+                return self._extract_expression(node.value)
             if isinstance(plain, ty.ObjectType):
                 if self._object_expression_owns_fresh_storage(node.value):
                     return self._extract_expression(node.value)

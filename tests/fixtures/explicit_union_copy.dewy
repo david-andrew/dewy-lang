@@ -1,0 +1,42 @@
+# The same value-copy operation works before narrowing a tagged union.
+# Exercise both standalone copies and copies stored/returned/passed onward.
+Box:type=[items:array<string>]
+Payload:type=Box|array<string>|string|int64|none
+Holder:type=[value:Payload]
+snapshot=(value:Payload):>Payload=>value.copy()
+consume=(value:Payload):>int64=>{
+    if value is? Box return value.items.length
+    if value is? array<string> return value.length
+    if value is? string return value.length
+    if value is? int64 return value
+    return 0
+}
+exercise=(value:Payload):>void=>{
+    let twin=value.copy()
+    let boxed=Holder[value.copy()]
+    let twice=snapshot(value).copy()
+    value.copy();
+    $runtime_assert consume(value.copy())=?consume(value)
+    $runtime_assert consume(boxed.value)=?consume(value)
+    $runtime_assert consume(twice)=?consume(value)
+    if twin is? Box {twin.items.push('independent')}
+    if twin is? array<string> {twin.push('independent')}
+    $runtime_assert consume(boxed.value)=?consume(value)
+}
+optional=(value:Box?):>Box?=>value.copy()
+main=():>int64=>{
+    let record=Box[["{42}"]]
+    let array:array<string>=["{43}"]
+    let text="text {44}"
+    exercise(record) exercise(array) exercise(text) exercise(42) exercise(none)
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {exercise(record) exercise(array) exercise(text) exercise(42) exercise(none)}
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    $runtime_assert retained=?0
+    let box=optional(Box[['original']])
+    $runtime_assert box isnt? none
+    $runtime_assert box.items.length=?1
+    $runtime_assert optional(none) is? none
+    return 42
+}

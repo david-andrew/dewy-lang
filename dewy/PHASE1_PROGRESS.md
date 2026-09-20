@@ -212,3 +212,16 @@ eight native acceptance/rejection and JSON-escaping checks, and all 39 focused
 paired cases passed. The native seed built the updated compiler in 60.04s;
 this is an integration checkpoint, still above the performance target.
 Artifacts: `../dewy-build-artifacts/phase1-unsafe-2026-09-20`.
+
+Checkpoint: explicit `.copy()` now accepts unions whose alternatives have
+builtin value-copy semantics, without hiding a declared `copy` member. Only
+the active payload is copied, the receiver is evaluated once, and destination
+stores can consume the snapshot directly rather than copy an extra temporary.
+Both general tagged unions and optional aggregates retain normal ownership.
+
+Validation: 60 hosted ownership/copy checks passed, including C execution,
+member precedence, single receiver evaluation and zero retained bytes across
+repeated mixed-alternative snapshots. Native generations built in 60.64s and
+60.14s, both running the lifetime fixture with zero retained bytes and exit
+42. All 41 focused paired cases passed against the second generation.
+Artifacts: `../dewy-build-artifacts/phase1-union-copy-stage2-2026-09-20`.

@@ -3030,6 +3030,17 @@ copy_method = (receiver:addr loc:Span @session:contexts.Session):>addr => {
     let signature=types.function_type([] [] none node_at(receiver session).value_type [] @session.types)
     return put(hir.CopyMethod[loc signature receiver] @session)
 }
+# A union's builtin copy snapshots the active alternative. An explicitly
+# declared member still wins: do not silently replace it with this operation.
+builtin_copy_available = (id:addr nodes:types.Table):>bool => {
+    let type=types.node_at(nodes views.structural_base(id nodes))
+    if type is? types.TypeOr {
+        loop member in type.items {if not builtin_copy_available(member nodes) return false}
+        return true
+    }
+    if type is? types.ObjectType return types.object_field(type 'copy') is? none and types.object_method(type 'copy') is? none
+    return type is? types.Primitive|types.ArrayType|types.IntegerLiteralType|types.StringLiteralType|types.StringType
+}
 member_named = (receiver:addr name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
     if name =? 'length' {receiver=binary_array(receiver @session)}
     let value = node_at(receiver session)
@@ -3071,6 +3082,7 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
     if type is? types.ArrayType and name in? array_methods.names return array_method(receiver type name id env @session)
     if views.string_valued(value.value_type session.types) and name in? STRING_METHODS return string_method(receiver name id env @session)
     if type is? types.TypeOr {
+        if name =? 'copy' and builtin_copy_available(value.value_type session.types) return copy_method(receiver loc @session)
         let forwarded=forwarding_member(receiver type name id env @session)
         if forwarded isnt? none return forwarded
     }

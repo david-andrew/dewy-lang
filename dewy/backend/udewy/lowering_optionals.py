@@ -295,7 +295,7 @@ class _OptionalLowering:
                 and (payload := ty.optional_payload(value.type)) is not None
                 and self._is_string_valued(payload)):
             return True  # A checked UTF-8 decode constructs its own cell/string.
-        return (isinstance(value, hir.Flow)
+        return (isinstance(value, (hir.Flow, hir.CopyValue))
                 or isinstance(value, hir.FunctionCall)
                 and isinstance(value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral)))
 
@@ -882,6 +882,11 @@ class _OptionalLowering:
         whose target may be an argument of that very call.
         """
         value = self._unwrap_transparent(value)
+        if isinstance(value, hir.CopyValue):
+            # Write an explicit snapshot straight into its destination. Going
+            # through a second temporary would copy the same payload twice.
+            self._note_copy('cell', value.type, 'explicit copy', 'requested with `.copy()`', value.loc, explicit=True)
+            return self._union_write(cell, value.value, members, prepared=prepared, fresh=fresh)
         if isinstance(value, hir.ValueCast):
             return self._union_write(cell, value.expr, members, prepared=prepared, fresh=fresh)
         if (

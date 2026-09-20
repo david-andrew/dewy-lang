@@ -11,7 +11,7 @@ from udewy.frontend import EntryPointOptions, entry_point
 from test_bootstrap_lowering import ROOT
 
 
-@pytest.mark.parametrize("fixture", ["explicit_aggregate_copy", "explicit_copy_lifetimes", "explicit_string_copy"])
+@pytest.mark.parametrize("fixture", ["explicit_aggregate_copy", "explicit_copy_lifetimes", "explicit_string_copy", "explicit_union_copy"])
 def test_explicit_aggregate_copy(tmp_path, fixture):
     source = ROOT / f'tests/fixtures/{fixture}.dewy'
     output = tmp_path / 'copy.udewy'
@@ -54,3 +54,25 @@ def test_declared_copy_member_takes_precedence(tmp_path):
     output.write_text(codegen(SrcFile(None, 'R:type=[copy:int64] main=():>int64=>{let value=R[42] return value.copy}')))
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0
     assert subprocess.run([cache_artifact(output).resolve()], timeout=5).returncode == 42
+
+
+def test_union_copy_preserves_receiver_evaluation_and_member_priority(tmp_path):
+    from tests.python_misc.test_scalar_projection import execute
+    source = (ROOT / 'tests/fixtures/explicit_union_copy_receiver.dewy').read_text()
+    execute(tmp_path, 'union-copy-receiver', codegen(SrcFile(None, source)))
+
+
+def test_union_copy_reports_explicit_intent():
+    from dewy.backend.udewy import lower
+    codegen(SrcFile(None, 'Box:type=[items:array<string>] snapshot=(x:Box|none):>Box|none=>x.copy() main=():>int64=>{snapshot(Box[["x"]]); return 42}'))
+    assert any(note.explicit and note.kind == 'cell' for note in lower.last_copy_notes)
+
+
+def test_union_copy_lifetimes_on_c_backend(tmp_path):
+    source = ROOT / 'tests/fixtures/explicit_union_copy.dewy'
+    output = tmp_path / 'union-copy-c.udewy'
+    output.write_text(codegen(SrcFile.from_path(source), target='c'))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target='c')) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 42, result.stdout + result.stderr
+    assert result.stdout.strip() == '0'
