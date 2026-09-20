@@ -37,7 +37,7 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
         }
         unfit[id]=proofs.Unfit[flag.interval flag.word]
     }
-    return proofs.Decision[unfit checker.constant_indices checker.warnings checker.deferred_sites]
+    return proofs.Decision[unfit checker.constant_indices checker.warnings checker.deferred_sites checker.word_iterators]
 }
 
 reusable = (saved:proofs.Prelude loaded:array<modules.Module> session:contexts.Session):>bool => {

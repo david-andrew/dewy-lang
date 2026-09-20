@@ -547,8 +547,10 @@ class IteratorExpression(AST):
     last: int | None
     count: int | None
     guarded: bool = field(default=False, kw_only=True)
-    """A right-unbounded counter whose loop guard bounds it strictly by a
-    word-sized value (`loop i in 0.. and i <? n`): it never passes `int64.max`."""
+    """A counter proven to fit word storage, including every advancing edge.
+    For unbounded ranges a syntactic hint is replaced by the bounds pass's
+    induction result before lowering; the target retains abstract semantics.
+    """
 
 
 IteratorLogicalOp = Literal['and', 'or', 'xor', 'nand', 'nor', 'xnor']

@@ -252,3 +252,18 @@ native inventories passed `--only readonly_array_field_view.dewy --max-copies 4`
 The native executable was the reviewed-assumption checkpoint, which already
 contains the summary correction. Runtime allocation gates remain distinct
 from these static site budgets.
+
+Checkpoint: abstract range counters can now use inductively proved word
+storage in both compilers. The proof covers the initial value and every
+normal/continue backedge, including step headroom and nested bounds learned
+from an outer counter. Failed candidate bounds are discarded before normal
+validation; neither a circular assertion nor `$prototype` can justify wrapping
+an otherwise unbounded counter. The native backend now rejects an unproved
+unbounded numeric iterator instead of silently using word arithmetic.
+
+Validation: 88 hosted range/loop checks, the native bounds harness, seven
+native overflow/continue/circular-proof rejection checks, and all 45 focused
+paired cases passed. Native generations built in 62.99s and 59.59s; both run
+the nested-counter fixture with result 42. General bigint iterator lowering
+and broader liquid inference remain open.
+Artifacts: `../dewy-build-artifacts/phase1-counters-stage2-2026-09-20`.

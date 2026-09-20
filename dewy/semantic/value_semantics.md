@@ -37,8 +37,10 @@ can share storage until a write. Checked IR and copy reports retain the
 explicit intent. A record's own `copy` field or method takes precedence over
 the synthesized operation. Strings retain their contents independently of
 the receiver's storage lifetime; unused temporary copies are released at the
-end of their consuming statement. General union copies, lifecycle-hook
-dispatch, and `$explicit_copies` enforcement are still pending.
+end of their consuming statement. General unions and optional aggregates
+support the same operation: only the active alternative is copied, and a
+user-declared `copy` member is not silently replaced. Lifecycle-hook dispatch
+and `$explicit_copies` enforcement remain pending.
 
 Slices and nested elements are values too. `A[1]` on a multidimensional array, and `nested[1]` on an `array<array<T>>`, both produce a value. `A[1 0] = 9` mutates `A`. `row = A[1]  row[0] = 9` does not.
 

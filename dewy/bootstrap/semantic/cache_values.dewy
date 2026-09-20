@@ -6580,6 +6580,7 @@ encode_Value336=(value:Value336 @out:bytes.Writer):>void=>{
     encode_Value341(value.constants @out)
     encode_Value2(value.warnings @out)
     encode_Value342(value.deferred @out)
+    encode_Value48(value.word_iterators @out)
 }
 decode_Value336=(@input:bytes.Reader):>Value336|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -6591,7 +6592,9 @@ decode_Value336=(@input:bytes.Reader):>Value336|CacheMiss=>{
     if field_2 is? CacheMiss return field_2
     let field_3=decode_Value342(@input)
     if field_3 is? CacheMiss return field_3
-    return Value336[unfit=field_0 constants=field_1 warnings=field_2 deferred=field_3]
+    let field_4=decode_Value48(@input)
+    if field_4 is? CacheMiss return field_4
+    return Value336[unfit=field_0 constants=field_1 warnings=field_2 deferred=field_3 word_iterators=field_4]
 }
 
 encode_Value337=(value:Value337 @out:bytes.Writer):>void=>{

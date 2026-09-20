@@ -4480,6 +4480,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
     let value:addr=0
     let view_owner:addr?=none
     if source is? hir.Range {
+        if node.count is? none and not node.guarded return IteratorStep[prefix reject(node 'unproven unbounded range storage' @state)]
         if node.count isnt? none {
             if node.count >? 9223372036854775807 {
                 if node.count >? 18446744073709551616 return IteratorStep[prefix reject(node 'range cardinality requiring an arbitrary-precision cursor' @state)]

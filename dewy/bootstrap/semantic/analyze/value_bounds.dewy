@@ -256,7 +256,12 @@ iterator_interval = (iterator:hir.IteratorExpression elements:ElementIntervals e
     $runtime_assert last isnt? none
     return if iterator.first <? last ranges.Interval[iterator.first last] else ranges.Interval[last iterator.first]
 }
-loop_counter_interval = (iterator:hir.IteratorExpression elements:ElementIntervals env:Environment):>ranges.Interval => {
+loop_counter_interval = (iterator:hir.IteratorExpression elements:ElementIntervals env:Environment word_candidates:bool=true):>ranges.Interval => {
+    if hir.node_at(env.nodes iterator.iterable) is? hir.Range and iterator.count is? none and not word_candidates return iterator_interval(iterator elements env)
+    if hir.node_at(env.nodes iterator.iterable) is? hir.Range and iterator.count is? none and iterator.first >=? -9223372036854775808 and iterator.first <=? 9223372036854775807 and iterator.step >=? -9223372036854775808 and iterator.step <=? 9223372036854775807 {
+        # Candidate invariant, checked on every advancing backedge by bounds.
+        return if iterator.step >? 0 ranges.Interval[iterator.first 9223372036854775807] else ranges.Interval[-9223372036854775808 iterator.first]
+    }
     if iterator.guarded and iterator.step >? 0 {
         let upper:bigint = 9223372036854775807
         let last = iterator.last

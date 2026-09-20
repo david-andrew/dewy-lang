@@ -23,7 +23,7 @@ Result:type = [warnings:array<Warning>=[] notes:array<representation.Note>=[] un
 # Rewrite proof witnesses only after their module has passed validation.
 # Runtime assertions already have their reporting/control flow in HIR; the
 # Assert node is the analysis witness alongside that actual runtime code.
-discharge = (root:addr constants:dict<addr bigint> @session:contexts.Session):>void => {
+discharge = (root:addr constants:dict<addr bigint> word_iterators:set<addr> @session:contexts.Session):>void => {
     let pending:array<addr>=[root]
     let seen:set<addr>=set[]
     let void_type=types.primitive('void' @session.types)
@@ -33,7 +33,11 @@ discharge = (root:addr constants:dict<addr bigint> @session:contexts.Session):>v
         seen.add(id)
         let node=hir.node_at(session.hir id)
         hir.push_children(node @pending)
-        if node is? hir.Obligation {
+        if node is? hir.IteratorExpression and node.count is? none {
+            node.guarded=id in? word_iterators
+            $runtime_assert id <? session.hir.length
+            session.hir[id]=node
+        } else if node is? hir.Obligation {
             $runtime_assert id <? session.hir.length
             session.hir[id]=hir.Block[node.loc node.value_type [node.value] false]
         } else if node is? hir.Assert {
@@ -96,7 +100,7 @@ validate = (@engine:modules.Engine):>Result|Error => {
             if selected is? Error return selected
             loop note in selected {result.notes.push(note)}
         }
-        discharge(module.root checked.constants @engine.session)
+        discharge(module.root checked.constants checked.word_iterators @engine.session)
     }
     # Install diagnostic helper calls after all user proof obligations have
     # been decided. Graph assembly can then retain the reachable reporters.

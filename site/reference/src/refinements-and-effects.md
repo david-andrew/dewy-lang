@@ -87,6 +87,16 @@ promise that insertion has preserved which element occupies an index.
 Array membership similarly carries a result fact: after `if value in? xs`,
 `xs` is known to be nonempty. A failed search promises nothing about length.
 
+Nested range bounds compose with the enclosing loop's facts. For example,
+inside `loop i in [0..xs.length)`, a `loop j in [0..i)` can index `xs[j]`
+without restating a guard. The counters retain abstract-integer semantics.
+To represent an unbounded counter as a word, the compiler verifies its first
+value and every advancing path, including `continue`, against the word range.
+Breaks and returns do not advance. This also permits inclusive conditions
+when the bound leaves room for the next step, and descending counters.
+An unproved storage invariant is discarded, not assumed; arbitrary-precision
+iterator lowering remains required for counters that cannot use a word.
+
 The general proposition language must be a deliberately bounded, decidable fragment. Unsupported Dewy expressions produce an unknown proof result or a diagnostic; they do not silently enter refinement checking as trusted predicates.
 
 ### Refined Parameters

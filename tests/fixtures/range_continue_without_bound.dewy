@@ -1,0 +1,8 @@
+# A normal exit is bounded, but the continue edge can advance forever.
+f=(skip:bool):>void=>{
+    loop i in 0.. {
+        if skip continue
+        if i>=?3 break
+    }
+}
+main=():>int64=>{f(true) return 0}

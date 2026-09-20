@@ -59,6 +59,9 @@ def test_a_predicate_may_not_use_the_target_before_it_is_proven() -> None:
 def test_only_a_strict_word_sized_upper_bound_guards_the_counter() -> None:
     root = _check('let main = ():>int64 => {\n    let n:int64 = 3\n    loop i in 0.. and n >? i { }\n    return 0\n}')
     assert _loop(root).condition.guarded   # type: ignore[union-attr]   # mirrored: bounds
-    # `<=?` could reach n + 1, so the counter stays unbounded and is rejected as today
+    # The value 3 leaves room for the advancing edge even with an inclusive
+    # condition. An arbitrary word parameter does not promise that room.
+    root = _check('let main=():>int64=>{let n:int64=3 loop j in 0.. and j<=?n {} return 0}')
+    assert _loop(root).condition.guarded
     with pytest.raises(UserError, match='cannot prove this integer fits'):
-        _check('let main = ():>int64 => {\n    let n:int64 = 3\n    loop j in 0.. and j <=? n { }\n    return 0\n}')
+        _check('let main=(n:int64):>int64=>{loop j in 0.. and j<=?n {} return 0}')

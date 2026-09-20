@@ -1895,10 +1895,10 @@ class _BoundsValidator:
 
         element = iterator.iterable.type.element if isinstance(iterator.iterable.type, ty.ArrayType) else None
 
-        def enter(head: State) -> State:
+        def enter(head: State, word_candidates: bool = True) -> State:
             body_state = dict(head)
             if iterator.target.binding_id is not None:
-                body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator)
+                body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator, word_candidates=word_candidates)
                 if iterated is not None:
                     self._read_element(body_state, iterated, iterator.target.binding_id, iterator.loc)
                 if isinstance(element, ty.RefinedType):
@@ -1918,7 +1918,7 @@ class _BoundsValidator:
             return dict(state)
         if count is not None and 0 < count <= 8 and count <= self.finite_loop_budget:
             return self._finite_iterator_loop(iterator, body, state, enter, target_ids, count, validate=validate)
-        return self._iterate_loop(body, state, enter, target_ids, validate=validate)
+        return self._iterate_loop(body, state, enter, target_ids, validate=validate, iterators=(iterator,))
 
     def _finite_iterator_loop(self, iterator, body, state, enter, target_ids, count, *, validate):
         """Compose a bounded number of transfers instead of widening to infinity.
@@ -1957,10 +1957,12 @@ class _BoundsValidator:
         self,
         body: hir.AST,
         state: State,
-        enter: 'Callable[[State], State]',
+        enter: 'Callable[[State, bool], State]',
         target_ids: set[int],
         *,
         validate: bool,
+        iterators: tuple[hir.IteratorExpression, ...] = (),
+        word_candidates: bool = True,
     ) -> State:
         """Widen loop-carried state to a fixed point, then validate the body once.
 
@@ -1971,7 +1973,7 @@ class _BoundsValidator:
         state = _seed_loop_equalities(state, self.assigned, self.registry)
         head = dict(state)
         for _ in range(8):
-            transfer = self._loop_transfer(body, enter(head), validate=False)
+            transfer = self._loop_transfer(body, enter(head, word_candidates), validate=False)
             backedges = [
                 *([transfer.normal] if transfer.normal is not None else []),
                 *transfer.continues.get(0, []),
@@ -1984,7 +1986,22 @@ class _BoundsValidator:
             if widened == head:
                 break
             head = widened
-        transfer = self._loop_transfer(body, enter(head), validate=validate)
+        unbounded = [item for item in iterators if isinstance(item.iterable, hir.Range) and item.count is None]
+        if unbounded:
+            transfer = self._loop_transfer(body, enter(head, word_candidates), validate=False)
+            proved = word_candidates and self._iterator_steps_fit(unbounded, transfer)
+            if word_candidates and not proved:
+                # Discard the speculative invariant and all transfers derived
+                # from it. Abstract iteration still typechecks; lowering needs
+                # bigint storage if no word proof can be established.
+                return self._iterate_loop(body, state, enter, target_ids, validate=validate,
+                                          iterators=iterators, word_candidates=False)
+            if validate:
+                for item in unbounded:
+                    item.guarded = proved
+                transfer = self._loop_transfer(body, enter(head, word_candidates), validate=True)
+        else:
+            transfer = self._loop_transfer(body, enter(head, word_candidates), validate=validate)
         exits = [
             *([transfer.normal] if transfer.normal is not None else []),
             *transfer.breaks.get(0, []),
@@ -2010,14 +2027,40 @@ class _BoundsValidator:
             if iterator.target.binding_id is not None
         }
 
-        def enter(head: State) -> State:
+        def enter(head: State, word_candidates: bool = True) -> State:
             body_state = dict(head)
             for iterator in condition.iterators:
                 if iterator.count != 0 and iterator.target.binding_id is not None:
-                    body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator)
+                    body_state[iterator.target.binding_id] = self._loop_counter_interval(iterator, word_candidates=word_candidates)
             return body_state
 
-        return self._iterate_loop(body, state, enter, target_ids, validate=validate)
+        return self._iterate_loop(body, state, enter, target_ids, validate=validate, iterators=tuple(condition.iterators))
+
+    def _iterator_steps_fit(self, iterators: list[hir.IteratorExpression], transfer: _LoopTransfer) -> bool:
+        """Check the candidate word invariant on every advancing backedge.
+
+        This is induction, not a type change: abstract integers keep their
+        semantics. Breaks and returns do not advance; continues do. A failed
+        invariant cannot be rescued by `$prototype` or silent word rollover.
+        """
+        backedges = [*([transfer.normal] if transfer.normal is not None else []),
+                     *transfer.continues.get(0, [])]
+        for iterator in iterators:
+            if not isinstance(iterator.iterable, hir.Range) or iterator.count is not None:
+                continue
+            valid = (iterator.target.binding_id is not None and iterator.step != 0
+                     and ty.integer_literal_fits(iterator.first, 'int64')
+                     and ty.integer_literal_fits(iterator.step, 'int64'))
+            for state in backedges:
+                if not valid:
+                    break
+                interval = self._binding_interval(state, iterator.target.binding_id)
+                valid = (interval.lower is not None and interval.upper is not None
+                         and -(1 << 63) <= interval.lower + iterator.step
+                         and interval.upper + iterator.step < (1 << 63))
+            if not valid:
+                return False
+        return True
 
     def _binding_interval(self, state: State, binding_id: int) -> Interval:
         """A binding's interval: its tracked facts, else its fixed width's range, else unknown."""
@@ -2091,11 +2134,22 @@ class _BoundsValidator:
         bits = ADDRESS_BITS[self.target]   # type: ignore[index]
         self.cap_notes.append(CapNote(self.srcfile, node.loc, f'{what} only because lengths are assumed below 2^{bits} on `{self.target}`'))
 
-    def _loop_counter_interval(self, iterator: hir.IteratorExpression) -> Interval:
-        """The iterator's interval inside its loop. A right-unbounded counter
-        (`i in 0..`) whose loop guard bounds it (`i <? E` for a word-sized `E`,
-        see `predicate_bounds_counter`) never passes `E <= int64.max`: the guard
-        breaks the loop at the first `i >= E`."""
+    def _loop_counter_interval(self, iterator: hir.IteratorExpression, *, word_candidates: bool = True) -> Interval:
+        """A candidate storage invariant, or the abstract interval on retry.
+
+        Candidate bounds may justify body operations only after the first
+        value and every advancing backedge verify them. A failed candidate
+        reruns inference without its facts before validating the body.
+        """
+        if isinstance(iterator.iterable, hir.Range) and iterator.count is None and not word_candidates:
+            return self._iterator_interval(iterator)
+        if (isinstance(iterator.iterable, hir.Range) and iterator.count is None
+                and ty.integer_literal_fits(iterator.first, 'int64')
+                and ty.integer_literal_fits(iterator.step, 'int64')):
+            # Candidate invariant. `_iterator_steps_fit` must verify it on
+            # all backedges before this program can be accepted.
+            return (Interval(iterator.first, (1 << 63) - 1) if iterator.step > 0
+                    else Interval(-(1 << 63), iterator.first))
         if iterator.guarded and iterator.step > 0:
             upper = (1 << 63) - 1
             return Interval(iterator.first, upper if iterator.last is None else min(upper, iterator.last))

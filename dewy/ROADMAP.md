@@ -449,6 +449,12 @@ mutation described above should carry "length grows by one per iteration"
 and "an iterator's interval is a fact inside nested loops" as consequences
 of the design rather than as two more transfer rules.
 
+Progress on 2026-09-20: shared array-length equality invariants and nested
+range-counter fixtures now pass in both compilers. Counter storage uses an
+inductive word-range candidate, checked on every advancing edge; failed
+candidates are discarded before ordinary body validation. The general liquid
+qualifier/invariant work remains broader than these completed fixtures.
+
 ### 1.3 Effects as a real vocabulary
 
 The transitive parameter effect analysis exists

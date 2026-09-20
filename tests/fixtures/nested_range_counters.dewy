@@ -1,0 +1,36 @@
+# The inner limit is an abstract range value. Its bounds are facts from the
+# outer loop, not a request to change either counter's integer semantics.
+inversions=(xs:array<int64>):>int64=>{
+    let count:int64=0
+    loop i in [0..xs.length) {
+        loop j in [0..i) {if xs[j]>?xs[i] {count+=1}}
+    }
+    return count
+}
+guarded=(xs:array<int64>):>int64=>{
+    let count:int64=0
+    loop i in [0..xs.length) {
+        loop j in 0.. and j<?i {
+            if xs[j]<=?xs[i] continue
+            count+=1
+        }
+    }
+    return count
+}
+inclusive=(n:int64<n<?int64.max>):>int64=>{
+    let count:int64=0
+    loop i in 0.. and i<=?n {count+=1}
+    return count
+}
+descending=():>int64=>{
+    let total:int64=0
+    loop i in 5,3.. and i>?0 {total+=i}
+    return total
+}
+main=():>int64=>{
+    $runtime_assert inversions([5 4 3 2 1])=?10
+    $runtime_assert guarded([5 4 3 2 1])=?10
+    $runtime_assert inversions([])=?0
+    $runtime_assert inclusive(3)=?4 and descending()=?9
+    return 42
+}

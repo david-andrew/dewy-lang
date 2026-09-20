@@ -45,7 +45,7 @@ Checker:type = [
     root_items:set<addr>=set[] deferred:array<addr>=[]
     element_intervals:values.ElementIntervals=[]
     unfit:dict<addr Unfit>=[] constant_indices:dict<addr bigint>=[] problem:Error?=none
-    warnings:array<Warning>=[]
+    warnings:array<Warning>=[] word_iterators:set<addr>=set[]
     # `$prototype`: unproven sites become runtime checks instead of errors.
     prototype:bool=false deferred_sites:dict<addr prototype.Deferred>=[]
     result_obligations:dict<addr array<addr>>=[]
@@ -744,7 +744,7 @@ iterators_of = (id:addr checker:Checker):>array<addr> => {
     if node is? hir.MultiIteratorExpression return node.iterators
     return []
 }
-enter_iterators = (iterators:array<addr> state:facts.State @checker:Checker):>facts.State => {
+enter_iterators = (iterators:array<addr> state:facts.State @checker:Checker word_candidates:bool=true):>facts.State => {
     let current=state
     loop id in iterators {
         let node=node_at(id checker)
@@ -753,7 +753,7 @@ enter_iterators = (iterators:array<addr> state:facts.State @checker:Checker):>fa
         let target=node_at(node.target checker)
         $runtime_assert target is? hir.ExpressedIdentifier
         if target.binding_id is? none continue
-        facts.set_value(@current facts.Term[target.binding_id] values.loop_counter_interval(node checker.element_intervals checker.data.env))
+        facts.set_value(@current facts.Term[target.binding_id] values.loop_counter_interval(node checker.element_intervals checker.data.env word_candidates))
         let sequence=terms.sequence_id(node.iterable checker.data.env @checker.data.registry)
         if sequence isnt? none {elements.read(@current sequence target.binding_id checker.word_type node.loc @checker.data.registry) note_element_routes(sequence @checker)}
         # `loop x in xs` over an `array<nat64>`: the element type's promise
@@ -830,7 +830,32 @@ finite_iterator_loop = (arm:hir.LoopArm iterator:hir.IteratorExpression iterator
     output.normal=joined(exits checker)
     return output
 }
-loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool):>Transfer => {
+# Word storage is an inductive invariant, not an assumption from the target's
+# abstract integer type. Every normal or continue edge advances the iterator;
+# breaks/returns do not. Unknown evidence requires arbitrary-precision lowering.
+iterator_steps_fit = (iterators:array<addr> transfer:Transfer checker:Checker):>bool => {
+    let backedges:array<facts.State>=[]
+    if transfer.normal isnt? none {backedges.push(transfer.normal)}
+    loop exit in transfer.continues {if exit.levels =? 0 {backedges.push(exit.state)}}
+    loop id in iterators {
+        let iterator=node_at(id checker)
+        $runtime_assert iterator is? hir.IteratorExpression
+        if node_at(iterator.iterable checker) isnt? hir.Range or iterator.count isnt? none continue
+        let target=node_at(iterator.target checker)
+        $runtime_assert target is? hir.ExpressedIdentifier
+        let valid=target.binding_id isnt? none and iterator.step not=? 0 and iterator.first >=? -9223372036854775808 and iterator.first <=? 9223372036854775807 and iterator.step >=? -9223372036854775808 and iterator.step <=? 9223372036854775807
+        loop state in backedges {
+            if not valid {break}
+            $runtime_assert target.binding_id isnt? none
+            let interval=values.binding_interval(facts.Term[target.binding_id] state checker.data.env)
+            valid=interval.lower isnt? none and interval.upper isnt? none and interval.lower+iterator.step >=? -9223372036854775808 and interval.upper+iterator.step <=? 9223372036854775807
+        }
+        if not valid return false
+    }
+    return true
+}
+
+loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool word_candidates:bool=true):>Transfer => {
     let iterators=iterators_of(arm.condition checker)
     let incoming=state
     loop id in iterators {
@@ -873,7 +898,7 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool):>
     loop pass <? 11 {
         if pass >=? 8 and iterators.length >? 0 break
         checker.data.snapshot=intervals.Snapshot[]
-        let current=if iterators.length >? 0 enter_iterators(iterators head @checker) else head
+        let current=if iterators.length >? 0 enter_iterators(iterators head @checker word_candidates) else head
         let positive:facts.State?=current
         if iterators.length =? 0 {
             evaluate(arm.condition @current @checker false)
@@ -904,7 +929,7 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool):>
         pass += 1
     }
     checker.data.snapshot=intervals.Snapshot[]
-    let current=if iterators.length >? 0 enter_iterators(iterators head @checker) else head
+    let current=if iterators.length >? 0 enter_iterators(iterators head @checker word_candidates) else head
     let positive:facts.State?=current
     let negative:facts.State?=none
     if iterators.length =? 0 {
@@ -917,7 +942,22 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool):>
     if iterators.length >? 0 {exits.push(incoming)}
     if negative isnt? none {exits.push(negative)}
     if positive isnt? none {
-        let body=analyze(arm.body positive @checker validate)
+        let unbounded:array<addr>=[]
+        loop id in iterators {
+            let iterator=node_at(id checker)
+            $runtime_assert iterator is? hir.IteratorExpression
+            if iterator.count is? none and node_at(iterator.iterable checker) is? hir.Range {unbounded.push(id)}
+        }
+        let body:Transfer=Transfer[none]
+        if unbounded.length >? 0 {
+            body=analyze(arm.body positive @checker false)
+            let proved=word_candidates and iterator_steps_fit(unbounded body checker)
+            if word_candidates and not proved return loop_body(arm state @checker validate false)
+            if validate {
+                if proved {loop id in unbounded {checker.word_iterators.add(id)}}
+                body=analyze(arm.body positive @checker true)
+            }
+        } else {body=analyze(arm.body positive @checker validate)}
         if iterators.length >? 0 and body.normal isnt? none {exits.push(body.normal)}
         loop exit in body.breaks {
             if exit.levels >? 0 {output.breaks.push(Exit[exit.levels-1 exit.state])}
