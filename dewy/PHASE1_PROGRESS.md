@@ -717,3 +717,15 @@ and C, with zero view allocations and no retained storage over 100 calls. A
 second native generation built in 67.16 seconds and executes both the scope
 and iterator-effect kernels (42). These remain correctness timings above target.
 Artifacts: `../dewy-build-artifacts/phase1-scoped-views-stage2-2026-09-20`.
+
+
+Dictionary-key parity correction: hosted lowering no longer hashes the address
+of an unsupported tagged cell or aggregate as if it were the key's value.
+Such a lookup could silently miss a separately owned equal value. It now
+rejects the same unsupported representations as native; fixed-width words,
+bools, strings and word enums retain their existing value hashes. This does
+not settle a user-defined hashing protocol or implement aggregate key equality.
+Validation: 16 hosted dictionary/set tests passed; native rejects all five
+unsupported representation probes and executes the supported-key kernel (42).
+The hosted kernel executes on x86 and C. The change was prepared in an isolated
+checkout while the preceding full integration runs used unchanged sources.

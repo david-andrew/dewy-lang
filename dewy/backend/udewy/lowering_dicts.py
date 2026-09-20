@@ -170,6 +170,14 @@ class _DictLowering:
             masked = self._word('__and__', accumulator, self._uword(HASH_MASK, loc), loc)
             statements.append(self._declare(result, hir.Transmute(loc, 'int64', masked), loc))
             return statements, result
+        if (ty.fixed_integer_layout(key_type) is None
+                and ty.strip_refinement(key_type) != 'bool'
+                and ty.enum_members(key_type) is None):
+            # A tagged cell or aggregate pointer is storage, not the key's
+            # semantic value. Hashing that address can miss an equal key in a
+            # separately owned cell. Keep the same representation boundary as
+            # native until both hashing and equality support the key type.
+            self._target_error(key, 'hashing this dictionary key representation')
         word = hir.Transmute(loc, 'uint64', key)
         mixed = self._word('__mul__', word, self._uword(WORD_MIX, loc), loc)
         folded = self._word('__xor__', mixed, self._word('__rshift__', mixed, self._uword(29, loc), loc), loc)

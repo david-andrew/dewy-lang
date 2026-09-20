@@ -74,6 +74,8 @@ loop [name score] in scores
 
 ### Lookup
 
+The current hash-table implementation supports fixed-width integer, boolean, string, and word-enum keys. Other key representations, including optional cells and aggregates, are rejected when hashing is needed; storage addresses are not a substitute for value hashes. General value hashing and matching key equality remain implementation work.
+
 `d[key]` is valid only when the key is *proven present* and then has type `V`. A key is proven when it is a constant entry of the literal that initialized the dictionary, was stored by `d[key] = value`, is the key bound by `loop [key value] in d`, or was tested by a guard `if key in? d`. Facts are path-sensitive (a key proven on every branch stays proven after the branches join) and are invalidated when the dictionary or the key binding is reassigned. A guard's search result is reused by the guarded lookup, so a proven lookup performs no second search. An unproven `d[key]` is a compile error.
 
 `d.get(key)` is the lookup that may miss, with type `V | none`. `d.get(key default)` yields `default` when the key is absent and has type `V`.

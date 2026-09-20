@@ -1,0 +1,8 @@
+# A tagged cell address is not the value's hash. Until key hashing and
+# equality support this representation, compilation must reject it.
+contains=(key:int64|none):>bool=>{
+    let seen:set<int64|none>=set[]
+    seen.push(key)
+    return key in? seen
+}
+main=():>int64=>if contains(42) 42 else 1

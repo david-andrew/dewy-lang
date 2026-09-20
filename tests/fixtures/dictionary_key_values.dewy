@@ -1,0 +1,12 @@
+main=():>int64=>{
+    let words:set<int16>=set[-1 0 42]
+    if -1 not in? words or 0 not in? words or 42 not in? words return 1
+    let truth:set<bool>=set[false true]
+    if false not in? truth or true not in? truth return 2
+    let names:set<string>=set[]
+    names.push('ab'+'c')
+    if 'abc' not in? names return 3
+    let choices:set<1|2|'a'>=set[1 2 'a']
+    if 1 not in? choices or 'a' not in? choices return 4
+    return 42
+}
