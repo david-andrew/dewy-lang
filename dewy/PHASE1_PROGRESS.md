@@ -108,3 +108,12 @@ early breaks reject. Ten targeted proof tests and all 21 focused parity
 cases passed. The updated compiler builds using the preceding direct native
 compiler (50.12 seconds); second-generation timing remains to be measured.
 The wider symbolic range-iterator and proof-boundary work remains pending.
+
+Checkpoint: hosted descriptor-backed array locals now use the existing
+stable-route borrow proof already used by native lowering and hosted record
+locals. Read-only field reads allocate zero bytes across 100 calls. A source
+or destination write keeps value independence, and returning the local or
+storing it in a returned record still acquires independent storage. Twenty-
+one ownership gates passed, with the escape kernel checked separately on
+both direct and C backends. The shared native parity fixture also passed.
+Explicit local `@` demands and mutable local places are still outstanding.

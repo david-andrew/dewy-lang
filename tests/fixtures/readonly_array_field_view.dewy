@@ -1,0 +1,39 @@
+Bag:type=[items:array<int64>]
+read=(bag:Bag):>int64=>{
+    const items=bag.items
+    return items.length
+}
+take=(bag:Bag):>array<int64>=>{
+    const items=bag.items
+    return items
+}
+wrap=(bag:Bag):>Bag=>{
+    const items=bag.items
+    return Bag[items]
+}
+# A write to the source or the destination prevents an implicit view.
+independence=():>void=>{
+    let bag=Bag[[1]]
+    const saved=bag.items
+    bag.items[0]=2
+    $runtime_assert saved[0]=?1
+    let changed=bag.items
+    changed[0]=3
+    $runtime_assert bag.items[0]=?2 and changed[0]=?3
+}
+main=():>int64=>{
+    let bag=Bag[[1 2 3]]
+    read(bag);
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..100) {$runtime_assert read(bag)=?3}
+    let allocated:int64=_arena_allocated_bytes-before
+    printl(allocated)
+    $runtime_assert allocated=?0
+    let escaped=take(Bag[[9]])
+    let wrapped=wrap(Bag[[8]])
+    $runtime_assert escaped.length >? 0 and wrapped.items.length >? 0
+    escaped[0]=7
+    $runtime_assert escaped[0]=?7 and wrapped.items[0]=?8
+    independence()
+    return 42
+}

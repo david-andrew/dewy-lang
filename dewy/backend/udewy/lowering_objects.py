@@ -1260,7 +1260,7 @@ class _ObjectLowering:
         )
         return prelude, result
 
-    def _borrowed_route_local(self, node: hir.Declare, object_type: ty.ObjectType) -> bool:
+    def _borrowed_route_local(self, node: hir.Declare, value_type: ty.Type) -> bool:
         """`let x = a[i]` / `a.f` / `d[k]` binds the storage it reads when both stay stable.
 
         The native rule (`borrowed_route_local` in lower.dewy): the declared
@@ -1275,11 +1275,13 @@ class _ObjectLowering:
         expr = borrowing.unwrap(node.expr)
         if not isinstance(expr, (hir.Index, hir.MemberAccess, hir.DictLookup)):
             return False
+        if isinstance(expr, hir.DictLookup) and not isinstance(value_type, ty.ObjectType):
+            return False  # only record lookups expose the stored value's block
         if node.binding_id not in self.borrow_plan.stable_bindings:
             return False
         if node.annotation is not None and ty.strip_refinement(node.annotation) != ty.strip_refinement(expr.type):
             return False
-        if ty.unfold(ty.strip_refinement(expr.type)) != object_type:
+        if ty.unfold(ty.strip_refinement(expr.type)) != value_type:
             return False
         if id(expr) in self.borrow_plan.array_snapshots:
             return False

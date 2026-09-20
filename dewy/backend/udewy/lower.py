@@ -4137,6 +4137,16 @@ class _Lowerer(
                 if not self._borrowed_route_local(node, declared_type):
                     self._note_owned_object(node, declared_type)
                 return self._lower_object_declare(node, declared_type)
+            if (
+                isinstance(declared_type, ty.ArrayType)
+                and self._array_representation(node) == 'descriptor'
+                and self._borrowed_route_local(node, declared_type)
+            ):
+                # The same stable-route proof used for records justifies an
+                # array descriptor view. It owns no storage to release; an
+                # escaping use must still copy or prove an ownership transfer.
+                prelude, value = self._extract_array_operand(node.expr, declared_type)
+                return [*prelude, replace(node, decltype='let', annotation='int64', expr=value)]
             if self._array_representation(node) == 'stack_data':
                 self._note_owned_raw_array(node, declared_type)
                 return self._lower_stack_array_declare(node)
