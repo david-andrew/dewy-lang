@@ -154,9 +154,8 @@ Proposed semantics for the first implementation:
 - Function subtyping permits fewer effects than the caller allows.
   Indirect calls must retain their signature's row; “unknown” is never pure.
 - A callback's row can be forwarded by an effect parameter, rather than
-  enumerating every effect in higher-order library code. The syntax for
-  quantifying an effect parameter still needs a decision (ordinary `type`
-  parameters would incorrectly conflate two kinds).
+  enumerating every effect in higher-order library code. The reviewed `E:Effect` syntax below keeps row parameters separate from
+  ordinary `type` parameters.
 - Treat `noreturn` as a checked control-flow guarantee, not a permission in
   the may-effect set: subset ordering is the wrong implication direction
   for “this call never returns.” Likewise, an error return and a process
@@ -202,7 +201,66 @@ The internal empty row `Effect<>` is distinct from instantiating an effect
 family with no subjects. Future effect-polymorphic elaboration may produce
 empty rows without exposing this ambiguous source shorthand.
 
-Still to review: how effect identities and effect parameters should be
-introduced. Allocation
+Resource identities and effect parameters use the reviewed forms below. Allocation
 failure policy remains separately tentative; this proposal does not choose
 `$fallible_allocation`, error identities, or an exit code on its behalf.
+
+### Resource identities and effect parameters — approved initial rules
+
+Reuse nominal type mints for named resources. An effect subject can resolve
+to a nominal type identity or an eligible parameter/place route, never just a
+string spelling:
+
+```dewy
+Filesystem = type of any
+read_count = (...):> int64 & reads<Filesystem> => ...
+update = (@state:State):> void & mutates<state> => ...
+```
+
+`Filesystem` is an ordinary nominal marker. Aliases/imports of that marker
+preserve its identity; a second `type of any` mint is distinct, even if it has
+the same source name. An effect subject is not an instance of the marker.
+Initially match named resource identities exactly; do not invent effect
+implications from nominal inheritance. Parameter routes resolve to binding
+identities and substitute at calls, using the existing alias analysis.
+The standard effect families are compiler vocabulary; custom effect-family
+declarations are outside this initial proposal.
+
+For row polymorphism, use a separately kind-checked generic parameter:
+
+```dewy
+apply = <E:Effect>(f:():>int64 & E):> int64 & E => f()
+```
+
+Here `Effect` names the kind of effect rows. `E` ranges over rows, including
+the empty row, and cannot appear in a value-type position. `Effect<>` remains
+the empty row itself, with `no_effects` as the preferred source spelling.
+Infer `E` from the callback's signature; substitute it into the caller's row.
+Unknown callback behavior cannot be inferred as empty. This introduces no
+first-class runtime effect values. The same positive-bound/exclusion rules
+apply after substitution.
+
+### What allocation contracts measure — approved initial rules
+
+Keep public effects distinct from internal per-parameter access summaries.
+Reading an ordinary by-value argument or updating a private local is not an
+external read/write effect. Reading or changing caller-owned place storage
+is, as are accesses to named resources. Internal route summaries still track
+all reads/writes needed to justify borrowing and preserve facts.
+
+An allocation guarantee must account for the logical storage operations left
+after proven borrowing, moves and static/stack placement, including implicit
+aggregate copies. Do not hide an allocation effect merely because the
+provisional COW implementation defers its physical allocation. Inference may
+be conservative; unknown allocation behavior cannot satisfy `no_effects`.
+For example, a read-only `xs.length` function can borrow its argument and
+have no effects, while returning `xs.copy()` for a runtime-length array
+requires permission to allocate even if a particular COW execution only
+retains its buffer. Source contracts should not accidentally promise that
+later COW detachment cannot occur. This proposal does not settle allocation
+failure behavior or the resource-exhaustion policy.
+
+David approved these starting rules on 2026-09-20. Implementation is still
+pending. A future builtin `resource` base type could make resource mints
+more explicit; ordinary nominal mints suffice for this first implementation.
+The allocation rule remains open to refinement from practical experience.
