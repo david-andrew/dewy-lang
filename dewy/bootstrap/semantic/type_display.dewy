@@ -86,7 +86,7 @@ refined_to_dewy = (base:addr props:array<facts.Proposition> nodes:types.Table):>
         remaining = []
         loop p in props { if not views.has_proposition(named p) { remaining.push(p) } }
     }
-    if types.is_primitive(node 'void') return "<{facts_to_dewy(remaining nodes)}>"
+    if types.is_primitive(node 'void') return "void & <{facts_to_dewy(remaining nodes)}>"
     if types.is_primitive(node 'bool') {
         let conditional = false
         loop p in remaining { if p.when isnt? none { conditional = true } }

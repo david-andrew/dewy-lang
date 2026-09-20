@@ -217,14 +217,14 @@ let f = (text:string i:uint64 j:uint64):>uint64 => {
         _check(program.replace('let piece = text[i..i+k)', 'let piece = text[i..i+k+2)'))   # `i + k + 1 <= j + 1 <= text.length` would still hold
 
 
-def test_a_result_of_only_facts_is_a_procedure_that_establishes_them() -> None:
-    # `:> <facts>`: no value; owed at every return and at the end of the body; the caller
+def test_a_void_result_with_facts_is_a_runtime_procedure() -> None:
+    # `:> void & <facts>`: no value; owed at every return and at the end of the body; the caller
     # gets them after the call — a library `require`, an in-place `ensure`, a type guard
-    program = '''let require = (ok:bool msg:string):> <ok =? true> => { if not ok { printl"{msg}"  exit(1) } }
-let ensure_nonempty = (@xs:array<int64>):> <xs.length >? 0> => { if xs.length =? 0 { xs.push(0) } }
+    program = '''let require = (ok:bool msg:string):> void & <ok =? true> => { if not ok { printl"{msg}"  exit(1) } }
+let ensure_nonempty = (@xs:array<int64>):> void & <xs.length >? 0> => { if xs.length =? 0 { xs.push(0) } }
 let Tok:type = $abstract type of any & [text:string]
 let Word = type of Tok & []
-let must_be_word = (tok:Tok):> <tok is? Word> => { if tok isnt? Word { exit(2) } }
+let must_be_word = (tok:Tok):> void & <tok is? Word> => { if tok isnt? Word { exit(2) } }
 let main = ():>int64 => {
     let xs:array<int64> = []
     ensure_nonempty(@xs)

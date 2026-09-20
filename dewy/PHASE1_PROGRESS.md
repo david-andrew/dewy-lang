@@ -150,3 +150,11 @@ checks passed. A rebuilt native compiler passed all 23 focused parity cases
 and both ordinary and debug execution of the identifier fixture (42).
 The direct seed built it in 55.82 seconds. The wider Unicode repertoire and
 doubled-marker escape remain open, and no rule for them was introduced.
+
+Proof-boundary prerequisite: hosted `:> void & <P>` now checks its facts at
+each explicit return and fallthrough without expecting a runtime value from
+the body. Native checking already handles this form. Both type displays
+retain `void &` so ordinary function contracts are not printed as proof-only
+`:> <P>` syntax. The fact-bearing procedure fixture mutates an empty array
+and returns 42 in the native compiler; the hosted fact suite passes 25 tests.
+The separate `$proof` marker and statement-call checks are still in progress.

@@ -1,0 +1,11 @@
+# A fact-bearing void procedure remains a real runtime call, including its
+# writes. This must never be confused with an erased `$proof` statement.
+ensure = (@xs:array<int64>):> void & <xs.length >? 0> => {
+    if xs.length >? 0 return
+    xs.push(42)
+}
+main=():>int64=>{
+    let xs:array<int64>=[]
+    ensure(@xs)
+    return xs[0]
+}

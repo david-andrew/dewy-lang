@@ -12588,8 +12588,7 @@ def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     signature = fn_ast.left
     if not (isinstance(signature, p0.BinOp) and isinstance(signature.op, t1.Operator) and signature.op.symbol == ':>'):
         return None
-    void_facts = _void_facts_annotation(signature.right, ctx=ctx)
-    rettype = void_facts if void_facts is not None else _value_type(ast_to_type(signature.right, ctx=ctx), loc=signature.right.loc, ctx=ctx)
+    rettype = _function_result_type(signature.right, ctx=ctx)
     pos_or_kw_args, kw_only_args, rest_args = collect_function_signature_args(signature.left, ctx=ctx)
     params = [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args is not None else [])]
     if any(p.type == ty.INFERRED_TYPE for p in params):
@@ -12639,11 +12638,15 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     # if the return type was annotated, capture it
     void_facts: ty.RefinedType | None = None
     if isinstance(signature, p0.BinOp) and signature.op.symbol == ':>':
-        void_facts = _void_facts_annotation(signature.right, ctx=ctx)
-        if void_facts is not None:
-            rettype = ty.VOID_TYPE   # `:> <facts>`: no value; the facts hold of the parameters at every return
+        declared = _function_result_type(signature.right, ctx=ctx)
+        if isinstance(declared, ty.RefinedType) and declared.base == ty.VOID_TYPE:
+            # A runtime procedure with `void & <facts>` has no expressed
+            # value. Its parameter facts are obligations at each return,
+            # not an expected value type to pass into the body.
+            void_facts = declared
+            rettype = ty.VOID_TYPE
         else:
-            rettype = _value_type(ast_to_type(signature.right, ctx=ctx), loc=signature.right.loc, ctx=ctx)
+            rettype = declared
         rettype_loc = signature.right.loc
         signature = signature.left
     

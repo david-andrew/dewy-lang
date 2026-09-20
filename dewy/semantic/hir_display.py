@@ -125,7 +125,7 @@ def _refined_type_to_dewy(t: ty.RefinedType) -> str:
         return name if not rest else _refined_type_to_dewy(ty.RefinedType(name, rest))   # `nat64`, `nat64<(<=? src.length)>`
     arms = {p.when for p in t.propositions}
     if t.base == 'void':
-        return f'<{" ".join(_fact_to_dewy(p) for p in t.propositions)}>'
+        return f'void & <{" ".join(_fact_to_dewy(p) for p in t.propositions)}>'
     if t.base == 'bool' and arms - {None}:
         parts = []
         for arm in (True, False):
