@@ -88,3 +88,11 @@ expected panic diagnostics; the full corpus run is in progress.
 Design review: `PHASE1_DESIGN_PROPOSALS.md` contains proposed proof and effect
 surfaces. David requested approval before implementation. These proposals
 are not language rules and do not mark 1.2 or 1.3 complete.
+
+Checkpoint: callable/numeric unions at juxtaposition now reject with the
+explicit pipe-call and multiplication forms in both compilers, without
+suggesting parentheses. A numeric token on the right starts a separate
+expression. Coefficient multiplication and parenthesized calls retain their
+distinct precedences. Hosted parser/semantic/ownership gates passed 67 tests;
+a rebuilt native compiler rejects the ambiguous-union fixture and runs the
+precedence fixture with result 42.

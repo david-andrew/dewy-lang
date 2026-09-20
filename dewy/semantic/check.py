@@ -11809,6 +11809,24 @@ def _value_membership(left: hir.AST, right: hir.AST, loc: Span, *, ctx: Context)
     return None
 
 
+def _check_juxtaposition_type(value: hir.AST, loc: Span, *, ctx: Context) -> None:
+    """A callable/numeric union cannot choose between two precedences."""
+    pending = [value.type]
+    callable_member = numeric_member = False
+    while pending:
+        member = ty.unfold(ty.strip_refinement(pending.pop()))
+        if isinstance(member, ty.TypeOr):
+            pending.extend(member.items)
+        elif isinstance(member, (ty.FunctionType, ty.OverloadType)):
+            callable_member = True
+        elif ctx.type_system.is_subtype(member, 'number'):
+            numeric_member = True
+    if callable_member and numeric_member:
+        user_error(ctx.srcfile, 'ambiguous juxtaposition of a callable and numeric union',
+                   Pointer(span=loc, message='the alternatives require different operator precedences'),
+                   hint='use `A |> B` or `B <| A` for a call, or `A * B` for multiplication; narrow the union to the required alternative')
+
+
 def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
     """
     typecheck and resolve a binary operator node.
@@ -11895,6 +11913,7 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
         if constructor is not None:
             return tcr_function_call(constructor, binop.right, ctx=ctx, expected=expected)
         left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block, call_target=True)
+        _check_juxtaposition_type(left, binop.loc, ctx=ctx)
         if (
             isinstance(binop.left, p0.Prefix)
             and isinstance(binop.left.op, t1.Operator)
@@ -12047,6 +12066,8 @@ def tcr_binop(binop: p0.BinOp, *, ctx: Context, type_block:bool=False, expected:
     # TODO: how to handle the fact that `and` and `or` might have inner elements that need type_block? for now just pass in to left and right
     # full expression
     left = typecheck_and_resolve_inner(binop.left, ctx=ctx, type_block=type_block)
+    if isinstance(binop.op, t2.MultiplyJuxtapose):
+        _check_juxtaposition_type(left, binop.loc, ctx=ctx)
     right_ctx = ctx
     if left.type == 'bool':
         if symbol in {'and', '&', 'nand'}:

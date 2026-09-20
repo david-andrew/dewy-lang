@@ -1224,6 +1224,22 @@ library_call = (name:string arguments:array<addr> id:addr env:Environment @sessi
 # forms still use the expectation to infer constructors, lambdas, and calls;
 # completing an index/member/flow must not silently bypass the conversion.
 # Keep an already emitted refinement obligation rather than duplicating it.
+ambiguous_juxtaposition = (type:addr @session:contexts.Session):>bool => {
+    let pending:array<addr>=[type]
+    let callable=false
+    let numeric=false
+    let number=types.primitive('number' @session.types)
+    loop pending.length >? 0 {
+        let current=types.unfold(types.strip_refinement(pending.pop() session.types) session.types)
+        let member=types.node_at(session.types current)
+        if member is? types.TypeOr {loop item in member.items {pending.push(item)}}
+        else if member is? types.CallableType {callable=true}
+        else if subtyping.is_subtype(current number session.links @session.types) {numeric=true}
+    }
+    return callable and numeric
+}
+juxtaposition_problem = (id:addr env:Environment session:contexts.Session):>Error => problem(id 'ambiguous juxtaposition of a callable and numeric union' 'use `A |> B` or `B <| A` for a call, or `A * B` for multiplication; narrow the union to the required alternative' env session)
+
 expression = (id:addr env:Environment @session:contexts.Session expected:addr?=none call_target:bool=false allow_place:bool=false):>addr|Error => {
     let value=expression_inner(id env @session expected=expected call_target=call_target allow_place=allow_place)
     if value is? Error return value
@@ -1508,6 +1524,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             let left = expression(node.left env @session call_target=true allow_place=allow_place)
             if left is? Error return left
             let value = node_at(left session)
+            if ambiguous_juxtaposition(value.value_type @session) return juxtaposition_problem(id env session)
             if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
             let type = types.node_at(session.types types.strip_refinement(value.value_type session.types))
             if 'CallJuxtapose' in? adjacency.options and metatype_of(value.value_type session) isnt? none return metatype_construct(left node.right id env @session expected=expected)
@@ -1533,6 +1550,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             let func = expression(node.left env @session call_target=true)
             if func is? Error return func
             let value = node_at(func session)
+            if ambiguous_juxtaposition(value.value_type @session) return juxtaposition_problem(id env session)
             if value is? hir.TypeValue return construct(value node.right id env @session expected=expected)
             if metatype_of(value.value_type session) isnt? none return metatype_construct(func node.right id env @session expected=expected)
             return call_syntax(func node.right id env @session expected=expected)
@@ -1580,6 +1598,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             let left = expression(node.left env @session)
             if left is? Error return left
             let left_type = node_at(left session).value_type
+            if op =? 'MultiplyJuxtapose' and ambiguous_juxtaposition(left_type @session) return juxtaposition_problem(id env session)
             let logical = op in? ['and' '&' 'or' '|' 'nand' 'nor'] and types.is_primitive(types.node_at(session.types left_type) 'bool')
             let continues = op in? ['and' '&' 'nand']
             let shortcut = if logical refined(left not continues env @session) else env

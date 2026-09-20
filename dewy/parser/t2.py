@@ -323,8 +323,8 @@ juxtapose_blacklist: set[tuple[type[t1.Token], type[t1.Token]]] = {
     (MultiplyJuxtapose, t1.IString),
     (MultiplyJuxtapose, t1.BasedString),
     (MultiplyJuxtapose, t1.Bool),
-    (MultiplyJuxtapose, t1.Integer),  # TBD if keep these two cases or not. right-side jux-mul for numbers is rare and not really great style
-    (MultiplyJuxtapose, t1.Real),     # e.g. `(x+1)5`, or `(y)3.14159`. For now, block them as it seems like bad style, but can enable them later if there's a good reason/example 
+    (MultiplyJuxtapose, t1.Integer),  # a number on the right starts a separate expression
+    (MultiplyJuxtapose, t1.Real),
     (MultiplyJuxtapose, OpFn),
     (MultiplyJuxtapose, Placeholder), # `5$` is also a bit odd, so block it for now
 
@@ -335,6 +335,8 @@ juxtapose_blacklist: set[tuple[type[t1.Token], type[t1.Token]]] = {
     (t1.Bool, CallJuxtapose),
     (t1.Integer, CallJuxtapose),
     (t1.Real, CallJuxtapose),
+    (CallJuxtapose, t1.Integer),
+    (CallJuxtapose, t1.Real),
 
     # things that CANNOT be indexed
     (t1.Bool, IndexJuxtapose),
@@ -427,7 +429,7 @@ def get_jux_type(left: t1.Token, right: t1.Token, prev: t1.Token|None, *, ctx: C
     # jux call, jux index, or jux mul. may only be between atoms (i.e. no operators on either side)
     if left_type in atom_tokens and right_type in atom_tokens:
         option_types = []
-        if (left_type, CallJuxtapose) not in juxtapose_blacklist:
+        if (left_type, CallJuxtapose) not in juxtapose_blacklist and (CallJuxtapose, right_type) not in juxtapose_blacklist:
             option_types.append(CallJuxtapose)
         if (left_type, IndexJuxtapose) not in juxtapose_blacklist and (IndexJuxtapose, right_type) not in juxtapose_blacklist:
             option_types.append(IndexJuxtapose)
