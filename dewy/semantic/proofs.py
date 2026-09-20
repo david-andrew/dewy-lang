@@ -73,7 +73,7 @@ def validate(root: hir.AST, registry: bindings.BindingRegistry, source: SrcFile)
             pass
         elif isinstance(node, hir.Obligation):
             proof_body(node.value, parameters, dependencies, src)
-        elif isinstance(node, hir.Assert) and not node.runtime and not node.expect:
+        elif isinstance(node, hir.Assert) and not node.runtime and not node.expect and not node.unsafe:
             if not fact_term(node.condition, parameters):
                 fail(node, 'a proof assertion must use pure fact terms', 'proofs cannot read mutable globals or call runtime functions', src)
         elif isinstance(node, hir.FunctionCall) and node.proof:

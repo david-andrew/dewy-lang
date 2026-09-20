@@ -5,6 +5,7 @@ import p"cache.dewy" as cache
 import p"../paths.dewy" as paths
 import p"../timing.dewy" as timing
 import p"../semantic/modules.dewy" as modules
+import p"../semantic/unsafe_audit.dewy" as unsafe_audit
 import p"../semantic/prelude.dewy" as prelude
 import p"../semantic/prelude_cache.dewy" as prelude_cache
 import p"../semantic/test_syntax.dewy" as tests
@@ -45,6 +46,7 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
     let compiled=build(request cwd library executable)
     if compiled is? Error return compiled
     if request.command =? 'analyze' {
+        if compiled.analysis.unsafe.length >? 0 {printl('unsafe assumption audit:') printl(unsafe_audit.render(compiled.analysis.unsafe))}
         # Every dynamic aggregate copy the lowering decided, with the reason
         # no borrow or move applied, then the representation decisions.
         let counts:dict<string int64>=[]
@@ -75,6 +77,9 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
     let source=cache.artifact(request.source cwd suffix)
     let error=platform.directories(p(source).parent.path)
     if error isnt? none return error
+    let audit_path=cache.artifact(request.source cwd if request.command =? 'debug' '.debug.unsafe.json' else if request.command =? 'test' '.test.unsafe.json' else '.unsafe.json')
+    let audited=p(audit_path).write_text(unsafe_audit.render(compiled.analysis.unsafe))
+    if audited isnt? int64 return Error[title='cannot write unsafe assumption audit' message=audit_path]
     let written=p(source).write_text(emitted)
     if written isnt? int64 return Error[title='cannot write generated µDewy source' message=source]
     let backend=platform.udewy(executable cwd)

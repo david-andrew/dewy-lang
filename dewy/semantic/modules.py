@@ -675,7 +675,11 @@ class ModuleCompiler:
         self.representation_notes.extend(notes)
 
     def finish(self, entry: ModuleRecord) -> hir.Block:
-        from . import check
+        from . import check, unsafe_audit
+        # Snapshot source assumptions before pruning unused imports or
+        # lowering. Warm prelude records carry the same checked HIR.
+        if any('$unsafe_assert' in record.srcfile.body for record in self.order):
+            unsafe_audit.last_entries[:] = [entry for record in self.order for entry in unsafe_audit.collect(record.root, record.srcfile)]
         check.validate_brand_matches()   # every module is loaded: the brands are a closed world
         names = self._emitted_names(entry)
         needed = self._needed_runtime_binding_ids(entry)
@@ -723,6 +727,8 @@ def typecheck_program(
 ) -> hir.Block:
     from . import check
 
+    from . import unsafe_audit
+    unsafe_audit.last_entries.clear()
     representation.last_notes.clear()
     check.last_prototype_reports.clear()
     check.pending_brand_matches.clear()

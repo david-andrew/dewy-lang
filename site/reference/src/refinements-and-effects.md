@@ -312,7 +312,31 @@ Expected failures remain [error alternatives in the return type](errors-and-forw
 
 ## `unsafe`
 
-The approved form `$unsafe_assert condition [, message]` introduces an auditable assumption without a runtime check. It does not turn off unrelated checking; its facts must be invalidated normally after mutation. This boundary and its audit records are still being implemented.
+`$unsafe_assert condition [, message]` introduces an assumption without a runtime
+check. Both compilers implement an initial subset with pure fact conditions
+and an optional compile-time string literal. It does not turn off unrelated
+checking. Writes and calls invalidate its facts normally, and a checked
+`$proof` body cannot use it.
+
+```dewy
+read_at = (xs:array<int64> i:int64):>int64 => {
+    $unsafe_assert 0 <=? i and i <? xs.length, 'validated by the producer'
+    return xs[i]
+}
+```
+
+The condition is not evaluated at runtime. Its truth is the programmer's
+responsibility; a false assumption can invalidate bounds or representation
+safety. Conditions the compiler already refutes are currently unsupported,
+pending a decision on that edge case.
+
+Builds retain source locations, conditions, messages and candidate consuming
+checks in a `.unsafe.json` file beside the generated `.udewy` artifact,
+including test and debug builds. `dewy analyze` also prints this audit.
+Assumptions in checked unused functions survive optimization in the report.
+The initial report conservatively lists checks in the same function; it does
+not yet identify the exact assumptions used by each proof. Removing all
+assumptions produces an empty report instead of leaving a stale one.
 
 ## Provisional Boundary
 

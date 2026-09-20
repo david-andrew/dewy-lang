@@ -1,0 +1,6 @@
+read_at=(xs:array<int64> i:int64):>int64=>{
+    $unsafe_assert 0<=?i and i<?xs.length, 'validated by the producer'
+    xs.clear()
+    return xs[i]
+}
+main=():>int64=>read_at([42] 0)

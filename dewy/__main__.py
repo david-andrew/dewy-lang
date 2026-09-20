@@ -102,6 +102,13 @@ def run(argv: list[str]) -> int:
         return _build_and_run(path, target, args.remainder, argv, compile_only=args.compile, debug_values=getattr(args, 'debug_values', False), print_prototype_warnings=print_prototype_warnings)
 
 
+def _write_unsafe_audit(udewy_path: Path) -> None:
+    from .semantic import unsafe_audit
+    # Overwrite even an empty report so removing an assumption cannot
+    # leave a stale audit attached to a newly built executable.
+    udewy_path.with_suffix('.unsafe.json').write_text(unsafe_audit.render(unsafe_audit.last_entries))
+
+
 def _build_and_run(
     path: Path,
     target: BackendName,
@@ -150,6 +157,7 @@ def _build_and_run(
         )
         udewy_path.parent.mkdir(parents=True, exist_ok=True)
         udewy_path.write_text(udewy_src)
+        _write_unsafe_audit(udewy_path)
 
         # run the udewy compiler/executor
         try:
@@ -179,6 +187,10 @@ def analyze(argv: list[str]) -> int:
         codegen(srcfile, target=_resolve_target(args.target))   # checks and lowers: both reports come from that
 
     use_color = color_enabled(sys.stdout)
+    from .semantic import unsafe_audit
+    if unsafe_audit.last_entries:
+        print('unsafe assumption audit:')
+        print(unsafe_audit.render(unsafe_audit.last_entries))
     # One machine-readable line per copy, then the excerpt; the same shape as
     # the native compiler's report (tools/copy_report.py reads both).
     counts: dict[str, int] = {}
@@ -280,6 +292,7 @@ def _build_test_driver(target: BackendName) -> Path:
         return binary
     udewy_path.parent.mkdir(parents=True, exist_ok=True)
     udewy_path.write_text(codegen(SrcFile.from_path(TEST_DRIVER), target=target))
+    _write_unsafe_audit(udewy_path)
     with redirect_stdout(io.StringIO()):
         status = entry_point(udewy_path, [], EntryPointOptions(compile_only=True, target=target, debug_info=False))
     if status != 0 or not binary.is_file():
@@ -335,6 +348,7 @@ def test(argv: list[str]) -> int:
             return TEST_NOT_BUILT
         udewy_path.parent.mkdir(parents=True, exist_ok=True)
         udewy_path.write_text(udewy_src)
+        _write_unsafe_audit(udewy_path)
         try:
             return entry_point(udewy_path, program_args, EntryPointOptions(target=target, debug_info=False))
         except Exception as e:

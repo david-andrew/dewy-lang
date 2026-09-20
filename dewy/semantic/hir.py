@@ -192,6 +192,7 @@ class Assert(AST):
     runtime: bool = False  # a `$runtime_assert`: only a refuted condition is a compile-time error
     dimmed: Span | None = None  # the `, message` tail, greyed out in reports
     expect: bool = False  # a `$expect`: a refuted condition is a warning (the test fails when it runs)
+    unsafe: bool = False  # audited assumption, without a runtime check
 
 
 @dataclass(slots=True, weakref_slot=True)

@@ -135,7 +135,8 @@ forget_place = (id:addr @state:facts.State @checker:Checker):>void => {
 validate_assert = (id:addr node:hir.Assert state:facts.State @checker:Checker):>void => {
     if refine(state node.condition false @checker) is? none return
     let refuted=refine(state node.condition true @checker) is? none
-    if node.runtime and not refuted return
+    if (node.runtime or node.unsafe) and not refuted return
+    if node.unsafe {fail(node.condition 'contradictory unsafe assertions are not supported' 'the current facts refute this condition; the policy for this case is still under design review' @checker) return}
     let message=if node.message isnt? none node.message else if refuted 'this condition is false for every value the analysis admits' else 'no compile-time fact establishes this condition (neither proven nor refuted)'
     if node.expect {
         checker.warnings.push(Warning[srcfile=checker.srcfile title='expectation refuted at compile time' pointers=[Pointer[span=node_at(node.condition checker).loc message=message]] hint='the test will fail when it runs'])

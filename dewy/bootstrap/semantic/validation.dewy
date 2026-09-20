@@ -3,6 +3,7 @@ import p"modules.dewy" as modules
 import p"context.dewy" as contexts
 import p"source_views.dewy" as sources
 import p"hir.dewy" as hir
+import p"unsafe_audit.dewy" as unsafe_audit
 import p"ty.dewy" as types
 import p"../targets.dewy" as targets
 import p"analyze/value_bounds.dewy" as values
@@ -17,7 +18,7 @@ import p"analyze/prototype_checks.dewy" as prototype
 # cannot fall back to the BigInt helpers they are themselves defining.
 # Keep this boundary separate from loading: a checked graph still contains
 # proof obligations and mathematical integers with no chosen storage.
-Result:type = [warnings:array<Warning>=[] notes:array<representation.Note>=[]]
+Result:type = [warnings:array<Warning>=[] notes:array<representation.Note>=[] unsafe:array<unsafe_audit.Entry>=[]]
 
 # Rewrite proof witnesses only after their module has passed validation.
 # Runtime assertions already have their reporting/control flow in HIR; the
@@ -71,6 +72,7 @@ validate = (@engine:modules.Engine):>Result|Error => {
     loop index in 0.. and index <? loaded.length {
         let module=loaded[index]
         let checked=decisions[index]
+        loop entry in unsafe_audit.collect(module.root sources.srcfile(module.context engine.session) engine.session) {result.unsafe.push(entry)}
         loop warning in checked.warnings {result.warnings.push(warning)}
         if checked.deferred.length >? 0 {
             # `$prototype`: each unproven site becomes a runtime check that

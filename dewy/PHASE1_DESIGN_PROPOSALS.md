@@ -36,6 +36,15 @@ that remains true after a value changes. A false assumption can invalidate
 bounds or representation safety; its audit entry must survive optimization.
 No unchecked external proof certificates.
 
+Initial implementation: both compilers accept unknown assumptions in the pure
+fact-term subset, retain them through optimization in a versioned JSON audit,
+and invalidate their facts normally on mutation. The initial consumer list is
+a conservative inventory of checks in the same function, **not** exact proof
+dependency tracking. That remaining work is part of the audit milestone.
+Conditions known false are currently unsupported; whether the final boundary
+rejects known contradictions or deliberately admits them is awaiting review.
+This limitation does not change the distinction between unknown and refuted.
+
 ## Proof functions — reviewed direction
 
 Use `$proof`, with the conclusion in a fact-only return annotation:

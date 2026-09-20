@@ -195,3 +195,20 @@ now use the same t1 canonicalization as their generated source. A fresh
 native build (59.24s) executes all three with result 42; they are also in
 the focused parity manifest. This fix changes synthesis lookup, not user
 identifier semantics. Artifact: `../dewy-build-artifacts/phase1-synthesis-2026-09-20`.
+
+Checkpoint: initial `$unsafe_assert cond [, message]` support now lands in
+both compilers. Pure unknown facts enter the normal mutation-aware state;
+the condition is erased, messages are static, and checked proofs cannot use
+unchecked assumptions. Source audits survive folded conditions, unused
+checked functions and prelude caching. Ordinary, debug and test builds write
+versioned `.unsafe.json` sidecars; analysis also displays them. Empty reports
+replace stale ones. Consumer coverage is deliberately conservative: checks
+in the same function, not exact proof-dependency provenance. That refinement
+remains required for the full audit milestone. Known contradictions are
+explicitly unsupported while their policy is under design review.
+
+Validation: 43 hosted unsafe/proof tests, 30 prototype/fact regressions,
+eight native acceptance/rejection and JSON-escaping checks, and all 39 focused
+paired cases passed. The native seed built the updated compiler in 60.04s;
+this is an integration checkpoint, still above the performance target.
+Artifacts: `../dewy-build-artifacts/phase1-unsafe-2026-09-20`.

@@ -1589,8 +1589,12 @@ class _BoundsValidator:
         if self._refine(state, node.condition, truth=False) is None:
             return
         refuted = self._refine(state, node.condition, truth=True) is None
-        if node.runtime and not refuted:
+        if (node.runtime or node.unsafe) and not refuted:
             return
+        if node.unsafe:
+            user_error(self.srcfile, 'contradictory unsafe assertions are not supported',
+                       Pointer(span=node.condition.loc, message=node.message or 'the current facts refute this condition'),
+                       notes=['The policy for explicitly assuming a known contradiction is still under design review.'])
         if node.expect:
             # a refuted expectation is a test failure, not a compile error: the
             # test still builds and reports it when it runs

@@ -70,7 +70,7 @@ body = (id:addr parameters:set<addr> @dependencies:set<addr> @state:State):>void
         return
     }
     if node is? hir.Obligation {body(node.value parameters @dependencies @state) return}
-    if node is? hir.Assert and not node.runtime and not node.expect {
+    if node is? hir.Assert and not node.runtime and not node.expect and not node.unsafe {
         if not fact_term(node.condition state.input parameters) {fail(node 'a proof assertion must use pure fact terms' 'proofs cannot read mutable globals or call runtime functions' @state)}
         return
     }

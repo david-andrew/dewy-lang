@@ -411,6 +411,7 @@ encode_Value1=(value:Value1 @out:bytes.Writer):>void=>{
     encode_Value48(value.hidden_bindings @out)
     encode_Value59(value.proof_literals @out)
     encode_Value59(value.proof_markers @out)
+    encode_Value48(value.unsafe_assertions @out)
     encode_Value40(value.object_strings @out)
     encode_Value48(value.preparing_methods @out)
     encode_Value48(value.prepared_methods @out)
@@ -463,49 +464,51 @@ decode_Value1=(@input:bytes.Reader):>Value1|CacheMiss=>{
     if field_12 is? CacheMiss return field_12
     let field_13=decode_Value59(@input)
     if field_13 is? CacheMiss return field_13
-    let field_14=decode_Value40(@input)
+    let field_14=decode_Value48(@input)
     if field_14 is? CacheMiss return field_14
-    let field_15=decode_Value48(@input)
+    let field_15=decode_Value40(@input)
     if field_15 is? CacheMiss return field_15
     let field_16=decode_Value48(@input)
     if field_16 is? CacheMiss return field_16
-    let field_17=decode_Value60(@input)
+    let field_17=decode_Value48(@input)
     if field_17 is? CacheMiss return field_17
-    let field_18=decode_Value79(@input)
+    let field_18=decode_Value60(@input)
     if field_18 is? CacheMiss return field_18
-    let field_19=decode_Value81(@input)
+    let field_19=decode_Value79(@input)
     if field_19 is? CacheMiss return field_19
-    let field_20=decode_Value48(@input)
+    let field_20=decode_Value81(@input)
     if field_20 is? CacheMiss return field_20
-    let field_21=decode_Value84(@input)
+    let field_21=decode_Value48(@input)
     if field_21 is? CacheMiss return field_21
-    let field_22=decode_Value78(@input)
+    let field_22=decode_Value84(@input)
     if field_22 is? CacheMiss return field_22
-    let field_23=decode_Value88(@input)
+    let field_23=decode_Value78(@input)
     if field_23 is? CacheMiss return field_23
-    let field_24=decode_Value48(@input)
+    let field_24=decode_Value88(@input)
     if field_24 is? CacheMiss return field_24
-    let field_25=decode_Value40(@input)
+    let field_25=decode_Value48(@input)
     if field_25 is? CacheMiss return field_25
-    let field_26=decode_Value13(@input)
+    let field_26=decode_Value40(@input)
     if field_26 is? CacheMiss return field_26
-    let field_27=decode_Value91(@input)
+    let field_27=decode_Value13(@input)
     if field_27 is? CacheMiss return field_27
-    let field_28=decode_Value97(@input)
+    let field_28=decode_Value91(@input)
     if field_28 is? CacheMiss return field_28
-    let field_29=decode_Value158(@input)
+    let field_29=decode_Value97(@input)
     if field_29 is? CacheMiss return field_29
-    let field_30=decode_Value159(@input)
+    let field_30=decode_Value158(@input)
     if field_30 is? CacheMiss return field_30
-    let field_31=decode_Value216(@input)
+    let field_31=decode_Value159(@input)
     if field_31 is? CacheMiss return field_31
-    let field_32=decode_Value328(@input)
+    let field_32=decode_Value216(@input)
     if field_32 is? CacheMiss return field_32
-    let field_33=decode_Value78(@input)
+    let field_33=decode_Value328(@input)
     if field_33 is? CacheMiss return field_33
-    let field_34=decode_Value13(@input)
+    let field_34=decode_Value78(@input)
     if field_34 is? CacheMiss return field_34
-    return Value1[warnings=field_0 pending_brand_matches=field_1 read_states=field_2 retained_read_states=field_3 value_keys=field_4 return_collectors=field_5 prepared_imports=field_6 next_key_position=field_7 hoisted=field_8 constructors=field_9 methods=field_10 hidden_bindings=field_11 proof_literals=field_12 proof_markers=field_13 object_strings=field_14 preparing_methods=field_15 prepared_methods=field_16 registry=field_17 scopes=field_18 brands=field_19 error_types=field_20 links=field_21 builtin_aliases=field_22 pending_aliases=field_23 resolving_aliases=field_24 named_refs=field_25 capture_pairs=field_26 target=field_27 sources=field_28 syntax_refs=field_29 types=field_30 hir=field_31 hir_edits=field_32 syntax_ref_positions=field_33 syntax_refs_indexed=field_34]
+    let field_35=decode_Value13(@input)
+    if field_35 is? CacheMiss return field_35
+    return Value1[warnings=field_0 pending_brand_matches=field_1 read_states=field_2 retained_read_states=field_3 value_keys=field_4 return_collectors=field_5 prepared_imports=field_6 next_key_position=field_7 hoisted=field_8 constructors=field_9 methods=field_10 hidden_bindings=field_11 proof_literals=field_12 proof_markers=field_13 unsafe_assertions=field_14 object_strings=field_15 preparing_methods=field_16 prepared_methods=field_17 registry=field_18 scopes=field_19 brands=field_20 error_types=field_21 links=field_22 builtin_aliases=field_23 pending_aliases=field_24 resolving_aliases=field_25 named_refs=field_26 capture_pairs=field_27 target=field_28 sources=field_29 syntax_refs=field_30 types=field_31 hir=field_32 hir_edits=field_33 syntax_ref_positions=field_34 syntax_refs_indexed=field_35]
 }
 
 encode_Value2=(value:Value2 @out:bytes.Writer):>void=>{
@@ -4410,6 +4413,7 @@ encode_Value221=(value:Value221 @out:bytes.Writer):>void=>{
     encode_Value32(value.runtime @out)
     encode_Value222(value.dimmed @out)
     encode_Value32(value.expect @out)
+    encode_Value32(value.unsafe @out)
 }
 decode_Value221=(@input:bytes.Reader):>Value221|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -4429,7 +4433,9 @@ decode_Value221=(@input:bytes.Reader):>Value221|CacheMiss=>{
     if field_6 is? CacheMiss return field_6
     let field_7=decode_Value32(@input)
     if field_7 is? CacheMiss return field_7
-    return Value221[loc=field_0 value_type=field_1 condition=field_2 source=field_3 message=field_4 runtime=field_5 dimmed=field_6 expect=field_7]
+    let field_8=decode_Value32(@input)
+    if field_8 is? CacheMiss return field_8
+    return Value221[loc=field_0 value_type=field_1 condition=field_2 source=field_3 message=field_4 runtime=field_5 dimmed=field_6 expect=field_7 unsafe=field_8]
 }
 
 encode_Value222=(value:Value222 @out:bytes.Writer):>void=>{

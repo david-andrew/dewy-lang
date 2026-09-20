@@ -1,0 +1,95 @@
+from reporting import Span, SrcFile
+import p"hir.dewy" as hir
+import p"context.dewy" as contexts
+
+# Preserve source assumptions before validation discharges their witnesses
+# or reachability drops an unused function. Consumer precision is explicitly
+# conservative: these are checks in the same function, not a minimal proof
+# dependency set. Normal fact invalidation remains the solver's job.
+Check:type = const [loc:Span kind:string]
+Entry:type = const [source:SrcFile loc:Span condition:string message:string? scope:string checks:array<Check>]
+kind = (node:hir.AST):>string? => {
+    if node is? hir.Obligation return 'refinement'
+    if node is? hir.Index|hir.StringIndex return 'index'
+    if node is? hir.StringSlice return 'slice'
+    if node is? hir.Assert and not node.unsafe return if node.runtime 'runtime assertion' else 'assertion'
+    if node is? hir.ValueCast return 'conversion'
+    if node is? hir.FunctionCall and not node.proof return 'call'
+    return none
+}
+source_at = (id:addr? fallback:SrcFile session:contexts.Session):>SrcFile => {
+    if id is? none return fallback
+    $runtime_assert id <? session.sources.length
+    return session.sources[id].srcfile
+}
+collect = (root:addr source:SrcFile session:contexts.Session scope:string='<module>'):>array<Entry> => {
+    if session.unsafe_assertions.length =? 0 return []
+    let entries:array<Entry>=[]
+    let sites:array<hir.Assert>=[]
+    let checks:array<Check>=[]
+    let keys:set<string>=set[]
+    let seen:set<addr>=set[]
+    let pending:array<addr>=[root]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(session.hir id)
+        if node is? hir.Declare {
+            let value=hir.node_at(session.hir node.expr)
+            if value is? hir.FunctionLiteral {
+                loop entry in collect(value.body source_at(value.source source session) session node.name) {entries.push(entry)}
+                continue
+            }
+        }
+        if node is? hir.FunctionLiteral {
+            loop entry in collect(node.body source_at(node.source source session) session '<anonymous>') {entries.push(entry)}
+            continue
+        }
+        if node is? hir.Assert and node.unsafe {sites.push(node) continue}
+        let category=kind(node)
+        if category isnt? none {
+            let key="{node.loc.start}:{node.loc.stop}:{category}"
+            if key not in? keys {keys.add(key) checks.push(Check[node.loc category])}
+        }
+        let children=hir.children(node)
+        let index=children.length
+        loop index >? 0 {index-=1 pending.push(children[index])}
+    }
+    loop node in sites {entries.push(Entry[source node.loc node.source node.message scope checks])}
+    return entries
+}
+
+# Escape bytes so CRLF graphemes and every JSON control character are
+# handled uniformly. Non-ASCII UTF-8 bytes are preserved exactly.
+quote = (text:string):>string => {
+    let out:array<uint8>=[34]
+    let digits:array<uint8>='0123456789abcdef' as array<uint8>
+    loop byte in (text as array<uint8>) {
+        if byte =? 34 or byte =? 92 {out.push(92) out.push(byte)}
+        else if byte <? 32 {
+            loop b in [92 117 48 48] {out.push(b as uint8)}
+            let high=byte // 16
+            let low=byte % 16
+            $runtime_assert high <? digits.length and low <? digits.length
+            out.push(digits[high]) out.push(digits[low])
+        } else {out.push(byte)}
+    }
+    out.push(34)
+    let decoded=out as string|none
+    $runtime_assert decoded isnt? none
+    return decoded
+}
+location = (source:SrcFile loc:Span):>string => {
+    return '"path":{quote(source.path)},"start":{loc.start},"stop":{loc.stop},"line":{source.first_row+source.line_of(loc.start)},"column":{source.column_of(loc.start)+1}'
+}
+render = (entries:array<Entry>):>string => {
+    let rows:array<string>=[]
+    loop entry in entries {
+        let checks:array<string>=[]
+        loop check in entry.checks {checks.push('\{{location(entry.source check.loc)},"kind":{quote(check.kind)}\}')}
+        let message=if entry.message is? none 'null' else quote(entry.message)
+        rows.push('\{{location(entry.source entry.loc)},"condition":{quote(entry.condition)},"message":{message},"scope":{quote(entry.scope)},"candidate_checks":[{checks.join(",")}]\}')
+    }
+    return '\{"version":1,"consumer_precision":"conservative function scope, not minimal proof dependencies","assumptions":[{rows.join(",")}]\}\n'
+}

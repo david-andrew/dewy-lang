@@ -5256,7 +5256,7 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     source = _assert_source(condition_ast, ctx=ctx)
     # the `, message` tail is greyed out in reports so the condition stands out
     dimmed = Span(condition_ast.loc.stop, message_ast.loc.stop) if message_ast is not None else None
-    if ast.name == 'assert':
+    if ast.name in ('assert', 'unsafe_assert'):
         message: str | None = None
         if message_ast is not None:
             checked = typecheck_and_resolve_inner(message_ast, ctx=ctx)
@@ -5268,6 +5268,21 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
                     hint='`$runtime_assert` messages may interpolate values',
                 )
             message = checked.content
+        if ast.name == 'unsafe_assert':
+            from .proofs import fact_term
+            if not fact_term(condition):
+                user_error(ctx.srcfile, 'an unsafe assertion needs a pure fact condition', Pointer(span=condition_ast.loc, message='the condition is not evaluated at runtime; use names, literals, trusted measures and supported arithmetic'))
+            held = _refine_condition_context(ctx, condition, truth=True)
+            refinements, bounds, keys = dict(held.refinements), dict(held.length_bounds), dict(held.key_facts)
+            ctx.refinements.clear()
+            ctx.refinements.update(refinements)
+            ctx.length_bounds.clear()
+            ctx.length_bounds.update(bounds)
+            ctx.key_facts.clear()
+            ctx.key_facts.update(keys)
+            # Retain even a folded condition so optimization cannot erase
+            # the programmer's explicit assumption from the audit record.
+            return hir.Assert(ast.loc, ty.VOID_TYPE, condition, source, message, dimmed=dimmed, unsafe=True)
         if isinstance(condition, hir.Bool):
             if not condition.value:
                 _report_refuted_assertion(condition_ast.loc, source, message, dimmed=dimmed, ctx=ctx)

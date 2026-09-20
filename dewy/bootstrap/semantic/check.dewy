@@ -8,6 +8,7 @@ import p"syntax.dewy" as syntax
 import p"type_check.dewy" as declarations
 import p"ty.dewy" as types
 import p"hir.dewy" as hir
+import p"proofs.dewy" as checked_proofs
 import p"bindings.dewy" as bindings
 import p"builtins.dewy" as builtins
 import p"dispatch.dewy" as dispatch
@@ -4928,7 +4929,7 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
         record_return(types.primitive('void' @session.types) node.loc env @session)
     }
     if node.name =? 'fail' return assertion_failure(id node none 'fail' env @session)
-    if node.name not in? ['assert' 'runtime_assert' 'expect'] return pending(id "directive `${node.name}`" env session)
+    if node.name not in? ['assert' 'unsafe_assert' 'runtime_assert' 'expect'] return pending(id "directive `${node.name}`" env session)
     $runtime_assert node.condition isnt? none
     let condition = expression(node.condition env @session expected=types.primitive('bool' @session.types))
     if condition is? Error return condition
@@ -4942,7 +4943,7 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
         dimmed = Span[condition_span.stop message_span.stop]
     }
     let empty = types.primitive('void' @session.types)
-    if node.name =? 'assert' {
+    if node.name in? ['assert' 'unsafe_assert'] {
         let message:string? = none
         if node.message isnt? none {
             let checked = expression(node.message env @session)
@@ -4950,6 +4951,14 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
             let literal = node_at(checked session)
             if literal isnt? hir.String return problem(node.message 'a compile-time assertion message must be a string literal' 'the message cannot depend on runtime values' env session)
             message = literal.content
+        }
+        if node.name =? 'unsafe_assert' {
+            if not checked_proofs.fact_term(condition checked_proofs.Input[session.hir session.registry session.sources]) return problem(node.condition 'an unsafe assertion needs a pure fact condition' 'the condition is not evaluated at runtime; use names, literals, trusted measures and supported arithmetic' env session)
+            let held=refined(condition true env @session)
+            join_reads([held] env @session)
+            let assertion=put(hir.Assert[node.loc empty condition text message dimmed=dimmed unsafe=true] @session)
+            session.unsafe_assertions.add(assertion)
+            return assertion
         }
         if value is? hir.Bool {
             if not value.value return problem(node.condition 'assertion refuted' if message is? none 'this condition is false at compile time' else message env session)
