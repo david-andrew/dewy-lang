@@ -1,0 +1,26 @@
+$explicit_copies
+Box:type=[value:int64 items:array<int64>]
+exercise=():>int64=>{
+    let rows:array<Box>=[]
+    rows.push([42 [7]])
+    let answer:int64=0
+    let before:int64=_arena_allocated_bytes
+    {
+        const view=@rows[0]
+        const items=@view.items
+        if items.length=?0 return 1
+        answer=view.value
+        if items[0] not=?7 return 2
+    }
+    if _arena_allocated_bytes not=?before return 3
+    rows.clear()
+    rows.push([9 [1]])
+    return answer
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {if exercise() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

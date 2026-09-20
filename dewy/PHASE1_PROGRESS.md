@@ -693,3 +693,27 @@ Validation: 23 strict-copy, ownership and array-release tests and all eight
 paired strict-copy cases passed. The new fixture executes on x86 and C through
 hosted lowering and through the existing native compiler.
 Artifacts: `../dewy-build-artifacts/phase1-fresh-replacement-parity-2026-09-20`.
+
+Required views now have a lexical-scope proof as well as the original
+whole-function proof. A private owner may change before and after the view's
+containing block, but any overlapping write, mutable place or unresolved call
+within that block prevents the view. Captured or addressed owners stay on the
+conservative path. Derived local views remain within that block; ordinary
+values leaving it retain independent-value semantics. Diagnostics search the
+relevant block rather than blaming a harmless earlier write. This first
+shorter lifetime is explicit-demand-only; ordinary inference and last-use
+intervals within a block remain separate work.
+
+The additional scope scan runs only for functions containing required views;
+the bootstrap's ordinary borrow analysis keeps its existing path. Native
+bookkeeping uses numeric scope keys, since optional numeric keys still lack a
+native hash implementation (an implementation gap, not a new design rule).
+
+Validation: 41 hosted view tests initially passed; the expanded scope tests
+and ownership/copy-report regressions passed 29 checks. Native passed all ten
+focused probes, including printing through a view, copying a value out and
+rejecting an addressed owner. The allocation/lifetime kernel passes on x86
+and C, with zero view allocations and no retained storage over 100 calls. A
+second native generation built in 67.16 seconds and executes both the scope
+and iterator-effect kernels (42). These remain correctness timings above target.
+Artifacts: `../dewy-build-artifacts/phase1-scoped-views-stage2-2026-09-20`.

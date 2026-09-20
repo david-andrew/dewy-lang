@@ -427,8 +427,10 @@ in both lowerings and the parity tool is the gate.
 Progress on 2026-09-20: explicit `const name = @route` demands are implemented
 for stored local values, including scalars and containers, in both compilers. They use the existing stable
 storage proof, retain owner liveness through dependent views, and report
-conflicting writes instead of copying. The initial proof requires stability
-throughout the function. Mutable local places and finer lifetime analysis remain pending.
+conflicting writes instead of copying. Inference initially requires stability
+throughout the function; required views can also use a containing lexical
+block when the owner is private, uncaptured and unexposed. Mutable local places
+and last-use lifetime intervals within a block remain pending.
 
 ### 1.2 The proof engine
 

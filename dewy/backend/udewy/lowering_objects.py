@@ -1294,7 +1294,7 @@ class _ObjectLowering:
         source = borrowing.route(expr)
         if source is None:
             return False
-        return borrowing.stable_owner(source, self.borrow_plan)
+        return borrowing.stable_owner(source, self.borrow_plan) or node.binding_id in self.borrow_plan.scoped_views
 
     def _lower_object_declare(
         self,

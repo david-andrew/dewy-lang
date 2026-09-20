@@ -353,7 +353,63 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
 }
 # `rejections` explains, per source binding, why its last considered use as
 # an argument was not borrowed (for `dewy analyze`).
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[]]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[]]
+
+# A required view can end with its lexical block. The owner may be changed
+# outside that block; every operation inside it must preserve the route.
+# Only functions containing explicit demands pay for this additional scan.
+ScopedViews:type = [bindings:set<addr>=set[] scopes:dict<addr addr>=[]]
+ScopeItem:type = const [id:addr scope:addr?]
+scoped_views = (demands:set<addr> nodes:array<hir.AST> plan:captures.Plan excluded:set<addr>):>ScopedViews => {
+    let result=ScopedViews[]
+    if demands.length =? 0 return result
+    loop [function_id function] in plan.functions {
+        let needed=false
+        loop binding in demands {if binding in? function.locals {needed=true break}}
+        if not needed continue
+        let literal=hir.node_at(nodes function_id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let pending:array<ScopeItem>=[ScopeItem[literal.body none]]
+        let seen:dict<addr set<addr>>=[]
+        let unscoped:set<addr>=set[]
+        let candidates:dict<addr set<addr>>=[]
+        loop pending.length >? 0 {
+            let item=pending.pop
+            if item.scope is? none {
+                if item.id in? unscoped continue
+                unscoped.add(item.id)
+            } else {
+                let scopes=seen.get(item.id set[])
+                if item.scope in? scopes continue
+                scopes.add(item.scope) seen[item.id]=scopes
+            }
+            let node=hir.node_at(nodes item.id)
+            if node is? hir.FunctionLiteral continue
+            let scope=item.scope
+            if node is? hir.Block and node.scoped {scope=item.id}
+            if node is? hir.Declare and node.view and node.binding_id isnt? none and scope isnt? none {
+                let known=candidates.get(item.id set[])
+                known.add(scope) candidates[item.id]=known
+                result.scopes[node.binding_id]=scope
+            }
+            loop child in hir.children(node) {pending.push(ScopeItem[child scope])}
+        }
+        loop [declaration scopes] in candidates {
+            let declared=hir.node_at(nodes declaration)
+            $runtime_assert declared is? hir.Declare and declared.binding_id isnt? none
+            let binding=declared.binding_id
+            let source=route(declared.expr nodes)
+            if source is? none or source.binding not in? function.locals or source.binding in? excluded continue
+            # This owner is private, uncaptured and unexposed. Ambient writes
+            # to unrelated storage cannot reach it; explicit places and
+            # unresolved callbacks still conflict through the normal scan.
+            let safe=true
+            loop scope in scopes {if expression_conflicts(scope source nodes plan set[]) {safe=false break}}
+            if safe {result.bindings.add(binding)}
+        }
+    }
+    return result
+}
 
 # Ownership transfer at a value boundary. A parameter whose only use, on
 # every path and outside any loop, pushes it into an array or passes it on
@@ -571,6 +627,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let rejections:dict<addr string>=[]
     let safe_places:set<addr>=set[]
     let unsafe_places:set<addr>=set[]
+    let view_demands:set<addr>=set[]
     let pending:array<addr>=[root]
     let seen:set<addr>=set[]
     loop pending.length >? 0 {
@@ -579,6 +636,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         seen.add(id)
         let node=hir.node_at(nodes id)
         hir.push_children(node @pending)
+        if node is? hir.Declare and node.view and node.binding_id isnt? none {view_demands.add(node.binding_id)}
         if node is? hir.Index {
             let source=route(node.array nodes)
             # A place may alias a different parameter's route. Its spelling
@@ -672,12 +730,21 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         if consumed_all.length >? 0 {consumed_arguments[id]=consumed_all}
     }
     let escaping:set<addr>=set[]
+    let addressed:set<addr>=set[]
     loop id in seen {
         let node=hir.node_at(nodes id)
-        if node is? hir.Place and (id not in? safe_places or id in? unsafe_places) {
+        if node is? hir.Place {
             let source=route(node.target nodes)
-            if source isnt? none {escaping.add(source.binding)}
+            if source isnt? none {
+                addressed.add(source.binding)
+                if id not in? safe_places or id in? unsafe_places {escaping.add(source.binding)}
+            }
         }
     }
-    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned]
+    let excluded=captured
+    loop binding in exposed {excluded.add(binding)}
+    loop binding in places {excluded.add(binding)}
+    loop binding in addressed {excluded.add(binding)}
+    let scoped=scoped_views(view_demands nodes plan excluded)
+    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned scoped.bindings scoped.scopes]
 }

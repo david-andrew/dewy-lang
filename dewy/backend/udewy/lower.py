@@ -3615,7 +3615,7 @@ class _Lowerer(
         owner = borrowing.route(node.expr)
         pointers = []
         if owner is not None and self.current_literal is not None:
-            pending = [self.current_literal.body]
+            pending = [self.borrow_plan.view_scopes.get(node.binding_id, self.current_literal.body)]
             while pending:
                 item = pending.pop()
                 if isinstance(item, hir.FunctionLiteral):
@@ -3632,7 +3632,7 @@ class _Lowerer(
             self.srcfile, 'cannot prove required local view',
             *pointers, Pointer(span=node.loc, message=f'`{node.name}` requires stable borrowed storage'),
             hint='use `.copy()` for an independent value, or keep the owner stable',
-            notes=['The initial local-view proof requires storage to remain stable throughout this function.'],
+            notes=['A required view needs stable storage throughout its lexical scope; captured or exposed owners need additional lifetime evidence.'],
         )
 
     def _compute_moves(self, literal: hir.FunctionLiteral) -> set[int]:

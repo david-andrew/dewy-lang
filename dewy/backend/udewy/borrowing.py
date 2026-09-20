@@ -61,6 +61,8 @@ class Plan:
     stable_bindings: set[int] = field(default_factory=set)
     stable_parameters: dict[int, ParameterEffects] = field(default_factory=dict)
     array_snapshots: set[int] = field(default_factory=set)             # id(Index) whose index may write the array
+    scoped_views: set[int] = field(default_factory=set)                # required view binding -> lexical lifetime proof
+    view_scopes: dict[int, hir.Block] = field(default_factory=dict)
 
 
 def unwrap(node: hir.AST) -> hir.AST:
@@ -330,8 +332,14 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
             summary = effects.for_param_binding(binding)
             if summary is not None:
                 plan.stable_parameters[binding] = summary
+    excluded_owners = captured | exposed | places
     for function in plan.functions.values():
+        has_views = False
         for node in _walk_function(function.literal):
+            if isinstance(node, hir.Declare) and node.view:
+                has_views = True
+            if isinstance(node, hir.Place) and (addressed := root_binding(node.target)) is not None:
+                excluded_owners.add(addressed)
             if isinstance(node, hir.Index):
                 source = route(node.array)
                 if source is not None and source.binding in places:
@@ -344,6 +352,38 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
                     source = None
                 if expression_conflicts(node.key, source, plan, source_bindings):
                     plan.array_snapshots.add(id(node))
+        # Required views may be confined to a lexical block even when their
+        # owner is written before/after that block. Derived local views cannot
+        # outlive this scope; ordinary values leaving it still get their usual
+        # independent-value treatment. Keep inference's existing fast path.
+        if not has_views:
+            continue
+        pending = [(function.literal.body, None)]
+        seen = set()
+        candidates = {}
+        while pending:
+            node, scope = pending.pop()
+            key = (id(node), id(scope))
+            if key in seen or isinstance(node, hir.FunctionLiteral):
+                continue
+            seen.add(key)
+            if isinstance(node, hir.Block) and node.scoped:
+                scope = node
+            if isinstance(node, hir.Declare) and node.view and node.binding_id is not None and scope is not None:
+                candidates.setdefault(node.binding_id, []).append((node, scope))
+            pending.extend((child, scope) for child in hir.children(node))
+        for binding, uses in candidates.items():
+            plan.view_scopes[binding] = uses[0][1]
+            safe = True
+            for node, scope in uses:
+                source = route(node.expr)
+                if (source is None or source.binding not in function.locals
+                        or source.binding in excluded_owners
+                        or expression_conflicts(scope, source, plan, source_bindings)):
+                    safe = False
+                    break
+            if safe:
+                plan.scoped_views.add(binding)
     return plan
 
 

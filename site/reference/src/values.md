@@ -69,8 +69,13 @@ independent snapshot is intended. Reading a view through an ordinary value
 boundary, such as returning it or storing it in another record, still supplies
 an independent value; this does not create a first-class reference.
 
-The initial implementation requires the owner to remain stable throughout the
-function, which is more conservative than the eventual lifetime analysis.
+The normal inference proof keeps the owner stable throughout the function.
+A required view can also use the shorter lifetime of its containing lexical
+block: private, uncaptured storage may change before and after that block,
+provided nothing changes it during the block. Captured owners, exposed
+addresses and mutable places still need stronger lifetime evidence. The
+compiler does not yet shorten a view's lifetime to its last read within the
+same block.
 It supports bindings, fields, and array elements, including scalars, records,
 arrays, strings, unions, dictionaries and sets. Scalar views retain the
 source width and signedness; they make the same stability demand as a view

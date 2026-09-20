@@ -1,0 +1,12 @@
+Box:type=[value:int64]
+main=():>int64=>{
+    let rows:array<Box>=[]
+    rows.push([42])
+    let answer:int64=0
+    {
+        const view=@rows[0]
+        rows[0].value=7
+        answer=view.value
+    }
+    return answer
+}
