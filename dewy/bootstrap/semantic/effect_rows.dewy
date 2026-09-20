@@ -1,0 +1,158 @@
+# Public contracts are distinct from analyze/effects.dewy's internal access
+# summaries. Keys below come from resolved nominal/generic/parameter identity,
+# never a source spelling. A missing row is open; Row[] is explicitly empty.
+Subject:type = const [kind:'resource'|'parameter' key:string route:array<string>=[]]
+Atom:type = const [family:string subject:Subject?=none]
+Row:type = const [atoms:array<Atom>=[] variables:array<string>=[] unknown:bool=false]
+Contract:type = const [allowed:Row?=none excluded:array<Atom>=[]]
+
+subject_covers = (wide:Subject narrow:Subject):>bool => {
+    if wide.kind not=? narrow.kind or wide.key not=? narrow.key return false
+    if wide.kind =? 'resource' and wide.route.length not=? narrow.route.length return false
+    if wide.route.length >? narrow.route.length return false
+    loop i in 0.. and i <? wide.route.length {
+        $runtime_assert i <? narrow.route.length
+        if wide.route[i] not=? narrow.route[i] return false
+    }
+    return true
+}
+covers = (wide:Atom narrow:Atom):>bool => {
+    if wide.family not=? narrow.family return false
+    if wide.subject is? none return narrow.subject is? none
+    if narrow.subject is? none return false
+    return subject_covers(wide.subject narrow.subject)
+}
+overlaps = (exclusion:Atom possible:Atom):>bool => {
+    if exclusion.family not=? possible.family return false
+    if exclusion.subject is? none return true
+    if possible.subject is? none return false
+    return subject_covers(exclusion.subject possible.subject) or subject_covers(possible.subject exclusion.subject)
+}
+# Rows are small. Normalize covered routes on insertion rather than relying
+# on structural hashing or expanding a family into all its possible subjects.
+add = (row:Row atom:Atom):>Row => {
+    loop old in row.atoms {if covers(old atom) return row}
+    let remaining:array<Atom>=[]
+    loop old in row.atoms {if not covers(atom old) {remaining.push(old)}}
+    remaining.push(atom)
+    return Row[remaining row.variables row.unknown]
+}
+merge = (left:Row right:Row):>Row => {
+    let result=left
+    loop atom in right.atoms {result=add(result atom)}
+    let variables=result.variables
+    loop variable in right.variables {if variable not in? variables {variables.push(variable)}}
+    return Row[result.atoms variables left.unknown or right.unknown]
+}
+subset = (actual:Row permitted:Row):>bool => {
+    if permitted.unknown return true
+    if actual.unknown return false
+    loop variable in actual.variables {if variable not in? permitted.variables return false}
+    loop atom in actual.atoms {
+        let found=false
+        loop bound in permitted.atoms {if covers(bound atom) {found=true break}}
+        if not found return false
+    }
+    return true
+}
+satisfies = (actual:Row contract:Contract):>bool => {
+    if contract.allowed isnt? none and not subset(actual contract.allowed) return false
+    if contract.excluded.length >? 0 and (actual.unknown or actual.variables.length >? 0) return false
+    loop excluded in contract.excluded {
+        loop atom in actual.atoms {if overlaps(excluded atom) return false}
+    }
+    return true
+}
+substitute = (row:Row rows:dict<string Row> subjects:dict<string Subject?>=[]):>Row => {
+    let output=Row[unknown=row.unknown]
+    loop atom in row.atoms {
+        let subject=atom.subject
+        if subject isnt? none and subject.kind =? 'parameter' and subject.key in? subjects {
+            let supplied=subjects[subject.key]
+            if supplied is? none continue
+            let route=supplied.route
+            loop field in subject.route {route.push(field)}
+            subject=Subject[supplied.kind supplied.key route]
+        }
+        output=add(output Atom[atom.family subject])
+    }
+    loop variable in row.variables {
+        let replacement=rows.get(variable Row[variables=[variable]])
+        output=merge(output replacement)
+    }
+    return output
+}
+
+implies = (actual:Contract? required:Contract?):>bool => {
+    if required is? none return true
+    let source=if actual is? none Contract[] else actual
+    let admitted=if source.allowed is? none Row[unknown=true] else source.allowed
+    if required.allowed isnt? none and not subset(admitted required.allowed) return false
+    loop exclusion in required.excluded {
+        let absent=not admitted.unknown and admitted.variables.length =? 0
+        loop atom in admitted.atoms {if overlaps(exclusion atom) {absent=false}}
+        if absent continue
+        let excluded=false
+        loop old in source.excluded {
+            if old.family =? exclusion.family and (old.subject is? none or (exclusion.subject isnt? none and subject_covers(old.subject exclusion.subject))) {excluded=true}
+        }
+        if not excluded return false
+    }
+    return true
+}
+# Length-prefixed components avoid collisions from punctuation in minted
+# identities/field names. Sorting makes interning independent of visit order.
+quoted = (text:string):>string => "{text.length}:{text}"
+atom_key = (atom:Atom):>string => {
+    let text=quoted(atom.family)
+    if atom.subject is? none return text + '-'
+    let subject=atom.subject
+    text+=quoted(subject.kind) + quoted(subject.key)
+    loop field in subject.route {text+=quoted(field)}
+    return text
+}
+identity = (contract:Contract?):>string => {
+    if contract is? none return ''
+    let allowed:string='*'
+    if contract.allowed isnt? none {
+        let row=merge(Row[] contract.allowed)
+        let atoms:array<string>=[]
+        loop atom in row.atoms {atoms.push(atom_key(atom))}
+        atoms=sorted_keys(atoms)
+        let variables=row.variables
+        variables=sorted_keys(variables)
+        allowed="{row.unknown}:"
+        loop atom in atoms {allowed+=quoted(atom)}
+        allowed+=';'
+        loop variable in variables {allowed+=quoted(variable)}
+    }
+    let excluded:array<string>=[]
+    loop atom in contract.excluded {
+        let key=atom_key(atom)
+        if key not in? excluded {excluded.push(key)}
+    }
+    excluded=sorted_keys(excluded)
+    let text=quoted(allowed)
+    loop key in excluded {text+=quoted(key)}
+    return text
+}
+
+# Internal identity ordering, independent of the user-facing array sort API.
+# UTF-8 byte order preserves Unicode scalar order.
+key_before = (a:string b:string):>bool => {
+    let left=a as array<uint8>
+    let right=b as array<uint8>
+    loop i in 0.. and i <? left.length and i <? right.length {
+        if left[i] not=? right[i] return left[i] <? right[i]
+    }
+    return left.length <? right.length
+}
+sorted_keys = (values:array<string>):>array<string> => {
+    let output:array<string>=[]
+    loop value in values {
+        let at:addr<i=>i<=?output.length>=0
+        loop at <? output.length and key_before(output[at] value) {at+=1}
+        output.insert(value idx=at)
+    }
+    return output
+}
