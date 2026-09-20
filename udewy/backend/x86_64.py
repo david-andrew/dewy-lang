@@ -98,11 +98,18 @@ class X86_64Backend(Backend):
         self._frame_subtract_index: int = -1
         self._locals = LocalRegisterAllocator()
         # The visible value may be pending rather than in %rax: the flags of
-        # the last comparison (the condition that would make it -1) or a local
-        # not yet loaded. Branches, saves and comparisons consume pending
-        # values directly; every other emitter flushes them first.
-        self._pending_cc: str | None = None
-        self._pending_slot: int | None = None
+        # the last comparison (the condition that would make it -1), a local
+        # plus a constant offset not yet loaded, a constant, or a load not yet
+        # performed. Branches, saves, comparisons and memory operations
+        # consume pending values directly; every other emitter flushes first.
+        self._pending_kind: str | None = None   # 'cc' | 'slot' | 'const' | 'mem'
+        self._pending_cc = ''
+        self._pending_slot = 0                  # 'slot', and 'mem' based on a local
+        self._pending_offset = 0
+        self._pending_value = 0                 # 'const'
+        self._pending_width = 64                # 'mem'
+        self._pending_signed = False
+        self._pending_address: str | None = None   # 'mem' operand based on %rax, or None when based on the local
         
         # Control flow state
         self._if_stack: list[tuple[str, str, bool]] = []  # (else_label, end_label, else_emitted)
@@ -454,8 +461,7 @@ class X86_64Backend(Backend):
         self._saved_depth = 0
         self._spilled_depth = 0
         self._min_slot_offset = 0
-        self._pending_cc = None
-        self._pending_slot = None
+        self._pending_kind = None
         self._locals.begin_function()
         
         self._current_fn_code = []
@@ -772,10 +778,68 @@ class X86_64Backend(Backend):
         The line is `prefix` + operand + `suffix`: the frame slot now, the
         slot's register after allocation. Debug builds keep the frame slot.
         """
+        self._emit_two_form(slot, f'{prefix}{slot}(%rbp){suffix}', prefix, suffix)
+
+    def _emit_two_form(self, slot: int, memory_line: str, prefix: str, suffix: str) -> None:
+        """Emit `memory_line` (which may hold two instructions) for a slot in memory.
+
+        After allocation the line becomes `prefix` + register + `suffix`.
+        """
         assert self._current_fn_code is not None
         if not self.debug_info:
             self._locals.note_site(len(self._current_fn_code), self._slot_key(slot), prefix, suffix)
-        self._current_fn_code.append(f'{prefix}{slot}(%rbp){suffix}')
+        self._current_fn_code.append(memory_line)
+
+    @staticmethod
+    def _reg32(reg: str) -> str:
+        return {'%rax': '%eax', '%rbx': '%ebx'}.get(reg, reg + 'd')
+
+    @staticmethod
+    def _load_mnemonic(width: int, signed: bool) -> str:
+        if width == 64:
+            return 'movq'
+        if width == 32:
+            return 'movslq' if signed else 'movl'
+        if width == 16:
+            return 'movswq' if signed else 'movzwq'
+        return 'movsbq' if signed else 'movzbq'
+
+    @staticmethod
+    def _store_mnemonic(width: int) -> str:
+        return {64: 'movq', 32: 'movl', 16: 'movw', 8: 'movb'}[width]
+
+    @staticmethod
+    def _fits_imm32(value: int) -> bool:
+        return -2147483648 <= value <= 2147483647
+
+    def _emit_pending_mem_op(self, op: str, tail: str) -> None:
+        """Emit `op X, tail` where X is the pending memory operand.
+
+        X is `off(%rax)`, or the local's slot loaded into %rax first (one
+        instruction after allocation).
+        """
+        if self._pending_address is not None:
+            self._emit(f'{op} {self._pending_address}{tail}')
+            return
+        offset = self._pending_offset
+        self._emit_two_form(
+            self._pending_slot,
+            f'    movq {self._pending_slot}(%rbp), %rax\n    {op} {offset}(%rax){tail}',
+            f'    {op} {offset}(', f'){tail}')
+
+    def _emit_pending_load(self, dst: str) -> None:
+        """Perform the pending load into `dst`."""
+        op = self._load_mnemonic(self._pending_width, self._pending_signed)
+        target = self._reg32(dst) if op == 'movl' else dst
+        if self._pending_address is None and dst != '%rax':
+            # The destination doubles as the base register while the local is in memory.
+            offset = self._pending_offset
+            self._emit_two_form(
+                self._pending_slot,
+                f'    movq {self._pending_slot}(%rbp), {dst}\n    {op} {offset}({dst}), {target}',
+                f'    {op} {offset}(', f'), {target}')
+            return
+        self._emit_pending_mem_op(op, f', {target}')
 
     def _emit_slot_load(self, slot: int, register: str) -> None:
         self._emit_slot_access(slot, '    movq ', f', {register}')
@@ -788,20 +852,27 @@ class X86_64Backend(Backend):
 
     def _flush(self) -> None:
         """Materialize a pending value into %rax."""
-        if self._pending_cc is not None:
-            cc, self._pending_cc = self._pending_cc, None
-            self._emit(f'set{cc} %al')
+        kind, self._pending_kind = self._pending_kind, None
+        if kind == 'cc':
+            self._emit(f'set{self._pending_cc} %al')
             self._emit('movzbq %al, %rax')
             self._emit('negq %rax')
-        elif self._pending_slot is not None:
-            slot, self._pending_slot = self._pending_slot, None
-            self._emit_slot_load(slot, '%rax')
+        elif kind == 'slot':
+            self._emit_slot_load(self._pending_slot, '%rax')
+            if self._pending_offset:
+                self._emit(f'addq ${self._pending_offset}, %rax')
+                self._address_adjustment = (self._current_fn_code, len(self._current_fn_code), self._pending_offset)
+        elif kind == 'const':
+            self._emit(f'movq ${self._pending_value}, %rax')
+        elif kind == 'mem':
+            self._emit_pending_load('%rax')
 
     def _branch_pending(self, label: str, when_true: bool) -> bool:
         """Consume a pending condition as a branch taken when it holds or fails."""
-        if self._pending_cc is None:
+        if self._pending_kind != 'cc':
             return False
-        cc, self._pending_cc = self._pending_cc, None
+        cc = self._pending_cc
+        self._pending_kind = None
         if not when_true:
             cc = self._INVERSE_CC[cc]
         self._emit(f'j{cc} {label}')
@@ -809,11 +880,20 @@ class X86_64Backend(Backend):
 
     def _compare_pending(self, cc: str, left: str) -> None:
         """Compare `left` with the visible value and leave the condition pending."""
-        if self._pending_slot is not None:
-            slot, self._pending_slot = self._pending_slot, None
-            self._emit_slot_access(slot, '    cmpq ', f', {left}')
+        kind = self._pending_kind
+        if kind == 'slot' and self._pending_offset == 0:
+            self._pending_kind = None
+            self._emit_slot_access(self._pending_slot, '    cmpq ', f', {left}')
+        elif kind == 'const' and self._fits_imm32(self._pending_value):
+            self._pending_kind = None
+            self._emit(f'cmpq ${self._pending_value}, {left}')
+        elif kind == 'mem' and self._pending_width == 64:
+            self._pending_kind = None
+            self._emit_pending_mem_op('cmpq', f', {left}')
         else:
+            self._flush()
             self._emit(f'cmpq %rax, {left}')
+        self._pending_kind = 'cc'
         self._pending_cc = cc
 
     def _allocate_locals(self) -> None:
@@ -841,10 +921,16 @@ class X86_64Backend(Backend):
     def load_local(self, slot: int) -> None:
         """Push local variable value onto the value stack."""
         self._flush()
+        self._pending_kind = 'slot'
         self._pending_slot = slot
+        self._pending_offset = 0
     
     def store_local(self, slot: int) -> None:
         """Pop value from stack and store to local variable."""
+        if self._pending_kind == 'const' and self._fits_imm32(self._pending_value):
+            self._pending_kind = None
+            self._emit_slot_access(slot, f'    movq ${self._pending_value}, ', '')
+            return
         self._flush()
         self._emit_slot_store('%rax', slot)
     
@@ -855,7 +941,8 @@ class X86_64Backend(Backend):
     def push_const_i64(self, value: int) -> None:
         """Push a 64-bit integer constant onto the value stack."""
         self._flush()
-        self._emit(f"movq ${wrap_i64(value)}, %rax")
+        self._pending_kind = 'const'
+        self._pending_value = wrap_i64(value)
     
     def push_void(self) -> None:
         """Push void (zero) onto the value stack."""
@@ -870,14 +957,27 @@ class X86_64Backend(Backend):
     
     def pop_value(self) -> None:
         """Discard the top value; one never materialized costs nothing."""
-        self._pending_cc = None
-        self._pending_slot = None
+        self._pending_kind = None
     
     def save_value(self) -> None:
         """Save the top value to physical stack."""
-        if self._pending_slot is not None and self._spilled_depth == 0 and self._saved_depth < len(self._VALUE_CACHE_REGS):
-            slot, self._pending_slot = self._pending_slot, None
-            self._emit_slot_load(slot, self._VALUE_CACHE_REGS[self._saved_depth])
+        kind = self._pending_kind
+        if kind in ('slot', 'const', 'mem') and self._spilled_depth == 0 and self._saved_depth < len(self._VALUE_CACHE_REGS):
+            cache = self._VALUE_CACHE_REGS[self._saved_depth]
+            self._pending_kind = None
+            if kind == 'slot':
+                if self._pending_offset == 0:
+                    self._emit_slot_load(self._pending_slot, cache)
+                else:
+                    offset = self._pending_offset
+                    self._emit_two_form(
+                        self._pending_slot,
+                        f'    movq {self._pending_slot}(%rbp), {cache}\n    addq ${offset}, {cache}',
+                        f'    leaq {offset}(', f'), {cache}')
+            elif kind == 'const':
+                self._emit(f'movq ${self._pending_value}, {cache}')
+            else:
+                self._emit_pending_load(cache)
             self._saved_depth += 1
             return
         self._flush()
@@ -895,8 +995,11 @@ class X86_64Backend(Backend):
     def unary_op(self, op_kind: t1.Kind) -> None:
         """Apply unary operator to top of stack."""
         # A pending condition is exactly -1 or 0, so `not` is its inverse.
-        if op_kind == t1.Kind.TK_NOT and self._pending_cc is not None:
+        if op_kind == t1.Kind.TK_NOT and self._pending_kind == 'cc':
             self._pending_cc = self._INVERSE_CC[self._pending_cc]
+            return
+        if op_kind == t1.Kind.TK_MINUS and self._pending_kind == 'const':
+            self._pending_value = wrap_i64(-self._pending_value)
             return
         self._flush()
         if op_kind == t1.Kind.TK_MINUS:
@@ -925,15 +1028,27 @@ class X86_64Backend(Backend):
         # Most x86 immediate operands sign-extend 32 bits, unlike movabsq.
         condition = self._SIGNED_COMPARISONS.get(op_kind)
         signed = wrap_i64(value)
-        if condition is not None and -2147483648 <= signed <= 2147483647:
-            if self._pending_slot is not None:
-                slot, self._pending_slot = self._pending_slot, None
-                self._emit_slot_access(slot, f'    cmpq ${signed}, ', '')
+        if condition is not None and self._fits_imm32(signed):
+            kind = self._pending_kind
+            if kind == 'slot' and self._pending_offset == 0:
+                self._pending_kind = None
+                self._emit_slot_access(self._pending_slot, f'    cmpq ${signed}, ', '')
+            elif kind == 'mem' and self._pending_width == 64:
+                self._pending_kind = None
+                self._emit_pending_mem_op(f'cmpq ${signed},', '')
             else:
                 self._flush()
                 self._emit(f'cmpq ${signed}, %rax')
+            self._pending_kind = 'cc'
             self._pending_cc = condition
             return
+        # A constant offset joins a pending local: the address folds into
+        # whatever consumes it.
+        if self._pending_kind == 'slot' and op_kind in (t1.Kind.TK_PLUS, t1.Kind.TK_MINUS) and self._fits_imm32(signed):
+            offset = self._pending_offset + (signed if op_kind == t1.Kind.TK_PLUS else -signed)
+            if self._fits_imm32(offset):
+                self._pending_offset = offset
+                return
         self._flush()
         instruction = self._IMMEDIATE_OPERATIONS.get(op_kind)
         if instruction is not None:
@@ -953,22 +1068,23 @@ class X86_64Backend(Backend):
                 if -2147483648 <= offset <= 2147483647:
                     self._address_adjustment = (self._current_fn_code, len(self._current_fn_code), offset)
             if condition is not None:
+                self._pending_kind = 'cc'
                 self._pending_cc = condition
             return
         super().binary_immediate(op_kind, value)
 
     def binary_op(self, op_kind: t1.Kind) -> None:
         """Combine the saved left value and %rax without staging extra copies."""
-        if self._pending_cc is not None:
+        if self._pending_kind == 'cc':
             self._flush()
         condition = self._SIGNED_COMPARISONS.get(op_kind)
         if condition is not None:
             self._compare_pending(condition, self._saved_operand())
             return
-        if op_kind == t1.Kind.TK_MINUS and self._pending_slot is not None:
-            slot, self._pending_slot = self._pending_slot, None
+        if op_kind == t1.Kind.TK_MINUS and self._pending_kind == 'slot' and self._pending_offset == 0:
+            self._pending_kind = None
             left = self._saved_operand()
-            self._emit_slot_access(slot, '    subq ', f', {left}')
+            self._emit_slot_access(self._pending_slot, '    subq ', f', {left}')
             self._emit(f'movq {left}, %rax')
             return
         self._flush()
@@ -1015,32 +1131,36 @@ class X86_64Backend(Backend):
         return '(%rax)'
 
     def load_mem(self, width: int, signed: bool = False) -> None:
-        """Load from memory address in rax."""
-        address = self._memory_address()
-        if width == 64:
-            self._emit(f"movq {address}, %rax")
-        elif width == 32:
-            if signed:
-                self._emit(f"movslq {address}, %rax")
-            else:
-                self._emit(f"movl {address}, %eax")
-        elif width == 16:
-            if signed:
-                self._emit(f"movswq {address}, %rax")
-            else:
-                self._emit(f"movzwq {address}, %rax")
-        elif width == 8:
-            if signed:
-                self._emit(f"movsbq {address}, %rax")
-            else:
-                self._emit(f"movzbq {address}, %rax")
-    
+        """Load from the address in rax, or from a pending local plus offset."""
+        if self._pending_kind == 'slot':
+            self._pending_address = None
+        else:
+            self._flush()
+            self._pending_address = self._memory_address()
+        self._pending_kind = 'mem'
+        self._pending_width = width
+        self._pending_signed = signed
+
     def store_mem(self, width: int) -> None:
-        """Store the saved value at %rax and return the intrinsic's zero."""
+        """Store the saved value at the address in rax, or at a pending local plus offset."""
+        if self._pending_kind == 'slot':
+            self._pending_kind = None
+            # The store goes through the local's register once allocated; %rax
+            # is free to hold the address while it is in memory.
+            value = self._saved_operand(width)
+            store = f'    {self._store_mnemonic(width)} {value}, '
+            offset = self._pending_offset
+            self._emit_two_form(
+                self._pending_slot,
+                f'    movq {self._pending_slot}(%rbp), %rax\n{store}{offset}(%rax)',
+                f'{store}{offset}(', ')')
+            self._emit("xorq %rax, %rax")
+            return
+        self._flush()
+        # Capture the address before a spilled saved value emits its pop.
         address = self._memory_address()
         value = self._saved_operand(width)
-        instruction = self._STORE_OPERATIONS[width]
-        self._emit(f'{instruction} {value}, {address}')
+        self._emit(f'{self._store_mnemonic(width)} {value}, {address}')
         self._emit("xorq %rax, %rax")
 
     def signed_shr(self) -> None:
@@ -1132,7 +1252,7 @@ class X86_64Backend(Backend):
 
     def unsigned_cmp(self, kind: str) -> None:
         """Unsigned comparison returning udewy booleans."""
-        if self._pending_cc is not None:
+        if self._pending_kind == 'cc':
             self._flush()
         self._compare_pending({"gt": "a", "lt": "b", "gte": "ae", "lte": "be"}[kind], self._saved_operand())
 
@@ -1379,7 +1499,7 @@ class X86_64Backend(Backend):
 
     def cond_or_split(self) -> str:
         done_label = self._new_label("cond_or_done")
-        if self._pending_cc is not None:
+        if self._pending_kind == 'cc':
             # The taken path must carry the true value; movq leaves the flags alone.
             self._emit("movq $-1, %rax")
             self._branch_pending(done_label, True)
@@ -1452,8 +1572,10 @@ class X86_64Backend(Backend):
         return set(range(1, 1 + mixed_args * 2, 2))
     
     def emit_intrinsic(self, name: str, num_args: int, intrinsic_data: object | None = None) -> None:
-        self._flush()
         """Emit code for an intrinsic call."""
+        # Memory intrinsics consume a pending address themselves.
+        if not (name.startswith("__load_") or name.startswith("__store_")):
+            self._flush()
         if name == "__load_u8__":
             self.load_mem(8, signed=False)
         elif name == "__load_u16__":

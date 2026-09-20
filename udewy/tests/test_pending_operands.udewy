@@ -1,0 +1,48 @@
+# Pending values reach memory operations, saves and comparisons in place:
+# locals plus constant offsets as load/store bases, constants saved or
+# compared directly, loads consumed by saves and comparisons.
+let sum_fields = (rec:int n:int):>int => {
+    let total:int = 0
+    let i:int = 0
+    loop i <? n {
+        total = total + __load_i64__(rec + i * 8)
+        i = i + 1
+    }
+    __store_i64__(total rec + 24)
+    __store_u8__(7 rec + 40)
+    __store_u16__(0xbeef rec + 42)
+    __store_u32__(0x7fffffff rec + 44)
+    if __load_i64__(rec + 24) not=? total { return -1 }
+    if __load_u8__(rec + 40) =? 7 and __load_u16__(rec + 42) =? 0xbeef {
+        if __load_i32__(rec + 44) =? 2147483647 { return total }
+    }
+    return -2
+}
+let tagged = (cell:int):>int => {
+    if __load_i64__(cell + 8) =? 140 { return 1 }
+    if __load_i64__(cell + 8) not=? 141 { return 3 }
+    return 2
+}
+let main = ():>int => {
+    let rec:int = __alloca__(48)
+    __store_i64__(1 rec)
+    __store_i64__(2 rec + 8)
+    __store_i64__(3 rec + 16)
+    let k:int = 5
+    let m:int = k + 3
+    let far:int = rec - 16
+    if sum_fields(rec 3) not=? 6 { return 1 }
+    if m - k not=? 3 { return 2 }
+    if __load_u32__(rec + 40) not=? 0xbeef0007 { return 3 }
+    if __load_i64__(far + 16) not=? 1 { return 4 }
+    __store_i64__(141 rec + 8)
+    if tagged(rec) not=? 2 { return 5 }
+    __store_i64__(140 rec + 8)
+    if tagged(rec) not=? 1 { return 6 }
+    __store_i64__(-1 rec + 8)
+    if tagged(rec) not=? 3 { return 7 }
+    let neg:int = -k
+    if neg + 5 not=? 0 { return 8 }
+    if __load_i64__(rec + 8) <? 0 and k =? 5 { return 0 }
+    return 9
+}

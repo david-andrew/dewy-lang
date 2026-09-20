@@ -203,7 +203,7 @@ def _cross_toolchain(prefixes, emulator):
 # test_local_registers and test_intrinsic_operands use x86-64 syscall numbers
 # and fail on AArch64 with or without allocation.
 @pytest.mark.parametrize('fixture', ['test_cached_operands.udewy', 'test_immediate_operands.udewy',
-                                     'test_address_displacements.udewy'])
+                                     'test_address_displacements.udewy', 'test_pending_operands.udewy'])
 def test_allocated_arm_programs_run_under_qemu(tmp_path, fixture):
     if _cross_toolchain(['aarch64-linux-gnu-', 'aarch64-elf-', 'aarch64-unknown-elf-'], 'qemu-aarch64') is None:
         pytest.skip('AArch64 toolchain or qemu-aarch64 not installed')
@@ -214,3 +214,19 @@ def test_allocated_arm_programs_run_under_qemu(tmp_path, fixture):
         assembly = p0.parse(t1.tokenize(program), program, backend)
         binary = backend.compile_and_link(assembly, name, tmp_path)
         assert subprocess.run(['qemu-aarch64', str(binary)], timeout=30).returncode == 0
+
+
+def test_x86_pending_values_fold_into_memory_operands():
+    source = (Path(__file__).parents[2] / 'udewy/tests/test_pending_operands.udewy').read_text()
+    backend = get_backend('x86_64')
+    backend.debug_info = False
+    assembly = p0.parse(t1.tokenize(source), source, backend)
+    # A local plus offset is the base of loads and stores, a constant is
+    # stored directly, and a load is compared against an immediate in place.
+    import re
+    assert re.search(r'movq %r12, 24\(%r\w+\)', assembly)
+    assert re.search(r'movzbq 40\(%r\w+\), %rax', assembly)
+    assert 'movq $7, %r12' in assembly
+    assert re.search(r'cmpq \$140, 8\(%r\w+\)', assembly)
+    assert re.search(r'movq \$5, %r\w+', assembly)
+

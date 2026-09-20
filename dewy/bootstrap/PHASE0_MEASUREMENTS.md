@@ -4314,3 +4314,36 @@ builds in about 17 s: the remaining gap is the generated record copies and
 tag dispatches themselves (Phase 1.1 ownership and, on the emitter side,
 folding a pending local into a memory operand's base register).
 
+### Pending constants, loads and address bases on x86-64 (2026-09-19)
+
+The x86-64 emitters (both languages) extend the pending value to three more
+shapes. A constant stays pending until its consumer: `save_value` puts it
+in the cache register (`movq $7, %r12`), a store to a local writes it
+directly (`movq $0, %r15`), a comparison uses it as the immediate, and
+unary minus folds into it. A load stays pending as a memory operand, so a
+save or a comparison reads memory directly (`movq 24(%rax), %r12`,
+`cmpq $140, 8(%rax)`). A local plus a constant offset stays pending as an
+address: loads and stores through it use the local as the base register
+(`movq 24(%rbx), %r12`, `movq %r12, 24(%rbx)`) and a save becomes `leaq`.
+While the local is still in memory the site holds two instructions in one
+code line (slot load into a free register, then the operation); the
+allocator's rewrite replaces the whole line with the register form. The
+memory intrinsics therefore no longer flush at entry; every other intrinsic
+still does. A tag test `__load_i64__(cell + 8) =? 140` followed by `if` is
+now `cmpq $140, 8(%rbx); jne` (seven instructions at the start of the day).
+
+Verification: hosted/native assembly identical for eight fixtures (a new
+`test_pending_operands.udewy` covers the new shapes on all three targets
+and runs under qemu on AArch64) on x86-64, AArch64 and RISC-V in both debug
+modes; hosted-built and self-built µDewy compilers byte-identical; Dewy
+fixtures 96/4 with the direct-built compiler, which rebuilds itself
+byte-identically. The self-build's assembly: 1,679,120 to 1,538,629
+instructions (1,962,359 at the start of the day, 22% fewer); load-then-cache
+pairs 62,983 to 2,453. Direct-built self-build (alternating pairs): 46.43/
+46.45 s before, 44.56/44.71 s after (4%); from the day's 57.36 s start the
+direct route is 22% faster with peak memory unchanged. Instruction count
+now falls faster than time: the remaining cost is in what the generated
+code does (record copies, release dispatch), not in how each operation is
+spelled, so the next step is Phase 1.1 ownership rather than more emitter
+work.
+

@@ -54,12 +54,23 @@ let x86_frame_subtract_index:int = 0   # index into current_fn_code to patch
 let x86_callee_local_regs:int = 0
 let x86_caller_local_regs:int = 0
 # The visible value may be pending rather than in %rax: the flags of the last
-# comparison (`x86_pending_cc`, the condition that would make it -1) or a
-# local not yet loaded (`x86_pending_slot`). Branches, saves and comparisons
-# consume pending values directly; every other emitter flushes them first.
-let x86_pending_cc:int = 0
-let x86_pending_slot:int = 0
-let x86_has_pending_slot:int = false
+# comparison (the condition that would make it -1), a local plus a constant
+# offset not yet loaded, a constant, or a load not yet performed. Branches,
+# saves, comparisons and memory operations consume pending values directly;
+# every other emitter flushes them first.
+const XP_NONE:int = 0
+const XP_CC:int = 1
+const XP_SLOT:int = 2
+const XP_CONST:int = 3
+const XP_MEM:int = 4
+let x86_pending_kind:int = 0
+let x86_pending_cc:int = 0        # XP_CC
+let x86_pending_slot:int = 0      # XP_SLOT, and XP_MEM based on a local
+let x86_pending_offset:int = 0
+let x86_pending_value:int = 0     # XP_CONST
+let x86_pending_width:int = 0     # XP_MEM
+let x86_pending_signed:int = 0
+let x86_pending_address:int = 0   # XP_MEM operand text based on %rax, or 0 when based on the local
 
 # Control-flow stacks. The if stack has 3 parallel Vecs; loop stack has 2.
 let x86_if_else_labels:int = 0
@@ -1222,8 +1233,7 @@ let x86_begin_function = (label_id:int name:int param_count:int is_main:int):>vo
     x86_saved_depth = 0
     x86_spilled_depth = 0
     x86_min_slot_offset = 0
-    x86_pending_cc = 0
-    x86_has_pending_slot = false
+    x86_pending_kind = XP_NONE
     la_begin_function()
 
     let code:int = vec_new(64)
@@ -1344,15 +1354,139 @@ let x86_slot_operand = (slot:int):>int => {
 # `suffix`, where the operand is the frame slot now and the slot's register
 # after allocation. Debug builds keep the frame slot.
 let x86_emit_slot_access = (slot:int prefix:int suffix:int):>void => {
-    if not be_debug_info {
-        la_note_site(vec_len(x86_current_fn_code) x86_slot_key(slot) prefix suffix)
-    }
     let bb:int = bb_new(str_len(prefix) + str_len(suffix) + 16)
     bb_push_str(bb prefix)
     bb_push_int(bb slot)
     bb_push_str(bb "(%rbp)")
     bb_push_str(bb suffix)
-    vec_push(x86_current_fn_code bb_finalize_as_string(bb))
+    x86_emit_two_form(slot bb_finalize_as_string(bb) prefix suffix)
+    return void
+}
+
+# Emit `memory_line` (which may hold two instructions) for a slot that is in
+# memory; after allocation the line becomes `prefix` + register + `suffix`.
+let x86_emit_two_form = (slot:int memory_line:int prefix:int suffix:int):>void => {
+    if not be_debug_info {
+        la_note_site(vec_len(x86_current_fn_code) x86_slot_key(slot) prefix suffix)
+    }
+    vec_push(x86_current_fn_code memory_line)
+    return void
+}
+
+let x86_slot_text = (slot:int):>int => {
+    let bb:int = bb_new(16)
+    bb_push_int(bb slot)
+    bb_push_str(bb "(%rbp)")
+    return bb_finalize_as_string(bb)
+}
+
+let x86_reg32 = (reg:int):>int => {
+    if str_eq(reg "%rax") { return "%eax" }
+    if str_eq(reg "%rbx") { return "%ebx" }
+    let bb:int = bb_new(8)
+    bb_push_str(bb reg)
+    bb_push_str(bb "d")
+    return bb_finalize_as_string(bb)
+}
+
+let x86_load_mnemonic = (width:int signed:int):>int => {
+    if width =? 64 { return "movq" }
+    if width =? 32 { if signed { return "movslq" } return "movl" }
+    if width =? 16 { if signed { return "movswq" } return "movzwq" }
+    if signed { return "movsbq" }
+    return "movzbq"
+}
+
+let x86_store_mnemonic = (width:int):>int => {
+    if width =? 64 { return "movq" }
+    if width =? 32 { return "movl" }
+    if width =? 16 { return "movw" }
+    return "movb"
+}
+
+# "    op $value, " for an immediate first operand.
+let x86_imm_prefix = (op:int value:int):>int => {
+    let bb:int = bb_new(32)
+    bb_push_str(bb "    ")
+    bb_push_str(bb op)
+    bb_push_str(bb " $")
+    bb_push_int(bb value)
+    bb_push_str(bb ", ")
+    return bb_finalize_as_string(bb)
+}
+
+# Emit `op X, tail` where X is the pending memory operand: `off(%rax)`, or the
+# local's slot loaded into %rax first (one instruction after allocation).
+let x86_emit_pending_mem_op = (op:int tail:int):>void => {
+    let bb:int = bb_new(64)
+    if x86_pending_address not=? 0 {
+        bb_push_str(bb "    ")
+        bb_push_str(bb op)
+        bb_push_byte(bb 32)
+        bb_push_str(bb x86_pending_address)
+        bb_push_str(bb tail)
+        vec_push(x86_current_fn_code bb_finalize_as_string(bb))
+        return void
+    }
+    bb_push_str(bb "    movq ")
+    bb_push_str(bb x86_slot_text(x86_pending_slot))
+    bb_push_str(bb ", %rax\n    ")
+    bb_push_str(bb op)
+    bb_push_byte(bb 32)
+    bb_push_int(bb x86_pending_offset)
+    bb_push_str(bb "(%rax)")
+    bb_push_str(bb tail)
+    let prefix:int = bb_new(32)
+    bb_push_str(prefix "    ")
+    bb_push_str(prefix op)
+    bb_push_byte(prefix 32)
+    bb_push_int(prefix x86_pending_offset)
+    bb_push_byte(prefix 40)
+    let suffix:int = bb_new(16 + str_len(tail))
+    bb_push_byte(suffix 41)
+    bb_push_str(suffix tail)
+    x86_emit_two_form(x86_pending_slot bb_finalize_as_string(bb) bb_finalize_as_string(prefix) bb_finalize_as_string(suffix))
+    return void
+}
+
+# Perform the pending load into `dst`.
+let x86_emit_pending_load = (dst:int):>void => {
+    let op:int = x86_load_mnemonic(x86_pending_width x86_pending_signed)
+    let target:int = dst
+    if str_eq(op "movl") { target = x86_reg32(dst) }
+    let tail:int = bb_new(16)
+    bb_push_str(tail ", ")
+    bb_push_str(tail target)
+    if x86_pending_address =? 0 and not str_eq(dst "%rax") {
+        # The destination doubles as the base register while the local is in memory.
+        let bb:int = bb_new(64)
+        bb_push_str(bb "    movq ")
+        bb_push_str(bb x86_slot_text(x86_pending_slot))
+        bb_push_str(bb ", ")
+        bb_push_str(bb dst)
+        bb_push_str(bb "\n    ")
+        bb_push_str(bb op)
+        bb_push_byte(bb 32)
+        bb_push_int(bb x86_pending_offset)
+        bb_push_byte(bb 40)
+        bb_push_str(bb dst)
+        bb_push_byte(bb 41)
+        bb_push_str(bb ", ")
+        bb_push_str(bb target)
+        let prefix:int = bb_new(32)
+        bb_push_str(prefix "    ")
+        bb_push_str(prefix op)
+        bb_push_byte(prefix 32)
+        bb_push_int(prefix x86_pending_offset)
+        bb_push_byte(prefix 40)
+        let suffix:int = bb_new(16)
+        bb_push_byte(suffix 41)
+        bb_push_str(suffix ", ")
+        bb_push_str(suffix target)
+        x86_emit_two_form(x86_pending_slot bb_finalize_as_string(bb) bb_finalize_as_string(prefix) bb_finalize_as_string(suffix))
+        return void
+    }
+    x86_emit_pending_mem_op(op bb_finalize_as_string(tail))
     return void
 }
 
@@ -1388,13 +1522,26 @@ let x86_invert_cc = (cc:int):>int => {
 
 # Materialize a pending value into %rax.
 let x86_flush = ():>void => {
-    if x86_pending_cc not=? 0 {
-        let cc:int = x86_pending_cc
-        x86_pending_cc = 0
-        x86_emit_bool_from_cc(cc)
-    } else if x86_has_pending_slot {
-        x86_has_pending_slot = false
+    let kind:int = x86_pending_kind
+    x86_pending_kind = XP_NONE
+    if kind =? XP_CC {
+        x86_emit_bool_from_cc(x86_pending_cc)
+    } else if kind =? XP_SLOT {
         x86_emit_slot_load(x86_pending_slot "%rax")
+        if x86_pending_offset not=? 0 {
+            x86_emit_op_imm("addq" x86_pending_offset "%rax")
+            x86_address_code = x86_current_fn_code
+            x86_address_length = vec_len(x86_current_fn_code)
+            x86_address_offset = x86_pending_offset
+        }
+    } else if kind =? XP_CONST {
+        let bb:int = bb_new(32)
+        bb_push_str(bb "    movq $")
+        bb_push_int(bb x86_pending_value)
+        bb_push_str(bb ", %rax")
+        vec_push(x86_current_fn_code bb_finalize_as_string(bb))
+    } else if kind =? XP_MEM {
+        x86_emit_pending_load("%rax")
     }
     return void
 }
@@ -1402,9 +1549,9 @@ let x86_flush = ():>void => {
 # Consume a pending condition as a branch: jump when the condition holds
 # (`when_true`) or fails. Returns false when no condition is pending.
 let x86_branch_pending = (label:int when_true:int):>int => {
-    if x86_pending_cc =? 0 { return false }
+    if x86_pending_kind not=? XP_CC { return false }
     let cc:int = x86_pending_cc
-    x86_pending_cc = 0
+    x86_pending_kind = XP_NONE
     if not when_true { cc = x86_invert_cc(cc) }
     let bb:int = bb_new(8)
     bb_push_str(bb "j")
@@ -1433,15 +1580,25 @@ let x86_alloc_local = ():>int => {
 
 let x86_load_local = (slot:int):>void => {
     x86_flush()
+    x86_pending_kind = XP_SLOT
     x86_pending_slot = slot
-    x86_has_pending_slot = true
+    x86_pending_offset = 0
     return void
 }
 
 let x86_store_local = (slot:int):>void => {
+    if x86_pending_kind =? XP_CONST and x86_fits_imm32(x86_pending_value) {
+        x86_pending_kind = XP_NONE
+        x86_emit_slot_access(slot x86_imm_prefix("movq" x86_pending_value) "")
+        return void
+    }
     x86_flush()
     x86_emit_slot_store("%rax" slot)
     return void
+}
+
+let x86_fits_imm32 = (value:int):>int => {
+    return value >=? -2147483648 and value <=? 2147483647
 }
 
 # ----------------------------------------------------------------------------
@@ -1450,11 +1607,8 @@ let x86_store_local = (slot:int):>void => {
 
 let x86_push_const_i64 = (value:int):>void => {
     x86_flush()
-    let bb:int = bb_new(32)
-    bb_push_str(bb "    movq $")
-    bb_push_int(bb value)
-    bb_push_str(bb ", %rax")
-    vec_push(x86_current_fn_code bb_finalize_as_string(bb))
+    x86_pending_kind = XP_CONST
+    x86_pending_value = value
     return void
 }
 
@@ -1476,16 +1630,49 @@ let x86_push_fn_ref = (label_id:int):>void => {
 }
 
 # A discarded value that was never materialized costs nothing.
+# A discarded value that was never materialized costs nothing.
 let x86_pop_value = ():>void => {
-    x86_pending_cc = 0
-    x86_has_pending_slot = false
+    x86_pending_kind = XP_NONE
     return void
 }
 
 let x86_save_value = ():>void => {
-    if x86_has_pending_slot and x86_spilled_depth =? 0 and x86_saved_depth <? 3 {
-        x86_has_pending_slot = false
-        x86_emit_slot_load(x86_pending_slot x86_value_cache_reg(x86_saved_depth))
+    let kind:int = x86_pending_kind
+    if kind >=? XP_SLOT and x86_spilled_depth =? 0 and x86_saved_depth <? 3 {
+        let cache:int = x86_value_cache_reg(x86_saved_depth)
+        x86_pending_kind = XP_NONE
+        if kind =? XP_SLOT {
+            if x86_pending_offset =? 0 {
+                x86_emit_slot_load(x86_pending_slot cache)
+            } else {
+                let bb:int = bb_new(64)
+                bb_push_str(bb "    movq ")
+                bb_push_str(bb x86_slot_text(x86_pending_slot))
+                bb_push_str(bb ", ")
+                bb_push_str(bb cache)
+                bb_push_str(bb "\n    addq $")
+                bb_push_int(bb x86_pending_offset)
+                bb_push_str(bb ", ")
+                bb_push_str(bb cache)
+                let prefix:int = bb_new(24)
+                bb_push_str(prefix "    leaq ")
+                bb_push_int(prefix x86_pending_offset)
+                bb_push_byte(prefix 40)
+                let suffix:int = bb_new(16)
+                bb_push_str(suffix "), ")
+                bb_push_str(suffix cache)
+                x86_emit_two_form(x86_pending_slot bb_finalize_as_string(bb) bb_finalize_as_string(prefix) bb_finalize_as_string(suffix))
+            }
+        } else if kind =? XP_CONST {
+            let bb:int = bb_new(32)
+            bb_push_str(bb "    movq $")
+            bb_push_int(bb x86_pending_value)
+            bb_push_str(bb ", ")
+            bb_push_str(bb cache)
+            vec_push(x86_current_fn_code bb_finalize_as_string(bb))
+        } else {
+            x86_emit_pending_load(cache)
+        }
         x86_saved_depth = x86_saved_depth + 1
         return void
     }
@@ -1506,8 +1693,12 @@ let x86_restore_value = ():>void => {
 
 let x86_unary_op = (op_kind:int):>void => {
     # A pending condition is exactly -1 or 0, so `not` is its inverse.
-    if op_kind =? TK_NOT and x86_pending_cc not=? 0 {
+    if op_kind =? TK_NOT and x86_pending_kind =? XP_CC {
         x86_pending_cc = x86_invert_cc(x86_pending_cc)
+        return void
+    }
+    if op_kind =? TK_MINUS and x86_pending_kind =? XP_CONST {
+        x86_pending_value = 0 - x86_pending_value
         return void
     }
     x86_flush()
@@ -1565,16 +1756,26 @@ let x86_emit_signed_mod = ():>void => {
 }
 
 # Compare `left` with the visible value and leave the condition pending.
+# Compare `left` with the visible value and leave the condition pending.
 let x86_compare_pending = (cc:int left:int):>void => {
-    if x86_has_pending_slot {
-        x86_has_pending_slot = false
-        let bb:int = bb_new(16)
-        bb_push_str(bb ", ")
-        bb_push_str(bb left)
-        x86_emit_slot_access(x86_pending_slot "    cmpq " bb_finalize_as_string(bb))
+    let kind:int = x86_pending_kind
+    let tail:int = bb_new(16)
+    bb_push_str(tail ", ")
+    bb_push_str(tail left)
+    if kind =? XP_SLOT and x86_pending_offset =? 0 {
+        x86_pending_kind = XP_NONE
+        x86_emit_slot_access(x86_pending_slot "    cmpq " bb_finalize_as_string(tail))
+    } else if kind =? XP_CONST and x86_fits_imm32(x86_pending_value) {
+        x86_pending_kind = XP_NONE
+        x86_emit_op_imm("cmpq" x86_pending_value left)
+    } else if kind =? XP_MEM and x86_pending_width =? 64 {
+        x86_pending_kind = XP_NONE
+        x86_emit_pending_mem_op("cmpq" bb_finalize_as_string(tail))
     } else {
+        x86_flush()
         x86_emit_op_2("cmpq" "%rax" left)
     }
+    x86_pending_kind = XP_CC
     x86_pending_cc = cc
     return void
 }
@@ -1600,20 +1801,35 @@ let x86_binary_immediate = (op_kind:int value:int):>void => {
     else if op_kind =? TK_LT { cc = "l" }
     else if op_kind =? TK_GT_EQ { cc = "ge" }
     else if op_kind =? TK_LT_EQ { cc = "le" }
-    if cc and value >=? -2147483648 and value <=? 2147483647 {
-        if x86_has_pending_slot {
-            x86_has_pending_slot = false
-            let bb:int = bb_new(24)
-            bb_push_str(bb "    cmpq $")
-            bb_push_int(bb value)
-            bb_push_str(bb ", ")
-            x86_emit_slot_access(x86_pending_slot bb_finalize_as_string(bb) "")
+    if cc and x86_fits_imm32(value) {
+        let kind:int = x86_pending_kind
+        if kind =? XP_SLOT and x86_pending_offset =? 0 {
+            x86_pending_kind = XP_NONE
+            x86_emit_slot_access(x86_pending_slot x86_imm_prefix("cmpq" value) "")
+        } else if kind =? XP_MEM and x86_pending_width =? 64 {
+            x86_pending_kind = XP_NONE
+            let op:int = bb_new(24)
+            bb_push_str(op "cmpq $")
+            bb_push_int(op value)
+            bb_push_byte(op 44)
+            x86_emit_pending_mem_op(bb_finalize_as_string(op) "")
         } else {
             x86_flush()
             x86_emit_op_imm("cmpq" value "%rax")
         }
+        x86_pending_kind = XP_CC
         x86_pending_cc = cc
         return void
+    }
+    # A constant offset joins a pending local: the address folds into whatever
+    # consumes it.
+    if x86_pending_kind =? XP_SLOT and (op_kind =? TK_PLUS or op_kind =? TK_MINUS) and x86_fits_imm32(value) {
+        let offset:int = x86_pending_offset + value
+        if op_kind =? TK_MINUS { offset = x86_pending_offset - value }
+        if x86_fits_imm32(offset) {
+            x86_pending_offset = offset
+            return void
+        }
     }
     x86_flush()
     if op_kind =? TK_LEFT_SHIFT {
@@ -1658,13 +1874,13 @@ let x86_binary_op = (op_kind:int):>void => {
     else if op_kind =? TK_LT { cc = "l" }
     else if op_kind =? TK_GT_EQ { cc = "ge" }
     else if op_kind =? TK_LT_EQ { cc = "le" }
-    if x86_pending_cc not=? 0 { x86_flush() }
+    if x86_pending_kind =? XP_CC { x86_flush() }
     if cc {
         x86_compare_pending(cc x86_pop_saved_operand(64))
         return void
     }
-    if op_kind =? TK_MINUS and x86_has_pending_slot {
-        x86_has_pending_slot = false
+    if op_kind =? TK_MINUS and x86_pending_kind =? XP_SLOT and x86_pending_offset =? 0 {
+        x86_pending_kind = XP_NONE
         let left:int = x86_pop_saved_operand(64)
         let bb:int = bb_new(16)
         bb_push_str(bb ", ")
@@ -1716,30 +1932,52 @@ let x86_memory_address = ():>int => {
 }
 
 let x86_load_mem = (width:int signed:int):>void => {
-    let address:int = x86_memory_address()
-    if width =? 64 {
-        x86_emit_op_2("movq" address "%rax")
-    } else if width =? 32 {
-        if signed { x86_emit_op_2("movslq" address "%rax") }
-        else      { x86_emit_op_2("movl" address "%eax") }
-    } else if width =? 16 {
-        if signed { x86_emit_op_2("movswq" address "%rax") }
-        else      { x86_emit_op_2("movzwq" address "%rax") }
-    } else if width =? 8 {
-        if signed { x86_emit_op_2("movsbq" address "%rax") }
-        else      { x86_emit_op_2("movzbq" address "%rax") }
+    if x86_pending_kind =? XP_SLOT {
+        x86_pending_address = 0
+    } else {
+        x86_flush()
+        x86_pending_address = x86_memory_address()
     }
+    x86_pending_kind = XP_MEM
+    x86_pending_width = width
+    x86_pending_signed = signed
     return void
 }
 
 let x86_store_mem = (width:int):>void => {
+    if x86_pending_kind =? XP_SLOT {
+        x86_pending_kind = XP_NONE
+        # The store goes through the local's register once allocated; %rax is
+        # free to hold the address while it is in memory.
+        x86_pending_address = 0
+        let value:int = x86_pop_saved_operand(width)
+        let head:int = bb_new(24)
+        bb_push_str(head "    ")
+        bb_push_str(head x86_store_mnemonic(width))
+        bb_push_byte(head 32)
+        bb_push_str(head value)
+        bb_push_str(head ", ")
+        let store:int = bb_finalize_as_string(head)
+        let bb:int = bb_new(64)
+        bb_push_str(bb "    movq ")
+        bb_push_str(bb x86_slot_text(x86_pending_slot))
+        bb_push_str(bb ", %rax\n")
+        bb_push_str(bb store)
+        bb_push_int(bb x86_pending_offset)
+        bb_push_str(bb "(%rax)")
+        let reg_prefix:int = bb_new(32)
+        bb_push_str(reg_prefix store)
+        bb_push_int(reg_prefix x86_pending_offset)
+        bb_push_byte(reg_prefix 40)
+        x86_emit_two_form(x86_pending_slot bb_finalize_as_string(bb) bb_finalize_as_string(reg_prefix) ")")
+        x86_emit_indented("xorq %rax, %rax")
+        return void
+    }
+    x86_flush()
     # Capture the address before a spilled saved value emits its pop.
     let address:int = x86_memory_address()
     let value:int = x86_pop_saved_operand(width)
-    if width =? 64      { x86_emit_op_2("movq" value address) }
-    else if width =? 32 { x86_emit_op_2("movl" value address) }
-    else if width =? 16 { x86_emit_op_2("movw" value address) }
-    else if width =? 8  { x86_emit_op_2("movb" value address) }
+    x86_emit_op_2(x86_store_mnemonic(width) value address)
     x86_emit_indented("xorq %rax, %rax")
     return void
 }
@@ -1794,7 +2032,7 @@ let x86_unsigned_mod = ():>void => {
 }
 
 let x86_unsigned_cmp = (kind:int):>void => {
-    if x86_pending_cc not=? 0 { x86_flush() }
+    if x86_pending_kind =? XP_CC { x86_flush() }
     let cc:int = ""
     if kind =? 0 { cc = "a" }
     else if kind =? 1 { cc = "b" }
@@ -2109,7 +2347,7 @@ let x86_cond_and_join = (false_label:int):>void => {
 
 let x86_cond_or_split = ():>int => {
     let done:int = x86_new_label("cond_or_done")
-    if x86_pending_cc not=? 0 {
+    if x86_pending_kind =? XP_CC {
         # The taken path must carry the true value; movq leaves the flags alone.
         x86_emit_indented("movq $-1, %rax")
         x86_branch_pending(done true)
@@ -2197,8 +2435,16 @@ let x86_str_starts_with = (s:int prefix:int):>int => {
     return str_prefix(s prefix)
 }
 
+# Memory intrinsics consume a pending address themselves.
+let x86_memory_intrinsic = (name:int):>int => {
+    let n:int = str_len(name)
+    if n <? 8 { return false }
+    if str_eq_len(name 7 "__load_" 7) { return true }
+    return str_eq_len(name 8 "__store_" 8)
+}
+
 let x86_emit_intrinsic = (name:int num_args:int static_args_map:int):>void => {
-    x86_flush()
+    if not x86_memory_intrinsic(name) { x86_flush() }
     if str_eq(name "__load_u8__")        { x86_load_mem(8 0) }
     else if str_eq(name "__load_u16__")  { x86_load_mem(16 0) }
     else if str_eq(name "__load_u32__")  { x86_load_mem(32 0) }

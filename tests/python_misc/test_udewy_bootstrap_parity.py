@@ -434,7 +434,7 @@ def test_short_circuit_contexts_match_between_compilers(bootstrap_binary, tmp_pa
     'test_cached_operands.udewy', 'test_alloca_spills.udewy', 'test_immediate_operands.udewy',
     'test_intrinsic_operands.udewy',
     'test_address_displacements.udewy',
-    'test_local_registers.udewy',
+    'test_local_registers.udewy', 'test_pending_operands.udewy',
 ])
 def test_cached_operand_execution_and_spills(bootstrap_binary, tmp_path, target, fixture, debug_info):
     source = (REPO_ROOT / 'udewy/tests' / fixture).read_text()
@@ -494,6 +494,7 @@ let main = ():>int => {
 @pytest.mark.parametrize('fixture', [
     'test_local_registers.udewy', 'test_cached_operands.udewy', 'test_immediate_operands.udewy',
     'test_intrinsic_operands.udewy', 'test_address_displacements.udewy', 'test_alloca_spills.udewy',
+    'test_pending_operands.udewy',
 ])
 def test_native_target_assembly_matches_between_compilers(bootstrap_binary, tmp_path, target, debug_info, fixture):
     """Both compilers emit the same instructions for every native register target.
