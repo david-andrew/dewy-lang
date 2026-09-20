@@ -391,3 +391,12 @@ Validation: 24 hosted copy/report/source-provenance regressions passed. Native
 generations built in 60.39s and 60.20s and executed the coverage fixture with
 result 42. Native `analyze` reports both cell and string sites in that fixture.
 Artifacts: `../dewy-build-artifacts/phase1-copy-coverage-stage2-2026-09-20`.
+
+Copy-budget tooling now supports exact file/directory scopes and static
+sites per thousand physical Dewy source lines. Zero-copy files contribute
+to the denominator; malformed, partial, or source-unresolvable inventories
+cannot pass a scoped gate. Both hosted and native summary formats are
+validated before filtering. Nine tool regressions passed, and the real
+hosted/native ownership kernel each reports four sites in 39 lines. Its
+stable regression budget remains four sites; density (102.564 sites/kloc)
+is supplementary and says nothing about runtime bytes or frequency.
