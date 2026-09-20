@@ -838,6 +838,18 @@ class Block(AST):
     scoped: bool
 
 
+@dataclass(slots=True)
+class Program(Block):
+    """Assembled module items and their defining files, in matching order.
+
+    This is module-graph metadata, not a new source construct. Ordinary
+    tree rewrites preserve item order (including erased proof placeholders),
+    so provenance survives rebuilding nodes without object-id side tables.
+    Native assembly carries the same information in graph.source_by_item.
+    """
+    item_sources: tuple[SrcFile, ...]
+
+
 @dataclass(slots=True, weakref_slot=True)
 class TypeBlock(AST):
     items: list[AST]

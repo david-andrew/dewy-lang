@@ -332,6 +332,7 @@ class _Lowerer(
         self.loop_signal_kind: hir.ExpressedIdentifier | None = None
         self.lower_loop_depth = 0
         self.lowering_module_startup = False
+        self.startup_item_sources: dict[int, SrcFile] = {}
         self.optional_payloads: dict[int, ty.TypeExpr] = {}
         self.union_cells: dict[int, tuple[ty.TypeExpr, ...]] = {}
         self.object_storage: dict[int, ty.ObjectType] = {}
@@ -568,7 +569,12 @@ class _Lowerer(
 
         globals_: list[hir.Declare] = []
         startup_sources: list[hir.AST] = []
-        for item in self.root.items:
+        entry_source = self.srcfile
+        if isinstance(self.root, hir.Program) and len(self.root.item_sources) != len(self.root.items):
+            raise TypeError('module item provenance no longer matches assembled HIR')
+        for index, item in enumerate(self.root.items):
+            if isinstance(self.root, hir.Program):
+                self.srcfile = self.root.item_sources[index]
             binding = self.declare_bindings.get(id(item))
             if binding is not None and binding.kind in {'function', 'overload'}:
                 continue
@@ -602,8 +608,11 @@ class _Lowerer(
                     transformed.expr,
                 )
                 startup_sources.append(assignment)
+                self.startup_item_sources[id(assignment)] = self.srcfile
             else:
                 startup_sources.append(transformed)
+                self.startup_item_sources[id(transformed)] = self.srcfile
+        self.srcfile = entry_source
         startup_items: list[hir.AST] = []
         if startup_sources:
             self.lowering_module_startup = True
@@ -3956,10 +3965,14 @@ class _Lowerer(
         and giving back the statement's string temporaries after it."""
         outer = self.statement_temporaries
         self.statement_temporaries = []
+        previous_source = self.srcfile
+        if self.lowering_module_startup:
+            self.srcfile = self.startup_item_sources.get(id(node), previous_source)
         try:
             lowered = self._lower_statement_inner(node)
         finally:
             temporaries, self.statement_temporaries = self.statement_temporaries, outer
+            self.srcfile = previous_source
         statements = self._with_temporaries_released(lowered, temporaries)
         if (
             node.type == ty.BOTTOM_TYPE

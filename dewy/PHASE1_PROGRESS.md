@@ -453,3 +453,21 @@ generation. A COW-backed local transfer allocates zero bytes on both hosted
 backends; disabling moves gives an allocating positive control. This batch
 changes hosted lowering only; the native implementation already moves these
 bindings. The broader paired run remains pinned to the preceding snapshot.
+
+The full paired corpus at the borrow/move snapshot passed all 211 cases.
+This broader run used the fixed second-generation snapshot above, before the
+later hosted array-binding and module-provenance work.
+
+Module-provenance checkpoint: assembled hosted HIR now keeps each top-level
+item's defining source in `hir.Program` metadata, mirroring the native module
+graph's source map. Source attribution survives ordinary HIR rebuilding and
+proof erasure. Global startup copy notes now point to the imported module's
+initializer rather than to an unrelated span in the entry file. This metadata
+also travels through direct checking/code-generation APIs; no CLI scan is used.
+
+Validation: 21 initial provenance/traversal/copy tests, 66 cache/proof/generic/
+native-effect-analysis regressions, and four final provenance checks passed.
+The direct API test covers both global initialization and a bare top-level
+copy with an imported erased proof. Hosted and native CLI inventories both
+attribute the global snapshot to dependency.dewy, and the scoped hosted gate
+counts its one copy. Strict-copy enforcement remains pending.

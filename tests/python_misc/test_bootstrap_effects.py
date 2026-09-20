@@ -164,10 +164,13 @@ def emit_hir(root, *, type_value=None, with_names=False):
     def node(item):
         if id(item) in memo:
             return memo[id(item)]
-        props = ' '.join(f'{"value_type" if f.name == "type" else f.name}={value(getattr(item, f.name), "type" if isinstance(item, hir.TypeValue) and f.name == "value" else f.name)}' for f in dataclasses.fields(item))
+        # Native module provenance is graph metadata rather than a field on
+        # its ordinary root Block; it is not an effect-analysis syntax edge.
+        props = ' '.join(f'{"value_type" if f.name == "type" else f.name}={value(getattr(item, f.name), "type" if isinstance(item, hir.TypeValue) and f.name == "value" else f.name)}' for f in dataclasses.fields(item) if f.name != 'item_sources')
         name = f'n{len(memo)}'
         memo[id(item)] = name
-        lines.append(f'    let {name} = hir.append_node(@nodes hir.{type(item).__name__}[{props}])')
+        kind = 'Block' if isinstance(item, hir.Program) else type(item).__name__
+        lines.append(f'    let {name} = hir.append_node(@nodes hir.{kind}[{props}])')
         return name
 
     root_id = node(root)

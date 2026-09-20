@@ -684,6 +684,7 @@ class ModuleCompiler:
         names = self._emitted_names(entry)
         needed = self._needed_runtime_binding_ids(entry)
         items: list[hir.AST] = []
+        item_sources: list[SrcFile] = []
         for record in self.order:
             # Filter before the recursive rename: discarded functions should
             # cost neither rebuilt HIR nor downstream lowering/analysis work.
@@ -701,16 +702,18 @@ class ModuleCompiler:
                 if isinstance(item, hir.Void):
                     continue
                 items.append(item)
+                item_sources.append(record.srcfile)
                 if isinstance(item, hir.Declare) and item.binding_id is not None:
                     binding = self.registry.by_id[item.binding_id]
                     binding.declaration = item
                     if isinstance(item.expr, hir.FunctionLiteral):
                         binding.function = item.expr
-        root = hir.Block(
+        root = hir.Program(
             entry.root.loc,
             entry.root.type,
             items,
             True,
+            tuple(item_sources),
         )
         initialization.validate_initialization(root, self.registry, entry.srcfile)
         return root
