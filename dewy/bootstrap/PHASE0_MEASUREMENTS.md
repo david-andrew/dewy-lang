@@ -4503,3 +4503,17 @@ bytes per call, caught by the arena live-bytes case of
 through proof obligations, which had let an unresolved obligation bypass
 the legalization that rejects it. The compiler-wide count is 5,736.
 
+### Hosted parity for moves (2026-09-20)
+
+The hosted `_compute_moves` now treats every owned record local as movable
+(`_owned_object_declaration`: built here or copied in, and not a scope
+borrow), not only literals and call results, and a `return` always counts
+as a last use, as in the native rule. Returned record locals are adopted
+into the caller's result storage through the existing `move='adopt'` path,
+which empties the moved handles in the local so its scope-exit release
+stays sound. The hosted lowering keeps records in frame cells and moves
+their fields rather than a block pointer, so the other native transfer
+sites (literal fields, stores, cell payloads) stay copies there for now;
+the reports of the two compilers agree on the fixture at every site except
+the array-element spelling.
+

@@ -44,5 +44,5 @@ def test_a_return_inside_a_loop_is_a_move() -> None:
         '}\n'
         'let main = ():>int64 => f(5).length\n'
     )
-    # the return inside the loop is not the textually last use, so it copies; the final return moves
-    assert notes.count(('xs', True)) == 1 and notes.count(('xs', False)) == 1
+    # a return leaves the function whatever follows it in the text: both returns move
+    assert notes.count(('xs', True)) == 2 and notes.count(('xs', False)) == 0

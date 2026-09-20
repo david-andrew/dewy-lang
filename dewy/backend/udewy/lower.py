@@ -3516,6 +3516,23 @@ class _Lowerer(
         declared = ty.strip_refinement(node.annotation or node.expr.type)
         return isinstance(declared, ty.ObjectType) and isinstance(self._copy_source_expression(node.expr), (hir.ObjectLiteral, hir.FunctionCall))
 
+    def _owned_object_declaration(self, node: hir.AST) -> bool:
+        """A local that owns a record: built here or copied in, and not a scope borrow of container storage.
+
+        Its fields may be adopted when it is returned at its last use, as the
+        native `moves.dewy` rule does for every owned local.
+        """
+        if not isinstance(node, hir.Declare) or node.binding_id is None:
+            return False
+        declared = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
+        if not isinstance(declared, ty.ObjectType):
+            return False
+        if self._fresh_object_declaration(node):
+            return True
+        if not hasattr(self, 'borrow_plan') or self._borrowed_route_local(node, declared):
+            return False
+        return isinstance(self._copy_source_expression(node.expr), (hir.ExpressedIdentifier, hir.Index, hir.MemberAccess, hir.DictLookup))
+
     def _compute_moves(self, literal: hir.FunctionLiteral) -> set[int]:
         """The move rule: the last use of an owned array local at a transfer site is a move.
 
@@ -3544,7 +3561,7 @@ class _Lowerer(
                 walk(node.body, depth, True, {})
                 return
             if isinstance(node, hir.Declare):
-                movable = self._owned_array_declaration(node) is not None or self._fresh_object_declaration(node)
+                movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node)
                 walk(node.expr, depth, nested, {})
                 if movable and node.binding_id is not None and not nested:
                     counter += 1
@@ -3600,12 +3617,17 @@ class _Lowerer(
             references = uses.get(binding_id, [])
             if not references or any(nested for _seq, _depth, nested, _transfer in references):
                 continue
+            # A `return` leaves every path: a returned local is at its last
+            # use there whatever the text after the return does with it.
+            for _sequence, _depth, _nested, transfer in references:
+                if transfer is not None and self._transfer_is_return(transfer, literal):
+                    moves.add(transfer)
             last = max(references, key=lambda use: use[0])
             _sequence, depth, _nested, transfer = last
-            if transfer is None:
+            if transfer is None or transfer in moves:
                 continue
             site_in_loop = depth > declared_depth
-            if site_in_loop and not self._transfer_is_return(transfer, literal):
+            if site_in_loop:
                 continue
             moves.add(transfer)
         return moves
