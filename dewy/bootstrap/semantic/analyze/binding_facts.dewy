@@ -73,6 +73,11 @@ call_result = (@state:facts.State subject:addr value:addr @data:predicates.Data)
 seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data:predicates.Data):>void => {
     # A block's value is its last item (a loop capture's hidden array).
     value=expressions.value_leaf(value data.env.nodes)
+    let copied=hir.node_at(data.env.nodes expressions.strip_casts(value data.env.nodes))
+    if copied is? hir.CopyValue {
+        seed(@state subject copied.value word_type loc @data)
+        return
+    }
     call_result(@state subject value @data)
     if not intervals.stable(value data.snapshot data.env.nodes) return
     terms.seed_sum(@state subject value data.env data.relations @data.registry)
@@ -112,6 +117,10 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
             loop route in routes {
                 if route.path.length >? 0 and route.path[0] not=? '*' {
                     let copied=bindings.route_id(@data.registry subject route.path word_type loc)
+                    let number=facts.lookup(state facts.value(facts.Term[route.id]))
+                    if number isnt? none {facts.set_value(@state facts.Term[copied] number)}
+                    let length=facts.lookup(state facts.value(facts.Term[route.id 'length']))
+                    if length isnt? none {facts.set_value(@state facts.Term[copied 'length'] length)}
                     relations.copy_relational(@state facts.Term[route.id] facts.Term[copied])
                     relations.copy_relational(@state facts.Term[route.id 'length'] facts.Term[copied 'length'])
                 }
@@ -160,9 +169,9 @@ install = (@state:facts.State subject:addr value:addr annotation:addr? word_type
         if contract is? types.RefinedType {
             refinements.seed_binding(@state @declared subject contract context loc @data.registry)
         }
-        let object=expressions.object_of(annotation data.env.types)
-        if object isnt? none {fields(@state subject object value [] @data)}
     }
+    let object=expressions.object_of(if annotation is? none hir.node_at(data.env.nodes value).value_type else annotation data.env.types)
+    if object isnt? none {fields(@state subject object value [] @data)}
     seed(@state subject value word_type loc @data)
     let called=expressions.call_function_type(value data.env.nodes data.env.types)
     if called isnt? none and types.node_at(data.env.types called.ret) is? types.TypeOr {data.member_calls[subject]=expressions.strip_casts(value data.env.nodes)}

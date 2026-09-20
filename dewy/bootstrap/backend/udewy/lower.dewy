@@ -39,7 +39,7 @@ OwnedLocal:type = const [value:addr value_type:addr box:addr?=none condition:add
 ScalarProjection:type = const [function:addr read:addr field:string result:addr symbol:string borrowed:bool=false]
 # One dynamic aggregate copy the lowering decided, for `dewy analyze`: what
 # was copied, at which kind of site, and why no borrow or move applied.
-CopyNote:type = const [kind:string type:string site:string reason:string loc:Span source:addr?]
+CopyNote:type = const [kind:string type:string site:string reason:string loc:Span source:addr? explicit:bool=false]
 State:type = [
     input:emit.Input
     source:SrcFile
@@ -122,14 +122,14 @@ State:type = [
     problem:Error?=none
 ]
 Result:type = const [program:program.Program input:emit.Input notes:array<CopyNote>=[]]
-note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state:State):>void => {
+note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state:State explicit:bool=false):>void => {
     # A minted type describes as its name followed by its structure; the name
     # alone identifies it in a report.
     let name=types.describe(type state.type_nodes)
     let space=name.find(' [')
     if space isnt? none and space >? 0 and space <? name.length and name[0] not=? '[' {name=name[0..space)}
     if name.length >? 48 {name="{name[0..45)}..."}
-    state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index])
+    state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index explicit])
 }
 copy_kind = (type:addr @state:State):>string? => {
     if owned_string(type state) return none
@@ -323,6 +323,14 @@ compile_time_binding = (node:hir.Declare state:State):>bool => {
 expression = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if state.problem isnt? none return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
+    if node is? hir.CopyValue {
+        # A dying fresh result already is independent. Otherwise retain the
+        # receiver before any surrounding operation can mutate its source.
+        if expression_owns(node.value @state) return owned_value(node.value @state 'explicit copy')
+        let kind=copy_kind(node.value_type @state)
+        if kind isnt? none {note_copy(kind node.value_type 'explicit copy' 'requested with `.copy()`' node @state explicit=true)}
+        return copy_value(expression(node.value @state) node.value_type node @state)
+    }
     if node is? hir.ValueCast {
         let actual=hir.node_at(state.input.nodes node.expr).value_type
         if object_valued(actual state) and object_valued(node.value_type state) and expression_owns(node.expr @state) return owned_record(expression(node.expr @state) actual node.value_type node @state)
@@ -707,6 +715,7 @@ borrowed_getter_receiver = (id:addr @state:State):>bool => {
 }
 expression_owns = (id:addr @state:State):>bool => {
     let node=hir.node_at(state.input.nodes id)
+    if node is? hir.CopyValue return true
     if node is? hir.Suppress return expression_owns(node.item @state)
     # The single consuming read of a donated parameter adopts the value.
     if node is? hir.ExpressedIdentifier and id in? state.consumed_uses return true

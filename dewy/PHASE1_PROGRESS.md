@@ -7,9 +7,9 @@ decisions. Open design questions stay open until resolved with David.
 
 ## Work remaining
 
-- Correctness/parity: resolve `nat_types` through sound reasoning or a
-  reviewed expectation; run explicit fixture manifests and a fresh paired
-  native checkpoint at integration boundaries.
+- Correctness/parity: `nat_types` now passes through sound finite-loop
+  reasoning. Continue explicit fixture manifests and fresh paired native
+  checkpoints at integration boundaries.
 - 1.1: complete copy reporting and explicit-copy policy across entry points;
   explicit aggregate copies and local places/views; last-use moves in both
   implementations; deterministic lifecycle hooks and move-only resources;
@@ -68,3 +68,23 @@ need second-generation native execution. Run complete build/fixed-point
 checks at integration checkpoints, not for every small edit. Maintain
 separate timing rows for C-built and direct-built executing compilers;
 30 seconds is the minimum native target and 10 seconds the stretch goal.
+
+Checkpoint: explicit `.copy()` for arrays, records, dictionaries, and sets
+is represented in HIR and both lowerers, with receiver evaluation once and
+independent mutation. Existing record members named `copy` take precedence.
+Copied numeric, length, and membership facts belong to the destination; an
+inferred record initializer now seeds its field facts in both analyzers.
+Copy notes carry an explicit-intent flag for the later enforcement policy.
+The operation participates in hosted representation discovery and definite
+initialization; owned and discarded temporaries are released, including
+array results returned through another copy. The lifetime kernel reports
+zero retained bytes over 100 repeated calls in both compilers. The native
+second-generation compiler built in 48.63 seconds; the C-built seed's first
+generation took 21.71 seconds. This remains above the direct-route target.
+Hosted copy/report gates passed 11 tests. All 14 focused parity cases
+passed against the second-generation native compiler, including independent
+expected panic diagnostics; the full corpus run is in progress.
+
+Design review: `PHASE1_DESIGN_PROPOSALS.md` contains proposed proof and effect
+surfaces. David requested approval before implementation. These proposals
+are not language rules and do not mark 1.2 or 1.3 complete.

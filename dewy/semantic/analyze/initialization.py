@@ -437,6 +437,8 @@ class _InitializationChecker:
                 parameters,
                 call_stack,
             )
+        if isinstance(node, (hir.CopyMethod, hir.CopyValue)):
+            return self._check_eager(node.value, initialized, parameters, call_stack)
         if isinstance(node, hir.DictEntries):
             return self._check_eager(node.dictionary, initialized, parameters, call_stack)
         if isinstance(node, hir.DictView):

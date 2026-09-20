@@ -1,0 +1,39 @@
+# An explicit snapshot owns its value. Facts transfer to the snapshot, but
+# later writes to it must neither change the source nor its facts.
+Record:type=[items:array<int64>]
+array_return=(value:array<int64>):>array<int64>=>value.copy()
+copy_return=(value:Record):>Record=>value.copy()
+consume=(value:Record):>int64=>value.items.length
+make=(@calls:int64):>Record=>{calls+=1 return Record[[3 4]]}
+let main=():>int64=>{
+    let original:array<int64>=[1 2]
+    let copied=original.copy()
+    copied[0]=9
+    $runtime_assert original[0]=?1 and copied[0]=?9
+    let new_array=array_return(original).copy()
+    $runtime_assert new_array.length >? 0
+    new_array[0]=6
+    $runtime_assert original[0]=?1 and new_array[0]=?6
+    let record=Record[[3 4]]
+    let twin=record.copy()
+    twin.items[0]=8
+    $runtime_assert record.items[0]=?3 and twin.items[0]=?8
+    twin.items.push(5)
+    $runtime_assert record.items.length=?2 and twin.items.length=?3
+    let returned=copy_return(record)
+    $runtime_assert returned.items.length >? 0
+    returned.items[0]=7
+    $runtime_assert record.items[0]=?3 and returned.items[0]=?7
+    let calls:int64=0
+    let fresh=make(@calls).copy()
+    $runtime_assert calls=?1 and consume(fresh.copy())=?2
+    let dictionary:dict<string int64>=['a' -> 1]
+    let other=dictionary.copy()
+    other['a']=42
+    $runtime_assert dictionary['a']=?1 and other['a']=?42
+    let members:set<int64>=set[1]
+    let more=members.copy()
+    more.push(2)
+    $runtime_assert 2 not in? members and 2 in? more
+    return 42
+}

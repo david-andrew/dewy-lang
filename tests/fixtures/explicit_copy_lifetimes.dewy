@@ -1,0 +1,24 @@
+# Repeated snapshots, including discarded and projected temporaries, must
+# release their descriptors and nested values at the end of each call.
+Record:type=[items:array<string>]
+consume=(value:Record):>int64=>value.items.length
+exercise=(record:Record):>void=>{
+    let twin=record.copy()
+    twin.items.push('other')
+    let items=record.items.copy()
+    items.push('another')
+    record.copy();
+    record.items.copy();
+    $runtime_assert consume(record.copy())=?1
+    $runtime_assert record.copy().items.length=?1
+}
+let main=():>int64=>{
+    let record=Record[['original']]
+    exercise(record)
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {exercise(record)}
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    $runtime_assert retained=?0
+    return 42
+}

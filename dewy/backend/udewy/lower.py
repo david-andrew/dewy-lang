@@ -2061,6 +2061,9 @@ class _Lowerer(
             # the copy loop reads the operand through its descriptor
             self._discover_node(node.value, scope, current_function, array_use='representation')
             return
+        if isinstance(node, (hir.CopyMethod, hir.CopyValue)):
+            self._discover_node(node.value, scope, current_function, array_use='representation')
+            return
         if isinstance(node, hir.ArrayLength):
             self._discover_node(
                 node.array,
@@ -2825,6 +2828,8 @@ class _Lowerer(
                 node,
                 array=self._require_node(self._transform_node(node.array)),
             )
+        if isinstance(node, (hir.CopyMethod, hir.CopyValue)):
+            return replace(node, value=self._require_node(self._transform_node(node.value)))
         if isinstance(node, hir.DictLookup):
             return replace(
                 node,
@@ -4007,7 +4012,7 @@ class _Lowerer(
     def _consume_array_value(self, node: hir.AST) -> None:
         """A binding, a return, or a store takes this array call's result over: not a temporary."""
         node = self._copy_source_expression(node)
-        if isinstance(node, (hir.FunctionCall, hir.DictView)):
+        if isinstance(node, (hir.FunctionCall, hir.DictView, hir.CopyValue)):
             self.consumed_string_values.add(id(node))
 
     def _array_result_temporary(self, node: hir.AST, value: hir.AST, prelude: list[hir.AST]) -> tuple[list[hir.AST], hir.AST]:
@@ -4159,7 +4164,7 @@ class _Lowerer(
                         expr=copied,
                     ),
                 ]
-            if isinstance(declared_type, ty.ArrayType) and isinstance(self._copy_source_expression(node.expr), (hir.ArrayLiteral, hir.FunctionCall, hir.DictView)):
+            if isinstance(declared_type, ty.ArrayType) and self._array_expression_owns_fresh_storage(node.expr):
                 # a literal or a call result: storage this local owns (a
                 # `bytes as …` view over a string's data is not: it borrows)
                 self._note_owned_array(node, declared_type)
@@ -4500,11 +4505,11 @@ class _Lowerer(
         active payload are owned allocations. Methods have separate result
         conventions; strings and dynamic arrays already track temporaries.
         """
-        if not self._has_arena() or not isinstance(source, hir.FunctionCall):
+        if not self._has_arena() or not isinstance(source, (hir.FunctionCall, hir.CopyValue)):
             return None
         if isinstance(source.type, ty.ObjectType) and self._frame_record_call(source):
             return self._release_object_members(value, source.type, source.loc)
-        if not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral)):
+        if not isinstance(source, hir.FunctionCall) or not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral)):
             return None
         members = self._field_union_members(source.type)
         if members is not None:
@@ -4790,6 +4795,22 @@ class _Lowerer(
         return [], node
 
     def _extract_expression_inner(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
+        if isinstance(node, hir.CopyValue):
+            plain = ty.unfold(ty.strip_refinement(node.type))
+            if isinstance(plain, ty.ObjectType):
+                if self._object_expression_owns_fresh_storage(node.value):
+                    return self._extract_expression(node.value)
+                self._note_copy('record', node.type, 'explicit copy', 'requested with `.copy()`', node.loc, explicit=True)
+                return self._clone_object_value(node.value, plain)
+            if isinstance(plain, ty.ArrayType):
+                if self._array_expression_owns_fresh_storage(node.value):
+                    self._consume_array_value(node.value)
+                    prelude, value = self._extract_expression(node.value)
+                    return self._array_result_temporary(node, value, prelude)
+                self._note_copy('array', node.type, 'explicit copy', 'requested with `.copy()`', node.loc, explicit=True)
+                prelude, value = self._clone_array_value(node.value, plain, arena=self._has_arena())
+                return self._array_result_temporary(node, value, prelude)
+            self._target_error(node, 'explicit copy of this value representation')
         if isinstance(node, hir.ExpressedIdentifier):
             return self._extract_identifier(node)
         # These literal leaves already have a word representation and no
@@ -5520,7 +5541,7 @@ class _Lowerer(
         # the cell.
         if not isinstance(ty.strip_refinement(node.type), ty.ArrayType):
             return False
-        return isinstance(node, (hir.ArrayLiteral, hir.FunctionCall)) or (
+        return isinstance(node, (hir.ArrayLiteral, hir.FunctionCall, hir.CopyValue)) or (
             isinstance(node, hir.DictView) and isinstance(node.type, ty.ArrayType)
         ) or (
             isinstance(node, hir.RepresentationCast)

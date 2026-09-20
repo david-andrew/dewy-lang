@@ -2288,7 +2288,7 @@ class _ArrayLowering(_ArraySharing):
         ):
             source = source.items[0]
         if (
-            isinstance(source, hir.FunctionCall)
+            isinstance(source, (hir.FunctionCall, hir.CopyValue))
             and isinstance(source.type, ty.ArrayType)
             and source.type.length is None
         ):
@@ -2785,7 +2785,7 @@ class _ArrayLowering(_ArraySharing):
         # A literal/call row has no surviving source owner. Transfer its
         # element handles into the stored row; cloning them would abandon
         # the original owned strings, cells, and nested objects.
-        fresh = isinstance(self._copy_source_expression(node), (hir.ArrayLiteral, hir.FunctionCall))
+        fresh = self._array_expression_owns_fresh_storage(node)
         return self._clone_array_value(node, array_type, arena=True, move=fresh)
 
     def _array_storage_value(

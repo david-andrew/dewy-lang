@@ -99,7 +99,7 @@ length = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @re
     let exact=exact_length(node.value_type env)
     if exact isnt? none return ranges.exact(exact)
     if node is? hir.ValueCast|hir.RepresentationCast return snapshot.lengths.get(node.expr)
-    if node is? hir.Obligation return snapshot.lengths.get(node.value)
+    if node is? hir.Obligation|hir.CopyValue return snapshot.lengths.get(node.value)
     if node is? hir.StringSlice return slice_length(node state snapshot env @registry)
     let declared=ranges.propositions_interval(expressions.member_invariant(id env.nodes env.types) 'length')
     let sequence=terms.sequence_id(id env @registry)

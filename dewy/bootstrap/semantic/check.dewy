@@ -1156,6 +1156,10 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     }
     let selected:addr? = if shape is? types.OverloadType matched.method_index else none
     let source = contexts.node_at(id env.lexical session)
+    if func is? hir.CopyMethod {
+        let result=put(hir.CopyValue[source.loc node_at(func.value session).value_type func.value] @session)
+        return if expected is? none result else against(result expected id env @session)
+    }
     if func is? hir.DictMethod {
         let result = container_call(func args kwargs id env @session)
         if result is? Error return result
@@ -2938,6 +2942,10 @@ member = (receiver:addr name_id:addr id:addr env:Environment @session:contexts.S
     if name is? none return problem(id 'member access needs a name' 'expected a field or method name' env session)
     return member_named(receiver name id env @session)
 }
+copy_method = (receiver:addr loc:Span @session:contexts.Session):>addr => {
+    let signature=types.function_type([] [] none node_at(receiver session).value_type [] @session.types)
+    return put(hir.CopyMethod[loc signature receiver] @session)
+}
 member_named = (receiver:addr name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
     if name =? 'length' {receiver=binary_array(receiver @session)}
     let value = node_at(receiver session)
@@ -2961,7 +2969,10 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
         if selected isnt? none return selected
     }
     let entry = views.container_entry_types(value.value_type session.types)
-    if entry isnt? none return container_member(receiver entry name id env @session)
+    if entry isnt? none {
+        if name =? 'copy' return copy_method(receiver loc @session)
+        return container_member(receiver entry name id env @session)
+    }
     if type is? types.ObjectType {
         let field = types.object_field(type name)
         if field isnt? none return match_read(put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session) env @session)
@@ -2969,8 +2980,10 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
         if selected is? Error return selected
         if selected isnt? none return selected
         if name =? 'typename' return type_names.instance(receiver loc @session)
+        if name =? 'copy' return copy_method(receiver loc @session)
         return problem(id 'object has no such member' name env session)
     }
+    if type is? types.ArrayType and name =? 'copy' return copy_method(receiver loc @session)
     if type is? types.ArrayType and name in? array_methods.names return array_method(receiver type name id env @session)
     if views.string_valued(value.value_type session.types) and name in? STRING_METHODS return string_method(receiver name id env @session)
     if type is? types.TypeOr {

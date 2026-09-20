@@ -509,6 +509,20 @@ class DictMethod(AST):
 
 
 @dataclass(slots=True, weakref_slot=True)
+class CopyMethod(AST):
+    """The explicit zero-argument value-copy operation bound to a receiver."""
+
+    value: AST
+
+
+@dataclass(slots=True, weakref_slot=True)
+class CopyValue(AST):
+    """An explicit value boundary; its result owns an independent value."""
+
+    value: AST
+
+
+@dataclass(slots=True, weakref_slot=True)
 class ArrayMethod(AST):
     """A compiler-provided method bound to a named array binding.
 

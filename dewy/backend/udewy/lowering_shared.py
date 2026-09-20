@@ -271,6 +271,7 @@ class CopyNote:
     kind: str = 'string'
     type_name: str = 'string'
     site: str = 'stored'
+    explicit: bool = False
 
     @property
     def line(self) -> str:

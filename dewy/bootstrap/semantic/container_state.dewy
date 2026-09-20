@@ -92,7 +92,7 @@ removed = (container:addr key:addr? state:addr @session:contexts.Session):>void 
 # again: in `left | change_left()`, the left operand has already been read.
 captured = (value:addr session:contexts.Session):>array<keys.Fact> => {
     let node=hir.node_at(session.hir value)
-    if node is? hir.Obligation return captured(node.value session)
+    if node is? hir.Obligation|hir.CopyValue return captured(node.value session)
     if node is? hir.ValueCast|hir.RepresentationCast return captured(node.expr session)
     let result=session.value_keys.get(value)
     return if result is? none [] else result
@@ -121,12 +121,14 @@ let capture = (value:addr state:addr @session:contexts.Session):>void => {
         }
         # Absence of a membership fact is not evidence of absence. Difference
         # and symmetric difference need negative facts before seeding keys.
-    } else if node is? hir.Obligation|hir.ValueCast|hir.RepresentationCast {
+    } else if node is? hir.Obligation|hir.CopyValue|hir.ValueCast|hir.RepresentationCast {
         result=captured(value session)
     }
     if result.length >? 0 {session.value_keys[value]=result}
 }
 seed = (binding:addr value:addr state:addr @session:contexts.Session):>void => {
+    let node=hir.node_at(session.hir value)
+    if node is? hir.CopyValue {seed(binding node.value state @session) return void}
     let current = facts(state session)
     let source = route(value @session)
     if source isnt? none {

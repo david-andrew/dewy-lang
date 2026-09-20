@@ -861,7 +861,7 @@ class _BoundsValidator:
                 current[_nonzero_key(node.binding_id)] = Interval.exact(1)
             if isinstance(node.annotation, ty.RefinedType) and node.binding_id is not None:
                 interval = self._seed_refinements(node, current, interval)
-            declared = ty.strip_refinement(node.annotation) if node.annotation is not None else None
+            declared = ty.strip_refinement(node.annotation if node.annotation is not None else node.expr.type)
             if node.binding_id is not None and isinstance(declared, ty.ObjectType):
                 self._seed_field_routes(node.binding_id, declared, node.expr, (), current)
             if node.binding_id is not None:
@@ -1141,6 +1141,8 @@ class _BoundsValidator:
         _drop_index_facts(state, array_id=binding_id)
 
     def _length_interval(self, node: hir.AST, state: State) -> Interval | None:
+        if isinstance(node, hir.CopyValue):
+            return self._length_interval(node.value, state)
         # `(s[1..])[..2)`: a parenthesized receiver is the expression inside
         while isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
             node = node.items[0]
@@ -3456,6 +3458,9 @@ class _BoundsValidator:
     def _seed_value_facts(self, subject: int, value: hir.AST, state: State, loc: Span) -> None:
         """What a stored value says about its new binding: a refined call's
         promise, a sum's bound, another binding's (or element's) facts."""
+        if isinstance(_strip_casts(value), hir.CopyValue):
+            self._seed_value_facts(subject, _strip_casts(value).value, state, loc)
+            return
         self._seed_call_term_facts(subject, value, state)
         self._seed_sum_facts(subject, value, state)
         stripped = _strip_casts(value)
@@ -3492,7 +3497,13 @@ class _BoundsValidator:
                 for route in self.registry.routes_under(source):
                     path = self.registry.route_paths[route]
                     if path and path[0] != '*':
-                        self._copy_relational_facts(state, route, self.registry.route_id(subject, path, 'int64', loc))
+                        copied = self.registry.route_id(subject, path, 'int64', loc)
+                        # A record snapshot carries its fields' numeric and
+                        # length bounds as well as their relationships.
+                        for before, after in ((route, copied), (_length_key(route), _length_key(copied))):
+                            if before in state:
+                                state[after] = state[before]
+                            self._copy_relational_facts(state, before, after)
             return
         element = self._element_route_of(stripped)
         if element is not None:
@@ -4620,6 +4631,7 @@ class _BoundsValidator:
         hir.Transmute: _eval_transmute,
         hir.ArrayLength: _eval_array_length,
         hir.ArrayMethod: _eval_array_method,
+        hir.CopyValue: lambda self, node, state, validate: self._eval(node.value, state, validate=validate),
         hir.DictLookup: _eval_dict_lookup,
         hir.DictContains: _eval_dict_contains,
         hir.DictRemove: _eval_dict_remove,

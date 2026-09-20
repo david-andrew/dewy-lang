@@ -397,6 +397,11 @@ ArrayMethod = type of AST & [
     name:string
 ]
 
+# An explicit copy is a value boundary, independent of the backend's
+# borrowing/moving choices for ordinary implicit transfers.
+CopyMethod = type of AST & [value:addr]
+CopyValue = type of AST & [value:addr]
+
 # A scoped `name in iterable` expression advanced by an enclosing loop.
 IteratorExpression = type of AST & [
     target:addr
@@ -795,6 +800,10 @@ push_children = (node:AST @result:array<addr>):>void => {
     if node is? BoundMethod {
         result.push(node.function)
         if node.receiver isnt? none { result.push(node.receiver) }
+        return void
+    }
+    if node is? CopyMethod | CopyValue {
+        result.push(node.value)
         return void
     }
     if node is? ArrayLength | ArrayMethod {

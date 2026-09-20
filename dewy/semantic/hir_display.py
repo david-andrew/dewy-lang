@@ -425,6 +425,8 @@ def _iter_children(node: hir.AST | hir.Param) -> list[tuple[str, hir.AST | hir.P
         return [('array', node.array)]
     if isinstance(node, hir.ArrayMethod):
         return [('array', node.array)]
+    if isinstance(node, (hir.CopyMethod, hir.CopyValue)):
+        return [('value', node.value)]
     if isinstance(node, hir.DictLookup):
         return [('keys', node.keys), ('values', node.values), ('key', node.key), *([('default', node.default)] if node.default is not None else [])]
     if isinstance(node, hir.DictMethod):
@@ -860,6 +862,8 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _seq(_to_doc(node.array, _CALL_PREC, indent), _text('.length'))
     if isinstance(node, hir.ArrayMethod):
         return _seq(_to_doc(node.array, _CALL_PREC, indent), _text(f'.{node.name}'))
+    if isinstance(node, (hir.CopyMethod, hir.CopyValue)):
+        return _seq(_to_doc(node.value, _CALL_PREC, indent), _text('.copy()' if isinstance(node, hir.CopyValue) else '.copy'))
     if isinstance(node, hir.DictLookup):
         return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('['), _to_doc(node.key, 0, indent), _text(']'))
     if isinstance(node, hir.DictMethod):

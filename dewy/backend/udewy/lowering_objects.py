@@ -318,6 +318,8 @@ class _ObjectLowering:
     def _frame_record_call(self, node: hir.AST) -> bool:
         """Calls whose record result follows the caller-frame storage ABI."""
         node = self._copy_source_expression(node)
+        if isinstance(node, hir.CopyValue):
+            return True  # its record root uses the same frame-owned layout
         return isinstance(node, hir.FunctionCall) and (
             isinstance(node.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))
             or isinstance(node.func, hir.ArrayMethod) and node.func.name == 'pop'
@@ -325,7 +327,7 @@ class _ObjectLowering:
 
     def _object_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
         node = self._copy_source_expression(node)
-        return isinstance(node, (hir.ObjectLiteral, hir.FunctionCall, hir.SetAlgebra, hir.DictView))
+        return isinstance(node, (hir.ObjectLiteral, hir.FunctionCall, hir.SetAlgebra, hir.DictView, hir.CopyValue))
 
     def _lower_object_argument(
         self,
@@ -731,12 +733,12 @@ class _ObjectLowering:
             loc,
         )
 
-    def _note_copy(self, kind: str, type_: ty.Type, site: str, reason: str, loc: Span) -> None:
+    def _note_copy(self, kind: str, type_: ty.Type, site: str, reason: str, loc: Span, *, explicit: bool = False) -> None:
         """Record one aggregate copy for `dewy analyze` (see CopyNote)."""
         name = type_to_dewy(type_)
         if len(name) > 48:
             name = name[:45] + '...'
-        self.copy_notes.append(CopyNote(self.srcfile, loc, reason, kind, name, site))
+        self.copy_notes.append(CopyNote(self.srcfile, loc, reason, kind, name, site, explicit))
 
     def _copy_reason(self, expr: hir.AST) -> str:
         """Why the copied expression could not be borrowed or moved."""

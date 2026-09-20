@@ -1959,8 +1959,8 @@ def _copy_dictionary_facts(source: hir.AST, target_id: int, *, ctx: Context) -> 
     """`let d = other` / `const radixes = [loop … k -> v]`: the new dictionary's
     keys are the source's, entry for entry, including an inferred totality."""
     source = _unwrap_parens(source)
-    while isinstance(source, (hir.RepresentationCast, hir.ValueCast)):
-        source = source.expr
+    while isinstance(source, (hir.RepresentationCast, hir.ValueCast, hir.CopyValue)):
+        source = source.value if isinstance(source, hir.CopyValue) else source.expr
     if not isinstance(source, hir.ExpressedIdentifier) or ty.container_entry_types(source.type) is None:
         return
     source_id = _dictionary_fact_id(source, ctx=ctx)
@@ -7906,6 +7906,8 @@ def _string_method(receiver: hir.AST, name: str, binop: p0.BinOp, *, ctx: Contex
 
 
 def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
+    if isinstance(node, hir.CopyMethod):
+        return hir.CopyValue(node.loc, node.value.type, node.value)
     if isinstance(node, hir.BoundMethod):
         if ty.is_zero_arg_function(node.type):
             return tcr_function_call(node, p0.Block(node.loc, [], '()', None), ctx=ctx)
@@ -8670,6 +8672,14 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             binding.name,
             binding_id=binding.id,
         )
+    if name == 'copy':
+        value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
+        plain = ty.unfold(ty.strip_refinement(value.type))
+        if isinstance(plain, (ty.ArrayType, ty.ObjectType)) and not (
+            isinstance(plain, ty.ObjectType) and (plain.field(name) is not None or plain.method(name) is not None)
+        ):
+            signature = ty.FunctionType([], [], None, value.type)
+            return hir.CopyMethod(binop.loc, signature, value)
     if name in _ARRAY_METHOD_NAMES:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         if isinstance(value.type, ty.ArrayType):
@@ -15846,6 +15856,8 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         )
     if isinstance(left, hir.DictMethod):
         return _dict_method_call(left, call, ctx=ctx)
+    if isinstance(left, hir.CopyMethod):
+        return hir.CopyValue(call.loc, left.value.type, left.value)
     _establish_call_facts(call, ctx=ctx)
     return call
 
