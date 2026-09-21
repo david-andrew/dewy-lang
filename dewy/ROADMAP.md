@@ -351,8 +351,11 @@ silently.
    sites, not execution counts or bytes; a hot loop and a cold branch each
    contribute one site. Treat
    "unexplained copies on the compiler's own sources" as a CI metric with a
-   fixed budget per kernel and per thousand lines. Regressions surface in a
-   pull request, not at 25 GB in a self-build.
+   fixed budget per kernel and per thousand lines. The native command test now
+   gates the bootstrap inventory at 5,000 static sites and 110 sites/KLOC;
+   the measured checkpoint is 4,932 sites and 107.898/KLOC. Concise reporting
+   retains every entry while avoiding repeated source rendering. Regressions
+   surface in a pull request, not at 25 GB in a self-build.
 2. **Mechanisms in order of where the bytes went.** First: read-only
    element and field reads that do not escape their expression or scope
    lower as views, justified by the effect analysis proving the root is not

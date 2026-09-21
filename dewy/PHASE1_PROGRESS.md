@@ -1854,6 +1854,30 @@ pair, records 4,919 bootstrap-only static copy sites across 45,661 physical
 Dewy lines (107.729 sites/KLOC): 1,185 records, 667 arrays, 479 cells and 2,588
 strings. This is a scoped inventory, not a comparison with the earlier
 whole-program baseline, nor a count of runtime allocations/bytes. Detailed
-output is `/tmp/dewy-phase1-copy-inventory.json`. Rendering thousands of
-source excerpts dominated the reporting path; concise reporting and shared
-source geometry are being implemented before using this as a routine gate.
+output is `/tmp/dewy-phase1-copy-inventory.json`. The reporting path rescanned source prefixes and rendered thousands of
+source excerpts that the inventory tool then discarded. Concise reporting
+and shared source geometry address that avoidable work.
+
+Copy-inventory gate checkpoint: `dewy analyze --brief` preserves every copy
+entry/count without rich excerpts; hosted move, representation and cap notes
+remain available in concise form, and unsafe auditing is not suppressed.
+Native reporting reuses immutable source-line indexes, and lowering memoizes
+copy type names. The inventory tool defaults to concise mode, with
+`--legacy-analyze` retained for historical compiler seeds. The existing native
+command test now gates the bootstrap at 5,000 static sites and 110 sites/KLOC.
+
+Validation: 14 hosted report/CLI checks and 11 options/tool checks passed.
+Native rich/concise inventories agree with CRLF and Unicode source offsets.
+A padded-source warm probe took 3.199 s rich versus 1.520/1.473 s concise,
+with identical entries; this measures reporting overhead, not compiler build
+latency. The full own-source gate records 4,932 sites over 45,710 Dewy lines
+(107.898/KLOC), taking 62.98 s and 2,694,940 KiB peak RSS. Artifacts are
+`/tmp/dewy-phase1-copy-budget.{json,log}`. These budgets are static reporting
+ratchets, not permission to hide copies or substitutes for byte-level kernels.
+
+Integration checkpoint at `bd17c8c5`: direct native generations 2/3 are byte
+identical; generation times were 64/74 s with other work running, still above
+the latency target. Direct and C execution checks pass, and all 168 expanded
+hosted/native parity cases pass. The pair and parity outputs are under
+`../dewy-build-artifacts/phase1-affine-{integration,parity}-2026-09-21`.
+The concise-report change is subsequent to this fixed-point certification.
