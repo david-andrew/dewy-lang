@@ -439,8 +439,10 @@ for stored local values, including scalars and containers, in both compilers. Th
 storage proof, retain owner liveness through dependent views, and report
 conflicting writes instead of copying. Inference initially requires stability
 throughout the function; required views can also use a containing lexical
-block when the owner is private, uncaptured and unexposed. Mutable local places
-and last-use lifetime intervals within a block remain pending.
+block or a statement interval ending at the last use of all derived aliases
+when the owner is private, uncaptured and unexposed. Control-flow statements
+remain indivisible, and outward/captured/exposed aliases retain the lexical
+lifetime. Mutable local places and broader inferred lifetimes remain pending.
 
 ### 1.2 The proof engine
 

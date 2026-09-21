@@ -1,0 +1,12 @@
+Box:type=[value:int64]
+main=():>int64=>{
+    let rows:array<Box>=[[42]]
+    const view=@rows[0]
+    let answer:int64=0
+    loop i in 0..2 {
+        answer=view.value
+        # A later iteration still reads the same view.
+        rows[0].value=0
+    }
+    return answer
+}

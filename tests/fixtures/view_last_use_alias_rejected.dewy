@@ -1,0 +1,10 @@
+Box:type=[value:int64]
+main=():>int64=>{
+    let rows:array<Box>=[[42]]
+    const view=@rows[0]
+    const child=@view
+    const grandchild=@child
+    rows.clear()
+    # The first view's own last read does not end this dependency chain.
+    return grandchild.value
+}

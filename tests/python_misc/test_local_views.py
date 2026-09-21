@@ -28,7 +28,7 @@ def test_local_view_reports_conflicting_write():
     ('const x=@42', 'stored value'),
     ('let x=@boxes[0]', 'mutable local places'),
     ('const x=@boxes[0] touch(@boxes)', 'cannot prove required local view'),
-    ('const x=@boxes[0] boxes.push(Box[7])', 'cannot prove required local view'),
+    ('const x=@boxes[0] boxes.push(Box[7]) x.value;', 'cannot prove required local view'),
 ])
 def test_local_view_rejections(code, diagnostic):
     source = SrcFile(None, 'Box:type=[value:int64] touch=(@xs:array<Box>):>void=>{xs.push(Box[1])} '

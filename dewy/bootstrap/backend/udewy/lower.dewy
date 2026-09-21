@@ -91,6 +91,7 @@ State:type = [
     stable_bindings:set<addr>=set[]
     scoped_views:set<addr>=set[]
     view_scopes:dict<addr addr>=[]
+    view_regions:dict<addr array<addr>>=[]
     stable_parameters:dict<addr effects.ParameterEffects>=[]
     array_snapshots:set<addr>=set[]
     view_writes:array<addr>=[]
@@ -3501,7 +3502,7 @@ required_view_error = (node:hir.Declare @state:State):>addr => {
     let within:set<addr>=set[]
     let scope=if node.binding_id is? none none else state.view_scopes.get(node.binding_id)
     if scope isnt? none {
-        let pending:array<addr>=[scope]
+        let pending=if node.binding_id is? none [scope] else state.view_regions.get(node.binding_id [scope])
         loop pending.length >? 0 {
             let id=pending.pop
             if id in? within continue
@@ -3522,7 +3523,7 @@ required_view_error = (node:hir.Declare @state:State):>addr => {
             if conflict {pointers.push(Pointer[current.loc 'this write or mutable place conflicts with the required view']) break}
         }
     }
-    let notes:array<string>=['A required view needs stable storage throughout its lexical scope; captured or exposed owners need additional lifetime evidence.']
+    let notes:array<string>=['A required view needs stable storage through its last use, including derived aliases; captured or exposed owners need additional lifetime evidence.']
     let value=hir.node_at(state.input.nodes node.expr)
     let stored=types.unfold(types.strip_refinement(stored_type(node.expr state) state.type_nodes) state.type_nodes)
     let read=types.unfold(types.strip_refinement(value.value_type state.type_nodes) state.type_nodes)
@@ -4419,6 +4420,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.stable_bindings=borrowed.stable_bindings
     state.scoped_views=borrowed.scoped_views
     state.view_scopes=borrowed.view_scopes
+    state.view_regions=borrowed.view_regions
     state.stable_parameters=borrowed.stable_parameters
     state.array_snapshots=borrowed.array_snapshots
     state.disposable_arguments=borrowed.disposable_arguments

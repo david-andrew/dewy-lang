@@ -353,14 +353,84 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
 }
 # `rejections` explains, per source binding, why its last considered use as
 # an argument was not borrowed (for `dewy analyze`).
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[]]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[] view_regions:dict<addr array<addr>>=[]]
 
-# A required view can end with its lexical block. The owner may be changed
-# outside that block; every operation inside it must preserve the route.
-# Only functions containing explicit demands pay for this additional scan.
-ScopedViews:type = [bindings:set<addr>=set[] scopes:dict<addr addr>=[]]
+# Required views can end at the last use of all their derived aliases.
+# Statements containing control flow remain indivisible, so a read in a loop
+# keeps the view live across that entire loop. Outward, captured or exposed
+# aliases retain the lexical lifetime. Ordinary inference pays no extra scan.
+view_nodes = (id:addr nodes:array<hir.AST> dependencies:bool=false):>array<addr> => {
+    let found:array<addr>=[]
+    let pending:array<addr>=[id]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let current=pending.pop
+        if current in? seen {continue}
+        seen.add(current) found.push(current)
+        let node=hir.node_at(nodes current)
+        if node isnt? hir.FunctionLiteral|hir.GenericFunction and not (dependencies and node is? hir.CopyValue) {hir.push_children(node @pending)}
+    }
+    return found
+}
+view_region = (scope:addr declaration:addr excluded:set<addr> nodes:array<hir.AST> type_nodes:types.Table):>array<addr> => {
+    let block=hir.node_at(nodes scope)
+    let declared=hir.node_at(nodes declaration)
+    $runtime_assert block is? hir.Block and declared is? hir.Declare and declared.binding_id isnt? none
+    let references:array<set<addr>>=[]
+    let locals:set<addr>=set[]
+    let dependents:dict<addr set<addr>>=[]
+    let start:addr?=none
+    let stop:addr=0
+    loop index in 0.. and index <? block.items.length {
+        let reads:set<addr>=set[]
+        loop id in view_nodes(block.items[index] nodes) {
+            let node=hir.node_at(nodes id)
+            if id =? declaration {
+                if start is? none {start=index}
+                stop=index
+            }
+            if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {reads.add(node.binding_id)}
+            let target:addr?=none
+            let value:addr?=none
+            if node is? hir.Declare {
+                if node.binding_id isnt? none {locals.add(node.binding_id)}
+                if node.view or not word_value(hir.node_at(nodes node.expr).value_type type_nodes) {target=node.binding_id value=node.expr}
+            } else if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign and not word_value(hir.node_at(nodes node.value).value_type type_nodes) {
+                let path=route(node.target nodes)
+                if path isnt? none {target=path.binding value=node.value}
+            }
+            if target isnt? none and value isnt? none {
+                loop read_id in view_nodes(value nodes dependencies=true) {
+                    let read=hir.node_at(nodes read_id)
+                    if read is? hir.ExpressedIdentifier and read.binding_id isnt? none {
+                        let edges=dependents.get(read.binding_id set[])
+                        edges.add(target) dependents[read.binding_id]=edges
+                    }
+                }
+            }
+        }
+        references.push(reads)
+    }
+    if start is? none return block.items
+    let live:set<addr>=set[declared.binding_id]
+    let pending:array<addr>=[declared.binding_id]
+    loop pending.length >? 0 {
+        let current=pending.pop
+        loop target in dependents.get(current set[]) {
+            if target not in? live {live.add(target) pending.push(target)}
+        }
+    }
+    loop binding in live {if binding in? excluded or binding not in? locals return block.items}
+    loop index in 0.. and index <? references.length {
+        loop binding in references[index] {if binding in? live and index >? stop {stop=index}}
+    }
+    let result:array<addr>=[]
+    loop index in 0.. and index <? block.items.length {if index >=? start and index <=? stop {result.push(block.items[index])}}
+    return result
+}
+ScopedViews:type = [bindings:set<addr>=set[] scopes:dict<addr addr>=[] regions:dict<addr array<addr>>=[]]
 ScopeItem:type = const [id:addr scope:addr?]
-scoped_views = (demands:set<addr> nodes:array<hir.AST> plan:captures.Plan excluded:set<addr>):>ScopedViews => {
+scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan excluded:set<addr>):>ScopedViews => {
     let result=ScopedViews[]
     if demands.length =? 0 return result
     loop [function_id function] in plan.functions {
@@ -399,12 +469,18 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> plan:captures.Plan exclud
             $runtime_assert declared is? hir.Declare and declared.binding_id isnt? none
             let binding=declared.binding_id
             let source=route(declared.expr nodes)
-            if source is? none or source.binding not in? function.locals or source.binding in? excluded continue
             # This owner is private, uncaptured and unexposed. Ambient writes
             # to unrelated storage cannot reach it; explicit places and
             # unresolved callbacks still conflict through the normal scan.
-            let safe=true
-            loop scope in scopes {if expression_conflicts(scope source nodes plan set[]) {safe=false break}}
+            let safe=source isnt? none and source.binding in? function.locals and source.binding not in? excluded
+            let regions:array<addr>=[]
+            loop scope in scopes {
+                loop item in view_region(scope declaration excluded nodes type_nodes) {
+                    regions.push(item)
+                    if source isnt? none and expression_conflicts(item source nodes plan set[]) {safe=false}
+                }
+            }
+            result.regions[binding]=regions
             if safe {result.bindings.add(binding)}
         }
     }
@@ -745,6 +821,6 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     loop binding in exposed {excluded.add(binding)}
     loop binding in places {excluded.add(binding)}
     loop binding in addressed {excluded.add(binding)}
-    let scoped=scoped_views(view_demands nodes plan excluded)
-    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned scoped.bindings scoped.scopes]
+    let scoped=scoped_views(view_demands nodes type_nodes plan excluded)
+    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned scoped.bindings scoped.scopes scoped.regions]
 }

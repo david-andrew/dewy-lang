@@ -827,3 +827,26 @@ All 11 lifecycle parity cases passed with required diagnostic fragments;
 the focused manifest now has 105 cases. Artifacts:
 `../dewy-build-artifacts/phase1-lifecycle-inheritance-stage1-2026-09-20` and
 `../dewy-build-artifacts/phase1-lifecycle-inheritance-parity-2026-09-20`.
+
+Required local views now use statement intervals through the last use of
+their derived aliases in both lowerers. Owners may change earlier and later
+in the same block. The dependency closure includes aggregate forwarding and
+explicit derived scalar views; an explicit `.copy()` creates an independent
+snapshot. Loops and conditional statements remain indivisible, preventing
+a later iteration or branch from reading invalidated storage. Captured,
+exposed and outward-stored aliases retain the containing-block proof, and
+addressed owners still need stronger evidence. Ordinary inferred views keep
+their existing fast path. Conflict diagnostics search the selected interval,
+so an earlier unrelated write no longer receives the blame.
+
+Validation: 50 hosted view/copy checks passed initially; one old rejection
+expected an unused view to block a later write and was updated to read the
+view after that write. The corrected local-view and ownership/report suites
+passed 34 checks. Native passed all 14 last-use acceptance/rejection probes
+and all ten paired view fixtures. The new allocation kernel executes on
+hosted x86/C and native, allocates nothing for the views and retains no
+storage over 100 repetitions. The native generation built in 63.41 seconds
+and also executes the previous three kernels (42), still above target.
+The focused manifest now has 108 cases. Artifacts:
+`../dewy-build-artifacts/phase1-view-last-use-stage1-2026-09-20` and
+`../dewy-build-artifacts/phase1-view-last-use-parity-2026-09-20`.
