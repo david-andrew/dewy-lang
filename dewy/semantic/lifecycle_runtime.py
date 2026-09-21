@@ -1,9 +1,10 @@
 """Materialize ownership operations before runtime lowering.
 
-The first supported owners are fresh local records with recursively owned record fields
-and drop hooks. Copies, moves, resource containers and escaping owners remain
-explicitly unsupported. Keeping drop calls in checked HIR makes their effects
-visible and lets ordinary lowering implement the internal place call ABI.
+Supported owners are fresh local records, including nested record resources.
+Explicit copy hooks may construct fresh results; drop runs before field
+cleanup. Implicit copies, moves, resource containers and escaping owners
+remain unsupported. Checked HIR calls expose effects and use the ordinary
+internal place call ABI.
 """
 from dataclasses import replace
 
@@ -50,8 +51,8 @@ def prepare(root: hir.Block, srcfile):
         literal = declaration.expr
         current_source = literal.source or srcfile
         receiver = ty.unfold(ty.strip_refinement(literal.pos_or_kw_args[0].type))
-        if literal.lifecycle != 'drop' or not isinstance(receiver, ty.ObjectType):
-            reject(declaration, 'copy/move hooks')
+        if literal.lifecycle not in ('drop', 'copy') or not isinstance(receiver, ty.ObjectType):
+            reject(declaration, 'move hooks')
 
     current_source = srcfile
 
@@ -97,6 +98,19 @@ def prepare(root: hir.Block, srcfile):
         return result
 
     def fresh(node, allowed, inherited):
+        # An explicit custom copy creates an independent owner. Its checked
+        # call already carries the hook's effects and result contract.
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier):
+            operation = declarations.get(node.func.binding_id)
+            if operation is not None and operation.expr.lifecycle == 'copy':
+                if len(node.pos_args) != 1 or node.kw_args or not isinstance(node.pos_args[0], hir.Place):
+                    reject(node, 'an invalid copy receiver')
+                receiver = node.pos_args[0].target
+                while isinstance(receiver, hir.MemberAccess):
+                    receiver = receiver.value
+                if not isinstance(receiver, hir.ExpressedIdentifier) or receiver.binding_id not in allowed:
+                    reject(node, 'an unavailable copy receiver')
+                return node
         shape = ty.unfold(ty.strip_refinement(node.type))
         if not isinstance(node, hir.ObjectLiteral) or not isinstance(shape, ty.ObjectType):
             reject(node, 'a non-fresh resource field or resource container')
@@ -178,10 +192,10 @@ def prepare(root: hir.Block, srcfile):
         allowed = set()
         for index, param in enumerate(params):
             if resource(param.type) is not None:
-                if not (literal.lifecycle == 'drop' and index == 0 and param.place):
+                if not (literal.lifecycle in ('drop', 'copy') and index == 0 and param.place):
                     reject(literal, 'owning parameters')
                 allowed.add(param.binding_id)
-        if resource(literal.rettype) is not None:
+        if resource(literal.rettype) is not None and literal.lifecycle != 'copy':
             reject(literal, 'owning returns')
         if literal.lifecycle is None and not mentions_resource(literal):
             current_source = previous_source
@@ -215,7 +229,10 @@ def prepare(root: hir.Block, srcfile):
                 owners.append(node)
                 return node
             if isinstance(node, hir.Return):
-                returned = expression(node.item, live, inherited=literal.lifecycle == 'drop') if node.item is not None else None
+                if node.item is not None and literal.lifecycle == 'copy' and resource(node.item.type) is not None:
+                    returned = fresh(node.item, live, False)
+                else:
+                    returned = expression(node.item, live, inherited=literal.lifecycle == 'drop') if node.item is not None else None
                 if not owners:
                     return replace(node, item=returned)
                 result = []
@@ -251,6 +268,8 @@ def prepare(root: hir.Block, srcfile):
             if isinstance(node, hir.MemberAssign):
                 return replace(node, target=expression(node.target, live, inherited=literal.lifecycle == 'drop'),
                                value=expression(node.value, live, inherited=literal.lifecycle == 'drop'))
+            if literal.lifecycle == 'copy' and resource(node.type) is not None:
+                return fresh(node, live, False)
             return expression(node, live, inherited=literal.lifecycle == 'drop')
 
         # A function body's unscoped block is nevertheless its lexical owner

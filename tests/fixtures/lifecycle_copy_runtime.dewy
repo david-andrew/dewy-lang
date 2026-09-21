@@ -1,0 +1,37 @@
+let copied:int64=0
+let dropped:int64=0
+BufferHandle=type of [token:int64 text:string values:array<int64>
+$__drop__
+release=():>void=>{dropped+=1 values.clear text="released"}
+$__copy__
+duplicate=():>BufferHandle=>{
+    copied+=1
+    return BufferHandle[token text values.copy()]
+}
+]
+Envelope=type of [inner:BufferHandle
+$__copy__
+duplicate=():>Envelope=>Envelope[inner.copy()]
+]
+nested=(n:int64):>int64=>{
+    let first=Envelope[BufferHandle[42 "nested {n}" [1 2 3]]]
+    let second=first.copy()
+    second.inner.values.push(4)
+    second.inner.token=1
+    return if first.inner.values.length=?3 and second.inner.values.length=?4 first.inner.token else 0
+}
+exercise=(n:int64):>int64=>{
+    let first=BufferHandle[42 "owned {n}" [1 2 3]]
+    let second=first.copy()
+    second.values.push(4)
+    second.token=1
+    return if first.values.length=?3 and second.values.length=?4 first.token else 0
+}
+main=():>int64=>{
+    if exercise(0) not=?42 or nested(0) not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {if exercise(i) not=?42 or nested(i) not=?42 return 2}
+    if copied not=?202 or dropped not=?404 return 3
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}
