@@ -1077,3 +1077,47 @@ mutation, exercised hook/drop counts, and zero retained bytes across 100
 iterations on hosted x86/C and native. The focused manifest has 130 cases.
 Artifacts: `../dewy-build-artifacts/phase1-lifecycle-copy-runtime-2026-09-21`
 and `../dewy-build-artifacts/phase1-lifecycle-copy-runtime-parity-2026-09-21`.
+
+## Test repair and ownership continuation (2026-09-21)
+
+The original failing local suite is repaired: the fixed baseline passed
+3,347 tests with 14 skips, and CI run 35565972436 passed. The recovery release
+published `native-8406363e1299` after three byte-identical generations and
+execution checks on both backends. Test drivers are cached within a pytest
+worker; each source case still executes in its own process and cache.
+
+Resource factories and callbacks now return fresh owners. Result evaluation
+precedes cleanup, including aggregate field snapshots and copy hooks with
+scratch owners. Ordinary `@` parameters lend resource records without
+transferring ownership; nested fields and callback forwarding are covered.
+Explicit returns transfer local owners along the exiting path, including
+branches and loops, and release the remaining owners. Hosted record binding
+moves now reuse storage at proven last use, matching the native behavior.
+Their allocation regression has a positive control with moves disabled.
+
+The expanded full suite passed 3,368 cases and exposed two regressions:
+construction-time move bookkeeping was missing, and optional widening was
+misclassified in the copy inventory. Both are fixed; all 11 targeted
+copy-inventory, binding-identity and record-move checks passed afterward.
+The full suite must still be rerun on the combined follow-up changes.
+
+Inherited copy wrappers now consume the intermediate parent's fields into
+the complete child instead of dropping those resources prematurely. Explicit
+HIR metadata identifies the checked composition; snapshot codecs preserve
+it. Native parent-place contracts compare proposition identities rather than
+array storage addresses. All 95 lifecycle, identity and snapshot checks passed.
+
+Explicit owner returns now invoke custom move hooks. The consumed owner's
+own drop hook is skipped; remaining nested resources still receive automatic
+cleanup. Inherited hooks compose the parent operation with ordinary added
+fields. Hook effects invalidate caller facts and participate in effect
+contracts; a returned fact must hold for the hook's result. All 96 targeted
+checks passed, including hosted x86/C and native execution, inheritance,
+effect rejection, and no retained storage across repeated calls.
+
+These checkpoints do not complete Phase 1. General local resource transfers,
+resource containers, owning parameters, mutable local places, shared storage
+proofs for allocation contracts, and inferred callable effect rows remain
+work to finish. Existing rejection gates remain explicit until their
+ownership operations are implemented. New integration and second-generation
+checks are required before certifying the combined changes.
