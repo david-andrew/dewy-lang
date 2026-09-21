@@ -1108,7 +1108,8 @@ local_transfers = (body:addr parameters:array<addr> @plan:Plan session:contexts.
             }
             let candidates:array<addr>=[item]
             loop candidates.length >? 0 {
-                let part=hir.node_at(session.hir candidates.pop)
+                let part_id=candidates.pop
+                let part=hir.node_at(session.hir part_id)
                 if part is? hir.Flow {
                     if part.arms.length >? 0 {
                         let first=hir.node_at(session.hir part.arms[0])
@@ -1117,7 +1118,11 @@ local_transfers = (body:addr parameters:array<addr> @plan:Plan session:contexts.
                     continue
                 }
                 if part is? hir.Block|hir.FunctionLiteral|hir.ShortCircuit {continue}
-                loop argument in owning_inputs(part) {
+                let inputs=owning_inputs(part)
+                # A branch-local expressed value uses the same last-use proof
+                # as an owning argument, including all trailing statements.
+                if part_id =? item and resource(block.value_type session.types) isnt? none and resource(part.value_type session.types) isnt? none {inputs.push(part_id)}
+                loop argument in inputs {
                     let selected=argument
                     let value=hir.node_at(session.hir selected)
                     loop true {

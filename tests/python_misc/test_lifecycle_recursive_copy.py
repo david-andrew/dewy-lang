@@ -23,7 +23,20 @@ $__copy__
 clone=():>Handle=>{copies+=1 return Handle[id]}
 ]
 '''
+MOVE_ONLY = HANDLE.replace('$__copy__\nclone=():>Handle=>{copies+=1 return Handle[id]}', '')
 CASES = [
+    MOVE_ONLY+'''work=(yes:bool):>int64=>{
+ let selected=if yes {let local=Handle[42] local} else {let local=Handle[42] local}
+ return selected.id
+}
+main=():>int64=>{let a=work(true) let b=work(false)
+return if a=?42 and b=?42 and drops=?2 42 else 0}''',
+    MOVE_ONLY+'''work=(yes:bool):>int64=>{
+ let selected=if yes {let local=Handle[42] local copies+=1} else Handle[42]
+ return selected.id
+}
+main=():>int64=>{let a=work(true) let b=work(false)
+return if a=?42 and b=?42 and copies=?1 and drops=?2 42 else 0}''',
     NODE+'''work=():>int64=>{
  let node=Node[42 Node[1 none]] let other=node.copy()
  other.id=7 return node.id
@@ -49,6 +62,9 @@ main=():>int64=>{let a=work(true) let b=work(false)
 return if a=?42 and b=?42 and copies=?1 and drops=?3 42 else 0}''',
 ]
 ERRORS = [
+    MOVE_ONLY+'''work=(yes:bool):>int64=>{
+let selected=if yes {let local=Handle[42] local local.id=1} else Handle[42]
+return selected.id}''',
     NODE+'work=():>int64 & no_effects=>{let node=Node[1 none] let other=node.copy() return other.id}',
     NODE.replace('copies+=1 return', 'id=7 copies+=1 return')+'main=():>int64=>42',
     HANDLE.replace('$__copy__\nclone=():>Handle=>{copies+=1 return Handle[id]}','')+'''work=(yes:bool):>int64=>{

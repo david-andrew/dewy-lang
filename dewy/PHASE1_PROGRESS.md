@@ -1812,3 +1812,11 @@ Validation: 92 hosted adjacent lifecycle cases passed; four positive and three
 negative cases passed on both compilers, with each positive executed through
 x86-64 and C. Cases cover custom and synthesized recursive copies, branch
 cleanup, trailing statements, receiver writes and empty effect contracts.
+
+Branch-local result checkpoint (2026-09-21): an expressed value in a resource
+block is now an owning input to the existing bounded last-use analysis.
+Move-only locals can leave either branch without a synthesized copy; later
+reads/writes and dependent aliases still prevent transfer. Statements after
+the value retain their evaluation point. Outer-owner joins remain separate.
+Validation: ten hosted checks and six positive/four negative paired cases
+passed, with all positives executed through x86-64 and C.

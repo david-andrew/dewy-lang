@@ -1,0 +1,13 @@
+# Branch-local last uses transfer move-only results.
+let copies:int64=0 let drops:int64=0
+Handle=type of [id:int64
+$__drop__
+release=():>void=>{drops+=1}
+
+]
+work=(yes:bool):>int64=>{
+ let selected=if yes {let local=Handle[42] local} else {let local=Handle[42] local}
+ return selected.id
+}
+main=():>int64=>{let a=work(true) let b=work(false)
+return if a=?42 and b=?42 and drops=?2 42 else 0}

@@ -720,7 +720,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         continue
                     if isinstance(part, (hir.Block, hir.FunctionLiteral, hir.ShortCircuit)):
                         continue
-                    for value in owning_inputs(part):
+                    inputs = list(owning_inputs(part))
+                    if part is node and resource(block.type) is not None and resource(part.type) is not None:
+                        # A scoped expression's value is another owning input.
+                        # The same last-use proof includes trailing statements
+                        # and aliases, so it can consume only a branch local.
+                        inputs.append(part)
+                    for value in inputs:
                         while isinstance(value, (hir.ValueCast, hir.RepresentationCast, hir.Obligation)):
                             value = value.value if isinstance(value, hir.Obligation) else value.expr
                         if (isinstance(value, hir.ExpressedIdentifier) and resource(value.type) is not None
