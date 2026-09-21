@@ -11,6 +11,7 @@ import p"analyze/fact_state.dewy" as facts
 import p"analyze/representation.dewy" as representation
 import p"runtime_reports.dewy" as runtime_reports
 import p"lifecycle_runtime.dewy" as lifecycle_runtime
+import p"local_places.dewy" as local_places
 import p"validation_state.dewy" as proofs
 import p"validation_analysis.dewy" as analysis
 import p"analyze/prototype_checks.dewy" as prototype
@@ -76,6 +77,10 @@ validate = (@engine:modules.Engine):>Result|Error => {
         let roots:array<addr>=[]
         loop module in engine.modules {roots.push(module.root)}
         let source=sources.srcfile(engine.modules[0].context engine.session)
+        if engine.session.local_place_roots.length >? 0 {
+            let place_error=local_places.rewrite(roots source @engine.session)
+            if place_error isnt? none return place_error
+        }
         ownership_error=lifecycle_runtime.prepare(roots source @engine.session)
     }
     let decisions=analyze_modules(word engine)

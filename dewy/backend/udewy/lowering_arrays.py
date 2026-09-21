@@ -880,6 +880,10 @@ class _ArrayLowering(_ArraySharing):
     ) -> list[hir.AST]:
         if not isinstance(node.expr, hir.ArrayLiteral):
             array_type = node.annotation or node.expr.type
+            if isinstance(array_type, ty.ArrayType) and array_type.length is None and self._array_use_representation(node.expr) is not None:
+                # Placement already proved one fixed backing extent for this
+                # alias group. A forgotten flow fact does not erase its layout.
+                array_type = replace(array_type, length=self._raw_array_length(node.expr))
             if not isinstance(array_type, ty.ArrayType) or array_type.length is None:
                 raise TypeError(
                     'INTERNAL ERROR: stack-data array copy requires an exact length'

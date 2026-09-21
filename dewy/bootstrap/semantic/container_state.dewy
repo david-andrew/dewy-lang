@@ -32,6 +32,21 @@ changed = (binding:addr state:addr @session:contexts.Session):>void => {
     let prefix:array<string> = []
     let item=bindings.route_at(session.registry binding)
     if item isnt? none {owner=item.root prefix=item.path}
+    if session.local_place_roots.length >? 0 {
+        let selected=session.local_place_roots.get(owner default=owner)
+        let related:array<addr>=[]
+        loop [alias root] in session.local_place_roots {
+            if root =? selected {related.push(alias)}
+        }
+        if related.length >? 0 {
+            related.push(selected)
+            let affected=related
+            loop id in related {loop route in bindings.routes_under(session.registry id []) {affected.push(route)}}
+            loop id in affected {current=keys.forget(current changed=id)}
+            $runtime_assert state <? session.read_states.length
+            drop_types(@session.read_states[state] affected)
+        }
+    }
     # Replacement invalidates facts about the whole projected subtree,
     # including narrowed member types, while unrelated sibling routes stay.
     $runtime_assert state <? session.read_states.length

@@ -1,0 +1,63 @@
+import p"ty.dewy" as types
+import p"propositions.dewy" as facts
+
+# Rebind checked fact identities after replacing a local place with its rooted
+# storage route. Spelling remains source spelling for diagnostics; type arena
+# descriptions are rebuilt through their factories, never mutated in place.
+Rebinding:type=[terms:dict<addr addr> memo:dict<addr addr>=[]]
+identity=(id:addr? mapping:Rebinding):>addr?=>if id is? none none else mapping.terms.get(id id)
+propositions=(items:array<facts.Proposition> @mapping:Rebinding @table:types.Table):>array<facts.Proposition>=>{
+    let result:array<facts.Proposition>=[]
+    loop p in items {
+        let tested=if p.tested_type is? none none else rebind(p.tested_type @mapping @table)
+        result.push(facts.Proposition[p.subject p.op p.value p.projection p.term identity(p.term_id mapping) p.term_projection tested p.when identity(p.subject_id mapping) p.axiom])
+    }
+    return result
+}
+rebind=(id:addr @mapping:Rebinding @table:types.Table):>addr=>{
+    let saved=mapping.memo.get(id)
+    if saved isnt? none return saved
+    let result=transform(id @mapping @table)
+    mapping.memo[id]=result
+    return result
+}
+transform=(id:addr @mapping:Rebinding @table:types.Table):>addr=>{
+    let node=types.node_at(table id)
+    if node is? types.RefinedType return types.refined_type(rebind(node.base @mapping @table) propositions(node.propositions @mapping @table) @table)
+    if node is? types.TypeNot return types.negate(rebind(node.item @mapping @table) @table)
+    if node is? types.ArrayType return types.array_type(rebind(node.element @mapping @table) node.length @table)
+    if node is? types.QuantityType return types.quantity_type(rebind(node.number @mapping @table) node.dimension @table)
+    if node is? types.MetaType return types.meta_type(rebind(node.family @mapping @table) @table)
+    if node is? types.TypeVariable return types.type_variable(node.name rebind(node.bound @mapping @table) @table)
+    if node is? types.PathType return id
+    if node is? types.ObjectType {
+        let fields:array<types.ObjectField>=[]
+        loop f in node.fields {fields.push(types.ObjectField[f.name rebind(f.value_type @mapping @table) f.mutable f.default propositions(f.refinement @mapping @table)])}
+        return types.object_type(fields node.brand node.immutable node.methods node.constructors @table minted=node.minted parent=node.parent abstract=node.abstract)
+    }
+    if node is? types.TypeAnd|types.TypeOr|types.SequenceType|types.OverloadType {
+        let original=if node is? types.OverloadType node.methods else node.items
+        let items:array<addr>=[]
+        loop item in original {items.push(rebind(item @mapping @table))}
+        if node is? types.TypeAnd return types.intersect(items @table)
+        if node is? types.TypeOr return types.union(items @table)
+        if node is? types.SequenceType return types.sequence(items @table)
+        return types.overload_type(items @table)
+    }
+    if node is? types.TypeParameterize {
+        let args:array<addr>=[]
+        loop item in node.args {args.push(rebind(item @mapping @table))}
+        return types.parameterize(rebind(node.head @mapping @table) args @table)
+    }
+    if node is? types.FunctionType {
+        let pos:array<types.PosOrKwArg>=[]
+        let kw:array<types.KwOnlyArg>=[]
+        let params:array<types.GenericParam>=[]
+        loop p in node.pos_or_kw {pos.push(types.PosOrKwArg[p.name rebind(p.value_type @mapping @table) p.required p.place])}
+        loop p in node.kw_only {kw.push(types.KwOnlyArg[p.name rebind(p.value_type @mapping @table) p.required p.place])}
+        loop p in node.type_params {params.push(types.GenericParam[p.name rebind(p.bound @mapping @table) p.kind p.identity])}
+        return types.function_type(pos kw node.rest rebind(node.ret @mapping @table) params @table effects=node.effects)
+    }
+    # Named recursive references preserve the declaration's nominal identity.
+    return id
+}

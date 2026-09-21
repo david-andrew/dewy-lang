@@ -497,7 +497,11 @@ when the owner is private, uncaptured and unexposed. The live interval now disti
 cleanup after saving a result does not invalidate an earlier view. Loop
 backedges retain repeated reads, and outward/captured/exposed aliases retain
 the lexical lifetime. Known nonescaping place calls outside the interval no
-longer exclude the owner for its entire function. Mutable local places and lifetimes for aliased/exposed owners remain pending.
+longer exclude the owner for its entire function. Mutable local places now use rooted bindings, fields and array selections,
+capturing selectors once and retaining checked storage/fact/effect contracts.
+Their private, uncaptured owners must remain stable through the last use of
+all dependent aliases. Dictionary-entry places and lifetimes for captured or
+exposed owners remain pending.
 
 ### 1.2 The proof engine
 

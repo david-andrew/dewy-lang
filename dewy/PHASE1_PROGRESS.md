@@ -1629,3 +1629,37 @@ Validation: 17 adjacent hosted checks pass. Positive/negative result-fact
 cases and string/array snapshot cases pass both compilers and both backends.
 No µDewy semantics changed. The full-suite count above records the original
 run; it is not a claim that the entire suite was rerun after this repair.
+
+Integration checkpoint at `1ef6c8d1`: the direct native pair again reached a
+byte-identical generation 2/3 fixed point and passed execution checks. All
+eight selected integration cases passed, including indexed scalar facts,
+resource slots and block-result repair. Generations 2/3 took 64/73 s; this
+remains above the native latency target. Artifacts are under
+`../dewy-build-artifacts/phase1-resource-slots-integration-2026-09-21`
+and `phase1-resource-slots-parity-2026-09-21`.
+
+Checkpoint: mutable local places now select rooted bindings, record fields
+and array elements. Selectors are captured once; ordinary checked assertions
+prove valid selection at declaration, including an unused place. The same
+structured lifetime analysis as required views includes derived aliases and
+rejects owner replacement/resizing before their last use, captures and raw
+exposure. Normal place lowering retains COW snapshot independence and const
+barriers; no raw pointer survives between uses.
+
+Storage contracts remain invariant, including declared refinements. Alias
+writes invalidate source-checker owner facts and vice versa. Before ordinary
+fact/effect/lifecycle checking, rooted selections replace alias reads/writes
+and rebind dependent fact identities, including projected terms and nested
+types. Native type factories preserve arena keys; only functions containing
+aliases are rewritten. Speculation and hosted prelude rollback retain the new
+metadata correctly. Debuggers currently expose the rooted owner instead of a
+separately stored alias variable. Dictionary-entry and captured/exposed-owner
+places still need further lifetime work.
+
+Validation: 60 adjacent hosted view/cache checks passed. The final 37
+acceptance/rejection cases and integration fixture pass both compilers and
+both x86-64/C backends through a fresh native-built program driver. Coverage
+includes generic instances, loop selectors, dependent refinements, alias
+invalidation, resource replacement/drop, effects and explicit-copy policy.
+The former test requiring mutable places to be unsupported was removed;
+rejections for unstable selections and const storage remain.

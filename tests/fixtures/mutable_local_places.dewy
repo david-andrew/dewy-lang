@@ -1,0 +1,34 @@
+# A local place names storage; selectors are evaluated at declaration, and
+# ordinary value snapshots remain independent of later writes through it.
+let selections:int64=0
+select=():>int64<v=>v=?0>=>{selections+=1 return 0}
+let drops:int64=0
+Handle=type of [id:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+replace_resource=():>int64=>{
+    let handles:array<Handle>=[Handle[1]]
+    let cursor=@handles[0]
+    cursor=Handle[42]
+    return handles[0].id
+}
+Box:type=[items:array<int64>]
+main=():>int64=>{
+    let xs:array<int64>=[40]
+    let cursor=@xs[select()]
+    let snapshot=xs
+    let next=@cursor
+    next+=2
+    $runtime_assert selections=?1 and snapshot[0]=?40 and xs[0]=?42
+
+    # The alias is dead here, so replacing its former owner is safe.
+    xs.clear xs.push(42)
+    let answer=replace_resource()
+    $runtime_assert drops=?2 and answer=?42
+
+    let box=Box[[42]]
+    let view=@box
+    let count:int64<v=>v=?view.items.length>=box.items.length
+    return count+41
+}

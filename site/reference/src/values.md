@@ -70,17 +70,34 @@ boundary, such as returning it or storing it in another record, still supplies
 an independent value; this does not create a first-class reference.
 
 The normal inference proof keeps the owner stable throughout the function.
-A required view can also use the shorter lifetime of its containing lexical
-block: private, uncaptured storage may change before and after that block,
-provided nothing changes it during the block. Captured owners, exposed
-addresses and mutable places still need stronger lifetime evidence. The
-compiler does not yet shorten a view's lifetime to its last read within the
-same block.
+A required view can also use a shorter interval ending at the last use of
+all its dependent aliases, including return edges and loop backedges. Private,
+uncaptured storage may change outside that interval. Captured owners and
+exposed addresses still need stronger lifetime evidence.
 It supports bindings, fields, and array elements, including scalars, records,
 arrays, strings, unions, dictionaries and sets. Scalar views retain the
 source width and signedness; they make the same stability demand as a view
-of aggregate storage. Mutable local places (`let cursor = @xs[i]`) remain
-pending.
+of aggregate storage.
+
+`let cursor = @xs[i]` creates a mutable local place. Writes through `cursor`
+update the selected element; `i` is evaluated once at the declaration. A
+place may also select a named binding or a record field. The selected storage
+must remain available until the last use, including uses by derived aliases.
+Replacing or resizing its owner in that interval is rejected. A local place
+retains the selected storage's write contract and const barriers, and its
+reads/writes retain the owner's effects and facts. It is not a first-class
+reference: captured/escaping places and dictionary-entry places still require
+further lifetime support. Ordinary value reads can still produce independent
+snapshots. These aliases currently lower to rooted selections, so the debugger
+shows the owner rather than a separate stored alias variable.
+
+```dewy
+let xs:array<int64> = [40]
+let cursor = @xs[0]
+cursor += 2
+$assert xs[0] =? 42
+```
+
 The explicit `@` form is an escape hatch while inference improves; ordinary
 read-only locals already borrow when the compiler can prove it safe.
 

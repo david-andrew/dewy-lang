@@ -76,6 +76,7 @@ CheckState:type = [
     # position there is a pair, not an unsupported operator.
     capture_pairs:addr=0
     local_view_probes:array<LocalViewProbe>=[]
+    local_place_roots:dict<addr addr>=[]
 ]
 # Types and syntax references are interned append-only. HIR also appends,
 # except for the few checking rewrites recorded below. A speculative parser
@@ -96,6 +97,7 @@ Session:type = CheckState & [
 Checkpoint:type = const [state:CheckState syntax_refs:addr types:addr hir:addr edits:addr]
 checkpoint = (session:Session):>Checkpoint => {
     let state=CheckState[
+        local_place_roots=session.local_place_roots
         local_view_probes=session.local_view_probes
         warnings=session.warnings
         pending_brand_matches=session.pending_brand_matches
@@ -154,6 +156,7 @@ restore = (checkpoint:Checkpoint @session:Session):>void => {
     }
     session.syntax_refs.truncate(checkpoint.syntax_refs)
     if session.syntax_refs_indexed >? session.syntax_refs.length {session.syntax_refs_indexed=session.syntax_refs.length}
+    session.local_place_roots=checkpoint.state.local_place_roots
     session.local_view_probes=checkpoint.state.local_view_probes
     session.warnings=checkpoint.state.warnings
     session.pending_brand_matches=checkpoint.state.pending_brand_matches

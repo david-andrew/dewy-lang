@@ -33,7 +33,7 @@ class ModuleRecord:
     explicit_copies: bool = False
 
 
-_PRELUDE_CACHE_VERSION = 4
+_PRELUDE_CACHE_VERSION = 5
 
 
 class _ResidentPrelude:
@@ -70,7 +70,7 @@ class _ResidentPrelude:
         self.promote_rules = dict(system._promote_rules)
         # every generic the prelude declares: its instances so far, and the
         # scope of its defining module (an instantiation writes its name there)
-        self.generics: list[tuple[hir.GenericSource, dict, dict, dict]] = []
+        self.generics: list[tuple[hir.GenericSource, dict, dict, dict, dict]] = []
         seen: set[int] = set()
         for record in self.order:
             for source in _generic_sources(record.root, seen):
@@ -80,6 +80,7 @@ class _ResidentPrelude:
                     dict(source.instances),
                     dict(context.declarations.maps[0]),
                     dict(context.binding_scopes.maps[0]),
+                    dict(context.local_place_roots),
                 ))
 
     def rollback(self) -> None:
@@ -125,9 +126,11 @@ class _ResidentPrelude:
         system._nominal_ancestors.clear()
         system._promote_rules.clear()
         system._promote_rules.update(self.promote_rules)
-        for source, instances, declarations, scopes in self.generics:
+        for source, instances, declarations, scopes, local_places in self.generics:
             source.instances.clear()
             source.instances.update(instances)
+            source.context.local_place_roots.clear()
+            source.context.local_place_roots.update(local_places)
             source.context.declarations.maps[0].clear()
             source.context.declarations.maps[0].update(declarations)
             source.context.binding_scopes.maps[0].clear()
@@ -682,6 +685,8 @@ class ModuleCompiler:
                              ctx: object | None = None) -> hir.Block:
         from .errors import NotImplementedYet
         options = dict(prelude_module=prelude_module, no_prelude=no_prelude, ctx=ctx)
+        from . import local_places
+        root = local_places.prepare(root, self.registry, srcfile)
         try:
             # Both file and in-memory modules share the native ordering:
             # insert implicit operations before proving facts about effects.

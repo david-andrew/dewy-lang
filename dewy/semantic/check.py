@@ -56,6 +56,7 @@ class Context:
     type_system: ty.TypeSystem = field(default_factory=ty.TypeSystem)
     binding_scopes: ChainMap[str, sb.Binding] = field(default_factory=ChainMap)
     binding_registry: sb.BindingRegistry = field(default_factory=sb.BindingRegistry)
+    local_place_roots: dict[int, int] = field(default_factory=dict)
     catcher: Catcher | None = None  # installed by the nearest enclosing return boundary
     label_scopes: tuple[LabelScope, ...] = ()
     loop_boundaries: tuple[LoopBoundary, ...] = ()
@@ -878,6 +879,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                     binding_scopes=ctx.binding_scopes.new_child(),
                     module_namespaces=ctx.module_namespaces.new_child(),
                     refinements=dict(ctx.refinements),
+                    local_place_roots=dict(ctx.local_place_roots),
                     length_bounds=dict(ctx.length_bounds),
                     key_facts=dict(ctx.key_facts),
                     view_probe=(ctx.view_probe[0], list(ctx.view_probe[1])) if ctx.view_probe is not None else None,
@@ -923,6 +925,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             ctx.declarations.maps[0].update(fork.declarations.maps[0])
             ctx.binding_scopes.maps[0].update(fork.binding_scopes.maps[0])
             ctx.module_namespaces.maps[0].update(fork.module_namespaces.maps[0])
+            ctx.local_place_roots.clear()
+            ctx.local_place_roots.update(fork.local_place_roots)
             ctx.refinements.clear()
             ctx.refinements.update(fork.refinements)
             ctx.length_bounds.clear()
@@ -1395,6 +1399,22 @@ def _complete_binding(
     declaration = replace(declaration, binding_id=binding.id)
     if declaration.expr is not None:
         _copy_dictionary_facts(declaration.expr, binding.id, ctx=ctx)   # `let copy = d`: the keys come along
+    if declaration.view and declaration.decltype not in {'const', 'local_const'}:
+        selected = _unwrap_write_path(declaration.expr)
+        owner = _member_root_binding(selected, ctx=ctx)
+        assert owner is not None
+        ctx.local_place_roots[binding.id] = ctx.local_place_roots.get(owner.id, owner.id)
+        stored = selected.type
+        if isinstance(selected, hir.ExpressedIdentifier):
+            stored = owner.store_type or (owner.declaration.annotation if owner.declaration is not None else None) or owner.type
+        elif isinstance(selected, hir.MemberAccess):
+            shape = ty.unfold(ty.strip_refinement(selected.value.type))
+            if isinstance(shape, ty.ObjectType) and (member := shape.field(selected.name)) is not None:
+                stored = member.type
+        if declaration.annotation is not None and not _place_fits(stored, declaration.annotation, readonly=False):
+            user_error(ctx.srcfile, 'local place annotation changes its storage contract', Pointer(span=declaration.loc, message='a mutable place must retain the selected storage contract'))
+        binding.store_type = stored
+        declaration = replace(declaration, annotation=stored)
     binding.declaration = declaration
     if isinstance(declaration.expr, hir.FunctionLiteral):
         binding.function = declaration.expr
@@ -1461,7 +1481,7 @@ def _declaration_initializer(right: p0.AST, keyword: str, *, ctx: Context,
     expr = typecheck_and_resolve_inner(right, ctx=checking, expected=expected)
     if used[0]:
         if keyword not in {'const', 'local_const'}:
-            not_implemented(ctx.srcfile, right.loc, 'mutable local places')
+            _mutable_place(expr, right.loc, ctx=ctx)
         if ctx.function_scope_depth == 0:
             user_error(ctx.srcfile, 'a local view needs a function scope', Pointer(span=right.loc))
         target = _unwrap_write_path(expr)
@@ -1799,6 +1819,8 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=ty.strip_refinement(store_expected))
     value = check_against(value, store_expected, ctx=ctx)
     if isinstance(target, hir.Index):
+        if ctx.local_place_roots and (owner := _member_root_binding(target, ctx=ctx)) is not None:
+            _invalidate_routes(owner.id, ctx=ctx)
         return hir.IndexAssign(ast.loc, ty.VOID_TYPE, target, value)
     if isinstance(target, hir.MemberAccess):
         if isinstance(target.type, (ty.FunctionType, ty.OverloadType)):
@@ -1895,6 +1917,20 @@ def _seed_field_routes(
 
 def _invalidate_routes(root_id: int, *, ctx: Context, prefix: tuple[str, ...] = ()) -> None:
     """Drop length facts of the member routes under a reassigned binding or field."""
+    if ctx.local_place_roots:
+        owner = ctx.local_place_roots.get(root_id, root_id)
+        related = {alias for alias, source in ctx.local_place_roots.items() if source == owner}
+        if related:
+            related.add(owner)
+            for binding_id in related:
+                ctx.refinements.pop(binding_id, None)
+                ctx.refinements.pop(_exclusion_key(binding_id), None)
+                ctx.member_facts.pop(binding_id, None)
+                ctx.length_bounds.pop(binding_id, None)
+                _drop_key_facts(ctx, dictionary_id=binding_id)
+                for route_id in ctx.binding_registry.routes_under(binding_id):
+                    ctx.refinements.pop(route_id, None)
+                    ctx.length_bounds.pop(route_id, None)
     for route_id in ctx.binding_registry.routes_under(root_id, prefix):
         ctx.refinements.pop(route_id, None)
         ctx.refinements.pop(_exclusion_key(route_id), None)

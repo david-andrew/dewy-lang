@@ -2134,7 +2134,10 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         session.local_view_probes.truncate(probe)
     }
     if view {
-        if not constant return pending(id 'mutable local places' env session)
+        if not constant {
+            let borrowed=place(value id env @session)
+            if borrowed is? Error return borrowed
+        }
         if env.return_collector is? none return problem(id 'a local view needs a function scope' 'bind the view inside its owning function' env session)
         let target=node_at(value session)
         if target isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index|hir.DictLookup return problem(id 'a local view needs a stored value' 'select a named binding, field, or element' env session)
@@ -2153,6 +2156,28 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     let binding = bindings.binding_at(session.registry binding_id)
     binding.value_type = if annotation is? none checked.value_type else annotation
     binding.store_type = binding.value_type
+    if view and not constant {
+        let path=bindings.access_path(value session.hir)
+        let root=node_at(path.root session)
+        $runtime_assert root is? hir.ExpressedIdentifier and root.binding_id isnt? none
+        let owner=bindings.binding_at(session.registry root.binding_id)
+        session.local_place_roots[binding_id]=session.local_place_roots.get(owner.id default=owner.id)
+        let stored=checked.value_type
+        if checked is? hir.ExpressedIdentifier {
+            if owner.store_type isnt? none {stored=owner.store_type}
+            else if owner.value_type isnt? none {stored=owner.value_type}
+        }
+        if checked is? hir.MemberAccess {
+            let shape=types.node_at(session.types views.structural_base(node_at(checked.value session).value_type session.types))
+            if shape is? types.ObjectType {
+                let field=types.object_field(shape checked.name)
+                if field isnt? none {stored=field.value_type}
+            }
+        }
+        if annotation isnt? none and not place_fits(stored annotation @session) return problem(id 'local place annotation changes its storage contract' 'a mutable place must retain the selected storage contract' env session)
+        binding.store_type=stored
+        annotation=stored
+    }
     let read=if annotation isnt? none and numeric_values.is_family(annotation 'BigInt' env.lexical session) annotation else checked.value_type
     # A declared function type is the binding's contract: a call through it
     # yields the declared (possibly wider) result, not the initializer's.

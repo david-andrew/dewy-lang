@@ -1,0 +1,330 @@
+from reporting import SrcFile, Error, Pointer, Span
+import p"context.dewy" as contexts
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+import p"bindings.dewy" as bindings
+import p"builtins.dewy" as builtins
+import p"type_terms.dewy" as type_terms
+import p"../backend/udewy/borrowing.dewy" as borrowing
+import p"../backend/udewy/captures.dewy" as captures
+
+# Local places name rooted storage, not saved machine pointers. Capture each
+# selector once; ordinary place lowering still owns COW detachment and writes.
+# Lifetime and fact checks precede the erasure of the source alias binding.
+Alias:type = const [declaration:addr binding:addr scope:addr? source:addr?]
+Item:type = const [id:addr scope:addr? source:addr? function:addr?=none]
+Plan:type = [
+    aliases:dict<addr Alias>=[] order:array<addr>=[]
+    routes:dict<addr addr>=[] prefixes:dict<addr array<addr>>=[]
+    original:array<addr>=[] symbols:set<addr>=set[]
+]
+put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
+store = (id:addr node:hir.AST @session:contexts.Session):>void => contexts.replace_hir(id node @session)
+mutable = (node:hir.AST):>bool => node is? hir.Declare and node.view and node.decltype not in? ['const' 'local_const']
+
+inventory = (roots:array<addr> session:contexts.Session):>Plan => {
+    let result=Plan[]
+    let pending:array<Item>=[]
+    loop root in roots {pending.push(Item[root none none])}
+    let seen:set<addr>=set[]
+    let containing:dict<addr addr>=[]
+    let affected:set<addr>=set[]
+    loop pending.length >? 0 {
+        let item=pending.pop
+        if item.id in? seen continue
+        seen.add(item.id)
+        result.original.push(item.id)
+        let node=hir.node_at(session.hir item.id)
+        let scope=item.scope
+        let source=item.source
+        let function=item.function
+        if node is? hir.FunctionLiteral and function is? none {function=item.id}
+        if function isnt? none {containing[item.id]=function}
+        if node is? hir.FunctionLiteral {scope=none source=node.source}
+        if node is? hir.Block {scope=item.id}
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+            let binding=bindings.find_binding(session.registry node.binding_id)
+            if binding isnt? none and not binding.builtin {result.symbols.add(node.binding_id)}
+        }
+        if node is? hir.Declare and node.binding_id isnt? none {
+            result.symbols.add(node.binding_id)
+            if mutable(node) {
+                result.aliases[node.binding_id]=Alias[item.id node.binding_id scope source]
+                result.order.push(node.binding_id)
+                if function isnt? none {affected.add(function)}
+            }
+        }
+        let children=hir.children(node)
+        loop children.length >? 0 {pending.push(Item[children.pop scope source function])}
+    }
+    # Local identities cannot occur outside their containing function. Keep
+    # nested functions with the same outer function so their annotations are
+    # included, without rebuilding unrelated prelude bodies and contracts.
+    let original=result.original
+    result.original=[]
+    loop id in original {
+        let function=containing.get(id)
+        if function isnt? none and function in? affected {result.original.push(id)}
+    }
+    return result
+}
+source_of = (alias:Alias fallback:SrcFile session:contexts.Session):>SrcFile => {
+    if alias.source is? none return fallback
+    $runtime_assert alias.source <? session.sources.length
+    return session.sources[alias.source].srcfile
+}
+selection_error = (alias:Alias fallback:SrcFile session:contexts.Session detail:string='the selected owner must remain available through the place’s last use'):>Error => Error[
+    srcfile=source_of(alias fallback session)
+    title='cannot prove mutable local place lifetime'
+    pointers=[Pointer[hir.node_at(session.hir alias.declaration).loc detail]]
+]
+
+capture = (id:addr @prefix:array<addr> @session:contexts.Session):>addr => {
+    let value=hir.node_at(session.hir id)
+    let name="__place_index_{session.registry.next_id}"
+    let binding_id=bindings.allocate(@session.registry none name 'value' value.loc)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=value.value_type binding.store_type=value.value_type
+    let declaration=put(hir.Declare[value.loc types.primitive('void' @session.types) 'const' name value.value_type id binding_id] @session)
+    binding.declaration=declaration
+    bindings.store_binding(@session.registry binding_id binding)
+    prefix.push(declaration)
+    return put(hir.ExpressedIdentifier[value.loc value.value_type name binding_id] @session)
+}
+comparison = (name:string left:addr right:addr loc:Span @session:contexts.Session):>addr => {
+    let boolean=types.primitive('bool' @session.types)
+    let signature=types.function_type([
+        types.PosOrKwArg[none hir.node_at(session.hir left).value_type]
+        types.PosOrKwArg[none hir.node_at(session.hir right).value_type]
+    ] [] none boolean [] @session.types)
+    let function=put(hir.ExpressedIdentifier[loc signature name] @session)
+    return put(hir.FunctionCall[loc boolean function [left right] []] @session)
+}
+freeze = (id:addr plan:Plan @prefix:array<addr> @session:contexts.Session):>addr? => {
+    let node=hir.node_at(session.hir id)
+    if node is? hir.ValueCast|hir.RepresentationCast return freeze(node.expr plan @prefix @session)
+    if node is? hir.ExpressedIdentifier return if node.binding_id isnt? none plan.routes.get(node.binding_id default=id) else none
+    if node is? hir.MemberAccess {
+        let value=freeze(node.value plan @prefix @session)
+        if value is? none return none
+        return put(hir.MemberAccess[node.loc node.value_type value node.name node.mutable] @session)
+    }
+    if node is? hir.Index {
+        let array=freeze(node.array plan @prefix @session)
+        if array is? none return none
+        let original=hir.node_at(session.hir node.index)
+        let index=if original is? hir.Integer node.index else capture(node.index @prefix @session)
+        let word=types.primitive('int64' @session.types)
+        let empty=types.primitive('void' @session.types)
+        let zero=put(hir.Integer[node.loc word '0d' 0] @session)
+        let length=put(hir.ArrayLength[node.loc word array] @session)
+        let lower=comparison('__ge__' index zero node.loc @session)
+        let upper=comparison('__lt__' index length node.loc @session)
+        prefix.push(put(hir.Assert[node.loc empty lower 'local place selector is within its owner'] @session))
+        prefix.push(put(hir.Assert[node.loc empty upper 'local place selector is within its owner'] @session))
+        return put(hir.Index[node.loc node.value_type array index node.constant_index] @session)
+    }
+    return none
+}
+
+# The checked prefix captures selectors. Replacing the source identifier
+# with this expression only reads those captures; it never repeats a selector.
+read = (route:addr loc:Span type:addr @session:contexts.Session):>hir.AST => {
+    let node=hir.node_at(session.hir route)
+    if node is? hir.ExpressedIdentifier return hir.ExpressedIdentifier[loc type node.name node.binding_id]
+    if node is? hir.MemberAccess return hir.MemberAccess[loc type node.value node.name node.mutable]
+    $runtime_assert node is? hir.Index
+    return hir.Index[loc type node.array node.index node.constant_index]
+}
+
+validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:contexts.Session):>Error? => {
+    let joined=put(hir.Block[Span[0 0] types.primitive('void' @session.types) roots false] @session)
+    let functions=captures.analyze(joined session.hir plan.symbols)
+    let captured:set<addr>=set[]
+    loop function in functions.functions.values {loop binding in function.captures {captured.add(binding)}}
+    let exposed=borrowing.exposed_roots(functions session.hir session.types)
+    let scopes:dict<addr borrowing.ViewScope>=[]
+    loop binding in plan.order {
+        $runtime_assert binding in? plan.aliases
+        let alias=plan.aliases[binding]
+        let declaration=hir.node_at(session.hir alias.declaration)
+        $runtime_assert declaration is? hir.Declare
+        let source=borrowing.route(declaration.expr session.hir)
+        let traversed:set<addr>=set[]
+        loop source isnt? none and source.binding in? plan.aliases {
+            if source.binding in? traversed return selection_error(alias fallback session)
+            traversed.add(source.binding)
+            let parent=hir.node_at(session.hir plan.aliases[source.binding].declaration)
+            $runtime_assert parent is? hir.Declare
+            let route=borrowing.route(parent.expr session.hir)
+            if route is? none {source=none}
+            else {
+                let path=route.fields
+                loop field in source.fields {path.push(field)}
+                source=borrowing.Route[route.binding path]
+            }
+        }
+        if source is? none return selection_error(alias fallback session detail='the selection has no stored root')
+        if alias.scope is? none return selection_error(alias fallback session detail='the place needs a containing block')
+        if binding in? captured or source.binding in? captured return selection_error(alias fallback session detail='the place or its owner is captured by another function')
+        if source.binding in? exposed return selection_error(alias fallback session detail='the owner can escape through a raw operation or unknown call')
+        let scope=alias.scope
+        if scope not in? scopes {scopes[scope]=borrowing.prepare_view_scope(scope session.hir session.types)}
+        let prepared=scopes[scope]
+        let region=borrowing.view_region(prepared alias.declaration captured session.hir)
+        let live:set<addr>=set[binding]
+        let pending:array<addr>=[binding]
+        loop pending.length >? 0 {
+            loop dependent in prepared.dependents.get(pending.pop set[]) {
+                if dependent not in? live {live.add(dependent) pending.push(dependent)}
+            }
+        }
+        if borrowing.view_conflicts(region live source session.hir functions) return selection_error(alias fallback session detail='a write or call may change the owner before the place’s last use')
+    }
+    return none
+}
+
+# A fact about cursor.items and a fact about owner.items use one identity.
+# Captured selector dependencies survive so loop reentry forgets stale facts.
+rebind_facts=(plan:Plan @session:contexts.Session):>void=>{
+    let mapping=type_terms.Rebinding[[]]
+    loop [binding selected] in plan.routes {
+        let canonical=bindings.array_route_id(selected session.hir @session.registry)
+        $runtime_assert canonical isnt? none
+        mapping.terms[binding]=canonical
+        let route=bindings.route_at(session.registry canonical)
+        let root=if route is? none canonical else route.root
+        let prefix:array<string>=if route is? none [] else route.path
+        loop old in session.registry.routes_by_root.get(binding []) {
+            let metadata=bindings.binding_at(session.registry old.id)
+            $runtime_assert metadata.value_type isnt? none
+            let path=prefix
+            loop field in old.path {path.push(field)}
+            let replacement=bindings.route_id(@session.registry root path metadata.value_type metadata.loc)
+            mapping.terms[old.id]=replacement
+            let dependencies=session.registry.index_routes
+            loop [index dependent] in dependencies {
+                if canonical in? dependent or old.id in? dependent {
+                    let updated=dependent
+                    updated.add(replacement) session.registry.index_routes[index]=updated
+                }
+            }
+        }
+    }
+    let symbols:set<addr>=set[]
+    loop id in plan.original {
+        let node=hir.node_at(session.hir id)
+        if node is? hir.Declare|hir.ExpressedIdentifier {
+            let binding_id=node.binding_id
+            if binding_id isnt? none {
+                let binding=bindings.find_binding(session.registry binding_id)
+                if binding isnt? none and not binding.builtin {symbols.add(binding_id)}
+            }
+        }
+        node.value_type=type_terms.rebind(node.value_type @mapping @session.types)
+        if node is? hir.Obligation {node.refined=type_terms.rebind(node.refined @mapping @session.types)}
+        if node is? hir.TypeValue and node.value is? addr {node.value=type_terms.rebind(node.value @mapping @session.types)}
+        if node is? hir.TypeTest {node.test_type=type_terms.rebind(node.test_type @mapping @session.types)}
+        if node is? hir.Declare and node.annotation isnt? none {node.annotation=type_terms.rebind(node.annotation @mapping @session.types)}
+        if node is? hir.ForwardingAccess {node.exception_type=type_terms.rebind(node.exception_type @mapping @session.types)}
+        if node is? hir.OrThrow {node.exception_type=type_terms.rebind(node.exception_type @mapping @session.types)}
+        if node is? hir.FunctionLiteral {
+            node.rettype=type_terms.rebind(node.rettype @mapping @session.types)
+            if node.object_type isnt? none {node.object_type=type_terms.rebind(node.object_type @mapping @session.types)}
+            let pos:array<hir.Param>=[]
+            let kw:array<hir.Param>=[]
+            loop original in node.pos_or_kw_args {
+                let p=original
+                p.value_type=type_terms.rebind(p.value_type @mapping @session.types)
+                if p.binding_id isnt? none {symbols.add(p.binding_id)}
+                pos.push(p)
+            }
+            loop original in node.kw_only_args {
+                let p=original
+                p.value_type=type_terms.rebind(p.value_type @mapping @session.types)
+                if p.binding_id isnt? none {symbols.add(p.binding_id)}
+                kw.push(p)
+            }
+            node.pos_or_kw_args=pos node.kw_only_args=kw
+            let rest=node.rest_args
+            if rest isnt? none {
+                rest.value_type=type_terms.rebind(rest.value_type @mapping @session.types)
+                if rest.binding_id isnt? none {symbols.add(rest.binding_id)}
+                node.rest_args=rest
+            }
+        }
+        store(id node @session)
+    }
+    let roots=symbols
+    loop root in roots {loop route in session.registry.routes_by_root.get(root []) {symbols.add(route.id)}}
+    loop id in symbols {
+        let binding=bindings.binding_at(session.registry id)
+        if binding.value_type isnt? none {binding.value_type=type_terms.rebind(binding.value_type @mapping @session.types)}
+        if binding.store_type isnt? none {binding.store_type=type_terms.rebind(binding.store_type @mapping @session.types)}
+        bindings.store_binding(@session.registry id binding)
+    }
+}
+
+# This structural rewrite is deliberately separate from checking. Mutating an
+# alias identifier before proving lifetimes would hide the source alias and
+# make an alias write indistinguishable from a conflicting owner write.
+rewrite = (roots:array<addr> fallback:SrcFile @session:contexts.Session):>Error? => {
+    let plan=inventory(roots session)
+    if plan.order.length =? 0 return none
+    let error=validate_lifetimes(roots fallback plan @session)
+    if error isnt? none return error
+    loop binding in plan.order {
+        $runtime_assert binding in? plan.aliases
+        let alias=plan.aliases[binding]
+        let declaration=hir.node_at(session.hir alias.declaration)
+        $runtime_assert declaration is? hir.Declare
+        let prefix:array<addr>=[]
+        let selected=freeze(declaration.expr plan @prefix @session)
+        if selected is? none return selection_error(alias fallback session detail='this selection is not a supported local place')
+        plan.routes[binding]=selected
+        plan.prefixes[binding]=prefix
+    }
+    rebind_facts(plan @session)
+    let assigned:dict<addr addr>=[]
+    loop id in plan.original {
+        let node=hir.node_at(session.hir id)
+        if node is? hir.Assign {
+            let target=hir.node_at(session.hir node.target)
+            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none and target.binding_id in? plan.routes {assigned[id]=target.binding_id}
+        }
+    }
+    loop id in plan.original {
+        let node=hir.node_at(session.hir id)
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id in? plan.routes {
+            store(id read(plan.routes[node.binding_id] node.loc node.value_type @session) @session)
+        }
+        if node is? hir.Declare and node.binding_id isnt? none and node.binding_id in? plan.routes {
+            $runtime_assert node.binding_id in? plan.prefixes
+            store(id hir.Block[node.loc node.value_type plan.prefixes[node.binding_id] false] @session)
+        }
+    }
+    loop [id binding] in assigned {
+        let node=hir.node_at(session.hir id)
+        $runtime_assert node is? hir.Assign
+        let target=hir.node_at(session.hir node.target)
+        let value=node.value
+        if node.op not=? '=' {
+            # Source checking has already resolved nonprimitive updates into
+            # ordinary calls assigned with '='. Keep primitive updates here.
+            $runtime_assert node.op.length >? 0
+            let spelling=node.op[..node.op.length-1)
+            let operation=builtins.binary_operators.get(spelling)
+            $runtime_assert operation isnt? none
+            let signature=types.function_type([
+                types.PosOrKwArg[none target.value_type]
+                types.PosOrKwArg[none hir.node_at(session.hir value).value_type]
+            ] [] none target.value_type [] @session.types)
+            let function=put(hir.ExpressedIdentifier[node.loc signature operation] @session)
+            value=put(hir.FunctionCall[node.loc target.value_type function [node.target value] []] @session)
+        }
+        if target is? hir.Index {store(id hir.IndexAssign[node.loc node.value_type node.target value] @session)}
+        else if target is? hir.MemberAccess {store(id hir.MemberAssign[node.loc node.value_type node.target value] @session)}
+        else {store(id hir.Assign[node.loc node.value_type node.target '=' value] @session)}
+    }
+    return none
+}
