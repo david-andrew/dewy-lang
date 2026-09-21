@@ -44,7 +44,7 @@ parse = (argv:array<string>):>Request|Error => {
         if options and result.command =? 'run' and arg is? '-c'|'--compile' {result.compile_only=true continue}
         if options and result.command =? 'run' and arg =? '--timings' {result.timings=true continue}
         if options and result.command =? 'test' and arg =? '--json' {result.json=true continue}
-        if options and result.command =? 'test' and arg =? '--brief' {result.brief=true continue}
+        if options and result.command is? 'test'|'analyze' and arg =? '--brief' {result.brief=true continue}
         if options and result.command =? 'debug' and arg =? '--build' {result.build=true continue}
         if options and result.command =? 'debug' and arg =? '--debugger' {
             if index >=? argv.length return Error[title='--debugger needs gdb or lldb']

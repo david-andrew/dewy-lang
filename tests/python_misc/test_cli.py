@@ -24,6 +24,18 @@ def test_analyze_reports_each_decision_through_the_report_renderer() -> None:
     assert '\x1b[' not in out  # no ANSI colors when stdout is not a terminal
 
 
+def test_brief_analysis_preserves_the_complete_copy_inventory() -> None:
+    rich = _dewy('analyze', 'dewy/tests/copy_report.dewy')
+    brief = _dewy('analyze', '--brief', 'dewy/tests/copy_report.dewy')
+    assert rich.returncode == brief.returncode == 0, rich.stderr + brief.stderr
+    def inventory(text):
+        return [line for line in text.splitlines() if line.startswith(('copy: ', 'copy report:'))]
+    assert inventory(brief.stdout) == inventory(rich.stdout)
+    assert any(line.startswith('copy: ') for line in brief.stdout.splitlines())
+    assert 'Info:' not in brief.stdout and '╭─[' not in brief.stdout
+    assert len(brief.stdout) < len(rich.stdout)
+
+
 def test_analyze_says_when_every_integer_is_a_word() -> None:
     result = _dewy('analyze', 'dewy/tests/abstract_int.dewy')
     assert result.returncode == 0, result.stderr

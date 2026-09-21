@@ -16,7 +16,7 @@ def test_failed_analysis_with_copy_notes(monkeypatch, capsys):
 
 def test_quoted_compiler_command(monkeypatch, capsys):
     def run(command, **kwargs):
-        assert command == ['/compiler directory/dewy', '--debug', 'analyze', 'source.dewy']
+        assert command == ['/compiler directory/dewy', '--debug', 'analyze', '--brief', 'source.dewy']
         return CompletedProcess(command, 0, 'copy report: 0 record, 0 array and 0 cell copies; 0 string copies\n', '')
     monkeypatch.setattr(copy_report.subprocess, 'run', run)
     assert copy_report.main(['--compiler', '"/compiler directory/dewy" --debug', 'source.dewy']) == 0
@@ -110,3 +110,12 @@ def test_hosted_summary_includes_moves(monkeypatch, capsys):
         report = report.replace('owned arrays', f'owned {category}')
         assert copy_report.main(['source.dewy', '--max-copies', '1']) == 0
         assert capsys.readouterr().out.startswith('1 copies: 1 string')
+
+
+def test_older_seed_can_use_the_original_analysis_command(monkeypatch, capsys):
+    def run(command, **kwargs):
+        assert command == ['seed', 'analyze', 'source.dewy']
+        return CompletedProcess(command, 0, 'copy report: 0 record, 0 array and 0 cell copies; 0 string copies\n', '')
+    monkeypatch.setattr(copy_report.subprocess, 'run', run)
+    assert copy_report.main(['--compiler', 'seed', '--legacy-analyze', 'source.dewy']) == 0
+    assert capsys.readouterr().out.startswith('0 copies:')

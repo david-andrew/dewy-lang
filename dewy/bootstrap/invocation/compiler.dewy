@@ -6,6 +6,7 @@ import p"../paths.dewy" as paths
 import p"../timing.dewy" as timing
 import p"../semantic/modules.dewy" as modules
 import p"../semantic/unsafe_audit.dewy" as unsafe_audit
+import p"../semantic/source_lines.dewy" as source_lines
 import p"../semantic/prelude.dewy" as prelude
 import p"../semantic/prelude_cache.dewy" as prelude_cache
 import p"../semantic/test_syntax.dewy" as tests
@@ -51,16 +52,20 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
         # no borrow or move applied, then the representation decisions.
         let counts:dict<string int64>=[]
         let files=compiled.lowered.input.source_files
+        let geometry:dict<addr source_lines.Index>=[]
         loop note in compiled.lowered.notes {
             let source=note.source
             let message="{note.kind} `{note.type}` copied when {note.site}: {note.reason}"
             # One machine-readable line per copy (`copy: path:row: ...`), then the excerpt.
             if source isnt? none and source >=? 0 and source <? files.length {
                 let srcfile=files[source]
-                printl("copy: {srcfile.path}:{srcfile.first_row + srcfile.line_of(note.loc.start)}: {message}")
-                Info[srcfile=srcfile title='copy' pointers=[Pointer[note.loc message]]].render(srcfile)
+                let index=geometry.get(source)
+                if index is? none {index=source_lines.build(srcfile.body) geometry[source]=index}
+                let location=source_lines.locate(index note.loc.start)
+                printl("copy: {srcfile.path}:{srcfile.first_row + location.row}: {message}")
+                if not request.brief {Info[srcfile=srcfile title='copy' pointers=[Pointer[note.loc message]]].render(srcfile)}
             } else {printl("copy: ?:0: {message}")}
-            printl('')
+            if not request.brief {printl('')}
             counts[note.kind]=counts.get(note.kind default=0)+1
         }
         printl("copy report: {counts.get('record' default=0)} record, {counts.get('array' default=0)} array and {counts.get('cell' default=0)} cell copies; {counts.get('string' default=0)} string copies")

@@ -176,6 +176,7 @@ def analyze(argv: list[str]) -> int:
     """Compile a program and report the compiler's analysis decisions."""
     parser = ArgumentParser(prog='dewy analyze', description='report the analysis decisions made while compiling a program: the escape copies of strings, and which integers became big integers, and why')
     parser.add_argument('file', help='.dewy file to analyze')
+    parser.add_argument('--brief', action='store_true', help='report each decision without source excerpts')
     _add_target_option(parser)
     args = parser.parse_args(argv)
 
@@ -198,6 +199,8 @@ def analyze(argv: list[str]) -> int:
         counts[note.kind] = counts.get(note.kind, 0) + 1
         row, _column = note.srcfile.offset_to_row_col(note.loc.start)
         print(f'copy: {note.srcfile.path}:{row + 1}: {note.line}')
+        if args.brief:
+            continue
         print(Info(
             srcfile=note.srcfile,
             title='copy',
@@ -207,6 +210,10 @@ def analyze(argv: list[str]) -> int:
         print()
     for note in lower.last_move_notes:
         if not note.moved:
+            continue
+        if args.brief:
+            row, _column = note.srcfile.offset_to_row_col(note.loc.start)
+            print(f'move: {note.srcfile.path}:{row + 1}: {note.message}')
             continue
         print(Info(
             srcfile=note.srcfile,
@@ -223,6 +230,10 @@ def analyze(argv: list[str]) -> int:
     print()
     notes = representation.last_notes
     for note in notes:
+        if args.brief:
+            row, _column = note.srcfile.offset_to_row_col(note.loc.start)
+            print(f'representation: {note.srcfile.path}:{row + 1}: {note.message}')
+            continue
         print(Info(
             srcfile=note.srcfile,
             title='big integer representation',
@@ -235,13 +246,18 @@ def analyze(argv: list[str]) -> int:
         if notes
         else 'every integer is a 64-bit word'
     )
-    print(Info(srcfile=srcfile, title='representation report', message=summary, use_color=use_color))
+    print(f'representation report: {summary}' if args.brief else
+          Info(srcfile=srcfile, title='representation report', message=summary, use_color=use_color))
     print()
     from .semantic.analyze import bounds
     from .targets import ADDRESS_BITS
 
     target = _resolve_target(args.target)
     for note in bounds.last_cap_notes:
+        if args.brief:
+            row, _column = note.srcfile.offset_to_row_col(note.loc.start)
+            print(f'address-space cap: {note.srcfile.path}:{row + 1}: {note.message}')
+            continue
         print(Info(
             srcfile=note.srcfile,
             title='address-space cap',
@@ -250,16 +266,13 @@ def analyze(argv: list[str]) -> int:
         ))
         print()
     relying = len(bounds.last_cap_notes)
-    print(Info(
-        srcfile=srcfile,
-        title='length cap report',
-        message=(
-            f'on `{target}` every array and string length is assumed below 2^{ADDRESS_BITS[target]} '
-            f'(no address space holds more elements) — an axiom the analysis trusts, not a proof; '
-            + (f'{relying} proof{"s" if relying != 1 else ""} above rest on it' if relying else 'no proof in this program rests on it')
-        ),
-        use_color=use_color,
-    ))
+    summary = (
+        f'on `{target}` every array and string length is assumed below 2^{ADDRESS_BITS[target]} '
+        f'(no address space holds more elements) — an axiom the analysis trusts, not a proof; '
+        + (f'{relying} proof{"s" if relying != 1 else ""} above rest on it' if relying else 'no proof in this program rests on it')
+    )
+    print(f'length cap report: {summary}' if args.brief else Info(
+        srcfile=srcfile, title='length cap report', message=summary, use_color=use_color))
     return 0
 
 

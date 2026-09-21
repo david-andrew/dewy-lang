@@ -3,9 +3,10 @@
 Usage: python tools/copy_report.py [--compiler CMD] [--by kind|site|reason|file] FILE.dewy
 
 Runs `CMD analyze FILE` (default: the hosted compiler, `python -m dewy`) and
-counts the `copy:` lines it prints, grouped by kind, site or reason. The
+requests concise analysis with `--brief` and counts its complete `copy:` lines,
+grouped by kind, site or reason. The
 native compiler prints the same lines, so `--compiler path/to/dewy` compares
-the two. This is the copy budget of Phase 1.1: the total and its breakdown
+the two; add --legacy-analyze for seeds without --brief. This is the copy budget of Phase 1.1: the total and its breakdown
 on the compiler's own sources (`dewy/bootstrap/main.dewy`) are recorded in
 `dewy/bootstrap/PHASE0_MEASUREMENTS.md`.
 
@@ -34,6 +35,7 @@ def main(argv: list[str]) -> int:
     parser = ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('file')
     parser.add_argument('--compiler', default=None, help='compiler command (default: python -m dewy)')
+    parser.add_argument('--legacy-analyze', action='store_true', help='omit --brief when comparing an older compiler seed')
     parser.add_argument('--by', choices=['kind', 'site', 'reason', 'type', 'file'], default='reason')
     parser.add_argument('--only', default=None, help='keep copies whose file path contains this text')
     parser.add_argument('--top', type=int, default=25)
@@ -66,7 +68,8 @@ def main(argv: list[str]) -> int:
         if source_lines == 0:
             parser.error('--scope has no source lines')
     command = shlex.split(args.compiler) if args.compiler else [sys.executable, '-m', 'dewy']
-    result = subprocess.run([*command, 'analyze', args.file], capture_output=True, text=True, cwd=root)
+    analysis_flags = [] if args.legacy_analyze else ['--brief']
+    result = subprocess.run([*command, 'analyze', *analysis_flags, args.file], capture_output=True, text=True, cwd=root)
     # A failed analysis may already have printed some copy notes. It is not
     # a complete inventory and must never pass a copy-budget gate.
     if result.returncode != 0:

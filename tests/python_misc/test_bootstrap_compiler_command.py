@@ -2,6 +2,8 @@
 import json
 import os
 import subprocess
+import sys
+import shlex
 from pathlib import Path
 
 from test_bootstrap_lowering import ARENA
@@ -84,16 +86,35 @@ def test_native_compiler_command(tmp_path):
                and line.split('bound to `h`: ', 1)[1].strip()
                for line in result.stdout.splitlines())
     assert 'copy report: ' in result.stdout
+    brief = invoke('analyze', '--brief', str(ROOT / 'dewy/tests/copy_report.dewy'))
+    assert brief.returncode == 0, brief.stdout + brief.stderr
+    def inventory(text):
+        return [line for line in text.splitlines() if line.startswith(('copy: ', 'copy report:'))]
+    assert inventory(brief.stdout) == inventory(result.stdout)
+    assert len(brief.stdout) < len(result.stdout)
+    assert 'Info: copy' in result.stderr and 'Info: copy' not in brief.stderr
     # This coverage fixture uses runtime assertions, whose reporting helpers
     # deliberately are not present in the small invocation-only library.
     real_env = env | {'DEWY_LIBRARY_ROOT': str(ROOT / 'library'), 'DEWY_UDEWY': str(micro)}
-    coverage = subprocess.run([compiler, 'analyze', ROOT / 'tests/fixtures/copy_report_coverage.dewy'],
+    coverage = subprocess.run([compiler, 'analyze', '--brief', ROOT / 'tests/fixtures/copy_report_coverage.dewy'],
                               cwd=tmp_path, env=real_env, capture_output=True,
                               text=True, timeout=900, check=False)
     assert coverage.returncode == 0, coverage.stdout + coverage.stderr
     entries = [line for line in coverage.stdout.splitlines() if line.startswith('copy: ') and 'copy_report_coverage.dewy:' in line]
     assert any(': string ' in line for line in entries)
     assert any(': cell ' in line for line in entries)
+
+    # The compiler's own copies are a bounded CI inventory, not an informal
+    # count. The tool verifies every summary entry before applying the scope.
+    budget = subprocess.run([
+        sys.executable, ROOT / 'tools/copy_report.py', '--compiler', shlex.quote(str(compiler)),
+        '--scope', ROOT / 'dewy/bootstrap', '--max-copies', '5000',
+        '--max-copies-per-kloc', '110', '--json', ROOT / 'dewy/bootstrap/main.dewy',
+    ], cwd=ROOT, env=real_env, capture_output=True, text=True, timeout=900, check=False)
+    (tmp_path / 'compiler-copy-inventory.json').write_text(budget.stdout)
+    assert budget.returncode == 0, budget.stderr
+    inventory_data = json.loads(budget.stdout)
+    assert inventory_data['within_budget'] and inventory_data['source_lines'] > 40000
 
     # HIR carries source indices across module assembly and normalization.
     # Both the imported function and entry retain their own debug locations;

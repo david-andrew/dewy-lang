@@ -41,6 +41,7 @@ let main=(argv:array<string>):>int64=>{{
         (['--help'], ['run', '', 'x86_64', 'false:true:false:false:false:false', '']),
         (['--version'], ['run', '', 'x86_64', 'false:false:true:false:false:false', '']),
         (['test', '--json', '--brief'], ['test', '.', 'x86_64', 'false:false:false:true:true:false', '']),
+        (['analyze', '--brief', 'file.dewy'], ['analyze', 'file.dewy', 'x86_64', 'false:false:false:false:true:false', '']),
         (['analyze', '--target=c', 'file.dewy'], ['analyze', 'file.dewy', 'c', 'false:false:false:false:false:false', '']),
         (['debug', '--debugger', 'lldb', '--build', 'file.dewy', '--flag'], ['debug', 'file.dewy', 'x86_64', 'false:false:false:false:false:true', 'lldb', '--flag']),
         (['update'], ['update', '', 'x86_64', 'false:false:false:false:false:false', '']),

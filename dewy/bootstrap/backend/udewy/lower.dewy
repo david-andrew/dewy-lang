@@ -47,6 +47,7 @@ State:type = [
     source:SrcFile
     source_index:addr?=none
     copy_notes:array<CopyNote>=[]
+    copy_names:dict<addr string>=[]
     copy_bound_memo:dict<addr bool>=[]
     explicit_copy_sources:set<addr>=set[]
     borrow_rejections:dict<addr string>=[]
@@ -138,13 +139,22 @@ State:type = [
     problem:Error?=none
 ]
 Result:type = const [program:program.Program input:emit.Input notes:array<CopyNote>=[]]
-note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state:State explicit:bool=false):>void => {
+copy_name = (type:addr @state:State):>string => {
+    # Checked type descriptions are immutable during lowering. Render once,
+    # even when thousands of sites copy the same arena-node or context type.
+    let cached=state.copy_names.get(type)
+    if cached isnt? none return cached
     # A minted type describes as its name followed by its structure; the name
     # alone identifies it in a report.
     let name=types.describe(type state.type_nodes)
     let space=name.find(' [')
     if space isnt? none and space >? 0 and space <? name.length and name[0] not=? '[' {name=name[0..space)}
     if name.length >? 48 {name="{name[0..45)}..."}
+    state.copy_names[type]=name
+    return name
+}
+note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state:State explicit:bool=false):>void => {
+    let name=copy_name(type @state)
     let dynamic=copy_policy.runtime_sized(type state.type_nodes state.layout_context.brands @state.copy_bound_memo)
     state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index explicit dynamic])
 }
