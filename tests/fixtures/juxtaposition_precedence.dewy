@@ -1,7 +1,8 @@
 # Call parentheses and coefficient multiplication keep their distinct
-# precedences after removing numeric right-hand adjacency.
+# precedences; tight right-hand numbers resolve from the left operand type.
 main=():>int64=>{
     let x:int64=3
     let square=(n:int64):>int64=>n*n
-    return if 2x^2=?18 and square(2)^2=?16 42 else 1
+    let g=(n:int64):>int64=>n+1
+    return if 2x^2=?18 and square(2)^2=?16 and (x+1)5=?20 and (square)2=?4 and g(1)2=?4 and (square)2^2=?16 and (x+1)5^2=?100 42 else 1
 }

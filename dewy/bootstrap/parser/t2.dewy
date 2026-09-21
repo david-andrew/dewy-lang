@@ -75,9 +75,9 @@ jux_options = (left:compound.Token right:compound.Token previous:compound.Token?
     if right is? compound.Block and right.delims =? '<>' { if is_atom(left) return ['TypeParamJuxtapose'] return [] }
     let options:array<string> = []
     if is_atom(left) and is_atom(right) {
-        if left isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | compound.Integer | compound.Real and right isnt? compound.Integer|compound.Real { options.push('CallJuxtapose') }
+        if left isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | compound.Integer | compound.Real { options.push('CallJuxtapose') }
         if left isnt? compound.Bool | compound.Integer | compound.Real | OpFn and right isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | compound.Integer | compound.Real | OpFn { options.push('IndexJuxtapose') }
-        if left isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | OpFn | Placeholder and right isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | compound.Integer | compound.Real | OpFn | Placeholder { options.push('MultiplyJuxtapose') }
+        if left isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | OpFn | Placeholder and right isnt? compound.String | compound.IString | compound.BasedString | compound.Bool | OpFn | Placeholder { options.push('MultiplyJuxtapose') }
         if options.length =? 0 {
             Warning[srcfile=srcfile title='Invalid types for juxtaposition'
                 pointers=[Pointer[span=Span[left.loc.stop right.loc.start] message="Juxtaposition ignored; these are separate expressions"]]].warn

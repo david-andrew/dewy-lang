@@ -549,18 +549,13 @@ Decisions were made by David on 2026-09-13.
 
    **Correction (2026-09-21):** the earlier record here said a number on
    the right starts a separate expression; that was a misreading of a
-   tentative note in the hosted `t2` stage, not a decision. **Where the
-   implementation does not match, to repair in the Phase 1.4 work:** both
-   parsers (hosted `t2`, native `t2.dewy`) blacklist `Integer`/`Real` on
-   the right of both the multiply and the call juxtaposition (added
-   2026-09-20), so `(x+1)5`, `(y)3.14159` and `(f)2` parse as two
-   expressions with a warning; before that change they parsed as calls
-   only. Remove those four entries so the number on the right leaves an
-   undecided call-or-multiply juxtaposition for the checker, as
-   `printl"hi"` already does; invert the tight-spelling tests in
-   `test_juxtaposition_decisions.py` (the whitespace cases stay); extend
-   `tests/fixtures/juxtaposition_precedence.dewy` with `(x+1)5` and a
-   callable `(f)2`.
+   tentative note in the hosted `t2` stage, not a decision. Both parsers now
+   leave tight right-hand numeric adjacency as undecided call-or-multiply;
+   whitespace still separates expressions. The four erroneous blacklist
+   entries were removed, and hosted grouping now preserves a callable's
+   call-target context through single parentheses, matching native behavior.
+   The precedence fixture checks `(x+1)5`, `(f)2`, `g(1)2` and exponentiation
+   on both routes. Callable-or-number union ambiguity remains an error.
 2. **Based byte literals (open, low priority).** Strings carry no `\x`
    escape because a string is a sequence of scalars, not bytes, so byte
    arrays need their own literal. The compiler already implements the

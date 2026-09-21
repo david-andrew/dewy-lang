@@ -322,7 +322,7 @@ array/dictionary elements and possible union alternatives; wrapping the value
 does not grant it a copy operation. A custom hook can instead construct fresh
 components and owns its result contract. Implicit copies
 and lifecycle invocation are still incomplete. Code generation explicitly
-rejects hooks until ownership lowering is ready;
+rejects unsupported ownership shapes until their lowering is ready;
 in particular, hidden hooks must not disappear through reachability pruning
 and leave a resource with ordinary memberwise behavior.
 

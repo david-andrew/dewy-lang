@@ -960,7 +960,7 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
             return tcr_assign(ast, ctx=ctx)
 
         case p0.IString(): return tcr_istring(ast, ctx=ctx)
-        case p0.Block(): return tcr_block(ast, ctx=ctx, expected=expected)
+        case p0.Block(): return tcr_block(ast, ctx=ctx, expected=expected, call_target=call_target)
         case p0.Prefix(): return tcr_prefix(ast, ctx=ctx, expected=expected)
         case p0.Postfix(op=t1.Operator(symbol='or_throw')): return tcr_or_throw(ast, ctx=ctx)
         case p0.BinOp() if _include_bytes_call(ast) is not None:
@@ -9738,7 +9738,7 @@ def _literal_path_parameter(expression: p0.BinOp) -> str | None:
     return value.item.name
 
 
-def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:
+def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None, call_target: bool=False) -> hir.AST:
     if block.kind == '<>':
         if len(block.inner) != 1:
             user_error(
@@ -9910,6 +9910,9 @@ def tcr_block(block: p0.Block, *, ctx: Context, expected: ty.Type|None=None) -> 
             ctx=ctx,
             type_block=type_block,
             expected=item_expected,
+            # Single parentheses group the callee; they do not force its
+            # bare name to auto-call before the outer arguments arrive.
+            call_target=call_target and block.kind == '()' and len(items) == 1,
         )
         if block.kind == '{}' and ctx.hoisted:
             results[index] = hir.Block(item.loc, results[index].type, [*ctx.hoisted, results[index]], False)

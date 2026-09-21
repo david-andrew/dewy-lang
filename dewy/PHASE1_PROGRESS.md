@@ -3,7 +3,8 @@
 Started 2026-09-20 from `be7d1b1a`. The scope is all of Phase 1 in
 [ROADMAP.md](ROADMAP.md), with the correctness/parity closure checkpoint
 first. This ledger records implementation and validation, not new language
-decisions. Open design questions stay open until resolved with David.
+decisions. Fundamental new directions still need review; obvious Dewy-aligned
+extensions may proceed provisionally and are recorded here for David.
 
 ## Work remaining
 
@@ -23,10 +24,9 @@ decisions. Open design questions stay open until resolved with David.
   errors remain return alternatives, separate from effects.
 - 1.4: implement and test the settled juxtaposition, reserved-name,
   unit-nominal, and uniform-container decisions. Repair the right-side
-  number juxtaposition: `(x+1)5` and `(y)3.14159` multiply and `(f)2`
-  calls or multiplies by the type of `f` (ROADMAP 1.4 item 1, corrected
-  2026-09-21); the four 2026-09-20 blacklist entries in both parsers and
-  the tight-spelling tests pin the wrong behavior. Preserve the decisions to
+  number juxtaposition correction is implemented and paired-tested:
+  `(x+1)5` multiplies and `(f)2` calls or multiplies by the type of `f`
+  (ROADMAP 1.4 item 1, corrected 2026-09-21). Preserve the decisions to
   keep type brackets and conventional export privacy. Keep the explicitly
   open byte-packing and Unicode escape questions visible.
 
@@ -998,3 +998,15 @@ lifecycle cases passed, including the new cleanup, no-retained-storage,
 effect and stale-fact fixtures. The focused manifest now has 124 cases.
 Artifacts: `../dewy-build-artifacts/phase1-lifecycle-drop-runtime-2026-09-20`
 and `../dewy-build-artifacts/phase1-lifecycle-drop-parity-final-2026-09-20`.
+
+Tight right-hand numeric adjacency now retains both call and multiply
+readings in both parsers. Whitespace remains a separator. The hosted checker
+now preserves call-target context through single grouping parentheses,
+matching native; `(f)2` no longer auto-calls `f` before seeing its argument.
+Callable-or-number unions still require explicit call pipes or multiplication.
+Validation: 40 hosted adjacency/function-value/keyword-call tests passed.
+A fresh native generation built in 66.31 seconds, passed three ownership
+kernels and the extended paired precedence fixture (including `g(1)2` and
+both call/multiply exponentiation). Artifacts:
+`../dewy-build-artifacts/phase1-tight-numeric-adjacency-2026-09-21` and
+`../dewy-build-artifacts/phase1-tight-numeric-adjacency-parity-2026-09-21`.

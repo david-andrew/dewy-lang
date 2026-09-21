@@ -323,8 +323,6 @@ juxtapose_blacklist: set[tuple[type[t1.Token], type[t1.Token]]] = {
     (MultiplyJuxtapose, t1.IString),
     (MultiplyJuxtapose, t1.BasedString),
     (MultiplyJuxtapose, t1.Bool),
-    (MultiplyJuxtapose, t1.Integer),  # a number on the right starts a separate expression
-    (MultiplyJuxtapose, t1.Real),
     (MultiplyJuxtapose, OpFn),
     (MultiplyJuxtapose, Placeholder), # `5$` is also a bit odd, so block it for now
 
@@ -335,8 +333,6 @@ juxtapose_blacklist: set[tuple[type[t1.Token], type[t1.Token]]] = {
     (t1.Bool, CallJuxtapose),
     (t1.Integer, CallJuxtapose),
     (t1.Real, CallJuxtapose),
-    (CallJuxtapose, t1.Integer),
-    (CallJuxtapose, t1.Real),
 
     # things that CANNOT be indexed
     (t1.Bool, IndexJuxtapose),
