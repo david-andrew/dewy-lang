@@ -152,3 +152,80 @@ def type_constraints(actual, required, seen=None):
         for a, b in zip(actual.items, required.items):
             result.extend(type_constraints(a, b, seen))
     return result
+
+
+
+def resolve_contracts(contract: rows.Contract | None, solutions: dict[str, rows.Contract]) -> rows.Contract | None:
+    """Substitute inferred rows without throwing away negative guarantees.
+
+    A sequence retains only exclusions shared by its pieces. Written outer
+    exclusions remain part of the original contract, independently of which
+    variable carried a guarantee during inference.
+    """
+    if contract is None or contract.allowed is None:
+        return contract
+    allowed = contract.allowed
+    parts = [rows.Contract(rows.Row(allowed.atoms, unknown=allowed.unknown))]
+    parts.extend(solutions.get(name, rows.Contract(rows.Row(variables=(name,)))) for name in allowed.variables)
+    combined = rows.join(*parts)
+    excluded = tuple(dict.fromkeys((*contract.excluded, *combined.excluded)))
+    return rows.Contract(combined.allowed, excluded)
+
+
+def solve_contracts(definitions: dict[str, rows.Contract], constraints: tuple[Constraint, ...] = ()) -> dict[str, rows.Contract]:
+    """Possible effects grow; proven absences shrink over a finite vocabulary.
+
+    Exclusions mentioned by bodies or obligations select candidates only.
+    Every body and incoming assignment must establish each surviving candidate.
+    An unknown operation therefore removes an unsupported candidate even in a
+    recursive component. The positive fixed point remains authoritative.
+    """
+    positive = solve(definitions, constraints)
+    vocabulary = dict.fromkeys(atom for body in definitions.values() for atom in body.excluded)
+    for edge in constraints:
+        for contract in (edge.actual, edge.required):
+            if contract is not None:
+                vocabulary.update(dict.fromkeys(contract.excluded))
+    if not vocabulary:
+        return {name: rows.Contract(row) for name, row in positive.items()}
+    rules = [(name, body, rows.Row()) for name, body in definitions.items()]
+    for edge in constraints:
+        admitted = _admitted(edge.required)
+        targets = tuple(name for name in admitted.variables if name in definitions)
+        if not targets or admitted.unknown:
+            continue
+        covered = rows.Row(admitted.atoms, tuple(name for name in admitted.variables if name not in targets))
+        rules.extend((name, edge.actual or rows.Contract(), covered) for name in targets)
+    solutions = {name: rows.Contract(row, tuple(vocabulary)) for name, row in positive.items()}
+    users: dict[str, set[int]] = {}
+    for index, (_, body, _) in enumerate(rules):
+        for name in _admitted(body).variables:
+            if name in definitions:
+                users.setdefault(name, set()).add(index)
+    work = deque(range(len(rules)))
+    queued = set(work)
+    while work:
+        index = work.popleft()
+        queued.remove(index)
+        name, body, covered = rules[index]
+        actual = resolve_contracts(body, solutions)
+        admitted = _admitted(actual)
+        residual = rows.Contract(rows.Row(
+            tuple(atom for atom in admitted.atoms if not any(rows.covers(bound, atom) for bound in covered.atoms)),
+            tuple(variable for variable in admitted.variables if variable not in covered.variables),
+            admitted.unknown,
+        ), actual.excluded)
+        previous = solutions[name]
+        kept = tuple(atom for atom in previous.excluded if rows.implies(residual, rows.Contract(excluded=(atom,))))
+        if kept == previous.excluded:
+            continue
+        solutions[name] = rows.Contract(previous.allowed, kept)
+        for user in users.get(name, ()):
+            if user not in queued:
+                work.append(user)
+                queued.add(user)
+    return solutions
+
+
+def satisfied_contracts(constraint: Constraint, solutions: dict[str, rows.Contract]) -> bool:
+    return rows.implies(resolve_contracts(constraint.actual, solutions), resolve_contracts(constraint.required, solutions))

@@ -40,5 +40,24 @@ main=():>int64=>{
         $runtime_assert name in? result
         if rows.identity(rows.Contract[result[name]]) not=? rows.identity(allocation) return 8
     }
+    # Open negative guarantees survive forwarding, but an unknown assignment
+    # and an unknown operation in a recursive component invalidate them.
+    let fs=rows.Atom['reads' rows.Subject['resource' 'Filesystem']]
+    let no_fs=rows.Contract[excluded=[fs]]
+    definitions=[a->variable(b) b->no_fs]
+    let solved=infer.solve_contracts(definitions)
+    if not infer.satisfied_contracts(infer.Constraint[variable(a) no_fs] solved) return 9
+    if infer.satisfied_contracts(infer.Constraint[variable(a) pure] solved) return 10
+    solved=infer.solve_contracts(definitions [infer.Constraint[none variable(b)]])
+    if infer.satisfied_contracts(infer.Constraint[variable(a) no_fs] solved) return 11
+    definitions=[a->variable(b) b->rows.join(variable(a) rows.Contract[])]
+    solved=infer.solve_contracts(definitions [infer.Constraint[variable(a) no_fs]])
+    if infer.satisfied_contracts(infer.Constraint[variable(a) no_fs] solved) return 12
+    definitions=[a->pure]
+    solved=infer.solve_contracts(definitions [
+        infer.Constraint[rows.Contract[rows.Row[[fs]]] rows.Contract[rows.Row[[fs] [a]]]]
+        infer.Constraint[variable(a) no_fs]
+    ])
+    if not infer.satisfied_contracts(infer.Constraint[variable(a) no_fs] solved) return 13
     return 42
 }

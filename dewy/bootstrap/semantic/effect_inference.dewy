@@ -95,3 +95,104 @@ compatible=(actual:rows.Contract? required:rows.Contract?):>bool=>{
     }
     return rows.implies(resolve(actual lower) resolve(required upper))
 }
+
+# A row's open negative guarantees travel through inference independently of
+# its possible effects. A requirement selects a candidate, never proves it.
+GuaranteeRule:type=const [name:string source:rows.Contract covered:rows.Row=rows.Row[]]
+resolve_contracts=(contract:rows.Contract? solutions:dict<string rows.Contract>):>rows.Contract?=>{
+    if contract is? none or contract.allowed is? none return contract
+    let allowed=contract.allowed
+    let combined=rows.Contract[rows.Row[allowed.atoms unknown=allowed.unknown]]
+    loop name in allowed.variables {
+        let part=solutions.get(name rows.Contract[rows.Row[variables=[name]]])
+        combined=rows.join(combined part)
+    }
+    let excluded=contract.excluded
+    let known:set<string>=set[]
+    loop atom in excluded {known.add(rows.atom_key(atom))}
+    loop atom in combined.excluded {
+        let key=rows.atom_key(atom)
+        if key not in? known {known.add(key) excluded.push(atom)}
+    }
+    return rows.Contract[combined.allowed excluded]
+}
+add_candidates=(contract:rows.Contract? @vocabulary:array<rows.Atom> @known:set<string>):>void=>{
+    if contract is? none return
+    loop atom in contract.excluded {
+        let key=rows.atom_key(atom)
+        if key not in? known {known.add(key) vocabulary.push(atom)}
+    }
+}
+solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[]):>dict<string rows.Contract>=>{
+    let positive=solve(definitions constraints)
+    let vocabulary:array<rows.Atom>=[]
+    let known:set<string>=set[]
+    loop [name body] in definitions {add_candidates(body @vocabulary @known)}
+    loop edge in constraints {
+        add_candidates(edge.actual @vocabulary @known)
+        add_candidates(edge.required @vocabulary @known)
+    }
+    let solutions:dict<string rows.Contract>=[]
+    loop [name row] in positive {solutions[name]=rows.Contract[row vocabulary]}
+    if vocabulary.length =? 0 return solutions
+    let rules:array<GuaranteeRule>=[]
+    loop [name body] in definitions {rules.push(GuaranteeRule[name body])}
+    loop edge in constraints {
+        let permitted=admitted(edge.required)
+        let targets:array<string>=[]
+        let variables:array<string>=[]
+        loop name in permitted.variables {
+            if name in? definitions {targets.push(name)} else {variables.push(name)}
+        }
+        if targets.length =? 0 or permitted.unknown continue
+        let covered=rows.Row[permitted.atoms variables]
+        let source=if edge.actual is? none rows.Contract[] else edge.actual
+        loop name in targets {rules.push(GuaranteeRule[name source covered])}
+    }
+    let users:dict<string set<addr>>=[]
+    let work:array<addr>=[]
+    let queued:set<addr>=set[]
+    loop i in 0.. and i <? rules.length {
+        work.push(i) queued.add(i)
+        loop name in admitted(rules[i].source).variables {
+            if name in? definitions {
+                let list=users.get(name set[])
+                list.add(i) users[name]=list
+            }
+        }
+    }
+    # Hypotheses shrink: every defining body and incoming assignment must
+    # establish a candidate. An unknown operation removes it, including in
+    # a cycle. Positive effects remain the independent least fixed point.
+    loop work.length >? 0 {
+        let index=work.pop
+        queued.pop(index default=index);
+        $runtime_assert index <? rules.length
+        let rule=rules[index]
+        let actual=resolve_contracts(rule.source solutions)
+        $runtime_assert actual isnt? none
+        let behavior=admitted(actual)
+        let atoms:array<rows.Atom>=[]
+        loop atom in behavior.atoms {
+            let covered=false
+            loop bound in rule.covered.atoms {if rows.covers(bound atom) {covered=true break}}
+            if not covered {atoms.push(atom)}
+        }
+        let variables:array<string>=[]
+        loop name in behavior.variables {if name not in? rule.covered.variables {variables.push(name)}}
+        let residual=rows.Contract[rows.Row[atoms variables behavior.unknown] actual.excluded]
+        $runtime_assert rule.name in? solutions
+        let previous=solutions[rule.name]
+        let kept:array<rows.Atom>=[]
+        loop atom in previous.excluded {if rows.implies(residual rows.Contract[excluded=[atom]]) {kept.push(atom)}}
+        if kept.length =? previous.excluded.length continue
+        solutions[rule.name]=rows.Contract[previous.allowed kept]
+        loop user in users.get(rule.name set[]) {
+            if user not in? queued {work.push(user) queued.add(user)}
+        }
+    }
+    return solutions
+}
+satisfied_contracts=(constraint:Constraint solutions:dict<string rows.Contract>):>bool=>{
+    return rows.implies(resolve_contracts(constraint.actual solutions) resolve_contracts(constraint.required solutions))
+}

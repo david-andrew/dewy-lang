@@ -308,13 +308,13 @@ def validate(root, registry, srcfile):
     for name, node in bodies:
         body = summaries[id(node)]
         definitions[name] = rows.join(definitions[name], body) if name in definitions else body
-    solutions = inference.solve(definitions, tuple(edge for _, edge in boundaries))
+    solutions = inference.solve_contracts(definitions, tuple(edge for _, edge in boundaries))
     for node, edge in boundaries:
-        if not inference.satisfied(edge, solutions):
+        if not inference.satisfied_contracts(edge, solutions):
             user_error(srcfile, 'callable does not satisfy its effect contract',
                        Pointer(span=node.loc, message='the inferred callable behavior exceeds its destination contract'))
     for literal in constrained:
-        if not rows.implies(inference.resolve(summaries[id(literal)], solutions), inference.resolve(literal.type.effects, solutions)):
+        if not rows.implies(inference.resolve_contracts(summaries[id(literal)], solutions), inference.resolve_contracts(literal.type.effects, solutions)):
             user_error(literal.source or srcfile, 'function does not satisfy its effect contract',
                        Pointer(span=literal.loc, message='an operation or callee may exceed the permitted effects or violate an exclusion'),
                        hint='omit the row to infer conservatively, or remove the operation requiring effects')

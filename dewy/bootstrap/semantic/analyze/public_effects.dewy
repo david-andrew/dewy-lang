@@ -348,9 +348,9 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
         let body=summaries[id]
         definitions[name]=if name in? definitions rows.join(definitions[name] body) else body
     }
-    let solutions=inference.solve(definitions constraints)
+    let solutions=inference.solve_contracts(definitions constraints)
     loop i in 0.. and i <? constraints.length and i <? sites.length {
-        if not inference.satisfied(constraints[i] solutions) {
+        if not inference.satisfied_contracts(constraints[i] solutions) {
             let node=hir.node_at(session.hir sites[i])
             return Error[srcfile=source title='callable does not satisfy its effect contract' pointers=[Pointer[span=node.loc message='the inferred callable behavior exceeds its destination contract']]]
         }
@@ -361,7 +361,7 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
         let signature=types.node_at(session.types node.value_type)
         $runtime_assert signature is? types.FunctionType and signature.effects isnt? none
         $runtime_assert id in? summaries
-        if not rows.implies(inference.resolve(summaries[id] solutions) inference.resolve(signature.effects solutions)) {
+        if not rows.implies(inference.resolve_contracts(summaries[id] solutions) inference.resolve_contracts(signature.effects solutions)) {
             let src=source
             if node.source isnt? none {
                 $runtime_assert node.source <? session.sources.length

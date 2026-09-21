@@ -589,9 +589,10 @@ and substitute callback rows in both compilers, including mixed type/row
 signatures and distinct cached instances. Omitted literal rows now travel through ordinary callable values and generic
 calls, including recursion, conditional joins and independently reassigned
 handles. Selected value boundaries are checked after solving and again after
-lifecycle lowering; an unknown callback parameter stays unknown. Scoped
-polymorphic place rows and retention of open negative guarantees through
-inferred wrappers remain in progress. Bare
+lifecycle lowering; an unknown callback parameter stays unknown. Inferred wrappers now retain open negative guarantees using a separate finite
+exclusion fixed point: every body and incoming assignment must establish each
+surviving exclusion. Scoped polymorphic place rows and negative guarantees
+through generic row substitution remain in progress. Bare
 `allocates` / `no allocates` now classify logical copies and aggregate
 construction; fixed scalar local arrays and scalar record literals now share
 a bounded nonescaping frame-placement proof with lowering. Native record

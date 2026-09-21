@@ -143,7 +143,9 @@ An omitted row on an unknown callback parameter still admits unknown behavior:
 there is no body from which to infer a narrower contract. Recursive calls,
 generic calls, conditional callback choices and callback reassignment retain
 possible effects; inferred rows also include synthesized lifecycle operations.
-Scoped place-row inference, open negative guarantees through inferred wrappers,
+Inferred wrappers preserve open negative guarantees; unknown operations still
+remove unproved exclusions. Scoped place-row inference, negative guarantees
+through generic row substitution,
 and the full allocation/failure vocabulary remain in progress.
 
 Effect rows have their own generic kind:

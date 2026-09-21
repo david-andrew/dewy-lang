@@ -2149,3 +2149,33 @@ including an eager default that changes a global key. Native analysis removes
 five unnecessary key-copy sites in that fixture while retaining the default's
 snapshot. The command test checks this inventory distinction; the runtime
 fixture also checks that a warmed membership probe allocates no storage.
+
+
+## Negative guarantees through inferred wrappers (2026-09-21)
+
+Possible effects still grow from bodies and selected assignments. Alongside
+that least fixed point, exclusions shrink over a finite vocabulary gathered
+from bodies and obligations. Requirements only nominate candidates; every
+body and incoming assignment must establish each surviving guarantee. An
+unknown operation removes unsupported candidates even in a recursive cycle.
+Written permissions are removed before checking an inferred residual.
+
+Both implementations preserve open guarantees through inferred callable
+wrappers without pretending those wrappers are pure. Generic row substitution
+still carries positive rows, so negative guarantees across a user `E` remain
+separate work, as do scoped place substitutions and competing callable
+alternatives.
+
+Validation: 22 hosted callable/guarantee checks pass. The native solver kernel,
+positive source wrapper and unknown-callback rejection agree with hosted
+checking on x86-64 and C. A rebuilt CLI checked the compiler's own source.
+The batch initially exceeded the copy gate (5,031 sites); immediate dictionary
+key borrowing removes 50 sites in the combined-source inventory, bringing it
+to 4,981 (105.642/KLOC), under the unchanged 5,000/110 limits. This preliminary
+combined inventory uses the key-borrow CLI; the integrated source remains due
+for its own fixed-point check.
+
+The preceding callable-inference revision, `69b8eb8d`, separately completed
+191/191 hosted/native parity cases and a byte-identical direct native fixed
+point. Its generation timings were 65 and 77 seconds under concurrent work;
+these are not isolated latency benchmarks and do not meet the 30-second goal.

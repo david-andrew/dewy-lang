@@ -1,0 +1,8 @@
+Filesystem=type of any
+Callback:type=():>int64 & no reads<Filesystem>
+Consumer:type=(f:Callback):>int64 & no reads<Filesystem>
+# An omitted wrapper row should retain the callback's open exclusion.
+forward=(f:Callback):>int64=>f()
+answer=():>int64=>42
+use=(g:Consumer):>int64 & no reads<Filesystem>=>g(@answer)
+main=():>int64=>use(@forward)

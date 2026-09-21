@@ -1,0 +1,9 @@
+# An uncontracted callback cannot acquire an exclusion merely by forwarding it.
+Filesystem=type of any
+Unknown:type=():>int64
+Callback:type=():>int64 & no reads<Filesystem>
+Consumer:type=(f:Unknown):>int64 & no reads<Filesystem>
+forward=(f:Unknown):>int64=>f()
+answer=():>int64=>42
+use=(g:Consumer):>int64=>g(@answer)
+main=():>int64=>use(@forward)
