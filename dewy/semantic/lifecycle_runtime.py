@@ -12,6 +12,7 @@ internal place call ABI.
 from dataclasses import replace
 
 from . import hir, ty
+from ..parser import t0
 from .errors import not_implemented
 from .analyze import public_effects
 
@@ -75,34 +76,74 @@ def prepare(root: hir.Block, srcfile):
     if registry is None:
         reject(root, 'checked ownership binding metadata')
 
+    array_drops = {}
+    generated = []
+
     def cleanup(owners, loc, fields_only=frozenset()):
         result = []
-        def drop(value, type_, ancestors, run_hook=True):
+        def drop(value, type_, ancestors, run_hook=True, into=result):
             if resource(type_) is None:
                 return
             shape = ty.unfold(ty.strip_refinement(type_))
-            if not isinstance(shape, ty.ObjectType) or id(shape) in ancestors:
-                reject(value, 'resource containers or recursive resource storage')
+            if id(shape) in ancestors:
+                reject(value, 'recursive resource storage')
+            if isinstance(shape, ty.ArrayType):
+                # One checked helper per array shape: its borrowed receiver
+                # has a stable identity even for an outer array's element.
+                # Reuse also avoids duplicating nested cleanup loops at exits.
+                operation = array_drops.get(shape)
+                if operation is None:
+                    name = f'__dewy_drop_array_{registry.next_id}'
+                    binding = registry.allocate(object(), name, 'value', loc)
+                    parameter = registry.allocate(object(), '__items', 'param', loc)
+                    parameter.type = shape
+                    signature = ty.FunctionType([ty.PosOrKwArg('__items', shape, place=True)], [], None, ty.VOID_TYPE)
+                    binding.type = signature
+                    operation = hir.ExpressedIdentifier(loc, signature, name, binding_id=binding.id)
+                    receiver = hir.ExpressedIdentifier(loc, shape, parameter.name, binding_id=parameter.id)
+                    declaration, cursor = capture(hir.ArrayLength(loc, 'int64', receiver), loc)
+                    zero = hir.Integer(loc, 'int64', t0.base10, 0)
+                    one = hir.Integer(loc, 'int64', t0.base10, 1)
+                    comparison = hir.ExpressedIdentifier(loc, ty.FunctionType(
+                        [ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, 'bool'), '__gt__')
+                    condition = hir.FunctionCall(loc, 'bool', comparison, [cursor, zero], {})
+                    element_calls = []
+                    drop(hir.Index(loc, shape.element, receiver, cursor, None), shape.element, ancestors | {id(shape)}, into=element_calls)
+                    body = hir.Block(loc, ty.VOID_TYPE, [hir.Assign(loc, ty.VOID_TYPE, cursor, '-=', one), *element_calls], True)
+                    loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, condition, body)])
+                    literal = hir.FunctionLiteral(loc, signature, [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)], [], None,
+                                                  ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, [declaration, loop], True), source=current_source)
+                    declared = hir.Declare(loc, ty.VOID_TYPE, 'const', name, signature, literal, binding_id=binding.id)
+                    binding.function = literal
+                    binding.declaration = declared
+                    generated.append(declared)
+                    array_drops[shape] = operation
+                into.append(hir.FunctionCall(loc, ty.VOID_TYPE, replace(operation, loc=loc), [hir.Place(loc, shape, value)], {}))
+                return
+            if not isinstance(shape, ty.ObjectType):
+                reject(value, 'resource union storage')
             hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
             if hook is not None and run_hook:
                 declaration = declarations.get(hook.binding_id)
                 if declaration is None:
                     reject(value, 'an unavailable drop operation')
                 function = hir.ExpressedIdentifier(loc, declaration.expr.type, declaration.name, binding_id=declaration.binding_id)
-                result.append(hir.FunctionCall(loc, ty.VOID_TYPE, function, [hir.Place(loc, shape, value)], {}))
+                into.append(hir.FunctionCall(loc, ty.VOID_TYPE, function, [hir.Place(loc, shape, value)], {}))
             # Parent body first; then fields in reverse declaration order.
             # Ordinary lowering releases the complete backing storage afterward.
             for field in reversed(shape.fields):
                 if resource(field.type) is not None:
-                    drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)})
+                    drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)}, into=into)
         for owner in reversed(owners):
-            value = hir.ExpressedIdentifier(loc, owner.expr.type, owner.name, binding_id=owner.binding_id)
-            drop(value, owner.expr.type, set(), owner.binding_id not in fields_only)
+            owner_type = owner.annotation or owner.expr.type
+            value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
+            drop(value, owner_type, set(), owner.binding_id not in fields_only)
         return result
 
     def transfer(value, expected):
         shape = ty.unfold(ty.strip_refinement(value.type))
-        assert isinstance(shape, ty.ObjectType)
+        if not isinstance(shape, ty.ObjectType):
+            return value, False
         hook = next((method for method in shape.methods if method.lifecycle == 'move'), None)
         if hook is None:
             return value, False
@@ -148,6 +189,8 @@ def prepare(root: hir.Block, srcfile):
                            pos_args=[expression(arg, allowed, inherited=inherited) for arg in node.pos_args],
                            kw_args={name: expression(arg, allowed, inherited=inherited) for name, arg in node.kw_args.items()})
         shape = ty.unfold(ty.strip_refinement(node.type))
+        if isinstance(node, hir.ArrayLiteral) and isinstance(shape, ty.ArrayType):
+            return replace(node, items=[fresh(item, allowed, inherited, components) for item in node.items])
         if not isinstance(node, hir.ObjectLiteral) or not isinstance(shape, ty.ObjectType):
             reject(node, 'a non-fresh resource field or resource container')
         hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
@@ -189,10 +232,15 @@ def prepare(root: hir.Block, srcfile):
                 or isinstance(node, hir.FunctionCall) and node.proof
                 or isinstance(node, hir.Assert) and not node.runtime and not node.expect):
             return node
-        if isinstance(node, hir.MemberAccess) and resource(node.value.type) is not None:
-            owner = node.value
-            while isinstance(owner, hir.MemberAccess):
-                owner = owner.value
+        if (isinstance(node, hir.MemberAccess) and resource(node.value.type) is not None
+                or isinstance(node, hir.ArrayLength) and resource(node.array.type) is not None):
+            owner = node.value if isinstance(node, hir.MemberAccess) else node.array
+            while isinstance(owner, (hir.MemberAccess, hir.Index)):
+                if isinstance(owner, hir.Index):
+                    expression(owner.index, allowed, inherited=inherited)
+                    owner = owner.array
+                else:
+                    owner = owner.value
             if (not isinstance(owner, hir.ExpressedIdentifier) or owner.binding_id not in allowed
                     or resource(node.type) is not None):
                 reject(node, 'an escaping or projected resource owner')
@@ -339,8 +387,11 @@ def prepare(root: hir.Block, srcfile):
                         items.append(result)
                 return replace(node, items=items)
             if isinstance(node, hir.Declare) and resource(node.expr.type) is not None:
+                expected = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
+                actual = ty.unfold(ty.strip_refinement(node.expr.type))
+                same_array = isinstance(expected, ty.ArrayType) and isinstance(actual, ty.ArrayType) and expected.element == actual.element
                 if (node.binding_id is None or node.view
-                        or node.annotation is not None and node.annotation != node.expr.type):
+                        or node.annotation is not None and node.annotation != node.expr.type and not same_array):
                     reject(node, 'a non-fresh local owner')
                 if id(node) in transfers:
                     source = next((owner for owner in owners if owner.binding_id == node.expr.binding_id), None)
@@ -439,7 +490,9 @@ def prepare(root: hir.Block, srcfile):
             if not isinstance(item, (hir.TypeValue, hir.ScopeMetatag)):
                 expression(item, set())
             items.append(item)
-    prepared = replace(root, items=items)
+    prepared = replace(root, items=[*items, *generated])
+    if isinstance(prepared, hir.Program):
+        prepared = replace(prepared, item_sources=(*root.item_sources, *(node.expr.source or srcfile for node in generated)))
     # Refresh checked definitions: fact/effect resolution must see cleanup
     # inside callees as well as in the current function.
     for node in hir.walk(prepared):

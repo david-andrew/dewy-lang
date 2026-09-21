@@ -102,14 +102,14 @@ def test_dropped_local_owners_retain_no_storage(tmp_path):
     execute(tmp_path, 'drop-lifetime', codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime', 'lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime', 'lifecycle_local_transfers', 'lifecycle_implicit_owner_result'])
+@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime', 'lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime', 'lifecycle_local_transfers', 'lifecycle_implicit_owner_result', 'lifecycle_resource_arrays'])
 def test_aggregate_cleanup_and_implicit_results(tmp_path, name):
     from pathlib import Path
     source = Path(__file__).resolve().parents[1] / f'fixtures/{name}.dewy'
     execute(tmp_path, name, codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-@pytest.mark.parametrize('name', ['lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime', 'lifecycle_local_transfers', 'lifecycle_implicit_owner_result'])
+@pytest.mark.parametrize('name', ['lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime', 'lifecycle_local_transfers', 'lifecycle_implicit_owner_result', 'lifecycle_resource_arrays'])
 def test_native_factory_result_ownership(tmp_path, name):
     from pathlib import Path
     from test_bootstrap_structural_text import build_program_driver, check_structural_text
@@ -270,3 +270,27 @@ probe=():>int64=>{changed=0 {let h=Handle[42]} $assert changed=?0 return 42}
     with pytest.raises(ReportException, match='cannot prove assertion') as error:
         codegen(SrcFile.from_path(source))
     assert str(module) in str(error.value)
+
+
+ARRAY_DROP_EFFECT = '''let changed:int64=0
+Handle=type of [token:int64
+$__drop__
+release=():>void=>{changed=1}
+]
+'''
+ARRAY_DROP_EFFECT_CASES = [
+    ARRAY_DROP_EFFECT + 'main=():>int64 & allocates=>{let owners=[Handle[42]] return 42}',
+    ARRAY_DROP_EFFECT + 'dropper=():>void=>{let owners=[Handle[42]]}\nmain=():>int64=>{changed=0 dropper() $assert changed=?0 return 42}',
+]
+
+
+@pytest.mark.parametrize('source,diagnostic', list(zip(ARRAY_DROP_EFFECT_CASES, ['effect contract', 'assert'])))
+def test_array_element_drop_preserves_effect_checks(source, diagnostic):
+    check.typecheck_and_resolve(SrcFile(None, source))
+    with pytest.raises(ReportException, match=diagnostic):
+        codegen(SrcFile(None, source))
+
+
+def test_native_array_element_drop_contracts(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[], errors=ARRAY_DROP_EFFECT_CASES)

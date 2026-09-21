@@ -1,0 +1,30 @@
+let trace:int64=0
+Handle=type of [token:int64 values:array<int64>
+$__drop__
+release=():>void=>{trace=trace*10+token values.clear}
+]
+Box=type of [items:array<Handle>]
+make=():>array<Handle>=>[Handle[1 [42]] Handle[2 [43]]]
+exercise=():>int64=>{
+    {let items=make()
+     if items.length not=?2 return 1
+     if items[0].token not=?1 or items[1].token not=?2 return 2}
+    if trace not=?21 return 3
+    trace=0
+    {let box=Box[[Handle[3 [1]] Handle[4 [2]]]]}
+    if trace not=?43 return 4
+    trace=0
+    {let nested:array<array<Handle>>=[[Handle[1 [1]] Handle[2 [2]]] [Handle[3 [3]]]]}
+    if trace not=?321 return 5
+    trace=0
+    {let empty:array<Handle>=[]}
+    if trace not=?0 return 6
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if exercise() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

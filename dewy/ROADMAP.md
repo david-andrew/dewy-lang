@@ -425,7 +425,10 @@ in both lowerings and the parity tool is the gate.
   owners whose fields use ordinary synthesized cleanup, including inherited
   drops, reverse scope cleanup, scalar implicit results and early returns/loop exits. Its calls participate in fact/effect checking.
   Nested resource records also drop in reverse field order, even when the
-  wrapper has no hook. Explicit custom copies can construct fresh results,
+  wrapper has no hook. Fresh arrays of resources, including nested arrays
+  and array fields, run element hooks in reverse order before releasing their
+  storage. Per-shape cleanup helpers retain ordinary bounds/effect checking;
+  array mutation and implicit element copies remain outstanding. Explicit custom copies can construct fresh results,
   including nested hook calls. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch

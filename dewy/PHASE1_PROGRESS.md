@@ -1151,3 +1151,19 @@ and reran the case against the same native generation: passed. All 136
 integration cases therefore have checked expected outcomes. Artifacts:
 `../dewy-build-artifacts/phase1-ownership-parity-2026-09-21` and
 `../dewy-build-artifacts/phase1-imported-owner-parity-2026-09-21`.
+
+Fresh arrays now own their resource elements, including nested arrays, empty
+arrays, record array fields and factory results. Cleanup borrows each array
+through a checked helper, runs element hooks in reverse order, then leaves
+backing storage release to normal lowering. Helper reuse avoids duplicating
+nested loops at every exit and gives each receiver a stable proof identity.
+Generated bindings and module provenance remain explicit in HIR. Aggregate
+mutation, resource union/dictionary handling and inferred element copies are
+not covered by this batch.
+
+Validation: the hosted lifetime fixture passed on x86 and C; 27 hosted
+lifecycle checks passed before native compilation found an incorrect internal
+binding-kind spelling. After correcting it, all eight native lifecycle cases
+passed. Three final hosted lifetime/effect checks and two native rejection
+cases passed, including propagation of implicit element-drop effects and
+invalidation of caller facts. No storage remains after 100 repeated calls.
