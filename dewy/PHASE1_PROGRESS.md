@@ -2042,3 +2042,27 @@ batch is not yet a fresh fixed-point certification. These changes do not
 complete Phase 1: entry places, broader field transfers and placement, full
 strict-copy acceptance, effect-row inference and proof provenance still need
 work.
+
+## Dictionary fallback lifetime correction (2026-09-21)
+
+The first executable effect-row inference kernel exposed a hosted `.get`
+lifetime bug. A read-only record binding borrowed the dictionary's storage,
+but a missing key selected a newly constructed fallback. Statement cleanup
+released that fallback's nested strings before the next statement used them.
+Both lowerers now require an independently owned result when an unproven
+lookup can select a fallback; stability of the dictionary alone is not a
+lifetime proof for the fallback. Proven entry borrows retain their usual path.
+
+The reduced fixture fails before the hosted fix and passes afterwards on
+x86-64 and C, including zero retained bytes across 100 calls. The newly built
+native driver passes the same fixture and the effect solver kernel against
+the hosted compiler on both backends. Nine focused and 34 adjacent hosted
+checks passed. Source-level inference is still being connected to the solver.
+
+Integration checkpoint: `f7e5c1ec` closes the direct native bootstrap with
+byte-identical generations 2/3, direct/C execution checks, and all **186**
+explicit hosted/native parity cases. Generation times were 68/79 seconds
+with concurrent work, not isolated latency baselines. Artifacts are under
+`../dewy-build-artifacts/phase1-iteration-f7e5c1ec-*`. CI also completed at
+`5e4281cb`: **3,803 passed, 32 skipped** in 55m24s. Neither result certifies the
+newer fallback correction as a new fixed point.

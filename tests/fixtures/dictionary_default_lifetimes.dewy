@@ -1,0 +1,30 @@
+# A fallback record owns its string storage beyond the lookup statement.
+Row:type=const [atoms:array<int64>=[] variables:array<string>=[] flag:bool=false]
+merge=(left:Row right:Row):>Row=>{
+    let result=left
+    let variables=result.variables
+    loop variable in right.variables {if variable not in? variables {variables.push(variable)}}
+    return Row[result.atoms variables left.flag or right.flag]
+}
+substitute=(row:Row table:dict<string Row>):>Row=>{
+    let output=Row[]
+    loop variable in row.variables {
+        let replacement=table.get(variable Row[variables=[variable]])
+        output=merge(output replacement)
+    }
+    return output
+}
+work=():>int64=>{
+    let result=substitute(Row[variables=['missing']] [])
+    if result.variables.length=?1 {
+        return if result.variables[0]=?'missing' 42 else 1
+    }
+    return 2
+}
+main=():>int64=>{
+    if work() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if work() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

@@ -3660,6 +3660,9 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     # A dictionary lookup hands out the stored record's block; other value
     # kinds are rebuilt by the lookup and must be owned.
     if expr is? hir.DictLookup and not object_valued(expr.value_type state) return false
+    # An unproven lookup may select a temporary fallback. Its lifetime is
+    # independent of the dictionary's, so a stable dictionary is insufficient.
+    if expr is? hir.DictLookup and expr.default isnt? none and not expr.proven return false
     # An explicit string/union view may use an immediate enum word. A
     # stable read then needs no owning storage or release in either form.
     if not node.view and not releasable(expr.value_type @state) return false
