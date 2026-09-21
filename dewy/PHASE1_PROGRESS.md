@@ -1428,3 +1428,18 @@ backends and their rejection cases. The shared fixture checks hook results,
 independent mutation, effect checking and zero retained storage over 100 calls.
 A test-harness adjustment retains the existing unsupported-lifetime diagnostic
 category for an inferred move-only conflict; it still requires native rejection.
+
+Bounds checking now reuses the transitive parameter-effect proof to preserve
+facts across read-only, nonescaping place calls. Unknown callees, ambiguous
+pairings, writes and escaping storage remain conservative; implicit global
+writes still invalidate their own roots. Argument evaluation and call-entry
+preconditions retain the ordering established in the preceding fix.
+Relational result contracts also retain their current numeric consequence,
+so a returned array with the source's known length carries that exact length.
+The source's ordinary copy loop proves this contract through its loop invariant.
+
+Validation: eight focused hosted cases and the native acceptance/rejection
+harness passed on both output backends. All 83 adjacent hosted effect,
+truncation, dependent-index and projected/length-fact checks passed. This does
+not yet preserve untouched subfields of a parameter that the callee mutates
+elsewhere; that needs finer route-specific invalidation.

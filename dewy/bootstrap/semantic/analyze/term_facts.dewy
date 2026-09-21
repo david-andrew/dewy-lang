@@ -203,10 +203,19 @@ call_facts = (id:addr subject:string env:values.Environment @registry:bindings.R
     return output
 }
 
-# Store the symbolic part of a result contract. Concrete interval tightening
-# belongs to the evaluator, which also knows literal argument lengths.
+# Retain a contract's symbolic relation and its current numeric consequence.
+# The evaluator separately handles unnamed literal arguments.
 seed = (@state:facts.State subject:facts.Term promises:array<CallFact> context:relations.Context):>void => {
     loop promise in promises {
+        let known=relations.interval_of(promise.upper state context)
+        let constraint=ranges.UNKNOWN
+        if promise.direction =? 'lower' {constraint=ranges.Interval[ranges.shift_endpoint(known.lower promise.gap) none]}
+        else {
+            let offset:bigint?=0
+            if promise.offset isnt? none {offset=relations.interval_of(facts.Term[promise.offset] state context).lower}
+            constraint=ranges.Interval[none (if offset is? none none else ranges.shift_endpoint(known.upper (-promise.gap-offset)))]
+        }
+        facts.put(@state facts.value(subject) ranges.intersect(relations.interval_of(subject state context) constraint))
         let bound = ranges.Interval[promise.gap none]
         if promise.direction =? 'lower' { facts.put(@state facts.order(promise.upper subject) bound) }
         else if promise.offset is? none { facts.put(@state facts.order(subject promise.upper) bound) }

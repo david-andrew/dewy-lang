@@ -829,6 +829,7 @@ class _BoundsValidator:
 
     def validate(self, root: hir.Block) -> None:
         self.call_writes = effects.analyze_global_writes(root, self.mutable_globals)
+        self.read_only_places = effects.read_only_places(root)
         self.predicate_bindings = predicate_effects.BindingQueries(self.call_writes)
         # module-level function bodies are analyzed after the module's own
         # statements, in the module's final state: a method (a hidden function
@@ -2936,7 +2937,8 @@ class _BoundsValidator:
         for arg, interval, observed in obligations:
             self._validate_obligation(arg, interval, self._join_states([observed, state]))
         for place in places:
-            self._forget_place(place.target, state)
+            if id(place) not in self.read_only_places:
+                self._forget_place(place.target, state)
         arguments = arguments[:len(node.pos_args)]
         name = node.integer_operation or (
             node.func.name
@@ -3667,6 +3669,16 @@ class _BoundsValidator:
                     state[subject] = self._binding_interval(state, subject).intersect(bound)
         for key, facts in ((subject, self._call_term_facts(value)), (_length_key(subject), self._call_length_facts(value))):
             for upper, offset_id, gap, direction in facts:
+                # Keep both the symbolic relation and its current numeric
+                # consequence. A length equal to a known length is exact,
+                # even when the function's written contract is relational.
+                known = _known_interval(state, upper, self.max_length)
+                if direction == 'lower':
+                    bound = Interval(_add(known.lower, gap), None)
+                else:
+                    offset = 0 if offset_id is None else _known_interval(state, offset_id, self.max_length).lower
+                    bound = Interval(None, None if offset is None else _subtract(known.upper, gap + offset))
+                state[key] = _known_interval(state, key, self.max_length).intersect(bound)
                 if direction == 'lower':
                     state[_order_key(upper, key)] = Interval(gap, None)   # `n >=? src.length`: `n - src.length >= gap`
                 elif offset_id is None:

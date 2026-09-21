@@ -683,13 +683,43 @@ def analyze_effects(root: hir.AST) -> ProgramEffects:
     return _EffectAnalyzer(root).solve()
 
 
+def read_only_places(root: hir.AST) -> set[int]:
+    """Places whose callees neither write nor retain their borrowed storage.
+
+    This is the same transitive may-effect proof used for storage borrows.
+    A missing body, unresolved callback, or ambiguous parameter pairing is
+    not evidence of a read-only call. Argument evaluation is still separate.
+    """
+    calls = [(node, [arg for arg in [*node.pos_args, *node.kw_args.values()] if isinstance(arg, hir.Place)])
+             for node in hir.walk(root) if isinstance(node, hir.FunctionCall)]
+    calls = [(call, places) for call, places in calls if places]
+    if not calls:
+        return set()
+    analysis = _EffectAnalyzer(root)
+    summaries = analysis.solve()
+    safe, unsafe = set(), set()
+    for call, places in calls:
+        targets = analysis._direct_targets(call)
+        for place in places:
+            readonly = targets is not None
+            for target in targets or ():
+                pairs = analysis._pair_arguments(call, target)
+                parameter = next((p for arg, p in pairs or () if arg is place), None)
+                summary = summaries.for_param_binding(parameter.binding_id) if parameter is not None else None
+                if summary is None or not summary.read_only:
+                    readonly = False
+                    break
+            (safe if readonly else unsafe).add(id(place))
+    return safe - unsafe
+
+
 def analyze_global_writes(root: hir.AST, globals: set[int]) -> dict[int, set[int]]:
     """May-write roots for each call, including transitive/default effects.
 
     Reuse direct-call resolution from parameter effects. Scan each body once,
     then propagate finite sets through the call graph. Unknown calls may write
     every tracked global; creating a nested function does not execute its body.
-    Place arguments remain conservative in the ordinary expression transfer.
+    Borrowed endpoints are tracked separately by read_only_places.
     """
     if not globals:
         return {}

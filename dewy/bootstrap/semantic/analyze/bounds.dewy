@@ -43,6 +43,7 @@ Checker:type = [
     declared:refinements.Declared=[] assigned:set<addr>=set[]
     mutable_globals:set<addr>=set[] call_writes:dict<addr set<addr>>=[] checked:set<addr>=set[]
     root_items:set<addr>=set[] deferred:array<addr>=[]
+    read_only_places:set<addr>=set[]
     element_intervals:values.ElementIntervals=[]
     unfit:dict<addr Unfit>=[] constant_indices:dict<addr bigint>=[] problem:Error?=none
     warnings:array<Warning>=[] word_iterators:set<addr>=set[]
@@ -632,7 +633,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         loop place in places {
             let argument=node_at(place checker)
             $runtime_assert argument is? hir.Place
-            forget_place(argument.target @state @checker)
+            if place not in? checker.read_only_places {forget_place(argument.target @state @checker)}
         }
         loop global in checker.call_writes.get(id checker.mutable_globals) {
             stores.forget(@state global @checker.data)
@@ -1080,6 +1081,7 @@ collect = (root:addr @checker:Checker):>void => {
 validate = (root:addr @checker:Checker):>void => {
     collect(root @checker)
     checker.call_writes=effects.analyze_global_writes(root checker.data.env.nodes checker.mutable_globals checker.data.env.registry)
+    checker.read_only_places=effects.read_only_places(root checker.data.env.nodes checker.data.env.types)
     checker.path_context=paths.Context[checker.data.env.nodes checker.data.relations.facts checker.call_writes]
     let node=node_at(root checker)
     $runtime_assert node is? hir.Block

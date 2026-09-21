@@ -579,3 +579,55 @@ analyze_global_writes = (root:addr nodes:array<hir.AST> globals:set<addr> regist
     }
     return result
 }
+
+
+# Reuse the borrow proof for fact preservation: no writes and no escape.
+# Unknown callbacks and incomplete parameter pairing remain conservative.
+read_only_places = (root:addr nodes:array<hir.AST> type_nodes:types.Table):>set<addr> => {
+    let calls:array<addr>=[]
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(nodes id)
+        if node is? hir.FunctionCall {
+            let has_place=false
+            loop arg in node.pos_args {if hir.node_at(nodes arg) is? hir.Place {has_place=true}}
+            loop arg in node.kw_args.values {if hir.node_at(nodes arg) is? hir.Place {has_place=true}}
+            if has_place {calls.push(id)}
+        }
+        hir.push_children(node @pending)
+    }
+    let safe:set<addr>=set[]
+    if calls.length =? 0 return safe
+    let unsafe:set<addr>=set[]
+    let analysis=collect(root nodes)
+    let summaries=analyze_collected(analysis nodes type_nodes)
+    loop id in calls {
+        let call=hir.node_at(nodes id)
+        $runtime_assert call is? hir.FunctionCall
+        let targets=direct_targets(call analysis nodes)
+        let arguments=call.pos_args
+        loop arg in call.kw_args.values {arguments.push(arg)}
+        loop arg in arguments {
+            if hir.node_at(nodes arg) isnt? hir.Place continue
+            let readonly=targets isnt? none
+            if targets isnt? none {
+                loop target in targets {
+                    let literal=hir.node_at(nodes target)
+                    $runtime_assert literal is? hir.FunctionLiteral
+                    let pairs=pair_arguments(call literal)
+                    let parameter:addr?=none
+                    if pairs isnt? none {loop pair in pairs {if pair.argument =? arg {parameter=pair.parameter}}}
+                    let summary=if parameter is? none none else summaries.by_param_binding.get(parameter)
+                    if summary is? none or not read_only(summary) {readonly=false break}
+                }
+            }
+            if readonly {safe.add(arg)} else {unsafe.add(arg)}
+        }
+    }
+    loop arg in unsafe {safe.pop(arg default=arg);}
+    return safe
+}
