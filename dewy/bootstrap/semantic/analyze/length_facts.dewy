@@ -41,12 +41,14 @@ transition = (before:ranges.Interval method:Method count:ranges.Interval? cap:bi
     return Change[ranges.exact(0) ranges.Interval[minimum maximum]]
 }
 
-apply = (@state:facts.State sequence:addr method:Method count:ranges.Interval? cap:bigint):>ranges.Interval => {
+apply = (@state:facts.State sequence:addr method:Method count:ranges.Interval? cap:bigint unchanged:bool=false fits:bool=false):>ranges.Interval => {
     let key = facts.value(facts.Term[sequence 'length'])
     let known = facts.lookup(state key)
     let before = if known is? none ranges.Interval[0 cap true] else known
     let changed = transition(before method count cap)
-    facts.put(@state key changed.after)
-    facts.change_length(@state sequence changed.delta)
-    return changed.after
+    let after=if unchanged before else changed.after
+    if fits and count isnt? none {after=ranges.intersect(after count)}
+    facts.put(@state key after)
+    facts.change_length(@state sequence if unchanged ranges.exact(0) else changed.delta)
+    return after
 }

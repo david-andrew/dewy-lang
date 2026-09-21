@@ -2490,24 +2490,27 @@ class _BoundsValidator:
 
     def _eval_place(self, node: hir.Place, state: State, *, validate: bool) -> Interval | None:
         self._eval(node.target, state, validate=validate)
+        self._forget_place(node.target, state)
+        return None
+
+    def _forget_place(self, target: hir.AST, state: State) -> None:
         # A place lends only its endpoint. Replacing an element cannot
         # resize its containing array or replace a sibling field. Numeric
         # meanings of containers and evidence about elements can change.
-        self._forget_container_value(node.target, state)
-        path = sb.access_path(node.target)
+        self._forget_container_value(target, state)
+        path = sb.access_path(target)
         for step in path.steps:
             if isinstance(step, hir.Index):
                 array = self._array_id(step.array)
                 if array is not None:
                     self._drop_route_facts(state, array)
-        endpoint = sb.array_route_id(node.target, self.registry)
+        endpoint = sb.array_route_id(target, self.registry)
         if endpoint is not None:
             if path.binding_id is not None and path.binding_id != endpoint:
                 # Field identities are flattened under their original root,
                 # not necessarily nested under the endpoint's route id.
                 self._drop_route_facts(state, path.binding_id, self.registry.route_paths[endpoint])
             self._forget_global(endpoint, state)
-        return None
 
     def _eval_value_cast(self, node: hir.ValueCast, state: State, *, validate: bool) -> Interval | None:
         inner = self._eval(node.expr, state, validate=validate)
@@ -2843,7 +2846,18 @@ class _BoundsValidator:
                         node, index_arg, index_interval, state, array_id, current,
                         allow_end=name == 'insert',
                     )
-                if validate and name == 'truncate' and (index_interval is None or index_interval.lower is None or index_interval.lower < 0):
+                if name == 'truncate':
+                    # truncate computes min(old_length, count). Preserve the
+                    # relational result even when neither operand is constant.
+                    # A named count is read once; no effectful argument is
+                    # evaluated again to discover a post-call fact.
+                    cap_term = self._binding_id(index_arg) if index_arg is not None else None
+                    fits = cap_term is not None and self._ordered(cap_term, key, 0, state)
+                    unchanged = cap_term is not None and self._ordered(key, cap_term, 0, state)
+                    if index_interval is not None:
+                        fits |= index_interval.upper is not None and current.lower is not None and index_interval.upper <= current.lower
+                        unchanged |= index_interval.lower is not None and current.upper is not None and current.upper <= index_interval.lower
+                if validate and name == 'truncate' and not unchanged and (index_interval is None or index_interval.lower is None or index_interval.lower < 0):
                     assert index_arg is not None
                     self._proof_failure(node, 'obligation', Error(
                         srcfile=self.srcfile,
@@ -2873,7 +2887,15 @@ class _BoundsValidator:
                         min(current.lower or 0, cap_lower),
                         _minimum_upper(current.upper, cap_upper),
                     )
-                    _change_length_facts(state, array_id, Interval(None, 0))
+                    if unchanged:
+                        state[key] = current
+                    elif fits and index_interval is not None:
+                        state[key] = state[key].intersect(index_interval)
+                    _change_length_facts(state, array_id, Interval.exact(0) if unchanged else Interval(None, 0))
+                    if cap_term is not None and cap_term != key:
+                        state[_order_key(key, cap_term)] = Interval(0, None)
+                        if fits:
+                            state[_order_key(cap_term, key)] = Interval(0, None)
                 elif name == 'clear':
                     state[key] = Interval.exact(0)
                     _change_length_facts(state, array_id, Interval(
@@ -2897,12 +2919,25 @@ class _BoundsValidator:
                 _change_length_facts(state, capture_id, Interval.exact(1))
             return None
         self._eval(node.func, state, validate=validate)
-        arguments = [
-            self._eval(arg, state, validate=validate)
-            for arg in node.pos_args
-        ]
-        for arg in node.kw_args.values():
-            self._eval(arg, state, validate=validate)
+        # Taking an address does not yet perform the callee's writes.
+        # Preconditions on later arguments may name the borrowed endpoint.
+        supplied = [*node.pos_args, *node.kw_args.values()]
+        places = [arg for arg in supplied if isinstance(arg, hir.Place)]
+        arguments = []
+        obligations = []
+        for arg in supplied:
+            interval = self._eval(arg.target if isinstance(arg, hir.Place) else arg, state, validate=validate)
+            arguments.append(interval)
+            if validate and places and isinstance(arg, hir.Obligation):
+                obligations.append((arg, interval, dict(state)))
+        # A later argument can still change a borrowed endpoint. Require
+        # the contract at entry too, using only evidence common to the
+        # argument's snapshot and the state after all argument evaluation.
+        for arg, interval, observed in obligations:
+            self._validate_obligation(arg, interval, self._join_states([observed, state]))
+        for place in places:
+            self._forget_place(place.target, state)
+        arguments = arguments[:len(node.pos_args)]
         name = node.integer_operation or (
             node.func.name
             if isinstance(node.func, hir.ExpressedIdentifier)

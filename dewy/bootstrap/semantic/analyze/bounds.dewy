@@ -319,7 +319,24 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
         let error=indices.check_method_index(method.name index count state sequence before method.name =? 'insert' checker.proof_context checker.data.snapshot.numbers checker.srcfile @checker.data.registry symbolic=intervals.stable(index checker.data.snapshot checker.data.env.nodes))
         if error isnt? none {checker.problem=error}
     }
-    if validate and method.name =? 'truncate' and (count is? none or count.lower is? none or count.lower <? 0) {fail(id 'truncate length is not proven nonnegative' 'the count may be negative' @checker)}
+    # min(old_length, count) has a relational result even when both
+    # values are dynamic. Capture the evidence before changing length.
+    let cap_term:facts.Term?=none
+    let fits=false
+    let unchanged=false
+    let length=facts.Term[sequence 'length']
+    if method.name =? 'truncate' and index isnt? none {
+        cap_term=terms.binding_term(index checker.data.env @checker.data.registry)
+        if cap_term isnt? none {
+            fits=relations.ordered(cap_term length 0 state checker.data.relations)
+            unchanged=relations.ordered(length cap_term 0 state checker.data.relations)
+        }
+        if count isnt? none {
+            fits=fits or (count.upper isnt? none and before.lower isnt? none and count.upper <=? before.lower)
+            unchanged=unchanged or (count.lower isnt? none and before.upper isnt? none and before.upper <=? count.lower)
+        }
+    }
+    if validate and method.name =? 'truncate' and not unchanged and (count is? none or count.lower is? none or count.lower <? 0) {fail(id 'truncate length is not proven nonnegative' 'the count may be negative' @checker)}
     if method.name in? ['push' 'insert'] {
         let value=if call.pos_args.length >? 0 call.pos_args[0] else call.kw_args.get('value')
         if value isnt? none {elements.store(@state sequence value checker.word_type call.loc checker.data.env @checker.data.registry) note_element_routes(sequence @checker)}
@@ -327,7 +344,11 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
     if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear'] {
         let name:lengths.Method=if method.name =? 'push' 'push' else if method.name =? 'insert' 'insert' else if method.name =? 'pop' 'pop' else if method.name =? 'truncate' 'truncate' else 'clear'
         intervals.forget(@checker.data.snapshot sequence)
-        let after=lengths.apply(@state sequence name count checker.data.env.cap)
+        let after=lengths.apply(@state sequence name count checker.data.env.cap unchanged=unchanged fits=fits)
+        if cap_term isnt? none and not facts.same_term(cap_term length) {
+            facts.put(@state facts.order(length cap_term) ranges.Interval[0 none])
+            if fits {facts.put(@state facts.order(cap_term length) ranges.Interval[0 none])}
+        }
         checker.data.snapshot.lengths[method.array]=after
         if validate {length_contract(id method array=sequence after=after state=state @checker)}
     }
@@ -586,8 +607,33 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         }
         if function is? hir.ArrayMethod {array_call(id node function @state @checker validate) record(id @state @checker) return}
         evaluate(node.func @state @checker validate)
-        loop argument in node.pos_args {evaluate(argument @state @checker validate)}
-        loop argument in node.kw_args.values {evaluate(argument @state @checker validate)}
+        # The call can write borrowed endpoints only after all arguments
+        # have been evaluated and their entry preconditions checked.
+        let arguments=node.pos_args
+        loop argument in node.kw_args.values {arguments.push(argument)}
+        let places:array<addr>=[]
+        loop argument in arguments {if node_at(argument checker) is? hir.Place {places.push(argument)}}
+        let observed:dict<addr facts.State>=[]
+        loop argument in arguments {
+            let value=node_at(argument checker)
+            evaluate(if value is? hir.Place value.target else argument @state @checker validate)
+            if validate and places.length >? 0 and value is? hir.Obligation {observed[argument]=state}
+        }
+        loop [argument entry] in observed {
+            let obligation=node_at(argument checker)
+            $runtime_assert obligation is? hir.Obligation
+            let common=facts.join([entry state] checker.data.relations.facts)
+            let error=obligations.check(obligation common checker.assigned checker.srcfile checker.path_context @checker.data)
+            if error isnt? none {
+                if checker.prototype and argument not in? checker.deferred_sites {checker.deferred_sites[argument]=prototype.Deferred['obligation' error obligation.refined]}
+                else {checker.problem=error}
+            }
+        }
+        loop place in places {
+            let argument=node_at(place checker)
+            $runtime_assert argument is? hir.Place
+            forget_place(argument.target @state @checker)
+        }
         loop global in checker.call_writes.get(id checker.mutable_globals) {
             stores.forget(@state global @checker.data)
         }

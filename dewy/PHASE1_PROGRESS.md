@@ -1386,3 +1386,17 @@ element overwrite and general field transfers remain outstanding.
 
 After integration with replacement, all eight hosted clear/replacement/narrowed
 array checks passed, including the const and fixed-length diagnostic assertions.
+
+Truncation now transfers the relation `new_length = min(old_length, count)`:
+it retains the count upper bound, proves equality when the count fits, and
+preserves existing index facts when no elements can be removed. These rules
+use pre-mutation named terms and intervals, without reevaluating arguments.
+A count proven at least the length is also nonnegative through that relation.
+
+The regression exposed premature place invalidation in both analyzers. Taking
+an address now evaluates its route without applying the callee's writes;
+argument preconditions can still refer to that endpoint. Contracts are checked
+again against evidence common to the argument snapshot and call-entry state,
+so later arguments cannot invalidate them silently. Endpoint writes are then
+applied before result facts. Fifteen focused hosted checks and the native
+acceptance/rejection harness passed, including execution on both backends.
