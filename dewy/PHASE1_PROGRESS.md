@@ -860,3 +860,11 @@ native generation built in 67.19 seconds while integration tests were also
 running, then executed the three existing kernels (42). Artifacts:
 `../dewy-build-artifacts/phase1-lifecycle-structural-guard-2026-09-20` and
 `../dewy-build-artifacts/phase1-lifecycle-structural-guard-parity-2026-09-20`.
+
+Integration closure: the last-use-view compiler passed all 211 broad corpus
+cases and all 108 then-current Phase 1 cases. The structural-composition
+diagnostic follow-up passed its additional paired case, bringing the focused
+manifest to 109. The broad runs used unchanged sources while the follow-up
+was prepared in an isolated checkout. Artifacts:
+`../dewy-build-artifacts/phase1-view-last-use-full-parity-2026-09-20` and
+`../dewy-build-artifacts/phase1-view-last-use-full-phase1-parity-2026-09-20`.
