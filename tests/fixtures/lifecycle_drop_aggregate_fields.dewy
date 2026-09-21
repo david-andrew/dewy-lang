@@ -1,0 +1,26 @@
+let dropped:int64=0
+BufferedHandle=type of [text:string values:array<int64>
+$__drop__
+release=():>void=>{
+    # The fields remain live until the hook finishes, including replacement
+    # and growth. Ordinary field storage is reclaimed afterward.
+    dropped+=values.length as int64
+    values.push(99)
+    text="released"
+}
+]
+ExtendedBuffer=type of BufferedHandle & [extra:string]
+exercise=(n:int64):>int64=>{
+    let h=ExtendedBuffer["buffer {n}" [1 2 3] "extra {n}"]
+    const snapshot=h.values
+    h.values.push(4)
+    return if snapshot.length=?3 and h.values.length=?4 and h.extra.length>?0 42 else 1
+}
+main=():>int64=>{
+    if exercise(0) not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {if exercise(i) not=?42 return 2}
+    if dropped not=?404 return 3
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

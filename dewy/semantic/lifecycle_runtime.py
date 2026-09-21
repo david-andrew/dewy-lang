@@ -1,7 +1,7 @@
 """Materialize ownership operations before runtime lowering.
 
-The first supported owners are fresh local nominal records with word fields
-and a drop hook. Copies, moves, aggregate fields and escaping owners remain
+The first supported owners are fresh local nominal records without resource-owning fields
+and a drop hook. Copies, moves, nested resource fields and escaping owners remain
 explicitly unsupported. Keeping drop calls in checked HIR makes their effects
 visible and lets ordinary lowering implement the internal place call ABI.
 """
@@ -22,17 +22,6 @@ def prepare(root: hir.Block, srcfile):
     current_source = srcfile
     def reject(node, detail):
         not_implemented(current_source, node.loc, 'lifecycle ownership lowering: ' + detail)
-
-    for declaration in declarations.values():
-        literal = declaration.expr
-        current_source = literal.source or srcfile
-        receiver = ty.unfold(ty.strip_refinement(literal.pos_or_kw_args[0].type))
-        if literal.lifecycle != 'drop' or not isinstance(receiver, ty.ObjectType):
-            reject(declaration, 'copy/move hooks')
-        if not all(public_effects.scalar(field.type) for field in receiver.fields):
-            reject(declaration, 'owners with aggregate fields')
-
-    current_source = srcfile
 
     resource_cache = {}
     def resource(type_):
@@ -56,6 +45,17 @@ def prepare(root: hir.Block, srcfile):
                 pending.extend(type_.items)
         resource_cache[key] = None
         return None
+
+    for declaration in declarations.values():
+        literal = declaration.expr
+        current_source = literal.source or srcfile
+        receiver = ty.unfold(ty.strip_refinement(literal.pos_or_kw_args[0].type))
+        if literal.lifecycle != 'drop' or not isinstance(receiver, ty.ObjectType):
+            reject(declaration, 'copy/move hooks')
+        if any(resource(field.type) is not None for field in receiver.fields):
+            reject(declaration, 'owners with lifecycle-bearing fields')
+
+    current_source = srcfile
 
     def mentions_resource(literal):
         for node in hir.walk(literal):
@@ -86,6 +86,16 @@ def prepare(root: hir.Block, srcfile):
             result.append(hir.FunctionCall(loc, ty.VOID_TYPE, function, [hir.Place(loc, owner_type, value)], {}))
         return result
 
+    def capture(value, loc):
+        # Preserve evaluation order and snapshot a scalar result before its
+        # owner's drop may mutate the field from which it was read.
+        name = f'__dewy_drop_result_{registry.next_id}'
+        binding = registry.allocate(object(), name, 'value', loc)
+        binding.type = value.type
+        declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', name, value.type, value, binding_id=binding.id)
+        binding.declaration = declaration
+        return declaration, hir.ExpressedIdentifier(loc, value.type, name, binding_id=binding.id)
+
     def mapped(value, visit):
         if isinstance(value, hir.AST):
             return visit(value)
@@ -108,7 +118,7 @@ def prepare(root: hir.Block, srcfile):
             return node
         if isinstance(node, hir.MemberAccess) and resource(node.value.type) is not None:
             if (not isinstance(node.value, hir.ExpressedIdentifier) or node.value.binding_id not in allowed
-                    or not public_effects.scalar(node.type)):
+                    or resource(node.type) is not None):
                 reject(node, 'an escaping or projected resource owner')
             return node
         if isinstance(node, hir.FunctionCall) and inherited and isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id in declarations:
@@ -160,9 +170,16 @@ def prepare(root: hir.Block, srcfile):
                     items.append(statement(item, active, loops))
                 local = active[start:]
                 if local and node.scoped:
+                    result = None
                     if node.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
-                        reject(node, 'an implicit value return with local owners')
+                        expressed = [i for i, item in enumerate(items) if item.type != ty.VOID_TYPE]
+                        if not public_effects.scalar(node.type) or len(expressed) != 1:
+                            reject(node, 'a non-word implicit result with local owners')
+                        index = expressed[0]
+                        items[index], result = capture(items[index], node.loc)
                     items.extend(cleanup(local, node.loc))
+                    if result is not None:
+                        items.append(result)
                 return replace(node, items=items)
             if isinstance(node, hir.Declare) and resource(node.expr.type) is not None:
                 owner_type = ty.unfold(ty.strip_refinement(node.expr.type))
@@ -187,13 +204,8 @@ def prepare(root: hir.Block, srcfile):
                 if returned is not None:
                     if not public_effects.scalar(returned.type):
                         reject(node, 'a non-word return with local owners')
-                    name = f'__dewy_drop_result_{registry.next_id}'
-                    binding = registry.allocate(object(), name, 'value', node.loc)
-                    binding.type = returned.type
-                    declaration = hir.Declare(node.loc, ty.VOID_TYPE, 'let', name, returned.type, returned, binding_id=binding.id)
-                    binding.declaration = declaration
+                    declaration, returned = capture(returned, node.loc)
                     result.append(declaration)
-                    returned = hir.ExpressedIdentifier(node.loc, returned.type, name, binding_id=binding.id)
                 result.extend(cleanup(owners, node.loc))
                 result.append(replace(node, item=returned))
                 return hir.Block(node.loc, node.type, result, False)

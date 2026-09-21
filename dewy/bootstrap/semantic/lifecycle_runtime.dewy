@@ -7,8 +7,8 @@ import p"bindings.dewy" as bindings
 import p"analyze/public_effects.dewy" as effects
 
 # Materialize operations before reachability and lowering. The initial
-# supported owners are fresh local nominal records with word fields and a
-# drop hook. Copy/move, aggregate fields and escaping owners remain explicit
+# supported owners are fresh local nominal records without resource-owning fields and a
+# drop hook. Copy/move, nested resource fields and escaping owners remain explicit
 # implementation gaps, never silent memberwise fallbacks.
 Hook:type = const [owner:addr binding:addr name:string signature:addr]
 Plan:type = [hooks:dict<addr Hook>=[] owners:dict<string Hook>=[] prepared:set<addr>=set[] source:SrcFile problem:Error?=none]
@@ -56,6 +56,20 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session):>ar
     }
     return result
 }
+Captured:type = const [declaration:addr value:addr]
+capture = (id:addr loc:Span @session:contexts.Session):>Captured => {
+    # Evaluate a scalar result before its owner's drop can change it.
+    let type=hir.node_at(session.hir id).value_type
+    let empty=types.primitive('void' @session.types)
+    let name="__dewy_drop_result_{session.registry.next_id}"
+    let binding_id=bindings.allocate(@session.registry none name 'value' loc)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=type
+    bindings.store_binding(@session.registry binding_id binding)
+    let declaration=put(hir.Declare[loc empty 'let' name type id binding_id] @session)
+    let value=put(hir.ExpressedIdentifier[loc type name binding_id] @session)
+    return Captured[declaration value]
+}
 expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session):>void => {
     if plan.problem isnt? none return
     let node=hir.node_at(session.hir id)
@@ -63,7 +77,7 @@ expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:conte
     if node is? hir.TypeValue or (node is? hir.FunctionCall and node.proof) or (node is? hir.Assert and not node.runtime and not node.expect) return
     if node is? hir.MemberAccess and resource(hir.node_at(session.hir node.value).value_type session.types) isnt? none {
         let owner=hir.node_at(session.hir node.value)
-        if owner isnt? hir.ExpressedIdentifier or owner.binding_id is? none or owner.binding_id not in? allowed or not effects.scalar(node.value_type session.types) {reject(node 'an escaping or projected resource owner' @plan)}
+        if owner isnt? hir.ExpressedIdentifier or owner.binding_id is? none or owner.binding_id not in? allowed or resource(node.value_type session.types) isnt? none {reject(node 'an escaping or projected resource owner' @plan)}
         return
     }
     if node is? hir.FunctionCall and inherited {
@@ -109,11 +123,25 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         loop item in current.items {statement(item @active loops allowed inherited @plan @session)}
         if plan.problem isnt? none return
         if current.scoped and active.length >? start {
-            if not types.is_primitive(types.node_at(session.types current.value_type) 'void') and not types.is_primitive(types.node_at(session.types current.value_type) 'never') {reject(current 'an implicit value return with local owners' @plan) return}
+            let result:addr?=none
+            if not types.is_primitive(types.node_at(session.types current.value_type) 'void') and not types.is_primitive(types.node_at(session.types current.value_type) 'never') {
+                let expressed:array<addr>=[]
+                loop index in 0.. and index <? current.items.length {
+                    let item=hir.node_at(session.hir current.items[index])
+                    if not types.is_primitive(types.node_at(session.types item.value_type) 'void') {expressed.push(index)}
+                }
+                if not effects.scalar(current.value_type session.types) or expressed.length not=? 1 {reject(current 'a non-word implicit result with local owners' @plan) return}
+                let index=expressed[0]
+                $runtime_assert index <? current.items.length
+                let saved=capture(current.items[index] current.loc @session)
+                current.items[index]=saved.declaration
+                result=saved.value
+            }
             let locals:array<addr>=[]
             let index:addr=start
             loop index <? active.length {locals.push(active[index]) index+=1}
             loop call in cleanup(locals current.loc @plan @session) {current.items.push(call)}
+            if result isnt? none {current.items.push(result)}
             store(id current @session)
         }
         if not current.scoped {owners=active}
@@ -137,18 +165,13 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         if current.item isnt? none {expression(current.item live inherited @plan @session)}
         if plan.problem isnt? none or owners.length =? 0 return
         let items:array<addr>=[]
-        let empty=types.primitive('void' @session.types)
         if current.item isnt? none {
             let returned:addr=current.item
             let value=hir.node_at(session.hir returned)
             if not effects.scalar(value.value_type session.types) {reject(current 'a non-word return with local owners' @plan) return}
-            let name="__dewy_drop_result_{session.registry.next_id}"
-            let binding_id=bindings.allocate(@session.registry none name 'value' current.loc)
-            let binding=bindings.binding_at(session.registry binding_id)
-            binding.value_type=value.value_type
-            bindings.store_binding(@session.registry binding_id binding)
-            items.push(put(hir.Declare[current.loc empty 'let' name value.value_type returned binding_id] @session))
-            current.item=put(hir.ExpressedIdentifier[current.loc value.value_type name binding_id] @session)
+            let saved=capture(returned current.loc @session)
+            items.push(saved.declaration)
+            current.item=saved.value
         }
         loop call in cleanup(owners current.loc @plan @session) {items.push(call)}
         items.push(put(current @session))
@@ -273,7 +296,7 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
         let owner=views.structural_base(value.pos_or_kw_args[0].value_type session.types)
         let type=types.node_at(session.types owner)
         $runtime_assert type is? types.ObjectType and type.brand isnt? none
-        loop field in type.fields {if not effects.scalar(field.value_type session.types) {reject(node 'owners with aggregate fields' @plan) return plan.problem}}
+        loop field in type.fields {if resource(field.value_type session.types) isnt? none {reject(node 'owners with lifecycle-bearing fields' @plan) return plan.problem}}
         let hook=Hook[owner node.binding_id node.name value.value_type]
         plan.hooks[node.binding_id]=hook
         plan.owners[type.brand]=hook

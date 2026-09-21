@@ -16,6 +16,8 @@ release=():>void=>{printl(token) token=0}
 
 @pytest.mark.parametrize('body,output', [
     ('let h=TraceHandle[42] return h.token', '42\n'),
+    ('let h=TraceHandle[42] h.token', '42\n'),
+    ('if true {let h=TraceHandle[42] h.token} else 0', '42\n'),
     ('let first=TraceHandle[1] let second=TraceHandle[2] return 42', '2\n1\n'),
     ('let outer=TraceHandle[1] {let inner=TraceHandle[2]} return 42', '2\n1\n'),
     ('let outer=TraceHandle[1] if true {let inner=TraceHandle[2] return 42} return 0', '2\n1\n'),
@@ -98,3 +100,10 @@ def test_dropped_local_owners_retain_no_storage(tmp_path):
     from pathlib import Path
     source = Path(__file__).resolve().parents[1] / 'fixtures/lifecycle_drop_lifetimes.dewy'
     execute(tmp_path, 'drop-lifetime', codegen(SrcFile.from_path(source), debug_locations=False))
+
+
+@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result'])
+def test_aggregate_cleanup_and_implicit_results(tmp_path, name):
+    from pathlib import Path
+    source = Path(__file__).resolve().parents[1] / f'fixtures/{name}.dewy'
+    execute(tmp_path, name, codegen(SrcFile.from_path(source), debug_locations=False))
