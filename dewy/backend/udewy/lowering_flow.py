@@ -943,17 +943,20 @@ class _FlowLowering:
         if isinstance(target_type, ty.ArrayType):
             return self._extract_array_operand(item, target_type)
         item_type = ty.strip_refinement(item.type)
-        if isinstance(item_type, ty.ObjectType) and local_binding_key(target) in self.object_flow_targets:
+        if isinstance(target_type, ty.ObjectType) and local_binding_key(target) in self.object_flow_targets:
             # an object-valued flow: the temporary is a pointer word — to the arm's
             # own object (a literal, a call's result), or to a copy of a value that
             # lives on (a binding, a field), as `let t = x` copies
-            if isinstance(item, (hir.ObjectLiteral, hir.FunctionCall)):
+            if isinstance(item_type, ty.ObjectType) and isinstance(item, (hir.ObjectLiteral, hir.FunctionCall)):
                 return self._extract_object_pointer(item)
-            size, _offsets = self._object_layout(item_type, item)
+            # An inferred join can widen a child union into its parent record.
+            # Extract its payload and copy into the joined layout; the cell's
+            # address is not itself a record pointer.
+            size, _offsets = self._object_layout(target_type, item)
             cell = hir.ExpressedIdentifier(item.loc, 'int64', self._new_optional_name('flow_object'))
             prelude, source = self._extract_object_pointer(item)
-            self._note_copy('record', item_type, 'kept as a flow result', self._copy_reason(item), item.loc)
-            return [*prelude, hir.Declare(item.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._object_allocation(item.loc, size)), *self._object_copy(cell, source, item_type, item.loc)], cell
+            self._note_copy('record', target_type, 'kept as a flow result', self._copy_reason(item), item.loc)
+            return [*prelude, hir.Declare(item.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._object_allocation(item.loc, size)), *self._object_copy(cell, source, target_type, item.loc)], cell
         if self._is_string_valued(item.type):
             return self._kept_string_value(item)   # the flow's temporary keeps a call's result
         return self._extract_expression(item)

@@ -1506,3 +1506,25 @@ yet implement those places or establish disjointness between indices.
 Validation: 39 hosted cache/bounds checks passed; the immutable-selector
 acceptance/rejection corpus, including record fields, executes through both
 compilers and both output backends.
+
+Checkpoint: warm-prelude differential execution caught three lifecycle
+fixtures failing in a self-built compiler despite byte-identical generations.
+A flow join from a record union to its parent retained the child payload
+without converting its storage: cleanup then used the parent's allocator
+size class, and the union wrapper was abandoned. Native joins now consume
+their already-evaluated owner through the same conversion used for checked
+casts. Retagged cell results transfer directly; unchanged cells need no copy.
+The hosted counterpart now retains the destination record type when lowering
+a flow binding and extracts/copies a union payload into that layout, instead
+of treating its cell address as a record. The regression exercises both
+branches, differently sized descendants, independent mutation and zero
+retained bytes. Validation: 80 focused ownership/copy checks passed; the new
+join regression and four adjacent union/lifecycle fixtures run through both
+compilers and both output backends, using a freshly native-built driver.
+An earlier version of the native conversion also produced byte-identical
+second and third generations and passed the three warm-cache regressions.
+
+Follow-up from the reduced case: explicit stored `(Base & ~Child) | Child`
+currently reaches an unhandled `TypeAnd` in hosted union-storage selection.
+Retain this parity gap for the record-family representation work; the concrete
+child-union reproducer above independently covers the flow ownership fix.

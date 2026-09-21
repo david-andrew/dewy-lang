@@ -1,0 +1,30 @@
+JoinBase=type of [items:array<int64>]
+JoinSmall=type of JoinBase & [extra:array<int64>]
+JoinLarge=type of JoinBase & [padding:int64 a:int64 b:int64 c:int64 d:int64 e:int64 f:int64 g:int64]
+pick=(value:JoinSmall | JoinLarge flag:bool):>JoinBase=>{
+ let result=if flag value else JoinBase[[42]]
+ return result
+}
+# The chosen arm starts as a tagged union, but the inferred join is one
+# parent record. Keep its dynamic brand and independent array ownership;
+# reclaim the intermediate cell and use the destination's allocation size.
+exercise=():>int64=>{
+ let input:JoinSmall | JoinLarge=JoinSmall[[42] [17]]
+ let selected=pick(input true)
+ if selected.items.length not=?1 return 1
+ if selected isnt?JoinSmall or selected.extra.length not=?1 return 2
+ selected.items[0]=9
+ if input isnt?JoinSmall or input.items.length not=?1 or input.items[0]not=?42 return 3
+ let other=pick(input false)
+ if other.items.length not=?1 or other.items[0]not=?42 return 4
+ let large=pick(JoinLarge[[42] 1 2 3 4 5 6 7 8] true)
+ if large isnt?JoinLarge or large.items.length not=?1 or large.g not=?8 return 5
+ return large.items[0]
+}
+main=():>int64=>{
+ if exercise()not=?42 return 1
+ let before=_arena_live_bytes
+ loop i in 0.. and i<?100 {if exercise()not=?42 return 2}
+ $runtime_assert _arena_live_bytes=?before
+ return 42
+}

@@ -1317,7 +1317,7 @@ class _ObjectLowering:
             # `token:Token = match o.kind { <'square'> => LeftSquareBracket[…] … }`:
             # an object binding is a pointer word, so each arm builds its own
             # object (of whichever concrete type) and the binding takes the pointer
-            target = hir.ExpressedIdentifier(node.loc, 'int64', node.name, binding_id=node.binding_id)
+            target = hir.ExpressedIdentifier(node.loc, object_type, node.name, binding_id=node.binding_id)
             self.object_flow_targets.add(local_binding_key(node))
             declaration = replace(node, decltype='let', annotation='int64', expr=hir.Integer(node.loc, 'int64', t0.base10, 0))
             statements: list[hir.AST] = [declaration]

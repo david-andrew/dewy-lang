@@ -873,17 +873,28 @@ copy_value = (value:addr type:addr node:hir.AST @state:State shared:bool=false):
 # must not abandon that cell. Retagging may itself create a new cell on only
 # some paths; release that intermediate only when it differs from the source.
 owned_cell_cast = (node:hir.ValueCast|hir.RepresentationCast actual:addr @state:State):>addr => {
+    return convert_owned_cell(expression(node.expr @state) actual node.value_type node @state)
+}
+# A checked cast and an inferred flow join have the same ownership boundary.
+# Consume the already evaluated cell, keeping the result in its destination
+# layout before releasing the original payload and any temporary retagging.
+convert_owned_cell = (value:addr actual:addr expected:addr node:hir.AST @state:State):>addr => {
     let prefix:array<addr>=[]
-    let source=snapshot(expression(node.expr @state) @prefix @state)
-    let value=if enum_members(node.value_type state) isnt? none enum_pack(source actual node.value_type node @state) else read_value(source actual node.value_type node @state)
-    value=snapshot(value @prefix @state)
-    let result=snapshot(copy_value(value node.value_type node @state) @prefix @state)
-    if cell_members(node.value_type @state) isnt? none {
-        prefix.push(conditional(compare('__ne__' value source node @state) release_value(value node.value_type node @state) node @state))
+    let source=snapshot(value @prefix @state)
+    let converted=if enum_members(expected state) isnt? none enum_pack(source actual expected node @state) else read_value(source actual expected node @state)
+    converted=snapshot(converted @prefix @state)
+    if cell_members(expected @state) isnt? none {
+        # read_value either retains this cell or constructs an independent
+        # retagged cell. Transfer that result directly, releasing the original
+        # only on paths that replaced it. No extra payload copy is necessary.
+        prefix.push(conditional(compare('__ne__' converted source node @state) release_value(source actual node @state) node @state))
+        prefix.push(converted)
+        return put(hir.Block[node.loc runtime_type(expected node @state) prefix false] @state)
     }
+    let result=snapshot(copy_value(converted expected node @state) @prefix @state)
     prefix.push(release_value(source actual node @state))
     prefix.push(result)
-    return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+    return put(hir.Block[node.loc runtime_type(expected node @state) prefix false] @state)
 }
 note_parameter_copy = (argument:hir.Param|hir.BoundParam boxed:bool rebound:set<addr> mutated:set<addr> written:set<addr> node:hir.AST @state:State):>void => {
     let kind=copy_kind(argument.value_type @state)
@@ -4847,6 +4858,14 @@ flow_value = (id:addr expected:addr @state:State):>addr => {
     if types.is_primitive(types.node_at(state.type_nodes expected) 'void') return value
     let actual=types.node_at(state.type_nodes types.unfold(source.value_type state.type_nodes))
     if types.is_primitive(actual 'void') or types.is_primitive(actual 'never') return value
+    # The selected arm owns its result when cleanup is active. A union's
+    # record payload may have a smaller allocation than its joined parent;
+    # unpacking its address alone would leak the cell and free the payload
+    # later through the parent's (wrong) allocator size class.
+    if state.cleanup_enabled {
+        if cell_members(source.value_type @state) isnt? none return convert_owned_cell(value source.value_type expected source @state)
+        if object_valued(source.value_type state) and object_valued(expected state) return owned_record(value source.value_type expected source @state)
+    }
     # Inferred joins need the same representation on every returning path.
     # A narrowed optional payload is a word; the other arm may still be a
     # cell. The flow result must materialize the word into the joined cell.
