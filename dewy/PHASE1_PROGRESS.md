@@ -970,3 +970,9 @@ Both used and unused imported hook declarations are covered. Validation:
 51 hosted lifecycle checks and the new paired imported-resource diagnostic
 passed. The focused manifest has 120 cases. Artifact:
 `../dewy-build-artifacts/phase1-lifecycle-import-gate-parity-2026-09-20`.
+
+Broad integration: the lifecycle-component generation passed all 211 broad
+compiler/parser corpus cases on fixed sources. Together with the preceding
+118-case Phase 1 run and the two new paired lifecycle cases, this closes the
+current integration checkpoint; it does not complete Phase 1. Artifact:
+`../dewy-build-artifacts/phase1-lifecycle-components-full-parity-2026-09-20`.
