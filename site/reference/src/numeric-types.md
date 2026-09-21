@@ -122,12 +122,14 @@ A comparison between two terms — bindings, fields, lengths — is also kept as
 
 <!-- dewy-example: compiler -->
 ```dewy
-remaining = (src:string):>nat64 => {
+remaining = (src:string):>nat64|none => {
     i:int64 = 0
     total:nat64 = 0
     loop i <? src.length {
         let rest:nat64 = src.length - i    # at least 1 while the guard holds
-        total += rest
+        let sum:int64 = total + rest        # fixed-width addition wraps
+        if sum <? 0 return none             # two nonnegative inputs overflow into negatives
+        total = sum
         i += 1                              # the fact drops here, and returns with the next test
     }
     return total
