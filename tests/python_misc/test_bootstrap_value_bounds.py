@@ -26,6 +26,8 @@ def test_union_bounds_do_not_apply_one_members_refinement_to_another():
     mixed = validator._declared_type_interval(ty.TypeOr([ty.addr_type(), 'int64', 'none']))
     assert mixed is not None and (mixed.lower, mixed.upper) == (-(1 << 63), (1 << 63) - 1)
     assert validator._declared_type_interval(ty.TypeOr([ty.addr_type(), 'string', 'none'])) is None
+    literals = validator._declared_type_interval(ty.TypeOr([ty.IntegerLiteralType(3), ty.IntegerLiteralType(7), 'none']))
+    assert literals is not None and (literals.lower, literals.upper) == (3, 7)
 
 
 def test_native_value_bounds_match_hosted(tmp_path):
@@ -49,7 +51,8 @@ def test_native_value_bounds_match_hosted(tmp_path):
                     ty.TypeOr([ty.addr_type(), 'int64', 'none']),
                     ty.TypeOr([ty.addr_type(), 'string', 'none']),
                     ty.TypeOr([ty.RefinedType('int64', (ty.Proposition('self', '>=?', 3),)),
-                               ty.RefinedType('int64', (ty.Proposition('self', '<=?', -3),)), 'none'])]
+                               ty.RefinedType('int64', (ty.Proposition('self', '<=?', -3),)), 'none']),
+                    ty.IntegerLiteralType(3), ty.union(ty.IntegerLiteralType(3), ty.IntegerLiteralType(7), 'none')]
     references = [declare(f'v{i}', type_, number(0)) for i, type_ in enumerate(scalar_types)]
     references.append(declare('place', 'int64', number(1), store_type=ty.RefinedType('int64', (ty.Proposition('self', '>=?', 3),))))
     saved = declare('saved', 'int64', number(7), const=True)

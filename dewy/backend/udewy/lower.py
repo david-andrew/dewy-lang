@@ -4740,6 +4740,20 @@ class _Lowerer(
                 prelude.append(hir.Declare(loc, ty.VOID_TYPE, 'let', held,
                     self._lower_runtime_value_type(evaluated.type), evaluated))
             return prelude, self._int64_literal(loc, index)
+        stored = self._stored_union_members(value)
+        if stored is not None:
+            # Narrowing a tagged cell to singleton alternatives changes the
+            # representation to an enum word. Read the original cell once,
+            # then use ordinary type tests (including word/string payload
+            # tests) to select the destination tag.
+            prelude, cell = self._extract_expression(replace(value, type=ty.union(*stored)))
+            held = hir.ExpressedIdentifier(loc, ty.union(*stored), self._new_optional_name('enum_cell'))
+            prelude.append(hir.Declare(loc, ty.VOID_TYPE, 'let', held.name, 'int64', replace(cell, type='int64')))
+            arms = [hir.IfArm(loc, 'int64', hir.TypeTest(loc, 'bool', held, member, False), self._int64_literal(loc, i))
+                    for i, member in enumerate(members[:-1])]
+            flow = hir.Flow(loc, 'int64', arms, self._int64_literal(loc, len(members) - 1))
+            steps, result = self._extract_expression(flow)
+            return [*prelude, *steps], result
         source = self._enum_of(value)
         if source is None:
             self._target_error(value, 'a value that is not a member of the enum it is stored into')

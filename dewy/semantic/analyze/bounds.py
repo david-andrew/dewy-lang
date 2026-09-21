@@ -2102,6 +2102,8 @@ class _BoundsValidator:
         Combine all alternatives; a refined alternative must not constrain
         an unrefined one. Non-numeric alternatives contribute no evidence.
         """
+        if isinstance(declared, ty.IntegerLiteralType):
+            return Interval.exact(declared.value)
         if isinstance(declared, ty.TypeOr):
             interval = None
             for member in declared.items:

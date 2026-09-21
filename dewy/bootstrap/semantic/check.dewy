@@ -371,7 +371,10 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
         if constant isnt? none and constant not=? 0 {
             let declared=numeric_values.family('BigInt' env.lexical session)
             $runtime_assert declared isnt? none
-            return numeric_values.bigint_literal(constant declared node.loc @session)
+            # Constructing the record is only the numeric conversion. The
+            # destination may still require its tagged zero/record union.
+            let converted=numeric_values.bigint_literal(constant declared node.loc @session)
+            return against(converted expected id env @session)
         }
         if constant is? none and subtyping.is_subtype(node.value_type types.primitive('int' @session.types) session.links @session.types) {
             let layout=views.fixed_integer_layout(types.strip_refinement(node.value_type session.types) session.types)
@@ -4991,7 +4994,14 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
         let concrete = inferred
         if type is? types.IntegerLiteralType or types.is_primitive(type 'int') {
             concrete = types.primitive('int64' @session.types)
-            if type is? types.IntegerLiteralType and not subtyping.is_subtype(inferred concrete session.links @session.types) return pending(id 'a bigint generic type argument' env session)
+            if type is? types.IntegerLiteralType and not subtyping.is_subtype(inferred concrete session.links @session.types) {
+                # Match an ordinary inferred binding and hosted generic
+                # inference: large literals materialize into the prelude's
+                # bigint representation before entering the instance.
+                let big=numeric_values.family('BigInt' env.lexical session)
+                if big is? none return pending(id 'a bigint generic type argument without the numeric prelude' env session)
+                concrete=big
+            }
         }
         else if type is? types.StringLiteralType | types.StringType { concrete = types.primitive('string' @session.types) }
         else if type is? types.BinaryLiteralType { concrete = types.array_type(types.primitive('uint8' @session.types) type.value.length @session.types) }

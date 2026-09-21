@@ -1761,6 +1761,39 @@ read_value = (value:addr stored:addr read:addr node:hir.AST @state:State):>addr 
     if object_valued(stored state) and cell_members(read @state) isnt? none return cell_pack(value stored read node @state)
     let original=cell_members(stored @state)
     let narrowed=cell_members(read @state)
+    let selected_enum=enum_members(read state)
+    if original isnt? none and selected_enum isnt? none {
+        # A cell's tag and an enum's tag use different vocabularies. A
+        # narrowed read must select the enum tag, not return the cell address
+        # or mistake the mathematical payload for that tag.
+        let prefix:array<addr>=[]
+        let source=snapshot(value @prefix @state)
+        let tag=snapshot(read_word(source 0 node @state) @prefix @state)
+        let boolean=types.primitive('bool' @state.type_nodes)
+        let output=types.primitive('int64' @state.type_nodes)
+        let arms:array<addr>=[]
+        loop target in selected_enum {
+            let matches=put(hir.Bool[node.loc boolean false] @state)
+            loop member in original {
+                if type_tests.disjoint(member target state.links @state.type_nodes) continue
+                let active=compare('__eq__' tag word(member_tag(member @state) node @state) node @state)
+                let test:addr?=none
+                if subtyping.is_subtype(member target state.links @state.type_nodes) {test=active}
+                else if string_type(member state) {
+                    test=put(hir.ShortCircuit[node.loc boolean 'and' active string_type_test(cell_payload(source member node @state) target node @state)] @state)
+                } else if views.fixed_integer_layout(views.structural_base(member state.type_nodes) state.type_nodes) isnt? none {
+                    test=put(hir.ShortCircuit[node.loc boolean 'and' active integer_predicate(cell_payload(source member node @state) member target node @state)] @state)
+                }
+                if test isnt? none {matches=put(hir.ShortCircuit[node.loc boolean 'or' matches test] @state)}
+            }
+            arms.push(put(hir.IfArm[node.loc output matches word(enum_tag(target @state) node @state)] @state))
+        }
+        $runtime_assert arms.length >? 0
+        let last=hir.node_at(state.nodes arms.pop)
+        $runtime_assert last is? hir.IfArm
+        prefix.push(put(hir.Flow[node.loc output arms last.body] @state))
+        return put(hir.Block[node.loc output prefix false] @state)
+    }
     if original isnt? none and narrowed isnt? none {
         # A parent may itself occupy a union cell (e.g. Token|none). Keeping
         # several child alternatives then needs new tags, not just the old

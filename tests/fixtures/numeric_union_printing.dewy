@@ -1,0 +1,24 @@
+# Printing uses numeric values, including singleton sets read from a tagged
+# union. Neither its cell address nor its internal enum tag is a number.
+show=(value:3|7|none):>void=>printl(value)
+unsigned=(value:uint64):>void=>printl(value)
+read=(value:3|7|none):>int64=>if value is? none 0 else value as int64
+field=(entry:[value:3|7|none]):>int64=>if entry.value is? none 0 else entry.value as int64
+word=(value:int64|none):>int64=>{
+    if value is? (3|7) return value as int64
+    return 0
+}
+main=():>int64=>{
+    if read(3) not=?3 or read(7) not=?7 or read(none) not=?0 return 1
+    if field([3]) not=?3 or field([7]) not=?7 or field([none]) not=?0 return 2
+    if word(3) not=?3 or word(7) not=?7 or word(8) not=?0 or word(none) not=?0 return 3
+    show(3)
+    show(7)
+    show(none)
+    printl(-9223372036854775808 as int64)
+    printl(9223372036854775807 as int64)
+    unsigned(18446744073709551615)
+    unsigned(0)
+    printl(123456789012345678901234567890)
+    return 42
+}

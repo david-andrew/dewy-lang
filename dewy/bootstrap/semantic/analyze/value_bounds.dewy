@@ -59,6 +59,7 @@ binding_type = (binding:bindings.Binding nodes:array<hir.AST>):>addr? => {
 }
 declared_interval = (id:addr env:Environment):>ranges.Interval? => {
     let node = types.node_at(env.types id)
+    if node is? types.IntegerLiteralType return ranges.exact(node.value)
     if node is? types.TypeOr {
         # This describes the numeric payload, not whether an optional is
         # present. Every non-none alternative must supply numeric evidence.

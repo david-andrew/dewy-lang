@@ -832,7 +832,11 @@ class _OptionalLowering:
         """The members a union value's cell is tagged by: its declaration's for a
         (possibly narrowed) local, the field's declared type for a member read."""
         if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None:
-            return self.union_cells.get(value.binding_id)
+            members = self.union_cells.get(value.binding_id)
+            if members is not None:
+                return members
+            payload = self.optional_payloads.get(value.binding_id)
+            return ('none', payload) if payload is not None else None
         if isinstance(value, hir.MemberAccess) and isinstance(value.value.type, ty.ObjectType):
             declared = value.value.type.field(value.name)
             return self._field_union_members(declared.type) if declared is not None else None

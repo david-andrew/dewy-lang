@@ -97,6 +97,12 @@ let _print_bool = (value:bool):>void => {
     return void
 }
 
+let _print_uint64 = (value:uint64):>void => {
+    if value >=? 10 {_print_uint64(value // 10)}
+    let digits="0123456789"
+    _print_string(digits[value % 10])
+}
+
 # Rationals print as reduced fractions; whole values print as integers.
 let _print_rational = (value:Rational):>void => {
     _print_int64(value.numerator)
@@ -180,7 +186,10 @@ let _print_bigint = (value:BigInt):>void => {
 # compiler, each part passed to `print`, which is not observable.
 let print = <T>(value:T):>void => {
     if value is? string { _print_string(value) }
-    else if value is? int { _print_int64(value transmute int64) }
+    # Printing needs the mathematical value, not an enum tag or a union
+    # cell's address. The unsigned arm also keeps the full uint64 range.
+    else if value is? uint64 { _print_uint64(value as uint64) }
+    else if value is? int { _print_int64(value as int64) }
     else if value is? bool { _print_bool(value) }
     else if value is? Rational { _print_rational(value) }
     else if value is? BigRational { _print_bigrational(value) }
