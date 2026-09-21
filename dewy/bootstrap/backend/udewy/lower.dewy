@@ -5995,6 +5995,14 @@ discarded_value = (id:addr @state:State):>addr => {
     return value
 }
 cleanup_block = (node:hir.Block @state:State):>addr => {
+    # An unscoped statement group introduces bindings into the enclosing
+    # lifetime (unpacking and generated lifecycle sequences use this form).
+    # Releasing them here would invalidate subsequent statements in that scope.
+    if not node.scoped and types.is_primitive(types.node_at(state.type_nodes node.value_type) 'void') {
+        let prefix:array<addr>=[]
+        loop item in node.items {prefix.push(discarded_value(item @state))}
+        return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
+    }
     let start=state.cleanup_frames.length
     state.cleanup_frames.push([])
     let prefix:array<addr>=[]
@@ -6087,6 +6095,8 @@ cleanup_return = (node:hir.Return @state:State):>addr => {
 
 cleanup_scoped = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
-    if node is? hir.Block return expression(id @state)
-    return cleanup_block(hir.Block[node.loc node.value_type [id] false] @state)
+    # A selected arm is a scope even when its source is a single statement
+    # or an unscoped desugared group. Its locals do not exist on other paths.
+    if node is? hir.Block return cleanup_block(hir.Block[node.loc node.value_type node.items true] @state)
+    return cleanup_block(hir.Block[node.loc node.value_type [id] true] @state)
 }

@@ -5,8 +5,9 @@ by-value parameters and results transfer fresh owners. Checked @ parameters
 borrow. Same-scope bindings can move at last use, and custom copy/move hooks
 remain checked calls. Drop precedes field/element storage cleanup.
 
-Conditional consumption of outer owners, field transfers and the remaining
-resource-container mutations still need the general lifetime plan.
+Branch consumption uses last-use proofs and conditional cleanup. Repeated
+outer-owner consumption, field transfers and remaining resource-container
+mutations still need further lifetime analysis.
 """
 from dataclasses import replace
 
@@ -98,6 +99,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     array_suffixes = {}
     component_copies = {}
     generated = []
+    ownership_flags = {}
 
     def move_remainder(shape):
         """Fields left behind by a custom move, excluding inherited transfers.
@@ -242,7 +244,14 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         for owner in reversed(owners):
             owner_type = owner.annotation or owner.expr.type
             value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
-            drop(value, owner_type, set(), owner.binding_id not in fields_only)
+            calls = []
+            drop(value, owner_type, set(), owner.binding_id not in fields_only, into=calls)
+            flag = ownership_flags.get(owner.binding_id)
+            if flag is not None and owner.binding_id not in fields_only:
+                body = hir.Block(loc, ty.VOID_TYPE, calls, True)
+                result.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, flag[1], body)], None))
+            else:
+                result.extend(calls)
         if selected is not None:
             drop(selected, selected.type, set())
         if suffix is not None:
@@ -827,6 +836,12 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         if literal.lifecycle is None and not mentions_resource(literal):
             current_source = previous_source
             return literal
+        def deactivate(source, loc):
+            flag = ownership_flags.get(source.binding_id)
+            if flag is None:
+                return []
+            return [hir.Assign(loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(loc, 'bool', False))]
+
         def statement(node, owners, loops, *, entry=False, fresh_result=False):
             live = allowed | {owner.binding_id for owner in owners}
             def control(child, *, consume=False, fresh_result=False):
@@ -837,10 +852,12 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     if source is None:
                         return None
                     value, moved = transfer(child, child.type)
-                    owners.remove(source)
-                    if moved:
+                    if source.binding_id not in ownership_flags:
+                        owners.remove(source)
+                    if moved or source.binding_id in ownership_flags:
                         saved, value = capture(value, child.loc)
-                        return hir.Block(child.loc, value.type, [saved, *cleanup([source], child.loc, {source.binding_id}), value], False)
+                        calls = cleanup([source], child.loc, {source.binding_id}) if moved else []
+                        return hir.Block(child.loc, value.type, [saved, *calls, *deactivate(source, child.loc), value], False)
                     return value
                 # Expression blocks have their own temporaries, but a return
                 # from inside them leaves every surrounding owner too.
@@ -865,6 +882,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 items = []
                 for item in node.items:
                     items.append(statement(item, active, loops, fresh_result=fresh_result and resource(item.type) is not None))
+                    if isinstance(item, hir.Declare) and item.binding_id in ownership_flags:
+                        items.append(ownership_flags[item.binding_id][0])
                 local = active[start:]
                 if local and node.scoped:
                     result = None
@@ -891,12 +910,14 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     source = next((owner for owner in owners if owner.binding_id == node.expr.binding_id), None)
                     if source is not None:
                         value, moved = transfer(node.expr, node.annotation or node.expr.type)
-                        owners.remove(source)
+                        if source.binding_id not in ownership_flags:
+                            owners.remove(source)
                         node = replace(node, expr=value)
                         owners.append(node)
                         # The source's storage stays alive through the hook.
                         # A hook consumes its owner, not every nested field.
                         calls = cleanup([source], node.loc, {source.binding_id}) if moved else []
+                        calls.extend(deactivate(source, node.loc))
                         return hir.Block(node.loc, node.type, [node, *calls], False) if calls else node
                 if id(node) in views and isinstance(node.expr, hir.ExpressedIdentifier) and node.expr.binding_id in live:
                     # Both names only read. Keep one logical owner and require
@@ -1003,7 +1024,23 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         elif not body.scoped:
             body = replace(body, scoped=True)
         transfers, views, consumes = local_transfers(body, parameter_owners)
-        prepared = replace(literal, body=statement(body, parameter_owners, [], entry=True))
+        from .analyze.ownership_liveness import conditional_consumptions
+        conditional, declarations_by_read = conditional_consumptions(body, parameter_owners, resource)
+        for read, owner in conditional.items():
+            declaration = declarations_by_read.get(read)
+            if read in consumes or declaration in transfers:
+                continue
+            if declaration is not None:
+                transfers.add(declaration)
+            else:
+                consumes.add(read)
+            if owner not in ownership_flags:
+                ownership_flags[owner] = capture(hir.Bool(literal.loc, 'bool', True), literal.loc)
+        prepared_body = statement(body, list(parameter_owners), [], entry=True)
+        prefix = [ownership_flags[owner.binding_id][0] for owner in parameter_owners if owner.binding_id in ownership_flags]
+        if prefix:
+            prepared_body = replace(prepared_body, items=[*prefix, *prepared_body.items])
+        prepared = replace(literal, body=prepared_body)
         def parameter(param):
             return replace(param, value=argument(param.value, allowed, False)) if isinstance(param, hir.BoundParam) else param
         result = replace(prepared, pos_or_kw_args=[parameter(p) for p in literal.pos_or_kw_args],

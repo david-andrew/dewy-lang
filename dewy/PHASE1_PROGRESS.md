@@ -1962,3 +1962,38 @@ Validation: 44 adjacent hosted checks passed. A fresh native driver passes the
 fixture and two rejection cases against hosted checking; accepted programs run
 on x86-64 and C. Exact drop traces distinguish the consumed parent fields from
 transferred children, and arena counters check complete storage reclamation.
+
+## Storage integration checkpoint (2026-09-21)
+
+At `38b8cec8`, generations 2/3 of both native compilers are byte identical
+through the direct x86-64 route. Direct and C execution checks pass, as do
+all **173** explicit parity cases. Artifacts are under
+`../dewy-build-artifacts/phase1-storage-{integration,parity}-2026-09-21`.
+Generation times were 68/78 seconds with concurrent work, not isolated
+performance baselines; the direct-route latency target remains outstanding.
+
+## Conditional resource consumption (2026-09-21)
+
+A backwards liveness pass joins the possible future reads of each branch.
+An owning input at last use may consume an outer owner on that path. Aliases,
+captures, overlapping sibling arguments and later uses retain ownership; loop
+backedges remain conservative. Existing same-block transfers remain available.
+The compiler inserts an ordinary boolean only for owners needing conditional
+cleanup. This tracks logical resource ownership; the storage lowerer retains
+its separate borrow/copy/move decisions. No source annotation is needed.
+
+Flags are initialized beside the owner's declaration, or at entry for owning
+parameters. Transferred owners remain in lexical cleanup lists, preserving
+scope and loop boundaries. Custom moves still clean their leftover fields
+before deactivation. Native lowering now treats unscoped void statement groups
+as part of their enclosing storage lifetime, while selected arms retain their
+own scope; generated transfer declarations are not released before later uses.
+
+Validation: all 207 selected hosted lifecycle checks passed, plus the repeated
+conditional kernel. A fresh native driver passes ten positive and six negative
+conditional cases against hosted checking, running accepted cases through both
+x86-64 and C. Adjacent consumption, recursive copies, inherited moves, resource
+array operations and ordinary container text cases pass on the same routes.
+The driver checked and emitted its own complete source (20,910,854 bytes;
+70.83 seconds, 3,016,084 KiB peak RSS). This batch follows the fixed-point
+checkpoint above and is not yet a new fixed-point certification.

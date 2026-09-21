@@ -1,0 +1,143 @@
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+
+# Logical ownership liveness, independent of physical storage lowering.
+# Branches join their future reads; repeated loop reads remain live. A view
+# keeps its source alive, but disappears when walking backward past its birth.
+Analysis:type=[
+    owners:set<addr>
+    aliases:dict<addr addr>=[]
+    captured:set<addr>=set[]
+    occurrences:dict<addr addr>=[]
+    candidates:set<addr>=set[]
+    consumes:dict<addr addr>=[]
+    declarations:dict<addr addr>=[]
+]
+roots=(binding:addr aliases:dict<addr addr>):>set<addr>=>{
+    let result:set<addr>=set[]
+    let current:addr?=binding
+    loop current isnt? none and current not in? result {
+        result.add(current)
+        current=aliases.get(current)
+    }
+    return result
+}
+read_roots=(id:addr aliases:dict<addr addr> nodes:array<hir.AST>):>set<addr>=>{
+    let result:set<addr>=set[]
+    let pending:array<addr>=[id]
+    loop pending.length >? 0 {
+        let node=hir.node_at(nodes pending.pop)
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+            loop binding in roots(node.binding_id aliases) {result.add(binding)}
+        }
+        hir.push_children(node @pending)
+    }
+    return result
+}
+alive=(binding:addr live:set<addr> aliases:dict<addr addr>):>bool=>{
+    loop later in live {if binding in? roots(later aliases) return true}
+    return false
+}
+visit=(id:addr after:set<addr> enabled:bool @analysis:Analysis nodes:array<hir.AST>):>set<addr>=>{
+    let node=hir.node_at(nodes id)
+    let live=after
+    if node is? hir.ExpressedIdentifier {
+        if node.binding_id isnt? none {
+            if enabled and id in? analysis.candidates and not alive(node.binding_id live analysis.aliases) {analysis.consumes[id]=node.binding_id}
+            live.add(node.binding_id)
+        }
+        return live
+    }
+    if node is? hir.FunctionLiteral {
+        loop binding in read_roots(id analysis.aliases nodes) {live.add(binding)}
+        return live
+    }
+    if node is? hir.Return {return if node.item is? none set[] else visit(node.item set[] enabled @analysis nodes)}
+    if node is? hir.Flow {
+        let following=if node.default is? none live else visit(node.default live enabled @analysis nodes)
+        let index=node.arms.length
+        loop index >? 0 {
+            index-=1
+            let arm=hir.node_at(nodes node.arms[index])
+            $runtime_assert arm is? hir.IfArm|hir.LoopArm
+            if arm is? hir.LoopArm {
+                let repeated=following
+                loop binding in live {repeated.add(binding)}
+                loop binding in read_roots(node.arms[index] analysis.aliases nodes) {repeated.add(binding)}
+                visit(arm.body repeated false @analysis nodes);
+                following=visit(arm.condition repeated false @analysis nodes)
+            } else {
+                let taken=visit(arm.body live enabled @analysis nodes)
+                loop binding in taken {following.add(binding)}
+                following=visit(arm.condition following enabled @analysis nodes)
+            }
+        }
+        return following
+    }
+    if node is? hir.Declare and node.binding_id isnt? none {live.pop(node.binding_id default=node.binding_id);}
+    let children=hir.children(node)
+    loop children.length >? 0 {live=visit(children.pop live enabled @analysis nodes)}
+    return live
+}
+consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table):>Analysis=>{
+    let analysis=Analysis[owners]
+    let order:array<addr>=[]
+    let pending:array<addr>=[body]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let node=hir.node_at(nodes id)
+        order.push(id)
+        if node is? hir.FunctionLiteral {
+            loop binding in read_roots(id [] nodes) {analysis.captured.add(binding)}
+            continue
+        }
+        if node is? hir.ExpressedIdentifier {analysis.occurrences[id]=analysis.occurrences.get(id 0)+1}
+        if node is? hir.Declare and node.binding_id isnt? none and node.binding_id in? owners {
+            let value=hir.node_at(nodes node.expr)
+            if value is? hir.ExpressedIdentifier and value.binding_id isnt? none {analysis.aliases[node.binding_id]=value.binding_id}
+        }
+        hir.push_children(node @pending)
+    }
+    let captured=analysis.captured
+    loop binding in captured {loop root in roots(binding analysis.aliases) {analysis.captured.add(root)}}
+    loop id in order {
+        let node=hir.node_at(nodes id)
+        let inputs:array<addr>=[]
+        let scope=id
+        if node is? hir.FunctionCall {
+            inputs=node.pos_args
+            loop item in node.kw_args.values {inputs.push(item)}
+        } else if node is? hir.ObjectLiteral {loop field in node.fields {inputs.push(field.value)}}
+        else if node is? hir.ArrayLiteral {inputs=node.items}
+        else if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign {inputs.push(node.value)}
+        else if node is? hir.Declare {
+            inputs.push(node.expr)
+            if hir.node_at(nodes node.expr) is? hir.ExpressedIdentifier {analysis.declarations[node.expr]=id}
+        } else if node is? hir.IfArm {inputs.push(node.body) scope=node.body}
+        else if node is? hir.Flow and node.default isnt? none {inputs.push(node.default) scope=node.default}
+        else if node is? hir.Block and not types.is_primitive(types.node_at(table node.value_type) 'void') {inputs=node.items}
+        if inputs.length =? 0 continue
+        let counts:dict<addr addr>=[]
+        let reads:array<addr>=[scope]
+        loop reads.length >? 0 {
+            let read=hir.node_at(nodes reads.pop)
+            if read is? hir.ExpressedIdentifier and read.binding_id isnt? none {
+                loop root in roots(read.binding_id analysis.aliases) {counts[root]=counts.get(root 0)+1}
+            }
+            hir.push_children(read @reads)
+        }
+        loop input in inputs {
+            let selected=input
+            let value=hir.node_at(nodes selected)
+            loop true {
+                if value is? hir.ValueCast|hir.RepresentationCast {selected=value.expr}
+                else if value is? hir.Obligation {selected=value.value}
+                else {break}
+                value=hir.node_at(nodes selected)
+            }
+            if value is? hir.ExpressedIdentifier and value.binding_id isnt? none and value.binding_id in? owners and value.binding_id not in? analysis.captured and analysis.occurrences.get(selected 0) =? 1 and counts.get(value.binding_id 0) =? 1 {analysis.candidates.add(selected)}
+        }
+    }
+    visit(body set[] true @analysis nodes);
+    return analysis
+}

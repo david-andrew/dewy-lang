@@ -478,8 +478,9 @@ in both lowerings and the parity tool is the gate.
   arrays. Only the original hook’s parent portion needs leftover field cleanup.
   Inherited copies consume their intermediate parent results, including nested
   resources and multiple inheritance levels. Conditional transfers of outer
-  owners, field transfers and remaining resource-container mutations remain
-  explicitly unsupported during code generation. Same-block owning input
+  owners now join branch liveness and guard cleanup on the executed path.
+  Repeated outer-owner consumption, field transfers and remaining resource-
+  container mutations still require further lifetime analysis. Same-block owning input
   transfers now include owning parameters, custom move hooks and union owners;
   first if conditions are unconditional input sites, while loop conditions
   and later arms still need the more general lifetime join. Fresh arguments, factory results and explicit copies

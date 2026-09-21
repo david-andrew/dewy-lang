@@ -7,14 +7,16 @@ import p"type_queries.dewy" as views
 import p"bindings.dewy" as bindings
 import p"propositions.dewy" as facts
 import p"analyze/effects.dewy" as effects
+import p"analyze/ownership_liveness.dewy" as ownership_liveness
 import p"analyze/predicate_effects.dewy" as predicate_effects
 
 # Materialize operations before reachability and lowering. Fresh records and
 # arrays own their nested resources. Factories, by-value parameters and results
 # transfer fresh owners; checked @ parameters borrow. Same-scope bindings move
 # at last use. Custom copy/move hooks remain checked calls, and drop precedes
-# field/element storage cleanup. Conditional outer-owner consumption, field
-# transfers, synthesized array copies and remaining array mutations remain gaps.
+# field/element storage cleanup. Branch consumption uses last-use proofs and
+# conditional cleanup. Repeated outer-owner consumption, field transfers and
+# remaining resource-container mutations still need further lifetime analysis.
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 # An expression can contain a block, branch, or early return. Carry its
 # enclosing lexical lifetime explicitly through expression traversal.
@@ -23,6 +25,7 @@ Frame:type = const [
     inherited:bool owning_result:bool composed_parent:addr?
 ]
 Plan:type = [
+    flags:dict<addr Captured>=[]
     hooks:dict<addr Hook>=[]
     composed_moves:dict<addr addr>=[]
     owners:dict<string Hook>=[]
@@ -265,7 +268,16 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
         if declared.binding_id isnt? none and declared.binding_id in? plan.consumed_bindings and owners[index] not=? fields_only {continue}
         let owner=if declared.annotation isnt? none declared.annotation else hir.node_at(session.hir declared.expr).value_type
         let value=put(hir.ExpressedIdentifier[loc owner declared.name declared.binding_id] @session)
-        drop_value(value owner loc set[] @result @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only)
+        let calls:array<addr>=[]
+        drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only)
+        $runtime_assert declared.binding_id isnt? none
+        let flag=plan.flags.get(declared.binding_id)
+        if flag isnt? none and owners[index] not=? fields_only {
+            let empty=types.primitive('void' @session.types)
+            let body=put(hir.Block[loc empty calls true] @session)
+            let arm=put(hir.IfArm[loc empty flag.value body] @session)
+            result.push(put(hir.Flow[loc empty [arm] none] @session))
+        } else {loop call in calls {result.push(call)}}
     }
     return result
 }
@@ -439,14 +451,15 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
         if source isnt? none {
             let selected=put(candidate @session)
             let result=transfer(selected candidate.value_type @plan @session)
-            if result not=? selected {
+            if result not=? selected or candidate.binding_id in? plan.flags {
                 let saved=capture_result(result candidate.loc @session)
                 let items:array<addr>=[saved.declaration]
-                loop call in cleanup([source] candidate.loc @plan @session fields_only=source) {items.push(call)}
+                if result not=? selected {loop call in cleanup([source] candidate.loc @plan @session fields_only=source) {items.push(call)}}
+                loop call in deactivate(candidate.binding_id candidate.loc plan @session) {items.push(call)}
                 items.push(saved.value)
                 store(id hir.Block[candidate.loc hir.node_at(session.hir saved.value).value_type items false] @session)
             }
-            plan.consumed_bindings.add(candidate.binding_id)
+            if candidate.binding_id not in? plan.flags {plan.consumed_bindings.add(candidate.binding_id)}
             return
         }
     }
@@ -766,6 +779,14 @@ scoped_body = (id:addr @session:contexts.Session):>addr => {
     }
     return put(hir.Block[node.loc node.value_type [id] true] @session)
 }
+deactivate=(binding:addr loc:Span plan:Plan @session:contexts.Session):>array<addr>=>{
+    let flag=plan.flags.get(binding)
+    if flag is? none return []
+    let boolean=types.primitive('bool' @session.types)
+    let empty=types.primitive('void' @session.types)
+    let value=put(hir.Bool[loc boolean false] @session)
+    return [put(hir.Assign[loc empty flag.value '=' value] @session)]
+}
 statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inherited:bool owning_result:bool @plan:Plan @session:contexts.Session composed_parent:addr?=none entry:bool=false fresh_result:bool=false):>void => {
     if plan.problem isnt? none return
     let node=hir.node_at(session.hir id)
@@ -781,7 +802,17 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         let current:hir.Block=node
         let active=owners
         let start=if entry 0 else active.length
-        loop item in current.items {statement(item @active loops allowed inherited owning_result @plan @session composed_parent=composed_parent fresh_result=fresh_result and resource(hir.node_at(session.hir item).value_type session.types) isnt? none)}
+        let items:array<addr>=[]
+        loop item in current.items {
+            let original=hir.node_at(session.hir item)
+            statement(item @active loops allowed inherited owning_result @plan @session composed_parent=composed_parent fresh_result=fresh_result and resource(original.value_type session.types) isnt? none)
+            items.push(item)
+            if original is? hir.Declare and original.binding_id isnt? none {
+                let flag=plan.flags.get(original.binding_id)
+                if flag isnt? none {items.push(flag.declaration)}
+            }
+        }
+        current.items=items
         if plan.problem isnt? none return
         if current.scoped and active.length >? start {
             let result:addr?=none
@@ -805,6 +836,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             if result isnt? none {current.items.push(result)}
             store(id current @session)
         }
+        store(id current @session)
         if not current.scoped {owners=active}
         return
     }
@@ -831,8 +863,10 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             loop owner in owners {
                 let declaration=hir.node_at(session.hir owner)
                 $runtime_assert declaration is? hir.Declare
-                if declaration.binding_id =? value.binding_id {source=owner}
-                else {retained.push(owner)}
+                if declaration.binding_id =? value.binding_id {
+                    source=owner
+                    if value.binding_id isnt? none and value.binding_id in? plan.flags {retained.push(owner)}
+                } else {retained.push(owner)}
             }
             if source isnt? none {
                 let result=transfer(declared.expr value.value_type @plan @session)
@@ -840,6 +874,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                 declared.expr=result
                 let calls:array<addr>=[]
                 if moved {calls=cleanup([source] declared.loc @plan @session fields_only=source)}
+                if value.binding_id isnt? none {loop call in deactivate(value.binding_id declared.loc plan @session) {calls.push(call)}}
                 if calls.length >? 0 {
                     let declaration_id=put(declared @session)
                     retained.push(declaration_id)
@@ -1274,6 +1309,32 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     if resource(function.rettype session.types) isnt? none and returnable_result(function.body session) {function.body=return_result(function.body @session)}
     function.body=scoped_body(function.body @session)
     local_transfers(function.body parameter_owners @plan session)
+    # Add branch-sensitive transfers. Keep flagged owners in lexical owner
+    # lists so nested scope/loop cleanup boundaries retain their indices.
+    let owned:set<addr>=set[]
+    loop owner in parameter_owners {
+        let declared=hir.node_at(session.hir owner)
+        $runtime_assert declared is? hir.Declare and declared.binding_id isnt? none
+        owned.add(declared.binding_id)
+    }
+    let pending:array<addr>=[function.body]
+    loop pending.length >? 0 {
+        let current=hir.node_at(session.hir pending.pop)
+        if current is? hir.FunctionLiteral continue
+        if current is? hir.Declare and current.binding_id isnt? none and resource((if current.annotation is? none hir.node_at(session.hir current.expr).value_type else current.annotation) session.types) isnt? none {owned.add(current.binding_id)}
+        hir.push_children(current @pending)
+    }
+    let conditional=ownership_liveness.consumptions(function.body owned session.hir session.types)
+    loop [read owner] in conditional.consumes {
+        let declaration=conditional.declarations.get(read)
+        if read in? plan.consume_sites or (declaration isnt? none and declaration in? plan.transfer_sites) continue
+        if declaration isnt? none {plan.transfer_sites.add(declaration)}
+        else {plan.consume_sites.add(read)}
+        if owner not in? plan.flags {
+            let boolean=types.primitive('bool' @session.types)
+            plan.flags[owner]=capture_result(put(hir.Bool[function.loc boolean true] @session) function.loc @session)
+        }
+    }
     let composed_parent:addr?=none
     if function.lifecycle_composition and function.lifecycle in? ['copy' 'move'] {
         let body=hir.node_at(session.hir function.body)
@@ -1290,6 +1351,21 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     }
     let owners=parameter_owners
     statement(function.body @owners [] allowed function.lifecycle =? 'drop' resource(function.rettype session.types) isnt? none @plan @session composed_parent=composed_parent entry=true)
+    let prefix:array<addr>=[]
+    loop owner in parameter_owners {
+        let declared=hir.node_at(session.hir owner)
+        $runtime_assert declared is? hir.Declare and declared.binding_id isnt? none
+        $runtime_assert declared.binding_id isnt? none
+        let flag=plan.flags.get(declared.binding_id)
+        if flag isnt? none {prefix.push(flag.declaration)}
+    }
+    if prefix.length >? 0 {
+        let body=hir.node_at(session.hir function.body)
+        $runtime_assert body is? hir.Block
+        loop item in body.items {prefix.push(item)}
+        body.items=prefix
+        store(function.body body @session)
+    }
     store(id function @session)
     plan.source=previous
     plan.function_source=previous_function_source
