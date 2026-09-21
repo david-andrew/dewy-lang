@@ -3744,7 +3744,7 @@ place_fits = (actual:addr required:addr @session:contexts.Session readonly:bool=
         if mine.name not=? theirs.name return false
         if readonly {
             if not types.same_type(types.strip_refinement(mine.value_type session.types) types.strip_refinement(theirs.value_type session.types) session.types) return false
-        } else if not types.same_type(mine.value_type theirs.value_type session.types) or mine.mutable not=? theirs.mutable or mine.refinement not=? theirs.refinement return false
+        } else if not types.same_type(mine.value_type theirs.value_type session.types) or mine.mutable not=? theirs.mutable or not types.same_propositions(mine.refinement theirs.refinement session.types) return false
     }
     if readonly {
         # The mint checker established value subtyping; only constness may

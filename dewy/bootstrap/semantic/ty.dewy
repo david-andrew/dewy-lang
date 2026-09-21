@@ -510,6 +510,15 @@ same_proposition = (a:facts.Proposition b:facts.Proposition nodes:Table):>bool =
     return same_type(a.tested_type b.tested_type nodes)
 }
 
+same_propositions = (a:array<facts.Proposition> b:array<facts.Proposition> nodes:Table):>bool => {
+    if a.length not=? b.length return false
+    loop i in 0.. and i <? a.length {
+        $runtime_assert i <? b.length
+        if not same_proposition(a[i] b[i] nodes) return false
+    }
+    return true
+}
+
 propositions_key = (props:array<facts.Proposition> structural:bool nodes:Table):>string => {
     let parts:array<string> = []
     loop p in props {
