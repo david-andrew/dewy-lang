@@ -3,7 +3,8 @@
 Supported owners are fresh records, including nested record resources and
 factory results transferred into their caller's ownership.
 Explicit copy hooks may construct fresh results; drop runs before field
-cleanup. Implicit copies, moves, resource containers and owning parameters
+cleanup. Checked place parameters borrow without acquiring ownership.
+Implicit copies, moves, resource containers and owning parameters
 remain unsupported. Checked HIR calls expose effects and use the ordinary
 internal place call ABI.
 """
@@ -179,9 +180,16 @@ def prepare(root: hir.Block, srcfile):
         if isinstance(node, hir.Place):
             path = node.target
             while isinstance(path, (hir.MemberAccess, hir.Index)):
+                if isinstance(path, hir.Index):
+                    expression(path.index, allowed, inherited=inherited)
                 path = path.value if isinstance(path, hir.MemberAccess) else path.array
             if resource(path.type) is not None:
-                reject(node, 'an exposed resource owner')
+                # A checked place call borrows the existing owner. Its
+                # lifetime and overlapping routes are checked by the normal
+                # place rules; the callee must not acquire another owner.
+                if not isinstance(path, hir.ExpressedIdentifier) or path.binding_id not in allowed:
+                    reject(node, 'an unavailable resource borrow')
+                return node
         if resource(node.type) is not None:
             reject(node, 'a resource copy, move, temporary, or escape')
         return replace(node, **{name: mapped(getattr(node, name), lambda child: expression(child, allowed, inherited=inherited))
@@ -197,9 +205,9 @@ def prepare(root: hir.Block, srcfile):
         if literal.rest_args is not None:
             params.append(literal.rest_args)
         allowed = set()
-        for index, param in enumerate(params):
+        for param in params:
             if resource(param.type) is not None:
-                if not (literal.lifecycle in ('drop', 'copy') and index == 0 and param.place):
+                if not param.place:
                     reject(literal, 'owning parameters')
                 allowed.add(param.binding_id)
         owning_result = resource(literal.rettype) is not None

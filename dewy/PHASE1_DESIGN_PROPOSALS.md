@@ -332,6 +332,14 @@ rejects unsupported ownership shapes until their lowering is ready;
 in particular, hidden hooks must not disappear through reachability pruning
 and leave a resource with ordinary memberwise behavior.
 
+Ordinary checked `@` parameters can borrow a resource record or its nested
+fields without taking ownership. Forwarding and callbacks use the existing
+place ABI and alias checks. Borrowed records receive no callee-side cleanup;
+copying, escaping, or replacing their complete resource value remains gated
+until transfer/replacement lowering can account for both owners. A write to
+a projected place preserves enclosing array lengths and unrelated fields,
+while discarding evidence about the endpoint and its descendants.
+
 Approved member shape (illustrative helpers, not currently executable):
 
 ```dewy

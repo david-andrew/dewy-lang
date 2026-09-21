@@ -8,8 +8,8 @@ import p"bindings.dewy" as bindings
 # Materialize operations before reachability and lowering. Supported owners
 # are fresh records, including nested record resources and factory results
 # transferred to callers. Explicit copy hooks may construct fresh results;
-# drop runs before field cleanup. Implicit copies/moves, resource containers
-# and owning parameters remain
+# drop runs before field cleanup. Checked place parameters borrow owners.
+# Implicit copies/moves, resource containers and owning parameters remain
 # implementation gaps, never silent memberwise fallbacks.
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 Plan:type = [hooks:dict<addr Hook>=[] owners:dict<string Hook>=[] prepared:set<addr>=set[] source:SrcFile problem:Error?=none]
@@ -155,8 +155,15 @@ expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:conte
     }
     if node is? hir.Place {
         let path=hir.node_at(session.hir node.target)
-        loop path is? hir.MemberAccess|hir.Index {path=hir.node_at(session.hir if path is? hir.MemberAccess path.value else path.array)}
-        if resource(path.value_type session.types) isnt? none {reject(node 'an exposed resource owner' @plan) return}
+        loop path is? hir.MemberAccess|hir.Index {
+            if path is? hir.Index {expression(path.index allowed inherited @plan @session)}
+            path=hir.node_at(session.hir if path is? hir.MemberAccess path.value else path.array)
+        }
+        if resource(path.value_type session.types) isnt? none {
+            # Ordinary checked places lend storage, not resource ownership.
+            if path isnt? hir.ExpressedIdentifier or path.binding_id is? none or path.binding_id not in? allowed {reject(node 'an unavailable resource borrow' @plan)}
+            return
+        }
     }
     if resource(node.value_type session.types) isnt? none {reject(node 'a resource copy, move, temporary, or escape' @plan) return}
     loop child in hir.children(node) {expression(child allowed inherited @plan @session)}
@@ -318,7 +325,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     loop index in 0.. and index <? params.length {
         let parameter=params[index]
         if resource(parameter.value_type session.types) isnt? none {
-            if function.lifecycle not in? ['drop' 'copy'] or index not=? 0 or not parameter.place or parameter.binding_id is? none {reject(function 'owning parameters' @plan) return}
+            if not parameter.place or parameter.binding_id is? none {reject(function 'owning parameters' @plan) return}
             allowed.add(parameter.binding_id)
         }
         if parameter is? hir.BoundParam {expression(parameter.value allowed false @plan @session)}

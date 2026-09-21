@@ -429,7 +429,9 @@ in both lowerings and the parity tool is the gate.
   including nested hook calls. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch
-  owners. Inferred transfers of existing owners, move hooks, inherited
+  owners. Ordinary `@` parameters borrow resource records, including nested
+  fields and forwarding through callbacks; callees do not drop borrowed owners.
+  Inferred transfers of existing owners, move hooks, inherited
   copies needing parent-result consumption, resource containers and general
   owning arguments remain explicitly unsupported during code generation.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred

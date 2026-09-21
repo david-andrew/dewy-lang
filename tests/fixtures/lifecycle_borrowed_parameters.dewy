@@ -1,0 +1,33 @@
+let drops:int64=0
+Handle=type of [token:int64 values:array<int64>
+$__drop__
+release=():>void=>{drops+=1 token=0 values.clear}
+]
+Envelope=type of [inner:Handle]
+read=(@h:Handle):>int64 & reads<h.token>=>h.token
+set=(@h:Handle):>void & mutates<h.token>=>{h.token=42}
+forward=(@h:Handle):>void=>set(@h)
+apply=(callback:(@h:Handle):>void @h:Handle):>void=>callback(@h)
+append=(@h:Handle):>void=>h.values.push(7)
+set_word=(@n:int64):>void=>{n=42}
+exercise=():>int64=>{
+    let outer=Envelope[Handle[1 [3]]]
+    forward(@outer.inner)
+    if drops not=?0 or read(@outer.inner) not=?42 return 1
+    outer.inner.token=2
+    apply(@set @outer.inner)
+    append(@outer.inner)
+    if outer.inner.values.length not=?2 return 2
+    set_word(@outer.inner.values[0])
+    return if outer.inner.values[0]=?42 and outer.inner.token=?42 42 else 3
+}
+main=():>int64=>{
+    if exercise() not=?42 or drops not=?1 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {
+        drops=0
+        if exercise() not=?42 or drops not=?1 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

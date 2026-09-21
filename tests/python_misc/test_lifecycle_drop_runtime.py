@@ -102,19 +102,40 @@ def test_dropped_local_owners_retain_no_storage(tmp_path):
     execute(tmp_path, 'drop-lifetime', codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime', 'lifecycle_factory_results'])
+@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime', 'lifecycle_factory_results', 'lifecycle_borrowed_parameters'])
 def test_aggregate_cleanup_and_implicit_results(tmp_path, name):
     from pathlib import Path
     source = Path(__file__).resolve().parents[1] / f'fixtures/{name}.dewy'
     execute(tmp_path, name, codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-def test_native_factory_result_ownership(tmp_path):
+@pytest.mark.parametrize('name', ['lifecycle_factory_results', 'lifecycle_borrowed_parameters'])
+def test_native_factory_result_ownership(tmp_path, name):
     from pathlib import Path
     from test_bootstrap_structural_text import build_program_driver, check_structural_text
 
-    source = Path(__file__).resolve().parents[1] / 'fixtures/lifecycle_factory_results.dewy'
+    source = Path(__file__).resolve().parents[1] / f'fixtures/{name}.dewy'
     check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[source.read_text()], errors=[])
+
+
+@pytest.mark.parametrize('helper', [
+    'borrow=(@h:TraceHandle):>TraceHandle=>h',
+    'borrow=(@h:TraceHandle):>void=>{let other=h}',
+    'borrow=(@h:TraceHandle):>void=>{h=TraceHandle[1]}',
+    'borrow=(@h:TraceHandle):>void=>{let get=():>int64=>h.token get();}',
+])
+def test_resource_borrow_cannot_create_an_owner_or_escape(helper):
+    with pytest.raises(ReportException, match='lifecycle ownership lowering'):
+        codegen(SrcFile(None, OWNER + helper + '\nmain=():>int64=>{let h=TraceHandle[42] borrow(@h); return 42}'))
+
+
+def test_resource_borrow_mutation_invalidates_facts():
+    source = OWNER + '''
+write=(@h:TraceHandle):>void=>{h.token=1}
+main=():>int64=>{let h=TraceHandle[42] write(@h) $assert h.token=?42 return 42}
+'''
+    with pytest.raises(ReportException, match='assert'):
+        codegen(SrcFile(None, source))
 
 
 FACTORY_WITH_DROP = '''let changed:int64=0
