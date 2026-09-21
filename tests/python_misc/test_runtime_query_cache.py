@@ -41,10 +41,10 @@ def test_bounds_query_scope_expires_before_type_changes(monkeypatch):
     observations = []
     original = bounds._BoundsValidator.validate
 
-    def validate(self, root):
+    def validate(self, root, *, effect_context=None):
         assert ty._runtime_query_cache.get() is not None
         observations.append(ty.optional_payload(choice))
-        original(self, root)
+        original(self, root, effect_context=effect_context)
 
     monkeypatch.setattr(bounds._BoundsValidator, 'validate', validate)
     source = SrcFile(None, '')

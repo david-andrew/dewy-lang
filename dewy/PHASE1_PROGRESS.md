@@ -1528,3 +1528,11 @@ Follow-up from the reduced case: explicit stored `(Base & ~Child) | Child`
 currently reaches an unhandled `TypeAnd` in hosted union-storage selection.
 Retain this parity gap for the record-family representation work; the concrete
 child-union reproducer above independently covers the flow ownership fix.
+
+Full-suite checkpoint at `b23ff134`: 3,481 passed, 14 skipped, two failures
+in stale harness interfaces. The query-cache spy now forwards the shared
+effect context; the length-transfer kernel comparison passes its caller's
+truncate decisions and excludes caller-installed named-count relations.
+Those relations retain independent source-level acceptance/rejection tests.
+All 20 affected and adjacent checks pass after repair. The later flow-join
+fix was validated separately as recorded above.

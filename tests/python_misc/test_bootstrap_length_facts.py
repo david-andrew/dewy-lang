@@ -60,9 +60,20 @@ def test_native_length_transfer_matches_hosted(tmp_path):
                 lines.append(f'    let s{case}:facts.State = facts.State[]')
                 for key, value in state.items():
                     lines.append(f'    facts.put(@s{case} {fact(key)[0]} {source_interval(value)})')
-                lines.append(f'    lengths.apply(@s{case} 1 "{method}" {source_interval(count_value)} 1024);')
+                # This harness tests the interval-transfer kernel. Its caller
+                # supplies relational decisions and records the named-count
+                # postcondition; source-level coverage lives in
+                # test_truncate_relations.py.
+                current = before if before is not None else interval(0, 1024, True)
+                unchanged = method == 'truncate' and count_value is not None and current.upper is not None and count_value.lower is not None and current.upper <= count_value.lower
+                fits = method == 'truncate' and count_value is not None and current.lower is not None and count_value.upper is not None and count_value.upper <= current.lower
+                lines.append(f'    lengths.apply(@s{case} 1 "{method}" {source_interval(count_value)} 1024 unchanged={str(unchanged).lower()} fits={str(fits).lower()});')
                 lines.append(f'    emit("{case}" s{case})')
                 validator._eval(call, state, validate=False)
+                # The kernel has no HIR identity for count, so compare its
+                # transfer separately from those caller-installed relations.
+                for key in (order(length(1), 3), order(3, length(1))):
+                    state.pop(key, None)
                 expected.extend(f'{case}|{fact(key)[1]}|{spelling(value)}' for key, value in state.items())
                 case += 1
     source = tmp_path / 'length_facts.dewy'
