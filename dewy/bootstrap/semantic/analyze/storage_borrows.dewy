@@ -1,0 +1,120 @@
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"effects.dewy" as effects
+import p"../bindings.dewy" as bindings
+
+# A storage proof shared by allocation contracts and argument lowering.
+# A read-only by-value parameter stays stable throughout its caller, including
+# later argument evaluation. Known calls operating only on their own bindings
+# cannot change an incoming alias through nonlocal or raw storage. This first
+# shared proof covers array forwarding without representation conversion.
+# More precise lowerer proofs may still borrow other expressions.
+const OPERATORS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
+# Native builtins carry stable identities. A source function with the same
+# spelling must still contribute its ordinary call-graph effects.
+primitive=(node:hir.AST registry:bindings.Registry):>bool=>{
+    if node isnt? hir.ExpressedIdentifier or node.name not in? OPERATORS return false
+    if node.binding_id is? none return true
+    let binding=bindings.find_binding(registry node.binding_id)
+    return binding isnt? none and binding.builtin
+}
+forwarded_arrays=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>{
+    let bodies:dict<addr array<addr>>=[]
+    let edges:dict<addr set<addr>>=[]
+    let blocked:set<addr>=set[]
+    loop id in analysis.literals {
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let locals:set<addr>=set[]
+        loop param in effects.literal_params(literal) {if param.binding_id isnt? none {locals.add(param.binding_id)}}
+        let body:array<addr>=[]
+        let pending:array<addr>=[literal.body]
+        loop param in effects.literal_params(literal) {if param is? hir.BoundParam {pending.push(param.value)}}
+        let seen:set<addr>=set[]
+        loop pending.length >? 0 {
+            let item=pending.pop
+            let node=hir.node_at(nodes item)
+            if item in? seen or node is? hir.FunctionLiteral continue
+            seen.add(item) body.push(item)
+            if node is? hir.Declare and node.binding_id isnt? none {locals.add(node.binding_id)}
+            if node is? hir.IteratorExpression {
+                let target=hir.node_at(nodes node.target)
+                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {locals.add(target.binding_id)}
+            }
+            hir.push_children(node @pending)
+        }
+        bodies[id]=body
+        loop item in body {
+            let node=hir.node_at(nodes item)
+            if node is? hir.RepresentationCast {blocked.add(id)}
+            else if node is? hir.ExpressedIdentifier {
+                let local=node.binding_id isnt? none and node.binding_id in? locals
+                let operation=primitive(node registry)
+                if not local and not operation and effects.flatten_callable(item set[] analysis nodes) is? none {blocked.add(id)}
+            } else if node is? hir.FunctionCall {
+                let targets=effects.direct_targets(node analysis nodes)
+                if targets is? none {
+                    let func=hir.node_at(nodes effects.unwrap(node.func nodes))
+                    if not primitive(func registry) {blocked.add(id)}
+                } else {
+                    loop target in targets {let callers=edges.get(target set[]) callers.add(id) edges[target]=callers}
+                }
+            }
+        }
+    }
+    let pending:array<addr>=[]
+    loop id in blocked {pending.push(id)}
+    loop pending.length >? 0 {
+        loop caller in edges.get(pending.pop set[]) {
+            if caller not in? blocked {blocked.add(caller) pending.push(caller)}
+        }
+    }
+    let result:dict<addr set<addr>>=[]
+    loop id in analysis.literals {
+        if id in? blocked continue
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let parameters:dict<addr addr>=[]
+        loop param in effects.literal_params(literal) {
+            if not param.place and param.binding_id isnt? none {parameters[param.binding_id]=param.value_type}
+        }
+        loop item in bodies.get(id []) {
+            let node=hir.node_at(nodes item)
+            if node isnt? hir.FunctionCall continue
+            let targets=effects.direct_targets(node analysis nodes)
+            if targets is? none or targets.length =? 0 continue
+            let allowed:set<addr>=set[]
+            loop arg in node.pos_args {allowed.add(arg)}
+            loop arg in node.kw_args.values {allowed.add(arg)}
+            loop target in targets {
+                let callee=hir.node_at(nodes target)
+                $runtime_assert callee is? hir.FunctionLiteral
+                let pairs=effects.pair_arguments(node callee)
+                let current:set<addr>=set[]
+                let rejected:set<addr>=set[]
+                let wanted:dict<addr addr>=[]
+                loop param in effects.literal_params(callee) {
+                    if not param.place and param.binding_id isnt? none {wanted[param.binding_id]=param.value_type}
+                }
+                if pairs isnt? none {
+                    loop pair in pairs {
+                        let arg=hir.node_at(nodes pair.argument)
+                        let source=hir.node_at(nodes effects.unwrap(pair.argument nodes))
+                        let safe=false
+                        if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and pair.parameter isnt? none {
+                            let own=parameters.get(source.binding_id)
+                            let expected=wanted.get(pair.parameter)
+                            let incoming=summaries.by_param_binding.get(source.binding_id)
+                            let outgoing=summaries.by_param_binding.get(pair.parameter)
+                            safe=own isnt? none and expected isnt? none and types.node_at(table arg.value_type) is? types.ArrayType and arg.value_type =? own and own =? expected and incoming isnt? none and effects.read_only(incoming) and outgoing isnt? none and effects.read_only(outgoing)
+                        }
+                        if safe {current.add(pair.argument)} else {rejected.add(pair.argument)}
+                    }
+                }
+                allowed=allowed & (current-rejected)
+            }
+            if allowed.length >? 0 {result[item]=allowed}
+        }
+    }
+    return result
+}

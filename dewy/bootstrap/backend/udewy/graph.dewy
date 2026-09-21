@@ -95,7 +95,7 @@ lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
         if helper isnt? none {required.push(helper)}
     }
     let prepared=assemble(entry @engine required_bindings=required)
-    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine))
+    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry)
 }
 # The executable boundary: every module proves its contracts before storage
 # selection, and startup is checked with the explicit entry export. Keep the
@@ -119,7 +119,7 @@ compile = (entry:addr @engine:modules.Engine timings:bool=false):>Compilation|Er
     timing.finish('initialization_and_reachability' preparation_started)
     if error isnt? none return error
     let lowering_started=timing.start(timings)
-    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine))
+    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry)
     timing.finish('lowering' lowering_started)
     if lowered is? Error return lowered
     return Compilation[lowered validated]

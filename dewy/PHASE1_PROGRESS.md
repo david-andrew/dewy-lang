@@ -1896,3 +1896,26 @@ with accepted programs executed through both direct and C backends. The
 strict-copy fixture checks zero allocation during reads and zero retained
 storage after repeated calls; writes through scalar and array fields, owner
 mutation, and a captured local retain independent values.
+
+## Shared forwarding storage proof (2026-09-21)
+
+Allocation contracts and both lowerers now share a read-only array-parameter
+forwarding proof. A whole-caller access summary rules out later-argument
+writes; a closed call graph excludes nonlocal storage, raw operations and
+unresolved callbacks. Parameter and representation agreement are required.
+Default expressions participate in the graph. Native operator purity uses
+the binding registry, so a user function named like an intrinsic cannot
+acquire its guarantees. Recursive and named forwarding can satisfy
+`no allocates` or `no_effects` without treating COW deferral as proof.
+
+Validation: 73 adjacent hosted checks passed. A fresh native driver passed
+the zero-allocation fixture and six rejection cases against hosted checking;
+the fixture executes through direct x86-64 and C. That driver also checked
+and emitted its own complete source successfully (20 MB of emitted µDewy).
+This is the first shared argument-storage slice; other projection borrows,
+moves and placement still need to feed allocation checking.
+
+Full CI checkpoint at `bd17c8c5`: **3,636 passed, 32 skipped**, in 2,618.68 s.
+The website and native release checks are also green. Subsequent concise
+reporting, unwritten-let views and forwarding proofs have their own targeted
+validation and await the next full integration run.

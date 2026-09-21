@@ -1,0 +1,19 @@
+# Contracts and lowering use the same proof for these forwarded parameters.
+size=(xs:array<int64>):>int64 & no_effects=>xs.length
+forward=(xs:array<int64>):>int64 & no_effects=>size(xs)
+forward_named=(xs:array<int64>):>int64 & no allocates=>size(xs=xs)
+again=(xs:array<int64> rounds:int64):>int64 & no allocates=>{
+    if rounds>?0 return again(xs rounds-1)
+    return forward(xs)
+}
+with_default=(xs:array<int64> count:int64=1+1):>int64 & no allocates=>forward(xs)+count
+main=():>int64=>{
+    let xs:array<int64>=[40 2]
+    let before:int64=_arena_allocated_bytes
+    if forward(xs) not=?2 return 1
+    if forward_named(xs) not=?2 return 2
+    if again(xs 5) not=?2 return 3
+    if with_default(xs) not=?4 return 5
+    if _arena_allocated_bytes not=?before return 4
+    return xs[0]+xs[1]
+}

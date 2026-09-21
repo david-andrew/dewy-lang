@@ -11,6 +11,7 @@ from .. import bindings, effect_rows as rows, hir, ty, placement
 from ..errors import user_error
 from ...reporting import Pointer
 from .effects import _EffectAnalyzer, _literal_params, _unwrap
+from . import storage_borrows
 
 SCALAR_OPERATIONS = frozenset({
     '__add__', '__sub__', '__mul__', '__div__', '__floordiv__', '__mod__',
@@ -50,6 +51,7 @@ def validate(root, registry, srcfile):
         return
     analysis = _EffectAnalyzer(root)
     storage_effects = analysis.solve()
+    borrowed_arguments = storage_borrows.forwarded_arrays(analysis, storage_effects)
     local = {}
     calls = {}
     dependents = {}
@@ -198,7 +200,8 @@ def validate(root, registry, srcfile):
                                 storage()
                     else:
                         visit(argument)
-                        if not word_value(argument) and not isinstance(argument.type, (ty.FunctionType, ty.OverloadType)):
+                        if (not word_value(argument) and not isinstance(argument.type, (ty.FunctionType, ty.OverloadType))
+                                and id(argument) not in borrowed_arguments.get(id(node), ())):
                             storage()  # logical aggregate transfer not proved
                 return
             if isinstance(node, hir.Declare):

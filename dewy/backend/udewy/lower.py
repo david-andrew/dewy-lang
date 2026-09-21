@@ -42,7 +42,8 @@ from typing import Literal, NoReturn
 from ...parser import t0
 from ...reporting import Error, Pointer, Span, SrcFile
 from ...semantic import builtins, hir, ty
-from ...semantic.analyze.effects import ProgramEffects, analyze_effects
+from ...semantic.analyze.effects import ProgramEffects, _EffectAnalyzer
+from ...semantic.analyze import storage_borrows
 from ...semantic.errors import NotImplementedYet
 from ...semantic.hir_display import type_to_dewy
 from .lowering_arrays import _ArrayLowering
@@ -489,7 +490,9 @@ class _Lowerer(
         self.user_main_base = '__dewy_user_main'
         # the source function the entry wrapper calls: `main`, or the generated test runner
         self.entry_name = entry_name
-        self.program_effects: ProgramEffects = analyze_effects(root)
+        analysis = _EffectAnalyzer(root)
+        self.program_effects: ProgramEffects = analysis.solve()
+        self.forwarded_arrays = storage_borrows.forwarded_arrays(analysis, self.program_effects)
 
     def _runtime_helper(self, name: str) -> _FunctionDef | None:
         """Find a runtime helper once in the append-only discovery list.

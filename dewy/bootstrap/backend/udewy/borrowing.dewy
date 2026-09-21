@@ -1,6 +1,8 @@
 import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/bindings.dewy" as bindings
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/analyze/effects.dewy" as effects
+import p"../../semantic/analyze/storage_borrows.dewy" as storage_borrows
 import p"captures.dewy" as captures
 import p"emit.dewy" as emit
 import p"callbacks.dewy" as callbacks
@@ -703,7 +705,7 @@ stable_owner = (source:Route stable:set<addr> parameters:dict<addr effects.Param
     return true
 }
 analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
-details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links external:set<addr>=set[] owned_parameter_protocol:bool=false):>Plan => {
+details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links external:set<addr>=set[] owned_parameter_protocol:bool=false registry:bindings.Registry=bindings.Registry[]):>Plan => {
     let valued=captures.value_functions(root nodes plan)
     let indirect=callbacks.analyze(root nodes type_nodes plan links function_values=valued)
     # Compiler-generated callers also keep the ordinary ABI. They are not
@@ -713,6 +715,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # storage. At a value boundary lowering supplies an independent owner,
     # including an aggregate wrapped into an optional result.
     let summaries=effects.analyze_effects(root nodes type_nodes indirect value_casts_escape=false)
+    let forwarded=storage_borrows.forwarded_arrays(effects.collect_roots([root] nodes) summaries nodes type_nodes registry)
     let ambient=ambient_graph(plan nodes type_nodes indirect)
     let initial=ambient.opaque
     loop id in ambient.globals {initial.add(id)}
@@ -886,6 +889,8 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         }
         result[id]=allowed_all
         disposable[id]=temporary_all
+        let proven=forwarded.get(id set[])
+        if proven.length >? 0 {result[id]=result.get(id set[]) | proven}
         if consumed_all.length >? 0 {consumed_arguments[id]=consumed_all}
     }
     let escaping:set<addr>=set[]

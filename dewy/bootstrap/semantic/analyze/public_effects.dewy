@@ -6,6 +6,7 @@ import p"../bindings.dewy" as bindings
 import p"../effect_rows.dewy" as rows
 import p"effects.dewy" as access
 import p"../placement.dewy" as placement
+import p"storage_borrows.dewy" as storage_borrows
 
 # Initial public checking recognizes scalar computation and read-only value
 # access. Storage operations without a checked allocation model stay unknown.
@@ -16,7 +17,7 @@ scalar = (id:addr nodes:types.Table):>bool => {
     if node is? types.IntegerLiteralType return node.value >=? -9223372036854775808 and node.value <? 18446744073709551616
     return node is? types.Primitive and node.name in? ['void' 'never' 'none' 'bool' 'true' 'false' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64']
 }
-Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[]]
+Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[] borrowed_arguments:dict<addr set<addr>>=[]]
 Call:type = const [target:addr subjects:dict<string rows.Subject?>]
 Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[] value_parameters:set<addr>=set[] frame_arrays:set<addr>=set[] frame_literals:set<addr>=set[]]
 Location:type = const [known:bool subject:rows.Subject?=none]
@@ -163,7 +164,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
             }
             else {
                 visit(arg input @scan)
-                if not word_value(value input scan) and types.node_at(input.types value.value_type) isnt? types.CallableType {storage(@scan)}
+                if not word_value(value input scan) and types.node_at(input.types value.value_type) isnt? types.CallableType and arg not in? input.borrowed_arguments.get(id set[]) {storage(@scan)}
             }
         }
         return
@@ -224,7 +225,9 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
     }
     if constrained.length =? 0 return none
     let analysis=access.collect_roots(roots session.hir)
-    let input=Input[session.hir session.types session.registry analysis access.analyze_collected(analysis session.hir session.types) word_iterators]
+    let access_summaries=access.analyze_collected(analysis session.hir session.types)
+    let borrowed=storage_borrows.forwarded_arrays(analysis access_summaries session.hir session.types session.registry)
+    let input=Input[session.hir session.types session.registry analysis access_summaries word_iterators borrowed]
     let local:dict<addr rows.Contract>=[]
     let calls:dict<addr array<Call>>=[]
     let edges:dict<addr set<addr>>=[]

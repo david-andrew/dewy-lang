@@ -10,6 +10,7 @@ import p"moves.dewy" as moves
 import p"../../semantic/analyze/effects.dewy" as effects
 import p"../../semantic/placement.dewy" as placement
 import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/bindings.dewy" as bindings
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/type_queries.dewy" as views
 import p"../../semantic/builtins.dewy" as builtins
@@ -4479,7 +4480,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     return put(hir.FunctionLiteral[node.loc code_type(id node @state result=if projection is? none none else projection.result) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[]):>Result|Error => {
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[]):>Result|Error => {
     let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links debug_names=debug_names explicit_copy_sources=explicit_copy_sources]
     # Older seeds and prelude-free kernels retain the six-word allocation
     # ABI. Install retain/drop together with prefix allocation, once per
@@ -4508,7 +4509,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         let id=state.capture_plan.named.get(binding)
         if id isnt? none {external.add(id)}
     }
-    let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers)
+    let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers registry=source_registry)
     state.borrowed_arguments=borrowed.arguments
     state.stable_bindings=borrowed.stable_bindings
     state.scoped_views=borrowed.scoped_views
