@@ -311,12 +311,15 @@ def test_array_call_adapter_fixture_codegen_shape() -> None:
     assert 'let transitive:int64 = alias' not in emitted
     assert emitted.count('__alloca__(16)') == 6
     assert emitted.count('__alloca__(48)') == 4
-    assert '__store_i64__(__load_i64__(transitive) __load_i64__(__dewy_array_1))' in emitted
-    assert '__store_i64__(__load_i64__(words) __load_i64__(__dewy_array_3))' in emitted
-    assert '__store_i64__(bytes __dewy_array_5)' in emitted
-    assert '__store_i64__(2 __dewy_array_5 + 32)' in emitted
-    assert '__store_i64__(selected_values __dewy_array_6)' in emitted
-    assert 'let overload_result:int64 = read_array(__dewy_array_6)' in emitted
+    # Verify the adapters' contents and use, not temporary allocation order.
+    for value in ('transitive', 'words'):
+        assert re.search(rf'__store_i64__\(__load_i64__\({value}\) __load_i64__\(__dewy_array_\d+\)\)', emitted)
+    byte_adapter = re.search(r'__store_i64__\(bytes (__dewy_array_\d+)\)', emitted)
+    assert byte_adapter is not None
+    assert f'__store_i64__(2 {byte_adapter[1]} + 32)' in emitted
+    selected_adapter = re.search(r'__store_i64__\(selected_values (__dewy_array_\d+)\)', emitted)
+    assert selected_adapter is not None
+    assert f'let overload_result:int64 = read_array({selected_adapter[1]})' in emitted
     assert 'local_result =? 42 and __load_i64__(local) =? 0' in emitted
 
 
@@ -531,7 +534,9 @@ def test_jump_table_codegen_uses_raw_static_storage() -> None:
     ) in emitted
     assert 'const program:int64 = 0x"000102"' in emitted
     assert '0q"' not in emitted
-    assert '__load_i64__(handlers + (opcode * 8))' in emitted
+    index = re.search(r'let (__dewy_array_index_\d+):int64 = opcode', emitted)
+    assert index is not None
+    assert f'__load_i64__(handlers + ({index[1]} * 8))' in emitted
     assert 'accumulator = (@handler)(accumulator)' in emitted
     assert 'alloca__(48)' not in emitted
     assert '__store_i64__(' not in emitted

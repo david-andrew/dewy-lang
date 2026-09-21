@@ -9,17 +9,22 @@ from udewy.backend.common import Backend
 
 def test_immediates_reduce_code_and_match_register_execution(tmp_path):
     source = (Path(__file__).parents[2] / 'udewy/tests/test_immediate_operands.udewy').read_text()
-    outputs = []
+    text_sizes = []
     for optimized in (False, True):
         backend = get_backend('x86_64')
         backend.debug_info = False
         if not optimized:
             backend.binary_immediate = Backend.binary_immediate.__get__(backend)
         assembly = p0.parse(t1.tokenize(source), source, backend)
-        outputs.append(assembly)
         binary = backend.compile_and_link(assembly, f'word-operations-{optimized}', tmp_path)
         assert subprocess.run([binary], timeout=5).returncode == 0
-    assert len(outputs[1]) < len(outputs[0]) * .9
+        # Compare emitted machine code, not assembly text (symbol names and
+        # formatting are unrelated to the immediate-operand optimization).
+        sections = subprocess.run(['size', '-A', binary], check=True,
+                                  capture_output=True, text=True).stdout
+        text_sizes.append(next(int(line.split()[1]) for line in sections.splitlines()
+                               if line.split() and line.split()[0] == '.text'))
+    assert text_sizes[1] < text_sizes[0] * .9
 
 
 def test_immediate_word_operations_against_independent_expected_results(tmp_path):

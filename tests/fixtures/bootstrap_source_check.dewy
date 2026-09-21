@@ -83,6 +83,14 @@ main = (argv:array<string>):>int64 => {
             let error=patterns.validate(session)
             if error isnt? none {result=error}
         }
+        if argv[1] =? 'pending' {
+            if result isnt? Error {printl("accepted pending source: {path}") failures += 1 continue}
+            if result.title not=? 'native checker implementation pending' or result.pointers.length not=? 1 {result.render(source) failures += 1 continue}
+            $runtime_assert result.pointers.length =? 1
+            if result.pointers[0].message not=? 'mutable local places' {result.render(source) failures += 1 continue}
+            printl('pending')
+            continue
+        }
         if invalid {
             if result isnt? Error { printl("accepted invalid source: {path}") failures += 1 continue }
             if result.title =? 'native checker implementation pending' {result.render(source) failures += 1 continue}

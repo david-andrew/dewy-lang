@@ -254,7 +254,6 @@ ERROR_CASES = [
     'let f=(@x:int64):>void => {}\nconst x:int64=1\nf(@x)',
     'let f=(@x:int64 @y:int64):>void => {}\nlet x:int64=1\nf(@x @x)',
     'let f=(@p:[x:int64] @x:int64):>void => {}\nlet p=[x=1]\nf(@p @p.x)',
-    'let x:int64=1\nlet escaped=@x',
     'let f=(@x:int64=1):>void => {}',
     'let x:int64=1\nx="wrong"',
     'const x=1\n{x=2}',
@@ -266,6 +265,14 @@ ERROR_CASES = [
     'Point:type=[x:int64]\nPoint[1 2]',
     'Point:type=[x:int64 y:int64]\nPoint[1 x=2]',
     'Point:type=const [x:int64]\nlet p=Point[1]\np.x=2',
+]
+
+
+# Mutable local places are planned, not invalid language. Keep an explicit
+# pending expectation so an unrelated not-implemented error cannot satisfy
+# the invalid-program rejection tests.
+PENDING_CASES = [
+    'let x:int64=1\nlet escaped=@x',
 ]
 
 
@@ -331,9 +338,12 @@ def test_native_source_values(tmp_path, *, validate_matches=False, function_type
             check._typecheck_module(SrcFile(None, text))
             if validate_matches:
                 check.validate_brand_matches()
+    for text in PENDING_CASES:
+        with pytest.raises(check.NotImplementedYet, match='mutable local places'):
+            check._typecheck_module(SrcFile(None, text))
     executable = _native_driver(tmp_path)
     output = []
-    for mode, texts in [('valid', CASES), ('invalid', ERROR_CASES)]:
+    for mode, texts in [('valid', CASES), ('invalid', ERROR_CASES), ('pending', PENDING_CASES)]:
         if not texts:
             continue
         paths = []
@@ -348,8 +358,9 @@ def test_native_source_values(tmp_path, *, validate_matches=False, function_type
         output.extend(result.stdout.splitlines())
         (tmp_path / 'native-output.txt').write_text('\n'.join(output) + '\n')
         assert result.returncode == 0, result.stderr + result.stdout
-    (tmp_path / 'expected-output.txt').write_text('\n'.join(expected + ['rejected'] * len(ERROR_CASES)) + '\n')
-    assert list(zip(CASES + ERROR_CASES, output, strict=True)) == list(zip(CASES + ERROR_CASES, expected + ['rejected'] * len(ERROR_CASES), strict=True))
+    expected += ['rejected'] * len(ERROR_CASES) + ['pending'] * len(PENDING_CASES)
+    (tmp_path / 'expected-output.txt').write_text('\n'.join(expected) + '\n')
+    assert list(zip(CASES + ERROR_CASES + PENDING_CASES, output, strict=True)) == list(zip(CASES + ERROR_CASES + PENDING_CASES, expected, strict=True))
 
 
 _NATIVE_DRIVER = None

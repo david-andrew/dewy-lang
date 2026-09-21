@@ -146,7 +146,9 @@ let read = ():>uint8 => {
 '''))
 
     assert 'const data:int64 = 0x"fbf0"' in emitted
-    assert 'return __load_u8__(data + 1)' in emitted
+    import re
+    index = re.search(r'let (\w+):int64 = count - 1', emitted)[1]
+    assert f'return __load_u8__(data + {index})' in emitted
     assert '0g"' not in emitted
     assert '__alloca__(48)' not in emitted
     assert '__dewy_string_' not in emitted

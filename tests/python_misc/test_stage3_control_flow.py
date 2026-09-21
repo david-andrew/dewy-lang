@@ -374,20 +374,22 @@ let main = ():>void => {
     assert '$outer' not in emitted
 
 
-def test_labeled_exit_signals_do_not_shadow_source_bindings() -> None:
+def test_labeled_exit_signals_do_not_shadow_source_bindings(tmp_path) -> None:
+    from tests.python_misc.test_scalar_projection import execute
     emitted = codegen(SrcFile(None, """
-let main = ():>void => {
-    let __dewy_loop_levels_1:int64 = 0
+let main = ():>int64 => {
+    let __dewy_loop_levels_1:int64 = 42
     $outer
     loop true {
         loop true { break $outer }
     }
+    return __dewy_loop_levels_1
 }
 """))
 
-    assert 'let __dewy_loop_levels_1:int64 = 0' in emitted
-    assert 'let __dewy_loop_levels_2:int64 = 0' in emitted
-    assert 'let __dewy_loop_kind_2:int64 = 0' in emitted
+    # Source names may be encoded or renamed; the generated exit signals must
+    # leave the live source binding's value intact on both backends.
+    execute(tmp_path, 'loop-signal-names', emitted)
 
 
 def test_scope_metatags_are_elided_from_udewy_output() -> None:
