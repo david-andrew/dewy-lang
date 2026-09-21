@@ -1305,3 +1305,25 @@ and conditional results, mutation after evaluation, and zero retained storage.
 All eight focused result-order and lifecycle integration checks passed,
 including hosted/native execution on both output backends. Mixed explicit
 and implicit returns retain their existing source-checking rules.
+
+
+Independent resource values now invoke a declared `$__copy__` hook when a
+surviving source cannot move or share a read-only view. This covers local
+bindings, projected resources and ordinary owning arguments. Calls enter HIR
+before fact/effect validation; refinements must hold for the hook's result,
+not merely its source. The HIR call retains implicit-copy intent for copy
+reports and `$explicit_copies`; native snapshot serialization preserves it.
+Proven local moves and views still take precedence. Synthesized copies of
+containers/records containing custom-copy components remain outstanding.
+
+All 12 focused inferred-copy, resource-union and resource-view checks passed,
+including hosted/native execution on both backends. The shared fixture checks
+independent mutation, hook effects/counts and zero retained storage over 100
+iterations; rejection cases cover effect contracts, strict-copy policy and
+stale facts. Snapshot-codec validation follows regeneration for the new HIR
+metadata.
+
+The regenerated native snapshot codec passed all three snapshot/schema checks,
+including round-tripping an implicit-copy call and effect contracts on both
+output backends. The four hosted inferred-copy checks also passed after
+integration with the implicit-result ordering fix (seven checks total).

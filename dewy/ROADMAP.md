@@ -431,7 +431,11 @@ in both lowerings and the parity tool is the gate.
   array mutation and implicit element copies remain outstanding. Resource unions
   and optional owners now select cleanup by the active alternative, including
   array elements; custom union moves consume only that alternative's resources. Explicit custom copies can construct fresh results,
-  including nested hook calls. Fresh record results now transfer from factories
+  including nested hook calls. When a surviving source needs an independent
+  owner, its declared copy hook now supplies local bindings, projected values
+  and owning arguments; its effects and implicit-copy cost remain checked.
+  Synthesized copies of containers/records with custom-copy components remain
+  pending. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch
   owners. Ordinary `@` parameters borrow resource records, including nested

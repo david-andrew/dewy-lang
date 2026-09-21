@@ -210,6 +210,26 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 # The checked inheritance wrapper transfers every parent
                 # field into its complete child, consuming that intermediate.
                 return node
+        if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
+            # A surviving source requires an independent value. Use its
+            # declared hook in checked HIR so effects and new result facts
+            # participate in the same checks as an explicit `.copy()`.
+            shape = ty.unfold(ty.strip_refinement(node.type))
+            if isinstance(shape, ty.ObjectType):
+                hook = next((method for method in shape.methods if method.lifecycle == 'copy'), None)
+                if hook is not None:
+                    operation = declarations.get(hook.binding_id)
+                    if operation is None:
+                        reject(node, 'an unavailable copy operation')
+                    receiver = expression(hir.Place(node.loc, shape, node), allowed,
+                                          inherited=inherited, control=control)
+                    function = hir.ExpressedIdentifier(node.loc, operation.expr.type, operation.name,
+                                                       binding_id=operation.binding_id)
+                    result_type = operation.expr.rettype
+                    copied = hir.FunctionCall(node.loc, result_type, function, [receiver], {}, implicit_copy=True)
+                    if isinstance(node.type, ty.RefinedType):
+                        copied = hir.Obligation(node.loc, result_type, copied, node.type, 'the value contract after copying')
+                    return copied
         # An explicit custom copy creates an independent owner. Its checked
         # call already carries the hook's effects and result contract.
         if isinstance(node, hir.FunctionCall):

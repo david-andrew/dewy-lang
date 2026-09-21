@@ -1,0 +1,42 @@
+# Independent owners use the declared copy hook when moving or viewing the
+# source is impossible. A surviving source never inherits the copy's facts.
+let copies:int64=0
+let drops:int64=0
+Handle=type of [id:int64 values:array<int64>
+$__drop__
+release=():>void=>{drops+=1 values.clear}
+$__copy__
+duplicate=():>Handle=>{copies+=1 Handle[id+1 values.copy()]}
+]
+consume=(owner:Handle):>int64=>owner.id
+exercise=():>int64=>{
+    let original=Handle[10 [40 2]]
+    let independent=original
+    independent.id=20
+    original.id=30
+    # A user hook may return different storage, so its length needs a fact.
+    if independent.values.length <?1 or original.values.length <?1 return 6
+    independent.values[0]=1
+    if original.values[0] not=?40 or independent.values[0] not=?1 return 1
+    if copies not=?1 return 2
+    if consume(original) not=?31 return 3
+    if original.id not=?30 or copies not=?2 or drops not=?1 return 4
+    let wrapper=[child=Handle[5 [50]]]
+    let projected=wrapper.child
+    projected.id=8
+    if wrapper.child.id not=?5 or copies not=?3 return 5
+    return 42
+}
+verify=():>int64=>{
+    copies=0 drops=0
+    if exercise() not=?42 return 1
+    if copies not=?3 or drops not=?5 return 2
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if verify() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

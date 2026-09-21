@@ -5431,6 +5431,9 @@ class _Lowerer(
         if isinstance(node, hir.DictView):
             return self._extract_dict_view(node)
         if isinstance(node, hir.FunctionCall):
+            if node.implicit_copy:
+                self._note_copy('record', node.type, 'implicit custom copy',
+                                'the source remains live and an independent owner is required', node.loc)
             raw = self._raw_aggregate_intrinsic(node)
             if raw is not None:
                 return raw

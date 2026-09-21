@@ -835,6 +835,8 @@ class FunctionCall(AST):
     # function. Never inferred from the spelling of a user-defined function.
     integer_operation: str | None = field(default=None, kw_only=True)
     proof: bool = field(default=False, kw_only=True)
+    # Ownership inserted a custom copy where the source remains live.
+    implicit_copy: bool = field(default=False, kw_only=True)
     #TODO: spread args
 
 @dataclass(slots=True, weakref_slot=True)
