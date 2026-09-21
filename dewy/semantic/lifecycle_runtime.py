@@ -223,6 +223,43 @@ def prepare(root: hir.Block, srcfile):
         return replace(node, **{name: mapped(getattr(node, name), lambda child: expression(child, allowed, inherited=inherited))
                                 for name in hir.child_fields(type(node))})
 
+    def local_transfers(body):
+        """Prove same-scope transfers before introducing cleanup calls.
+
+        Later branches count as uses, and captures prevent transfer. Owners
+        declared outside a branch/loop are excluded by the same-block rule;
+        their conditional consumption needs a separate lifetime join.
+        """
+        last, occurrences, captured = {}, {}, set()
+        blocks = []
+        pending = [body]
+        while pending:
+            node = pending.pop()
+            if isinstance(node, hir.FunctionLiteral):
+                captured.update(child.binding_id for child in hir.walk(node)
+                                if isinstance(child, hir.ExpressedIdentifier))
+                continue
+            if isinstance(node, hir.ExpressedIdentifier):
+                last[node.binding_id] = id(node)
+                occurrences[id(node)] = occurrences.get(id(node), 0) + 1
+            if isinstance(node, hir.Block):
+                blocks.append(node)
+            pending.extend(reversed(tuple(hir.children(node))))
+        result = set()
+        for block in blocks:
+            local = set()
+            for node in block.items:
+                if not isinstance(node, hir.Declare):
+                    continue
+                source = node.expr
+                if (isinstance(source, hir.ExpressedIdentifier)
+                        and source.binding_id in local and source.binding_id not in captured
+                        and last.get(source.binding_id) == id(source) and occurrences[id(source)] == 1):
+                    result.add(id(node))
+                if resource(source.type) is not None:
+                    local.add(node.binding_id)
+        return result
+
     def function(literal):
         nonlocal current_source
         if literal.proof:
@@ -248,6 +285,7 @@ def prepare(root: hir.Block, srcfile):
         if literal.lifecycle is None and not mentions_resource(literal):
             current_source = previous_source
             return literal
+        transfers = local_transfers(literal.body)
         def statement(node, owners, loops):
             live = allowed | {owner.binding_id for owner in owners}
             if isinstance(node, hir.Block):
@@ -273,6 +311,17 @@ def prepare(root: hir.Block, srcfile):
                 if (node.binding_id is None or node.view
                         or node.annotation is not None and node.annotation != node.expr.type):
                     reject(node, 'a non-fresh local owner')
+                if id(node) in transfers:
+                    source = next((owner for owner in owners if owner.binding_id == node.expr.binding_id), None)
+                    if source is not None:
+                        value, moved = transfer(node.expr, node.annotation or node.expr.type)
+                        owners.remove(source)
+                        node = replace(node, expr=value)
+                        owners.append(node)
+                        # The source's storage stays alive through the hook.
+                        # A hook consumes its owner, not every nested field.
+                        calls = cleanup([source], node.loc, {source.binding_id}) if moved else []
+                        return hir.Block(node.loc, node.type, [node, *calls], False) if calls else node
                 node = replace(node, expr=fresh(node.expr, live, literal.lifecycle == 'drop'))
                 owners.append(node)
                 return node

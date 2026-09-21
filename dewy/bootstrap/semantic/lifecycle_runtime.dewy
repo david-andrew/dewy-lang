@@ -13,7 +13,7 @@ import p"bindings.dewy" as bindings
 # local transfers, implicit copies, resource containers and owning parameters remain
 # implementation gaps, never silent memberwise fallbacks.
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
-Plan:type = [hooks:dict<addr Hook>=[] owners:dict<string Hook>=[] moves:dict<string Hook>=[] prepared:set<addr>=set[] source:SrcFile problem:Error?=none result_type:addr?=none]
+Plan:type = [hooks:dict<addr Hook>=[] owners:dict<string Hook>=[] moves:dict<string Hook>=[] prepared:set<addr>=set[] transfer_sites:set<addr>=set[] source:SrcFile problem:Error?=none result_type:addr?=none]
 put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
 store = (id:addr node:hir.AST @session:contexts.Session):>void => {
     contexts.replace_hir(id node @session)
@@ -79,7 +79,7 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
     }
     return result
 }
-transfer = (id:addr @plan:Plan @session:contexts.Session):>addr => {
+transfer = (id:addr expected:addr? @plan:Plan @session:contexts.Session):>addr => {
     let value=hir.node_at(session.hir id)
     let shape=views.structural_base(value.value_type session.types)
     let type=types.node_at(session.types shape)
@@ -93,7 +93,6 @@ transfer = (id:addr @plan:Plan @session:contexts.Session):>addr => {
     let function=put(hir.ExpressedIdentifier[value.loc hook.signature hook.name hook.binding] @session)
     let place=put(hir.Place[value.loc shape id] @session)
     let result=put(hir.FunctionCall[value.loc signature.ret function [place] []] @session)
-    let expected=plan.result_type
     if expected isnt? none and types.node_at(session.types expected) is? types.RefinedType {
         result=put(hir.Obligation[value.loc signature.ret result expected 'the return contract after moving'] @session)
     }
@@ -246,6 +245,32 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         let declared:hir.Declare=node
         let value=hir.node_at(session.hir declared.expr)
         if declared.binding_id is? none or declared.view or (declared.annotation isnt? none and not types.same_type(declared.annotation value.value_type session.types)) {reject(declared 'a non-fresh local owner' @plan) return}
+        if id in? plan.transfer_sites and value is? hir.ExpressedIdentifier {
+            let retained:array<addr>=[]
+            let source:addr?=none
+            loop owner in owners {
+                let declaration=hir.node_at(session.hir owner)
+                $runtime_assert declaration is? hir.Declare
+                if declaration.binding_id =? value.binding_id {source=owner}
+                else {retained.push(owner)}
+            }
+            if source isnt? none {
+                let result=transfer(declared.expr value.value_type @plan @session)
+                let moved=result not=? declared.expr
+                declared.expr=result
+                let calls:array<addr>=[]
+                if moved {calls=cleanup([source] declared.loc @plan @session fields_only=source)}
+                if calls.length >? 0 {
+                    let declaration_id=put(declared @session)
+                    retained.push(declaration_id)
+                    let items:array<addr>=[declaration_id]
+                    loop call in calls {items.push(call)}
+                    store(id hir.Block[declared.loc declared.value_type items false] @session)
+                } else {store(id declared @session) retained.push(id)}
+                owners=retained
+                return
+            }
+        }
         fresh(declared.expr live inherited @plan @session)
         owners.push(id)
         return
@@ -275,7 +300,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                         $runtime_assert declaration is? hir.Declare
                         if declaration.binding_id =? returned.binding_id {
                             consumed=owner
-                            let result=transfer(returned_id @plan @session)
+                            let result=transfer(returned_id plan.result_type @plan @session)
                             moved=result not=? returned_id
                             current.item=result
                             break
@@ -364,6 +389,52 @@ mentions_resource = (root:addr session:contexts.Session):>bool => {
     }
     return false
 }
+# Before cleanup adds artificial reads, identify last uses transferring
+# between declarations in one lexical block. Outer-owner conditional moves
+# need lifetime joins and are deliberately excluded by the same-block rule.
+local_transfers = (body:addr @plan:Plan session:contexts.Session):>void => {
+    let last:dict<addr addr>=[]
+    let occurrences:dict<addr int>=[]
+    let captured:set<addr>=set[]
+    let blocks:array<addr>=[]
+    let pending:array<addr>=[body]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let node=hir.node_at(session.hir id)
+        if node is? hir.FunctionLiteral {
+            let nested:array<addr>=[id]
+            loop nested.length >? 0 {
+                let child=hir.node_at(session.hir nested.pop)
+                if child is? hir.ExpressedIdentifier and child.binding_id isnt? none {captured.add(child.binding_id)}
+                hir.push_children(child @nested)
+            }
+            continue
+        }
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+            last[node.binding_id]=id
+            occurrences[id]=occurrences.get(id 0)+1
+        }
+        if node is? hir.Block {blocks.push(id)}
+        let children:array<addr>=[]
+        hir.push_children(node @children)
+        # Stack order must preserve the order of statements in each block.
+        loop children.length >? 0 {pending.push(children.pop)}
+    }
+    loop id in blocks {
+        let block=hir.node_at(session.hir id)
+        $runtime_assert block is? hir.Block
+        let locals:set<addr>=set[]
+        loop item in block.items {
+            let declaration=hir.node_at(session.hir item)
+            if declaration isnt? hir.Declare continue
+            let source=hir.node_at(session.hir declaration.expr)
+            if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? locals and source.binding_id not in? captured {
+                if last.get(source.binding_id) =? declaration.expr and occurrences.get(declaration.expr 0) =? 1 {plan.transfer_sites.add(item)}
+            }
+            if declaration.binding_id isnt? none and resource(source.value_type session.types) isnt? none {locals.add(declaration.binding_id)}
+        }
+    }
+}
 prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     if id in? plan.prepared or plan.problem isnt? none return
     plan.prepared.add(id)
@@ -394,6 +465,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     # Cleanup added inside another function is visible through its call edge.
     if function.lifecycle is? none and not mentions_resource(id session) {plan.source=previous plan.result_type=previous_result return}
     function.body=scoped_body(function.body @session)
+    local_transfers(function.body @plan session)
     let composed_parent:addr?=none
     if function.lifecycle_composition and function.lifecycle in? ['copy' 'move'] {
         let body=hir.node_at(session.hir function.body)
