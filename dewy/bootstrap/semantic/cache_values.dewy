@@ -444,6 +444,7 @@ encode_Value1=(value:Value1 @out:bytes.Writer):>void=>{
     encode_Value40(value.named_refs @out)
     encode_Value13(value.capture_pairs @out)
     encode_Value104(value.local_view_probes @out)
+    encode_Value40(value.local_place_roots @out)
     encode_Value106(value.target @out)
     encode_Value112(value.sources @out)
     encode_Value173(value.syntax_refs @out)
@@ -513,23 +514,25 @@ decode_Value1=(@input:bytes.Reader):>Value1|CacheMiss=>{
     if field_27 is? CacheMiss return field_27
     let field_28=decode_Value104(@input)
     if field_28 is? CacheMiss return field_28
-    let field_29=decode_Value106(@input)
+    let field_29=decode_Value40(@input)
     if field_29 is? CacheMiss return field_29
-    let field_30=decode_Value112(@input)
+    let field_30=decode_Value106(@input)
     if field_30 is? CacheMiss return field_30
-    let field_31=decode_Value173(@input)
+    let field_31=decode_Value112(@input)
     if field_31 is? CacheMiss return field_31
-    let field_32=decode_Value174(@input)
+    let field_32=decode_Value173(@input)
     if field_32 is? CacheMiss return field_32
-    let field_33=decode_Value233(@input)
+    let field_33=decode_Value174(@input)
     if field_33 is? CacheMiss return field_33
-    let field_34=decode_Value345(@input)
+    let field_34=decode_Value233(@input)
     if field_34 is? CacheMiss return field_34
-    let field_35=decode_Value90(@input)
+    let field_35=decode_Value345(@input)
     if field_35 is? CacheMiss return field_35
-    let field_36=decode_Value13(@input)
+    let field_36=decode_Value90(@input)
     if field_36 is? CacheMiss return field_36
-    return Value1[warnings=field_0 pending_brand_matches=field_1 read_states=field_2 retained_read_states=field_3 value_keys=field_4 return_collectors=field_5 prepared_imports=field_6 next_key_position=field_7 hoisted=field_8 constructors=field_9 methods=field_10 hidden_bindings=field_11 proof_literals=field_12 proof_markers=field_13 unsafe_assertions=field_14 object_strings=field_15 preparing_methods=field_16 prepared_methods=field_17 registry=field_18 scopes=field_19 brands=field_20 error_types=field_21 links=field_22 builtin_aliases=field_23 pending_aliases=field_24 resolving_aliases=field_25 named_refs=field_26 capture_pairs=field_27 local_view_probes=field_28 target=field_29 sources=field_30 syntax_refs=field_31 types=field_32 hir=field_33 hir_edits=field_34 syntax_ref_positions=field_35 syntax_refs_indexed=field_36]
+    let field_37=decode_Value13(@input)
+    if field_37 is? CacheMiss return field_37
+    return Value1[warnings=field_0 pending_brand_matches=field_1 read_states=field_2 retained_read_states=field_3 value_keys=field_4 return_collectors=field_5 prepared_imports=field_6 next_key_position=field_7 hoisted=field_8 constructors=field_9 methods=field_10 hidden_bindings=field_11 proof_literals=field_12 proof_markers=field_13 unsafe_assertions=field_14 object_strings=field_15 preparing_methods=field_16 prepared_methods=field_17 registry=field_18 scopes=field_19 brands=field_20 error_types=field_21 links=field_22 builtin_aliases=field_23 pending_aliases=field_24 resolving_aliases=field_25 named_refs=field_26 capture_pairs=field_27 local_view_probes=field_28 local_place_roots=field_29 target=field_30 sources=field_31 syntax_refs=field_32 types=field_33 hir=field_34 hir_edits=field_35 syntax_ref_positions=field_36 syntax_refs_indexed=field_37]
 }
 
 encode_Value2=(value:Value2 @out:bytes.Writer):>void=>{

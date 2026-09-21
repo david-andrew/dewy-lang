@@ -41,6 +41,7 @@ main=():>int64=>{
     # copy to check that its pages remain independent of the saved snapshot.
     let last:addr=0
     loop i in 0..129 {last=bindings.allocate_param(@session.registry 'parameter' word span)}
+    session.local_place_roots[binding]=last
     let route=bindings.route_id(@session.registry binding ['field'] word span)
     session.methods['deleted']=contexts.MethodEntry[binding]
     session.methods.pop('deleted');
@@ -58,6 +59,7 @@ main=():>int64=>{
     if restored.modules.length not=? 1 return 38
     if not restored.modules[0].options.explicit_copies return 39
     let copy=restored.session
+    if copy.local_place_roots.get(binding) not=? last return 43
     if types.primitive('int64' @copy.types) not=? word return 4
     if contexts.syntax_ref(parsed.root context @copy) not=? syntax return 5
     if restored.prelude_bindings.get('answer') not=? binding return 6
