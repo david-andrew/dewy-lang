@@ -678,6 +678,14 @@ class ModuleCompiler:
 
     def finish(self, entry: ModuleRecord) -> hir.Block:
         from . import check, unsafe_audit
+        from .analyze import place_contracts
+        # Parent-place safety needs imported helper bodies and must also
+        # check unused source functions before runtime reachability pruning.
+        source_items = [record.root for record in self.order]
+        place_contracts.validate(hir.Program(
+            entry.root.loc, entry.root.type, source_items, True,
+            tuple(record.srcfile for record in self.order), (),
+        ), self.registry, entry.srcfile)
         # Snapshot source assumptions before pruning unused imports or
         # lowering. Warm prelude records carry the same checked HIR.
         if any('$unsafe_assume' in record.srcfile.body for record in self.order):

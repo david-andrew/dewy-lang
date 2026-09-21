@@ -1,0 +1,7 @@
+ParentCounter=type of [value:int64]
+ExtraCounter=type of ParentCounter & [extra:int64]
+invalid=(callback:(@counter:ParentCounter):>void):>void=>{
+    let counter=ExtraCounter[40 2]
+    callback(@counter)
+}
+main=():>int64=>42

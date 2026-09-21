@@ -1,5 +1,6 @@
 from reporting import SrcFile, Error, Pointer, Warning
 import p"analyze/public_effects.dewy" as public_effects
+import p"analyze/place_contracts.dewy" as place_contracts
 import p"module_state.dewy" as modules
 import p"context.dewy" as contexts
 import p"source_views.dewy" as sources
@@ -80,6 +81,10 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
     let cached=saved
     if cached isnt? none and not reusable(cached loaded session) {cached=none}
     let source_files=sources.files(session)
+    let roots:array<place_contracts.Root>=[]
+    loop module in loaded {roots.push(place_contracts.Root[module.root module.context.source])}
+    let place_error=place_contracts.validate(roots source_files session)
+    if place_error isnt? none return place_error
     let env=values.Environment[session.hir session.types session.registry targets.max_length(session.target)]
     let prepared=bounds.prepare(env)
     let decisions:array<proofs.Decision>=[]

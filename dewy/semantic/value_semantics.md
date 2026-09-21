@@ -54,7 +54,14 @@ Default argument expressions run on every call that omits them, so `(a:array = [
 
 ## Places
 
-The current compiler supports places rooted in named mutable scalar, array, or structural-object bindings, including routes through object fields and individual array elements. The caller and parameter types must match exactly, a `const` root cannot be passed, and potentially overlapping routes cannot occupy two place arguments in one call. Nested calls may forward a place. The place cannot be returned, stored, or bound to another local.
+The current compiler supports places rooted in named mutable scalar, array, or structural-object bindings, including routes through object fields and individual array elements. The caller and parameter storage contracts must match, a `const` root cannot be passed, and potentially overlapping routes cannot occupy two place arguments in one call. Nested calls may forward a place. The place cannot be returned, stored, or bound to another local.
+
+A nominal child may lend its parent portion when the inherited fields have
+identical writable contracts. The callee's transitive access summary must
+prove that it neither replaces nor exposes the whole parent place: the
+complete value remains the child. Unknown callbacks cannot supply that
+proof. Field-only updates through known helpers are valid; strengthening a
+parent field in the child prevents lending it through a wider writable type.
 
 `@x` is the place `x` lives. A bare name is the value (or, for a function, the call). That is already how `@` works on functions: `sum` calls, `@sum` is the handle. Arrays and objects use the same word as the opt-in hole in value semantics.
 

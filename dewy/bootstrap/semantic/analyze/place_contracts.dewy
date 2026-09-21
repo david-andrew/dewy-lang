@@ -1,0 +1,103 @@
+from reporting import SrcFile, Error, Pointer
+import p"../context.dewy" as contexts
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"effects.dewy" as access
+
+# Field compatibility is checked at the call. Whole-value replacement and
+# escape need transitive body effects, including imported helpers. Analyze
+# the complete loaded graph once, only when a nominal parent view occurs.
+Root:type = const [id:addr source:addr]
+Candidate:type = const [id:addr source:addr arguments:array<addr>]
+parent_arguments = (call:hir.FunctionCall nodes:array<hir.AST> type_nodes:types.Table):>array<addr> => {
+    let signature=types.node_at(type_nodes hir.node_at(nodes call.func).value_type)
+    if signature is? types.OverloadType {
+        if call.selected_method_index is? none {
+            let result:array<addr>=[]
+            loop method in signature.methods {
+                let selected=types.node_at(type_nodes method)
+                $runtime_assert selected is? types.FunctionType
+                loop argument in signature_arguments(call selected nodes type_nodes) {if argument not in? result {result.push(argument)}}
+            }
+            return result
+        }
+        $runtime_assert call.selected_method_index <? signature.methods.length
+        signature=types.node_at(type_nodes signature.methods[call.selected_method_index])
+    }
+    if signature isnt? types.FunctionType return []
+    return signature_arguments(call signature nodes type_nodes)
+}
+signature_arguments = (call:hir.FunctionCall signature:types.FunctionType nodes:array<hir.AST> type_nodes:types.Table):>array<addr> => {
+    let result:array<addr>=[]
+    let positional:addr=0
+    let parameters=signature.pos_or_kw
+    # Both parameter kinds carry name/type/place; use the two loops so the
+    # positional cursor never consumes a keyword-only argument.
+    loop parameter in parameters {
+        let argument:addr?=none
+        if parameter.name isnt? none and parameter.name in? call.kw_args {argument=call.kw_args[parameter.name]}
+        else if positional <? call.pos_args.length {argument=call.pos_args[positional] positional+=1}
+        if not parameter.place or argument is? none {continue}
+        let value=hir.node_at(nodes argument)
+        let actual=types.node_at(type_nodes types.unfold(types.strip_refinement(value.value_type type_nodes) type_nodes))
+        if value is? hir.Place and actual is? types.ObjectType and actual.minted and not types.same_type(value.value_type parameter.value_type type_nodes) {result.push(argument)}
+    }
+    loop parameter in signature.kw_only {
+        if not parameter.place or parameter.name not in? call.kw_args {continue}
+        let argument=call.kw_args[parameter.name]
+        let value=hir.node_at(nodes argument)
+        let actual=types.node_at(type_nodes types.unfold(types.strip_refinement(value.value_type type_nodes) type_nodes))
+        if value is? hir.Place and actual is? types.ObjectType and actual.minted and not types.same_type(value.value_type parameter.value_type type_nodes) {result.push(argument)}
+    }
+    return result
+}
+validate = (roots:array<Root> source_files:array<SrcFile> session:contexts.Session):>Error? => {
+    let candidates:array<Candidate>=[]
+    let pending=roots
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let item=pending.pop
+        if item.id in? seen {continue}
+        seen.add(item.id)
+        let node=hir.node_at(session.hir item.id)
+        let source=item.source
+        if node is? hir.FunctionLiteral and node.source isnt? none {source=node.source}
+        if node is? hir.FunctionCall {
+            let arguments=parent_arguments(node session.hir session.types)
+            if arguments.length >? 0 {candidates.push(Candidate[item.id source arguments])}
+        }
+        loop child in hir.children(node) {pending.push(Root[child source])}
+    }
+    if candidates.length =? 0 return none
+    let ids:array<addr>=[]
+    loop root in roots {ids.push(root.id)}
+    let analysis=access.collect_roots(ids session.hir)
+    let effects=access.analyze_collected(analysis session.hir session.types)
+    loop candidate in candidates {
+        let call=hir.node_at(session.hir candidate.id)
+        $runtime_assert call is? hir.FunctionCall
+        let targets=access.direct_targets(call analysis session.hir)
+        loop argument in candidate.arguments {
+            let safe=targets isnt? none
+            if targets isnt? none {
+                loop target in targets {
+                    let literal=hir.node_at(session.hir target)
+                    $runtime_assert literal is? hir.FunctionLiteral
+                    let pairs=access.pair_arguments(call literal)
+                    let parameter:addr?=none
+                    if pairs isnt? none {loop pair in pairs {if pair.argument =? argument {parameter=pair.parameter}}}
+                    let summary=if parameter is? none none else effects.by_param_binding.get(parameter)
+                    if summary is? none {safe=false break}
+                    loop path in summary.rebinds {if path.steps.length =? 0 {safe=false}}
+                    loop path in summary.escapes {if path.steps.length =? 0 {safe=false}}
+                }
+            }
+            if not safe {
+                $runtime_assert candidate.source <? source_files.length
+                let value=hir.node_at(session.hir argument)
+                return Error[srcfile=source_files[candidate.source] title='parent place may replace or escape the child' pointers=[Pointer[value.loc 'the complete child must retain its identity through this parent view']] hint='update the parent fields without replacing or retaining the whole parent place']
+            }
+        }
+    }
+    return none
+}

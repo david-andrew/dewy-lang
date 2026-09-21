@@ -1,0 +1,10 @@
+ParentCounter=type of [value:int64]
+ExtraCounter=type of ParentCounter & [extra:int64]
+replace=(@counter:ParentCounter):>void=>{counter=ParentCounter[0]}
+forward=(@counter:ParentCounter):>void=>replace(@counter)
+# Unused functions are checked too; pruning must not hide this violation.
+invalid=():>void=>{
+    let counter=ExtraCounter[40 2]
+    forward(@counter)
+}
+main=():>int64=>42

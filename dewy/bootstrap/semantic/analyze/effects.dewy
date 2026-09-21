@@ -123,8 +123,11 @@ unwrap = (id:addr nodes:array<hir.AST>):>addr => {
 }
 
 collect = (root:addr nodes:array<hir.AST>):>Analysis => {
+    return collect_roots([root] nodes)
+}
+collect_roots = (roots:array<addr> nodes:array<hir.AST>):>Analysis => {
     let analysis = Analysis[]
-    let pending:array<addr> = [root]
+    let pending=roots
     let seen:set<addr> = set[]
     loop pending.length >? 0 {
         let id = pending.pop
@@ -425,7 +428,9 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> @analysi
 }
 
 analyze_effects = (root:addr nodes:array<hir.AST> type_nodes:types.Table callback_targets:dict<addr array<addr>>=[] value_casts_escape:bool=true):>ProgramEffects => {
-    let analysis = collect(root nodes)
+    return analyze_collected(collect(root nodes) nodes type_nodes callback_targets=callback_targets value_casts_escape=value_casts_escape)
+}
+analyze_collected = (analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table callback_targets:dict<addr array<addr>>=[] value_casts_escape:bool=true):>ProgramEffects => {
     analysis.callback_targets=callback_targets
     analysis.value_casts_escape=value_casts_escape
     # Scan bodies/defaults once for local effects and place-call transfers.

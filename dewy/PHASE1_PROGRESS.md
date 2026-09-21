@@ -887,3 +887,21 @@ focused probes and both new paired fixtures. A fresh generation built in
 63.57 seconds and executed the three existing kernels (42). Artifacts:
 `../dewy-build-artifacts/phase1-nominal-place-contracts-2026-09-20` and
 `../dewy-build-artifacts/phase1-nominal-place-contract-parity-2026-09-20`.
+
+Parent-place identity proof: both compilers now use transitive parameter
+access summaries to reject whole-parent replacement or escape through a
+child's wider nominal view. Field-only updates and independent value reads
+remain valid, including through imported helpers. Unknown callbacks cannot
+supply that proof. The pass sees all loaded source functions before runtime
+pruning, so an unused invalid function cannot disappear before checking.
+The native effect collector now accepts several module roots without
+repeating collection. Existing overload dispatch still rejects a mismatched
+place type before this proof is reached. Sibling-field invariants remain
+restricted to immutable records under the existing type rules.
+
+Validation: 112 hosted place/lifecycle/effect checks passed. The fresh native
+generation built in 64.90 seconds, executed the three ownership kernels (42),
+and passed all five paired nominal-place cases. The focused manifest now
+has 114 cases. Artifacts:
+`../dewy-build-artifacts/phase1-parent-place-effects-2026-09-20` and
+`../dewy-build-artifacts/phase1-parent-place-effects-parity-2026-09-20`.

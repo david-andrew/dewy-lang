@@ -1,0 +1,11 @@
+# A parent-place borrow may update its fields through another helper, while
+# the complete child retains its additional fields and nominal identity.
+ParentCounter=type of [value:int64]
+ExtraCounter=type of ParentCounter & [extra:int64]
+update=(@counter:ParentCounter):>void=>{counter.value=40}
+forward=(@counter:ParentCounter):>void=>update(@counter)
+main=():>int64=>{
+    let counter=ExtraCounter[0 2]
+    forward(@counter)
+    return counter.value+counter.extra
+}
