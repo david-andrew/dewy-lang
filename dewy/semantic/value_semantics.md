@@ -201,3 +201,18 @@ Dewy doesn't necessarily need to use exactly this breakdown, but the goal is for
 A user-defined shared-ownership type such as `Rc<T>` remains compatible with value semantics: the value being copied is an explicit handle, whose copy operation retains its shared payload. `@rc` selects the caller's storage for that handle; it does not mean "the payload behind this handle" and is not the mechanism that makes the payload escape.
 
 Supporting such types requires deterministic copy/transfer/release hooks, typed allocation capabilities, and lifetime-bounded payload places. The provisional substrate and its relationship to `@` are recorded in [`user_managed_storage.md`](user_managed_storage.md).
+
+## Resource iteration
+
+An iterator keeps its source alive until the loop no longer needs it. This
+also applies to a temporary returned by a factory. Normal completion and
+early exits release owned elements through their lifecycle hooks before
+releasing their storage. Dictionary key/value iteration evaluates the
+dictionary once; multiple iterator sources retain their evaluation order.
+
+The loop binding is a read-only loan of the current element. Creating an
+independent, mutable local from it uses the type's ordinary copy operation.
+The compiler can borrow a stable source or transfer an owner at its last use;
+otherwise it needs a valid copy. Move-only elements can therefore be read
+without requiring a copy hook. Dictionary mutation during iteration remains
+rejected by the existing container-stability check.

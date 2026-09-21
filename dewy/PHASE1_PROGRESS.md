@@ -2013,3 +2013,32 @@ three negative cases pass a freshly built native driver against hosted checking,
 with all accepted cases executed through x86-64 and C. They check immediate
 versus end-of-iteration drop timing, break/continue cleanup, function returns,
 nested loops, rejected repeated consumption, and complete storage reclamation.
+
+## Resource iterator source lifetimes (2026-09-21)
+
+Resource arrays and dictionaries now use ordinary lexical owners for iterator
+sources. Existing move, copy and read-only-view proofs choose how to keep each
+source alive. Read-only loop bindings borrow their elements; an owning value
+boundary in the body invokes the usual checked copy. Fresh factory results
+receive logical cleanup on returns, breaks, continues and normal completion.
+Dictionary key/value leaves share one evaluated receiver. Multi-iterator setup
+preserves source evaluation order, including ordinary sources before resources.
+The existing restriction on dictionary mutation during iteration is unchanged.
+
+The hosted borrow planner now recognizes stable single-place parameters when
+no ambient call or alias can change their storage. Native lowering no longer
+rejects an addressed source after the borrow planner has proven its lifetime.
+The hosted padded-iterator path stores a borrowed element word into its cell;
+it must not treat an already-lowered record load as an owning function call.
+
+Validation: 21 focused hosted checks and 59 adjacent borrow/view checks pass.
+Resource iteration and place-view programs run through hosted/native checking
+and x86-64/C execution, including zero retained bytes over 100 early-return
+loops. The final source-order/dictionary-source/view bundle passes five
+positive and seven negative cases. The rebuilt native driver checks and emits
+its own source (21,229,873 bytes). The preceding `5e4281cb` direct-route fixed
+point also completed all 184 explicit hosted/native parity cases; this newer
+batch is not yet a fresh fixed-point certification. These changes do not
+complete Phase 1: entry places, broader field transfers and placement, full
+strict-copy acceptance, effect-row inference and proof provenance still need
+work.

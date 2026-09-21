@@ -1,0 +1,11 @@
+# Fresh iterator sources own resources until their last loop use.
+# Early returns release the same lexical owner on every repeated call.
+let drops:int64=0
+let copies:int64=0
+Handle=type of [id:int64
+$__drop__ release=():>void=>{drops+=id}
+$__copy__ clone=():>Handle=>{copies+=1 Handle[id]}
+]
+make=():>array<Handle>=>[Handle[20] Handle[22]]
+work=():>int64=>{loop x in make() {return x.id+22} return 1}
+main=():>int64=>{if work() not=?42 or drops not=?42 return 1 let before:int64=_arena_live_bytes loop i in 0.. and i<?100 {if work() not=?42 return 2} $runtime_assert _arena_live_bytes=?before return 42}

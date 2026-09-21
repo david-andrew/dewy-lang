@@ -427,18 +427,25 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
         places |= function.places
     exposed = exposed_roots(plan, source_bindings)
     plan.exposed_bindings = exposed
+    # A single place parameter can be stable too, provided no call can
+    # change it through an ambient alias. Unknown calls write the sentinel.
+    ambient = analyze_global_writes(root, plan.globals | captured | {-1})
     for function in plan.functions.values():
+        place_stable = (len(function.places) == 1
+                        and not function.writes & (plan.globals | captured)
+                        and not any(ambient.get(id(node)) for node in _walk_function(function.literal)
+                                    if isinstance(node, hir.FunctionCall)))
         for binding in function.locals:
             if binding not in function.writes and binding not in places and binding not in plan.globals and binding not in captured and binding not in exposed:
                 plan.stable_bindings.add(binding)
         for param in literal_params(function.literal):
             binding = param.binding_id
-            if binding is None or binding in captured or binding in plan.globals or binding in exposed or param.place:
-                continue   # place parameters need the ambient graph the native pass has
+            if binding is None or binding in captured or binding in plan.globals or binding in exposed or (param.place and not place_stable):
+                continue
             summary = effects.for_param_binding(binding)
             if summary is not None:
                 plan.stable_parameters[binding] = summary
-    plan.ambient_writes = analyze_global_writes(root, (plan.globals | captured) - plan.named.keys())
+    plan.ambient_writes = ambient
     # A nonescaping place call only lends its owner for that call. It must
     # conflict while a view is live, but need not lengthen the view past its
     # last use. Unknown or retaining calls keep the whole-scope exclusion.

@@ -35,6 +35,7 @@ Plan:type = [
     transfer_sites:set<addr>=set[]
     consume_sites:set<addr>=set[]
     consumed_bindings:set<addr>=set[]
+    iteration_loans:set<addr>=set[]
     view_sites:set<addr>=set[]
     view_bindings:set<addr>=set[]
     recursive_drops:dict<string addr>=[]
@@ -596,6 +597,94 @@ capture_result = (id:addr loc:Span @session:contexts.Session):>Captured => {
     let value=put(hir.ExpressedIdentifier[loc type name binding_id] @session)
     return Captured[declaration value]
 }
+# Iteration reuses ordinary lexical ownership. Keep one source declaration
+# alive for the loop, so the usual proof chooses borrow, move or copy. The
+# loop target remains a read-only element loan; body value boundaries copy.
+iterator_leaves=(id:addr nodes:array<hir.AST>):>array<addr>=>{
+    let node=hir.node_at(nodes id)
+    if node is? hir.IteratorExpression return [id]
+    if node is? hir.MultiIteratorExpression return node.iterators
+    return []
+}
+prepare_iterations=(id:addr @seen:set<addr> @plan:Plan @session:contexts.Session):>void=>{
+    if id in? seen return
+    seen.add(id)
+    let node=hir.node_at(session.hir id)
+    if node is? hir.FunctionLiteral and node.proof return
+    let children:array<addr>=[]
+    hir.push_children(node @children)
+    loop child in children {prepare_iterations(child @seen @plan @session)}
+    if node isnt? hir.Flow return
+    let needed=false
+    loop arm_id in node.arms {
+        let arm=hir.node_at(session.hir arm_id)
+        $runtime_assert arm is? hir.IfArm|hir.LoopArm
+        loop iterator_id in iterator_leaves(arm.condition session.hir) {
+            let iterator=hir.node_at(session.hir iterator_id)
+            $runtime_assert iterator is? hir.IteratorExpression
+            let source=hir.node_at(session.hir iterator.iterable)
+            let source_id=if source is? hir.DictEntries source.dictionary else iterator.iterable
+            if resource(hir.node_at(session.hir source_id).value_type session.types) isnt? none {needed=true}
+        }
+    }
+    if not needed return
+    let tail=node.default
+    let changed=false
+    let arms=node.arms
+    loop arms.length >? 0 {
+        let arm_id=arms.pop
+        let arm=hir.node_at(session.hir arm_id)
+        $runtime_assert arm is? hir.IfArm|hir.LoopArm
+        let prefix:array<addr>=[]
+        let dictionaries:dict<addr addr>=[]
+        let iterators=iterator_leaves(arm.condition session.hir)
+        let arm_needed=false
+        loop iterator_id in iterators {
+            let iterator=hir.node_at(session.hir iterator_id)
+            $runtime_assert iterator is? hir.IteratorExpression
+            let source=hir.node_at(session.hir iterator.iterable)
+            let source_id=if source is? hir.DictEntries source.dictionary else iterator.iterable
+            if resource(hir.node_at(session.hir source_id).value_type session.types) isnt? none {arm_needed=true}
+        }
+        loop iterator_id in iterators {
+            let iterator=hir.node_at(session.hir iterator_id)
+            $runtime_assert iterator is? hir.IteratorExpression
+            let source=hir.node_at(session.hir iterator.iterable)
+            # Source initialization remains left-to-right across ordinary
+            # and resource iterators. Normalized ranges have no setup value.
+            if not arm_needed or source is? hir.Range continue
+            if source is? hir.DictEntries {
+                let held=dictionaries.get(source.dictionary)
+                if held is? none {
+                    let saved=capture_result(source.dictionary source.loc @session)
+                    prefix.push(saved.declaration)
+                    held=saved.value
+                    dictionaries[source.dictionary]=held
+                }
+                source.dictionary=held
+                store(iterator.iterable source @session)
+            } else {
+                let saved=capture_result(iterator.iterable source.loc @session)
+                prefix.push(saved.declaration)
+                iterator.iterable=saved.value
+                store(iterator_id iterator @session)
+            }
+            let target=hir.node_at(session.hir iterator.target)
+            $runtime_assert target is? hir.ExpressedIdentifier and target.binding_id isnt? none
+            if resource(target.value_type session.types) isnt? none {plan.iteration_loans.add(target.binding_id)}
+        }
+        let inner=put(hir.Flow[node.loc node.value_type [arm_id] tail] @session)
+        if prefix.length >? 0 {
+            changed=true
+            prefix.push(inner)
+            tail=put(hir.Block[node.loc node.value_type prefix true] @session)
+        } else {tail=inner}
+    }
+    if changed {
+        $runtime_assert tail isnt? none
+        store(id hir.node_at(session.hir tail) @session)
+    }
+}
 # Fresh arguments supply owners; a checked place argument only lends one.
 owning_argument = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?=none):>void => {
     let node=hir.node_at(session.hir id)
@@ -877,6 +966,24 @@ expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:conte
     if node is? hir.DictView and resource(hir.node_at(session.hir node.dictionary).value_type session.types) isnt? none {
         dictionary_view(id node allowed inherited @plan @session frame)
         return
+    }
+    if node is? hir.DictEntries and resource(hir.node_at(session.hir node.dictionary).value_type session.types) isnt? none {
+        let source=hir.node_at(session.hir node.dictionary)
+        let borrowed=put(hir.Place[node.loc source.value_type node.dictionary] @session)
+        expression(borrowed allowed inherited @plan @session frame=frame)
+        return
+    }
+    if node is? hir.IteratorExpression {
+        let target=hir.node_at(session.hir node.target)
+        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none and target.binding_id in? plan.iteration_loans {
+            let source=hir.node_at(session.hir node.iterable)
+            if source is? hir.DictEntries {expression(node.iterable allowed inherited @plan @session frame=frame)}
+            else {
+                let borrowed=put(hir.Place[node.loc source.value_type node.iterable] @session)
+                expression(borrowed allowed inherited @plan @session frame=frame)
+            }
+            return
+        }
     }
     if node is? hir.DictStore and node.values isnt? none and resource(hir.node_at(session.hir node.values).value_type session.types) isnt? none {
         dictionary_store(id node allowed inherited @plan @session frame)
@@ -1199,12 +1306,22 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             let arm=hir.node_at(session.hir arm_id)
             $runtime_assert arm is? hir.IfArm|hir.LoopArm
             let branch:hir.IfArm|hir.LoopArm=arm
-            expression(branch.condition live inherited @plan @session frame=frame)
+            let branch_allowed=allowed
+            let branch_live=live
+            loop iterator_id in iterator_leaves(branch.condition session.hir) {
+                let iterator=hir.node_at(session.hir iterator_id)
+                $runtime_assert iterator is? hir.IteratorExpression
+                let target=hir.node_at(session.hir iterator.target)
+                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none and target.binding_id in? plan.iteration_loans {
+                    branch_allowed.add(target.binding_id) branch_live.add(target.binding_id)
+                }
+            }
+            expression(branch.condition branch_live inherited @plan @session frame=frame)
             let boundaries=loops
             if branch is? hir.LoopArm {boundaries.push(owners.length)}
             let body=scoped_body(branch.body @session)
             let active=owners
-            statement(body @active boundaries allowed inherited owning_result @plan @session composed_parent=composed_parent fresh_result=fresh_result)
+            statement(body @active boundaries branch_allowed inherited owning_result @plan @session composed_parent=composed_parent fresh_result=fresh_result)
             let rewritten=if branch is? hir.IfArm hir.IfArm[branch.loc branch.value_type branch.condition body] else hir.LoopArm[branch.loc branch.value_type branch.condition body]
             store(arm_id rewritten @session)
         }
@@ -1295,13 +1412,15 @@ alias_alive=(binding:addr read:addr dependent:dict<addr set<addr>> born:dict<add
 # Before cleanup adds artificial reads, identify last uses transferring
 # between declarations in one lexical block. Outer-owner conditional moves
 # need lifetime joins and are deliberately excluded by the same-block rule.
-local_transfers = (body:addr parameters:array<addr> @plan:Plan session:contexts.Session):>void => {
+local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Plan session:contexts.Session):>void => {
     let last:dict<addr addr>=[]
     let occurrences:dict<addr int>=[]
     let positions:dict<addr addr>=[]
     let captured:set<addr>=set[]
     let written:set<addr>=set[]
     let blocks:array<addr>=[]
+    let lexical=borrowed
+    loop loan in plan.iteration_loans {lexical.add(loan)}
     let pending:array<addr>=[body]
     loop pending.length >? 0 {
         let id=pending.pop
@@ -1331,6 +1450,7 @@ local_transfers = (body:addr parameters:array<addr> @plan:Plan session:contexts.
             occurrences[id]=occurrences.get(id 0)+1
         }
         if node is? hir.Block {blocks.push(id)}
+        if node is? hir.Declare and node.binding_id isnt? none {lexical.add(node.binding_id)}
         let children:array<addr>=[]
         hir.push_children(node @children)
         # Stack order must preserve the order of statements in each block.
@@ -1406,7 +1526,7 @@ local_transfers = (body:addr parameters:array<addr> @plan:Plan session:contexts.
             if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? locals and source.binding_id not in? captured {
                 if last.get(source.binding_id) =? declaration.expr and occurrences.get(declaration.expr 0) =? 1 and not alias_alive(source.binding_id declaration.expr dependent born last positions) {plan.transfer_sites.add(item)}
             }
-            if declaration.binding_id isnt? none and source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? locals and source.binding_id not in? captured and declaration.binding_id not in? captured and source.binding_id not in? written and declaration.binding_id not in? written {plan.view_sites.add(item)}
+            if declaration.binding_id isnt? none and source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? lexical and source.binding_id not in? captured and declaration.binding_id not in? captured and source.binding_id not in? written and declaration.binding_id not in? written {plan.view_sites.add(item)}
             if declaration.binding_id isnt? none and resource(source.value_type session.types) isnt? none {locals.add(declaration.binding_id)}
         }
     }
@@ -1514,7 +1634,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     if function.lifecycle is? none and not mentions_resource(id session) {plan.source=previous plan.function_source=previous_function_source plan.result_type=previous_result return}
     if resource(function.rettype session.types) isnt? none and returnable_result(function.body session) {function.body=return_result(function.body @session)}
     function.body=scoped_body(function.body @session)
-    local_transfers(function.body parameter_owners @plan session)
+    local_transfers(function.body parameter_owners allowed @plan session)
     # Add branch-sensitive transfers. Keep flagged owners in lexical owner
     # lists so nested scope/loop cleanup boundaries retain their indices.
     let owned:set<addr>=set[]
@@ -1607,6 +1727,8 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
         if value.lifecycle =? 'copy' {plan.copies[type.brand]=hook}
     }
     if plan.hooks.length =? 0 return none
+    let iteration_seen:set<addr>=set[]
+    loop root in roots {prepare_iterations(root @iteration_seen @plan @session)}
     # Before rewriting bodies, summarize calls which may change a selected
     # resource-array receiver. This includes transitive captured/global writes.
     let receivers:set<addr>=set[]

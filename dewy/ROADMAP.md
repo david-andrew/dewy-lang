@@ -448,8 +448,11 @@ in both lowerings and the parity tool is the gate.
   tombstones, without adding linear work to each pop. Cached resource-entry
   positions are reprobed because synthesized copies can compact the receiver.
   Dictionary values snapshots copy live components through their hooks; keys
-  keep ordinary value semantics. Resource iteration and entry-place lifetimes
-  remain pending.
+  keep ordinary value semantics.
+  Resource iterator sources now use ordinary lexical owners: stable sources
+  borrow, last uses move, and independent snapshots invoke checked copies.
+  Read-only element loans end with each iteration; source cleanup covers
+  early returns and loop exits. Entry-place lifetimes remain pending.
   Field and element overwrite now capture selectors and replacement values
   once, then drop the previous owner before installing the new one. This
   includes optional fields, nested arrays and borrowed receivers; side effects

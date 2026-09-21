@@ -966,3 +966,11 @@ insertions or disabled diagnostics were needed. Later additions to these
 modules must retain a proven borrow/move or explicitly request a runtime-sized
 copy. The remaining compiler modules still need work before whole-compiler
 strict acceptance; report completeness and acceptance parity remain gates.
+
+Resource iteration now keeps source owners alive through the loop, including
+fresh array/dictionary factories and early returns. Element bindings remain
+read-only loans; body value boundaries use ordinary copy/move rules. Shared
+dictionary leaves evaluate their receiver once, and mixed iterator sources
+retain evaluation order. Padded aggregate targets borrow the stored payload.
+Single-place view proofs also cover read-only borrowed parameters; conflicting
+aliases, ambient writes and escapes still prevent borrowing.

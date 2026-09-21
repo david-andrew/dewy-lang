@@ -3674,7 +3674,10 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     if not borrow_storage_matches(stored_type(node.expr state) read_type state.type_nodes) return false
     if node.expr in? state.array_snapshots return false
     let route=borrowing.route(node.expr state.input.nodes)
-    if route is? none or route.binding in? state.boxed return false
+    if route is? none return false
+    # Taking an owner's address for a later call does not invalidate an
+    # earlier view. The whole-function or scoped proof below checks storage
+    # stability; expression lowering loads the current box value.
     return borrowing.stable_owner(route state.stable_bindings state.stable_parameters) or node.binding_id in? state.scoped_views
 }
 mark_mutated = (id:addr @mutated:set<addr> state:State):>void => {

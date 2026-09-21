@@ -11,7 +11,7 @@ mutations still need further lifetime analysis.
 """
 from dataclasses import replace
 
-from . import hir, ty, lifecycle, bindings
+from . import hir, ty, lifecycle, bindings, resource_iteration
 from ..parser import t0
 from .errors import not_implemented, user_error
 from ..reporting import Pointer
@@ -79,6 +79,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     registry = root.binding_registry if isinstance(root, hir.Program) else None
     if registry is None:
         reject(root, 'checked ownership binding metadata')
+
+    iteration_loans = resource_iteration.prepare(root, registry, resource)
 
     # Splitting a resource mutation into cleanup and storage operations must
     # not reselect a receiver changed by an argument or selector. Use the
@@ -753,6 +755,17 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     def expression(node, allowed, *, inherited=False, control=None):
         if isinstance(node, hir.DictView) and resource(node.dictionary.type) is not None:
             return dictionary_view(node, allowed, inherited, control)
+        if isinstance(node, hir.DictEntries) and resource(node.dictionary.type) is not None:
+            receiver = expression(hir.Place(node.loc, node.dictionary.type, node.dictionary), allowed,
+                                  inherited=inherited, control=control)
+            return replace(node, dictionary=receiver.target)
+        if isinstance(node, hir.IteratorExpression) and node.target.binding_id in iteration_loans:
+            if isinstance(node.iterable, hir.DictEntries):
+                iterable = expression(node.iterable, allowed, inherited=inherited, control=control)
+            else:
+                iterable = expression(hir.Place(node.loc, node.iterable.type, node.iterable), allowed,
+                                      inherited=inherited, control=control).target
+            return replace(node, iterable=iterable)
         if isinstance(node, hir.DictStore) and node.values is not None and resource(node.values.type) is not None:
             return dictionary_store(node, allowed, inherited, control)
         if (isinstance(node, hir.DictRemove) and node.key is None and node.values is not None
@@ -819,7 +832,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         return replace(node, **{name: mapped(getattr(node, name), lambda child: expression(child, allowed, inherited=inherited, control=control))
                                 for name in hir.child_fields(type(node))})
 
-    def local_transfers(body, parameter_owners):
+    def local_transfers(body, parameter_owners, borrowed_parameters):
         """Prove same-scope transfers before introducing cleanup calls.
 
         Later branches count as uses, and captures prevent transfer. Owners
@@ -833,6 +846,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if isinstance(node, hir.ExpressedIdentifier):
                 written.add(node.binding_id)
         blocks = []
+        lexical = {owner.binding_id for owner in parameter_owners} | iteration_loans | borrowed_parameters
         pending = [body]
         while pending:
             node = pending.pop()
@@ -853,6 +867,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 occurrences[id(node)] = occurrences.get(id(node), 0) + 1
             if isinstance(node, hir.Block):
                 blocks.append(node)
+            if isinstance(node, hir.Declare):
+                lexical.add(node.binding_id)
             pending.extend(reversed(tuple(hir.children(node))))
         result, views, consumes = set(), set(), set()
         # A lexical position is enough for this same-block proof. Dependent
@@ -932,7 +948,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         and last.get(source.binding_id) == id(source) and occurrences[id(source)] == 1
                         and not alive_after(source.binding_id, id(source))):
                     result.add(id(node))
-                if (isinstance(source, hir.ExpressedIdentifier) and source.binding_id in local
+                if (isinstance(source, hir.ExpressedIdentifier) and source.binding_id in lexical
                         and not {source.binding_id, node.binding_id} & (captured | written)):
                     views.add(id(node))
                 if resource(source.type) is not None:
@@ -1142,11 +1158,18 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if isinstance(node, hir.Flow):
                 arms = []
                 for arm in node.arms:
-                    condition = expression(arm.condition, live, inherited=literal.lifecycle == 'drop', control=control)
+                    iterators = ([arm.condition] if isinstance(arm.condition, hir.IteratorExpression) else
+                                 arm.condition.iterators if isinstance(arm.condition, hir.MultiIteratorExpression) else [])
+                    borrowed = {it.target.binding_id for it in iterators} & iteration_loans
+                    previous_allowed = set(allowed)
+                    allowed.update(borrowed)
+                    condition = expression(arm.condition, live | borrowed, inherited=literal.lifecycle == 'drop', control=control)
                     boundaries = [*loops, len(owners)] if isinstance(arm, hir.LoopArm) else loops
                     body = arm.body if isinstance(arm.body, hir.Block) else hir.Block(arm.body.loc, arm.body.type, [arm.body], True)
                     body = statement(body, list(owners), boundaries, fresh_result=fresh_result)
                     arms.append(replace(arm, condition=condition, body=body))
+                    allowed.clear()
+                    allowed.update(previous_allowed)
                 default = node.default
                 if default is not None:
                     if not isinstance(default, hir.Block):
@@ -1185,7 +1208,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             body = hir.Block(body.loc, body.type, [body], True)
         elif not body.scoped:
             body = replace(body, scoped=True)
-        transfers, views, consumes = local_transfers(body, parameter_owners)
+        transfers, views, consumes = local_transfers(body, parameter_owners, allowed)
         from .analyze.ownership_liveness import conditional_consumptions
         conditional, declarations_by_read = conditional_consumptions(body, parameter_owners, resource)
         for read, owner in conditional.items():

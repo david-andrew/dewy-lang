@@ -386,9 +386,18 @@ class _IteratorLowering:
                     payload,
                 )
             elif payload is not None:
+                # Array loads already produce the stored word/handle. A
+                # padded iterator borrows that payload, just like a plain
+                # iterator; ordinary cell construction would copy it (and
+                # could mistake an aggregate-typed raw load for a call).
+                writes = ([self._tag_write(target, payload, iterator.loc),
+                           self._intrinsic_call('__store_i64__',
+                               [replace(value, type='int64'), self._optional_payload_address(target, iterator.loc)],
+                               ty.VOID_TYPE, iterator.loc)]
+                          if array_value is not None else self._optional_write(target, value, payload))
                 defined_body = [
                     *value_updates,
-                    *self._optional_write(target, value, payload),
+                    *writes,
                     hir.Assign(
                         iterator.loc,
                         ty.VOID_TYPE,
