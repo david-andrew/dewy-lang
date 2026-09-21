@@ -4696,6 +4696,19 @@ class _BoundsValidator:
             return self._binding_id(node.pos_args[0])
         while isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
             node = node.expr
+        if isinstance(node, hir.Block):
+            expressed = [(index, item) for index, item in enumerate(node.items)
+                         if item.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)]
+            if len(expressed) != 1:
+                return None
+            index, value = expressed[0]
+            reads = self.predicate_bindings.read_bindings(value)
+            if any(reads & self.predicate_bindings.mutated_bindings(item)
+                   for item in node.items[index + 1:]):
+                return None
+            # The block's value was evaluated once. Its identity survives
+            # only if subsequent statements leave that selection unchanged.
+            return self._binding_id(value)
         measured = _sequence_of(node)
         if measured is not None:
             array_id = self._array_id(measured)

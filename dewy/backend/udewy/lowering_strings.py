@@ -2794,10 +2794,24 @@ class _StringLowering:
 
         def returning(body: hir.AST) -> hir.AST:
             if isinstance(body, hir.Block) and body.items:
-                last = body.items[-1]
-                if isinstance(last, hir.Return):
+                if body.type == ty.BOTTOM_TYPE:
                     return body
-                return replace(body, type=ty.BOTTOM_TYPE, items=[*body.items[:-1], hir.Return(last.loc, ty.BOTTOM_TYPE, last)])
+                values = [(index, node) for index, node in enumerate(body.items)
+                          if node.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)]
+                if len(values) != 1:
+                    self._target_error(body, 'returning branch does not have one expressed value')
+                index, value = values[0]
+                if index == len(body.items) - 1:
+                    return replace(body, type=ty.BOTTOM_TYPE, items=[*body.items[:-1], hir.Return(value.loc, ty.BOTTOM_TYPE, value)])
+                # An arm, like a function body, may express its result before
+                # trailing statements. Save it there and let those statements
+                # finish before returning; the last statement need not be a value.
+                saved = hir.ExpressedIdentifier(value.loc, value.type, self._new_result_name())
+                declaration = hir.Declare(value.loc, ty.VOID_TYPE, 'let', saved.name, value.type, value)
+                return replace(body, type=ty.BOTTOM_TYPE, items=[
+                    *body.items[:index], declaration, *body.items[index + 1:],
+                    hir.Return(value.loc, ty.BOTTOM_TYPE, saved),
+                ])
             if isinstance(body, hir.Return):
                 return body
             return hir.Return(body.loc, ty.BOTTOM_TYPE, body)

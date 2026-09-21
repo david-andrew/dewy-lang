@@ -1613,3 +1613,19 @@ final pair. Generations 2 and 3 took 131 s and 164 s while the full suite and
 other checks ran concurrently; these timings are not performance baselines.
 Artifacts: `../dewy-build-artifacts/phase1-truncate-integration-2026-09-21`
 and `../dewy-build-artifacts/phase1-truncate-parity-2026-09-21`.
+
+Full-suite checkpoint at `61a044bd`: 3,514 passed, 14 skipped, one bounds-
+visitor mismatch. Native retained the identity of a block's saved scalar
+result while hosted analysis retained only its numeric interval. Hosted
+blocks now expose that identity only when trailing statements cannot change
+it; assignments and mutable calls invalidate it. All 65 cases now agree
+with the native bounds visitor produced by the full run.
+
+The new result-order regression also exposed hosted conditional-return
+lowering using a branch's last statement as its result. It now saves the
+unique expressed value before trailing statements and returns it afterward,
+matching the native implementation and the existing function-body rule.
+Validation: 17 adjacent hosted checks pass. Positive/negative result-fact
+cases and string/array snapshot cases pass both compilers and both backends.
+No µDewy semantics changed. The full-suite count above records the original
+run; it is not a claim that the entire suite was rerun after this repair.

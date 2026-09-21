@@ -1,0 +1,11 @@
+# A block's result is selected where it is expressed. Later statements run,
+# but do not turn that earlier value into a read of different storage.
+let calls:int64=0
+minimum=(a:int64 b:int64):>int64<v=>v<=?a and v<=?b>=>
+    if a<?b {let result=a result calls+=1}
+    else {let result=b result calls+=1}
+main=():>int64=>{
+    let a=minimum(42 50)
+    let b=minimum(50 42)
+    return if calls=?2 and a=?42 b else 0
+}
