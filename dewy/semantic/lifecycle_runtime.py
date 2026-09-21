@@ -90,6 +90,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     receivers.update(bindings.access_path(node.target).binding_id
                      for node in hir.walk(root) if isinstance(node, (hir.MemberAssign, hir.IndexAssign))
                      and resource(node.target.type) is not None)
+    receivers.update(bindings.access_path(node.keys).binding_id
+                     for node in hir.walk(root) if isinstance(node, hir.DictRemove)
+                     and node.key is None and node.values is not None
+                     and resource(node.values.type) is not None)
     receivers.discard(None)
     argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
     readonly_arguments = effects.read_only_places(root, effect_context) if receivers else set()
@@ -599,7 +603,26 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                        pos_args=[argument(arg, allowed, inherited, control) for arg in node.pos_args],
                        kw_args={name: argument(arg, allowed, inherited, control) for name, arg in node.kw_args.items()})
 
+    def dictionary_clear(node, allowed, inherited, control):
+        # Dictionary bookkeeping still belongs to DictRemove. Run checked
+        # element cleanup first, then let it release storage and reset the
+        # table. Freeze the shared dictionary route once for both fields.
+        if not isinstance(node.keys, hir.MemberAccess) or not isinstance(node.values, hir.MemberAccess):
+            reject(node, 'a dictionary clear without rooted storage')
+        owner = node.keys.value
+        borrowed = expression(hir.Place(node.loc, owner.type, owner), allowed,
+                              inherited=inherited, control=control)
+        prefix = []
+        selected = freeze_route(borrowed.target, node.loc, bindings.access_path(owner).binding_id, prefix)
+        keys = replace(node.keys, value=selected)
+        values = replace(node.values, value=selected)
+        return hir.Block(node.loc, node.type, [*prefix, *cleanup((), node.loc, selected=values),
+                                              replace(node, keys=keys, values=values)], False)
+
     def expression(node, allowed, *, inherited=False, control=None):
+        if (isinstance(node, hir.DictRemove) and node.key is None and node.values is not None
+                and resource(node.values.type) is not None):
+            return dictionary_clear(node, allowed, inherited, control)
         if control is not None and isinstance(node, (hir.Block, hir.Flow, hir.Return, hir.Break, hir.Continue, hir.OrThrow)):
             return control(node)
         if isinstance(node, hir.Suppress) and resource(node.item.type) is not None:

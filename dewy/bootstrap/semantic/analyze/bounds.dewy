@@ -735,6 +735,29 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         if array isnt? none {elements.store(@state array node.value checker.word_type node.loc checker.data.env @checker.data.registry) note_element_routes(array @checker)}
     }
     if node is? hir.DictStore|hir.DictRemove {
+        # Public dictionary length is its live count. Backing arrays may
+        # include tombstones, so their length facts cannot stand in for it.
+        let keys=node_at(node.keys checker)
+        if keys is? hir.MemberAccess {
+            forget_value(keys.value @state @checker)
+            # These are compiler-owned fields of an opaque dictionary,
+            # so the public field-route resolver deliberately excludes them.
+            # Derive the sibling route from the already checked keys route.
+            let key_id=bindings.array_route_id(node.keys checker.data.env.nodes @checker.data.registry)
+            let owner_type=types.node_at(checker.data.env.types views.structural_base(node_at(keys.value checker).value_type checker.data.env.types))
+            if key_id isnt? none and owner_type is? types.ObjectType {
+                let route=bindings.route_at(checker.data.registry key_id)
+                let field=types.object_field(owner_type 'live')
+                if route isnt? none and field isnt? none and route.path.length>?0 {
+                    let path=route.path
+                    path.pop;
+                    path.push('live')
+                    let live=bindings.route_id(@checker.data.registry route.root path field.value_type keys.loc)
+                    stores.forget(@state live @checker.data)
+                    if node is? hir.DictRemove and node.key is? none {facts.set_value(@state facts.Term[live] ranges.exact(0))}
+                }
+            }
+        }
         let arrays:array<addr>=[node.keys]
         let payload=node.values
         if payload isnt? none {arrays.push(payload)}

@@ -4718,8 +4718,9 @@ writable_container = (value:addr id:addr env:Environment @session:contexts.Sessi
     if binding.read_only_reason isnt? none return problem(id 'cannot mutate a constant container' binding.name env session)
     loop step in path.steps {
         let node = node_at(step session)
-        if node isnt? hir.MemberAccess return pending(id 'container mutation through an indexed place' env session)
-        if not node.mutable return problem(id 'cannot mutate an immutable container field' node.name env session)
+        # Array selections already carry ordinary bounds and rooted-place
+        # checks; storage lowering captures their selectors exactly once.
+        if node is? hir.MemberAccess and not node.mutable return problem(id 'cannot mutate an immutable container field' node.name env session)
     }
     return value
 }

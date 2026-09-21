@@ -900,3 +900,20 @@ The initial all-interval grouping made native self-check/lower/emission take
 terms brought it to 70.2 s on the same frozen source with fresh prelude caches
 and no concurrent local build (about 3.0 GiB peak RSS). These are isolated
 single-process front-end measurements, not complete compiler build timings.
+
+### Resource dictionaries and live-count facts (2026-09-21)
+
+Both lifecycle passes now lower dictionary `clear` as checked reverse-order
+value cleanup followed by ordinary table/storage reset. Indexed receiver
+selectors are captured once; rooted-place mutability and bounds rules still
+apply. Repeated clear does not repeat drops, and ordinary scope cleanup sees
+no remaining elements. Native checking now accepts writable indexed container
+receivers, matching the existing lowering and hosted checker.
+
+Dictionary/set `.length` is the live-entry count, not the backing-array
+length, which can include tombstones. Bounds checking records zero after
+clear and invalidates earlier live-count relations after stores and removals.
+Indexed aliases also lose affected descendant facts. Paired tests cover
+empty-length proofs, mutation invalidation, value independence, const fields,
+single selector evaluation, drop order and zero retained arena bytes. Resource
+dictionary entry lookup/store/pop and entry-place lifetimes remain pending.

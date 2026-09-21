@@ -2623,11 +2623,25 @@ class _BoundsValidator:
         self._eval(node.key, state, validate=validate)
         return None
 
+    def _dictionary_live_changed(self, keys, state, *, empty=False):
+        # Public .length reads the live count, not the backing-array length:
+        # removed entries can remain as tombstones until compaction.
+        if not isinstance(keys, hir.MemberAccess):
+            return
+        self._forget_container_value(keys.value, state)
+        member = hir.MemberAccess(keys.loc, ty.addr_type(), keys.value, 'live')
+        route = sb.array_route_id(member, self.registry)
+        if route is not None:
+            self._forget_global(route, state)
+            if empty:
+                self._set_interval(state, route, Interval.exact(0))
+
     def _eval_dict_remove(self, node: hir.DictRemove, state: State, *, validate: bool) -> Interval | None:
         if node.key is not None:
             self._eval(node.key, state, validate=validate)
         if node.default is not None:
             self._eval(node.default, state, validate=validate)
+        self._dictionary_live_changed(node.keys, state, empty=isinstance(node, hir.DictRemove) and node.key is None)
         for array in (node.keys, *([node.values] if node.values is not None else [])):
             array_id = self._array_id(array)
             if array_id is not None:
@@ -2659,6 +2673,7 @@ class _BoundsValidator:
         if node.value is not None:
             self._eval(node.value, state, validate=validate)
         # A store may append to both hidden arrays.
+        self._dictionary_live_changed(node.keys, state, empty=isinstance(node, hir.DictRemove) and node.key is None)
         for array in (node.keys, *([node.values] if node.values is not None else [])):
             array_id = self._array_id(array)
             if array_id is not None:

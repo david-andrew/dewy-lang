@@ -695,9 +695,32 @@ array_operation = (id:addr node:hir.FunctionCall method:hir.ArrayMethod allowed:
     loop argument in node.pos_args {owning_argument(argument allowed inherited @plan @session frame=frame)}
     loop [name argument] in node.kw_args {owning_argument(argument allowed inherited @plan @session frame=frame)}
 }
+dictionary_clear = (id:addr node:hir.DictRemove allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?):>void => {
+    # Drop the logical elements before DictRemove releases their storage and
+    # resets the hash table. Select the shared owner just once.
+    let keys=hir.node_at(session.hir node.keys)
+    $runtime_assert node.values isnt? none
+    let values=hir.node_at(session.hir node.values)
+    if keys isnt? hir.MemberAccess or values isnt? hir.MemberAccess {reject(node 'a dictionary clear without rooted storage' @plan) return}
+    let owner=hir.node_at(session.hir keys.value)
+    let borrowed=put(hir.Place[node.loc owner.value_type keys.value] @session)
+    expression(borrowed allowed inherited @plan @session frame=frame)
+    let prefix:array<addr>=[]
+    let selected=freeze_route(keys.value node.loc receiver_root(keys.value session.hir) @prefix @plan @session)
+    keys.value=selected values.value=selected
+    let selected_keys=put(keys @session) let selected_values=put(values @session)
+    drop_value(selected_values values.value_type node.loc set[] @prefix @plan @session)
+    node.keys=selected_keys node.values=selected_values
+    prefix.push(put(node @session))
+    store(id hir.Block[node.loc node.value_type prefix false] @session)
+}
 expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?=none):>void => {
     if plan.problem isnt? none return
     let node=hir.node_at(session.hir id)
+    if node is? hir.DictRemove and node.key is? none and node.values isnt? none and resource(hir.node_at(session.hir node.values).value_type session.types) isnt? none {
+        dictionary_clear(id node allowed inherited @plan @session frame)
+        return
+    }
     if node is? hir.Suppress and resource(hir.node_at(session.hir node.item).value_type session.types) isnt? none {
         fresh(node.item allowed inherited @plan @session frame=frame)
         let owner=capture_result(node.item node.loc @session)
@@ -1417,6 +1440,10 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
         }
         if node is? hir.MemberAssign|hir.IndexAssign and resource(hir.node_at(session.hir node.target).value_type session.types) isnt? none {
             let root=receiver_root(node.target session.hir)
+            if root isnt? none {receivers.add(root)}
+        }
+        if node is? hir.DictRemove and node.key is? none and node.values isnt? none and resource(hir.node_at(session.hir node.values).value_type session.types) isnt? none {
+            let root=receiver_root(node.keys session.hir)
             if root isnt? none {receivers.add(root)}
         }
         hir.push_children(node @pending)

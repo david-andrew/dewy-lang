@@ -437,6 +437,10 @@ in both lowerings and the parity tool is the gate.
   zero-length result fact even through an indexed receiver. `truncate` drops
   only the removed suffix and preserves the builtin's minimum-length facts;
   selectors and counts are evaluated once, with receiver stability checked.
+  Dictionary `clear` also drops values in reverse order before resetting
+  storage, including indexed receivers selected once. Dictionary/set live
+  length facts become zero after clear and are invalidated by later mutations.
+  Resource entry lookup, store/pop and entry-place lifetimes remain pending.
   Field and element overwrite now capture selectors and replacement values
   once, then drop the previous owner before installing the new one. This
   includes optional fields, nested arrays and borrowed receivers; side effects
