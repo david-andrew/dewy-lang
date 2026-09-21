@@ -1197,5 +1197,27 @@ separate checkouts. The combined local-move/array/parameter tree then passed
 100 hosted checks and built two byte-identical native generations with both
 backend execution checks. The final generation took 60 seconds under load.
 Artifacts: `../dewy-build-artifacts/phase1-resource-ownership-integration-2026-09-21`.
-Targeted second-generation lifecycle parity is running separately; CI is still
-running on the full-suite checkpoint, with the merged ownership commit queued.
+Targeted second-generation lifecycle parity passed all 33 cases; the full-suite
+checkpoint is green on CI (run 35572685303).
+
+Ownership/proof ordering follow-up: both file and in-memory hosted modules
+now materialize lifecycle operations before their first bounds and effect
+validation, matching native ordering. A module-local pass uses a cached hook
+inventory and marks the finished program so backend entry points cannot
+insert cleanup twice. The combined counter/array-length guard now compiles
+unchanged. Contradictory assertions and effect contracts are rejected by the
+semantic entry point as well as code generation.
+
+Custom copy receivers can now be factory and constructor temporaries,
+including nested copies and inherited hooks. Each receiver is evaluated once;
+the copy result is captured before dropping its temporary receiver. A shared
+fixture checks hook counts, independent storage and repeated-call reclamation.
+
+The prior combined ownership generation passed all 33 lifecycle manifest
+cases against the hosted compiler. The 744f25d7 full-suite checkpoint passed
+3,379 tests (14 skipped), and its CI run 35572685303 is green.
+
+Validation for this follow-up: 65 hosted/native lifecycle checks passed,
+including both output backends; all 53 module, prelude-cache, imported-effect,
+prototype and representation checks passed. The earlier hosted lifecycle
+coverage passed 108 cases before the temporary-receiver additions.

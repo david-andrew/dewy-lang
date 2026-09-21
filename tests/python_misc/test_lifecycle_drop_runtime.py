@@ -59,10 +59,9 @@ main=():>int64=>{
     return 42
 }
 '''
-    # The source-only graph has not materialized the implicit write yet.
-    check.typecheck_and_resolve(SrcFile(None, source))
-    with pytest.raises(ReportException, match='prove|assert'):
-        codegen(SrcFile(None, source))
+    for compile_ in (check.typecheck_and_resolve, codegen):
+        with pytest.raises(ReportException, match='prove|assert'):
+            compile_(SrcFile(None, source))
 
 
 def test_drop_effects_in_a_callee_invalidate_caller_facts():
@@ -74,10 +73,9 @@ release=():>void=>{total=1}
 dropper=():>void=>{let h=Handle[42]}
 main=():>int64=>{total=0 dropper() $assert total=?0 return 42}
 '''
-    # The source-only graph has not materialized the implicit write yet.
-    check.typecheck_and_resolve(SrcFile(None, source))
-    with pytest.raises(ReportException, match='prove|assert'):
-        codegen(SrcFile(None, source))
+    for compile_ in (check.typecheck_and_resolve, codegen):
+        with pytest.raises(ReportException, match='prove|assert'):
+            compile_(SrcFile(None, source))
 
 
 def test_parent_drop_runs_for_the_child_owner(tmp_path):
@@ -151,9 +149,9 @@ def test_factory_cleanup_is_in_its_effect_contract():
 make=():>Handle & allocates=>{let scratch=Handle[1] return Handle[42]}
 main=():>int64=>{let owner=make() return owner.token}
 ''')
-    check.typecheck_and_resolve(source)
-    with pytest.raises(ReportException, match='effect contract'):
-        codegen(source)
+    for compile_ in (check.typecheck_and_resolve, codegen):
+        with pytest.raises(ReportException, match='effect contract'):
+            compile_(source)
 
 
 def test_factory_cleanup_invalidates_facts_in_its_caller():
@@ -161,9 +159,9 @@ def test_factory_cleanup_invalidates_facts_in_its_caller():
 make=():>Handle=>{let scratch=Handle[1] return Handle[42]}
 main=():>int64=>{changed=0 let owner=make() $assert changed=?0 return owner.token}
 ''')
-    check.typecheck_and_resolve(source)
-    with pytest.raises(ReportException, match='assert'):
-        codegen(source)
+    for compile_ in (check.typecheck_and_resolve, codegen):
+        with pytest.raises(ReportException, match='assert'):
+            compile_(source)
 
 
 MOVE_WITH_EFFECT = '''let changed:int64=0
@@ -179,9 +177,9 @@ def test_implicit_move_hook_is_in_the_returning_functions_effects():
 make=():>Handle & allocates=>{let owner=Handle[42] return owner}
 main=():>int64=>{let owner=make() return owner.token}
 ''')
-    check.typecheck_and_resolve(source)
-    with pytest.raises(ReportException, match='effect contract'):
-        codegen(source)
+    for compile_ in (check.typecheck_and_resolve, codegen):
+        with pytest.raises(ReportException, match='effect contract'):
+            compile_(source)
 
 
 def test_implicit_move_hook_invalidates_caller_facts():
@@ -189,9 +187,9 @@ def test_implicit_move_hook_invalidates_caller_facts():
 make=():>Handle=>{let owner=Handle[42] return owner}
 main=():>int64=>{changed=0 let owner=make() $assert changed=?0 return owner.token}
 ''')
-    check.typecheck_and_resolve(source)
-    with pytest.raises(ReportException, match='assert'):
-        codegen(source)
+    for compile_ in (check.typecheck_and_resolve, codegen):
+        with pytest.raises(ReportException, match='assert'):
+            compile_(source)
 
 
 @pytest.mark.parametrize('suffix, row, diagnostic', [
@@ -202,9 +200,9 @@ def test_local_move_hooks_preserve_effect_checks(suffix, row, diagnostic):
     prefix = 'changed=0 ' if not row else ''
     source = SrcFile(None, MOVE_WITH_EFFECT + '\nmain=():>int64' + row +
                      '=>{' + prefix + 'let owner=Handle[42] let moved=owner ' + suffix + '}')
-    check.typecheck_and_resolve(source)
-    with pytest.raises(ReportException, match=diagnostic):
-        codegen(source)
+    for compile_ in (check.typecheck_and_resolve, codegen):
+        with pytest.raises(ReportException, match=diagnostic):
+            compile_(source)
 
 
 def test_native_move_hook_contracts(tmp_path):
@@ -286,9 +284,9 @@ ARRAY_DROP_EFFECT_CASES = [
 
 @pytest.mark.parametrize('source,diagnostic', list(zip(ARRAY_DROP_EFFECT_CASES, ['effect contract', 'assert'])))
 def test_array_element_drop_preserves_effect_checks(source, diagnostic):
-    check.typecheck_and_resolve(SrcFile(None, source))
-    with pytest.raises(ReportException, match=diagnostic):
-        codegen(SrcFile(None, source))
+    for compile_ in (check.typecheck_and_resolve, codegen):
+        with pytest.raises(ReportException, match=diagnostic):
+            compile_(SrcFile(None, source))
 
 
 def test_native_array_element_drop_contracts(tmp_path):

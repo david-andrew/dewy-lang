@@ -20,8 +20,7 @@ exercise=():>int64=>{
     if owner.token not=?42 or drops not=?4 return 5
     if consume(owner.copy()) not=?42 or drops not=?5 return 6
     let values=snapshot(Handle[42 [40 2]])
-    if drops not=?6 return 7
-    if values.length not=?2 return 8
+    if drops not=?6 or values.length not=?2 return 7
     return values[0]+values[1]
 }
 main=():>int64=>{

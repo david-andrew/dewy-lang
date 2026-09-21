@@ -16,7 +16,9 @@ from .errors import not_implemented
 from .analyze import public_effects
 
 
-def prepare(root: hir.Block, srcfile):
+def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, validate: bool = True):
+    if isinstance(root, hir.Program) and root.ownership_prepared:
+        return root
     declarations = {node.binding_id: node for node in root.items
                     if isinstance(node, hir.Declare) and isinstance(node.expr, hir.FunctionLiteral)
                     and node.expr.lifecycle is not None}
@@ -176,6 +178,14 @@ def prepare(root: hir.Block, srcfile):
                 if len(node.pos_args) != 1 or node.kw_args or not isinstance(node.pos_args[0], hir.Place):
                     reject(node, 'an invalid copy receiver')
                 receiver = node.pos_args[0].target
+                if isinstance(receiver, (hir.FunctionCall, hir.ObjectLiteral)):
+                    # A temporary receiver owns its resource until the copy
+                    # finishes. Snapshot the result before dropping that
+                    # receiver; neither evaluation nor cleanup is duplicated.
+                    owner, borrowed = capture(fresh(receiver, allowed, inherited), node.loc)
+                    copied = replace(node, pos_args=[replace(node.pos_args[0], target=borrowed)])
+                    result, value = capture(copied, node.loc)
+                    return hir.Block(node.loc, node.type, [owner, result, *cleanup([owner], node.loc), value], False)
                 while isinstance(receiver, hir.MemberAccess):
                     receiver = receiver.value
                 if not isinstance(receiver, hir.ExpressedIdentifier) or receiver.binding_id not in allowed:
@@ -352,7 +362,7 @@ def prepare(root: hir.Block, srcfile):
 
     def function(literal):
         nonlocal current_source
-        if literal.proof:
+        if literal.proof or selected is not None and id(literal) not in selected:
             return literal
         previous_source = current_source
         current_source = literal.source or srcfile
@@ -513,7 +523,8 @@ def prepare(root: hir.Block, srcfile):
             binding.declaration = node
             if isinstance(node.expr, hir.FunctionLiteral):
                 binding.function = node.expr
-    from .analyze import bounds
-    bounds.validate_bounds(prepared, registry, srcfile, target=root.target)
-    public_effects.validate(prepared, registry, srcfile)
-    return prepared
+    if validate:
+        from .analyze import bounds
+        bounds.validate_bounds(prepared, registry, srcfile, target=root.target)
+        public_effects.validate(prepared, registry, srcfile)
+    return replace(prepared, ownership_prepared=selected is None) if isinstance(prepared, hir.Program) else prepared

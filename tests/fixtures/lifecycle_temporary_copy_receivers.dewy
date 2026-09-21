@@ -1,0 +1,33 @@
+let made:int64=0
+let copies:int64=0
+let drops:int64=0
+Handle=type of [token:int64 values:array<int64>
+$__drop__
+release=():>void=>{drops+=1 token=0 values.clear}
+$__copy__
+duplicate=():>Handle=>{copies+=1 Handle[token values.copy()]}
+]
+CopiedChild=type of Handle & [label:string]
+make=():>CopiedChild=>{made+=1 CopiedChild[42 [1 2] 'kept']}
+exercise=():>int64=>{
+    let first=make().copy()
+    if made not=?1 or copies not=?1 or drops not=?1 return 1
+    let second=CopiedChild[42 [3] 'literal'].copy()
+    if copies not=?2 or drops not=?2 return 2
+    let third=make().copy().copy()
+    if made not=?2 or copies not=?4 or drops not=?4 return 3
+    if first.token not=?42 or second.token not=?42 or third.token not=?42 return 4
+    if first.values.length not=?2 or second.values.length not=?1 or third.values.length not=?2 return 5
+    if first.label not=?'kept' or second.label not=?'literal' or third.label not=?'kept' return 6
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 or drops not=?7 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {
+        made=0 copies=0 drops=0
+        if exercise() not=?42 or drops not=?7 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

@@ -172,6 +172,18 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
                 let place=hir.node_at(session.hir candidate.pos_args[0])
                 if place isnt? hir.Place {reject(candidate 'an invalid copy receiver' @plan) return}
                 let receiver=hir.node_at(session.hir place.target)
+                if receiver is? hir.FunctionCall|hir.ObjectLiteral {
+                    fresh(place.target allowed inherited @plan @session)
+                    let owner=capture_result(place.target candidate.loc @session)
+                    let copied:hir.FunctionCall=candidate
+                    copied.pos_args=[put(hir.Place[place.loc place.value_type owner.value] @session)]
+                    let result=capture_result(put(copied @session) candidate.loc @session)
+                    let items:array<addr>=[owner.declaration result.declaration]
+                    loop call in cleanup([owner.declaration] candidate.loc @plan @session) {items.push(call)}
+                    items.push(result.value)
+                    store(id hir.Block[candidate.loc candidate.value_type items false] @session)
+                    return
+                }
                 loop receiver is? hir.MemberAccess {receiver=hir.node_at(session.hir receiver.value)}
                 if receiver isnt? hir.ExpressedIdentifier or receiver.binding_id is? none or receiver.binding_id not in? allowed {reject(candidate 'an unavailable copy receiver' @plan)}
                 return

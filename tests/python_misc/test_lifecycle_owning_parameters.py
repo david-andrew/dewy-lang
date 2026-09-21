@@ -18,9 +18,9 @@ CASES = [
 
 @pytest.mark.parametrize('source,diagnostic', list(zip(CASES, ['effect contract', 'assert'])))
 def test_parameter_cleanup_enters_fact_and_effect_checks(source, diagnostic):
-    check.typecheck_and_resolve(SrcFile(None, source))
-    with pytest.raises(ReportException, match=diagnostic):
-        codegen(SrcFile(None, source))
+    for compile_ in (check.typecheck_and_resolve, codegen):
+        with pytest.raises(ReportException, match=diagnostic):
+            compile_(SrcFile(None, source))
 
 
 def test_native_parameter_cleanup_contracts(tmp_path):

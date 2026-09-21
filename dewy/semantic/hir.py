@@ -862,6 +862,9 @@ class Program(Block):
     # elaboration must recheck facts with those calls present before erasure.
     binding_registry: object | None = field(default=None, repr=False, compare=False)
     target: str = 'x86_64'
+    ownership_prepared: bool = field(default=False, repr=False, compare=False)
+    # Module checking inserts implicit lifecycle operations before proving
+    # facts. Backend entry points must not insert those operations again.
 
 
 @dataclass(slots=True, weakref_slot=True)

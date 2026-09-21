@@ -175,6 +175,7 @@ class ModuleCompiler:
         self.prelude_paths: set[Path] = set()
         self.representation_notes: list[representation.RepresentationNote] = []
         self.finished_roots: dict[int, hir.Block] = {}
+        self.lifecycle_hooks: dict[int, tuple[hir.Declare, SrcFile]] | None = None
 
     def _ensure_prelude(self) -> None:
         from . import check
@@ -398,7 +399,7 @@ class ModuleCompiler:
         # acquire different facts from a changed dependency. A separate cache
         # keyed only by this file's timestamp would reuse stale proofs.
         # `ctx.srcfile` includes the generated runner in entry test mode.
-        self._validate_and_select(root, ctx.srcfile, prelude_module=prelude, no_prelude=no_prelude, ctx=ctx)
+        root = self._validate_and_select(root, ctx.srcfile, prelude_module=prelude, no_prelude=no_prelude, ctx=ctx)
         exports: dict[str, sb.Binding] = {}
         for item in root.items:
             if not isinstance(item, hir.Declare) or item.binding_id is None:
@@ -640,7 +641,51 @@ class ModuleCompiler:
         return (isinstance(item, hir.Declare) and item.binding_id is not None
                 and isinstance(item.expr, (hir.FunctionLiteral, hir.OverloadedFunction)))
 
-    def _validate_and_select(
+    @staticmethod
+    def _hooks(root: hir.Block):
+        return (item for item in root.items if isinstance(item, hir.Declare)
+                and isinstance(item.expr, hir.FunctionLiteral) and item.expr.lifecycle is not None)
+
+    def _materialize_ownership(self, root: hir.Block, source: SrcFile) -> hir.Block:
+        from . import lifecycle_runtime
+        # Restored prelude records may already contain prepared hooks. Build
+        # their small inventory once; ordinary modules must not repeatedly
+        # copy or walk the complete imported/prelude graph for this pass.
+        if self.lifecycle_hooks is None:
+            self.lifecycle_hooks = {item.binding_id: (item, record.srcfile)
+                                    for record in self.order for item in self._hooks(record.root)}
+        if not self.lifecycle_hooks and not any(self._hooks(root)):
+            return root
+        # Imported hooks supply call identities, but only this module's
+        # functions (including nested literals/specializations) are rewritten.
+        prefix = [item for item, _ in self.lifecycle_hooks.values()]
+        sources = [source for _, source in self.lifecycle_hooks.values()]
+        combined = hir.Program(root.loc, root.type, [*prefix, *root.items], root.scoped,
+                               (*sources, *(source for _ in root.items)), (),
+                               binding_registry=self.registry, target=self.target)
+        selected = {id(node) for node in hir.walk(root) if isinstance(node, hir.FunctionLiteral)}
+        prepared = lifecycle_runtime.prepare(combined, source, selected=selected, validate=False)
+        return replace(root, items=prepared.items[len(prefix):])
+
+    def _validate_and_select(self, root: hir.Block, srcfile: SrcFile, *,
+                             prelude_module: bool, no_prelude: bool,
+                             ctx: object | None = None) -> hir.Block:
+        from .errors import NotImplementedYet
+        options = dict(prelude_module=prelude_module, no_prelude=no_prelude, ctx=ctx)
+        try:
+            # Both file and in-memory modules share the native ordering:
+            # insert implicit operations before proving facts about effects.
+            prepared = self._materialize_ownership(root, srcfile)
+        except NotImplementedYet:
+            # Unsupported ownership retains ordinary source fact diagnostics.
+            self._prove_and_select_representations(root, srcfile, **options)
+            raise
+        self._prove_and_select_representations(prepared, srcfile, **options)
+        assert self.lifecycle_hooks is not None
+        self.lifecycle_hooks.update((item.binding_id, (item, srcfile)) for item in self._hooks(prepared))
+        return prepared
+
+    def _prove_and_select_representations(
         self,
         root: hir.Block,
         srcfile: SrcFile,
@@ -729,7 +774,7 @@ class ModuleCompiler:
                 renamed.loc, renamed.type, renamed.items, renamed.scoped,
                 tuple(record.srcfile for _ in renamed.items),
                 (record.srcfile,) if record.explicit_copies else (),
-                binding_registry=ownership_registry, target=self.target,
+                binding_registry=ownership_registry, target=self.target, ownership_prepared=True,
             )
             for item in renamed.items:
                 if isinstance(item, hir.Void):
@@ -748,7 +793,7 @@ class ModuleCompiler:
             True,
             tuple(item_sources),
             tuple(record.srcfile for record in self.order if record.explicit_copies),
-            binding_registry=ownership_registry, target=self.target,
+            binding_registry=ownership_registry, target=self.target, ownership_prepared=True,
         )
         initialization.validate_initialization(root, self.registry, entry.srcfile)
         return root
@@ -802,7 +847,7 @@ def typecheck_program(
         test=test,
         debug_variables=debug_variables,
     )
-    compiler._validate_and_select(root, ctx.srcfile, prelude_module=False, no_prelude=no_prelude, ctx=ctx)
+    root = compiler._validate_and_select(root, ctx.srcfile, prelude_module=False, no_prelude=no_prelude, ctx=ctx)
     exports = {
         item.name: compiler.registry.by_id[item.binding_id]
         for item in root.items
