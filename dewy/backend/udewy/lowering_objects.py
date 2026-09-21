@@ -1341,6 +1341,20 @@ class _ObjectLowering:
                     expr=ptr,
                 ),
             ]
+        source = self._copy_source_expression(node.expr)
+        if (isinstance(source, hir.ExpressedIdentifier) and id(source) in self.moved_uses
+                and ty.unfold(ty.strip_refinement(source.type)) == object_type
+                and local_binding_key(source) in self.owned_objects):
+            # Both locals live in this frame. Transfer the complete record
+            # handle rather than cloning its fields; empty the old binding
+            # so cleanup remains correct on either side of a branch.
+            prelude, pointer = self._extract_object_pointer(node.expr)
+            self.moved_record_bindings.add(local_binding_key(source))
+            self.borrowed_fields[local_binding_key(node)] = set(self.borrowed_fields.get(local_binding_key(source), ()))
+            self.move_notes.append(MoveNote(self.srcfile, source.loc,
+                f'`{source.name}` is moved when bound to `{node.name}`: this is its last use, so its record storage is transferred', True))
+            return [*prelude, replace(node, decltype='let', annotation='int64', expr=pointer),
+                    hir.Assign(node.loc, ty.VOID_TYPE, replace(source, type='int64'), '=', self._int64_literal(node.loc, 0))]
         size, _offsets = self._object_layout(object_type, node)
         cell = hir.ExpressedIdentifier(
             node.loc,

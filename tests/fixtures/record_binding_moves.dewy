@@ -1,0 +1,41 @@
+Record:type=[text:string inner:[items:array<int64>]]
+make=():>Record=>["record {42}" [[42]]]
+exercise=():>int64=>{
+    let first=make()
+    let shared=first.copy()
+    let before:int64=_arena_allocated_bytes
+    let second=first
+    let third=second
+    let allocated:int64=_arena_allocated_bytes-before
+    third.inner.items.push(7)
+    third.text='changed'
+    if shared.text not=?'record 42' or shared.inner.items.length not=?1 return -1
+    return allocated
+}
+branch=(yes:bool):>int64=>{
+    let source=make()
+    if yes {
+        let taken=source
+        taken.inner.items.push(7)
+        return if taken.inner.items.length=?2 42 else 1
+    }
+    return 42
+}
+view=():>int64=>{
+    let source=make()
+    const held=@source.inner
+    let copy=source
+    copy.inner.items.clear
+    return if held.items.length=?1 and held.items[0]=?42 42 else 1
+}
+main=():>int64=>{
+    printl(exercise())
+    if branch(true) not=?42 or branch(false) not=?42 or view() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {
+        exercise();
+        if branch(true) not=?42 or branch(false) not=?42 or view() not=?42 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

@@ -3307,6 +3307,7 @@ class _Lowerer(
         self.owned_array_names = set(parameter_arrays or {})
         self.owned_array_elements = dict(parameter_arrays or {})
         self.owned_objects = dict(parameter_objects or {})
+        self.moved_record_bindings = set()
         # Already-lowered parameter copies belong to this scope just like
         # body declarations. Register them before lowering writes/returns so
         # replacement and every exit release their owned fields or payloads.
@@ -3703,8 +3704,8 @@ class _Lowerer(
                 movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node) or node.binding_id in strings
                 # A descriptor-backed destination can take the source's
                 # ownership. Fixed raw buffers still require their own layout.
-                array_destination = self._owned_array_declaration(node) is not None
-                walk(node.expr, depth, nested, transfer(node.expr, string_only=not array_destination))
+                aggregate_destination = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node)
+                walk(node.expr, depth, nested, transfer(node.expr, string_only=not aggregate_destination))
                 if movable and node.binding_id is not None and not nested:
                     counter += 1
                     owned[node.binding_id] = (counter, depth)
@@ -3840,7 +3841,14 @@ class _Lowerer(
                         length, element = self.owned_raw_arrays[local.name]
                         released.extend(self._release_raw_array_members(local, length, element, local.loc))
                     elif local_binding_key(local) in self.owned_objects:
-                        released.extend(self._release_object_members(local, self.owned_objects[local_binding_key(local)], local.loc))
+                        cleanup = self._release_object_members(local, self.owned_objects[local_binding_key(local)], local.loc)
+                        if local_binding_key(local) in self.moved_record_bindings:
+                            # A branch may have transferred this frame record's
+                            # handle. Only the path retaining it owns its fields.
+                            condition = self._intrinsic_call('__ne__', [local, self._int64_literal(local.loc, 0)], 'bool', local.loc)
+                            cleanup = [hir.Flow(local.loc, ty.VOID_TYPE, [hir.IfArm(local.loc, ty.VOID_TYPE, condition,
+                                       hir.Block(local.loc, ty.VOID_TYPE, cleanup, True))], None)]
+                        released.extend(cleanup)
                     else:
                         released.extend(self._release_owned_array(local, local.loc, element=self.owned_array_elements.get(local.name)))
             return released
