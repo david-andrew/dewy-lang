@@ -77,6 +77,26 @@ execution checks, the three native generations, matching last generations,
 and packaging remain mandatory. Release notes identify whether recovery was
 used. There is no automatic hosted fallback after a native build failure.
 
+### Recovery verified, 2026-09-21
+
+The hosted checker now builds the current native compiler source again:
+conditional array types use the proof-aware join, and the lifecycle helper
+no longer collides with the prelude's `capture`. A fresh hosted x86-64 pair
+seeded three native C generations from the matching compiler/library source
+snapshot. Native execution checks passed on x86-64 and C, and the final two
+generations matched for both compilers. Local digests (GCC 16, two LTO jobs):
+
+```text
+6cebe6abee8008f7da22545db6ed243d8c7376e105ae9882af8bb28af1e48da7  dewy
+36d83c3ac22e3363746ed4cd14d66a602528d1ece54805503320d9f6d1b9eefa  udewy
+```
+
+The independent [CI recovery run](https://github.com/david-andrew/dewy-lang/actions/runs/35562897036)
+also completed, publishing [native-8406363e1299](https://github.com/david-andrew/dewy-lang/releases/tag/native-8406363e1299).
+That published pair is now a compatible seed for the normal native release
+path. This restores release verification; it does not mark Phase 1 complete
+or certify the general test suite, whose repair/checkpoint is separate.
+
 ## Hosted parity gaps
 
 The subsequent [isolated Phase 0 inventory](PARITY_INVENTORY.md) completed
