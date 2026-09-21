@@ -710,6 +710,8 @@ class FunctionLiteral(AST):
     """Compiler-only ownership operation; the first parameter is its receiver.
     Kept in HIR so analyses and reachability need not decode hidden names.
     """
+    lifecycle_composition: bool = field(default=False, kw_only=True)
+    """Checked inheritance wrapper: its parent result becomes the child portion."""
 
 # TODO: Partial evaluation is roughly a stack of function calls. Explicitly
 # supplied values are evaluated and saved immediately; signature defaults stay

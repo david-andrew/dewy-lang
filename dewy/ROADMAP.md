@@ -433,8 +433,9 @@ in both lowerings and the parity tool is the gate.
   fields and forwarding through callbacks; callees do not drop borrowed owners.
   Explicit returns transfer existing local owners on the exiting path, including
   returns from branches and loops; the other owners still drop in reverse order.
-  General local transfers, move hooks, inherited
-  copies needing parent-result consumption, resource containers and general
+  Inherited copies consume their intermediate parent results, including nested
+  resources and multiple inheritance levels. General local transfers, move
+  hooks, resource containers and general
   owning arguments remain explicitly unsupported during code generation.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a

@@ -29,6 +29,7 @@ main=():>int64=>{
     session.hir.push(integer)
     session.hir.push(hir.TargetString[span text 'x86_64'])
     session.hir.push(hir.Declare[span word 'const' 'view' none 0 none view=true])
+    session.hir.push(hir.FunctionLiteral[span types.function_type([] [] none word [] @session.types) [] [] none word 0 lifecycle='copy' lifecycle_composition=true])
     session.hir_edits.push(contexts.HirEdit[0 integer])
     let binding=bindings.allocate(@session.registry syntax 'answer' 'value' span)
     let record=bindings.binding_at(session.registry binding)
@@ -59,12 +60,14 @@ main=():>int64=>{
     if types.primitive('int64' @copy.types) not=? word return 4
     if contexts.syntax_ref(parsed.root context @copy) not=? syntax return 5
     if restored.prelude_bindings.get('answer') not=? binding return 6
-    if copy.hir.length not=? 3 or copy.sources.length not=? 1 return 7
+    if copy.hir.length not=? 4 or copy.sources.length not=? 1 return 7
     let first=copy.hir[0]
     if first isnt? hir.Integer or first.value not=? integer.value return 8
     if copy.hir[1] isnt? hir.TargetString return 9
     let view=copy.hir[2]
     if view isnt? hir.Declare or not view.view return 37
+    let composed=copy.hir[3]
+    if composed isnt? hir.FunctionLiteral or composed.lifecycle not=?'copy' or not composed.lifecycle_composition return 40
     if copy.methods.length not=? 1 or 'retained' not in? copy.methods return 10
     if not bindings.has_binding(copy.registry last) return 20
     if bindings.binding_at(copy.registry last).name not=?'parameter' return 21

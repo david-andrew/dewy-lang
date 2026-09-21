@@ -99,7 +99,15 @@ def prepare(root: hir.Block, srcfile):
             drop(value, owner.expr.type, set())
         return result
 
-    def fresh(node, allowed, inherited):
+    def fresh(node, allowed, inherited, components=frozenset()):
+        if isinstance(node, hir.MemberAccess):
+            owner = node.value
+            while isinstance(owner, hir.MemberAccess):
+                owner = owner.value
+            if isinstance(owner, hir.ExpressedIdentifier) and owner.binding_id in components:
+                # The checked inheritance wrapper transfers every parent
+                # field into its complete child, consuming that intermediate.
+                return node
         # An explicit custom copy creates an independent owner. Its checked
         # call already carries the hook's effects and result contract.
         if isinstance(node, hir.FunctionCall):
@@ -127,7 +135,7 @@ def prepare(root: hir.Block, srcfile):
             operation = declarations.get(hook.binding_id)
             if operation is None or ty.unfold(ty.strip_refinement(operation.expr.pos_or_kw_args[0].type)) != shape:
                 reject(node, 'an adapted drop receiver without a checked composition')
-        return replace(node, fields=[replace(field, value=fresh(field.value, allowed, inherited)
+        return replace(node, fields=[replace(field, value=fresh(field.value, allowed, inherited, components)
                                             if resource(field.value.type) is not None else expression(field.value, allowed, inherited=inherited))
                                      for field in node.fields])
 
@@ -211,6 +219,12 @@ def prepare(root: hir.Block, srcfile):
                     reject(literal, 'owning parameters')
                 allowed.add(param.binding_id)
         owning_result = resource(literal.rettype) is not None
+        composed_parent = None
+        if literal.lifecycle_composition and literal.lifecycle == 'copy':
+            assert isinstance(literal.body, hir.Block) and len(literal.body.items) == 2
+            parent = literal.body.items[0]
+            assert isinstance(parent, hir.Declare)
+            composed_parent = parent.binding_id
         if literal.lifecycle is None and not mentions_resource(literal):
             current_source = previous_source
             return literal
@@ -248,7 +262,11 @@ def prepare(root: hir.Block, srcfile):
                     # Returning leaves this path, so a named local owner is
                     # at its last use. Borrowed parameters are deliberately
                     # absent from owners: lending cannot transfer ownership.
-                    if isinstance(node.item, hir.ExpressedIdentifier) and any(owner.binding_id == node.item.binding_id for owner in owners):
+                    if composed_parent is not None:
+                        assert isinstance(node.item, hir.ObjectLiteral)
+                        returned = fresh(node.item, live, False, {composed_parent})
+                        consumed = composed_parent
+                    elif isinstance(node.item, hir.ExpressedIdentifier) and any(owner.binding_id == node.item.binding_id for owner in owners):
                         returned = node.item
                         consumed = node.item.binding_id
                     else:

@@ -319,7 +319,8 @@ the caller becomes their owner. A result is evaluated before local cleanup,
 including an aggregate field whose owner's drop might mutate it. An explicit
 return can also transfer an existing local owner: that path exits without
 dropping the transferred value, while releasing the other locals. General
-local transfers and consumption of intermediate parent results remain pending. Both
+local transfers remain pending. Inherited copy wrappers consume the parent
+result into the completed child without dropping it as an extra owner. Both
 checkers now validate declarations, result identity, compiler-only access and
 the read-only copy receiver. The native snapshot codec retains this metadata.
 Explicit `.copy()` now resolves a custom copy hook into an ordinary checked
@@ -420,7 +421,7 @@ user-minted resources with allocator ownership. The allocation-capability
 protocol and remaining failure behavior need their own design before useful
 resource-owning hooks can be declared complete.
 
-### Inheritance — checked composition implemented, runtime pending
+### Inheritance — copy/drop composition implemented, move pending
 
 If `Child = type of Parent & [extra:string]`, an inherited parent copy/move
 hook returns `Parent`, not the complete `Child`. David approved applying the
@@ -440,8 +441,12 @@ custom copies of added fields remain ordinary checked calls. Multi-level
 inheritance composes through the immediate parent, retaining each level's
 result identity. Runtime drop composition now executes for fresh local owners, including
 ordinary string/array fields and scalar implicit results. Nested record fields
-and explicit fresh-result copy hooks are supported. Inherited copy wrappers
-that consume an intermediate parent result, move hooks and containers of
+and explicit fresh-result copy hooks are supported. Inherited copies consume
+the complete intermediate parent, including nested resource fields, without
+running that intermediate's drop. Only the finished child owns those fields;
+the parent operation's effects and child constructor's fact checks remain
+visible. The checked HIR and snapshot codec retain this composition contract.
+Move hooks and containers of
 resources still need ownership lowering.
 
 Provisional details following David's updated review guidance: an explicitly

@@ -6005,6 +6005,7 @@ def _inherit_lifecycle(alias: sb.Binding, owner: ty.ObjectType, method: ty.Metho
     binding = _hoist_hidden_function(f'{alias.name}__{method.name}$lifecycle', literal, ctx=replace(defining, srcfile=source))
     assert binding.function is not None
     binding.function.lifecycle = method.lifecycle
+    binding.function.lifecycle_composition = True
     method.binding_id = binding.id
     method.place_self = True
 

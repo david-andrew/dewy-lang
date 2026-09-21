@@ -5985,7 +5985,7 @@ inherit_lifecycle = (owner:addr method:types.MethodSpec id:addr env:Environment 
         }
         text="(@__dewy_value:__dewy_lifecycle_child):>__dewy_lifecycle_child => \{\nlet __dewy_parent_value=__dewy_lifecycle_parent(@__dewy_value)\nreturn __dewy_lifecycle_child[{fields.join(' ')}]\n}"
     }
-    return hoist_hidden_function("{child.brand}__{method.name}$lifecycle" text [HiddenAlias['__dewy_lifecycle_child' owner]] id env @session values=[hir.FieldBinding[entry.binding '__dewy_lifecycle_parent']] lifecycle=method.lifecycle)
+    return hoist_hidden_function("{child.brand}__{method.name}$lifecycle" text [HiddenAlias['__dewy_lifecycle_child' owner]] id env @session values=[hir.FieldBinding[entry.binding '__dewy_lifecycle_parent']] lifecycle=method.lifecycle lifecycle_composition=true)
 }
 # Code point order, as the hosted `sorted` on brand names (UTF-8 bytes order
 # as code points do).
@@ -6111,7 +6111,7 @@ module_scope = (scope:addr session:contexts.Session):>addr => {
 }
 # Typecheck a synthesized function literal as a module-level hidden
 # function, like a generic instance or a type's method.
-hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:addr env:Environment @session:contexts.Session values:array<hir.FieldBinding>=[] lifecycle:string?=none):>addr|Error => {
+hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:addr env:Environment @session:contexts.Session values:array<hir.FieldBinding>=[] lifecycle:string?=none lifecycle_composition:bool=false):>addr|Error => {
     let srcfile=SrcFile["<{name}>" text]
     let parsed=parser.parse(srcfile)
     if parsed is? Error return parsed
@@ -6140,6 +6140,7 @@ hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:a
     let checked=node_at(value session)
     $runtime_assert checked is? hir.FunctionLiteral and value <? session.hir.length
     checked.lifecycle=lifecycle
+    checked.lifecycle_composition=lifecycle_composition
     session.hir[value]=checked
     let binding=bindings.binding_at(session.registry binding_id)
     binding.value_type=checked.value_type binding.store_type=checked.value_type binding.function=value

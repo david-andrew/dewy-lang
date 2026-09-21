@@ -1,0 +1,40 @@
+let parent_drops:int64=0
+let leaf_drops:int64=0
+let parent_copies:int64=0
+let leaf_copies:int64=0
+LeafHandle=type of [token:int64 values:array<int64>
+$__drop__
+release=():>void=>{leaf_drops+=1 token=0 values.clear}
+$__copy__
+duplicate=():>LeafHandle=>{leaf_copies+=1 return LeafHandle[token values.copy()]}
+]
+ParentHandle=type of [leaf:LeafHandle
+$__drop__
+release=():>void=>{parent_drops+=1}
+$__copy__
+duplicate=():>ParentHandle=>{parent_copies+=1 return ParentHandle[leaf.copy()]}
+]
+DerivedHandle=type of ParentHandle & [extra:LeafHandle]
+FinalHandle=type of DerivedHandle & [text:string]
+exercise=():>int64=>{
+    let first=FinalHandle[LeafHandle[42 [1 2]] LeafHandle[7 [3]] "kept {42}"]
+    let second=first.copy()
+    # Parent results have become parts of the child, not extra owners to drop.
+    if parent_drops not=?0 or leaf_drops not=?0 return 1
+    if parent_copies not=?1 or leaf_copies not=?2 return 2
+    second.leaf.values.clear
+    second.extra.token=9
+    if first.leaf.values.length not=?2 or first.extra.token not=?7 return 3
+    if second.text not=?'kept 42' return 4
+    return first.leaf.token
+}
+main=():>int64=>{
+    if exercise() not=?42 or parent_drops not=?2 or leaf_drops not=?4 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {
+        parent_drops=0 leaf_drops=0 parent_copies=0 leaf_copies=0
+        if exercise() not=?42 or parent_drops not=?2 or leaf_drops not=?4 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}
