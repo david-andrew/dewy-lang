@@ -23,7 +23,7 @@ Binding:type = [
     # and mutation, separately from a read's current flow facts.
     store_type:addr?=none
     type_value:types.TypeAliasValue?=none
-    effect_value:effect_rows.Row?=none
+    effect_value:effect_rows.Contract?=none
     declaration:addr?=none
     function:addr?=none
     syntax:addr?=none
@@ -42,7 +42,7 @@ Binding:type = [
 
 # Generic instances retain the defining source and call context so a later
 # representation pass can instantiate again when an integer becomes bigint.
-GenericInstance:type = [generic:addr type_arguments:dict<string addr> context:addr effect_arguments:dict<string effect_rows.Row>=[]]
+GenericInstance:type = [generic:addr type_arguments:dict<string addr> context:addr effect_arguments:dict<string effect_rows.Contract>=[]]
 Route:type = const [id:addr root:addr path:array<string>]
 Registry:type = [
     next_id:addr=1

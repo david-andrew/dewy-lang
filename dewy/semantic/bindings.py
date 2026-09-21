@@ -26,7 +26,7 @@ class Binding:
     Both private values and borrowed places retain their written annotation;
     a place additionally owes that contract to the caller's storage."""
     type_value: ty.TypeAliasValue | None = None
-    effect_value: effect_rows.Row | None = None
+    effect_value: effect_rows.Contract | None = None
     declaration: hir.Declare | None = None
     function: hir.FunctionLiteral | None = None
     literal_path_parameter: str | None = None

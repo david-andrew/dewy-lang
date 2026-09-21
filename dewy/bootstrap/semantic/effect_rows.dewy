@@ -246,7 +246,24 @@ replace_variables = (contract:Contract? arguments:dict<string Row>):>Contract? =
     if contract is? none return none
     return Contract[if contract.allowed is? none none else substitute(contract.allowed arguments) contract.excluded]
 }
-infer = (formal:Contract? actual:Contract? variables:set<string> @arguments:dict<string Row>):>bool => {
+replace_contracts = (contract:Contract? solutions:dict<string Contract>):>Contract? => {
+    if contract is? none or contract.allowed is? none return contract
+    let allowed=contract.allowed
+    let combined=Contract[Row[allowed.atoms unknown=allowed.unknown]]
+    loop name in allowed.variables {
+        let part=solutions.get(name Contract[Row[variables=[name]]])
+        combined=join(combined part)
+    }
+    let excluded=contract.excluded
+    let known:set<string>=set[]
+    loop atom in excluded {known.add(atom_key(atom))}
+    loop atom in combined.excluded {
+        let key=atom_key(atom)
+        if key not in? known {known.add(key) excluded.push(atom)}
+    }
+    return Contract[combined.allowed excluded]
+}
+infer = (formal:Contract? actual:Contract? variables:set<string> @arguments:dict<string Contract>):>bool => {
     if formal is? none or formal.allowed is? none return implies(actual formal)
     let free:array<string>=[]
     let fixed:array<string>=[]
@@ -265,10 +282,15 @@ infer = (formal:Contract? actual:Contract? variables:set<string> @arguments:dict
     }
     let remaining:array<string>=[]
     loop key in supplied.variables {if key not in? fixed {remaining.push(key)}}
+    let excluded:array<Atom>=[]
+    if actual isnt? none {excluded=actual.excluded}
     loop atom in atoms {
         if atom.subject isnt? none and atom.subject.kind =? 'parameter' return false
     }
+    loop atom in excluded {
+        if atom.subject isnt? none and atom.subject.kind =? 'parameter' return false
+    }
     let key=free[0]
-    arguments[key]=merge(arguments.get(key Row[]) Row[atoms remaining supplied.unknown])
+    arguments[key]=join(arguments.get(key Contract[Row[]]) Contract[Row[atoms remaining supplied.unknown] excluded])
     return true
 }

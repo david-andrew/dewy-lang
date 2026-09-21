@@ -5117,7 +5117,7 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
         if matches {
             loop [key actual] in inference.effects {
                 let prior=instance.effect_arguments.get(key)
-                if prior is? none or effect_rows.identity(effect_rows.Contract[prior]) not=? effect_rows.identity(effect_rows.Contract[actual]) {matches=false break}
+                if prior is? none or effect_rows.identity(prior) not=? effect_rows.identity(actual) {matches=false break}
             }
         }
         if matches { cached = binding_id break }

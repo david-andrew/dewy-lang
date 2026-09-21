@@ -144,9 +144,9 @@ there is no body from which to infer a narrower contract. Recursive calls,
 generic calls, conditional callback choices and callback reassignment retain
 possible effects; inferred rows also include synthesized lifecycle operations.
 Inferred wrappers preserve open negative guarantees; unknown operations still
-remove unproved exclusions. Scoped place-row inference, negative guarantees
-through generic row substitution,
-and the full allocation/failure vocabulary remain in progress.
+remove unproved exclusions. Generic row substitution preserves the guarantees
+shared by every contributing callback. Scoped place-row inference and the full
+allocation/failure vocabulary remain in progress.
 
 Effect rows have their own generic kind:
 
@@ -164,8 +164,10 @@ The initial inference supports one free row remainder in each callback bound.
 Two unconstrained remainders cannot be split uniquely. Callback-relative place
 subjects are not inferred into an outer row: their slots belong to the callback,
 not the enclosing signature. Such routes need an explicit scoped representation
-before this case can be supported. Negative-only callback rows conservatively
-infer an unknown row; their exclusions are not yet inferred as row arguments.
+before this case can be supported. Negative-only callback rows infer an open
+row with their exclusions. Combining callbacks keeps only shared guarantees;
+adding a permission can remove an incompatible inferred exclusion. Written
+exclusions remain obligations on the complete result.
 Effect-polymorphic type aliases are also pending.
 
 ## Calls and Pipes

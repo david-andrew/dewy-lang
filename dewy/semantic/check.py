@@ -7333,7 +7333,7 @@ def _declare_generic_parameters(parameters: p0.Block, *, ctx: Context) -> tuple[
         )
         if effect:
             binding.kind = 'effect'
-            binding.effect_value = effect_rows.Row(variables=(identity,))
+            binding.effect_value = effect_rows.Contract(effect_rows.Row(variables=(identity,)))
         else:
             binding.type_value = ty.TypeVariable(name, bound)
         alias_ctx.declarations[name] = ty.TYPE_TYPE
@@ -7387,12 +7387,12 @@ def _generic_signature(fn_ast: p0.BinOp, *, ctx: Context) -> tuple[ty.FunctionTy
 
 def _generic_argument_display(arguments, param):
     if param.kind == 'effect':
-        return effect_rows.display(effect_rows.Contract(arguments.effects[param.identity]), {}).removeprefix(' & ')
+        return effect_rows.display(arguments.effects[param.identity], {}).removeprefix(' & ')
     return type_to_dewy(arguments[param.name])
 
 
 def _instantiation_key(arguments, params):
-    return tuple((param.name, effect_rows.identity(effect_rows.Contract(arguments.effects[param.identity])) if param.kind == 'effect' else repr(arguments[param.name])) for param in params)
+    return tuple((param.name, effect_rows.identity(arguments.effects[param.identity]) if param.kind == 'effect' else repr(arguments[param.name])) for param in params)
 
 
 def _instantiation_name(name: str, bindings: dict[str, ty.TypeExpr], params: list[ty.GenericParam]) -> str:

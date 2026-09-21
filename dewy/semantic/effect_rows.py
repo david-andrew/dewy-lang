@@ -238,13 +238,23 @@ def replace_variables(contract: Contract | None, bindings: dict[str, Row]) -> Co
     return Contract(substitute(contract.allowed, bindings) if contract.allowed is not None else None, contract.excluded)
 
 
-def infer(formal: Contract | None, actual: Contract | None, variables: set[str], bindings: dict[str, Row]) -> bool:
+def replace_contracts(contract: Contract | None, bindings: dict[str, Contract]) -> Contract | None:
+    """Substitute full rows, retaining only guarantees shared by all terms."""
+    if contract is None or contract.allowed is None:
+        return contract
+    allowed = contract.allowed
+    combined = join(Contract(Row(allowed.atoms, unknown=allowed.unknown)),
+                    *(bindings.get(name, Contract(Row(variables=(name,)))) for name in allowed.variables))
+    return Contract(combined.allowed, tuple(dict.fromkeys((*contract.excluded, *combined.excluded))))
+
+
+def infer(formal: Contract | None, actual: Contract | None, variables: set[str], bindings: dict[str, Contract]) -> bool:
     """Infer one row remainder per callback bound, joining repeated uses.
 
     Two unknown remainders in one bound have no unique decomposition. Leave
     that case unresolved rather than choosing arbitrary permissions. Open
-    callback rows contribute unknown, never an empty row; their exclusions
-    continue to participate in the final callable-subtyping check.
+    callback rows contribute unknown, never an empty row. Their shared exclusions
+    survive substitution; an unknown contributor removes unsupported guarantees.
     """
     if formal is None or formal.allowed is None:
         return implies(actual, formal)
@@ -257,10 +267,11 @@ def infer(formal: Contract | None, actual: Contract | None, variables: set[str],
     fixed = Row(formal.allowed.atoms, tuple(key for key in formal.allowed.variables if key not in variables), formal.allowed.unknown)
     remainder = Row(tuple(atom for atom in supplied.atoms if not any(covers(old, atom) for old in fixed.atoms)),
                     tuple(key for key in supplied.variables if key not in fixed.variables), supplied.unknown)
-    if any(atom.subject is not None and atom.subject.kind == 'parameter' for atom in remainder.atoms):
+    excluded = actual.excluded if actual is not None else ()
+    if any(atom.subject is not None and atom.subject.kind == 'parameter' for atom in (*remainder.atoms, *excluded)):
         # Callback-relative places cannot escape into the enclosing signature
         # as if they were that signature's parameter slots.
         return False
     key = free[0]
-    bindings[key] = union(bindings.get(key, Row()), remainder)
+    bindings[key] = join(bindings.get(key, Contract(Row())), Contract(remainder, excluded))
     return True

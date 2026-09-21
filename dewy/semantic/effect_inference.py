@@ -162,14 +162,7 @@ def resolve_contracts(contract: rows.Contract | None, solutions: dict[str, rows.
     exclusions remain part of the original contract, independently of which
     variable carried a guarantee during inference.
     """
-    if contract is None or contract.allowed is None:
-        return contract
-    allowed = contract.allowed
-    parts = [rows.Contract(rows.Row(allowed.atoms, unknown=allowed.unknown))]
-    parts.extend(solutions.get(name, rows.Contract(rows.Row(variables=(name,)))) for name in allowed.variables)
-    combined = rows.join(*parts)
-    excluded = tuple(dict.fromkeys((*contract.excluded, *combined.excluded)))
-    return rows.Contract(combined.allowed, excluded)
+    return rows.replace_contracts(contract, solutions)
 
 
 def solve_contracts(definitions: dict[str, rows.Contract], constraints: tuple[Constraint, ...] = ()) -> dict[str, rows.Contract]:

@@ -100,6 +100,7 @@ def contract(ast, parameters, ctx):
         return rows.Subject('resource', resource.brand)
 
     permitted = None
+    row_terms = []
     excluded = []
     for term in terms:
         negative = isinstance(term, p0.Prefix) and term.op.symbol == 'no'
@@ -109,7 +110,7 @@ def contract(ast, parameters, ctx):
         if bound_row is not None:
             if negative:
                 fail(term, 'cannot exclude a row parameter', 'exclude a named effect family or resource instead')
-            permitted = rows.union(permitted or rows.Row(), bound_row)
+            row_terms.append(bound_row)
             continue
         if family == 'no_effects' and arguments is None or family == 'Effect' and arguments == []:
             if negative:
@@ -138,4 +139,8 @@ def contract(ast, parameters, ctx):
             excluded.extend(atoms)
         else:
             permitted = rows.union(permitted or rows.Row(), rows.Row(tuple(atoms)))
+    if row_terms:
+        combined = rows.join(rows.Contract(permitted or rows.Row()), *row_terms)
+        permitted = combined.allowed
+        excluded.extend(combined.excluded)
     return rows.Contract(permitted, tuple(excluded))

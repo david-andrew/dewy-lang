@@ -1028,7 +1028,7 @@ generic_parameters = (parameters:parser.Block context:contexts.Context @session:
         let binding = bindings.binding_at(session.registry binding_id)
         if effect {
             binding.kind='effect'
-            binding.effect_value=effect_rows.Row[variables=[identity]]
+            binding.effect_value=effect_rows.Contract[effect_rows.Row[variables=[identity]]]
         } else {binding.type_value = types.type_variable(name bound @session.types)}
         bindings.store_binding(@session.registry binding_id binding)
         bindings.bind(@session.scopes inner.scope name binding_id)
@@ -1293,6 +1293,7 @@ effect_contract = (id:addr parameters:array<types.PosOrKwArg> keyword_parameters
     if terms.length =? 0 return none
     loop parameter in keyword_parameters {parameters.push(types.PosOrKwArg[parameter.name parameter.value_type parameter.required parameter.place])}
     let permitted:effect_rows.Row?=none
+    let row_terms:array<effect_rows.Contract>=[]
     let excluded:array<effect_rows.Atom>=[]
     loop term in terms {
         let node=contexts.node_at(term context session)
@@ -1305,7 +1306,7 @@ effect_contract = (id:addr parameters:array<types.PosOrKwArg> keyword_parameters
         let bound_row=effect_syntax.row_binding(value context session)
         if bound_row isnt? none {
             if negative return contexts.problem(term 'cannot exclude a row parameter' 'exclude a named effect family or resource instead' context session)
-            permitted=effect_rows.merge(if permitted is? none effect_rows.Row[] else permitted bound_row)
+            row_terms.push(bound_row)
             continue
         }
         if (family =? 'no_effects' and arguments is? none) or (family =? 'Effect' and arguments isnt? none and arguments.length =? 0) {
@@ -1334,6 +1335,12 @@ effect_contract = (id:addr parameters:array<types.PosOrKwArg> keyword_parameters
             if negative {excluded.push(atom)}
             else {permitted=effect_rows.add(if permitted is? none effect_rows.Row[] else permitted atom)}
         }
+    }
+    if row_terms.length >? 0 {
+        let combined=effect_rows.Contract[if permitted is? none effect_rows.Row[] else permitted]
+        loop term in row_terms {combined=effect_rows.join(combined term)}
+        permitted=combined.allowed
+        loop atom in combined.excluded {excluded.push(atom)}
     }
     return effect_rows.Contract[permitted excluded]
 }

@@ -1,0 +1,7 @@
+Filesystem=type of any
+NoFilesystem:type=():>int64 & no reads<Filesystem>
+Unknown:type=():>int64
+let combine=<E:Effect>(first:():>int64 & E second:():>int64 & E):>int64 & E=>first()+second()
+# One unknown callback removes the guarantee of the shared row.
+invalid=(f:NoFilesystem g:Unknown):>int64 & no reads<Filesystem>=>combine(@f @g)
+main=():>int64=>42

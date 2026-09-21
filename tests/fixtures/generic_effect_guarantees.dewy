@@ -1,0 +1,15 @@
+Filesystem=type of any
+Database=type of any
+NoFilesystem:type=():>int64 & no reads<Filesystem>
+NoDatabase:type=():>int64 & no reads<Database>
+let apply=<E:Effect>(f:():>int64 & E):>int64 & E=>f()
+let combine=<E:Effect>(first:():>int64 & E second:():>int64 & E):>int64 & E=>first()+second()
+# Distinct negative-only substitutions need distinct cached instances.
+filesystem=(f:NoFilesystem):>int64 & no reads<Filesystem>=>apply(@f)
+database=(f:NoDatabase):>int64 & no reads<Database>=>apply(@f)
+repeated=(f:NoFilesystem g:NoFilesystem):>int64 & no reads<Filesystem>=>combine(@f @g)
+answer=():>int64=>21
+main=():>int64=>{
+    if filesystem(@answer) not=?21 or database(@answer) not=?21 return 1
+    return repeated(@answer @answer)
+}

@@ -591,8 +591,9 @@ calls, including recursion, conditional joins and independently reassigned
 handles. Selected value boundaries are checked after solving and again after
 lifecycle lowering; an unknown callback parameter stays unknown. Inferred wrappers now retain open negative guarantees using a separate finite
 exclusion fixed point: every body and incoming assignment must establish each
-surviving exclusion. Scoped polymorphic place rows and negative guarantees
-through generic row substitution remain in progress. Bare
+surviving exclusion. Generic row substitutions now retain shared negative
+guarantees as well, including their cache identity and restored bindings.
+Scoped polymorphic place rows remain in progress. Bare
 `allocates` / `no allocates` now classify logical copies and aggregate
 construction; fixed scalar local arrays and scalar record literals now share
 a bounded nonescaping frame-placement proof with lowering. Native record

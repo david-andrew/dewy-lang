@@ -100,22 +100,9 @@ compatible=(actual:rows.Contract? required:rows.Contract?):>bool=>{
 # its possible effects. A requirement selects a candidate, never proves it.
 GuaranteeRule:type=const [name:string source:rows.Contract covered:rows.Row=rows.Row[]]
 resolve_contracts=(contract:rows.Contract? solutions:dict<string rows.Contract>):>rows.Contract?=>{
-    if contract is? none or contract.allowed is? none return contract
-    let allowed=contract.allowed
-    let combined=rows.Contract[rows.Row[allowed.atoms unknown=allowed.unknown]]
-    loop name in allowed.variables {
-        let part=solutions.get(name rows.Contract[rows.Row[variables=[name]]])
-        combined=rows.join(combined part)
-    }
-    let excluded=contract.excluded
-    let known:set<string>=set[]
-    loop atom in excluded {known.add(rows.atom_key(atom))}
-    loop atom in combined.excluded {
-        let key=rows.atom_key(atom)
-        if key not in? known {known.add(key) excluded.push(atom)}
-    }
-    return rows.Contract[combined.allowed excluded]
+    return rows.replace_contracts(contract solutions)
 }
+
 add_candidates=(contract:rows.Contract? @vocabulary:array<rows.Atom> @known:set<string>):>void=>{
     if contract is? none return
     loop atom in contract.excluded {

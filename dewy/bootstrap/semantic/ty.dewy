@@ -668,7 +668,7 @@ module_field = (node:ModuleType name:string):>ModuleField? => {
 # Substitute free names, respecting generic binders inside a nested callable.
 # Instantiating the outer method is a separate operation: it removes that
 # method's binder before substitution rather than accidentally shadowing it.
-substitute = (id:addr bindings:dict<string addr> @nodes:Table effects:dict<string effect_rows.Row>=[]):>addr => {
+substitute = (id:addr bindings:dict<string addr> @nodes:Table effects:dict<string effect_rows.Contract>=[]):>addr => {
     let node = node_at(nodes id)
     if node is? Primitive | TypeVariable return bindings.get(node.name default=id)
     if node is? TypeNot return negate(substitute(node.item bindings @nodes effects=effects) @nodes)
@@ -700,7 +700,7 @@ substitute = (id:addr bindings:dict<string addr> @nodes:Table effects:dict<strin
     return id
 }
 
-substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:bool @nodes:Table effects:dict<string effect_rows.Row>=[]):>addr => {
+substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:bool @nodes:Table effects:dict<string effect_rows.Contract>=[]):>addr => {
     let inner = bindings
     let params = node.type_params
     if instantiate { params = [] }
@@ -715,7 +715,7 @@ substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:
     loop p in node.pos_or_kw { pos.push(PosOrKwArg[p.name substitute(p.value_type inner @nodes effects=effects) p.required p.place]) }
     loop p in node.kw_only { kw.push(KwOnlyArg[p.name substitute(p.value_type inner @nodes effects=effects) p.required p.place]) }
     let ret = substitute(node.ret inner @nodes effects=effects)
-    return function_type(pos kw node.rest ret params @nodes effects=effect_rows.replace_variables(node.effects effects) inferred_effect=node.inferred_effect)
+    return function_type(pos kw node.rest ret params @nodes effects=effect_rows.replace_contracts(node.effects effects) inferred_effect=node.inferred_effect)
 }
 
 # De Morgan's laws put not only on atoms. A type constructor is itself an atom

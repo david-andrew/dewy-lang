@@ -2903,7 +2903,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
             t.rest,
             substitute_type(t.ret, inner),
             list(t.type_params),
-            effect_rows.replace_variables(t.effects, inner.effects),
+            effect_rows.replace_contracts(t.effects, inner.effects),
             t.inferred_effect,
         )
     if isinstance(t, OverloadType):
@@ -2942,7 +2942,7 @@ def instantiate_method(m: FunctionType, type_args: dict[str, TypeExpr]) -> Funct
         m.rest,
         substitute_type(m.ret, type_args),
         [],
-        effect_rows.replace_variables(m.effects, getattr(type_args, 'effects', {})),
+        effect_rows.replace_contracts(m.effects, getattr(type_args, 'effects', {})),
         m.inferred_effect,
     )
 

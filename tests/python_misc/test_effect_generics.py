@@ -62,9 +62,9 @@ def test_row_inference_joins_repeated_callback_constraints():
     inferred = {}
     assert rows.infer(variable, rows.Contract(rows.Row((fs,))), {'E:1'}, inferred)
     assert rows.infer(variable, rows.Contract(rows.Row((db,))), {'E:1'}, inferred)
-    assert inferred['E:1'] == rows.union(rows.Row((fs,)), rows.Row((db,)))
+    assert inferred['E:1'] == rows.Contract(rows.union(rows.Row((fs,)), rows.Row((db,))))
     assert rows.infer(variable, None, {'E:1'}, inferred)
-    assert inferred['E:1'].unknown
+    assert inferred['E:1'].allowed.unknown
     # A slot belongs to its callback signature, not to the enclosing one.
     assert not rows.infer(variable, rows.Contract(rows.Row((rows.Atom('reads', rows.Subject('parameter', '0')),))), {'E:1'}, {})
 

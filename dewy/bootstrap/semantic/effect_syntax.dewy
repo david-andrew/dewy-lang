@@ -17,7 +17,7 @@ application = (id:addr context:contexts.Context session:contexts.Session):>Appli
     }
     return Application[views.identifier(id context session)]
 }
-row_binding = (id:addr context:contexts.Context session:contexts.Session):>rows.Row? => {
+row_binding = (id:addr context:contexts.Context session:contexts.Session):>rows.Contract? => {
     let name=views.identifier(views.unparen(id context session) context session)
     if name is? none return none
     let found=bindings.lookup(session.scopes context.scope name)

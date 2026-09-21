@@ -2179,3 +2179,31 @@ The preceding callable-inference revision, `69b8eb8d`, separately completed
 191/191 hosted/native parity cases and a byte-identical direct native fixed
 point. Its generation timings were 65 and 77 seconds under concurrent work;
 these are not isolated latency benchmarks and do not meet the 30-second goal.
+
+## Generic negative effect guarantees (2026-09-21)
+
+Generic row arguments now carry complete contracts, including negative
+promises. Inference combines permissions and retains only guarantees shared
+by every contributing callback. An unknown callback removes unsupported
+exclusions; adding a permission can invalidate an inherited exclusion.
+Explicitly written exclusions remain obligations on the complete row.
+
+Binding metadata, signature substitution, instance cache identity and native
+prelude serialization preserve these contracts. The ordinary inferred-row
+solver shares the same substitution helper. Callback-relative place exclusions
+remain rejected as generic row arguments until their scope can be represented;
+they must not accidentally name a slot in the enclosing signature.
+
+Validation: 60 hosted effect checks and 12 hosted prelude-cache checks pass.
+Two positive programs and one rejection case agree on both compilers and
+x86-64/C. A native cached prelude containing two distinct negative-only generic
+instances produces identical output before and after restoration, and both
+outputs execute correctly on both backends. The rebuilt native CLI reports
+4,985 bootstrap copy sites over 47,170 source lines (105.682/KLOC), within the
+unchanged 5,000/110 gates. Inventory:
+`../dewy-build-artifacts/phase1-generic-guarantees-copies.json`.
+
+The preceding integrated revision, `181db533`, reached another byte-identical
+direct fixed point, with native execution checks on both backends. Its own
+rebuilt pair confirms 4,981 sites over 47,154 lines (105.633/KLOC). Generation
+2/3 took 70/80 seconds during concurrent work; the latency target remains open.
