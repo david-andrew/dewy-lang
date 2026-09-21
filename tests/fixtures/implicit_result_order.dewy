@@ -1,0 +1,30 @@
+# An implicit result is evaluated at its source position. Trailing statements
+# still run; later mutation cannot change the saved value.
+let trace:int64=0
+scalar=():>int64=>{let value:int64=42 value value=99 trace+=1}
+text=():>string=>{let value:string='answer' value value='changed' trace+=1}
+array=():>array<int64>=>{let value:array<int64>=[40 2] value value.clear trace+=1}
+Record:type=[items:array<int64>]
+record=():>Record=>{let value=Record[[42]] value value.items.clear trace+=1}
+optional=():>Record?=>{let value:Record?=Record[[42]] value value=none trace+=1}
+branch=(choose:bool):>int64=>{if choose 42 else 43 trace+=1}
+verify=():>int64=>{
+    trace=0
+    if scalar() not=?42 or text() not=?'answer' return 1
+    let values=array()
+    if values.length not=?2 or values[0] not=?40 return 2
+    let object=record()
+    if object.items.length not=?1 or object.items[0] not=?42 return 3
+    let present=optional()
+    if present isnt? Record or present.items.length not=?1 return 4
+    if branch(true) not=?42 or branch(false) not=?43 return 5
+    if trace not=?7 return 7
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if verify() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

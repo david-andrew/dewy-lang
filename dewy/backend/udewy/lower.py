@@ -3936,6 +3936,19 @@ class _Lowerer(
             if len(value_indices) != 1:
                 self._target_error(node, 'function body does not have one implicit return value')
             value_index = value_indices[0]
+            if value_index != len(node.items) - 1:
+                # A body expresses its value at that position, but execution
+                # continues through the remaining statements. Save the value
+                # using the ordinary local-owner boundary and return it
+                # after the trailing statements have run.
+                value = node.items[value_index]
+                saved = hir.ExpressedIdentifier(value.loc, value.type, self._new_result_name())
+                declared = hir.Declare(value.loc, ty.VOID_TYPE, 'let', saved.name, value.type, value)
+                body = replace(node, type=ty.BOTTOM_TYPE, items=[
+                    *node.items[:value_index], declared, *node.items[value_index + 1:],
+                    hir.Return(node.loc, ty.BOTTOM_TYPE, saved),
+                ])
+                return self._lower_statement_body(body)
             items: list[hir.AST] = []
             for index, item in enumerate(node.items):
                 if index != value_index:

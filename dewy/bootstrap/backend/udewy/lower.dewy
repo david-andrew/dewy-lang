@@ -637,7 +637,7 @@ expression = (id:addr @state:State):>addr => {
     }
     if node is? hir.FunctionLiteral return function_value(id node @state)
     if node is? hir.ShortCircuit return put(hir.ShortCircuit[node.loc type node.op expression(node.left @state) expression(node.right @state)] @state)
-    if node is? hir.Block and state.cleanup_enabled return cleanup_block(node @state)
+    if node is? hir.Block and (state.cleanup_enabled or not types.is_primitive(types.node_at(state.type_nodes node.value_type) 'void')) return cleanup_block(node @state)
     if node is? hir.Block return put(hir.Block[node.loc type items(node.items @state) node.scoped] @state)
     if node is? hir.IfArm return put(hir.IfArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
     if node is? hir.LoopArm return put(hir.LoopArm[node.loc type expression(node.condition @state) expression(node.body @state)] @state)
@@ -5936,7 +5936,10 @@ cleanup_block = (node:hir.Block @state:State):>addr => {
     let result:addr?=none
     loop index in 0.. and index <? node.items.length {
         let item=node.items[index]
-        if index+1 =? node.items.length and not types.is_primitive(types.node_at(state.type_nodes node.value_type) 'void') {
+        let original=hir.node_at(state.input.nodes item)
+        # The expressed item need not be last. Save it at its evaluation
+        # point, then run trailing statements before releasing the scope.
+        if not types.is_primitive(types.node_at(state.type_nodes node.value_type) 'void') and not types.is_primitive(types.node_at(state.type_nodes original.value_type) 'void') {
             let value=owned_value(item @state)
             let actual=hir.node_at(state.nodes value)
             if types.is_primitive(types.node_at(state.type_nodes actual.value_type) 'never') {prefix.push(value)}

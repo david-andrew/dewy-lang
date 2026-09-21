@@ -1294,3 +1294,14 @@ native execution on both output backends. The preceding run also passed all
 21 adjacent hosted optional/union checks. Resource-union fixtures retain zero
 storage over 100 iterations; cleanup effects reject empty contracts and stale
 assertions in both compilers.
+
+
+Ordinary implicit function results now preserve their evaluation position even
+when statements follow them. Hosted lowering previously returned immediately;
+native block cleanup treated the last statement as the result. Both now save
+the expressed value and run trailing statements before returning/releasing the
+scope. The shared regression covers scalar, string, array, record, optional
+and conditional results, mutation after evaluation, and zero retained storage.
+All eight focused result-order and lifecycle integration checks passed,
+including hosted/native execution on both output backends. Mixed explicit
+and implicit returns retain their existing source-checking rules.
