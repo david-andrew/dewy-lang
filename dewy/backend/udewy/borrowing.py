@@ -61,7 +61,7 @@ class Plan:
     stable_bindings: set[int] = field(default_factory=set)
     stable_parameters: dict[int, ParameterEffects] = field(default_factory=dict)
     array_snapshots: set[int] = field(default_factory=set)             # id(Index) whose index may write the array
-    scoped_views: set[int] = field(default_factory=set)                # required view binding -> lexical lifetime proof
+    scoped_views: set[int] = field(default_factory=set)                # view binding -> interval/lexical proof
     view_scopes: dict[int, hir.Block] = field(default_factory=dict)
     view_regions: dict[int, list[hir.AST]] = field(default_factory=dict)
 
@@ -276,28 +276,30 @@ def _walk_function_subtree(root: hir.AST):
         stack.extend(children(node))
 
 
-def view_region(scope: hir.Block, declaration: hir.Declare, excluded: set[int]) -> list[hir.AST]:
-    """A statement interval ending at the last use of every derived alias.
+@dataclass
+class ViewScope:
+    items: list[hir.AST]
+    references: list[set[int]]
+    locals: set[int]
+    dependents: dict[int, set[int]]
+    starts: dict[int, int]
+    ends: dict[int, int]
 
-    Control-flow statements remain indivisible: a view read in a loop lives
-    across that entire loop. Aggregate value forwarding is conservatively
-    treated as a dependency even when later lowering will choose a copy.
-    Captured, exposed or outward-stored aliases keep the lexical lifetime.
-    """
+
+def prepare_view_scope(scope: hir.Block) -> ViewScope:
+    """Collect alias dependencies once for all candidate views in a block."""
     statements = [list(_walk_function_subtree(item)) for item in scope.items]
     references = [{node.binding_id for node in nodes if isinstance(node, hir.ExpressedIdentifier)
                    and node.binding_id is not None} for nodes in statements]
     locals_ = set()
     dependents: dict[int, set[int]] = {}
-    start = None
-    end = 0
+    starts, ends = {}, {}
     for index, nodes in enumerate(statements):
         for node in nodes:
-            if node is declaration:
-                start = index if start is None else min(start, index)
-                end = max(end, index)
             target = value = None
             if isinstance(node, hir.Declare):
+                starts.setdefault(id(node), index)
+                ends[id(node)] = index
                 locals_.add(node.binding_id)
                 if node.view or not _word_value(node.expr.type):
                     target, value = node.binding_id, node.expr
@@ -312,19 +314,30 @@ def view_region(scope: hir.Block, declaration: hir.Declare, excluded: set[int]) 
                     if isinstance(read, hir.ExpressedIdentifier) and read.binding_id is not None:
                         dependents.setdefault(read.binding_id, set()).add(target)
                     pending_values.extend(hir.children(read))
+    return ViewScope(scope.items, references, locals_, dependents, starts, ends)
+
+
+def view_region(scope: ViewScope, declaration: hir.Declare, excluded: set[int]) -> list[hir.AST]:
+    """End after every derived alias's last use; keep control flow indivisible.
+
+    Aggregate forwarding conservatively creates a dependency even when later
+    lowering chooses a copy. Captured, exposed and outward-stored aliases
+    retain the lexical lifetime.
+    """
+    start = scope.starts.get(id(declaration))
     if start is None:
         return scope.items
     live = {declaration.binding_id}
     pending = list(live)
     while pending:
-        for target in dependents.get(pending.pop(), ()):
+        for target in scope.dependents.get(pending.pop(), ()):
             if target not in live:
                 live.add(target)
                 pending.append(target)
-    if live & excluded or not live <= locals_:
+    if live & excluded or not live <= scope.locals:
         return scope.items
-    stop = max((index for index, reads in enumerate(references) if reads & live), default=start)
-    return scope.items[start:max(end, stop) + 1]
+    stop = max((index for index, reads in enumerate(scope.references) if reads & live), default=start)
+    return scope.items[start:max(scope.ends[id(declaration)], stop) + 1]
 
 
 def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source_bindings: set[int]) -> Plan:
@@ -386,10 +399,16 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
                 plan.stable_parameters[binding] = summary
     excluded_owners = captured | exposed | places
     for function in plan.functions.values():
-        has_views = False
+        view_candidates = set()
         for node in _walk_function(function.literal):
-            if isinstance(node, hir.Declare) and node.view:
-                has_views = True
+            if isinstance(node, hir.Declare) and node.binding_id is not None:
+                source = route(node.expr)
+                inferred = (node.decltype in {'const', 'local_const'} and not _word_value(node.expr.type)
+                            and isinstance(unwrap(node.expr), (hir.Index, hir.MemberAccess, hir.DictLookup))
+                            and node.binding_id in plan.stable_bindings and source is not None
+                            and not stable_owner(source, plan))
+                if node.view or inferred:
+                    view_candidates.add(node.binding_id)
             if isinstance(node, hir.Place) and (addressed := root_binding(node.target)) is not None:
                 excluded_owners.add(addressed)
             if isinstance(node, hir.Index):
@@ -404,10 +423,9 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
                     source = None
                 if expression_conflicts(node.key, source, plan, source_bindings):
                     plan.array_snapshots.add(id(node))
-        # Required views use their last-use interval when their aliases stay
-        # local; otherwise retain the lexical proof. Keep ordinary inference's
-        # existing fast path, so unannotated functions pay no extra scan.
-        if not has_views:
+        # Only inferred views that failed the whole-function proof need the
+        # interval scan. Share its dependency graph across each block's views.
+        if not view_candidates:
             continue
         pending = [(function.literal.body, None)]
         seen = set()
@@ -420,16 +438,19 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
             seen.add(key)
             if isinstance(node, hir.Block) and node.scoped:
                 scope = node
-            if isinstance(node, hir.Declare) and node.view and node.binding_id is not None and scope is not None:
+            if isinstance(node, hir.Declare) and node.binding_id in view_candidates and scope is not None:
                 candidates.setdefault(node.binding_id, []).append((node, scope))
             pending.extend((child, scope) for child in hir.children(node))
+        prepared_scopes = {}
         for binding, uses in candidates.items():
             plan.view_scopes[binding] = uses[0][1]
             regions = []
             safe = True
             for node, scope in uses:
                 source = route(node.expr)
-                region = view_region(scope, node, excluded_owners)
+                if id(scope) not in prepared_scopes:
+                    prepared_scopes[id(scope)] = prepare_view_scope(scope)
+                region = view_region(prepared_scopes[id(scope)], node, excluded_owners)
                 regions.extend(region)
                 if (source is None or source.binding not in function.locals
                         or source.binding in excluded_owners

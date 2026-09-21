@@ -905,3 +905,20 @@ and passed all five paired nominal-place cases. The focused manifest now
 has 114 cases. Artifacts:
 `../dewy-build-artifacts/phase1-parent-place-effects-2026-09-20` and
 `../dewy-build-artifacts/phase1-parent-place-effects-parity-2026-09-20`.
+
+Inferred const projection views now reuse the last-use interval proof when
+their owner is not stable for the whole function. Alias dependencies are
+collected once per containing block and shared by its candidate views;
+already-proven whole-function borrows keep their existing fast path.
+Conflicting writes still select independent copies, or the existing
+`$explicit_copies` diagnostic. No new source form was introduced.
+
+Validation: the hosted ownership/view/report/strict-copy batch passed 109
+checks, with one new test initially expecting the wrong diagnostic text;
+after correcting that expectation, all nine new inferred-view tests passed.
+The fresh native generation built in 63.90 seconds and passed the three
+ownership kernels plus all eleven paired view fixtures. The inferred-view
+kernel allocates nothing for the views and retains no storage across 100
+repetitions on hosted x86/C and native. The focused manifest has 115 cases.
+Artifacts: `../dewy-build-artifacts/phase1-inferred-view-last-use-2026-09-20`
+and `../dewy-build-artifacts/phase1-inferred-view-last-use-parity-2026-09-20`.
