@@ -692,19 +692,35 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
             let fields:array<types.ObjectField> = []
             let methods:array<types.MethodSpec> = []
             let names:set<string> = set[]
+            let lifecycle:string?=none
+            let lifecycle_roles:set<string>=set[]
             let inner = contexts.Context[context.source context.scope context.refinement_subject]
             loop item in node.inner {
                 let row = contexts.node_at(item context session)
+                if row is? parser.Atom {
+                    let tag=contexts.node_at(row.item context session)
+                    if tag is? tokens.Metatag and tag.name in? ['__drop__' '__copy__' '__move__'] {
+                        if lifecycle isnt? none return contexts.problem(item 'a lifecycle marker must mark a method declaration' 'put it immediately before the method' context session)
+                        let role=if tag.name =? '__drop__' 'drop' else if tag.name =? '__copy__' 'copy' else 'move'
+                        if role in? lifecycle_roles return contexts.problem(item 'duplicate lifecycle hook' role context session)
+                        lifecycle_roles.add(role)
+                        lifecycle=role
+                        continue
+                    }
+                }
                 if row is? parser.BinOp and source_views.symbol(row.op context session) in? ['=' '&='] {
                     let name = source_views.identifier(row.left context session)
                     let body = contexts.node_at(row.right context session)
                     if name isnt? none and body is? parser.BinOp and source_views.is_operator(body.op '=>' context session) {
                         if source_views.is_operator(row.op '=' context session) and name in? names return contexts.problem(item "duplicate object member `{name}`" 'this member repeats a name' context session)
                         names.add(name)
-                        methods.push(types.MethodSpec[name contexts.syntax_ref(row.right inner @session)])
+                        if lifecycle isnt? none and source_views.is_operator(row.op '&=' context session) return contexts.problem(item 'a lifecycle marker must mark a method declaration' 'a lifecycle hook cannot be an overload' context session)
+                        methods.push(types.MethodSpec[name contexts.syntax_ref(row.right inner @session) lifecycle=lifecycle])
+                        lifecycle=none
                         continue
                     }
                 }
+                if lifecycle isnt? none return contexts.problem(item 'a lifecycle marker must mark a method declaration' 'expected `name = () => ...`' context session)
                 let declared = field(item inner @session)
                 if declared is? Error return declared
                 if declared.name in? names return contexts.problem(item "duplicate object member `{declared.name}`" 'this member repeats a name' context session)
@@ -716,6 +732,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
                 names.add(declared.name)
                 fields.push(declared)
             }
+            if lifecycle isnt? none return contexts.problem(id 'a lifecycle marker must mark a method declaration' 'the marker has no following method' context session)
             return types.object_type(fields none context.immutable_record methods [] @session.types)
         }
     }
@@ -1223,7 +1240,7 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
         let declared_methods:array<types.MethodSpec>=[]
         loop method in node.methods {
             let owner = if method.owner is? none name else method.owner
-            let declared = types.MethodSpec[method.name method.literal method.binding_id method.place_self owner method.static]
+            let declared = types.MethodSpec[method.name method.literal method.binding_id method.place_self owner method.static method.lifecycle]
             declared_methods.push(declared)
         }
         records.merge_methods(@methods declared_methods)

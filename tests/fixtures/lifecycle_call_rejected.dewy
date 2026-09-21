@@ -1,0 +1,11 @@
+# Lifecycle members belong to compiler ownership operations, not source calls.
+Handle = type of [
+    token:int64
+    $__drop__
+    release = ():>void => {}
+]
+main = ():>int64 => {
+    let handle=Handle[42]
+    handle.release()
+    return 42
+}

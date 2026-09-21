@@ -418,7 +418,9 @@ in both lowerings and the parity tool is the gate.
   field cleanup. Observable hook effects are allowed under ordinary effect
   contracts, with no guaranteed invocation count for elidable operations.
   The [approved call protocol](PHASE1_DESIGN_PROPOSALS.md#lifecycle-call-protocol--approved-implementation-pending)
-  records the details. These hooks remain unimplemented.
+  records the details. Both checkers now validate their declarations and
+  read-only copy receivers; automatic runtime invocation and ownership
+  handling remain unimplemented and code generation rejects them explicitly.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a
   last use turns out to be needed it should be a meta-level form (a

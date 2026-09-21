@@ -82,6 +82,8 @@ MethodSpec:type = const [
     name:string literal:addr binding_id:addr?=none place_self:bool=false
     # An inherited method compiles once, for its declaring owner.
     owner:string?=none static:bool=false
+    # Compiler-only lifecycle operation; not an ordinary callable member.
+    lifecycle:string?=none
 ]
 ObjectType = type of Type & [
     fields:array<ObjectField> brand:string?=none
@@ -545,7 +547,7 @@ object_type = (fields:array<ObjectField> brand:string? immutable:bool methods:ar
     let method_keys:array<string> = []
     loop m in methods {
         let owner = if m.owner is? none 'none' else _quoted(m.owner)
-        method_keys.push("{_quoted(m.name)}:{m.literal}:{m.binding_id}:{m.place_self}:{owner}:{m.static}")
+        method_keys.push("{_quoted(m.name)}:{m.literal}:{m.binding_id}:{m.place_self}:{owner}:{m.static}:{m.lifecycle}")
     }
     let brand_key = if brand is? none 'none' else _quoted(brand)
     let key = "J{brand_key}:{immutable}:{parts.join(';')}:{method_keys.join(';')}:{items_key(constructors)}:{minted}:{parent}:{abstract}"

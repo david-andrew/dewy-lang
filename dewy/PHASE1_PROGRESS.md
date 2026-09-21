@@ -745,3 +745,31 @@ contracts; implicit copy/move and temporary drop counts may change through
 elision. The proposal and storage design notes now reflect that decision.
 Hook implementation, raw-resource ownership contracts and remaining failure
 behavior are still outstanding. Phase 1 is not complete.
+
+Lifecycle declaration foundation: both checkers retain the metatag's role
+separately from the ordinary method name, require one zero-argument member
+per role on a nominal owner, check drop's void result and copy/move's exact
+nominal result, and reject manual calls or function values. Even a field-free
+body receives the original object through an internal place. Copy receivers
+are read-only through projections, forwarded places and nested functions.
+Ordinary effect contracts still check hook bodies; observable unannotated
+hooks are allowed. Result inference continues to work. Native cache codecs
+preserve the new member metadata.
+
+This is declaration support, not automatic resource lifetime support. Both
+code-generation routes reject runtime hooks explicitly. The native guard
+runs before reachability pruning, which would otherwise erase a hidden hook
+and silently compile its object with ordinary memberwise semantics. Inherited
+hooks are explicitly pending, with a separate parent-portion proposal awaiting
+review. Next, implicit ownership operations must be visible to effect/fact
+analysis and reachability as well as to cleanup and copy lowering.
+
+Validation: the initial hosted declaration/method suites passed 39 tests;
+the effect/declaration suite passed 122, and the expanded declaration suite
+passed 28. Native passed all 16 focused acceptance/rejection probes (including
+the explicit lowering limitation), the existing scoped-view and iterator
+execution kernels, and all four new paired rejection fixtures. The native
+build took 65.66 seconds, still above target. The focused manifest has 97
+cases; no new full-corpus result is claimed for this batch. Artifacts:
+`../dewy-build-artifacts/phase1-lifecycle-declarations-stage1-2026-09-20` and
+`../dewy-build-artifacts/phase1-lifecycle-declarations-parity-2026-09-20`.

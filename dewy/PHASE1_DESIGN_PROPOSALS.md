@@ -306,7 +306,12 @@ David approved the call shape and cleanup rules below on 2026-09-20, after
 reviewing an overview in the conversation. This extends the earlier approval
 of `$__drop__`, `$__copy__`, `$__move__`, inferred moves, and internal
 nonescaping places. It adds no uninitialized-place syntax. Approval does not
-mean the compiler implements these hooks yet.
+mean the compiler implements their runtime ownership behavior yet. Both
+checkers now validate declarations, result identity, compiler-only access and
+the read-only copy receiver. The native snapshot codec retains this metadata.
+Code generation explicitly rejects hooks until ownership lowering is ready;
+in particular, hidden hooks must not disappear through reachability pruning
+and leave a resource with ordinary memberwise behavior.
 
 Approved member shape (illustrative helpers, not currently executable):
 
@@ -374,3 +379,13 @@ establish that relationship, bypass raw-operation checking, or equate
 user-minted resources with allocator ownership. The allocation-capability
 protocol and remaining failure behavior need their own design before useful
 resource-owning hooks can be declared complete.
+
+### Inheritance — awaiting review
+
+If `Child = type of Parent & [extra:string]`, an inherited parent copy/move
+hook returns `Parent`, not the complete `Child`. The implementation currently
+rejects inherited hooks explicitly. A proposed extension is to apply the
+parent hook to the parent portion, handle the added fields normally, and keep
+the complete result's child identity. The alternative is to require explicit
+hooks on each child mint. This question was sent to David for review; neither
+behavior is implemented or implied by the root-type call protocol.

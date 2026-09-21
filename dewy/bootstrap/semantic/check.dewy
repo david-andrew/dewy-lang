@@ -1333,6 +1333,7 @@ expression_inner = (id:addr env:Environment @session:contexts.Session expected:a
             value=void_at(id env @session)
         }
         else if atom is? tokens.Metatag {
+            if atom.name in? ['__drop__' '__copy__' '__move__'] return problem(id 'a lifecycle marker belongs on a nominal type member' 'put it immediately before the method inside the type' env session)
             let count=env.control.scopes.length
             if count =? 0 return pending(id 'metatag expression outside a direct scoped-block declaration' env session)
             let scope=env.control.scopes[count-1]
@@ -2540,6 +2541,11 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         if method.receiver_type isnt? none {
             let receiver_type=method.receiver_type
             let receiver_id=bindings.allocate_param(@session.registry '__dewy_receiver' receiver_type literal.loc)
+            if method.lifecycle =? 'copy' {
+                let binding=bindings.binding_at(session.registry receiver_id)
+                binding.read_only_reason='is the read-only receiver of a copy hook'
+                bindings.store_binding(@session.registry receiver_id binding)
+            }
             receiver=put(hir.ExpressedIdentifier[literal.loc receiver_type '__dewy_receiver' receiver_id] @session)
             let with_receiver:array<hir.Param>=[hir.Param['__dewy_receiver' receiver_type receiver_id place=method.place_self]]
             loop parameter in parameters {with_receiver.push(parameter)}
@@ -5455,6 +5461,20 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
     let type=types.node_at(session.types type_id)
     if type isnt? types.ObjectType or type.methods.length =? 0 return none
     if type_id in? session.prepared_methods or type_id in? session.preparing_methods return none
+    let lifecycle_roles:set<string>=set[]
+    loop method in type.methods {
+        if method.lifecycle is? none {continue}
+        $runtime_assert method.literal <? session.syntax_refs.length
+        let reference=session.syntax_refs[method.literal]
+        let defining=Environment[contexts.Context[reference.source reference.scope] env.state]
+        if not type.minted return problem(reference.node 'lifecycle hooks require a nominal type' 'declare the owner with `type of [...]`' defining session)
+        if method.lifecycle in? lifecycle_roles return problem(reference.node 'duplicate lifecycle hook' method.lifecycle defining session)
+        lifecycle_roles.add(method.lifecycle)
+        if method.owner isnt? none and method.owner not=? alias return pending(reference.node 'inherited lifecycle hooks' defining session)
+        let count:addr=0
+        loop other in type.methods {if other.name =? method.name {count+=1}}
+        if count not=? 1 return problem(reference.node 'a lifecycle hook cannot be overloaded' method.name defining session)
+    }
     if env.return_collector isnt? none {
         $runtime_assert type.methods.length >? 0
         let first=type.methods[0]
@@ -5496,7 +5516,10 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let visible:set<string>=set[]
         loop name in names {if name not in? hidden {visible.add(name)}}
         let analysis=source_views.method_scan(literal.right visible lexical session)
-        let instance=false
+        loop candidate in type.methods {
+            if candidate.lifecycle isnt? none and candidate.name in? analysis.references return problem(reference.node 'a lifecycle hook is compiler-only' candidate.name Environment[lexical env.state] session)
+        }
+        let instance=method.lifecycle isnt? none
         loop name in analysis.references {if name in? fields {instance=true}}
         if instance {instances.add(method.name)}
         plans.push(MethodPlan[method analysis.references instance analysis.mutates])
@@ -5525,9 +5548,14 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let shape=function_shape(literal defining @session)
         if shape is? Error return shape
         let signature=dispatch.method_at(session.types shape)
+        if spec.lifecycle isnt? none {
+            if signature.type_params.length >? 0 return problem(reference.node 'a lifecycle hook cannot have generic parameters' 'the compiler supplies only its borrowed receiver' defining session)
+            if signature.pos_or_kw.length >? 0 or signature.kw_only.length >? 0 or signature.rest isnt? none return problem(reference.node 'a lifecycle hook takes no explicit parameters' 'write `()`' defining session)
+        }
         if signature.type_params.length >? 0 return pending(reference.node 'generic record methods' defining session)
         let parameters:array<types.PosOrKwArg>=[]
-        if instance {parameters.push(types.PosOrKwArg['__dewy_receiver' type_id true mutates])}
+        let place_self=mutates or spec.lifecycle isnt? none
+        if instance {parameters.push(types.PosOrKwArg['__dewy_receiver' type_id true place_self])}
         loop parameter in signature.pos_or_kw {parameters.push(parameter)}
         let effects=if instance effect_rows.prepend_parameter(signature.effects signature.pos_or_kw.length+signature.kw_only.length) else signature.effects
         let full=types.function_type(parameters signature.kw_only signature.rest signature.ret [] @session.types effects=effects)
@@ -5537,13 +5565,13 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
             if earlier.name =? spec.name {ordinal += 1}
         }
         let suffix=if ordinal =? 0 '' else "_{ordinal+1}"
-        let hidden_name="{alias}__{spec.name}{suffix}"
+        let hidden_name="{alias}__{spec.name}{suffix}" + if spec.lifecycle is? none '' else '$lifecycle'
         let binding_id=bindings.allocate(@session.registry none hidden_name 'function' literal.loc)
         let binding=bindings.binding_at(session.registry binding_id)
         binding.value_type=full binding.store_type=full
         bindings.store_binding(@session.registry binding_id binding)
         session.hidden_bindings.add(binding_id)
-        session.methods[method_key(type_id spec)]=contexts.MethodEntry[binding_id if instance type_id else none mutates]
+        session.methods[method_key(type_id spec)]=contexts.MethodEntry[binding_id if instance type_id else none place_self spec.lifecycle]
     }
     # Prefer callees before callers so inferred methods have concrete results.
     # Cycles with complete signatures are already reserved above; an inferred
@@ -5575,6 +5603,12 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         if entry.receiver_type is? none and slot isnt? none and types.node_at(session.types slot.value_type) is? types.FunctionType {expected=slot.value_type}
         let checked=function_literal(reference.node literal defining @session name=binding.name method=entry owner=type_id expected_signature=expected)
         if checked is? Error return checked
+        if plan.method.lifecycle isnt? none {
+            let signature=dispatch.method_at(session.types node_at(checked session).value_type)
+            let actual=views.structural_base(signature.ret session.types)
+            let required=if plan.method.lifecycle =? 'drop' types.primitive('void' @session.types) else type_id
+            if actual not=? required return problem(reference.node 'invalid lifecycle hook result' if plan.method.lifecycle =? 'drop' 'drop must return void' else 'copy and move must return the same nominal type' defining session)
+        }
         if expected isnt? none and not subtyping.is_subtype(node_at(checked session).value_type expected session.links @session.types) return problem(reference.node 'method does not fit its slot' plan.method.name defining session)
         binding.value_type=node_at(checked session).value_type binding.store_type=binding.value_type binding.function=checked
         let declared=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'const' binding.name none checked binding.id] @session)
@@ -5607,6 +5641,7 @@ method_member = (owner:addr receiver:addr? name:string id:addr env:Environment @
     if type isnt? types.ObjectType return none
     let method=types.object_method(type name)
     if method is? none return none
+    if method.lifecycle isnt? none return problem(id 'a lifecycle hook is compiler-only' name env session)
     let alias=if type.brand is? none display.type_to_dewy(type_id session.types) else type.brand
     let error=prepare_methods(type_id alias env @session)
     if error isnt? none return error
@@ -5632,6 +5667,7 @@ bind_method_members = (owner:addr receiver:addr? lexical:contexts.Context env:En
         }
     }
     loop method in type.methods {
+        if method.lifecycle isnt? none continue
         let entry=session.methods.get(method_key(owner method))
         if entry is? none continue
         if entry.receiver_type isnt? none and receiver is? none continue

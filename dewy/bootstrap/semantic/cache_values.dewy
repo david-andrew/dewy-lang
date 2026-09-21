@@ -1315,6 +1315,7 @@ encode_Value58=(value:Value58 @out:bytes.Writer):>void=>{
     encode_Value13(value.binding @out)
     encode_Value47(value.receiver_type @out)
     encode_Value32(value.place_self @out)
+    encode_Value36(value.lifecycle @out)
 }
 decode_Value58=(@input:bytes.Reader):>Value58|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -1324,7 +1325,9 @@ decode_Value58=(@input:bytes.Reader):>Value58|CacheMiss=>{
     if field_1 is? CacheMiss return field_1
     let field_2=decode_Value32(@input)
     if field_2 is? CacheMiss return field_2
-    return Value58[binding=field_0 receiver_type=field_1 place_self=field_2]
+    let field_3=decode_Value36(@input)
+    if field_3 is? CacheMiss return field_3
+    return Value58[binding=field_0 receiver_type=field_1 place_self=field_2 lifecycle=field_3]
 }
 
 encode_Value59=(value:Value59 @out:bytes.Writer):>void=>{
@@ -4049,6 +4052,7 @@ encode_Value216=(value:Value216 @out:bytes.Writer):>void=>{
     encode_Value32(value.place_self @out)
     encode_Value36(value.owner @out)
     encode_Value32(value.static @out)
+    encode_Value36(value.lifecycle @out)
 }
 decode_Value216=(@input:bytes.Reader):>Value216|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -4064,7 +4068,9 @@ decode_Value216=(@input:bytes.Reader):>Value216|CacheMiss=>{
     if field_4 is? CacheMiss return field_4
     let field_5=decode_Value32(@input)
     if field_5 is? CacheMiss return field_5
-    return Value216[name=field_0 literal=field_1 binding_id=field_2 place_self=field_3 owner=field_4 static=field_5]
+    let field_6=decode_Value36(@input)
+    if field_6 is? CacheMiss return field_6
+    return Value216[name=field_0 literal=field_1 binding_id=field_2 place_self=field_3 owner=field_4 static=field_5 lifecycle=field_6]
 }
 
 encode_Value217=(value:Value217 @out:bytes.Writer):>void=>{

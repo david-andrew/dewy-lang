@@ -1,0 +1,10 @@
+# A copy hook borrows the source read-only, including its projected fields.
+Handle = type of [
+    token:int64
+    $__copy__
+    duplicate = ():>Handle => {
+        token=0
+        return Handle[token]
+    }
+]
+main = ():>int64 => 42

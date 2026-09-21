@@ -31,7 +31,7 @@ ReturnSite:type = const [value_type:addr loc:Span]
 ReturnCollector:type = [sites:array<ReturnSite>=[]]
 ReadState:type = [types:dict<addr addr>=[] keys:array<keys.Fact>=[]]
 ConstructorSet:type = [bindings:array<addr>=[]]
-MethodEntry:type = const [binding:addr receiver_type:addr?=none place_self:bool=false]
+MethodEntry:type = const [binding:addr receiver_type:addr?=none place_self:bool=false lifecycle:string?=none]
 LocalViewProbe:type = [prefix:addr used:bool=false]
 CheckState:type = [
     # Checking collects diagnostics; the invocation decides how to render them.

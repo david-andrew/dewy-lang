@@ -1,0 +1,8 @@
+# Structural equality does not satisfy the same-nominal-type result rule.
+OtherHandle = type of [token:int64]
+Handle = type of [
+    token:int64
+    $__move__
+    transfer = ():>OtherHandle => OtherHandle[token]
+]
+main = ():>int64 => 42

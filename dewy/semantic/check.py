@@ -1014,6 +1014,8 @@ def typecheck_and_resolve_inner(ast: p0.AST, *, ctx: Context, type_block:bool=Fa
                 user_error(ctx.srcfile, '`$proof` must mark a function declaration', Pointer(span=ast.loc, message='put it immediately before the declaration'))
             return hir.Void(ast.loc, ty.VOID_TYPE)
         case p0.Atom(item=t1.Metatag(name=name)):
+            if name in _LIFECYCLE_TAGS:
+                user_error(ctx.srcfile, 'a lifecycle marker belongs on a nominal type member', Pointer(span=ast.loc, message=f'`${name}` must immediately precede a method inside the type'))
             return tcr_scope_metatag(ast, name=name, ctx=ctx)
         case p0.Atom(item=t1.Real() as real):
             return _real_literal(real, loc=ast.loc, ctx=ctx)
@@ -1281,6 +1283,8 @@ def _conversion_method_binding(unfolded: ty.ObjectType, target: ty.Type, loc: Sp
         _declare_pending_methods(ctx=ctx, for_type=unfolded)
     function_binding = None
     for method in conversions:
+        if method.lifecycle is not None:
+            user_error(ctx.srcfile, 'a lifecycle hook is compiler-only', Pointer(span=loc, message='a lifecycle member cannot also act as an ordinary conversion'))
         if method.binding_id is None:
             continue
         candidate = ctx.binding_registry.by_id[method.binding_id]
@@ -5679,6 +5683,41 @@ def _method_row(item: p0.AST, *, symbol: str = '=') -> tuple[str, p0.AST] | None
     return None
 
 
+_LIFECYCLE_TAGS = {'__drop__': 'drop', '__copy__': 'copy', '__move__': 'move'}
+
+
+def _lifecycle_rows(items: list[p0.AST], *, ctx: Context) -> dict[int, str]:
+    """Attach lifecycle markers to exactly one following method declaration.
+
+    These are member annotations, not scope labels. Keep the marker out of
+    the field list, but retain the function's ordinary name and source body.
+    Nominal ownership and result types are checked after the mint exists.
+    """
+    annotated: dict[int, str] = {}
+    seen: set[str] = set()
+    for index, item in enumerate(items):
+        tag = _direct_scope_metatag(item)
+        role = _LIFECYCLE_TAGS.get(tag.name) if tag is not None else None
+        if role is None:
+            continue
+        if role in seen:
+            user_error(ctx.srcfile, f'duplicate lifecycle hook `${tag.name}`', Pointer(span=item.loc, message='a type has at most one member for each lifecycle operation'))
+        following = items[index + 1] if index + 1 < len(items) else None
+        row = _method_row(following) if following is not None else None
+        if row is None:
+            user_error(ctx.srcfile, f'`${tag.name}` must mark a method declaration', Pointer(span=item.loc, message='put it immediately before `name = ():>Result => ...`'))
+        literal = row[1]
+        assert isinstance(literal, p0.BinOp)
+        if _generic_function_parts(literal) is not None:
+            user_error(ctx.srcfile, 'a lifecycle hook cannot have generic parameters', Pointer(span=literal.loc, message='the compiler supplies only its borrowed receiver'))
+        params, result, _body = _function_literal_parts(literal)
+        if params.inner:
+            user_error(ctx.srcfile, 'a lifecycle hook takes no explicit parameters', Pointer(span=params.loc, message='write `()`; the receiver is supplied by the compiler'))
+        seen.add(role)
+        annotated[id(following)] = role
+    return annotated
+
+
 def _function_literal_parts(literal: p0.BinOp) -> tuple[p0.Block, p0.AST | None, p0.AST]:
     """(parameter block, result annotation, body) of a `(params):>ret => body` literal."""
     signature = literal.left
@@ -5887,10 +5926,10 @@ def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
     return found
 
 
-def _hoist_hidden_function(name: str, literal: p0.BinOp, *, ctx: Context, expected: ty.Type | None = None) -> sb.Binding:
+def _hoist_hidden_function(name: str, literal: p0.BinOp, *, ctx: Context, expected: ty.Type | None = None, readonly_receiver: bool = False) -> sb.Binding:
     """Typecheck a synthesized function literal as a module-level function (like a generic instance)."""
     binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'function', literal.loc)
-    checked = tcr_function_literal(literal, ctx=ctx, expected=expected)
+    checked = tcr_function_literal(literal, ctx=ctx, expected=expected, readonly_receiver=readonly_receiver)
     binding.type = checked.type
     declaration = hir.Declare(literal.loc, ty.VOID_TYPE, 'let', name, None, checked, binding_id=binding.id)
     binding.declaration = declaration
@@ -5924,6 +5963,19 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
     """
     if alias.name not in ctx.module_declared_names:
         not_implemented(ctx.srcfile, alias.loc, 'methods on a type declared inside a function')
+    hooks: dict[str, ty.MethodSpec] = {}
+    for method in object_type.methods:
+        if method.lifecycle is None:
+            continue
+        if not ty.user_branded(object_type):
+            user_error(ctx.srcfile, 'lifecycle hooks require a nominal type', Pointer(span=alias.loc, message='declare the owner with `type of [...]`'))
+        if method.lifecycle in hooks:
+            user_error(ctx.srcfile, f'duplicate lifecycle hook `$__{method.lifecycle}__`', Pointer(span=alias.loc, message='a type has at most one member for each lifecycle operation'))
+        hooks[method.lifecycle] = method
+        if method.owner not in (None, alias.name):
+            not_implemented(ctx.srcfile, alias.loc, 'inherited lifecycle hooks')
+        if sum(m.name == method.name for m in object_type.methods) != 1:
+            user_error(ctx.srcfile, 'a lifecycle hook cannot be overloaded', Pointer(span=alias.loc, message=f'`{method.name}` is a compiler-only operation'))
     members = {f.name for f in object_type.fields} | {m.name for m in object_type.methods}
     field_names = {f.name for f in object_type.fields}
     for method in object_type.methods:
@@ -5946,7 +5998,7 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         # Keep the source parts per declaration so `__as__ &= ...` does not
         # replace the result annotation and body of every earlier target.
         parts[id(method)] = (params, result, body, visible, _referenced_members(body, visible))
-    instance_level = {method.name for method in own if parts[id(method)][4] & (field_names | {'typename'})}
+    instance_level = {method.name for method in own if method.lifecycle is not None or parts[id(method)][4] & (field_names | {'typename'})}
     instance_level |= {m.name for m in object_type.methods if m.binding_id is not None and not m.static}
     changed = True
     while changed:
@@ -5977,14 +6029,18 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         assert isinstance(literal, p0.BinOp)
         params, result, body, visible, _refs = parts[id(method)]
         loc = literal.loc
+        invoked_hook = next((m for m in object_type.methods if m.lifecycle is not None and m.name in _refs), None)
+        if invoked_hook is not None:
+            user_error(ctx.srcfile, 'a lifecycle hook is compiler-only', Pointer(span=body.loc, message=f'`{invoked_hook.name}` cannot be called or used as a function value'))
         if method.name in statics:
             method.static = True
             rewritten = _rewrite_static_calls(body, statics - {method.name}, alias.name)
             signature: p0.AST = params if result is None else p0.BinOp(loc, t1.Operator(loc, ':>'), params, result)
         else:
             self_name: p0.AST = p0.Atom(loc, t1.Identifier(loc, _RECEIVER))
-            method.place_self = _body_mutates_members(body, visible)
-            if method.place_self and isinstance(alias.type_value, ty.ObjectType) and alias.type_value.immutable:
+            mutates = _body_mutates_members(body, visible)
+            method.place_self = method.lifecycle is not None or mutates
+            if mutates and isinstance(alias.type_value, ty.ObjectType) and alias.type_value.immutable:
                 user_error(
                     ctx.srcfile,
                     f'method `{method.name}` changes an immutable record',
@@ -6000,13 +6056,21 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         ctx.synthesized.append(new_literal)
         ordinal = sum(1 for earlier in object_type.methods[:object_type.methods.index(method)] if earlier.name == method.name)
         hidden_name = f'{alias.name}__{method.name}' + (f'_{ordinal + 1}' if ordinal else '')
+        if method.lifecycle is not None:
+            hidden_name += '$lifecycle'  # cannot be spelled as a source identifier
         # a static method implementing an inherited function-typed slot
         # (`eat:eatfn`) is checked against the slot's contract: its result
         # refinements are what the method's returns must prove
         slot = object_type.field(method.name) if method.name in statics else None
         expected = slot.type if slot is not None and isinstance(slot.type, ty.FunctionType) else None
-        hoisted = _hoist_hidden_function(hidden_name, new_literal, ctx=ctx, expected=expected)
+        hoisted = _hoist_hidden_function(hidden_name, new_literal, ctx=ctx, expected=expected, readonly_receiver=method.lifecycle == 'copy')
         method.binding_id = hoisted.id
+        if method.lifecycle is not None:
+            assert isinstance(hoisted.type, ty.FunctionType)
+            required = ty.VOID_TYPE if method.lifecycle == 'drop' else object_type
+            actual = ty.unfold(ty.strip_refinement(hoisted.type.ret))
+            if actual != required:
+                user_error(ctx.srcfile, 'invalid lifecycle hook result', Pointer(span=literal.loc, message=f'{method.lifecycle} must return `{type_to_dewy(required)}`'))
         if expected is not None and isinstance(hoisted.type, ty.FunctionType) and not ctx.type_system.is_subtype(hoisted.type, expected):
             assert slot is not None
             user_error(
@@ -6822,6 +6886,8 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
     else:
         ty.USER_BRAND_PARENTS.pop(name, None)
     minted = ty.ObjectType.compose(operands, fields=fields, brand=name, methods=methods)
+    if ancestor is not None and any(method.lifecycle is not None and method.owner != binding.name for method in methods):
+        not_implemented(ctx.srcfile, rhs.loc, 'inherited lifecycle hooks')
     ty.USER_BRAND_TYPES[name] = minted
     if abstract:
         ty.USER_ABSTRACT_BRANDS.add(name)   # `$abstract`: values only of its children
@@ -8979,6 +9045,8 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         return _typename(value, binop.loc, ctx=ctx)
     if field is None:
         method = value.type.method(name)
+        if method is not None and method.lifecycle is not None:
+            user_error(ctx.srcfile, 'a lifecycle hook is compiler-only', Pointer(span=binop.loc, message=f'`{name}` cannot be called or used as a function value'))
         if method is not None and method.binding_id is None:
             _declare_pending_methods(ctx=ctx, for_type=value.type)
         if method is not None and method.binding_id is not None:
@@ -9039,6 +9107,9 @@ def _type_name_member(value: hir.TypeValue, name: str, binop: p0.BinOp, *, ctx: 
     """`Whitespace.eat`: a static method off the type's name; `Whitespace.typename` its name."""
     object_type = ty.unfold(value.value)
     assert isinstance(object_type, ty.ObjectType)
+    method = object_type.method(name)
+    if method is not None and method.lifecycle is not None:
+        user_error(ctx.srcfile, 'a lifecycle hook is compiler-only', Pointer(span=binop.loc, message=f'`{name}` cannot be called or used as a function value'))
     if name == 'typename':
         text = object_type.brand if ty.user_branded(object_type) and object_type.brand is not None else type_to_dewy(object_type)
         return hir.String(binop.loc, ty.StringLiteralType(text), text)
@@ -12784,7 +12855,7 @@ def _discarded_expressed_sites(body: hir.AST) -> list[hir.AST]:
     return sites
 
 
-def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> hir.FunctionLiteral:
+def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None, readonly_receiver: bool = False) -> hir.FunctionLiteral:
     """
     function literal: `args => body`
     """
@@ -12851,6 +12922,8 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     def bind_param(param: hir.Param | hir.BoundParam) -> hir.Param | hir.BoundParam:
         # inside the body the binding has the base type; the refinement is a fact (bounds analysis)
         binding = ctx.binding_registry.allocate_param(param.name, ty.strip_refinement(param.type), binop.loc)
+        if readonly_receiver and param.name == _RECEIVER:
+            binding.read_only_reason = 'is the read-only receiver of a copy hook'
         if ty.total_dict_key(param.type) is not None:
             ctx.declared_total.add(binding.id)   # `table:totaldict<K V>`: every key present, `pop`/`clear` refused
         elif isinstance(param.type, ty.RefinedType):
@@ -14423,7 +14496,11 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
             seen: dict[str, Span] = {}
             fields: list[ty.ObjectField] = []
             methods: list[ty.MethodSpec] = []
+            lifecycle_rows = _lifecycle_rows(items, ctx=ctx)
             for item in items:
+                tag = _direct_scope_metatag(item)
+                if tag is not None and tag.name in _LIFECYCLE_TAGS:
+                    continue
                 overload_row = _method_row(item, symbol='&=')
                 if overload_row is not None:
                     # `__as__ &= ():>int64 => …`: another method of the same name
@@ -14434,7 +14511,7 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 method_row = _method_row(item)
                 if method_row is not None:
                     member_name, literal = method_row
-                    methods.append(ty.MethodSpec(member_name, literal))
+                    methods.append(ty.MethodSpec(member_name, literal, lifecycle=lifecycle_rows.get(id(item))))
                 else:
                     field = _object_type_member(item, ctx=ctx)
                     member_name = field.name

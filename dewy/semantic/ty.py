@@ -322,6 +322,7 @@ class MethodSpec:
     place_self: bool = False
     owner: str | None = None   # the alias that declared it: a method compiles once, for its declaring type; inheritors share it
     static: bool = False       # reads no field, and calls no method that does: callable off the type, no receiver
+    lifecycle: str | None = None  # compiler-only role: drop, copy or move
 
 
 @dataclass(frozen=True, slots=True, weakref_slot=True)
