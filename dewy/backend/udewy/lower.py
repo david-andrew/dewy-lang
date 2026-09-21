@@ -279,6 +279,7 @@ class _Lowerer(
         # Lowering only reads these generated signatures. Their primitive
         # types have no registry dependencies, and keeping them on this lowerer
         # prevents mutable FunctionType objects from crossing compilations.
+        self.moved_record_bindings = set()
         self.primitive_equality_types: dict[str, ty.FunctionType] = {}
         # A checked callable has one runtime ABI, shared by its definition
         # and references. Keep input objects alive with the cached signatures;

@@ -953,7 +953,8 @@ class _OptionalLowering:
             # view. Copy its active child's tree, not the obsolete parent tag.
             source_tags = possible if self._union_family_conversions(stored_members, possible) else stored_members
             if not reported:
-                self._note_copy('cell', value.type, 'stored in a union', self._copy_reason(value), value.loc)
+                site = 'stored in a union' if possible == members else 'converted to a union'
+                self._note_copy('cell', value.type, site, self._copy_reason(value), value.loc)
             return [*prelude, *self._union_retag(cell, source_word, source_tags, members, value.loc, prepared=prepared)]
         if self._field_union_members(value.type) == members:
             # Same-union copy: tag, payload word, and the active aggregate
