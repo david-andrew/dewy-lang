@@ -1820,3 +1820,40 @@ reads/writes and dependent aliases still prevent transfer. Statements after
 the value retain their evaluation point. Outer-owner joins remain separate.
 Validation: ten hosted checks and six positive/four negative paired cases
 passed, with all positives executed through x86-64 and C.
+
+Affine-loop checkpoint (2026-09-21): the bounded qualifier vocabulary now
+connects exact entry-value groups with constant differences, while retaining
+separate equality groups when another counter advances at a different rate.
+Every advancing edge must preserve a candidate. At most 64 entry terms are
+considered, with linear-size stars rather than all pairs. A one-hop reduction
+combines interval and difference evidence when proving an update fits its
+word. Rollover invalidates affine facts, including a narrow operation widened
+into a wider destination; mathematical order cannot survive modular wrap.
+
+Validation: 32 adjacent hosted loop/proof checks passed. Five positive and six
+negative cases passed both compilers and x86-64/C; the new native driver also
+successfully checked and emitted its own complete source. The manifest adds
+nonzero parallel-array differences and narrow-operation rollover rejection.
+This extends the bounded proof machinery without adding source syntax.
+
+Completed full-suite checkpoint at `c2cc5330`: 3,628 passed, 14 skipped, two
+failed in 2,341.73 s. Both failures were outdated expectations: a guarded pop
+retains a weaker nonnegative difference, and fixed nonescaping scalar arrays
+now satisfy `no allocates` through frame placement. The revised tests retain
+strict-positivity/index rejection and runtime-length escaping-array rejection;
+all 21 adjacent tests passed. The website's unchecked `nat64` sum now checks
+fixed-width overflow, and all 329 published examples validate. These repairs,
+recursive copies, branch-local transfers and affine qualifiers are integrated
+at `bd17c8c5`; 43 focused integrated checks pass. The previous CI run at
+`fc9030f4` completed with 3,585 passes, 32 skips and only the two already-fixed
+pop/snapshot failures. Website CI is green at `bd17c8c5`; full CI remains a
+separate gate, not a claimed pass.
+
+A fresh native inventory of `c2cc5330`, using the verified `386475fb` native
+pair, records 4,919 bootstrap-only static copy sites across 45,661 physical
+Dewy lines (107.729 sites/KLOC): 1,185 records, 667 arrays, 479 cells and 2,588
+strings. This is a scoped inventory, not a comparison with the earlier
+whole-program baseline, nor a count of runtime allocations/bytes. Detailed
+output is `/tmp/dewy-phase1-copy-inventory.json`. Rendering thousands of
+source excerpts dominated the reporting path; concise reporting and shared
+source geometry are being implemented before using this as a routine gate.

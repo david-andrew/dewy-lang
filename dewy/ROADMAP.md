@@ -450,7 +450,11 @@ in both lowerings and the parity tool is the gate.
   hooks, including nested wrappers and temporary receivers. Synthesized array
   copies now run component hooks and prove their returned length; nested arrays
   and optional elements use the same construction. Recursive optional-link records now use checked cleanup helpers, including
-  arrays containing those records and recursive factory results. General dictionary ownership
+  arrays containing those records and recursive factory results. Recursive copy
+  hooks and synthesized recursive wrapper copies now preserve independent
+  owners. Fresh conditional/block initializers capture their value before
+  local cleanup, and branch-local move-only results transfer at proven last
+  use, including values followed by unrelated trailing statements. General dictionary ownership
   operations and recursion through `array<Self>` remain pending. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch
@@ -538,7 +542,10 @@ of the design rather than as two more transfer rules.
 Progress on 2026-09-20: shared array-length equality invariants and nested
 range-counter fixtures now pass in both compilers. Counter storage uses an
 inductive word-range candidate, checked on every advancing edge; failed
-candidates are discarded before ordinary body validation. The general liquid
+candidates are discarded before ordinary body validation. Bounded constant-difference
+qualifiers now connect distinct exact entry values as well as equal ones;
+every backedge must preserve them. Word updates keep affine facts only when
+neither the arithmetic nor its destination can wrap. The general liquid
 qualifier/invariant work remains broader than these completed fixtures.
 
 ### 1.3 Effects as a real vocabulary
