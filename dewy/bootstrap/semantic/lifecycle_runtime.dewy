@@ -5,15 +5,26 @@ import p"ty.dewy" as types
 import p"type_queries.dewy" as views
 import p"bindings.dewy" as bindings
 
-# Materialize operations before reachability and lowering. Supported owners
-# are fresh records, including nested record resources and factory results
-# transferred to callers. Explicit copy hooks may construct fresh results;
-# drop runs before field cleanup. Checked place parameters borrow owners.
-# Explicit returns transfer locals and invoke custom move hooks. General
-# local transfers, implicit copies, resource containers and owning parameters remain
-# implementation gaps, never silent memberwise fallbacks.
+# Materialize operations before reachability and lowering. Fresh records and
+# arrays own their nested resources. Factories, by-value parameters and results
+# transfer fresh owners; checked @ parameters borrow. Same-scope bindings move
+# at last use. Custom copy/move hooks remain checked calls, and drop precedes
+# field/element storage cleanup. Conditional outer-owner consumption, field
+# transfers, inferred copies and resource-container mutation remain gaps.
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
-Plan:type = [hooks:dict<addr Hook>=[] owners:dict<string Hook>=[] moves:dict<string Hook>=[] prepared:set<addr>=set[] transfer_sites:set<addr>=set[] array_drops:dict<addr addr>=[] generated:array<addr>=[] function_source:addr?=none source:SrcFile problem:Error?=none result_type:addr?=none]
+Plan:type = [
+    hooks:dict<addr Hook>=[]
+    owners:dict<string Hook>=[]
+    moves:dict<string Hook>=[]
+    prepared:set<addr>=set[]
+    transfer_sites:set<addr>=set[]
+    array_drops:dict<addr addr>=[]
+    generated:array<addr>=[]
+    function_source:addr?=none
+    source:SrcFile
+    problem:Error?=none
+    result_type:addr?=none
+]
 put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
 store = (id:addr node:hir.AST @session:contexts.Session):>void => {
     contexts.replace_hir(id node @session)

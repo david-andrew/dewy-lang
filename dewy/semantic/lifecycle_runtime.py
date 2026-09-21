@@ -1,13 +1,12 @@
 """Materialize ownership operations before runtime lowering.
 
-Supported owners are fresh records, including nested record resources and
-factory results transferred into their caller's ownership.
-Explicit copy hooks may construct fresh results; drop runs before field
-cleanup. Checked place parameters borrow without acquiring ownership.
-Explicit returns transfer locals and invoke custom move hooks when present.
-General local transfers, implicit copies, resource containers and owning parameters
-remain unsupported. Checked HIR calls expose effects and use the ordinary
-internal place call ABI.
+Fresh records and arrays own their nested resources; factories, ordinary
+by-value parameters and results transfer fresh owners. Checked @ parameters
+borrow. Same-scope bindings can move at last use, and custom copy/move hooks
+remain checked calls. Drop precedes field/element storage cleanup.
+
+Conditional consumption of outer owners, field transfers, inferred copies
+and resource-container mutation still need the general lifetime plan.
 """
 from dataclasses import replace
 

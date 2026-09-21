@@ -448,7 +448,10 @@ in both lowerings and the parity tool is the gate.
   Inherited copies consume their intermediate parent results, including nested
   resources and multiple inheritance levels. Conditional transfers of outer
   owners, field transfers, mutable resource containers and general owning
-  arguments remain explicitly unsupported during code generation.
+  argument transfers from existing bindings remain explicitly unsupported
+  during code generation. Fresh arguments, factory results and explicit copies
+  can supply ordinary by-value parameters, which own and clean up the value.
+  This includes callbacks and defaults; returning a parameter transfers it.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a
   last use turns out to be needed it should be a meta-level form (a
