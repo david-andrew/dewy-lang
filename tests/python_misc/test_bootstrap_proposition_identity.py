@@ -31,6 +31,12 @@ main=():>int64=>{
     let tested=facts.Proposition['self' 'is?' tested_type=first]
     let equivalent=facts.Proposition['self' 'is?' tested_type=second]
     if not types.same_proposition(tested equivalent nodes) return 3
+    let empty:array<facts.Proposition>=[]
+    let other_empty=empty.copy()
+    if not types.same_propositions(empty other_empty nodes) return 9
+    if not types.same_propositions([base tested] [provenance equivalent] nodes) return 10
+    if types.same_propositions([base tested] [tested base] nodes) return 11
+    if types.same_propositions([base] [] nodes) return 12
     let different:array<facts.Proposition>=[
         facts.Proposition['length' '=?']
         facts.Proposition['self' 'not=?']
