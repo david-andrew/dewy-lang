@@ -1694,3 +1694,21 @@ The kernel checks exact hook/drop counts and zero retained arena bytes over
 100 repetitions. Existing local-transfer, move-effect, resource-view and union
 fixtures remain covered. Tests that formerly required array/record transfers
 to be unsupported now check their single-drop execution behavior.
+
+
+Integration checkpoint at `c2cc99a7`: the direct native pair reached another
+byte-identical generation 2/3 fixed point, and all 160 parity cases passed.
+The interrupted full pytest run found 17 failures (2,791 passed, 14 skipped),
+mostly sharing a hosted build failure in the native program driver. This is
+not a full-suite pass: native fixed points did not detect a hosted/source
+parity gap in a bare `capture` declaration shadowing the prelude function.
+
+The declaration now explicitly shadows with `let`; native function
+predeclaration and imported-binding assignment enforce the existing rule.
+A local-view diagnostic now supplies its required pointer message. The shared
+source-checker tests no longer expect mutable local places to be unimplemented:
+local usage is supported, while a module-level escaping selection is rejected.
+37 adjacent checks passed; an initially malformed new execution case was
+corrected to suppress its discarded call result. All corrected foreign-name,
+import mutation, explicit-shadow and local-view cases pass both compilers and
+both backends through a freshly hosted-built native program driver.

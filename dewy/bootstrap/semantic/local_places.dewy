@@ -79,7 +79,7 @@ selection_error = (alias:Alias fallback:SrcFile session:contexts.Session detail:
     pointers=[Pointer[hir.node_at(session.hir alias.declaration).loc detail]]
 ]
 
-capture = (id:addr @prefix:array<addr> @session:contexts.Session):>addr => {
+let capture = (id:addr @prefix:array<addr> @session:contexts.Session):>addr => {
     let value=hir.node_at(session.hir id)
     let name="__place_index_{session.registry.next_id}"
     let binding_id=bindings.allocate(@session.registry none name 'value' value.loc)
@@ -175,7 +175,8 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
         let live:set<addr>=set[binding]
         let pending:array<addr>=[binding]
         loop pending.length >? 0 {
-            loop dependent in prepared.dependents.get(pending.pop set[]) {
+            let next=pending.pop
+            loop dependent in prepared.dependents.get(next set[]) {
                 if dependent not in? live {live.add(dependent) pending.push(dependent)}
             }
         }

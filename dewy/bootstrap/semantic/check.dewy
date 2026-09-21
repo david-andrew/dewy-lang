@@ -2029,6 +2029,16 @@ local_view_prefix = (id:addr env:Environment session:contexts.Session):>addr? =>
     return none
 }
 
+# Imports retain declaration identity. A bare assignment cannot replace a
+# binding owned by another module; explicit let creates a local shadow.
+foreign_assignment = (binding:bindings.Binding id:addr env:Environment session:contexts.Session):>Error? => {
+    if binding.syntax is? none return none
+    $runtime_assert binding.syntax <? session.syntax_refs.length
+    let origin=session.syntax_refs[binding.syntax]
+    if origin.source =? env.lexical.source return none
+    return problem(id "cannot assign to `{binding.name}`: it belongs to another module" "write `let {binding.name} = ...` to declare a local shadow" env session)
+}
+
 declaration = (id:addr env:Environment @session:contexts.Session constant:bool=false explicit:bool=false):>addr|Error => {
     let node = contexts.node_at(id env.lexical session)
     if node isnt? parser.BinOp return problem(id 'declaration needs a value' 'expected a named assignment' env session)
@@ -2071,6 +2081,10 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     }
     let scope = bindings.scope_at(session.scopes env.lexical.scope)
     let existing = if explicit or annotation isnt? none scope.names.get(name) else declarations.lookup(name env.lexical session)
+    if existing isnt? none and not explicit and annotation is? none {
+        let error=foreign_assignment(bindings.binding_at(session.registry existing) id env session)
+        if error isnt? none return error
+    }
     if existing isnt? none and existing in? session.pending_aliases {
         let pending=session.pending_aliases[existing].expression
         # Only the alias's original statement completes its declaration.
@@ -2424,14 +2438,18 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
 }
 predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error? => {
     let node = contexts.node_at(id env.lexical session)
+    let explicit=false
     if node is? parser.KeywordExpr and node.parts.length =? 2 {
         let keyword = contexts.node_at(node.parts[0] env.lexical session)
-        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] { node = contexts.node_at(node.parts[1] env.lexical session) }
+        if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] { node = contexts.node_at(node.parts[1] env.lexical session) explicit=true }
     }
     if node isnt? parser.BinOp or source_views.symbol(node.op env.lexical session) not in? ['=' '::' ':='] return none
     let name = source_views.identifier(node.left env.lexical session)
     let literal = contexts.node_at(node.right env.lexical session)
     if name is? none or literal isnt? parser.BinOp or not source_views.is_operator(literal.op '=>' env.lexical session) return none
+    # A complete function signature does not turn assignment to an existing
+    # binding into a declaration. Alias collection follows this same rule.
+    if not explicit and declarations.lookup(name env.lexical session) isnt? none return none
     let signature = contexts.node_at(literal.left env.lexical session)
     if signature isnt? parser.BinOp or not source_views.is_operator(signature.op ':>' env.lexical session) return none
     let shape = function_shape(literal env @session)
@@ -3936,6 +3954,10 @@ compound_assignment = (id:addr node:parser.BinOp env:Environment @session:contex
     if read is? hir.TypeValue and symbol =? '&' return declare_constructor(read node.right id env @session)
     if read is? hir.DictLookup return compound_container(read node.right name id env @session)
     if read isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return problem(id 'assignment requires mutable storage' 'select a binding, record field, or array element' env session)
+    if read is? hir.ExpressedIdentifier and read.binding_id isnt? none {
+        let error=foreign_assignment(bindings.binding_at(session.registry read.binding_id) id env session)
+        if error isnt? none return error
+    }
     let error = writable(target id env session)
     if error isnt? none return error
     let required = store_type(target @session)

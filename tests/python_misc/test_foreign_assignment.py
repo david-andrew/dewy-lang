@@ -39,3 +39,36 @@ def test_an_imported_binding_is_not_assignable_here(tmp_path) -> None:
         check.typecheck_and_resolve(SrcFile.from_path(tmp_path / 'main.dewy'))
     (tmp_path / 'main2.dewy').write_text('from p"lib.dewy" import bump\nmain = () => exit(bump() + bump())\n')   # the module itself still assigns it
     check.typecheck_and_resolve(SrcFile.from_path(tmp_path / 'main2.dewy'))
+
+
+CASES = [
+    'let capture=(n:int64):>int64=>n main=():>int64=>capture(42)',
+    'let run=(n:int64):>int64=>n main=():>int64=>run(42)',
+    'let counter:int64=0 bump=():>int64=>{counter+=21 return counter} '
+    'main=():>int64=>{bump(); return bump()}',
+]
+ERRORS = [
+    'capture=(n:int64):>int64=>n',
+    'run=(n:int64):>int64=>n',
+    'Child=type of [x:int64]',
+    'let owner:int64=42 const view=@owner',
+    'let owner:int64=42 let cursor=@owner',
+]
+
+
+@pytest.mark.parametrize('source', ERRORS)
+def test_foreign_and_module_view_diagnostics(source):
+    with pytest.raises(UserError):
+        _check(source)
+
+
+def test_native_foreign_assignments(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=CASES, errors=ERRORS)
+    library=tmp_path/'lib.dewy'
+    library.write_text('let counter:int64=0 let bump=():>int64=>{counter+=21 return counter}')
+    check_structural_text(build_program_driver(tmp_path), tmp_path,
+        cases=['from p"lib.dewy" import bump main=():>int64=>{bump(); return bump()}'],
+        errors=['from p"lib.dewy" import counter main=():>int64=>{counter=42 return counter}',
+                'from p"lib.dewy" import counter main=():>int64=>{counter+=42 return counter}',
+                'from p"lib.dewy" import bump bump=():>int64=>42'])
