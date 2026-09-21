@@ -1,0 +1,39 @@
+# The final value of a function has the same ownership contract as return.
+let drops:int64=0
+Handle=type of [token:int64 values:array<int64>
+$__drop__
+release=():>void=>{drops+=1 token=0 values.clear}
+]
+make=():>Handle=>{let owner=Handle[42 [1 2]] owner}
+choose=(yes:bool):>Handle=>{
+    let first=Handle[42 [1]]
+    let second=Handle[42 [2 3]]
+    if yes {first} else {second}
+}
+nested=():>Handle=>{
+    let scratch=Handle[0 []]
+    {let inner=Handle[42 [4]] inner}
+}
+# Expressing a value before a later statement must still execute that statement.
+with_trailing=():>Handle=>{Handle[42 [6]] drops+=1}
+exercise=():>int64=>{
+    let a=make()
+    let b=choose(true)
+    let c=choose(false)
+    let d=nested()
+    let g=with_trailing()
+    if drops not=?4 return 1
+    if a.token+b.token+c.token+d.token+g.token not=?210 return 2
+    if a.values.length not=?2 or b.values.length not=?1 or c.values.length not=?2 return 3
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 or drops not=?9 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {
+        drops=0
+        if exercise() not=?42 or drops not=?9 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

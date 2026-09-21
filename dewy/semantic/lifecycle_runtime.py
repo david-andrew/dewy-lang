@@ -260,6 +260,38 @@ def prepare(root: hir.Block, srcfile):
                     local.add(node.binding_id)
         return result
 
+    def returnable_result(node):
+        """Recognize a function result whose ownership can be made explicit."""
+        if node.type == ty.BOTTOM_TYPE:
+            return True
+        if resource(node.type) is None:
+            return False
+        if isinstance(node, hir.Block):
+            values = [item for item in node.items if item.type != ty.VOID_TYPE]
+            return len(values) == 1 and returnable_result(values[0])
+        if isinstance(node, hir.Flow):
+            return (node.default is not None and returnable_result(node.default)
+                    and all(isinstance(arm, hir.IfArm) and returnable_result(arm.body) for arm in node.arms))
+        return True
+
+    def return_result(node):
+        if node.type == ty.BOTTOM_TYPE:
+            return node
+        if isinstance(node, hir.Block):
+            index = next(i for i, item in enumerate(node.items) if item.type != ty.VOID_TYPE)
+            if index == len(node.items) - 1:
+                return replace(node, type=ty.BOTTOM_TYPE, items=[*node.items[:-1], return_result(node.items[-1])])
+            # Preserve the value's original evaluation point, then execute
+            # every trailing statement before transferring the saved owner.
+            declaration, result = capture(node.items[index], node.loc)
+            items = [*node.items[:index], declaration, *node.items[index + 1:], hir.Return(node.loc, ty.BOTTOM_TYPE, result)]
+            return replace(node, type=ty.BOTTOM_TYPE, items=items)
+        if isinstance(node, hir.Flow):
+            return replace(node, type=ty.BOTTOM_TYPE,
+                           arms=[replace(arm, type=ty.BOTTOM_TYPE, body=return_result(arm.body)) for arm in node.arms],
+                           default=return_result(node.default))
+        return hir.Return(node.loc, ty.BOTTOM_TYPE, node)
+
     def function(literal):
         nonlocal current_source
         if literal.proof:
@@ -285,7 +317,6 @@ def prepare(root: hir.Block, srcfile):
         if literal.lifecycle is None and not mentions_resource(literal):
             current_source = previous_source
             return literal
-        transfers = local_transfers(literal.body)
         def statement(node, owners, loops):
             live = allowed | {owner.binding_id for owner in owners}
             if isinstance(node, hir.Block):
@@ -384,10 +415,13 @@ def prepare(root: hir.Block, srcfile):
         # A function body's unscoped block is nevertheless its lexical owner
         # scope, as in normal backend cleanup.
         body = literal.body
+        if owning_result and returnable_result(body):
+            body = return_result(body)
         if not isinstance(body, hir.Block):
             body = hir.Block(body.loc, body.type, [body], True)
         elif not body.scoped:
             body = replace(body, scoped=True)
+        transfers = local_transfers(body)
         prepared = replace(literal, body=statement(body, [], []))
         def parameter(param):
             return replace(param, value=expression(param.value, allowed)) if isinstance(param, hir.BoundParam) else param

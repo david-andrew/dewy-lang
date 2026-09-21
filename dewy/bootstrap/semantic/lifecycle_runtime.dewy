@@ -435,6 +435,70 @@ local_transfers = (body:addr @plan:Plan session:contexts.Session):>void => {
         }
     }
 }
+# Make the result's ownership explicit while retaining its evaluation point.
+# A value before trailing statements needs a saved owner, not an early return.
+returnable_result = (id:addr session:contexts.Session):>bool => {
+    let node=hir.node_at(session.hir id)
+    if types.is_primitive(types.node_at(session.types node.value_type) 'never') return true
+    if resource(node.value_type session.types) is? none return false
+    if node is? hir.Block {
+        let values:array<addr>=[]
+        loop item in node.items {
+            if not types.is_primitive(types.node_at(session.types hir.node_at(session.hir item).value_type) 'void') {values.push(item)}
+        }
+        if values.length not=? 1 return false
+        return returnable_result(values[0] session)
+    }
+    if node is? hir.Flow {
+        if node.default is? none or not returnable_result(node.default session) return false
+        loop arm_id in node.arms {
+            let arm=hir.node_at(session.hir arm_id)
+            if arm isnt? hir.IfArm or not returnable_result(arm.body session) return false
+        }
+    }
+    return true
+}
+return_result = (id:addr @session:contexts.Session):>addr => {
+    let node=hir.node_at(session.hir id)
+    if types.is_primitive(types.node_at(session.types node.value_type) 'never') return id
+    let bottom=types.primitive('never' @session.types)
+    if node is? hir.Block {
+        let block:hir.Block=node
+        $runtime_assert block.items.length >? 0
+        let selected:addr?=none
+        loop index in 0.. and index <? block.items.length {
+            if not types.is_primitive(types.node_at(session.types hir.node_at(session.hir block.items[index]).value_type) 'void') {selected=index break}
+        }
+        $runtime_assert selected isnt? none and selected <? block.items.length
+        let index:addr=selected
+        if index =? block.items.length-1 {block.items[index]=return_result(block.items[index] @session)}
+        else {
+            let saved=capture_result(block.items[index] block.loc @session)
+            block.items[index]=saved.declaration
+            block.items.push(put(hir.Return[block.loc bottom saved.value] @session))
+        }
+        block.value_type=bottom
+        store(id block @session)
+        return id
+    }
+    if node is? hir.Flow {
+        let flow:hir.Flow=node
+        loop arm_id in flow.arms {
+            let arm=hir.node_at(session.hir arm_id)
+            $runtime_assert arm is? hir.IfArm
+            let branch:hir.IfArm=arm
+            branch.body=return_result(branch.body @session)
+            branch.value_type=bottom
+            store(arm_id branch @session)
+        }
+        $runtime_assert flow.default isnt? none
+        flow.default=return_result(flow.default @session)
+        flow.value_type=bottom
+        store(id flow @session)
+        return id
+    }
+    return put(hir.Return[node.loc bottom id] @session)
+}
 prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     if id in? plan.prepared or plan.problem isnt? none return
     plan.prepared.add(id)
@@ -464,6 +528,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     # Leave ordinary helpers (especially the cached prelude) untouched.
     # Cleanup added inside another function is visible through its call edge.
     if function.lifecycle is? none and not mentions_resource(id session) {plan.source=previous plan.result_type=previous_result return}
+    if resource(function.rettype session.types) isnt? none and returnable_result(function.body session) {function.body=return_result(function.body @session)}
     function.body=scoped_body(function.body @session)
     local_transfers(function.body @plan session)
     let composed_parent:addr?=none
