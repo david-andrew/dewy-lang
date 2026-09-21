@@ -102,11 +102,47 @@ def test_dropped_local_owners_retain_no_storage(tmp_path):
     execute(tmp_path, 'drop-lifetime', codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime'])
+@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime', 'lifecycle_factory_results'])
 def test_aggregate_cleanup_and_implicit_results(tmp_path, name):
     from pathlib import Path
     source = Path(__file__).resolve().parents[1] / f'fixtures/{name}.dewy'
     execute(tmp_path, name, codegen(SrcFile.from_path(source), debug_locations=False))
+
+
+def test_native_factory_result_ownership(tmp_path):
+    from pathlib import Path
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+
+    source = Path(__file__).resolve().parents[1] / 'fixtures/lifecycle_factory_results.dewy'
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[source.read_text()], errors=[])
+
+
+FACTORY_WITH_DROP = '''let changed:int64=0
+Handle=type of [token:int64
+$__drop__
+release=():>void=>{changed=1}
+]
+'''
+
+
+def test_factory_cleanup_is_in_its_effect_contract():
+    source = SrcFile(None, FACTORY_WITH_DROP + '''
+make=():>Handle & allocates=>{let scratch=Handle[1] return Handle[42]}
+main=():>int64=>{let owner=make() return owner.token}
+''')
+    check.typecheck_and_resolve(source)
+    with pytest.raises(ReportException, match='effect contract'):
+        codegen(source)
+
+
+def test_factory_cleanup_invalidates_facts_in_its_caller():
+    source = SrcFile(None, FACTORY_WITH_DROP + '''
+make=():>Handle=>{let scratch=Handle[1] return Handle[42]}
+main=():>int64=>{changed=0 let owner=make() $assert changed=?0 return owner.token}
+''')
+    check.typecheck_and_resolve(source)
+    with pytest.raises(ReportException, match='assert'):
+        codegen(source)
 
 
 @pytest.mark.parametrize('body', [

@@ -314,7 +314,10 @@ record owners now run drop hooks, including inherited drops, with checked
 effects and lexical cleanup. Nested record fields drop after the containing hook in reverse field order;
 transfers and containers of resources remain gated. Explicit custom copy
 hooks now execute when they construct fresh results (including nested hook
-calls); consuming an intermediate parent result still needs transfer lowering. Both
+calls). Fresh results can return through factories/callbacks and cleanup scopes;
+the caller becomes their owner. A result is evaluated before local cleanup,
+including an aggregate field whose owner's drop might mutate it. Consuming an
+existing owner or intermediate parent result still needs transfer lowering. Both
 checkers now validate declarations, result identity, compiler-only access and
 the read-only copy receiver. The native snapshot codec retains this metadata.
 Explicit `.copy()` now resolves a custom copy hook into an ordinary checked

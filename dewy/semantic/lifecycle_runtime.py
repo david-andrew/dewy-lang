@@ -1,8 +1,9 @@
 """Materialize ownership operations before runtime lowering.
 
-Supported owners are fresh local records, including nested record resources.
+Supported owners are fresh records, including nested record resources and
+factory results transferred into their caller's ownership.
 Explicit copy hooks may construct fresh results; drop runs before field
-cleanup. Implicit copies, moves, resource containers and escaping owners
+cleanup. Implicit copies, moves, resource containers and owning parameters
 remain unsupported. Checked HIR calls expose effects and use the ordinary
 internal place call ABI.
 """
@@ -100,8 +101,8 @@ def prepare(root: hir.Block, srcfile):
     def fresh(node, allowed, inherited):
         # An explicit custom copy creates an independent owner. Its checked
         # call already carries the hook's effects and result contract.
-        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier):
-            operation = declarations.get(node.func.binding_id)
+        if isinstance(node, hir.FunctionCall):
+            operation = declarations.get(node.func.binding_id) if isinstance(node.func, hir.ExpressedIdentifier) else None
             if operation is not None and operation.expr.lifecycle == 'copy':
                 if len(node.pos_args) != 1 or node.kw_args or not isinstance(node.pos_args[0], hir.Place):
                     reject(node, 'an invalid copy receiver')
@@ -111,6 +112,12 @@ def prepare(root: hir.Block, srcfile):
                 if not isinstance(receiver, hir.ExpressedIdentifier) or receiver.binding_id not in allowed:
                     reject(node, 'an unavailable copy receiver')
                 return node
+            # A function result is an owned value, including through a
+            # callback. Every checked body owes the same return contract;
+            # resource arguments still require their own ownership proof.
+            return replace(node, func=expression(node.func, allowed, inherited=inherited),
+                           pos_args=[expression(arg, allowed, inherited=inherited) for arg in node.pos_args],
+                           kw_args={name: expression(arg, allowed, inherited=inherited) for name, arg in node.kw_args.items()})
         shape = ty.unfold(ty.strip_refinement(node.type))
         if not isinstance(node, hir.ObjectLiteral) or not isinstance(shape, ty.ObjectType):
             reject(node, 'a non-fresh resource field or resource container')
@@ -124,8 +131,8 @@ def prepare(root: hir.Block, srcfile):
                                      for field in node.fields])
 
     def capture(value, loc):
-        # Preserve evaluation order and snapshot a scalar result before its
-        # owner's drop may mutate the field from which it was read.
+        # Evaluate the result before cleanup. Ordinary lowering transfers a
+        # fresh aggregate or snapshots a borrowed field that drop may mutate.
         name = f'__dewy_drop_result_{registry.next_id}'
         binding = registry.allocate(object(), name, 'value', loc)
         binding.type = value.type
@@ -195,8 +202,7 @@ def prepare(root: hir.Block, srcfile):
                 if not (literal.lifecycle in ('drop', 'copy') and index == 0 and param.place):
                     reject(literal, 'owning parameters')
                 allowed.add(param.binding_id)
-        if resource(literal.rettype) is not None and literal.lifecycle != 'copy':
-            reject(literal, 'owning returns')
+        owning_result = resource(literal.rettype) is not None
         if literal.lifecycle is None and not mentions_resource(literal):
             current_source = previous_source
             return literal
@@ -213,8 +219,8 @@ def prepare(root: hir.Block, srcfile):
                     result = None
                     if node.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
                         expressed = [i for i, item in enumerate(items) if item.type != ty.VOID_TYPE]
-                        if not public_effects.scalar(node.type) or len(expressed) != 1:
-                            reject(node, 'a non-word implicit result with local owners')
+                        if len(expressed) != 1:
+                            reject(node, 'an implicit result without a unique value')
                         index = expressed[0]
                         items[index], result = capture(items[index], node.loc)
                     items.extend(cleanup(local, node.loc))
@@ -229,7 +235,7 @@ def prepare(root: hir.Block, srcfile):
                 owners.append(node)
                 return node
             if isinstance(node, hir.Return):
-                if node.item is not None and literal.lifecycle == 'copy' and resource(node.item.type) is not None:
+                if node.item is not None and owning_result and resource(node.item.type) is not None:
                     returned = fresh(node.item, live, False)
                 else:
                     returned = expression(node.item, live, inherited=literal.lifecycle == 'drop') if node.item is not None else None
@@ -237,8 +243,6 @@ def prepare(root: hir.Block, srcfile):
                     return replace(node, item=returned)
                 result = []
                 if returned is not None:
-                    if not public_effects.scalar(returned.type):
-                        reject(node, 'a non-word return with local owners')
                     declaration, returned = capture(returned, node.loc)
                     result.append(declaration)
                 result.extend(cleanup(owners, node.loc))
@@ -268,7 +272,7 @@ def prepare(root: hir.Block, srcfile):
             if isinstance(node, hir.MemberAssign):
                 return replace(node, target=expression(node.target, live, inherited=literal.lifecycle == 'drop'),
                                value=expression(node.value, live, inherited=literal.lifecycle == 'drop'))
-            if literal.lifecycle == 'copy' and resource(node.type) is not None:
+            if owning_result and resource(node.type) is not None:
                 return fresh(node, live, False)
             return expression(node, live, inherited=literal.lifecycle == 'drop')
 

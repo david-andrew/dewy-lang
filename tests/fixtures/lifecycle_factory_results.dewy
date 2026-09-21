@@ -1,0 +1,43 @@
+let drops:int64=0
+let copies:int64=0
+Handle=type of [token:int64 text:string values:array<int64>
+$__drop__
+release=():>void=>{drops+=1 token=0 text='released' values.clear}
+$__copy__
+duplicate=():>Handle=>{
+    # A scratch owner is released after the result has been constructed.
+    let scratch=make(9)
+    copies+=1
+    return Handle[token text values.copy()]
+}
+]
+make=(n:int64):>Handle=>Handle[n "value {n}" [n]]
+explicit=():>Handle=>{let scratch=make(8) return make(42)}
+implicit=():>Handle=>{let scratch=make(7) make(42)}
+branch=(yes:bool):>Handle=>{
+    let scratch=make(6)
+    if yes return make(42)
+    return make(1)
+}
+text=():>string=>{let owner=make(42) return owner.text}
+values=():>array<int64>=>{let owner=make(42) owner.values}
+apply=(factory:():>Handle):>Handle=>factory()
+exercise=():>int64=>{
+    let first=apply(@explicit)
+    let second=implicit()
+    let third=branch(true)
+    let fourth=branch(false)
+    let duplicate=first.copy()
+    if text() not=?'value 42' return 1
+    let result=values()
+    if result.length not=?1 or result[0] not=?42 return 2
+    return if first.token=?42 and second.token=?42 and third.token=?42 and fourth.token=?1 and duplicate.token=?42 42 else 3
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {if exercise() not=?42 return 2}
+    if drops not=?1212 or copies not=?101 return 3
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

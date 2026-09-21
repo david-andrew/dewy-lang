@@ -4,12 +4,12 @@ import p"hir.dewy" as hir
 import p"ty.dewy" as types
 import p"type_queries.dewy" as views
 import p"bindings.dewy" as bindings
-import p"analyze/public_effects.dewy" as effects
 
 # Materialize operations before reachability and lowering. Supported owners
-# are fresh local records, including nested record resources. Explicit copy
-# hooks may construct fresh results; drop runs before field cleanup.
-# Implicit copies/moves, resource containers and escaping owners remain
+# are fresh records, including nested record resources and factory results
+# transferred to callers. Explicit copy hooks may construct fresh results;
+# drop runs before field cleanup. Implicit copies/moves, resource containers
+# and owning parameters remain
 # implementation gaps, never silent memberwise fallbacks.
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 Plan:type = [hooks:dict<addr Hook>=[] owners:dict<string Hook>=[] prepared:set<addr>=set[] source:SrcFile problem:Error?=none]
@@ -95,6 +95,12 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
                 return
             }
         }
+        # Results are owned values, including through callbacks. Each checked
+        # body owes this contract; arguments need their own ownership proof.
+        expression(candidate.func allowed inherited @plan @session)
+        loop argument in candidate.pos_args {expression(argument allowed inherited @plan @session)}
+        loop [name argument] in candidate.kw_args {expression(argument allowed inherited @plan @session)}
+        return
     }
     let node=hir.node_at(session.hir id)
     let type=types.node_at(session.types views.structural_base(node.value_type session.types))
@@ -112,7 +118,8 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
 }
 Captured:type = const [declaration:addr value:addr]
 capture_result = (id:addr loc:Span @session:contexts.Session):>Captured => {
-    # Evaluate a scalar result before its owner's drop can change it.
+    # Evaluate before cleanup; lowering transfers fresh aggregates and
+    # snapshots borrowed fields that a subsequent drop might mutate.
     let type=hir.node_at(session.hir id).value_type
     let empty=types.primitive('void' @session.types)
     let name="__dewy_drop_result_{session.registry.next_id}"
@@ -162,7 +169,7 @@ scoped_body = (id:addr @session:contexts.Session):>addr => {
     }
     return put(hir.Block[node.loc node.value_type [id] true] @session)
 }
-statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inherited:bool copy_result:bool @plan:Plan @session:contexts.Session):>void => {
+statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inherited:bool owning_result:bool @plan:Plan @session:contexts.Session):>void => {
     if plan.problem isnt? none return
     let node=hir.node_at(session.hir id)
     let live=allowed
@@ -175,7 +182,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         let current:hir.Block=node
         let active=owners
         let start=active.length
-        loop item in current.items {statement(item @active loops allowed inherited copy_result @plan @session)}
+        loop item in current.items {statement(item @active loops allowed inherited owning_result @plan @session)}
         if plan.problem isnt? none return
         if current.scoped and active.length >? start {
             let result:addr?=none
@@ -185,7 +192,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                     let item=hir.node_at(session.hir current.items[index])
                     if not types.is_primitive(types.node_at(session.types item.value_type) 'void') {expressed.push(index)}
                 }
-                if not effects.scalar(current.value_type session.types) or expressed.length not=? 1 {reject(current 'a non-word implicit result with local owners' @plan) return}
+                if expressed.length not=? 1 {reject(current 'an implicit result without a unique value' @plan) return}
                 let index=expressed[0]
                 $runtime_assert index <? current.items.length
                 let saved=capture_result(current.items[index] current.loc @session)
@@ -213,7 +220,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
     if node is? hir.Return {
         let current:hir.Return=node
         if current.item isnt? none {
-            if copy_result and resource(hir.node_at(session.hir current.item).value_type session.types) isnt? none {fresh(current.item live false @plan @session)}
+            if owning_result and resource(hir.node_at(session.hir current.item).value_type session.types) isnt? none {fresh(current.item live false @plan @session)}
             else {expression(current.item live inherited @plan @session)}
         }
         if plan.problem isnt? none or owners.length =? 0 return
@@ -221,7 +228,6 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         if current.item isnt? none {
             let returned:addr=current.item
             let value=hir.node_at(session.hir returned)
-            if not effects.scalar(value.value_type session.types) {reject(current 'a non-word return with local owners' @plan) return}
             let saved=capture_result(returned current.loc @session)
             items.push(saved.declaration)
             current.item=saved.value
@@ -258,20 +264,20 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             if branch is? hir.LoopArm {boundaries.push(owners.length)}
             let body=scoped_body(branch.body @session)
             let active=owners
-            statement(body @active boundaries allowed inherited copy_result @plan @session)
+            statement(body @active boundaries allowed inherited owning_result @plan @session)
             let rewritten=if branch is? hir.IfArm hir.IfArm[branch.loc branch.value_type branch.condition body] else hir.LoopArm[branch.loc branch.value_type branch.condition body]
             store(arm_id rewritten @session)
         }
         if current.default isnt? none {
             let body=scoped_body(current.default @session)
             let active=owners
-            statement(body @active loops allowed inherited copy_result @plan @session)
+            statement(body @active loops allowed inherited owning_result @plan @session)
             current.default=body
         }
         store(id current @session)
         return
     }
-    if copy_result and resource(node.value_type session.types) isnt? none {fresh(id live false @plan @session)}
+    if owning_result and resource(node.value_type session.types) isnt? none {fresh(id live false @plan @session)}
     else {expression(id live inherited @plan @session)}
 }
 mentions_resource = (root:addr session:contexts.Session):>bool => {
@@ -317,13 +323,12 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
         }
         if parameter is? hir.BoundParam {expression(parameter.value allowed false @plan @session)}
     }
-    if resource(function.rettype session.types) isnt? none and function.lifecycle not=? 'copy' {reject(function 'owning returns' @plan) return}
     # Leave ordinary helpers (especially the cached prelude) untouched.
     # Cleanup added inside another function is visible through its call edge.
     if function.lifecycle is? none and not mentions_resource(id session) {plan.source=previous return}
     function.body=scoped_body(function.body @session)
     let owners:array<addr>=[]
-    statement(function.body @owners [] allowed function.lifecycle =? 'drop' function.lifecycle =? 'copy' @plan @session)
+    statement(function.body @owners [] allowed function.lifecycle =? 'drop' resource(function.rettype session.types) isnt? none @plan @session)
     store(id function @session)
     plan.source=previous
 }

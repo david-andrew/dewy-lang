@@ -426,9 +426,12 @@ in both lowerings and the parity tool is the gate.
   drops, reverse scope cleanup, scalar implicit results and early returns/loop exits. Its calls participate in fact/effect checking.
   Nested resource records also drop in reverse field order, even when the
   wrapper has no hook. Explicit custom copies can construct fresh results,
-  including nested hook calls. Inferred transfers, move hooks, inherited
+  including nested hook calls. Fresh record results now transfer from factories
+  (including callbacks) to caller-owned bindings. Results are evaluated before
+  cleanup, including aggregate field snapshots and copy hooks with scratch
+  owners. Inferred transfers of existing owners, move hooks, inherited
   copies needing parent-result consumption, resource containers and general
-  owning arguments/results remain explicitly unsupported during code generation.
+  owning arguments remain explicitly unsupported during code generation.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a
   last use turns out to be needed it should be a meta-level form (a
