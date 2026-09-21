@@ -13081,7 +13081,7 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
     pos_or_kw_args = [replace(param, type=_resolve_result_terms(param.type, param_ids, ctx=ctx, loc=binop.loc)) if _refined_members(param.type) else param for param in pos_or_kw_args]
     kw_only_args = [replace(param, type=_resolve_result_terms(param.type, param_ids, ctx=ctx, loc=binop.loc)) if _refined_members(param.type) else param for param in kw_only_args]
     for param in [*pos_or_kw_args, *kw_only_args]:
-        if param.place and param.binding_id is not None:
+        if param.binding_id is not None:
             ctx.binding_registry.by_id[param.binding_id].store_type = param.type
     annotated = rettype if rettype != ty.INFERRED_TYPE else None
     catcher = Catcher(expected=annotated, void_facts=void_facts)

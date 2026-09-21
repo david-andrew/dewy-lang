@@ -1,0 +1,10 @@
+# Copies retain equality until a checked write changes one endpoint.
+snapshot=(value:int64<v=>0<=?v<?100>):>int64=>{
+    if value>=?99 return 0
+    const saved=value
+    $assert saved=?value
+    value+=1
+    $assert saved<?value
+    return saved
+}
+main=():>int64=>snapshot(42)

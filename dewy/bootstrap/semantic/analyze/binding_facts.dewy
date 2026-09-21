@@ -1,6 +1,7 @@
 from reporting import Span
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
+import p"../type_queries.dewy" as views
 import p"../bindings.dewy" as bindings
 import p"hir_facts.dewy" as expressions
 import p"value_bounds.dewy" as values
@@ -115,6 +116,12 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
     }
     if node is? hir.ExpressedIdentifier|hir.MemberAccess and saved isnt? none and saved.shift =? 0 {
         relations.copy_relational(@state saved.term target)
+        # A scalar snapshot equals the source until one endpoint changes.
+        # Casts require their own representation proof; do not erase them here.
+        if id =? value and views.fixed_integer_layout(types.strip_refinement(node.value_type data.env.types) data.env.types) isnt? none {
+            facts.put(@state facts.order(saved.term target) ranges.Interval[0 none])
+            facts.put(@state facts.order(target saved.term) ranges.Interval[0 none])
+        }
         let sequence=data.snapshot.sequences.get(value)
         if sequence isnt? none {relations.copy_relational(@state facts.Term[sequence 'length'] facts.Term[subject 'length'])}
         if node is? hir.ExpressedIdentifier {

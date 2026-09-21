@@ -1536,3 +1536,25 @@ truncate decisions and excludes caller-installed named-count relations.
 Those relations retain independent source-level acceptance/rejection tests.
 All 20 affected and adjacent checks pass after repair. The later flow-join
 fix was validated separately as recorded above.
+
+Integration checkpoint at `a91af1f9`: the direct native compiler pair reached
+byte-identical second and third generations, with no hosted compiler or C
+backend in the loop. Those generations took 62 s and 74 s respectively;
+these are integration measurements, not a performance-target claim. All
+152 Phase 1 parity cases passed against the final pair, including the
+warm-cache lifecycle cases. The release job at `47fbc9cd` also passed.
+Artifacts: `../dewy-build-artifacts/phase1-flow-join-final-2026-09-21` and
+`../dewy-build-artifacts/phase1-flow-join-parity-2026-09-21`.
+
+Checkpoint: scalar snapshots retain equality in the ordinary mutable fact
+state. Changing either endpoint invalidates or transfers that relationship;
+no special trusted rule is used for compiler-generated temporaries. Hosted
+result contracts also retain the numeric consequences of symbolic bounds,
+matching native comparison refinement. Parameter annotations now constrain
+hosted assignment storage consistently with annotated locals and native
+parameters. Previously a private parameter could be assigned an out-of-
+contract value while its old facts were reinstalled by analysis.
+Validation: 72 adjacent hosted checks passed. The scalar snapshot and
+parameter-store corpus passes both compilers and both output backends using
+a freshly native-built driver. Indexed scalar selections remain separate
+work; snapshot equality does not equate every element of an array.

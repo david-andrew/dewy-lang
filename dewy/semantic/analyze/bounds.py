@@ -3746,6 +3746,13 @@ class _BoundsValidator:
         source = self._binding_id(stripped) if isinstance(stripped, (hir.ExpressedIdentifier, hir.MemberAccess)) else None
         if source is not None and source >= 0:
             self._copy_relational_facts(state, source, subject)
+            # An unchanged scalar read equals its stored copy until either
+            # endpoint is written. Keep this in the ordinary relation state,
+            # so assignment/alias invalidation applies to the equality too.
+            # Casts are excluded: their representation must be checked first.
+            if stripped is value and ty.fixed_integer_layout(ty.strip_refinement(value.type)) is not None:
+                state[_order_key(source, subject)] = Interval(0, None)
+                state[_order_key(subject, source)] = Interval(0, None)
             if _has_sequence_length(stripped.type):
                 # Value semantics copies shape as well as elements. Evidence
                 # for an index in the copy survives replacement of the source.
@@ -3840,11 +3847,12 @@ class _BoundsValidator:
                     smaller_interval, larger_interval = (subject_interval, bound_interval) if direction == 'upper' else (bound_interval, subject_interval)
                     if smaller is not None and larger is not None:
                         state[_order_key(smaller, larger)] = Interval(gap, None)
-                    elif smaller is not None and larger_interval is not None and larger_interval.upper is not None:
-                        # bounded above by a known value: an interval on the smaller term
+                    if smaller is not None and larger_interval is not None and larger_interval.upper is not None:
+                        # A symbolic bound also has a numeric consequence.
+                        # Retain both when both arguments have identities.
                         current = _known_interval(state, smaller, self.max_length) if smaller < 0 else self._binding_interval(state, smaller)
                         state[smaller] = current.intersect(Interval(None, larger_interval.upper - gap))
-                    elif larger is not None and smaller_interval is not None and smaller_interval.lower is not None:
+                    if larger is not None and smaller_interval is not None and smaller_interval.lower is not None:
                         current = _known_interval(state, larger, self.max_length) if larger < 0 else self._binding_interval(state, larger)
                         state[larger] = current.intersect(Interval(smaller_interval.lower + gap, None))
                     if direction == 'upper' and window is not None:

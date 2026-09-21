@@ -22,9 +22,9 @@ class Binding:
     loc: Span
     type: ty.Type | None = None
     store_type: ty.Type | None = None
-    """A place parameter's declared storage contract, before flow narrowing.
-    Unlike a value parameter's copied local, every write remains constrained
-    by the caller's storage type, including scalar refinements."""
+    """A parameter's declared storage contract, before flow narrowing.
+    Both private values and borrowed places retain their written annotation;
+    a place additionally owes that contract to the caller's storage."""
     type_value: ty.TypeAliasValue | None = None
     effect_value: effect_rows.Row | None = None
     declaration: hir.Declare | None = None
