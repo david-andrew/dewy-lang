@@ -1579,3 +1579,16 @@ its two failures were repaired in this final batch). Seventy-two adjacent
 hosted annotation/bounds/place checks passed. The native driver was built
 by the verified native pair, not by the hosted compiler. Whole-compiler
 integration and the updated full suite are separate subsequent gates.
+
+Checkpoint: scalar facts now follow indexed elements selected by a literal or
+immutable binding, alongside the existing field and sequence-length routes.
+A guard can establish a selected denominator is nonzero, and a store can
+establish its new value. Writes through potentially aliased indices, owner
+mutation, and loop re-entry invalidate the evidence; mutable selectors do
+not acquire persistent element identities. Assignment analysis evaluates
+its operands once and records the result only when its target stayed stable.
+Validation: eight hosted acceptance/rejection cases pass. The bounds-only
+native visitor agrees with hosted analysis, and a freshly native-built
+program driver passes the cases through both compilers and both backends.
+These are ordinary array facts, not a special rule for generated helpers or
+permission to assume distinct indices are disjoint.

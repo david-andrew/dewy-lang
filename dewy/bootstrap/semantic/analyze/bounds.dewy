@@ -706,7 +706,15 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
     if node is? hir.IndexAssign {
         let target=node_at(node.target checker)
         $runtime_assert target is? hir.Index
+        let number=checker.data.snapshot.numbers.get(node.value)
+        let nonzero=obligations.nonzero(node.value number state checker.data)
+        let stable=intervals.stable(node.target checker.data.snapshot checker.data.env.nodes)
         forget_value(target.array @state @checker)
+        let route=if stable bindings.array_route_id(node.target checker.data.env.nodes @checker.data.registry) else none
+        if route isnt? none {
+            if number isnt? none {facts.set_value(@state facts.Term[route] number)}
+            if nonzero {facts.put(@state facts.nonzero(route) ranges.exact(1))}
+        }
         let array=terms.sequence_id(target.array checker.data.env @checker.data.registry)
         if array isnt? none {elements.store(@state array node.value checker.word_type node.loc checker.data.env @checker.data.registry) note_element_routes(array @checker)}
     }

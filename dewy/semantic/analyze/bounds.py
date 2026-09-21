@@ -974,14 +974,7 @@ class _BoundsValidator:
                             current[key] = current.get(key, self._length_default()).intersect(Interval(minimum, maximum))
             return current
         if isinstance(node, hir.IndexAssign):
-            self._eval(node.target, current, validate=validate)
-            self._eval(node.value, current, validate=validate)
-            self._forget_container_value(node.target.array, current)
-            target = _strip_casts(node.target)
-            if isinstance(target, hir.Index):
-                stored_into = self._array_id(target.array)
-                if stored_into is not None:
-                    self._store_element(current, stored_into, node.value, node.loc)
+            self._eval_index_assign(node, current, validate=validate)
             return current
         if isinstance(node, hir.Flow):
             return self._analyze_flow(node, current, validate=validate)
@@ -2649,14 +2642,29 @@ class _BoundsValidator:
         interval = self._eval(node.index, state, validate=validate)
         if validate:
             self._validate_index(node, interval, state, length_interval=length)
+        route = self._binding_id(node)
+        known = state.get(route) if route is not None else None
         if isinstance(node.type, ty.RefinedType):
-            return self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
-        return None
+            declared = self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
+            if declared is not None:
+                known = declared if known is None else known.intersect(declared)
+        return known
 
     def _eval_index_assign(self, node: hir.IndexAssign, state: State, *, validate: bool) -> Interval | None:
         self._eval(node.target, state, validate=validate)
-        self._eval(node.value, state, validate=validate)
+        value = self._eval(node.value, state, validate=validate)
+        nonzero = self._nonzero_proven(node.value, value, state)
+        stable = not (self.predicate_bindings.read_bindings(node.target)
+                      & self.predicate_bindings.mutated_bindings(node.value))
         self._forget_container_value(node.target.array, state)
+        stored_into = self._array_id(node.target.array)
+        if stored_into is not None:
+            self._store_element(state, stored_into, node.value, node.loc)
+        route = self._binding_id(node.target) if stable else None
+        if route is not None:
+            self._set_interval(state, route, value)
+            if nonzero:
+                state[_nonzero_key(route)] = Interval.exact(1)
         return None
 
     def _eval_string_index(self, node: hir.StringIndex, state: State, *, validate: bool) -> Interval | None:
@@ -4694,9 +4702,9 @@ class _BoundsValidator:
             return None if array_id is None else _length_key(array_id)
         if isinstance(node, hir.ExpressedIdentifier):
             return node.binding_id
-        if isinstance(node, hir.MemberAccess):
-            # a field of a named object (`value.denominator`) is a route:
-            # guards refine it until the field or its root is assigned
+        if isinstance(node, (hir.MemberAccess, hir.Index)):
+            # Fields and stable element selections name storage routes.
+            # Root/selector writes invalidate their facts through the registry.
             return sb.array_route_id(node, self.registry)
         return None
 

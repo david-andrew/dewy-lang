@@ -260,13 +260,14 @@ array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
         let step=hir.node_at(nodes id)
         if step is? hir.MemberAccess {fields.push(step.name)}
         else if step is? hir.Index {
-            if step.constant_index isnt? none {fields.push("[{step.constant_index}]") continue}
             let selected=hir.node_at(nodes step.index)
             loop true {
                 if selected is? hir.ValueCast|hir.RepresentationCast {selected=hir.node_at(nodes selected.expr) continue}
                 if selected is? hir.Obligation {selected=hir.node_at(nodes selected.value) continue}
                 break
             }
+            if selected is? hir.Integer {fields.push("[{selected.value}]") continue}
+            if step.constant_index isnt? none {fields.push("[{step.constant_index}]") continue}
             if selected isnt? hir.ExpressedIdentifier or selected.binding_id is? none return none
             let binding=find_binding(registry selected.binding_id)
             if binding is? none or binding.declaration is? none return none

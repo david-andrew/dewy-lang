@@ -226,10 +226,14 @@ def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = T
     indices = []
     for step in path.steps:
         if isinstance(step, hir.Index):
-            if step.constant_index is not None:
+            selected = _unwrap_fact_route(step.index)
+            if isinstance(selected, hir.Integer):
+                # Literal routes must exist during inference too, before
+                # validation records an optional constant-index optimization.
+                names.append(f'[{selected.value}]')
+            elif step.constant_index is not None:
                 names.append(f'[{step.constant_index}]')
             else:
-                selected = _unwrap_fact_route(step.index)
                 binding = registry.by_id.get(selected.binding_id) if isinstance(selected, hir.ExpressedIdentifier) else None
                 if binding is None or binding.declaration is None or binding.declaration.decltype != 'const':
                     return None

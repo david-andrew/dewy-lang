@@ -1,0 +1,17 @@
+# Facts belong to a particular stable selection, not to every array element.
+read=(@xs:array<int64> i:int64<v=>0<=?v<?xs.length>):>int64=>{
+    const slot=i
+    if xs[slot]=?0 return 0
+    return 84//xs[slot]
+}
+write=(@xs:array<int64> i:int64<v=>0<=?v<?xs.length>):>int64=>{
+    const slot=i
+    xs[slot]=42
+    $assert xs[slot]=?42
+    return xs[slot]
+}
+main=():>int64=>{
+    let xs:array<int64>=[2 0]
+    if read(@xs 0) not=?42 or read(@xs 1) not=?0 return 1
+    return write(@xs 1)
+}

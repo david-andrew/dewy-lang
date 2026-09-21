@@ -216,7 +216,12 @@ transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @
         }
         return interval
     }
-    if node is? hir.Index|hir.DictLookup|hir.DictRemove return own_bounds(node.value_type env)
+    if node is? hir.Index {
+        let route=bindings.array_route_id(id env.nodes @registry)
+        let known=if route is? none none else facts.lookup(state facts.value(facts.Term[route]))
+        return meet(known own_bounds(node.value_type env))
+    }
+    if node is? hir.DictLookup|hir.DictRemove return own_bounds(node.value_type env)
     if node is? hir.Block and node.items.length >? 0 return snapshot.numbers.get(node.items[node.items.length-1])
     return none
 }
@@ -229,7 +234,7 @@ affine = (id:addr snapshot:Snapshot env:values.Environment @registry:bindings.Re
         let sequence=snapshot.sequences.get(source)
         return if sequence is? none none else terms.Offset[facts.Term[sequence 'length'] 0]
     }
-    if node is? hir.ExpressedIdentifier|hir.MemberAccess {
+    if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index {
         let term=terms.binding_term(id env @registry)
         return if term is? none none else terms.Offset[term 0]
     }
