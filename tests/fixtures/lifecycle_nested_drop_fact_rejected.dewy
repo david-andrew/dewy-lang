@@ -1,0 +1,7 @@
+let changed:int64=0
+Leaf=type of [token:int64
+$__drop__
+release=():>void=>{changed=1}
+]
+Outer=type of [leaf:Leaf]
+main=():>int64=>{changed=0 {let outer=Outer[Leaf[42]]} $assert changed=?0 return 42}

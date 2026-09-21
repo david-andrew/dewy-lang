@@ -1,7 +1,7 @@
 """Materialize ownership operations before runtime lowering.
 
-The first supported owners are fresh local nominal records without resource-owning fields
-and a drop hook. Copies, moves, nested resource fields and escaping owners remain
+The first supported owners are fresh local records with recursively owned record fields
+and drop hooks. Copies, moves, resource containers and escaping owners remain
 explicitly unsupported. Keeping drop calls in checked HIR makes their effects
 visible and lets ordinary lowering implement the internal place call ABI.
 """
@@ -52,8 +52,6 @@ def prepare(root: hir.Block, srcfile):
         receiver = ty.unfold(ty.strip_refinement(literal.pos_or_kw_args[0].type))
         if literal.lifecycle != 'drop' or not isinstance(receiver, ty.ObjectType):
             reject(declaration, 'copy/move hooks')
-        if any(resource(field.type) is not None for field in receiver.fields):
-            reject(declaration, 'owners with lifecycle-bearing fields')
 
     current_source = srcfile
 
@@ -75,16 +73,41 @@ def prepare(root: hir.Block, srcfile):
 
     def cleanup(owners, loc):
         result = []
+        def drop(value, type_, ancestors):
+            if resource(type_) is None:
+                return
+            shape = ty.unfold(ty.strip_refinement(type_))
+            if not isinstance(shape, ty.ObjectType) or id(shape) in ancestors:
+                reject(value, 'resource containers or recursive resource storage')
+            hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
+            if hook is not None:
+                declaration = declarations.get(hook.binding_id)
+                if declaration is None:
+                    reject(value, 'an unavailable drop operation')
+                function = hir.ExpressedIdentifier(loc, declaration.expr.type, declaration.name, binding_id=declaration.binding_id)
+                result.append(hir.FunctionCall(loc, ty.VOID_TYPE, function, [hir.Place(loc, shape, value)], {}))
+            # Parent body first; then fields in reverse declaration order.
+            # Ordinary lowering releases the complete backing storage afterward.
+            for field in reversed(shape.fields):
+                if resource(field.type) is not None:
+                    drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)})
         for owner in reversed(owners):
-            owner_type = ty.unfold(ty.strip_refinement(owner.expr.type))
-            hook = next(method for method in owner_type.methods if method.lifecycle == 'drop')
-            declaration = declarations.get(hook.binding_id)
-            if declaration is None:
-                reject(owner, 'an unavailable drop operation')
-            function = hir.ExpressedIdentifier(loc, declaration.expr.type, declaration.name, binding_id=declaration.binding_id)
-            value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
-            result.append(hir.FunctionCall(loc, ty.VOID_TYPE, function, [hir.Place(loc, owner_type, value)], {}))
+            value = hir.ExpressedIdentifier(loc, owner.expr.type, owner.name, binding_id=owner.binding_id)
+            drop(value, owner.expr.type, set())
         return result
+
+    def fresh(node, allowed, inherited):
+        shape = ty.unfold(ty.strip_refinement(node.type))
+        if not isinstance(node, hir.ObjectLiteral) or not isinstance(shape, ty.ObjectType):
+            reject(node, 'a non-fresh resource field or resource container')
+        hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
+        if hook is not None:
+            operation = declarations.get(hook.binding_id)
+            if operation is None or ty.unfold(ty.strip_refinement(operation.expr.pos_or_kw_args[0].type)) != shape:
+                reject(node, 'an adapted drop receiver without a checked composition')
+        return replace(node, fields=[replace(field, value=fresh(field.value, allowed, inherited)
+                                            if resource(field.value.type) is not None else expression(field.value, allowed, inherited=inherited))
+                                     for field in node.fields])
 
     def capture(value, loc):
         # Preserve evaluation order and snapshot a scalar result before its
@@ -117,7 +140,10 @@ def prepare(root: hir.Block, srcfile):
                 or isinstance(node, hir.Assert) and not node.runtime and not node.expect):
             return node
         if isinstance(node, hir.MemberAccess) and resource(node.value.type) is not None:
-            if (not isinstance(node.value, hir.ExpressedIdentifier) or node.value.binding_id not in allowed
+            owner = node.value
+            while isinstance(owner, hir.MemberAccess):
+                owner = owner.value
+            if (not isinstance(owner, hir.ExpressedIdentifier) or owner.binding_id not in allowed
                     or resource(node.type) is not None):
                 reject(node, 'an escaping or projected resource owner')
             return node
@@ -182,18 +208,10 @@ def prepare(root: hir.Block, srcfile):
                         items.append(result)
                 return replace(node, items=items)
             if isinstance(node, hir.Declare) and resource(node.expr.type) is not None:
-                owner_type = ty.unfold(ty.strip_refinement(node.expr.type))
-                if (not isinstance(node.expr, hir.ObjectLiteral) or not isinstance(owner_type, ty.ObjectType)
-                        or not any(method.lifecycle == 'drop' for method in owner_type.methods)
-                        or node.binding_id is None or node.view
+                if (node.binding_id is None or node.view
                         or node.annotation is not None and node.annotation != node.expr.type):
                     reject(node, 'a non-fresh local owner')
-                hook = next(method for method in owner_type.methods if method.lifecycle == 'drop')
-                operation = declarations.get(hook.binding_id)
-                if operation is None or ty.unfold(ty.strip_refinement(operation.expr.pos_or_kw_args[0].type)) != owner_type:
-                    reject(node, 'an adapted drop receiver without a checked composition')
-                fields = [replace(field, value=expression(field.value, live, inherited=literal.lifecycle == 'drop')) for field in node.expr.fields]
-                node = replace(node, expr=replace(node.expr, fields=fields))
+                node = replace(node, expr=fresh(node.expr, live, literal.lifecycle == 'drop'))
                 owners.append(node)
                 return node
             if isinstance(node, hir.Return):

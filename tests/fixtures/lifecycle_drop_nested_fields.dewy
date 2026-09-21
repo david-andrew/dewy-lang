@@ -1,0 +1,25 @@
+let dropped:int64=0
+Leaf=type of [token:int64 text:string
+$__drop__
+release=():>void=>{dropped=dropped*10+token text="released"}
+]
+Pair=type of [first:Leaf second:Leaf
+$__drop__
+release=():>void=>{dropped=dropped*10+3 second.token=2}
+]
+# This outer record has no hook; its resource fields still require cleanup.
+Outer=type of [pair:Pair extra:Leaf]
+exercise=(n:int64):>int64=>{
+    let owner=Outer[Pair[Leaf[1 "a{n}"] Leaf[9 "b{n}"]] Leaf[4 "c{n}"]]
+    return owner.pair.first.token+41
+}
+main=():>int64=>{
+    if exercise(0) not=?42 or dropped not=?4321 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {
+        dropped=0
+        if exercise(i) not=?42 or dropped not=?4321 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

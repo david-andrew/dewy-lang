@@ -7,8 +7,8 @@ import p"bindings.dewy" as bindings
 import p"analyze/public_effects.dewy" as effects
 
 # Materialize operations before reachability and lowering. The initial
-# supported owners are fresh local nominal records without resource-owning fields and a
-# drop hook. Copy/move, nested resource fields and escaping owners remain explicit
+# supported owners are fresh local records with recursively owned record fields and a
+# drop hook. Copy/move, resource containers and escaping owners remain explicit
 # implementation gaps, never silent memberwise fallbacks.
 Hook:type = const [owner:addr binding:addr name:string signature:addr]
 Plan:type = [hooks:dict<addr Hook>=[] owners:dict<string Hook>=[] prepared:set<addr>=set[] source:SrcFile problem:Error?=none]
@@ -35,26 +35,62 @@ resource = (id:addr nodes:types.Table):>addr? => {
     }
     return none
 }
+drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session):>void => {
+    if plan.problem isnt? none or resource(type_id session.types) is? none return
+    let owner=views.structural_base(type_id session.types)
+    let type=types.node_at(session.types owner)
+    if type isnt? types.ObjectType or owner in? ancestors {reject(hir.node_at(session.hir value) 'resource containers or recursive resource storage' @plan) return}
+    loop method in type.methods {
+        if method.lifecycle not=? 'drop' continue
+        if type.brand is? none {reject(hir.node_at(session.hir value) 'an unavailable drop operation' @plan) return}
+        let hook=plan.owners.get(type.brand)
+        if hook is? none {reject(hir.node_at(session.hir value) 'an unavailable drop operation' @plan) return}
+        let function=put(hir.ExpressedIdentifier[loc hook.signature hook.name hook.binding] @session)
+        let place=put(hir.Place[loc owner value] @session)
+        let empty=types.primitive('void' @session.types)
+        calls.push(put(hir.FunctionCall[loc empty function [place] []] @session))
+    }
+    # Parent body first, then fields in reverse declaration order. Backing
+    # storage for the complete value is released by ordinary lowering later.
+    let nested=ancestors
+    nested.add(owner)
+    let index=type.fields.length
+    loop index >? 0 {
+        index-=1
+        let field=type.fields[index]
+        if resource(field.value_type session.types) is? none continue
+        let member=put(hir.MemberAccess[loc field.value_type value field.name] @session)
+        drop_value(member field.value_type loc nested @calls @plan @session)
+    }
+}
 cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session):>array<addr> => {
     let result:array<addr>=[]
     let index=owners.length
-    let empty=types.primitive('void' @session.types)
     loop index >? 0 {
         index-=1
         let declaration=hir.node_at(session.hir owners[index])
         $runtime_assert declaration is? hir.Declare and declaration.binding_id isnt? none
         let declared:hir.Declare=declaration
-        let owner=views.structural_base(hir.node_at(session.hir declared.expr).value_type session.types)
-        let type=types.node_at(session.types owner)
-        $runtime_assert type is? types.ObjectType and type.brand isnt? none
-        let hook=plan.owners.get(type.brand)
-        if hook is? none {reject(declared 'an unavailable drop operation' @plan) return []}
-        let function=put(hir.ExpressedIdentifier[loc hook.signature hook.name hook.binding] @session)
+        let owner=hir.node_at(session.hir declared.expr).value_type
         let value=put(hir.ExpressedIdentifier[loc owner declared.name declared.binding_id] @session)
-        let place=put(hir.Place[loc owner value] @session)
-        result.push(put(hir.FunctionCall[loc empty function [place] []] @session))
+        drop_value(value owner loc set[] @result @plan @session)
     }
     return result
+}
+fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session):>void => {
+    let node=hir.node_at(session.hir id)
+    let type=types.node_at(session.types views.structural_base(node.value_type session.types))
+    if node isnt? hir.ObjectLiteral or type isnt? types.ObjectType {reject(node 'a non-fresh resource field or resource container' @plan) return}
+    loop method in type.methods {
+        if method.lifecycle not=? 'drop' continue
+        if type.brand is? none {reject(node 'an unavailable drop operation' @plan) return}
+        let hook=plan.owners.get(type.brand)
+        if hook is? none or not types.same_type(hook.owner node.value_type session.types) {reject(node 'an adapted drop receiver without a checked composition' @plan) return}
+    }
+    loop field in node.fields {
+        if resource(hir.node_at(session.hir field.value).value_type session.types) isnt? none {fresh(field.value allowed inherited @plan @session)}
+        else {expression(field.value allowed inherited @plan @session)}
+    }
 }
 Captured:type = const [declaration:addr value:addr]
 capture = (id:addr loc:Span @session:contexts.Session):>Captured => {
@@ -77,6 +113,7 @@ expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:conte
     if node is? hir.TypeValue or (node is? hir.FunctionCall and node.proof) or (node is? hir.Assert and not node.runtime and not node.expect) return
     if node is? hir.MemberAccess and resource(hir.node_at(session.hir node.value).value_type session.types) isnt? none {
         let owner=hir.node_at(session.hir node.value)
+        loop owner is? hir.MemberAccess {owner=hir.node_at(session.hir owner.value)}
         if owner isnt? hir.ExpressedIdentifier or owner.binding_id is? none or owner.binding_id not in? allowed or resource(node.value_type session.types) isnt? none {reject(node 'an escaping or projected resource owner' @plan)}
         return
     }
@@ -148,15 +185,10 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         return
     }
     if node is? hir.Declare and resource(hir.node_at(session.hir node.expr).value_type session.types) isnt? none {
-        let value=hir.node_at(session.hir node.expr)
-        let type=types.node_at(session.types views.structural_base(value.value_type session.types))
-        if value isnt? hir.ObjectLiteral or type isnt? types.ObjectType or type.brand is? none or type.brand not in? plan.owners or node.binding_id is? none or node.view {
-            reject(node 'a non-fresh local owner' @plan) return
-        }
-        if node.annotation isnt? none and not types.same_type(node.annotation value.value_type session.types) {reject(node 'a non-fresh local owner' @plan) return}
-        let hook=plan.owners[type.brand]
-        if not types.same_type(hook.owner value.value_type session.types) {reject(node 'an adapted drop receiver without a checked composition' @plan) return}
-        loop field in value.fields {expression(field.value live inherited @plan @session)}
+        let declared:hir.Declare=node
+        let value=hir.node_at(session.hir declared.expr)
+        if declared.binding_id is? none or declared.view or (declared.annotation isnt? none and not types.same_type(declared.annotation value.value_type session.types)) {reject(declared 'a non-fresh local owner' @plan) return}
+        fresh(declared.expr live inherited @plan @session)
         owners.push(id)
         return
     }
@@ -296,7 +328,6 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
         let owner=views.structural_base(value.pos_or_kw_args[0].value_type session.types)
         let type=types.node_at(session.types owner)
         $runtime_assert type is? types.ObjectType and type.brand isnt? none
-        loop field in type.fields {if resource(field.value_type session.types) isnt? none {reject(node 'owners with lifecycle-bearing fields' @plan) return plan.problem}}
         let hook=Hook[owner node.binding_id node.name value.value_type]
         plan.hooks[node.binding_id]=hook
         plan.owners[type.brand]=hook

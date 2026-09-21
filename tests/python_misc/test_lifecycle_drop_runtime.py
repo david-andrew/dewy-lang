@@ -102,8 +102,53 @@ def test_dropped_local_owners_retain_no_storage(tmp_path):
     execute(tmp_path, 'drop-lifetime', codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result'])
+@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields'])
 def test_aggregate_cleanup_and_implicit_results(tmp_path, name):
     from pathlib import Path
     source = Path(__file__).resolve().parents[1] / f'fixtures/{name}.dewy'
     execute(tmp_path, name, codegen(SrcFile.from_path(source), debug_locations=False))
+
+
+@pytest.mark.parametrize('body', [
+    'let leaf=TraceHandle[42] let outer=Outer[leaf] return 42',
+    'let outer=Outer[TraceHandle[42]] outer.leaf=TraceHandle[1] return 42',
+])
+def test_nested_owner_transfers_require_ownership_lowering(body):
+    source = OWNER + 'Outer=type of [leaf:TraceHandle]\nmain=():>int64=>{'+body+'}'
+    with pytest.raises(ReportException, match='lifecycle ownership lowering'):
+        codegen(SrcFile(None, source))
+
+
+def test_nested_implicit_drop_effect_is_in_the_enclosing_contract():
+    source = OWNER + 'Outer=type of [leaf:TraceHandle]\nmain=():>int64 & allocates=>{let outer=Outer[TraceHandle[42]] return 42}'
+    with pytest.raises(ReportException, match='effect contract'):
+        codegen(SrcFile(None, source))
+
+
+def test_nested_implicit_drop_invalidates_facts():
+    source = """let changed:int64=0
+Leaf=type of [token:int64
+$__drop__
+release=():>void=>{changed=1}
+]
+Outer=type of [leaf:Leaf]
+main=():>int64=>{changed=0 {let outer=Outer[Leaf[42]]} $assert changed=?0 return 42}
+"""
+    with pytest.raises(ReportException, match='prove|assert'):
+        codegen(SrcFile(None, source))
+
+
+def test_imported_implicit_drop_fact_error_names_its_own_source(tmp_path):
+    module = tmp_path / 'owner.dewy'
+    module.write_text("""let changed:int64=0
+Handle=type of [token:int64
+$__drop__
+release=():>void=>{changed=1}
+]
+probe=():>int64=>{changed=0 {let h=Handle[42]} $assert changed=?0 return 42}
+""")
+    source = tmp_path / 'main.dewy'
+    source.write_text('from p"owner.dewy" import probe\nmain=():>int64=>probe()')
+    with pytest.raises(ReportException, match='cannot prove assertion') as error:
+        codegen(SrcFile.from_path(source))
+    assert str(module) in str(error.value)

@@ -1696,28 +1696,34 @@ class _BoundsValidator:
         # later validating pass can certify a nested function's body.
         if validate:
             self.checked_functions.add(function_id)
-        state: State = {
-            key: interval
-            for key, interval in (enclosing or {}).items()
-            if key not in self.mutable_globals
-        }
-        for binding_id in self.mutable_globals:
-            self._forget_global(binding_id, state)
-        for param in [
-            *function.pos_or_kw_args,
-            *function.kw_only_args,
-            *([function.rest_args] if function.rest_args is not None else []),
-        ]:
-            if isinstance(param, hir.BoundParam):
-                self._eval(param.value, state, validate=validate)
-        self._seed_parameter_refinements(function, state)
-        prototype_sites = self.prototype_sites
-        if function.proof:
-            self.prototype_sites = None  # erased proofs cannot defer checks to runtime
+        previous_source = self.srcfile
+        self.srcfile = function.source or previous_source
         try:
-            self._analyze(function.body, state, validate=validate)
+            state: State = {
+                key: interval
+                for key, interval in (enclosing or {}).items()
+                if key not in self.mutable_globals
+            }
+            for binding_id in self.mutable_globals:
+                self._forget_global(binding_id, state)
+            for param in [
+                *function.pos_or_kw_args,
+                *function.kw_only_args,
+                *([function.rest_args] if function.rest_args is not None else []),
+            ]:
+                if isinstance(param, hir.BoundParam):
+                    self._eval(param.value, state, validate=validate)
+            self._seed_parameter_refinements(function, state)
+            prototype_sites = self.prototype_sites
+            if function.proof:
+                self.prototype_sites = None  # erased proofs cannot defer checks to runtime
+            try:
+                self._analyze(function.body, state, validate=validate)
+            finally:
+                self.prototype_sites = prototype_sites
         finally:
-            self.prototype_sites = prototype_sites
+            self.srcfile = previous_source
+
 
     def _bind_conditional(self, node: hir.Declare | hir.Assign, flow: hir.Flow, state: State, *, validate: bool) -> State:
         """`let c = if p a else b` (or `c = …`) analyzed as the statement form
