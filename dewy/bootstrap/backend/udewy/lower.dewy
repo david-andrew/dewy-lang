@@ -2376,7 +2376,7 @@ string_view = (value:addr first:addr count:addr node:hir.AST @state:State):>addr
 # the loop prologue), so loops reuse it. Only consumers that neither retain
 # nor release the value (comparisons, tests, hashing) may request one; the
 # control word stays zero and the descriptor must never escape the statement.
-string_frame_view = (id:addr @prefix:array<addr> @state:State):>addr? => {
+string_frame_view = (id:addr @prefix:array<addr> @state:State immediate:bool=false):>addr? => {
     if state.allocator is? none or not state.cleanup_enabled return none
     let node=hir.node_at(state.input.nodes id)
     # Contextual typing wraps an index in representation-preserving casts
@@ -2398,7 +2398,11 @@ string_frame_view = (id:addr @prefix:array<addr> @state:State):>addr? => {
         if id in? state.array_snapshots return none
         let source=borrowing.route(id state.input.nodes)
         if source is? none or source.binding in? state.boxed return none
-        if not borrowing.stable_owner(source state.stable_bindings state.stable_parameters) return none
+        # An immediate builtin consumer runs no user code after this read.
+        # A local/parameter string handle survives that interval even when
+        # a later statement replaces it. Longer intervals still require the
+        # whole-function stability proof (notably lookup defaults).
+        if not (immediate and node is? hir.ExpressedIdentifier) and not borrowing.stable_owner(source state.stable_bindings state.stable_parameters) return none
         return snapshot(expression(id @state) @prefix @state)
     }
     if node isnt? hir.StringIndex|hir.StringSlice return none
@@ -5584,7 +5588,7 @@ dict_probe_body = (parts:DictParts key:addr node:hir.AST @prefix:array<addr> @st
 dict_contains = (node:hir.DictContains @state:State):>addr => {
     let prefix:array<addr>=[]
     let parts=dict_from_keys(node.keys @prefix @state)
-    let key_view=string_frame_view(node.key @prefix @state)
+    let key_view=string_frame_view(node.key @prefix @state immediate=true)
     let key=if key_view isnt? none key_view else snapshot(owned_value(node.key @state) @prefix @state)
     prefix.push(dict_ensure(parts node @state))
     let probe=dict_probe(parts key node @prefix @state)
@@ -5596,7 +5600,7 @@ dict_lookup = (node:hir.DictLookup @state:State):>addr => {
     let prefix:array<addr>=[]
     let parts=dict_from_keys(node.keys @prefix @state)
     $runtime_assert parts.value isnt? none
-    let key_view=string_frame_view(node.key @prefix @state)
+    let key_view=string_frame_view(node.key @prefix @state immediate=node.default is? none)
     let key=if key_view isnt? none key_view else snapshot(owned_value(node.key @state) @prefix @state)
     let fallback:addr?=none
     if node.default isnt? none {fallback=snapshot(owned_value(node.default @state) @prefix @state)}

@@ -1,0 +1,23 @@
+# Probing borrows a key until the probe ends, not until its last assignment.
+let key:string='alpha'
+let defaults:int64=0
+change=():>int64=>{defaults+=1 key='beta' return 99}
+main=():>int64=>{
+    let values:dict<string int64>=['alpha'->20 'beta'->22]
+    let probe:string='alpha'
+    if probe not in? values return 1
+    let before:int64=_arena_allocated_bytes
+    if probe not in? values return 6
+    if _arena_allocated_bytes not=?before return 7
+    let first=values.get(probe)
+    probe='beta'
+    if probe not in? values return 2
+    let second=values.get(probe)
+    if first is? none or second is? none return 3
+    if first+second not=?42 return 4
+    # Defaults are eager. Their writes must not change the captured key.
+    key='alpha'
+    let selected=values.get(key change())
+    if selected not=?20 or key not=?'beta' or defaults not=?1 return 5
+    return 42
+}

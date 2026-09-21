@@ -104,6 +104,17 @@ def test_native_compiler_command(tmp_path):
     assert any(': string ' in line for line in entries)
     assert any(': cell ' in line for line in entries)
 
+    # A later reassignment does not force a snapshot for an immediate key
+    # probe. An eager default can change the key and must retain its snapshot.
+    key_inventory = subprocess.run([
+        compiler, 'analyze', '--brief', ROOT / 'tests/fixtures/dictionary_key_borrows.dewy',
+    ], cwd=tmp_path, env=real_env, capture_output=True, text=True, timeout=120, check=False)
+    assert key_inventory.returncode == 0, key_inventory.stdout + key_inventory.stderr
+    key_notes = [line for line in key_inventory.stdout.splitlines()
+                 if line.startswith('copy: ') and 'dictionary_key_borrows.dewy:' in line]
+    assert not any('`probe`' in line for line in key_notes), key_notes
+    assert any('`key`' in line for line in key_notes), key_notes
+
     # The compiler's own copies are a bounded CI inventory, not an informal
     # count. The tool verifies every summary entry before applying the scope.
     budget = subprocess.run([

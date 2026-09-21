@@ -2134,3 +2134,18 @@ The rebuilt native CLI reports **4,992** bootstrap copy sites over 47,049
 source lines (**106.102/KLOC**), within the unchanged 5,000/110 gates. Inventory:
 `../dewy-build-artifacts/phase1-inferred-effects-copies.json`. The absolute
 budget is close; subsequent batches must keep reducing unproved copies.
+
+## Immediate dictionary key borrows (2026-09-21)
+
+Native membership and default-free lookups now borrow a string binding until
+probing finishes. The probe runs no user code, so a later assignment to the
+binding does not require an independent handle. Longer intervals still use
+the existing stability proof; in particular, an eager lookup default can
+change the key and retains the earlier snapshot. This is a lowering proof,
+with no new surface syntax. Hosted probes already read these keys directly.
+
+Validation: the key-lifetime fixture passes both compilers on x86-64 and C,
+including an eager default that changes a global key. Native analysis removes
+five unnecessary key-copy sites in that fixture while retaining the default's
+snapshot. The command test checks this inventory distinction; the runtime
+fixture also checks that a warmed membership probe allocates no storage.
