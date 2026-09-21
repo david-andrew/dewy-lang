@@ -446,9 +446,9 @@ in both lowerings and the parity tool is the gate.
   parent results with ordinary added fields. Moving added resource fields still
   needs field-transfer analysis.
   Inherited copies consume their intermediate parent results, including nested
-  resources and multiple inheritance levels. General local/field transfers,
-  resource containers and general
-  owning arguments remain explicitly unsupported during code generation.
+  resources and multiple inheritance levels. Conditional transfers of outer
+  owners, field transfers, mutable resource containers and general owning
+  arguments remain explicitly unsupported during code generation.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a
   last use turns out to be needed it should be a meta-level form (a

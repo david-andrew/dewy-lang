@@ -6,7 +6,8 @@ release=():>void=>{trace=trace*10+token values.clear}
 Box=type of [items:array<Handle>]
 make=():>array<Handle>=>[Handle[1 [42]] Handle[2 [43]]]
 exercise=():>int64=>{
-    {let items=make()
+    {let originals=make()
+     let items=originals
      if items.length not=?2 return 1
      if items[0].token not=?1 or items[1].token not=?2 return 2}
     if trace not=?21 return 3
