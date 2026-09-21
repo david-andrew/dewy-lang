@@ -438,7 +438,9 @@ in both lowerings and the parity tool is the gate.
   once, then drop the previous owner before installing the new one. This
   includes optional fields, nested arrays and borrowed receivers; side effects
   that change the selected receiver during evaluation are rejected. Transfers
-  from existing move-only bindings remain outstanding. Resource unions
+  from existing local owners now also supply owning calls, constructors,
+  array literals/insertion and replacement at a proven same-block last use.
+  Dependent read-only aliases extend the original owner’s lifetime. Resource unions
   and optional owners now select cleanup by the active alternative, including
   array elements; custom union moves consume only that alternative's resources. Explicit custom copies can construct fresh results,
   including nested hook calls. When a surviving source needs an independent
@@ -468,9 +470,11 @@ in both lowerings and the parity tool is the gate.
   needs field-transfer analysis.
   Inherited copies consume their intermediate parent results, including nested
   resources and multiple inheritance levels. Conditional transfers of outer
-  owners, field transfers, remaining resource-container mutations and general owning
-  argument transfers from existing bindings remain explicitly unsupported
-  during code generation. Fresh arguments, factory results and explicit copies
+  owners, field transfers and remaining resource-container mutations remain
+  explicitly unsupported during code generation. Same-block owning input
+  transfers now include owning parameters, custom move hooks and union owners;
+  first if conditions are unconditional input sites, while loop conditions
+  and later arms still need the more general lifetime join. Fresh arguments, factory results and explicit copies
   can supply ordinary by-value parameters, which own and clean up the value.
   This includes callbacks and defaults; returning a parameter transfers it.
   Replacing a local owner or owning parameter now evaluates the new value

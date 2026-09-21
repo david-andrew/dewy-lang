@@ -29,6 +29,8 @@ Plan:type = [
     copies:dict<string Hook>=[]
     prepared:set<addr>=set[]
     transfer_sites:set<addr>=set[]
+    consume_sites:set<addr>=set[]
+    consumed_bindings:set<addr>=set[]
     view_sites:set<addr>=set[]
     view_bindings:set<addr>=set[]
     array_drops:dict<addr addr>=[]
@@ -207,6 +209,7 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
         let declaration=hir.node_at(session.hir owners[index])
         $runtime_assert declaration is? hir.Declare and declaration.binding_id isnt? none
         let declared:hir.Declare=declaration
+        if declared.binding_id isnt? none and declared.binding_id in? plan.consumed_bindings and owners[index] not=? fields_only {continue}
         let owner=if declared.annotation isnt? none declared.annotation else hir.node_at(session.hir declared.expr).value_type
         let value=put(hir.ExpressedIdentifier[loc owner declared.name declared.binding_id] @session)
         drop_value(value owner loc set[] @result @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only)
@@ -357,7 +360,8 @@ copy_component = (id:addr implicit:bool @plan:Plan @session:contexts.Session):>a
         return if shape is? types.ArrayType|types.ObjectType|types.TypeOr or views.string_valued(owner session.types) put(hir.CopyValue[source_node.loc source_node.value_type id] @session) else id
     }
     if lifecycle.copy_blocker(source_node.value_type session.types) isnt? none {
-        reject(source_node 'an independent copy of a move-only component' @plan) return id
+        if plan.problem is? none {plan.problem=Error[srcfile=plan.source title='lifecycle ownership lowering requires an independent copy' pointers=[Pointer[source_node.loc 'this move-only value is still owned elsewhere; declare $__copy__ or use a proven borrow or last-use transfer']]]}
+        return id
     }
     let operation=copy_operation(owner source_node.loc @plan @session)
     let signature=types.node_at(session.types hir.node_at(session.hir operation).value_type)
@@ -373,6 +377,27 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
     # The checked custom-copy call carries its effects and result contract.
     let candidate=hir.node_at(session.hir id)
     if resource(candidate.value_type session.types) is? none {expression(id allowed inherited @plan @session frame=frame) return}
+    if candidate is? hir.ExpressedIdentifier and candidate.binding_id isnt? none and id in? plan.consume_sites and frame isnt? none {
+        let source:addr?=none
+        loop owner in frame.owners {
+            let declaration=hir.node_at(session.hir owner)
+            if declaration is? hir.Declare and declaration.binding_id =? candidate.binding_id {source=owner break}
+        }
+        if source isnt? none {
+            let selected=put(candidate @session)
+            let result=transfer(selected candidate.value_type @plan @session)
+            if result not=? selected {
+                let saved=capture_result(result candidate.loc @session)
+                let items:array<addr>=[saved.declaration]
+                loop call in cleanup([source] candidate.loc @plan @session fields_only=source) {items.push(call)}
+                items.push(saved.value)
+                store(id hir.Block[candidate.loc hir.node_at(session.hir saved.value).value_type items false] @session)
+            }
+            plan.consumed_bindings.add(candidate.binding_id)
+            return
+        }
+    }
+    if candidate is? hir.Obligation {fresh(candidate.value allowed inherited @plan @session components=components frame=frame) return}
     if candidate is? hir.ValueCast|hir.RepresentationCast and types.node_at(session.types types.strip_refinement(candidate.value_type session.types)) is? types.TypeOr {
         fresh(candidate.expr allowed inherited @plan @session components=components frame=frame)
         return
@@ -926,12 +951,45 @@ mentions_resource = (root:addr session:contexts.Session):>bool => {
     }
     return false
 }
+# Ownership inputs share one last-use proof, independent of call/record/array
+# spelling. A surviving read-only alias extends the source owner's lifetime.
+owning_inputs=(node:hir.AST):>array<addr>=>{
+    if node is? hir.FunctionCall {
+        let items=node.pos_args
+        loop [name value] in node.kw_args {items.push(value)}
+        return items
+    }
+    if node is? hir.ObjectLiteral {
+        let items:array<addr>=[]
+        loop field in node.fields {items.push(field.value)}
+        return items
+    }
+    if node is? hir.ArrayLiteral return node.items
+    if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign return [node.value]
+    return []
+}
+alias_alive=(binding:addr read:addr dependent:dict<addr set<addr>> born:dict<addr addr> last:dict<addr addr> positions:dict<addr addr>):>bool=>{
+    let pending:array<addr>=[]
+    loop alias in dependent.get(binding set[]) {pending.push(alias)}
+    let seen:set<addr>=set[]
+    let position=positions.get(read 0)
+    loop pending.length >? 0 {
+        let alias=pending.pop
+        if alias in? seen or born.get(alias 0) >=? position continue
+        seen.add(alias)
+        let final=last.get(alias)
+        if final isnt? none and positions.get(final 0) >? position return true
+        loop child in dependent.get(alias set[]) {pending.push(child)}
+    }
+    return false
+}
 # Before cleanup adds artificial reads, identify last uses transferring
 # between declarations in one lexical block. Outer-owner conditional moves
 # need lifetime joins and are deliberately excluded by the same-block rule.
-local_transfers = (body:addr @plan:Plan session:contexts.Session):>void => {
+local_transfers = (body:addr parameters:array<addr> @plan:Plan session:contexts.Session):>void => {
     let last:dict<addr addr>=[]
     let occurrences:dict<addr int>=[]
+    let positions:dict<addr addr>=[]
     let captured:set<addr>=set[]
     let written:set<addr>=set[]
     let blocks:array<addr>=[]
@@ -959,6 +1017,7 @@ local_transfers = (body:addr @plan:Plan session:contexts.Session):>void => {
         }
         if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
             last[node.binding_id]=id
+            if id not in? positions {positions[id]=positions.length}
             occurrences[id]=occurrences.get(id 0)+1
         }
         if node is? hir.Block {blocks.push(id)}
@@ -967,16 +1026,70 @@ local_transfers = (body:addr @plan:Plan session:contexts.Session):>void => {
         # Stack order must preserve the order of statements in each block.
         loop children.length >? 0 {pending.push(children.pop)}
     }
+    let dependent:dict<addr set<addr>>=[]
+    let born:dict<addr addr>=[]
+    loop id in blocks {
+        let block=hir.node_at(session.hir id)
+        $runtime_assert block is? hir.Block
+        loop item in block.items {
+            let node=hir.node_at(session.hir item)
+            if node isnt? hir.Declare or node.binding_id is? none continue
+            let source=hir.node_at(session.hir node.expr)
+            if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and resource(source.value_type session.types) isnt? none and node.binding_id not in? captured and source.binding_id not in? captured and node.binding_id not in? written and source.binding_id not in? written {
+                let aliases=dependent.get(source.binding_id set[])
+                aliases.add(node.binding_id) dependent[source.binding_id]=aliases
+                born[node.binding_id]=positions.get(node.expr 0)
+            }
+        }
+    }
     loop id in blocks {
         let block=hir.node_at(session.hir id)
         $runtime_assert block is? hir.Block
         let locals:set<addr>=set[]
+        if id =? body {
+            loop parameter in parameters {
+                let owner=hir.node_at(session.hir parameter)
+                $runtime_assert owner is? hir.Declare and owner.binding_id isnt? none
+                locals.add(owner.binding_id)
+            }
+        }
         loop item in block.items {
+            let references:dict<addr addr>=[]
+            let reads:array<addr>=[item]
+            loop reads.length >? 0 {
+                let read=hir.node_at(session.hir reads.pop)
+                if read is? hir.ExpressedIdentifier and read.binding_id isnt? none {references[read.binding_id]=references.get(read.binding_id 0)+1}
+                hir.push_children(read @reads)
+            }
+            let candidates:array<addr>=[item]
+            loop candidates.length >? 0 {
+                let part=hir.node_at(session.hir candidates.pop)
+                if part is? hir.Flow {
+                    if part.arms.length >? 0 {
+                        let first=hir.node_at(session.hir part.arms[0])
+                        if first is? hir.IfArm {candidates.push(first.condition)}
+                    }
+                    continue
+                }
+                if part is? hir.Block|hir.FunctionLiteral|hir.ShortCircuit {continue}
+                loop argument in owning_inputs(part) {
+                    let selected=argument
+                    let value=hir.node_at(session.hir selected)
+                    loop true {
+                        if value is? hir.ValueCast|hir.RepresentationCast {selected=value.expr}
+                        else if value is? hir.Obligation {selected=value.value}
+                        else break
+                        value=hir.node_at(session.hir selected)
+                    }
+                    if value is? hir.ExpressedIdentifier and value.binding_id isnt? none and resource(value.value_type session.types) isnt? none and value.binding_id in? locals and value.binding_id not in? captured and last.get(value.binding_id) =? selected and occurrences.get(selected 0) =? 1 and references.get(value.binding_id 0) =? 1 and not alias_alive(value.binding_id selected dependent born last positions) {plan.consume_sites.add(selected)}
+                }
+                hir.push_children(part @candidates)
+            }
             let declaration=hir.node_at(session.hir item)
             if declaration isnt? hir.Declare continue
             let source=hir.node_at(session.hir declaration.expr)
             if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? locals and source.binding_id not in? captured {
-                if last.get(source.binding_id) =? declaration.expr and occurrences.get(declaration.expr 0) =? 1 {plan.transfer_sites.add(item)}
+                if last.get(source.binding_id) =? declaration.expr and occurrences.get(declaration.expr 0) =? 1 and not alias_alive(source.binding_id declaration.expr dependent born last positions) {plan.transfer_sites.add(item)}
             }
             if declaration.binding_id isnt? none and source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? locals and source.binding_id not in? captured and declaration.binding_id not in? captured and source.binding_id not in? written and declaration.binding_id not in? written {plan.view_sites.add(item)}
             if declaration.binding_id isnt? none and resource(source.value_type session.types) isnt? none {locals.add(declaration.binding_id)}
@@ -1086,7 +1199,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     if function.lifecycle is? none and not mentions_resource(id session) {plan.source=previous plan.function_source=previous_function_source plan.result_type=previous_result return}
     if resource(function.rettype session.types) isnt? none and returnable_result(function.body session) {function.body=return_result(function.body @session)}
     function.body=scoped_body(function.body @session)
-    local_transfers(function.body @plan session)
+    local_transfers(function.body parameter_owners @plan session)
     let composed_parent:addr?=none
     if function.lifecycle_composition and function.lifecycle in? ['copy' 'move'] {
         let body=hir.node_at(session.hir function.body)

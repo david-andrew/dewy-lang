@@ -39,7 +39,6 @@ def test_implicit_drop_effects_are_checked():
 @pytest.mark.parametrize('body', [
     'let h=TraceHandle[42] let other=h h.token=0 return other.token',
     'let h=TraceHandle[42] let read=():>int64=>h.token return read()',
-    'let h=TraceHandle[42] let values=[h] return 42',
 ])
 def test_unimplemented_transfers_remain_explicitly_rejected(body):
     with pytest.raises(ReportException, match='lifecycle ownership lowering'):
@@ -227,11 +226,12 @@ main=():>int64=>{changed=0 let owner=make() $assert changed=?0 return owner.toke
 
 @pytest.mark.parametrize('body', [
     'let leaf=TraceHandle[42] let outer=Outer[leaf] return 42',
+    'let leaf=TraceHandle[42] let values=[leaf] return 42',
 ])
-def test_nested_owner_transfers_require_ownership_lowering(body):
+def test_nested_last_use_transfers_release_once(tmp_path, body):
     source = OWNER + 'Outer=type of [leaf:TraceHandle]\nmain=():>int64=>{'+body+'}'
-    with pytest.raises(ReportException, match='lifecycle ownership lowering'):
-        codegen(SrcFile(None, source))
+    for result in execute(tmp_path, 'nested-transfer', codegen(SrcFile(None, source), debug_locations=False)):
+        assert result.stdout == '42\n'
 
 
 def test_nested_owner_replacement_releases_both_lifetimes(tmp_path):

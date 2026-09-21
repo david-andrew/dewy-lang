@@ -1670,3 +1670,27 @@ to be unsupported, after that operation had landed. It now executes the
 replacement and checks the exact `42` then `1` drop trace; all 51 adjacent
 hosted lifecycle checks pass. This updates the expected supported behavior,
 not the compiler's acceptance rules. CI's release workflow passed separately.
+
+
+Checkpoint: the same last-use proof now supplies existing owners to function
+arguments, forwarded owning parameters, record/array construction, insertion
+and field/element replacement. These are ownership inputs with one rule,
+not separate syntax-specific move permissions. A first if condition is an
+unconditional input site; branch bodies, repeated loop conditions and later
+arms cannot consume an outer owner through this same-block proof.
+
+Dependent read-only aliases extend the source lifetime, accounting for when
+those aliases are created. The destination of the current transfer is not
+an already-live alias. Custom move hooks run as checked calls, their remaining
+nested fields are released, and the consumed owner does not drop twice.
+Surviving sources requiring independent ownership still need a copy hook;
+that rejection is now an ordinary ownership diagnostic. This does not yet
+implement conditional outer-owner joins or field ownership transfers.
+
+Validation: all 70 adjacent hosted lifecycle checks pass. Twelve new execution
+cases, six adjacent/integration kernels and six rejection cases pass both
+compilers and x86-64/C backends through a freshly native-built program driver.
+The kernel checks exact hook/drop counts and zero retained arena bytes over
+100 repetitions. Existing local-transfer, move-effect, resource-view and union
+fixtures remain covered. Tests that formerly required array/record transfers
+to be unsupported now check their single-drop execution behavior.

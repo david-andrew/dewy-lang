@@ -323,7 +323,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             shape = ty.unfold(ty.strip_refinement(value.type))
             return hir.CopyValue(value.loc, value.type, value) if isinstance(shape, (ty.ArrayType, ty.ObjectType, ty.TypeOr)) or ty.string_valued(shape) else value
         if lifecycle.copy_blocker(value.type) is not None:
-            reject(value, 'an independent copy of a move-only component')
+            user_error(current_source, 'lifecycle ownership lowering requires an independent copy',
+                       Pointer(span=value.loc, message='this move-only value is still owned elsewhere'),
+                       hint='declare $__copy__ for independent owners, or keep this use within a proven borrow or last-use transfer')
         shape = ty.unfold(ty.strip_refinement(value.type))
         operation = copy_operation(shape, value.loc)
         result = hir.FunctionCall(value.loc, operation.type.ret, operation,
@@ -335,6 +337,12 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     def fresh(node, allowed, inherited, components=frozenset(), control=None):
         if resource(node.type) is None:
             return expression(node, allowed, inherited=inherited, control=control)
+        if isinstance(node, hir.ExpressedIdentifier) and control is not None:
+            consumed = control(node, consume=True)
+            if consumed is not None:
+                return consumed
+        if isinstance(node, hir.Obligation):
+            return replace(node, value=fresh(node.value, allowed, inherited, components, control))
         if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and isinstance(ty.strip_refinement(node.type), ty.TypeOr):
             return replace(node, expr=fresh(node.expr, allowed, inherited, components, control))
         if isinstance(node, hir.MemberAccess):
@@ -588,7 +596,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         return replace(node, **{name: mapped(getattr(node, name), lambda child: expression(child, allowed, inherited=inherited, control=control))
                                 for name in hir.child_fields(type(node))})
 
-    def local_transfers(body):
+    def local_transfers(body, parameter_owners):
         """Prove same-scope transfers before introducing cleanup calls.
 
         Later branches count as uses, and captures prevent transfer. Owners
@@ -621,23 +629,84 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if isinstance(node, hir.Block):
                 blocks.append(node)
             pending.extend(reversed(tuple(hir.children(node))))
-        result, views = set(), set()
+        result, views, consumes = set(), set(), set()
+        # A lexical position is enough for this same-block proof. Dependent
+        # read-only aliases keep their original owner live as well.
+        positions = {read: index for index, read in enumerate(occurrences)}
+        dependent, born = {}, {}
         for block in blocks:
-            local = set()
             for node in block.items:
+                if (isinstance(node, hir.Declare) and isinstance(node.expr, hir.ExpressedIdentifier)
+                        and resource(node.expr.type) is not None
+                        and not {node.binding_id, node.expr.binding_id} & (captured | written)):
+                    dependent.setdefault(node.expr.binding_id, set()).add(node.binding_id)
+                    born[node.binding_id] = positions[id(node.expr)]
+        def alive_after(binding, read):
+            pending = list(dependent.get(binding, ()))
+            seen = set()
+            while pending:
+                alias = pending.pop()
+                if alias in seen or born[alias] >= positions[read]:
+                    continue
+                seen.add(alias)
+                if positions.get(last.get(alias), -1) > positions[read]:
+                    return True
+                pending.extend(dependent.get(alias, ()))
+            return False
+        def owning_inputs(node):
+            if isinstance(node, hir.FunctionCall):
+                return [*node.pos_args, *node.kw_args.values()]
+            if isinstance(node, hir.ObjectLiteral):
+                return [field.value for field in node.fields]
+            if isinstance(node, hir.ArrayLiteral):
+                return node.items
+            if isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign)):
+                return [node.value]
+            return ()
+        for block in blocks:
+            local = {owner.binding_id for owner in parameter_owners} if block is body else set()
+            for node in block.items:
+                # Do not hoist a conditional consumption or a repeated loop
+                # use into its parent lifetime. Nested blocks get their own
+                # plan; owning arguments, fields and items share this rule.
+                references = {}
+                for read in hir.walk(node):
+                    if isinstance(read, hir.ExpressedIdentifier):
+                        references[read.binding_id] = references.get(read.binding_id, 0) + 1
+                pending = [node]
+                while pending:
+                    part = pending.pop()
+                    if isinstance(part, hir.Flow):
+                        # The first if condition runs on every incoming path.
+                        # Loop conditions repeat, and later arms are conditional.
+                        if part.arms and isinstance(part.arms[0], hir.IfArm):
+                            pending.append(part.arms[0].condition)
+                        continue
+                    if isinstance(part, (hir.Block, hir.FunctionLiteral, hir.ShortCircuit)):
+                        continue
+                    for value in owning_inputs(part):
+                        while isinstance(value, (hir.ValueCast, hir.RepresentationCast, hir.Obligation)):
+                            value = value.value if isinstance(value, hir.Obligation) else value.expr
+                        if (isinstance(value, hir.ExpressedIdentifier) and resource(value.type) is not None
+                                and value.binding_id in local and value.binding_id not in captured
+                                and last.get(value.binding_id) == id(value) and occurrences[id(value)] == 1
+                                and references.get(value.binding_id) == 1 and not alive_after(value.binding_id, id(value))):
+                            consumes.add(id(value))
+                    pending.extend(hir.children(part))
                 if not isinstance(node, hir.Declare):
                     continue
                 source = node.expr
                 if (isinstance(source, hir.ExpressedIdentifier)
                         and source.binding_id in local and source.binding_id not in captured
-                        and last.get(source.binding_id) == id(source) and occurrences[id(source)] == 1):
+                        and last.get(source.binding_id) == id(source) and occurrences[id(source)] == 1
+                        and not alive_after(source.binding_id, id(source))):
                     result.add(id(node))
                 if (isinstance(source, hir.ExpressedIdentifier) and source.binding_id in local
                         and not {source.binding_id, node.binding_id} & (captured | written)):
                     views.add(id(node))
                 if resource(source.type) is not None:
                     local.add(node.binding_id)
-        return result, views
+        return result, views, consumes
 
     def returnable_result(node):
         """Recognize a function result whose ownership can be made explicit."""
@@ -700,7 +769,19 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             return literal
         def statement(node, owners, loops, *, entry=False):
             live = allowed | {owner.binding_id for owner in owners}
-            def control(child):
+            def control(child, *, consume=False):
+                if consume:
+                    if id(child) not in consumes:
+                        return None
+                    source = next((owner for owner in owners if owner.binding_id == child.binding_id), None)
+                    if source is None:
+                        return None
+                    value, moved = transfer(child, child.type)
+                    owners.remove(source)
+                    if moved:
+                        saved, value = capture(value, child.loc)
+                        return hir.Block(child.loc, value.type, [saved, *cleanup([source], child.loc, {source.binding_id}), value], False)
+                    return value
                 # Expression blocks have their own temporaries, but a return
                 # from inside them leaves every surrounding owner too.
                 if isinstance(child, hir.Block):
@@ -856,7 +937,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             body = hir.Block(body.loc, body.type, [body], True)
         elif not body.scoped:
             body = replace(body, scoped=True)
-        transfers, views = local_transfers(body)
+        transfers, views, consumes = local_transfers(body, parameter_owners)
         prepared = replace(literal, body=statement(body, parameter_owners, [], entry=True))
         def parameter(param):
             return replace(param, value=argument(param.value, allowed, False)) if isinstance(param, hir.BoundParam) else param

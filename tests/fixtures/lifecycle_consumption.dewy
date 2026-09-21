@@ -1,0 +1,45 @@
+# Last-use ownership transfer is the same operation at a call, a constructor,
+# an array insertion and replacement. Borrowing aliases extend last use.
+let drops:int64=0
+let moves:int64=0
+Handle=type of [value:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+Moving=type of [value:int64 values:array<int64>
+    $__drop__
+    release=():>void=>{drops+=1 values.clear}
+    $__move__
+    relocate=():>Moving=>{moves+=1 Moving[value+1 values.copy()]}
+]
+Box:type=[item:Handle]
+consume=(h:Handle):>int64=>h.value
+consume_moving=(h:Moving):>int64=>h.value
+forward=(h:Handle):>int64=>consume(h)
+exercise=():>int64=>{
+    let a=Handle[42]
+    if forward(a) not=?42 return 1
+    let b=Handle[42]
+    let box=Box[b]
+    let c=Handle[42]
+    let items:array<Handle>=[c]
+    let slots:array<Handle>=[Handle[1]]
+    let d=Handle[42]
+    slots[0]=d
+    if box.item.value+items[0].value+slots[0].value not=?126 return 2
+    let moving=Moving[41 [1 2]]
+    if consume_moving(moving) not=?42 return 3
+    let shared=Moving[21 [3]]
+    let alias=shared
+    let other=shared
+    return alias.value+other.value
+}
+main=():>int64=>{
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {
+        drops=0 moves=0
+        if exercise() not=?42 or drops not=?7 or moves not=?1 return 1
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}
