@@ -31,11 +31,22 @@ ERRORS = [
 ]
 
 
+_PROGRAM_DRIVER = None
+
+
 def build_program_driver(tmp_path):
+    # Like the lowerer driver, this executable is independent of the input
+    # case. Every invocation still starts a fresh process, and each test owns
+    # its prelude cache directory. Rebuild once per worker, not once per case
+    # group, and never carry the binary across pytest sessions.
+    global _PROGRAM_DRIVER
+    if _PROGRAM_DRIVER is not None:
+        return _PROGRAM_DRIVER
     output = tmp_path / 'program-driver.udewy'
     output.write_text(codegen(SrcFile.from_path(native_lowering.ROOT / 'tests/fixtures/bootstrap_program.dewy'), debug_locations=False))
     assert entry_point(output, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
-    return cache_artifact(output).resolve()
+    _PROGRAM_DRIVER = cache_artifact(output).resolve()
+    return _PROGRAM_DRIVER
 
 
 def check_structural_text(binary, tmp_path, *, cases=None, errors=None, outputs=None):
