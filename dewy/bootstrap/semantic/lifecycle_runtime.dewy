@@ -6,6 +6,8 @@ import p"ty.dewy" as types
 import p"type_queries.dewy" as views
 import p"bindings.dewy" as bindings
 import p"propositions.dewy" as facts
+import p"analyze/effects.dewy" as effects
+import p"analyze/predicate_effects.dewy" as predicate_effects
 
 # Materialize operations before reachability and lowering. Fresh records and
 # arrays own their nested resources. Factories, by-value parameters and results
@@ -31,6 +33,9 @@ Plan:type = [
     view_bindings:set<addr>=set[]
     array_drops:dict<addr addr>=[]
     array_clears:dict<addr addr>=[]
+    array_suffixes:dict<addr addr>=[]
+    argument_writes:dict<addr set<addr>>=[]
+    readonly_arguments:set<addr>=set[]
     component_copies:dict<addr addr>=[]
     generated:array<addr>=[]
     function_source:addr?=none
@@ -61,13 +66,14 @@ resource = (id:addr nodes:types.Table):>addr? => {
     }
     return none
 }
-drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true):>void => {
+Suffix:type = const [first:addr before:addr]
+drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none):>void => {
     if plan.problem isnt? none or resource(type_id session.types) is? none return
     let owner=views.structural_base(type_id session.types)
     let type=types.node_at(session.types owner)
     if owner in? ancestors {reject(hir.node_at(session.hir value) 'recursive resource storage' @plan) return}
     if type is? types.ArrayType {
-        let operation=plan.array_drops.get(owner)
+        let operation=if tail is? none plan.array_drops.get(owner) else plan.array_suffixes.get(owner)
         let empty=types.primitive('void' @session.types)
         if operation is? none {
             let name="__dewy_drop_array_{session.registry.next_id}"
@@ -77,7 +83,30 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
             parameter.value_type=owner
             parameter.store_type=owner
             bindings.store_binding(@session.registry parameter_id parameter)
-            let signature=types.function_type([types.PosOrKwArg['__items' owner place=true]] [] none empty [] @session.types)
+            let parameters:array<hir.Param>=[hir.Param['__items' owner parameter_id place=true]]
+            let signature_parameters:array<types.PosOrKwArg>=[types.PosOrKwArg['__items' owner place=true]]
+            let result=empty
+            let limit:addr?=none
+            if tail isnt? none {
+                let word=types.primitive('int64' @session.types)
+                let first_id=bindings.allocate(@session.registry none '__first' 'param' loc)
+                let first_type=types.refined_type(word [facts.Proposition['self' '>=?' 0]] @session.types)
+                let first=bindings.binding_at(session.registry first_id)
+                first.value_type=first_type first.store_type=first_type
+                bindings.store_binding(@session.registry first_id first)
+                let before_id=bindings.allocate(@session.registry none '__before' 'param' loc)
+                let before_type=types.refined_type(word [facts.Proposition['self' '=?' term='__items' term_id=parameter_id]] @session.types)
+                let before=bindings.binding_at(session.registry before_id)
+                before.value_type=before_type before.store_type=before_type
+                bindings.store_binding(@session.registry before_id before)
+                parameters.push(hir.Param['__first' first_type first_id])
+                parameters.push(hir.Param['__before' before_type before_id])
+                signature_parameters.push(types.PosOrKwArg['__first' first_type])
+                signature_parameters.push(types.PosOrKwArg['__before' before_type])
+                result=types.refined_type(empty [facts.Proposition['@__items' '=?' projection='length' subject_id=parameter_id term='__before' term_id=before_id term_projection='value']] @session.types)
+                limit=put(hir.ExpressedIdentifier[loc first_type '__first' first_id] @session)
+            }
+            let signature=types.function_type(signature_parameters [] none result [] @session.types)
             let receiver=put(hir.ExpressedIdentifier[loc owner '__items' parameter_id] @session)
             let word=types.primitive('int64' @session.types)
             let boolean=types.primitive('bool' @session.types)
@@ -87,7 +116,8 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
             let one=put(hir.Integer[loc word '0d' 1] @session)
             let comparison_type=types.function_type([types.PosOrKwArg[none word] types.PosOrKwArg[none word]] [] none boolean [] @session.types)
             let comparison=put(hir.ExpressedIdentifier[loc comparison_type '__gt__' none] @session)
-            let condition=put(hir.FunctionCall[loc boolean comparison [cursor.value zero] []] @session)
+            let endpoint=if limit is? none zero else limit
+            let condition=put(hir.FunctionCall[loc boolean comparison [cursor.value endpoint] []] @session)
             let body:array<addr>=[put(hir.Assign[loc empty cursor.value '-=' one] @session)]
             let element=put(hir.Index[loc type.element receiver cursor.value none] @session)
             let nested=ancestors
@@ -96,19 +126,27 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
             let block=put(hir.Block[loc empty body true] @session)
             let arm=put(hir.LoopArm[loc empty condition block] @session)
             let loop_body=put(hir.Flow[loc empty [arm] none] @session)
-            let function_body=put(hir.Block[loc empty [cursor.declaration loop_body] true] @session)
-            let function=put(hir.FunctionLiteral[loc signature [hir.Param['__items' owner parameter_id place=true]] [] none empty function_body source=plan.function_source] @session)
+            let statements:array<addr>=[cursor.declaration loop_body]
+            if tail isnt? none {
+                let returned=put(hir.Void[loc empty] @session)
+                statements.push(put(hir.Obligation[loc empty returned result 'the generated suffix cleanup preserves length'] @session))
+            }
+            let function_body=put(hir.Block[loc empty statements true] @session)
+            let function=put(hir.FunctionLiteral[loc signature parameters [] none empty function_body source=plan.function_source] @session)
             let declaration=put(hir.Declare[loc empty 'const' name signature function binding_id] @session)
             let binding=bindings.binding_at(session.registry binding_id)
             binding.value_type=signature binding.function=function binding.declaration=declaration
             bindings.store_binding(@session.registry binding_id binding)
             operation=put(hir.ExpressedIdentifier[loc signature name binding_id] @session)
-            plan.array_drops[owner]=operation
+            if tail is? none {plan.array_drops[owner]=operation}
+            else {plan.array_suffixes[owner]=operation}
             plan.generated.push(declaration)
         }
         $runtime_assert operation isnt? none
         let place=put(hir.Place[loc owner value] @session)
-        calls.push(put(hir.FunctionCall[loc empty operation [place] []] @session))
+        let arguments:array<addr>=[place]
+        if tail isnt? none {arguments.push(tail.first) arguments.push(tail.before)}
+        calls.push(put(hir.FunctionCall[loc empty operation arguments []] @session))
         return
     }
     if type is? types.TypeOr {
@@ -481,13 +519,69 @@ clear_operation = (owner:addr loc:Span @plan:Plan @session:contexts.Session):>ad
     plan.generated.push(declaration)
     return operation
 }
+# Hidden selectors are immutable: route facts refer to the selected element,
+# and later cleanup/builtin calls do not evaluate a source index again.
+freeze_value = (id:addr loc:Span @prefix:array<addr> @session:contexts.Session):>addr => {
+    let held=capture_result(id loc @session)
+    let node=hir.node_at(session.hir held.declaration)
+    $runtime_assert node is? hir.Declare and node.binding_id isnt? none
+    let declaration=hir.Declare[node.loc node.value_type 'const' node.name node.annotation node.expr node.binding_id]
+    store(held.declaration declaration @session)
+    let binding=bindings.binding_at(session.registry node.binding_id)
+    binding.declaration=held.declaration
+    bindings.store_binding(@session.registry node.binding_id binding)
+    prefix.push(held.declaration)
+    return held.value
+}
+receiver_root = (id:addr nodes:array<hir.AST>):>addr? => {
+    let path=bindings.access_path(id nodes)
+    let node=hir.node_at(nodes path.root)
+    return if node is? hir.ExpressedIdentifier node.binding_id else none
+}
+check_selection = (id:addr root:addr? @plan:Plan session:contexts.Session):>void => {
+    if root isnt? none and root in? predicate_effects.mutated_bindings(id session.hir plan.argument_writes plan.readonly_arguments) {
+        if plan.problem is? none {plan.problem=Error[srcfile=plan.source title='resource array receiver changes during argument evaluation' pointers=[Pointer[hir.node_at(session.hir id).loc 'the selected place must survive its selector and count']]]}
+    }
+}
+freeze_route = (id:addr loc:Span root:addr? @prefix:array<addr> @plan:Plan @session:contexts.Session):>addr => {
+    let node=hir.node_at(session.hir id)
+    if node is? hir.MemberAccess {
+        let value=freeze_route(node.value loc root @prefix @plan @session)
+        return put(hir.MemberAccess[node.loc node.value_type value node.name node.mutable] @session)
+    }
+    if node is? hir.Index {
+        let array=freeze_route(node.array loc root @prefix @plan @session)
+        check_selection(node.index root @plan session)
+        let index=freeze_value(node.index loc @prefix @session)
+        return put(hir.Index[node.loc node.value_type array index node.constant_index] @session)
+    }
+    return id
+}
 array_operation = (id:addr node:hir.FunctionCall method:hir.ArrayMethod allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?=none):>void => {
-    if method.name not in? ['push' 'insert' 'pop' 'reserve' 'clear'] {reject(node 'a resource array method without element lifetime handling' @plan) return}
+    if method.name not in? ['push' 'insert' 'pop' 'reserve' 'clear' 'truncate'] {reject(node 'a resource array method without element lifetime handling' @plan) return}
     # Insertion introduces owners; pop transfers one; reserve only changes
     # capacity. Other methods need explicit handling for discarded elements.
     let receiver=hir.node_at(session.hir method.array)
     let place=put(hir.Place[receiver.loc receiver.value_type method.array] @session)
     expression(place allowed inherited @plan @session frame=frame)
+    if method.name =? 'truncate' {
+        let prefix:array<addr>=[]
+        let root=receiver_root(method.array session.hir)
+        let selected=freeze_route(method.array node.loc root @prefix @plan @session)
+        let argument=if node.pos_args.length >? 0 node.pos_args[0] else node.kw_args.get('count')
+        $runtime_assert argument isnt? none
+        check_selection(argument root @plan session)
+        expression(argument allowed inherited @plan @session frame=frame)
+        let count=freeze_value(argument node.loc @prefix @session)
+        let word=types.primitive('int64' @session.types)
+        let length=put(hir.ArrayLength[node.loc word selected] @session)
+        let before=freeze_value(length node.loc @prefix @session)
+        drop_value(selected receiver.value_type node.loc set[] @prefix @plan @session tail=Suffix[count before])
+        let truncated=put(hir.ArrayMethod[method.loc method.value_type selected 'truncate'] @session)
+        prefix.push(put(hir.FunctionCall[node.loc node.value_type truncated [count] []] @session))
+        store(id hir.Block[node.loc node.value_type prefix false] @session)
+        return
+    }
     if method.name =? 'clear' {
         let shape=views.structural_base(receiver.value_type session.types)
         let function=clear_operation(shape node.loc @plan @session)
@@ -1018,6 +1112,28 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
         if value.lifecycle =? 'copy' {plan.copies[type.brand]=hook}
     }
     if plan.hooks.length =? 0 return none
+    # Before rewriting bodies, summarize calls which may change a selected
+    # resource-array receiver. This includes transitive captured/global writes.
+    let receivers:set<addr>=set[]
+    let pending=items
+    let visited:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? visited {continue}
+        visited.add(id)
+        let node=hir.node_at(session.hir id)
+        if node is? hir.ArrayMethod and node.name =? 'truncate' and resource(hir.node_at(session.hir node.array).value_type session.types) isnt? none {
+            let root=receiver_root(node.array session.hir)
+            if root isnt? none {receivers.add(root)}
+        }
+        hir.push_children(node @pending)
+    }
+    if receivers.length >? 0 {
+        let empty=types.primitive('void' @session.types)
+        let joined=put(hir.Block[Span[0 0] empty items false] @session)
+        plan.argument_writes=effects.analyze_global_writes(joined session.hir receivers session.registry)
+        plan.readonly_arguments=effects.read_only_places(joined session.hir session.types)
+    }
     loop root in roots {
         let block=hir.node_at(session.hir root)
         $runtime_assert block is? hir.Block

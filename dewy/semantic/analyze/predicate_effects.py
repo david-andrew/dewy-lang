@@ -10,7 +10,7 @@ from .. import bindings as sb
 from .. import hir
 
 
-def _binding_effects(root: hir.AST, *, reads: bool, writes: bool, call_writes: dict[int, set[int]] | None = None) -> tuple[set[int], set[int]]:
+def _binding_effects(root: hir.AST, *, reads: bool, writes: bool, call_writes: dict[int, set[int]] | None = None, read_only_places: set[int] | frozenset[int] = frozenset()) -> tuple[set[int], set[int]]:
     read: set[int] = set()
     written: set[int] = set()
     pending = [root]
@@ -22,7 +22,9 @@ def _binding_effects(root: hir.AST, *, reads: bool, writes: bool, call_writes: d
             read.add(node.binding_id)
         if writes:
             target = None
-            if isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign, hir.Place)):
+            if isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign)):
+                target = node.target
+            elif isinstance(node, hir.Place) and id(node) not in read_only_places:
                 target = node.target
             elif isinstance(node, (hir.DictStore, hir.DictRemove)):
                 target = node.keys
@@ -45,8 +47,10 @@ def read_bindings(root: hir.AST) -> set[int]:
     return _binding_effects(root, reads=True, writes=False)[0]
 
 
-def mutated_bindings(root: hir.AST) -> set[int]:
-    return _binding_effects(root, reads=False, writes=True)[1]
+def mutated_bindings(root: hir.AST, *, call_writes: dict[int, set[int]] | None = None,
+                     read_only_places: set[int] | frozenset[int] = frozenset()) -> set[int]:
+    return _binding_effects(root, reads=False, writes=True, call_writes=call_writes,
+                           read_only_places=read_only_places)[1]
 
 
 class BindingQueries:

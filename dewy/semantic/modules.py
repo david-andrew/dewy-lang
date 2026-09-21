@@ -671,7 +671,10 @@ class ModuleCompiler:
                                (*sources, *(source for _ in root.items)), (),
                                binding_registry=self.registry, target=self.target)
         selected = {id(node) for node in hir.walk(root) if isinstance(node, hir.FunctionLiteral)}
-        prepared = lifecycle_runtime.prepare(combined, source, selected=selected, validate=False)
+        effect_context = hir.Block(root.loc, root.type,
+                                   [*(record.root for record in self.order), combined], False)
+        prepared = lifecycle_runtime.prepare(combined, source, selected=selected, validate=False,
+                                             effect_context=effect_context)
         return replace(root, items=prepared.items[len(prefix):])
 
     def _validate_and_select(self, root: hir.Block, srcfile: SrcFile, *,

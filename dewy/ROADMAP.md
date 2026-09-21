@@ -431,8 +431,10 @@ in both lowerings and the parity tool is the gate.
   `push`/`insert` accept fresh or copied owners, `pop` transfers the removed
   owner, and `reserve` preserves element lifetimes. Discarded results drop
   once. `clear` drops elements in reverse order, retaining its checked
-  zero-length result fact even through an indexed receiver. Element overwrite,
-  `truncate`, transfers from existing
+  zero-length result fact even through an indexed receiver. `truncate` drops
+  only the removed suffix and preserves the builtin's minimum-length facts;
+  selectors and counts are evaluated once, with receiver stability checked.
+  Element overwrite and transfers from existing
   move-only bindings remain outstanding. Resource unions
   and optional owners now select cleanup by the active alternative, including
   array elements; custom union moves consume only that alternative's resources. Explicit custom copies can construct fresh results,

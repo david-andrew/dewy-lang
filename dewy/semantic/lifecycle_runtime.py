@@ -10,13 +10,15 @@ resource-container mutations still need the general lifetime plan.
 """
 from dataclasses import replace
 
-from . import hir, ty, lifecycle
+from . import hir, ty, lifecycle, bindings
 from ..parser import t0
-from .errors import not_implemented
-from .analyze import public_effects
+from .errors import not_implemented, user_error
+from ..reporting import Pointer
+from .analyze import public_effects, effects, predicate_effects
 
 
-def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, validate: bool = True):
+def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, validate: bool = True,
+            effect_context: hir.AST | None = None):
     if isinstance(root, hir.Program) and root.ownership_prepared:
         return root
     declarations = {node.binding_id: node for node in root.items
@@ -77,14 +79,25 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     if registry is None:
         reject(root, 'checked ownership binding metadata')
 
+    # Splitting a resource mutation into cleanup and storage operations must
+    # not reselect a receiver changed by an argument or selector. Use the
+    # existing transitive may-write summaries, including captured roots.
+    receivers = {bindings.access_path(node.func.array).binding_id
+                 for node in hir.walk(root) if isinstance(node, hir.FunctionCall)
+                 and isinstance(node.func, hir.ArrayMethod) and node.func.name == 'truncate'
+                 and resource(node.func.array.type) is not None}
+    receivers.discard(None)
+    argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
+    readonly_arguments = effects.read_only_places(root, effect_context) if receivers else set()
     array_drops = {}
     array_clears = {}
+    array_suffixes = {}
     component_copies = {}
     generated = []
 
-    def cleanup(owners, loc, fields_only=frozenset()):
+    def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None):
         result = []
-        def drop(value, type_, ancestors, run_hook=True, into=result):
+        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None):
             if resource(type_) is None:
                 return
             shape = ty.unfold(ty.strip_refinement(type_))
@@ -94,15 +107,28 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 # One checked helper per array shape: its borrowed receiver
                 # has a stable identity even for an outer array's element.
                 # Reuse also avoids duplicating nested cleanup loops at exits.
-                cached = array_drops.get(id(shape))
+                cache = array_drops if tail is None else array_suffixes
+                cached = cache.get(id(shape))
                 operation = cached[1] if cached is not None else next(
-                    (operation for known, operation in array_drops.values() if known == shape), None)
+                    (operation for known, operation in cache.values() if known == shape), None)
                 if operation is None:
                     name = f'__dewy_drop_array_{registry.next_id}'
                     binding = registry.allocate(object(), name, 'value', loc)
                     parameter = registry.allocate(object(), '__items', 'param', loc)
                     parameter.type = shape
-                    signature = ty.FunctionType([ty.PosOrKwArg('__items', shape, place=True)], [], None, ty.VOID_TYPE)
+                    parameters = [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)]
+                    result_type = ty.VOID_TYPE
+                    if tail is not None:
+                        first = registry.allocate(object(), '__first', 'param', loc)
+                        first.type = ty.RefinedType('int64', (ty.Proposition('self', '>=?', 0),))
+                        before = registry.allocate(object(), '__before', 'param', loc)
+                        before.type = ty.RefinedType('int64', (ty.Proposition('self', '=?', 0,
+                            term=parameter.name, term_id=parameter.id, term_of='length'),))
+                        parameters.extend([hir.Param(first.name, first.type, binding_id=first.id),
+                                           hir.Param(before.name, before.type, binding_id=before.id)])
+                        result_type = ty.RefinedType(ty.VOID_TYPE, (ty.Proposition('@' + parameter.name, '=?', 0,
+                            of='length', subject_id=parameter.id, term=before.name, term_id=before.id, term_of='value'),))
+                    signature = ty.FunctionType([ty.PosOrKwArg(p.name, p.type, place=p.place) for p in parameters], [], None, result_type)
                     binding.type = signature
                     operation = hir.ExpressedIdentifier(loc, signature, name, binding_id=binding.id)
                     receiver = hir.ExpressedIdentifier(loc, shape, parameter.name, binding_id=parameter.id)
@@ -111,19 +137,25 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     one = hir.Integer(loc, 'int64', t0.base10, 1)
                     comparison = hir.ExpressedIdentifier(loc, ty.FunctionType(
                         [ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, 'bool'), '__gt__')
-                    condition = hir.FunctionCall(loc, 'bool', comparison, [cursor, zero], {})
+                    limit = zero if tail is None else hir.ExpressedIdentifier(loc, first.type, first.name, binding_id=first.id)
+                    condition = hir.FunctionCall(loc, 'bool', comparison, [cursor, limit], {})
                     element_calls = []
                     drop(hir.Index(loc, shape.element, receiver, cursor, None), shape.element, ancestors | {id(shape)}, into=element_calls)
                     body = hir.Block(loc, ty.VOID_TYPE, [hir.Assign(loc, ty.VOID_TYPE, cursor, '-=', one), *element_calls], True)
                     loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, condition, body)])
-                    literal = hir.FunctionLiteral(loc, signature, [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)], [], None,
-                                                  ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, [declaration, loop], True), source=current_source)
+                    statements = [declaration, loop]
+                    if tail is not None:
+                        statements.append(hir.Obligation(loc, ty.VOID_TYPE, hir.Void(loc, ty.VOID_TYPE),
+                            result_type, 'the generated suffix cleanup preserves length'))
+                    literal = hir.FunctionLiteral(loc, signature, parameters, [], None,
+                                                  ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, statements, True), source=current_source)
                     declared = hir.Declare(loc, ty.VOID_TYPE, 'const', name, signature, literal, binding_id=binding.id)
                     binding.function = literal
                     binding.declaration = declared
                     generated.append(declared)
-                array_drops[id(shape)] = (shape, operation)
-                into.append(hir.FunctionCall(loc, ty.VOID_TYPE, replace(operation, loc=loc), [hir.Place(loc, shape, value)], {}))
+                cache[id(shape)] = (shape, operation)
+                arguments = [hir.Place(loc, shape, value), *(tail or ())]
+                into.append(hir.FunctionCall(loc, ty.VOID_TYPE, replace(operation, loc=loc), arguments, {}))
                 return
             if isinstance(shape, ty.TypeOr):
                 # The tag selects the only live owner. A narrowed read keeps
@@ -163,6 +195,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             owner_type = owner.annotation or owner.expr.type
             value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
             drop(value, owner_type, set(), owner.binding_id not in fields_only)
+        if suffix is not None:
+            value, first, before = suffix
+            drop(value, value.type, set(), tail=(first, before))
         return result
 
     def transfer(value, expected):
@@ -438,12 +473,43 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
 
     def array_operation(node, allowed, inherited, control):
         method = node.func
-        if method.name not in ('push', 'insert', 'pop', 'reserve', 'clear'):
+        if method.name not in ('push', 'insert', 'pop', 'reserve', 'clear', 'truncate'):
             reject(node, 'a resource array method without element lifetime handling')
         # Borrow the receiver once. Clearing uses a checked helper to drop
         # live elements; insertion/removal otherwise transfers their owners.
         receiver = expression(hir.Place(method.loc, method.array.type, method.array), allowed,
                               inherited=inherited, control=control)
+        if method.name == 'truncate':
+            prefix = []
+            receiver_root = bindings.access_path(receiver.target).binding_id
+            def check_selection(value):
+                writes = predicate_effects.mutated_bindings(value, call_writes=argument_writes,
+                                                           read_only_places=readonly_arguments)
+                if receiver_root in writes:
+                    user_error(current_source, 'resource array receiver changes during argument evaluation',
+                               Pointer(span=value.loc, message='the selected place must survive its selector and count'))
+            def once(value):
+                declaration, held = capture(value, node.loc)
+                declaration = replace(declaration, decltype='const')
+                registry.by_id[held.binding_id].declaration = declaration
+                prefix.append(declaration)
+                return held
+            def freeze_route(value):
+                if isinstance(value, hir.MemberAccess):
+                    return replace(value, value=freeze_route(value.value))
+                if isinstance(value, hir.Index):
+                    array = freeze_route(value.array)
+                    check_selection(value.index)
+                    return replace(value, array=array, index=once(value.index))
+                return value
+            selected = freeze_route(receiver.target)
+            supplied = node.pos_args[0] if node.pos_args else node.kw_args['count']
+            check_selection(supplied)
+            count = once(expression(supplied, allowed, inherited=inherited, control=control))
+            before = once(hir.ArrayLength(node.loc, 'int64', selected))
+            dropped = cleanup((), node.loc, suffix=(selected, count, before))
+            truncated = replace(node, func=replace(method, array=selected), pos_args=[count], kw_args={})
+            return hir.Block(node.loc, node.type, [*prefix, *dropped, truncated], False)
         if method.name == 'clear':
             shape = ty.unfold(ty.strip_refinement(method.array.type))
             assert isinstance(shape, ty.ArrayType)

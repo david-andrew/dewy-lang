@@ -51,3 +51,23 @@ copy=(@items:array<Handle>):>array<Handle>=>items.copy()
     broken = replace(root, items=[changed if node is helper else node for node in root.items])
     with pytest.raises(ReportException, match='cannot prove|refinement refuted'):
         bounds.validate_bounds(broken, root.binding_registry, source)
+
+
+def test_generated_suffix_contract_rejects_a_body_that_changes_length():
+    source = SrcFile(None, '''$no_prelude=true
+Handle=type of [id:int64 $__drop__ release=():>void=>{}]
+cut=(@items:array<Handle> count:int64<v=>v>=?0>):>void=>items.truncate(count)
+''')
+    root = check.typecheck_and_resolve(source)
+    helper = next(node for node in root.items if isinstance(node, hir.Declare)
+                  and node.name.startswith('__dewy_drop_array_')
+                  and len(node.expr.pos_or_kw_args) == 3)
+    param = helper.expr.pos_or_kw_args[0]
+    receiver = hir.ExpressedIdentifier(helper.loc, param.type, param.name, binding_id=param.binding_id)
+    method = hir.ArrayMethod(helper.loc, ty.FunctionType([], [], None, ty.VOID_TYPE), receiver, 'clear')
+    changed = replace(helper, expr=replace(helper.expr, body=replace(helper.expr.body,
+        items=[*helper.expr.body.items[:-1], hir.FunctionCall(helper.loc, ty.VOID_TYPE, method, [], {}),
+               helper.expr.body.items[-1]])))
+    broken = replace(root, items=[changed if node is helper else node for node in root.items])
+    with pytest.raises(ReportException, match='cannot prove|refinement refuted'):
+        bounds.validate_bounds(broken, root.binding_registry, source)

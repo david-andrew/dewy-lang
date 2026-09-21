@@ -1,0 +1,41 @@
+# Truncation drops only the removed suffix, in reverse order. Its receiver
+# and count are evaluated once before a hook can change unrelated state.
+let trace:int64=0
+let selections:int64=0
+let counts:int64=0
+Handle=type of [id:int64 values:array<int64>
+$__drop__
+release=():>void=>{trace=trace*10+id values.clear}
+]
+select=():>0=>{selections+=1 0}
+count=():>1=>{counts+=1 1}
+exercise=():>int64=>{
+    let items:array<Handle>=[Handle[1 [10]] Handle[2 [20]] Handle[3 [30]]]
+    items.truncate(10)
+    $assert items.length=?3
+    if trace not=?0 return 5
+    items.truncate(2)
+    $assert items.length=?2
+    if trace not=?3 return 1
+    items.truncate(count=2)
+    if trace not=?3 return 2
+    items.truncate(1)
+    $assert items.length=?1
+    if trace not=?32 or items[0].id not=?1 return 3
+    let groups:array<array<Handle>>=[[Handle[4 [40]] Handle[5 [50]]]]
+    groups[select()].truncate(count())
+    if selections not=?1 or counts not=?1 or trace not=?325 return 4
+    return 42
+}
+verify=():>int64=>{
+    trace=0 selections=0 counts=0
+    if exercise() not=?42 or trace not=?32541 return 1
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if verify() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

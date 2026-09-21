@@ -1558,3 +1558,24 @@ Validation: 72 adjacent hosted checks passed. The scalar snapshot and
 parameter-store corpus passes both compilers and both output backends using
 a freshly native-built driver. Indexed scalar selections remain separate
 work; snapshot equality does not equate every element of an array.
+
+Checkpoint: resource-array `truncate` drops its suffix in reverse order before
+releasing element storage. Counts above the current length are a no-op;
+negative counts still require a proof failure. Selectors and the count are
+captured once. The suffix helper proves that it preserves array length,
+then the existing builtin transfer computes `min(old_length, count)`. This
+uses an ordinary checked pre/postcondition, not a trusted generated fact.
+May-write summaries reject selector/count expressions which replace or
+relocate the selected receiver; proven read-only borrowed calls remain
+usable. Hosted summaries include imported bodies as well as local hooks.
+
+Validation: the final candidate passed 32 hosted/native checks, including
+both x86-64 and C execution, symbolic length contracts, selector/count
+side effects, imported counts, invalidation, and an intentionally damaged
+helper whose length claim must be rejected. Repeated nested resource
+truncation retains zero bytes. The preceding paired batch also passed the
+clear, const-index, and ordinary truncation corpora (49 passing checks;
+its two failures were repaired in this final batch). Seventy-two adjacent
+hosted annotation/bounds/place checks passed. The native driver was built
+by the verified native pair, not by the hosted compiler. Whole-compiler
+integration and the updated full suite are separate subsequent gates.
