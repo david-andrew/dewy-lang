@@ -572,6 +572,15 @@ class ModuleCompiler:
         """
         needed: set[int] = set()
         for record in self.order:
+            # Ownership operations are implicit call edges. Until the
+            # ownership pass materializes them, keep their declarations so
+            # runtime validation cannot mistake an imported resource for an
+            # ordinary memberwise value after pruning its unreferenced hook.
+            for item in record.root.items:
+                if (isinstance(item, hir.Declare) and item.binding_id is not None
+                        and isinstance(item.expr, hir.FunctionLiteral)
+                        and item.expr.lifecycle is not None):
+                    needed.add(item.binding_id)
             if record is entry:
                 self._collect_referenced_binding_ids(record.root, needed)
             elif not record.prelude:

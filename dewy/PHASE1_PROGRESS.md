@@ -961,3 +961,12 @@ three ownership kernels (42), and passed all six nested-resource probes plus
 the paired diagnostic fixture. The focused manifest now has 119 cases.
 Artifacts: `../dewy-build-artifacts/phase1-lifecycle-components-2026-09-20`
 and `../dewy-build-artifacts/phase1-lifecycle-components-parity-2026-09-20`.
+
+Imported lifecycle declarations now remain in the hosted runtime dependency
+graph until ownership operations have explicit call edges. Otherwise pruning
+could remove a hidden hook and bypass the runtime implementation gate for
+an imported resource. Native validation already rejects before pruning.
+Both used and unused imported hook declarations are covered. Validation:
+51 hosted lifecycle checks and the new paired imported-resource diagnostic
+passed. The focused manifest has 120 cases. Artifact:
+`../dewy-build-artifacts/phase1-lifecycle-import-gate-parity-2026-09-20`.

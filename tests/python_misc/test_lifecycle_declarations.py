@@ -241,3 +241,16 @@ Handle=type of Protocol & [
 '''
     with pytest.raises(ReportException, match='cannot implement a callable field'):
         checked(source)
+
+
+@pytest.mark.parametrize('use', [
+    'main=():>int64=>{let h=ImportedHandle[42] return h.token}',
+    'main=():>int64=>42',
+])
+def test_import_pruning_cannot_erase_the_runtime_lifecycle_gate(tmp_path, use):
+    module = tmp_path / 'resource.dewy'
+    module.write_text('ImportedHandle=type of [token:int64\n$__drop__\nrelease=():>void=>{}\n]')
+    source = tmp_path / 'main.dewy'
+    source.write_text('from p"resource.dewy" import ImportedHandle\n' + use)
+    with pytest.raises(ReportException, match='lifecycle ownership lowering'):
+        codegen(SrcFile.from_path(source))
