@@ -5,12 +5,12 @@ by-value parameters and results transfer fresh owners. Checked @ parameters
 borrow. Same-scope bindings can move at last use, and custom copy/move hooks
 remain checked calls. Drop precedes field/element storage cleanup.
 
-Conditional consumption of outer owners, field transfers, synthesized component copies
+Conditional consumption of outer owners, field transfers, synthesized array copies
 and the remaining resource-container mutations still need the general lifetime plan.
 """
 from dataclasses import replace
 
-from . import hir, ty
+from . import hir, ty, lifecycle
 from ..parser import t0
 from .errors import not_implemented
 from .analyze import public_effects
@@ -79,6 +79,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
 
     array_drops = {}
     array_clears = {}
+    component_copies = {}
     generated = []
 
     def cleanup(owners, loc, fields_only=frozenset()):
@@ -198,6 +199,73 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             result = hir.Obligation(value.loc, result_type, result, expected, 'the return contract after moving')
         return result, True
 
+    def copy_operation(shape, loc):
+        """A synthesized copy calls component hooks through checked HIR.
+
+        Borrow once at the boundary, including for indexed receivers. The
+        helper constructs a complete independent result; physical COW cannot
+        substitute for a component's logical copy operation.
+        """
+        if isinstance(shape, ty.ObjectType):
+            hook = next((method for method in shape.methods if method.lifecycle == 'copy'), None)
+            if hook is not None:
+                operation = declarations.get(hook.binding_id)
+                if operation is None:
+                    reject(root, 'an unavailable copy operation')
+                return hir.ExpressedIdentifier(loc, operation.expr.type, operation.name, binding_id=operation.binding_id)
+        cached = component_copies.get(id(shape))
+        operation = cached[1] if cached is not None else next(
+            (operation for known, operation in component_copies.values() if known == shape), None)
+        if operation is not None:
+            return replace(operation, loc=loc)
+        if not isinstance(shape, (ty.ObjectType, ty.TypeOr)):
+            reject(root, 'synthesized copies of this resource container')
+        name = f'__dewy_copy_components_{registry.next_id}'
+        binding = registry.allocate(object(), name, 'value', loc)
+        parameter = registry.allocate(object(), '__source', 'param', loc)
+        parameter.type = shape
+        signature = ty.FunctionType([ty.PosOrKwArg('__source', shape, place=True)], [], None, shape)
+        binding.type = signature
+        operation = hir.ExpressedIdentifier(loc, signature, name, binding_id=binding.id)
+        component_copies[id(shape)] = (shape, operation)
+        receiver = hir.ExpressedIdentifier(loc, shape, parameter.name, binding_id=parameter.id)
+        if isinstance(shape, ty.ObjectType):
+            value = hir.ObjectLiteral(loc, shape, [hir.ObjectField(loc, field.name,
+                copy_value(hir.MemberAccess(loc, field.type, receiver, field.name), implicit=False))
+                for field in shape.fields])
+        else:
+            alternatives = []
+            for member in shape.items:
+                selected = copy_value(replace(receiver, type=member), implicit=False)
+                selected = hir.ValueCast(loc, shape, selected)
+                alternatives.append((member, selected))
+            value = hir.Flow(loc, shape, [hir.IfArm(loc, shape,
+                hir.TypeTest(loc, 'bool', receiver, member, False), result)
+                for member, result in alternatives[:-1]], alternatives[-1][1])
+        body = hir.Block(loc, ty.BOTTOM_TYPE, [hir.Return(loc, ty.BOTTOM_TYPE, value)], True)
+        literal = hir.FunctionLiteral(loc, signature,
+            [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)], [], None,
+            shape, body, source=current_source)
+        declared = hir.Declare(loc, ty.VOID_TYPE, 'const', name, signature, literal, binding_id=binding.id)
+        binding.function = literal
+        binding.declaration = declared
+        generated.append(declared)
+        return operation
+
+    def copy_value(value, *, implicit):
+        if resource(value.type) is None:
+            shape = ty.unfold(ty.strip_refinement(value.type))
+            return hir.CopyValue(value.loc, value.type, value) if isinstance(shape, (ty.ArrayType, ty.ObjectType, ty.TypeOr)) or ty.string_valued(shape) else value
+        if lifecycle.copy_blocker(value.type) is not None:
+            reject(value, 'an independent copy of a move-only component')
+        shape = ty.unfold(ty.strip_refinement(value.type))
+        operation = copy_operation(shape, value.loc)
+        result = hir.FunctionCall(value.loc, operation.type.ret, operation,
+                                  [hir.Place(value.loc, shape, value)], {}, implicit_copy=implicit)
+        if isinstance(value.type, ty.RefinedType):
+            result = hir.Obligation(value.loc, result.type, result, value.type, 'the value contract after copying')
+        return result
+
     def fresh(node, allowed, inherited, components=frozenset(), control=None):
         if resource(node.type) is None:
             return expression(node, allowed, inherited=inherited, control=control)
@@ -212,25 +280,17 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 # field into its complete child, consuming that intermediate.
                 return node
         if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
-            # A surviving source requires an independent value. Use its
-            # declared hook in checked HIR so effects and new result facts
-            # participate in the same checks as an explicit `.copy()`.
-            shape = ty.unfold(ty.strip_refinement(node.type))
-            if isinstance(shape, ty.ObjectType):
-                hook = next((method for method in shape.methods if method.lifecycle == 'copy'), None)
-                if hook is not None:
-                    operation = declarations.get(hook.binding_id)
-                    if operation is None:
-                        reject(node, 'an unavailable copy operation')
-                    receiver = expression(hir.Place(node.loc, shape, node), allowed,
-                                          inherited=inherited, control=control)
-                    function = hir.ExpressedIdentifier(node.loc, operation.expr.type, operation.name,
-                                                       binding_id=operation.binding_id)
-                    result_type = operation.expr.rettype
-                    copied = hir.FunctionCall(node.loc, result_type, function, [receiver], {}, implicit_copy=True)
-                    if isinstance(node.type, ty.RefinedType):
-                        copied = hir.Obligation(node.loc, result_type, copied, node.type, 'the value contract after copying')
-                    return copied
+            receiver = expression(hir.Place(node.loc, node.type, node), allowed,
+                                  inherited=inherited, control=control)
+            return copy_value(receiver.target, implicit=True)
+        if isinstance(node, hir.CopyValue):
+            if isinstance(node.value, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
+                receiver = expression(hir.Place(node.loc, node.value.type, node.value), allowed,
+                                      inherited=inherited, control=control)
+                return copy_value(receiver.target, implicit=False)
+            owner, borrowed = capture(fresh(node.value, allowed, inherited, control=control), node.loc)
+            copied, result = capture(copy_value(borrowed, implicit=False), node.loc)
+            return hir.Block(node.loc, node.type, [owner, copied, *cleanup([owner], node.loc), result], False)
         # An explicit custom copy creates an independent owner. Its checked
         # call already carries the hook's effects and result contract.
         if isinstance(node, hir.FunctionCall):

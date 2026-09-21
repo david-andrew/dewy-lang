@@ -25,7 +25,7 @@ probe=(@owner:Handle):>int64 & no_effects=>{let snapshot=owner return snapshot.i
 def test_implicit_copy_hooks(tmp_path):
     from dewy.backend.udewy import lower
     generated = codegen(SrcFile(None, SOURCE), debug_locations=False)
-    notes = [note for note in lower.last_copy_notes if note.site == 'implicit custom copy']
+    notes = [note for note in lower.last_copy_notes if note.site == 'implicit resource copy']
     assert len(notes) == 3 and all(not note.explicit for note in notes)
     execute(tmp_path, 'implicit-copies', generated)
 

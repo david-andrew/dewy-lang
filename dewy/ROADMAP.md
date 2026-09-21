@@ -439,8 +439,9 @@ in both lowerings and the parity tool is the gate.
   including nested hook calls. When a surviving source needs an independent
   owner, its declared copy hook now supplies local bindings, projected values
   and owning arguments; its effects and implicit-copy cost remain checked.
-  Synthesized copies of containers/records with custom-copy components remain
-  pending. Fresh record results now transfer from factories
+  Synthesized record and union copies now call the active components' copy
+  hooks, including nested wrappers and temporary receivers. Array/container
+  element copies remain pending. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch
   owners. Ordinary `@` parameters borrow resource records, including nested
@@ -460,7 +461,7 @@ in both lowerings and the parity tool is the gate.
   needs field-transfer analysis.
   Inherited copies consume their intermediate parent results, including nested
   resources and multiple inheritance levels. Conditional transfers of outer
-  owners, field transfers, mutable resource containers and general owning
+  owners, field transfers, remaining resource-container mutations and general owning
   argument transfers from existing bindings remain explicitly unsupported
   during code generation. Fresh arguments, factory results and explicit copies
   can supply ordinary by-value parameters, which own and clean up the value.

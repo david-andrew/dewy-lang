@@ -605,7 +605,10 @@ expression = (id:addr @state:State):>addr => {
         return put(hir.Assign[node.loc type target '=' value] @state)
     }
     if node is? hir.FunctionCall {
-        if node.implicit_copy {note_copy('record' node.value_type 'implicit custom copy' 'the source remains live and an independent owner is required' node @state)}
+        if node.implicit_copy {
+            let kind=if types.node_at(state.type_nodes types.strip_refinement(node.value_type state.type_nodes)) is? types.TypeOr 'cell' else 'record'
+            note_copy(kind node.value_type 'implicit resource copy' 'the source remains live and an independent owner is required' node @state)
+        }
         let args:array<addr>=[]
         let callee=hir.node_at(state.input.nodes node.func)
         if callee is? hir.ArrayMethod return array_method_call(node callee @state)

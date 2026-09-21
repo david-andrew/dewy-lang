@@ -1413,3 +1413,18 @@ do not change that choice. Eight packaging checks passed, including valid-hash
 mismatches and three-generation builds with different stage-1 output. The
 updated script also packaged the actual verified `c277e5d8` three-generation
 pair successfully. The remote pytest workflow was still running at this check.
+
+Synthesized record and union copies now construct independent resource
+components through their declared hooks, including nested wrappers, optional
+absence and fresh temporary receivers. A helper borrows the receiver once;
+component calls and result obligations remain ordinary checked HIR. Types
+containing move-only components cannot acquire an independent copied owner.
+The copy report labels implicit operations as resource copies, classifying
+union storage separately from records. Array/container copies remain pending.
+
+Validation: all 132 hosted lifecycle checks passed. The component-copy and
+existing inferred-copy harnesses passed hosted/native execution on both output
+backends and their rejection cases. The shared fixture checks hook results,
+independent mutation, effect checking and zero retained storage over 100 calls.
+A test-harness adjustment retains the existing unsupported-lifetime diagnostic
+category for an inferred move-only conflict; it still requires native rejection.

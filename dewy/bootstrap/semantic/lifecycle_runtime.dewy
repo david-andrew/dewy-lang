@@ -1,6 +1,7 @@
 from reporting import SrcFile, Error, Pointer, Span
 import p"context.dewy" as contexts
 import p"hir.dewy" as hir
+import p"lifecycle.dewy" as lifecycle
 import p"ty.dewy" as types
 import p"type_queries.dewy" as views
 import p"bindings.dewy" as bindings
@@ -11,7 +12,7 @@ import p"propositions.dewy" as facts
 # transfer fresh owners; checked @ parameters borrow. Same-scope bindings move
 # at last use. Custom copy/move hooks remain checked calls, and drop precedes
 # field/element storage cleanup. Conditional outer-owner consumption, field
-# transfers, synthesized copies and remaining array mutations remain gaps.
+# transfers, synthesized array copies and remaining array mutations remain gaps.
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 # An expression can contain a block, branch, or early return. Carry its
 # enclosing lexical lifetime explicitly through expression traversal.
@@ -30,6 +31,7 @@ Plan:type = [
     view_bindings:set<addr>=set[]
     array_drops:dict<addr addr>=[]
     array_clears:dict<addr addr>=[]
+    component_copies:dict<addr addr>=[]
     generated:array<addr>=[]
     function_source:addr?=none
     source:SrcFile
@@ -212,6 +214,88 @@ transfer = (id:addr expected:addr? @plan:Plan @session:contexts.Session):>addr =
     }
     return result
 }
+# Synthesize logical component copies before facts/effects are checked.
+# Each helper borrows its receiver once and constructs an independent result.
+copy_operation = (owner:addr loc:Span @plan:Plan @session:contexts.Session):>addr => {
+    let type=types.node_at(session.types owner)
+    if type is? types.ObjectType and type.brand isnt? none {
+        let hook=plan.copies.get(type.brand)
+        if hook isnt? none return put(hir.ExpressedIdentifier[loc hook.signature hook.name hook.binding] @session)
+    }
+    let operation=plan.component_copies.get(owner)
+    if operation isnt? none return operation
+    if type isnt? types.ObjectType|types.TypeOr {
+        reject(hir.Void[loc types.primitive('void' @session.types)] 'synthesized copies of this resource container' @plan)
+        return put(hir.Void[loc owner] @session)
+    }
+    let name="__dewy_copy_components_{session.registry.next_id}"
+    let binding_id=bindings.allocate(@session.registry none name 'value' loc)
+    let parameter_id=bindings.allocate(@session.registry none '__source' 'param' loc)
+    let parameter=bindings.binding_at(session.registry parameter_id)
+    parameter.value_type=owner parameter.store_type=owner
+    bindings.store_binding(@session.registry parameter_id parameter)
+    let signature=types.function_type([types.PosOrKwArg['__source' owner place=true]] [] none owner [] @session.types)
+    operation=put(hir.ExpressedIdentifier[loc signature name binding_id] @session)
+    plan.component_copies[owner]=operation
+    let receiver=put(hir.ExpressedIdentifier[loc owner '__source' parameter_id] @session)
+    let value=if type is? types.ObjectType {
+        let fields:array<hir.ObjectField>=[]
+        loop field in type.fields {
+            let source=put(hir.MemberAccess[loc field.value_type receiver field.name] @session)
+            fields.push(hir.ObjectField[loc field.name copy_component(source false @plan @session)])
+        }
+        put(hir.ObjectLiteral[loc owner fields] @session)
+    } else {
+        $runtime_assert type is? types.TypeOr
+        let arms:array<addr>=[]
+        let fallback:addr?=none
+        let boolean=types.primitive('bool' @session.types)
+        let index:addr=0
+        loop member in type.items {
+            let selected=put(hir.ExpressedIdentifier[loc member '__source' parameter_id] @session)
+            let result=copy_component(selected false @plan @session)
+            result=put(hir.ValueCast[loc owner result] @session)
+            if index+1 =? type.items.length {fallback=result}
+            else {
+                let condition=put(hir.TypeTest[loc boolean receiver member false] @session)
+                arms.push(put(hir.IfArm[loc owner condition result] @session))
+            }
+            index+=1
+        }
+        put(hir.Flow[loc owner arms fallback] @session)
+    }
+    let bottom=types.primitive('never' @session.types)
+    let empty=types.primitive('void' @session.types)
+    let returned=put(hir.Return[loc bottom value] @session)
+    let body=put(hir.Block[loc bottom [returned] true] @session)
+    let function=put(hir.FunctionLiteral[loc signature [hir.Param['__source' owner parameter_id place=true]] [] none owner body source=plan.function_source] @session)
+    let declaration=put(hir.Declare[loc empty 'const' name signature function binding_id] @session)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=signature binding.function=function binding.declaration=declaration
+    bindings.store_binding(@session.registry binding_id binding)
+    plan.generated.push(declaration)
+    return operation
+}
+copy_component = (id:addr implicit:bool @plan:Plan @session:contexts.Session):>addr => {
+    let source_node=hir.node_at(session.hir id)
+    let owner=views.structural_base(source_node.value_type session.types)
+    if resource(source_node.value_type session.types) is? none {
+        let shape=types.node_at(session.types owner)
+        return if shape is? types.ArrayType|types.ObjectType|types.TypeOr or views.string_valued(owner session.types) put(hir.CopyValue[source_node.loc source_node.value_type id] @session) else id
+    }
+    if lifecycle.copy_blocker(source_node.value_type session.types) isnt? none {
+        reject(source_node 'an independent copy of a move-only component' @plan) return id
+    }
+    let operation=copy_operation(owner source_node.loc @plan @session)
+    let signature=types.node_at(session.types hir.node_at(session.hir operation).value_type)
+    if signature isnt? types.FunctionType return id
+    let place=put(hir.Place[source_node.loc owner id] @session)
+    let result=put(hir.FunctionCall[source_node.loc signature.ret operation [place] [] implicit_copy=implicit] @session)
+    if types.node_at(session.types source_node.value_type) is? types.RefinedType {
+        result=put(hir.Obligation[source_node.loc signature.ret result source_node.value_type 'the value contract after copying'] @session)
+    }
+    return result
+}
 fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session components:set<addr>=set[] frame:Frame?=none):>void => {
     # The checked custom-copy call carries its effects and result contract.
     let candidate=hir.node_at(session.hir id)
@@ -226,27 +310,31 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
         if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none and owner.binding_id in? components {return}
     }
     if candidate is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index {
-        let shape=views.structural_base(candidate.value_type session.types)
-        let type=types.node_at(session.types shape)
-        if type is? types.ObjectType and type.brand isnt? none {
-            let hook=plan.copies.get(type.brand)
-            if hook isnt? none {
-                # Copy a surviving source through the checked hook. Store a
-                # separate source node before replacing this expression.
-                let signature=types.node_at(session.types hook.signature)
-                $runtime_assert signature is? types.FunctionType
-                let source=put(candidate @session)
-                let receiver=put(hir.Place[candidate.loc shape source] @session)
-                expression(receiver allowed inherited @plan @session frame=frame)
-                let function=put(hir.ExpressedIdentifier[candidate.loc hook.signature hook.name hook.binding] @session)
-                let copied=put(hir.FunctionCall[candidate.loc signature.ret function [receiver] [] implicit_copy=true] @session)
-                if types.node_at(session.types candidate.value_type) is? types.RefinedType {
-                    copied=put(hir.Obligation[candidate.loc signature.ret copied candidate.value_type 'the value contract after copying'] @session)
-                }
-                store(id hir.node_at(session.hir copied) @session)
-                return
-            }
+        let source=put(candidate @session)
+        let receiver=put(hir.Place[candidate.loc candidate.value_type source] @session)
+        expression(receiver allowed inherited @plan @session frame=frame)
+        let copied=copy_component(source true @plan @session)
+        store(id hir.node_at(session.hir copied) @session)
+        return
+    }
+    if candidate is? hir.CopyValue {
+        let source=hir.node_at(session.hir candidate.value)
+        if source is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index {
+            let receiver=put(hir.Place[candidate.loc source.value_type candidate.value] @session)
+            expression(receiver allowed inherited @plan @session frame=frame)
+            let copied=copy_component(candidate.value false @plan @session)
+            store(id hir.node_at(session.hir copied) @session)
+        } else {
+            fresh(candidate.value allowed inherited @plan @session frame=frame)
+            let owner=capture_result(candidate.value candidate.loc @session)
+            let copied=capture_result(copy_component(owner.value false @plan @session) candidate.loc @session)
+            let body:array<addr>=[owner.declaration copied.declaration]
+            let calls=cleanup([owner.declaration] candidate.loc @plan @session)
+            loop call in calls {body.push(call)}
+            body.push(copied.value)
+            store(id hir.Block[candidate.loc candidate.value_type body false] @session)
         }
+        return
     }
     if candidate is? hir.FunctionCall {
         let function=hir.node_at(session.hir candidate.func)

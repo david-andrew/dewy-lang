@@ -1,0 +1,52 @@
+# Synthesized wrappers copy resource components through their hooks, not by
+# sharing their backing bytes. The active union alternative alone is copied.
+let copies:int64=0
+let drops:int64=0
+Handle=type of [id:int64 data:array<int64>
+$__drop__
+release=():>void=>{drops+=1 data.clear}
+$__copy__
+duplicate=():>Handle=>{copies+=1 Handle[id+1 data.copy()]}
+]
+Envelope=type of [child:Handle label:string]
+make=():>Envelope=>Envelope[Handle[30 [42]] 'temporary']
+exercise=():>int64=>{
+    let original=Envelope[Handle[10 [42]] 'original']
+    let explicit=original.copy()
+    let inferred=original
+    inferred.child.id=20
+    original.child.id=11
+    if explicit.child.id not=?11 or inferred.child.id not=?20 return 1
+    if copies not=?2 return 2
+    if explicit.child.data.length <?1 or original.child.data.length <?1 return 3
+    explicit.child.data[0]=0
+    if original.child.data[0] not=?42 return 4
+    let nested=[packet=original.copy()]
+    let nested_copy=nested.copy()
+    if nested.packet.child.id not=?12 or nested_copy.packet.child.id not=?13 return 5
+    let optional:Handle?=Handle[40 [42]]
+    let optional_copy=optional.copy()
+    if optional isnt? Handle or optional_copy isnt? Handle return 6
+    if optional.id not=?40 or optional_copy.id not=?41 return 7
+    let empty:Handle?=none
+    let empty_copy=empty.copy()
+    if empty_copy isnt? none return 8
+    let temporary=make().copy()
+    if temporary.child.id not=?31 or temporary.label not=?'temporary' return 9
+    if copies not=?6 or drops not=?1 return 10
+    return 42
+}
+verify=():>int64=>{
+    copies=0 drops=0
+    let result=exercise()
+    if result not=?42 return result
+    if drops not=?9 return 11
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if verify() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}
