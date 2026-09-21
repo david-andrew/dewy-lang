@@ -2066,3 +2066,21 @@ with concurrent work, not isolated latency baselines. Artifacts are under
 `../dewy-build-artifacts/phase1-iteration-f7e5c1ec-*`. CI also completed at
 `5e4281cb`: **3,803 passed, 32 skipped** in 55m24s. Neither result certifies the
 newer fallback correction as a new fixed point.
+
+## Public effect-row inference machinery (in progress, 2026-09-21)
+
+Both implementations now have an independent monotone row solver. Function
+bodies seed possible behavior; selected assignment constraints widen inferred
+destination rows. Unknown operations and unresolved user row parameters remain
+unknown or symbolic. Explicit permissions are removed before inferring a row's
+residual; negative contracts are checked against the result and never erase
+possible effects. Reverse dependency worklists handle recursion and long chains.
+The public-effect body inventory is now callable without a written contract;
+ordinary validation reuses it. Connecting inferred rows to source callable
+types and recording selected-boundary obligations is still outstanding.
+
+Validation: 33 focused/adjacent hosted checks pass. The Dewy solver executes
+through both hosted and native checking on x86-64 and C. Three written-effect
+programs and five rejection cases also agree across the two compilers after
+the inventory refactor. This is an internal foundation checkpoint, not a
+claim that callable-type inference is complete.

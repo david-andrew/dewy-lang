@@ -43,12 +43,8 @@ def word_iterator(node):
         for value in (node.first, node.step, node.last, node.count))
 
 
-def validate(root, registry, srcfile):
-    # Do not add a second whole-program fixed point to unannotated programs.
-    constrained = [node for node in hir.walk(root) if isinstance(node, hir.FunctionLiteral)
-                   and isinstance(node.type, ty.FunctionType) and node.type.effects is not None]
-    if not constrained:
-        return
+def summarize(root, registry):
+    """Infer behavior for every checked function, even without written rows."""
     analysis = _EffectAnalyzer(root)
     storage_effects = analysis.solve()
     borrowed_arguments = storage_borrows.forwarded_values(analysis, storage_effects)
@@ -277,6 +273,16 @@ def validate(root, registry, srcfile):
             if caller not in queued:
                 pending.append(caller)
                 queued.add(caller)
+    return summaries
+
+
+def validate(root, registry, srcfile):
+    # Do not add a second whole-program fixed point to unannotated programs.
+    constrained = [node for node in hir.walk(root) if isinstance(node, hir.FunctionLiteral)
+                   and isinstance(node.type, ty.FunctionType) and node.type.effects is not None]
+    if not constrained:
+        return
+    summaries = summarize(root, registry)
     for literal in constrained:
         if not rows.implies(summaries[id(literal)], literal.type.effects):
             user_error(literal.source or srcfile, 'function does not satisfy its effect contract',

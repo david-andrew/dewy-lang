@@ -1,0 +1,81 @@
+import p"effect_rows.dewy" as rows
+
+# Compiler identities for omitted rows, distinct from user row parameters.
+# Bodies and selected value boundaries contribute possible behavior. Negative
+# contracts are checked afterwards; they never remove possible effects.
+const PREFIX='inferred-effect:'
+Constraint:type = const [actual:rows.Contract? required:rows.Contract?]
+Rule:type = const [targets:array<string> source:rows.Row covered:rows.Row=rows.Row[]]
+pending=(contract:rows.Contract?):>bool=>{
+    if contract is? none or contract.allowed is? none return false
+    loop name in contract.allowed.variables {if name.startswith(PREFIX) return true}
+    return false
+}
+resolve=(contract:rows.Contract? solutions:dict<string rows.Row>):>rows.Contract?=>{
+    return rows.replace_variables(contract solutions)
+}
+admitted=(contract:rows.Contract?):>rows.Row=>{
+    if contract is? none or contract.allowed is? none return rows.Row[unknown=true]
+    return contract.allowed
+}
+solve=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[]):>dict<string rows.Row>=>{
+    let rules:array<Rule>=[]
+    let solutions:dict<string rows.Row>=[]
+    loop [name body] in definitions {
+        rules.push(Rule[[name] admitted(body)])
+        solutions[name]=rows.Row[]
+    }
+    loop constraint in constraints {
+        let permitted=admitted(constraint.required)
+        let targets:array<string>=[]
+        let covered_variables:array<string>=[]
+        loop name in permitted.variables {
+            if name in? definitions {targets.push(name)} else {covered_variables.push(name)}
+        }
+        if targets.length =? 0 or permitted.unknown continue
+        rules.push(Rule[targets admitted(constraint.actual) rows.Row[permitted.atoms covered_variables]])
+    }
+    let users:dict<string set<addr>>=[]
+    let work:array<addr>=[]
+    let queued:set<addr>=set[]
+    loop index in 0.. and index <? rules.length {
+        loop name in rules[index].source.variables {
+            if name in? definitions {
+                let dependents=users.get(name set[])
+                dependents.add(index) users[name]=dependents
+            }
+        }
+        work.push(index) queued.add(index)
+    }
+    loop work.length >? 0 {
+        let index=work.pop
+        queued.pop(index default=index);
+        $runtime_assert index <? rules.length
+        let rule=rules[index]
+        let source=rows.substitute(rule.source solutions)
+        let atoms:array<rows.Atom>=[]
+        loop atom in source.atoms {
+            let covered=false
+            loop bound in rule.covered.atoms {if rows.covers(bound atom) {covered=true break}}
+            if not covered {atoms.push(atom)}
+        }
+        let variables:array<string>=[]
+        loop name in source.variables {if name not in? rule.covered.variables {variables.push(name)}}
+        let residual=rows.Row[atoms variables source.unknown]
+        # With several destination variables, give each the residual. This
+        # is conservative; it does not invent a unique minimal partition.
+        loop name in rule.targets {
+            $runtime_assert name in? solutions
+            let updated=rows.merge(solutions[name] residual)
+            if rows.identity(rows.Contract[updated]) =? rows.identity(rows.Contract[solutions[name]]) continue
+            solutions[name]=updated
+            loop user in users.get(name set[]) {
+                if user not in? queued {work.push(user) queued.add(user)}
+            }
+        }
+    }
+    return solutions
+}
+satisfied=(constraint:Constraint solutions:dict<string rows.Row>):>bool=>{
+    return rows.implies(resolve(constraint.actual solutions) resolve(constraint.required solutions))
+}

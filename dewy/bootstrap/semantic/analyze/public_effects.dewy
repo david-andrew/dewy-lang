@@ -207,23 +207,9 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     }
     unknown(@scan)
 }
-validate = (roots:array<addr> source:SrcFile session:contexts.Session word_iterators:set<addr>=set[]):>Error? => {
-    if not session.types.effect_contracts return none
-    let constrained:array<addr>=[]
-    let pending=roots
-    let seen:set<addr>=set[]
-    loop pending.length >? 0 {
-        let id=pending.pop
-        if id in? seen continue
-        seen.add(id)
-        let node=hir.node_at(session.hir id)
-        loop child in hir.children(node) {pending.push(child)}
-        if node is? hir.FunctionLiteral {
-            let signature=types.node_at(session.types node.value_type)
-            if signature is? types.FunctionType and signature.effects isnt? none {constrained.push(id)}
-        }
-    }
-    if constrained.length =? 0 return none
+# The behavior inventory is independent of whether a source contract exists.
+# Validation and omitted-row inference share this same checked call graph.
+summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[]):>dict<addr rows.Contract> => {
     let analysis=access.collect_roots(roots session.hir)
     let access_summaries=access.analyze_collected(analysis session.hir session.types)
     let borrowed=storage_borrows.forwarded_values(analysis access_summaries session.hir session.types session.registry)
@@ -280,7 +266,7 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
     # Possible behaviors grow to a fixed point. This does not imply that a
     # recursive pure function terminates ($proof has a separate boundary).
     let summaries=local
-    pending=analysis.literals
+    let pending=analysis.literals
     let queued:set<addr>=set[]
     loop id in pending {queued.add(id)}
     loop pending.length >? 0 {
@@ -298,6 +284,26 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
             if caller not in? queued {pending.push(caller) queued.add(caller)}
         }
     }
+    return summaries
+}
+validate = (roots:array<addr> source:SrcFile session:contexts.Session word_iterators:set<addr>=set[]):>Error? => {
+    if not session.types.effect_contracts return none
+    let constrained:array<addr>=[]
+    let pending=roots
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=hir.node_at(session.hir id)
+        loop child in hir.children(node) {pending.push(child)}
+        if node is? hir.FunctionLiteral {
+            let signature=types.node_at(session.types node.value_type)
+            if signature is? types.FunctionType and signature.effects isnt? none {constrained.push(id)}
+        }
+    }
+    if constrained.length =? 0 return none
+    let summaries=summarize(roots session word_iterators)
     loop id in constrained {
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
