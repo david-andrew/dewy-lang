@@ -543,7 +543,17 @@ ARENA_CASES += [((ROOT / 'tests/fixtures/native_dict_rebuild_helpers.dewy').read
 ARENA_CASES += [((ROOT / 'tests/fixtures/native_array_growth_helpers.dewy').read_text(), 42)]
 
 
+_LOWERING_DRIVER = None
+
+
 def build_native_lowering_driver(tmp_path):
+    # The driver source is identical for every case and is a compiler-sized
+    # build. Reuse its executable within one pytest worker; each source case
+    # still starts a separate process with a fresh compiler session. Never
+    # persist this cache across pytest runs or cache a failed build.
+    global _LOWERING_DRIVER
+    if _LOWERING_DRIVER is not None:
+        return _LOWERING_DRIVER
     source = tmp_path / 'lowering.dewy'
     source.write_text(f'''
 from reporting import SrcFile, Error
@@ -589,7 +599,8 @@ main = (argv:array<string>):>int64 => {{
     # variable descriptions for the bootstrap compiler itself.
     seed.write_text(codegen(SrcFile.from_path(source), debug_locations=False))
     assert entry_point(seed, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
-    return cache_artifact(seed).resolve()
+    _LOWERING_DRIVER = cache_artifact(seed).resolve()
+    return _LOWERING_DRIVER
 
 
 def test_native_unproven_refined_type_tests(tmp_path):
