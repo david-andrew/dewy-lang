@@ -111,7 +111,7 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
     }
 }
 Captured:type = const [declaration:addr value:addr]
-capture = (id:addr loc:Span @session:contexts.Session):>Captured => {
+capture_result = (id:addr loc:Span @session:contexts.Session):>Captured => {
     # Evaluate a scalar result before its owner's drop can change it.
     let type=hir.node_at(session.hir id).value_type
     let empty=types.primitive('void' @session.types)
@@ -188,7 +188,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                 if not effects.scalar(current.value_type session.types) or expressed.length not=? 1 {reject(current 'a non-word implicit result with local owners' @plan) return}
                 let index=expressed[0]
                 $runtime_assert index <? current.items.length
-                let saved=capture(current.items[index] current.loc @session)
+                let saved=capture_result(current.items[index] current.loc @session)
                 current.items[index]=saved.declaration
                 result=saved.value
             }
@@ -222,7 +222,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             let returned:addr=current.item
             let value=hir.node_at(session.hir returned)
             if not effects.scalar(value.value_type session.types) {reject(current 'a non-word return with local owners' @plan) return}
-            let saved=capture(returned current.loc @session)
+            let saved=capture_result(returned current.loc @session)
             items.push(saved.declaration)
             current.item=saved.value
         }

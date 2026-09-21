@@ -854,7 +854,7 @@ class Program(Block):
     so provenance survives rebuilding nodes without object-id side tables.
     Native assembly carries the same information in graph.source_by_item.
     """
-    item_sources: tuple[SrcFile, ...]
+    item_sources: tuple[SrcFile, ...] = field(compare=False, repr=False)
     explicit_copy_sources: tuple[SrcFile, ...] = ()
     # Retained only for programs with implicit lifecycle operations: runtime
     # elaboration must recheck facts with those calls present before erasure.

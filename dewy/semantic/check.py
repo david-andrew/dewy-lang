@@ -3472,7 +3472,9 @@ def _flow_value_type(
             low, high = (-(1 << (width - 1)), (1 << (width - 1)) - 1) if signed else (0, (1 << width) - 1)
             if all(low <= literal.value <= high for literal in literals):
                 return word
-    return ty.union(*values)
+    # A branch already covered by another does not introduce a new runtime
+    # alternative (for example an exact-length array beside array<T>).
+    return ctx.type_system.join(*values)
 
 
 def _unhandled_type_test_members(
