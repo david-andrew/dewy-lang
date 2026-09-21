@@ -64,6 +64,7 @@ FunctionType = type of Type & [
     ret:addr
     type_params:array<GenericParam>
     effects:effect_rows.Contract?=none
+    inferred_effect:string?=none
 ]
 # Alternatives retain declaration order. Dispatch later records which one
 # won, so lowering never has to infer a function's identity from its shape.
@@ -428,7 +429,7 @@ type_variable = (name:string bound:addr @nodes:Table):>addr => {
     return intern(@nodes TypeVariable[key=key shape="V{_quoted(name)}:{shapes_key([bound] nodes)}" name=name bound=bound])
 }
 
-function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr params:array<GenericParam> @nodes:Table effects:effect_rows.Contract?=none):>addr => {
+function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr params:array<GenericParam> @nodes:Table effects:effect_rows.Contract?=none inferred_effect:string?=none):>addr => {
     if effects isnt? none {nodes.effect_contracts=true}
     let slots:array<string> = []
     loop p in pos {
@@ -443,7 +444,7 @@ function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr
     }
     let rest_key = if rest is? none 'none' else _quoted(rest)
     let effect_key=effect_rows.identity(effects)
-    let key = "F{slots.join(';')}:R{rest_key}:T{ret}:E{effect_key}"
+    let key = "F{slots.join(';')}:R{rest_key}:T{ret}:E{effect_key}:I{inferred_effect}"
     let known=nodes.positions.get(key)
     if known isnt? none return known
     let shapes:array<string> = []
@@ -454,7 +455,7 @@ function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr
     loop p in kw { shapes.push("K{_quoted(p.name)}:{shapes_key([p.value_type] nodes)}:{p.required}:{p.place}") }
     loop p in params { shapes.push("G{_quoted(p.name)}:{shapes_key([p.bound] nodes)}:{p.kind}:{_quoted(p.identity)}") }
     let shape = "F{shapes.join(';')}:R{rest_key}:T{shapes_key([ret] nodes)}:E{effect_key}"
-    return intern(@nodes FunctionType[key=key shape=shape pos_or_kw=pos kw_only=kw rest=rest ret=ret type_params=params effects=effects])
+    return intern(@nodes FunctionType[key=key shape=shape pos_or_kw=pos kw_only=kw rest=rest ret=ret type_params=params effects=effects inferred_effect=inferred_effect])
 }
 
 # Lowered operations have required, unnamed value arguments. Keep that common
@@ -714,7 +715,7 @@ substitute_function = (node:FunctionType bindings:dict<string addr> instantiate:
     loop p in node.pos_or_kw { pos.push(PosOrKwArg[p.name substitute(p.value_type inner @nodes effects=effects) p.required p.place]) }
     loop p in node.kw_only { kw.push(KwOnlyArg[p.name substitute(p.value_type inner @nodes effects=effects) p.required p.place]) }
     let ret = substitute(node.ret inner @nodes effects=effects)
-    return function_type(pos kw node.rest ret params @nodes effects=effect_rows.replace_variables(node.effects effects))
+    return function_type(pos kw node.rest ret params @nodes effects=effect_rows.replace_variables(node.effects effects) inferred_effect=node.inferred_effect)
 }
 
 # De Morgan's laws put not only on atoms. A type constructor is itself an atom

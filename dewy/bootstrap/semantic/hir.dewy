@@ -490,6 +490,8 @@ StringConcat = type of AST & [
 # Value cast: explicit `expr as Target`, or an implicit promotion. `type` is the target.
 ValueCast = type of AST & [
     expr:addr
+    # Selected effect obligation; preserve the actual inferred value type.
+    effect_target:addr?=none
 ]
 
 # A conversion that materializes a value in a different representation.

@@ -4,6 +4,8 @@ import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
 import p"../bindings.dewy" as bindings
 import p"../effect_rows.dewy" as rows
+import p"../effect_inference.dewy" as inference
+import p"../effect_boundaries.dewy" as effect_boundaries
 import p"effects.dewy" as access
 import p"../placement.dewy" as placement
 import p"storage_borrows.dewy" as storage_borrows
@@ -96,6 +98,7 @@ call_subjects = (call:hir.FunctionCall signature:types.FunctionType input:Input 
 }
 visit = (id:addr input:Input @scan:Scan):>void => {
     let node=hir.node_at(input.nodes id)
+    if node is? hir.ValueCast and node.effect_target isnt? none {visit(node.expr input @scan) return}
     if node is? hir.FunctionLiteral return
     if node is? hir.Void|hir.NoneValue|hir.Bool|hir.Integer|hir.String|hir.Break|hir.Continue|hir.ScopeMetatag|hir.TypeValue return
     if node is? hir.ExpressedIdentifier and access.flatten_callable(id set[] input.analysis input.nodes) isnt? none return
@@ -172,7 +175,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     if node is? hir.Declare {
         let value=hir.node_at(input.nodes node.expr)
         # A required view has no copy fallback: lowering proves or rejects it.
-        if not node.view and (node.binding_id is? none or node.binding_id not in? scan.frame_values) and not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {storage(@scan)}
+        if not node.view and (node.binding_id is? none or node.binding_id not in? scan.frame_values) and not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral and types.node_at(input.types value.value_type) isnt? types.FunctionType|types.OverloadType {storage(@scan)}
         visit(node.expr input @scan)
         return
     }
@@ -226,7 +229,7 @@ summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
             $runtime_assert declaration is? hir.Declare
             scan.frame_values.add(binding) scan.frame_literals.add(declaration.expr)
         }
-        if not scalar(node.rettype session.types) {storage(@scan)}
+        if not scalar(node.rettype session.types) and types.node_at(session.types node.rettype) isnt? types.FunctionType|types.OverloadType {storage(@scan)}
         let params=access.literal_params(node)
         loop index in 0.. and index <? params.length {
             let param=params[index]
@@ -303,14 +306,62 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
         }
     }
     if constrained.length =? 0 return none
+    let written=false
+    loop id in constrained {
+        let signature=types.node_at(session.types hir.node_at(session.hir id).value_type)
+        if signature is? types.FunctionType and signature.inferred_effect is? none {written=true}
+    }
+    let definitions:dict<string rows.Contract>=[]
+    let bodies:array<addr>=[]
+    let constraints:array<inference.Constraint>=[]
+    let sites:array<addr>=[]
+    loop id in seen {
+        let node=hir.node_at(session.hir id)
+        if node is? hir.FunctionLiteral {
+            let signature=types.node_at(session.types node.value_type)
+            if signature is? types.FunctionType and signature.inferred_effect isnt? none {
+                bodies.push(id)
+            }
+        } else if node is? hir.ValueCast {
+            let target=if node.effect_target is? none node.value_type else node.effect_target
+            let signature=types.node_at(session.types target)
+            if node.effect_target isnt? none and signature is? types.FunctionType and signature.effects isnt? none and signature.effects.allowed isnt? none {
+                loop name in signature.effects.allowed.variables {
+                    if name.startswith(inference.BINDING_PREFIX) and name not in? definitions {definitions[name]=rows.Contract[rows.Row[]]}
+                }
+            }
+            loop edge in effect_boundaries.constraints(hir.node_at(session.hir node.expr).value_type target session.types) {
+                constraints.push(edge) sites.push(id)
+            }
+        }
+    }
+    let required=false
+    loop edge in constraints {
+        if edge.required isnt? none and not rows.implies(none edge.required) and (not inference.pending(edge.required) or edge.required.excluded.length >? 0) {required=true}
+    }
+    if not written and not required return none
     let summaries=summarize(roots session word_iterators)
+    loop id in bodies {
+        let signature=types.node_at(session.types hir.node_at(session.hir id).value_type)
+        $runtime_assert signature is? types.FunctionType and signature.inferred_effect isnt? none and id in? summaries
+        let name=signature.inferred_effect
+        let body=summaries[id]
+        definitions[name]=if name in? definitions rows.join(definitions[name] body) else body
+    }
+    let solutions=inference.solve(definitions constraints)
+    loop i in 0.. and i <? constraints.length and i <? sites.length {
+        if not inference.satisfied(constraints[i] solutions) {
+            let node=hir.node_at(session.hir sites[i])
+            return Error[srcfile=source title='callable does not satisfy its effect contract' pointers=[Pointer[span=node.loc message='the inferred callable behavior exceeds its destination contract']]]
+        }
+    }
     loop id in constrained {
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
         let signature=types.node_at(session.types node.value_type)
         $runtime_assert signature is? types.FunctionType and signature.effects isnt? none
         $runtime_assert id in? summaries
-        if not rows.implies(summaries[id] signature.effects) {
+        if not rows.implies(inference.resolve(summaries[id] solutions) inference.resolve(signature.effects solutions)) {
             let src=source
             if node.source isnt? none {
                 $runtime_assert node.source <? session.sources.length

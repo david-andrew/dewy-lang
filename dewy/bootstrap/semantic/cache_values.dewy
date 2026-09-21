@@ -3515,6 +3515,7 @@ encode_Value185=(value:Value185 @out:bytes.Writer):>void=>{
     encode_Value13(value.ret @out)
     encode_Value72(value.type_params @out)
     encode_Value190(value.effects @out)
+    encode_Value36(value.inferred_effect @out)
 }
 decode_Value185=(@input:bytes.Reader):>Value185|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -3536,7 +3537,9 @@ decode_Value185=(@input:bytes.Reader):>Value185|CacheMiss=>{
     if field_7 is? CacheMiss return field_7
     let field_8=decode_Value190(@input)
     if field_8 is? CacheMiss return field_8
-    return Value185[key=field_0 shape=field_1 shape_id=field_2 pos_or_kw=field_3 kw_only=field_4 rest=field_5 ret=field_6 type_params=field_7 effects=field_8]
+    let field_9=decode_Value36(@input)
+    if field_9 is? CacheMiss return field_9
+    return Value185[key=field_0 shape=field_1 shape_id=field_2 pos_or_kw=field_3 kw_only=field_4 rest=field_5 ret=field_6 type_params=field_7 effects=field_8 inferred_effect=field_9]
 }
 
 encode_Value186=(value:Value186 @out:bytes.Writer):>void=>{
@@ -6695,6 +6698,7 @@ encode_Value343=(value:Value343 @out:bytes.Writer):>void=>{
     encode_Value12(value.loc @out)
     encode_Value13(value.value_type @out)
     encode_Value13(value.expr @out)
+    encode_Value47(value.effect_target @out)
 }
 decode_Value343=(@input:bytes.Reader):>Value343|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -6704,7 +6708,9 @@ decode_Value343=(@input:bytes.Reader):>Value343|CacheMiss=>{
     if field_1 is? CacheMiss return field_1
     let field_2=decode_Value13(@input)
     if field_2 is? CacheMiss return field_2
-    return Value343[loc=field_0 value_type=field_1 expr=field_2]
+    let field_3=decode_Value47(@input)
+    if field_3 is? CacheMiss return field_3
+    return Value343[loc=field_0 value_type=field_1 expr=field_2 effect_target=field_3]
 }
 
 encode_Value344=(value:Value344 @out:bytes.Writer):>void=>{

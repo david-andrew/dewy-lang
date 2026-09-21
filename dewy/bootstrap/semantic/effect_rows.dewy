@@ -170,9 +170,9 @@ display = (contract:Contract? parameters:dict<string string>):>string => {
     if contract.allowed isnt? none {
         let row=contract.allowed
         loop atom in row.atoms {terms.push(atom_display(atom parameters))}
-        loop variable in row.variables {terms.push(variable)}
+        loop variable in row.variables {if not variable.startswith('inferred-effect:') {terms.push(variable)}}
         if row.unknown {terms.push('<unknown effects>')}
-        if terms.length =? 0 {terms.push('no_effects')}
+        if terms.length =? 0 and row.variables.length =? 0 {terms.push('no_effects')}
     }
     loop atom in contract.excluded {terms.push("no {atom_display(atom parameters)}")}
     return if terms.length =? 0 '' else ' & ' + terms.join(' & ')
@@ -196,7 +196,11 @@ instantiate = (contract:Contract subjects:dict<string Subject?>):>Contract => {
     let allowed:Row?=none
     if contract.allowed isnt? none {
         let supplied=substitute(contract.allowed [] subjects)
-        let widened=Row[variables=supplied.variables unknown=supplied.unknown]
+        let opaque=supplied.unknown
+        if subjects.length >? 0 {
+            loop name in supplied.variables {if name.startswith('inferred-effect:') {opaque=true}}
+        }
+        let widened=Row[variables=supplied.variables unknown=opaque]
         loop atom in supplied.atoms {
             let subject=atom.subject
             if subject isnt? none and subject.route.length >? 8 {

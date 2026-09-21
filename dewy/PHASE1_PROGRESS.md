@@ -2094,3 +2094,43 @@ resolution after assignment or writable exposure. Saved function handles
 retain their value semantics. The focused regression passes hosted/native
 checking and x86-64/C execution, including repeated assignment and a saved
 handle. Function-handle place parameters remain separately unsupported.
+
+## Inferred callable rows (2026-09-21)
+
+Omitted function-literal rows now receive compiler identities shared by
+prebinding, body checking and generic specialization. Ordinary callback type
+annotations with no row remain open. The fixed point combines body behavior
+and selected value-boundary constraints; speculative subtype/overload probes
+do not contribute assignments. Deferred checks preserve the actual value
+type, survive lifecycle insertion and erase before runtime lowering. Native
+cache codecs retain the new metadata. Internal identities are not displayed
+as source syntax.
+
+A copied callback handle gets an independent inference variable: reassigning
+it cannot widen its source function's own row. Compatible conditional callable
+shapes join possible behavior instead of introducing distinct runtime variants
+solely because their inferred rows differ. Recursive and generic callbacks
+retain their body effects, and unknown operations stay unknown. Union and
+overload boundary checks are conservative when several alternatives compete.
+
+Scoped polymorphic place rows still need a retained substitution environment.
+Until that exists, moving an unresolved inference variable to a different
+place scope contributes unknown behavior rather than reusing an unrelated
+parameter index. Preserving open negative guarantees through inferred wrappers
+also remains pending; the positive-row solver does not infer such exclusions.
+
+Validation so far: 142 adjacent hosted effect/lifecycle/proof checks and 44
+focused row/callable checks pass. The preceding native build passed seven
+positive and six negative callback cases on x86-64/C against hosted checking,
+and checked/emitted its own source (21,670,022 bytes; 61.95 seconds and
+3,101,360 KiB peak RSS under concurrent work). The final batch passes eight positive and eight negative cases on both
+compilers/backends, including lifecycle cleanup. After the unannotated-program
+fast path and literal-reassignment correction, another 104 hosted checks and
+the final two positive/three negative native cases pass. Twelve hosted cache
+checks preserve cold/resident/on-disk behavior. These are bounded development checks, not
+a new native fixed-point or latency certification.
+
+The rebuilt native CLI reports **4,992** bootstrap copy sites over 47,049
+source lines (**106.102/KLOC**), within the unchanged 5,000/110 gates. Inventory:
+`../dewy-build-artifacts/phase1-inferred-effects-copies.json`. The absolute
+budget is close; subsequent batches must keep reducing unproved copies.

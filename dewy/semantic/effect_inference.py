@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from . import effect_rows as rows
 
 PREFIX = 'inferred-effect:'
+BINDING_PREFIX = PREFIX + 'binding:'
 
 
 def pending(contract: rows.Contract | None) -> bool:
@@ -88,3 +89,66 @@ def solve(definitions: dict[str, rows.Contract], constraints: tuple[Constraint, 
 
 def satisfied(constraint: Constraint, solutions: dict[str, rows.Row]) -> bool:
     return rows.implies(resolve(constraint.actual, solutions), resolve(constraint.required, solutions))
+
+
+def compatible(actual: rows.Contract | None, required: rows.Contract | None) -> bool:
+    """Possibility check only; selected boundaries owe the solved implication.
+
+    Overload probes must not record constraints. Known atoms/exclusions still
+    participate; only the compiler's unresolved variables have bounds here.
+    """
+    if not pending(actual) and not pending(required):
+        return rows.implies(actual, required)
+    lower = {name: rows.Row() for name in actual.allowed.variables if name.startswith(PREFIX)} if pending(actual) else {}
+    upper = {name: rows.Row(unknown=True) for name in required.allowed.variables if name.startswith(PREFIX)} if pending(required) else {}
+    return rows.implies(resolve(actual, lower), resolve(required, upper))
+
+
+def type_constraints(actual, required, seen=None):
+    """Rows at an already selected structural boundary, with call variance."""
+    from . import ty
+    actual, required = (ty.unfold(ty.strip_refinement(t)) for t in (actual, required))
+    if actual is required:
+        return []
+    seen = set() if seen is None else seen
+    key = id(actual), id(required)
+    if key in seen:
+        return []
+    seen.add(key)
+    result = []
+    if isinstance(actual, ty.FunctionType) and isinstance(required, ty.FunctionType):
+        result.append(Constraint(actual.effects, required.effects))
+        for a, b in zip(actual.pos_or_kw, required.pos_or_kw):
+            result.extend(type_constraints(b.type, a.type, seen))
+        actual_kw = {p.name: p for p in [*actual.pos_or_kw, *actual.kw_only]}
+        for b in required.kw_only:
+            a = actual_kw.get(b.name)
+            if a is not None:
+                result.extend(type_constraints(b.type, a.type, seen))
+        result.extend(type_constraints(actual.ret, required.ret, seen))
+    elif isinstance(actual, ty.ArrayType) and isinstance(required, ty.ArrayType):
+        result.extend(type_constraints(actual.element, required.element, seen))
+        result.extend(type_constraints(required.element, actual.element, seen))
+    elif isinstance(actual, ty.ObjectType) and isinstance(required, ty.ObjectType):
+        for field in required.fields:
+            supplied = actual.field(field.name)
+            if supplied is not None:
+                result.extend(type_constraints(supplied.type, field.type, seen))
+                if not required.immutable:
+                    result.extend(type_constraints(field.type, supplied.type, seen))
+    elif isinstance(actual, (ty.TypeOr, ty.TypeAnd)):
+        for member in actual.items:
+            result.extend(type_constraints(member, required, seen))
+    elif isinstance(required, (ty.TypeOr, ty.TypeAnd)):
+        for member in required.items:
+            result.extend(type_constraints(actual, member, seen))
+    elif isinstance(actual, ty.OverloadType):
+        for member in actual.methods:
+            result.extend(type_constraints(member, required, seen))
+    elif isinstance(required, ty.OverloadType):
+        for member in required.methods:
+            result.extend(type_constraints(actual, member, seen))
+    elif isinstance(actual, ty.SequenceType) and isinstance(required, ty.SequenceType) and len(actual.items) == len(required.items):
+        for a, b in zip(actual.items, required.items):
+            result.extend(type_constraints(a, b, seen))
+    return result

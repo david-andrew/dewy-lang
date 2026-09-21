@@ -4,6 +4,7 @@ import p"effect_rows.dewy" as rows
 # Bodies and selected value boundaries contribute possible behavior. Negative
 # contracts are checked afterwards; they never remove possible effects.
 const PREFIX='inferred-effect:'
+const BINDING_PREFIX='inferred-effect:binding:'
 Constraint:type = const [actual:rows.Contract? required:rows.Contract?]
 Rule:type = const [targets:array<string> source:rows.Row covered:rows.Row=rows.Row[]]
 pending=(contract:rows.Contract?):>bool=>{
@@ -78,4 +79,19 @@ solve=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[]):
 }
 satisfied=(constraint:Constraint solutions:dict<string rows.Row>):>bool=>{
     return rows.implies(resolve(constraint.actual solutions) resolve(constraint.required solutions))
+}
+
+# Possibility only. Selected value boundaries retain their final obligation;
+# speculative overload/subtype probes must never contribute assignments.
+compatible=(actual:rows.Contract? required:rows.Contract?):>bool=>{
+    if not pending(actual) and not pending(required) return rows.implies(actual required)
+    let lower:dict<string rows.Row>=[]
+    let upper:dict<string rows.Row>=[]
+    if actual isnt? none and actual.allowed isnt? none {
+        loop name in actual.allowed.variables {if name.startswith(PREFIX) {lower[name]=rows.Row[]}}
+    }
+    if required isnt? none and required.allowed isnt? none {
+        loop name in required.allowed.variables {if name.startswith(PREFIX) {upper[name]=rows.Row[unknown=true]}}
+    }
+    return rows.implies(resolve(actual lower) resolve(required upper))
 }

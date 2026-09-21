@@ -1,4 +1,5 @@
 import p"effect_rows.dewy" as effect_rows
+import p"effect_inference.dewy" as effect_inference
 import p"ty.dewy" as types
 import p"text_shapes.dewy" as text_shapes
 
@@ -496,6 +497,26 @@ join = (items:array<addr> links:Graph @nodes:types.Table):>addr => {
     let node = types.node_at(nodes combined)
     let members:array<addr> = [combined]
     if node is? types.TypeOr { members = node.items }
+    let merged:array<addr>=[]
+    loop member in members {
+        let candidate=types.node_at(nodes member)
+        let combined=false
+        if candidate is? types.FunctionType {
+            let shape=types.function_type(candidate.pos_or_kw candidate.kw_only candidate.rest candidate.ret candidate.type_params @nodes)
+            loop i in 0.. and i <? merged.length {
+                let other=types.node_at(nodes merged[i])
+                if other isnt? types.FunctionType continue
+                let other_shape=types.function_type(other.pos_or_kw other.kw_only other.rest other.ret other.type_params @nodes)
+                if not types.same_type(shape other_shape nodes) continue
+                let effects=effect_rows.join(if candidate.effects is? none effect_rows.Contract[] else candidate.effects if other.effects is? none effect_rows.Contract[] else other.effects)
+                merged[i]=types.function_type(candidate.pos_or_kw candidate.kw_only candidate.rest candidate.ret candidate.type_params @nodes effects=effects)
+                combined=true
+                break
+            }
+        }
+        if not combined {merged.push(member)}
+    }
+    members=merged
     let kept:array<addr> = []
     loop member in members {
         let absorbed:bool = false
@@ -513,7 +534,7 @@ join = (items:array<addr> links:Graph @nodes:types.Table):>addr => {
 # G's result. Defaults and keyword names affect the call shape; source
 # parameter bodies and default expressions do not participate here.
 function_subtype = (f:types.FunctionType g:types.FunctionType links:Graph @nodes:types.Table):>bool => {
-    if not effect_rows.implies(f.effects g.effects) return false
+    if not effect_inference.compatible(f.effects g.effects) return false
     if f.pos_or_kw.length not=? g.pos_or_kw.length return false
     loop i in 0.. and i <? f.pos_or_kw.length {
         let fp = f.pos_or_kw[i]

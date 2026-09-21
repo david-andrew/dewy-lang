@@ -50,7 +50,7 @@ def test_effect_rows_cannot_be_value_types_or_values(source):
 
 
 def test_unknown_callback_row_is_not_inferred_empty():
-    source = APPLY + 'answer=():>int64=>42\nmain=():>int64 & no_effects=>apply(@answer)'
+    source = APPLY + 'unknown=(f:():>int64):>int64 & no_effects=>apply(@f)\nmain=():>int64=>42'
     with pytest.raises(ReportException, match='effect contract'):
         codegen(SrcFile(None, source))
 

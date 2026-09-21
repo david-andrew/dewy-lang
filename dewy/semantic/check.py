@@ -15,7 +15,7 @@ from itertools import count
 from typing import Callable, Literal, NoReturn, cast
 from ..parser import p0, t2, t1, t0
 from . import bindings as sb
-from . import builtins, hir, ty, effect_rows, effect_syntax
+from . import builtins, hir, ty, effect_rows, effect_syntax, effect_inference
 from .analyze import predicate_effects
 from .hir import children as hir_children
 from .errors import TypeCheckError, UserError, NotImplementedYet, type_error, user_error, user_warning, not_implemented, require_valued
@@ -108,12 +108,14 @@ class Context:
     # Declaration-local probe: only this leading @ can request a local view.
     # Nested @ arguments retain their ordinary mutable-place checking.
     view_probe: tuple[int, list[bool]] | None = None
+    inferred_effects: dict[tuple[int, int], tuple[object, object, str]] = field(default_factory=dict)
     proof_literals: dict[int, p0.BinOp] = field(default_factory=dict)
     proof_markers: dict[int, p0.AST] = field(default_factory=dict)
     # TODO: etc stuff
 
     def __setstate__(self, state: dict) -> None:
         self.__dict__.update(state)
+        self.inferred_effects = {(id(node), id(scope)): (node, scope, key) for node, scope, key in self.inferred_effects.values()}
         self.proof_literals = {id(node): node for node in self.proof_literals.values()}
         self.proof_markers = {id(node): node for node in self.proof_markers.values()}
 
@@ -1393,6 +1395,16 @@ def _complete_binding(
         if isinstance(declaration.expr.type, ty.OverloadType)
         else 'value'
     )
+    if (declaration.annotation is None and isinstance(declaration.expr.type, ty.FunctionType)
+            and not isinstance(declaration.expr, (hir.FunctionLiteral, hir.GenericFunction))
+            and not declaration.expr.type.type_params and not declaration.view):
+        # A copied handle can later change independently of its source. Give
+        # its inferred storage row a fresh lower-bound variable rather than
+        # widening the source function's own body row on reassignment.
+        name = effect_inference.BINDING_PREFIX + str(binding.id)
+        type_ = replace(declaration.expr.type, effects=effect_rows.Contract(effect_rows.Row(variables=(name,))), inferred_effect=None)
+        declaration = replace(declaration, expr=hir.ValueCast(declaration.expr.loc, type_, declaration.expr, effect_target=type_))
+        ctx.declarations[declaration.name] = type_
     binding.type = declaration.expr.type
     if isinstance(declaration.expr, hir.TypeValue):
         binding.type_value = declaration.expr.value
@@ -7370,7 +7382,7 @@ def _generic_signature(fn_ast: p0.BinOp, *, ctx: Context) -> tuple[ty.FunctionTy
     if any(p.type == ty.INFERRED_TYPE for p in all_params):
         user_error(ctx.srcfile, 'a generic function needs every parameter type declared', Pointer(span=params_block.loc, message='annotate each parameter'))
     signature = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
-    return replace(signature, type_params=params, effects=effect_syntax.contract(rettype_ast, all_params, generic_ctx)), params
+    return _infer_literal_effect(replace(signature, type_params=params, effects=effect_syntax.contract(rettype_ast, all_params, generic_ctx)), fn_ast, ctx), params
 
 
 def _generic_argument_display(arguments, param):
@@ -7484,6 +7496,10 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
         instance_ctx.binding_scopes[param.name] = alias
     assert isinstance(generic.type, ty.FunctionType)
     instance_type = ty.instantiate_method(generic.type, bindings)
+    if instance_type.inferred_effect is not None:
+        binder = ctx.binding_registry.allocate_param('__inferred_effect', ty.TYPE_TYPE, generic.loc)
+        inferred = effect_inference.PREFIX + str(binder.id)
+        instance_type = replace(instance_type, effects=effect_rows.Contract(effect_rows.Row(variables=(inferred,))), inferred_effect=inferred)
     name = _instantiation_name(generic.name, bindings, source.params)
     taken = {instance.name for instance in source.instances.values()}
     if name in taken:
@@ -7506,7 +7522,7 @@ def _instantiate_generic_function(generic: hir.GenericFunction, bindings: dict[s
     else:
         plain = replace(literal_ast, left=signature.right)
     try:
-        literal = tcr_function_literal(plain, ctx=instance_ctx)
+        literal = tcr_function_literal(plain, ctx=instance_ctx, expected=instance_type)
     except BaseException as error:
         # an instance whose body does not check leaves no cache entry behind
         # (a debugger formatter's attempt is dropped; a later request must
@@ -13036,6 +13052,23 @@ def _function_result_type(ast: p0.AST, *, ctx: Context, proof: bool = False) -> 
     return facts if facts is not None else _value_type(ast_to_type(ast, ctx=ctx), loc=ast.loc, ctx=ctx)
 
 
+def _infer_literal_effect(signature: ty.FunctionType, syntax: p0.BinOp, ctx: Context) -> ty.FunctionType:
+    if signature.effects is not None:
+        return signature
+    # Scope identity separates instantiations of the same generic syntax.
+    # Retain both objects so Python id reuse and checked-prelude reloads are safe.
+    scope = ctx.binding_scopes.maps[0]
+    key = (id(syntax.left), id(scope))
+    entry = ctx.inferred_effects.get(key)
+    if entry is None:
+        binder = ctx.binding_registry.allocate_param('__inferred_effect', ty.TYPE_TYPE, syntax.loc)
+        name = effect_inference.PREFIX + str(binder.id)
+        entry = (syntax.left, scope, name)
+        ctx.inferred_effects[key] = entry
+    name = entry[2]
+    return replace(signature, effects=effect_rows.Contract(effect_rows.Row(variables=(name,))), inferred_effect=name)
+
+
 def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     """FunctionType for a function literal whose params and return type are fully annotated, else None.
 
@@ -13052,7 +13085,7 @@ def signature_of(fn_ast: p0.BinOp, *, ctx: Context) -> ty.FunctionType | None:
     params = [*pos_or_kw_args, *kw_only_args, *([rest_args] if rest_args is not None else [])]
     if any(p.type == ty.INFERRED_TYPE for p in params):
         return None
-    return replace(typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype), effects=effect_syntax.contract(signature.right, params, ctx))
+    return _infer_literal_effect(replace(typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype), effects=effect_syntax.contract(signature.right, params, ctx)), fn_ast, ctx)
 
 
 def _discarded_expressed_sites(body: hir.AST) -> list[hir.AST]:
@@ -13274,9 +13307,12 @@ def tcr_function_literal(binop: p0.BinOp, *, ctx: Context, expected: ty.Type|Non
             # the end of the body is a return too: the facts are owed there
             body = hir.Block(body.loc, ty.VOID_TYPE, [body, _void_obligation(Span(body.loc.stop - 1, body.loc.stop), void_facts, ctx=inner_ctx)], False)
     ftype = typefunc_from_hir_params(pos_or_kw_args, kw_only_args, rest_args, rettype)
-    if effect_contract is None and isinstance(expected, ty.FunctionType):
+    if (effect_contract is None and isinstance(expected, ty.FunctionType)
+            and (expected.inferred_effect is not None or not effect_inference.pending(expected.effects))):
         effect_contract = expected.effects
-    ftype = replace(ftype, effects=effect_contract)
+    ftype = _infer_literal_effect(replace(ftype, effects=effect_contract), binop, ctx)
+    if isinstance(expected, ty.FunctionType) and expected.inferred_effect is not None and ftype.effects == expected.effects:
+        ftype = replace(ftype, inferred_effect=expected.inferred_effect)
     if void_facts is not None:
         ftype = replace(ftype, ret=void_facts)   # the promise travels with the function type; the value is still nothing
 
@@ -16963,6 +16999,10 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
         missing = _missing_invariants(checked.type, target)
         if missing:
             checked = _prove_refinements(checked, ty.RefinedType(target, tuple(missing)), ctx=ctx)
+    if any(effect_inference.pending(edge.actual) or effect_inference.pending(edge.required)
+           for edge in effect_inference.type_constraints(node.type, expected)
+           if edge.required is not None):
+        return hir.ValueCast(node.loc, checked.type, checked, effect_target=expected)
     return checked
 
 

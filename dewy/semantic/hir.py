@@ -652,6 +652,9 @@ class StringConcat(AST):
 class ValueCast(AST):
     """Value cast: explicit `expr as Target`, or an implicit promotion. `type` is the target."""
     expr: AST
+    # A selected callable boundary, checked once its effect variables solve.
+    # Retain the actual value type: contextual `any` must not erase inference.
+    effect_target: ty.Type | None = None
 
 
 @dataclass(slots=True, weakref_slot=True)

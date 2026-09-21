@@ -169,10 +169,14 @@ validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
 # Erasure occurs only on entry to backend assembly, before reachability; the
 # proof's arguments must not keep runtime functions or allocations alive.
 erase = (@session:contexts.Session):>void => {
-    if session.proof_literals.length =? 0 return
+    if session.proof_literals.length =? 0 and not session.types.effect_contracts return
     let empty=types.primitive('void' @session.types)
     loop id in 0.. and id <? session.hir.length {
         let node=hir.node_at(session.hir id)
+        if node is? hir.ValueCast and node.effect_target isnt? none {
+            session.hir[id]=hir.node_at(session.hir node.expr)
+            continue
+        }
         let remove=node is? hir.FunctionCall and node.proof
         if node is? hir.Declare {
             let value=hir.node_at(session.hir node.expr)

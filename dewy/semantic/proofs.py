@@ -150,8 +150,10 @@ def validate(root: hir.AST, registry: bindings.BindingRegistry, source: SrcFile)
 
 
 def erase(root: hir.AST) -> hir.AST:
-    """Erase only explicit proof constructs, after all semantic obligations pass."""
+    """Erase proof constructs and checked effect boundaries after obligations pass."""
     def rewrite(value):
+        if isinstance(value, hir.ValueCast) and value.effect_target is not None:
+            return rewrite(value.expr)
         if isinstance(value, hir.FunctionCall) and value.proof:
             return hir.Void(value.loc, ty.VOID_TYPE)
         if isinstance(value, hir.Declare) and isinstance(value.expr, hir.FunctionLiteral) and value.expr.proof:
@@ -167,6 +169,6 @@ def erase(root: hir.AST) -> hir.AST:
             return replace(value, **changes) if changes else value
         return value
     # Most modules contain no proofs; don't rebuild their trees unnecessarily.
-    if not any(isinstance(node, hir.FunctionCall) and node.proof or isinstance(node, hir.FunctionLiteral) and node.proof for node in hir.walk(root)):
+    if not any(isinstance(node, hir.FunctionCall) and node.proof or isinstance(node, hir.FunctionLiteral) and node.proof or isinstance(node, hir.ValueCast) and node.effect_target is not None for node in hir.walk(root)):
         return root
     return rewrite(root)

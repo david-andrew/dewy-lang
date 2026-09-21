@@ -56,7 +56,7 @@ transform=(id:addr @mapping:Rebinding @table:types.Table):>addr=>{
         loop p in node.pos_or_kw {pos.push(types.PosOrKwArg[p.name rebind(p.value_type @mapping @table) p.required p.place])}
         loop p in node.kw_only {kw.push(types.KwOnlyArg[p.name rebind(p.value_type @mapping @table) p.required p.place])}
         loop p in node.type_params {params.push(types.GenericParam[p.name rebind(p.bound @mapping @table) p.kind p.identity])}
-        return types.function_type(pos kw node.rest rebind(node.ret @mapping @table) params @table effects=node.effects)
+        return types.function_type(pos kw node.rest rebind(node.ret @mapping @table) params @table effects=node.effects inferred_effect=node.inferred_effect)
     }
     # Named recursive references preserve the declaration's nominal identity.
     return id

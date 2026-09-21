@@ -1,0 +1,9 @@
+Handle=type of [token:int64
+    $__drop__
+    release=():>void=>printl(token)
+]
+# The inferred callback row must include synthesized cleanup, even though
+# the source body contains no explicit call to release.
+answer=():>int64=>{let handle=Handle[42] return 42}
+apply=(f:():>int64 & allocates):>int64 & allocates=>f()
+main=():>int64=>apply(@answer)

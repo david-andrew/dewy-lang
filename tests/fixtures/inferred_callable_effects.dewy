@@ -1,0 +1,20 @@
+let apply=<E:Effect>(f:():>int64 & E):>int64 & E=>f()
+quiet=(f:():>int64 & no_effects):>int64 & no_effects=>f()
+answer=():>int64=>42
+other=():>int64=>21
+forward=():>int64=>answer()
+recursive=(n:int64):>int64=>{if n <=? 0 return 42 return recursive(n-1)}
+choose=(yes:bool):>int64=>{
+    let callback=if yes @answer else @other
+    return callback()
+}
+checked=():>int64 & no_effects=>quiet(@forward)
+main=():>int64=>{
+    if checked() not=? 42 return 1
+    if apply(@answer) not=? 42 return 2
+    if recursive(3) not=? 42 return 3
+    if choose(true) not=? 42 return 4
+    let callback=@other
+    callback=@answer
+    return callback()
+}

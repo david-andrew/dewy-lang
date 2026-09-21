@@ -1,4 +1,4 @@
-"""Conservative public-effect checking, starting with explicit empty rows.
+"""Infer public callable effects and check selected source contracts.
 
 This is not the aggregate-access analysis used for borrow selection. A local
 read/write is private, whereas a place or captured mutable value belongs to
@@ -7,7 +7,7 @@ allocation/escape behavior has a checked model; unknown never means pure.
 """
 from collections import deque
 
-from .. import bindings, effect_rows as rows, hir, ty, placement
+from .. import bindings, effect_rows as rows, effect_inference as inference, hir, ty, placement
 from ..errors import user_error
 from ...reporting import Pointer
 from .effects import _EffectAnalyzer, _literal_params, _unwrap
@@ -135,6 +135,9 @@ def summarize(root, registry):
             return supplied
 
         def visit(node):
+            if isinstance(node, hir.ValueCast) and node.effect_target is not None:
+                visit(node.expr)
+                return
             if isinstance(node, hir.FunctionLiteral):
                 return  # its body is checked at its own call boundary
             if isinstance(node, (hir.Void, hir.NoneValue, hir.Bool, hir.Integer, hir.String,
@@ -203,7 +206,7 @@ def summarize(root, registry):
             if isinstance(node, hir.Declare):
                 # A required view cannot silently allocate a replacement;
                 # lowering must prove the storage demand or reject it.
-                if not node.view and node.binding_id not in frame_values and not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)):
+                if not node.view and node.binding_id not in frame_values and not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)) and not isinstance(node.expr.type, (ty.FunctionType, ty.OverloadType)):
                     storage()
                 visit(node.expr)
                 return
@@ -245,7 +248,7 @@ def summarize(root, registry):
                 return
             unknown()
 
-        if not scalar(literal.rettype):
+        if not scalar(literal.rettype) and not isinstance(literal.rettype, (ty.FunctionType, ty.OverloadType)):
             storage()  # independent return storage; no placement proof yet
         visit(literal.body)
         for param in params:
@@ -282,9 +285,36 @@ def validate(root, registry, srcfile):
                    and isinstance(node.type, ty.FunctionType) and node.type.effects is not None]
     if not constrained:
         return
+    definitions = {}
+    bodies = []
+    boundaries = []
+    for node in hir.walk(root):
+        if isinstance(node, hir.FunctionLiteral) and node.type.inferred_effect is not None:
+            name = node.type.inferred_effect
+            bodies.append((name, node))
+        elif isinstance(node, hir.ValueCast):
+            if node.effect_target is not None and isinstance(node.effect_target, ty.FunctionType) and node.effect_target.effects is not None and node.effect_target.effects.allowed is not None:
+                for name in node.effect_target.effects.allowed.variables:
+                    if name.startswith(inference.BINDING_PREFIX):
+                        definitions.setdefault(name, rows.Contract(rows.Row()))
+            boundaries.extend((node, edge) for edge in inference.type_constraints(node.expr.type, node.effect_target or node.type))
+    written = any(node.type.inferred_effect is None for node in constrained)
+    required = any(edge.required is not None and not rows.implies(None, edge.required)
+                   and (not inference.pending(edge.required) or edge.required.excluded)
+                   for _, edge in boundaries)
+    if not written and not required:
+        return
     summaries = summarize(root, registry)
+    for name, node in bodies:
+        body = summaries[id(node)]
+        definitions[name] = rows.join(definitions[name], body) if name in definitions else body
+    solutions = inference.solve(definitions, tuple(edge for _, edge in boundaries))
+    for node, edge in boundaries:
+        if not inference.satisfied(edge, solutions):
+            user_error(srcfile, 'callable does not satisfy its effect contract',
+                       Pointer(span=node.loc, message='the inferred callable behavior exceeds its destination contract'))
     for literal in constrained:
-        if not rows.implies(summaries[id(literal)], literal.type.effects):
+        if not rows.implies(inference.resolve(summaries[id(literal)], solutions), inference.resolve(literal.type.effects, solutions)):
             user_error(literal.source or srcfile, 'function does not satisfy its effect contract',
                        Pointer(span=literal.loc, message='an operation or callee may exceed the permitted effects or violate an exclusion'),
                        hint='omit the row to infer conservatively, or remove the operation requiring effects')

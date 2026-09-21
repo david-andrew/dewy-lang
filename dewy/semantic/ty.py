@@ -230,6 +230,8 @@ class FunctionType:
     ret: TypeExpr
     type_params: list[GenericParam] = field(default_factory=list)
     effects: effect_rows.Contract | None = None
+    # The body defining this compiler-only inference variable, if any.
+    inferred_effect: str | None = field(default=None, compare=False)
 
 @dataclass(slots=True, weakref_slot=True)
 class OverloadType:
@@ -1519,6 +1521,19 @@ class TypeSystem:
         combined = union(*types)
         members = combined.items if isinstance(combined, TypeOr) else [combined]
 
+        merged = []
+        for member in members:
+            if isinstance(member, FunctionType):
+                for index, other in enumerate(merged):
+                    if isinstance(other, FunctionType) and replace(member, effects=None) == replace(other, effects=None):
+                        merged[index] = replace(other, effects=effect_rows.join(other.effects or effect_rows.Contract(), member.effects or effect_rows.Contract()), inferred_effect=None)
+                        break
+                else:
+                    merged.append(member)
+            else:
+                merged.append(member)
+        members = merged
+
         def covered(member: TypeExpr, other: TypeExpr, seen: frozenset[tuple[int, int]] = frozenset()) -> bool:
             # is_subtype accepts a refined target's base: check_against then
             # proves its obligations. A join has no such checking boundary.
@@ -2072,7 +2087,8 @@ class TypeSystem:
         Optional parameters on G cannot be required on F; F may add optional
         keyword-only extras.
         """
-        if not effect_rows.implies(f.effects, g.effects):
+        from .effect_inference import compatible
+        if not compatible(f.effects, g.effects):
             return False
         if len(f.pos_or_kw) != len(g.pos_or_kw):
             return False
@@ -2888,6 +2904,7 @@ def substitute_type(t: TypeExpr, bindings: dict[str, TypeExpr]) -> TypeExpr:
             substitute_type(t.ret, inner),
             list(t.type_params),
             effect_rows.replace_variables(t.effects, inner.effects),
+            t.inferred_effect,
         )
     if isinstance(t, OverloadType):
         methods: list[FunctionType] = []
@@ -2926,6 +2943,7 @@ def instantiate_method(m: FunctionType, type_args: dict[str, TypeExpr]) -> Funct
         substitute_type(m.ret, type_args),
         [],
         effect_rows.replace_variables(m.effects, getattr(type_args, 'effects', {})),
+        m.inferred_effect,
     )
 
 

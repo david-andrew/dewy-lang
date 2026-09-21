@@ -1,0 +1,63 @@
+import p"ty.dewy" as types
+import p"effect_inference.dewy" as inference
+
+# Call shape has already selected these boundaries. Contravariant parameters
+# reverse the row obligation; values returned by the callable are covariant.
+Pair:type=const [actual:addr required:addr]
+constraints=(actual:addr required:addr table:types.Table):>array<inference.Constraint>=>{
+    let result:array<inference.Constraint>=[]
+    let pending:array<Pair>=[Pair[actual required]]
+    let seen:set<string>=set[]
+    loop pending.length >? 0 {
+        let pair=pending.pop
+        let a=types.unfold(types.strip_refinement(pair.actual table) table)
+        let b=types.unfold(types.strip_refinement(pair.required table) table)
+        if a =? b continue
+        let key="{a}:{b}"
+        if key in? seen continue
+        seen.add(key)
+        let left=types.node_at(table a)
+        let right=types.node_at(table b)
+        if left is? types.FunctionType and right is? types.FunctionType {
+            result.push(inference.Constraint[left.effects right.effects])
+            loop i in 0.. and i <? left.pos_or_kw.length and i <? right.pos_or_kw.length {
+                pending.push(Pair[right.pos_or_kw[i].value_type left.pos_or_kw[i].value_type])
+            }
+            loop slot in right.kw_only {
+                loop other in left.pos_or_kw {if other.name =? slot.name {pending.push(Pair[slot.value_type other.value_type])}}
+                loop other in left.kw_only {if other.name =? slot.name {pending.push(Pair[slot.value_type other.value_type])}}
+            }
+            pending.push(Pair[left.ret right.ret])
+        } else if left is? types.ArrayType and right is? types.ArrayType {
+            pending.push(Pair[left.element right.element])
+            pending.push(Pair[right.element left.element])
+        } else if left is? types.ObjectType and right is? types.ObjectType {
+            loop field in right.fields {
+                loop supplied in left.fields {
+                    if supplied.name =? field.name {
+                        pending.push(Pair[supplied.value_type field.value_type])
+                        if not right.immutable {pending.push(Pair[field.value_type supplied.value_type])}
+                    }
+                }
+            }
+        } else if left is? types.TypeOr|types.TypeAnd {
+            loop member in left.items {pending.push(Pair[member b])}
+        } else if right is? types.TypeOr|types.TypeAnd {
+            loop member in right.items {pending.push(Pair[a member])}
+        } else if left is? types.OverloadType {
+            loop member in left.methods {pending.push(Pair[member b])}
+        } else if right is? types.OverloadType {
+            loop member in right.methods {pending.push(Pair[a member])}
+        } else if left is? types.SequenceType and right is? types.SequenceType {
+            loop pair in item_pairs(left.items right.items) {pending.push(pair)}
+        }
+    }
+    return result
+}
+
+item_pairs=(left:array<addr> right:array<addr>):>array<Pair>=>{
+    let result:array<Pair>=[]
+    if left.length not=? right.length return result
+    loop i in 0.. and i <? left.length and i <? right.length {result.push(Pair[left[i] right[i]])}
+    return result
+}

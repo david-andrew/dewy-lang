@@ -1,6 +1,8 @@
 from reporting import Error, Span, Warning, Pointer, SrcFile
 import p"source_names.dewy" as source_names
 import p"effect_rows.dewy" as effect_rows
+import p"effect_inference.dewy" as effect_inference
+import p"effect_boundaries.dewy" as effect_boundaries
 import p"lifecycle.dewy" as lifecycle
 import p"source_views.dewy" as source_views
 import p"../parser/p0.dewy" as parser
@@ -249,6 +251,17 @@ carries_promises = (id:addr target:types.RefinedType session:contexts.Session):>
     return false
 }
 against = (value:addr expected:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let checked=against_shape(value expected id env @session)
+    if checked is? Error return checked
+    let node=node_at(checked session)
+    loop edge in effect_boundaries.constraints(node_at(value session).value_type expected session.types) {
+        if edge.required isnt? none and (effect_inference.pending(edge.actual) or effect_inference.pending(edge.required)) {
+            return put(hir.ValueCast[node.loc node.value_type checked effect_target=expected] @session)
+        }
+    }
+    return checked
+}
+against_shape = (value:addr expected:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let node = node_at(value session)
     if types.is_primitive(types.node_at(session.types node.value_type) 'never') return value
     if node is? hir.Block and not types.same_type(node.value_type expected session.types) {
@@ -2179,6 +2192,14 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     let syntax_id = contexts.syntax_ref(id env.lexical @session)
     let binding_id = if existing is? none bindings.allocate(@session.registry syntax_id name 'value' node.loc) else existing
     let binding = bindings.binding_at(session.registry binding_id)
+    let signature=types.node_at(session.types checked.value_type)
+    if annotation is? none and signature is? types.FunctionType and checked isnt? hir.FunctionLiteral|hir.GenericFunction and signature.type_params.length =? 0 and not view {
+        let name="{effect_inference.BINDING_PREFIX}{binding_id}"
+        let effects=effect_rows.Contract[effect_rows.Row[variables=[name]]]
+        let type=types.function_type(signature.pos_or_kw signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=effects)
+        value=put(hir.ValueCast[checked.loc type value effect_target=type] @session)
+        checked=node_at(value session)
+    }
     binding.value_type = if annotation is? none checked.value_type else annotation
     binding.store_type = binding.value_type
     if view and not constant {
@@ -2445,7 +2466,13 @@ function_shape = (literal:parser.BinOp env:Environment @session:contexts.Session
     }
     let effect_contract=if result_id is? none none else declarations.effect_contract(result_id effect_parameters args.kw_only lexical @session)
     if effect_contract is? Error return effect_contract
-    return types.function_type(parameters args.kw_only none result generic @session.types effects=effect_contract)
+    let inferred:string?=none
+    if effect_contract is? none {
+        # SyntaxRef includes lexical scope, so generic instances are distinct.
+        inferred="{effect_inference.PREFIX}{contexts.syntax_ref(literal.left env.lexical @session)}"
+        effect_contract=effect_rows.Contract[effect_rows.Row[variables=[inferred]]]
+    }
+    return types.function_type(parameters args.kw_only none result generic @session.types effects=effect_contract inferred_effect=inferred)
 }
 predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error? => {
     let node = contexts.node_at(id env.lexical session)
@@ -2546,12 +2573,16 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     }
     shape.pos_or_kw=contextual_parameters(literal shape expected_signature env session)
     let effect_contract=shape.effects
+    let inferred_effect=shape.inferred_effect
     let contract=shape.ret
     if expected_signature isnt? none {
         let required=types.node_at(session.types types.strip_refinement(expected_signature session.types))
         if required is? types.FunctionType and required.type_params.length =? 0 {
             contract=contracts.adopt(contract required shape.pos_or_kw @session.types)
-            if effect_contract is? none {effect_contract=required.effects}
+            if inferred_effect isnt? none and required.effects isnt? none and (required.inferred_effect isnt? none or not effect_inference.pending(required.effects)) {
+                effect_contract=required.effects
+                inferred_effect=required.inferred_effect
+            }
         }
     }
     let infer=types.is_primitive(types.node_at(session.types contract) 'untyped')
@@ -2687,7 +2718,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
         effect_contract=effect_rows.prepend_parameter(effect_contract shape.pos_or_kw.length+shape.kw_only.length)
     }
     loop slot in shape.pos_or_kw {slots.push(slot)}
-    let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types effects=effect_contract)
+    let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types effects=effect_contract inferred_effect=inferred_effect)
     let value=put(hir.FunctionLiteral[literal.loc function_type parameters keyword_parameters none returns body source=env.lexical.source proof=is_proof_literal(literal env session) lifecycle=if method is? none none else method.lifecycle] @session)
     return if expected_signature is? none value else against(value expected_signature id env @session)
 }
@@ -5117,7 +5148,11 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
         bindings.store_binding(@session.registry parameter_id binding)
         bindings.bind(@session.scopes lexical.scope parameter.name parameter_id)
     }
-    let resolved = types.substitute_function(signature arguments true @session.types effects=inference.effects)
+    let literal = contexts.node_at(reference.node lexical session)
+    $runtime_assert literal is? parser.BinOp
+    let defining = Environment[lexical source.context]
+    let resolved = function_shape(literal defining @session concrete=true)
+    if resolved is? Error return resolved
     let name = "{generic.name}__instance_{session.registry.next_id}"
     let binding_id = bindings.allocate(@session.registry none name 'function' generic.loc)
     let binding = bindings.binding_at(session.registry binding_id)
@@ -5126,9 +5161,6 @@ instantiate_call = (callee:hir.ExpressedIdentifier signature:types.FunctionType 
     # Register before checking: a recursive call with these same types must
     # refer to this declaration, rather than instantiate another body.
     session.registry.generic_instances[binding_id] = bindings.GenericInstance[callee.binding_id arguments contexts.syntax_ref(id env.lexical @session) inference.effects]
-    let literal = contexts.node_at(reference.node lexical session)
-    $runtime_assert literal is? parser.BinOp
-    let defining = Environment[lexical source.context]
     let value = function_literal(reference.node literal defining @session concrete=true name=name)
     if value is? Error {
         if binding_id in? session.registry.generic_instances { session.registry.generic_instances.pop(binding_id); }

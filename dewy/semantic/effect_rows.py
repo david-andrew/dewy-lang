@@ -173,10 +173,10 @@ def display(contract: Contract | None, parameter_names: dict[str, str]) -> str:
     if contract.allowed is not None:
         row = union(contract.allowed)
         terms.extend(atom_text(atom) for atom in row.atoms)
-        terms.extend(row.variables)
+        terms.extend(name for name in row.variables if not name.startswith('inferred-effect:'))
         if row.unknown:
             terms.append('<unknown effects>')
-        if not terms:
+        if not terms and not row.variables:
             terms.append('no_effects')
     terms.extend(f'no {atom_text(atom)}' for atom in contract.excluded)
     return ''.join(f' & {term}' for term in terms)
@@ -208,6 +208,8 @@ def instantiate(contract: Contract, subjects: dict[str, Subject | None], *, max_
         return atom
 
     allowed = substitute(contract.allowed, {}, subjects) if contract.allowed is not None else None
+    if allowed is not None and subjects and any(name.startswith('inferred-effect:') for name in allowed.variables):
+        allowed = union(allowed, Row(unknown=True))
     if allowed is not None:
         allowed = union(Row(tuple(bounded(atom) for atom in allowed.atoms), allowed.variables, allowed.unknown))
     excluded = substitute(Row(contract.excluded), {}, subjects).atoms

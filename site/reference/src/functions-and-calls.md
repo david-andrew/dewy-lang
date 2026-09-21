@@ -130,8 +130,21 @@ Current checking covers scalar computation, read-only value access, place
 reads and scalar place writes, direct calls, and constrained callbacks.
 Unmodeled operations and allocations remain unknown and cannot satisfy an
 empty row or negative promise. In particular COW deferral is not proof of no
-allocation. Complete inferred callable rows and the full allocation/failure
-vocabulary are still being implemented.
+allocation. A function literal with an omitted row now carries its inferred
+body effects when used as a callback:
+
+```dewy
+answer = ():>int64 => 42
+use = (f:():>int64 & no_effects):>int64 & no_effects => f()
+checked = ():>int64 & no_effects => use(@answer)
+```
+
+An omitted row on an unknown callback parameter still admits unknown behavior:
+there is no body from which to infer a narrower contract. Recursive calls,
+generic calls, conditional callback choices and callback reassignment retain
+possible effects; inferred rows also include synthesized lifecycle operations.
+Scoped place-row inference, open negative guarantees through inferred wrappers,
+and the full allocation/failure vocabulary remain in progress.
 
 Effect rows have their own generic kind:
 
