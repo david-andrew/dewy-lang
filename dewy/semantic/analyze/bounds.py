@@ -228,12 +228,9 @@ def _call_argument(node: hir.AST, name: str, queries: predicate_effects.BindingQ
 
 def _object_of(type_: ty.Type) -> ty.ObjectType | None:
     """The unique positive record shape, including optional values and exclusions."""
-    unfolded = ty.unfold(ty.strip_refinement(type_))
-    if isinstance(unfolded, ty.TypeAnd):
-        positive = [item for item in unfolded.items if not isinstance(item, ty.TypeNot)]
-        return _object_of(positive[0]) if len(positive) == 1 else None
+    unfolded = ty.structural_base(type_)
     if isinstance(unfolded, ty.TypeOr):
-        objects = [item for item in unfolded.items if isinstance(item, ty.ObjectType)]
+        objects = [shape for item in unfolded.items if (shape := _object_of(item)) is not None]
         unfolded = objects[0] if len(objects) == 1 else None
     return unfolded if isinstance(unfolded, ty.ObjectType) else None
 
@@ -1371,10 +1368,7 @@ class _BoundsValidator:
 
     def _declared_field_interval(self, receiver: ty.Type, name: str) -> Interval | None:
         """Common fields must satisfy the bounds of every possible owner."""
-        receiver = ty.unfold(ty.strip_refinement(receiver))
-        if isinstance(receiver, ty.TypeAnd):
-            positive = [item for item in receiver.items if not isinstance(item, ty.TypeNot)]
-            return self._declared_field_interval(positive[0], name) if len(positive) == 1 else None
+        receiver = ty.structural_base(receiver)
         if isinstance(receiver, ty.ObjectType):
             field = receiver.field(name)
             if field is None:

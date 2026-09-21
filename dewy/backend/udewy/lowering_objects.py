@@ -355,7 +355,8 @@ class _ObjectLowering:
         borrowing callee could observe mid-call writes, so the caller clones
         the argument first. Distinct fields of a record do not overlap.
         """
-        if isinstance(arg.type, ty.ObjectType):
+        object_type = ty.structural_base(arg.type)
+        if isinstance(object_type, ty.ObjectType):
             # A raw pointer can reach this value without appearing as an
             # argument or a parameter effect of this call. Preserve the
             # value boundary even if the callee only reads its parameter.
@@ -363,22 +364,22 @@ class _ObjectLowering:
             if root is not None and root in self.borrow_plan.exposed_bindings:
                 self._note_copy('record', arg.type, 'passed to a call',
                                 'its storage has been exposed to raw operations', arg.loc)
-                prelude, value = self._clone_object_value(arg, arg.type)
-                return self._object_statement_temporary(prelude, value, arg.type, arg.loc)
+                prelude, value = self._clone_object_value(arg, object_type)
+                return self._object_statement_temporary(prelude, value, object_type, arg.loc)
             route = self._storage_field_route(arg)
             if route is not None and any(
                 self._storage_routes_overlap(route, place)
                 for place in self._call_place_argument_routes(call, position)
             ):
                 self._note_copy('record', arg.type, 'passed to a call', 'another argument of the same call may write it', arg.loc)
-                prelude, value = self._clone_object_value(arg, arg.type)
-                return self._object_statement_temporary(prelude, value, arg.type, arg.loc)
+                prelude, value = self._clone_object_value(arg, object_type)
+                return self._object_statement_temporary(prelude, value, object_type, arg.loc)
         prelude, value = self._extract_object_pointer(arg)
-        if isinstance(arg.type, ty.ObjectType) and (
+        if isinstance(object_type, ty.ObjectType) and (
             isinstance(arg, hir.ObjectLiteral)
             or self._frame_record_call(arg)
         ):
-            return self._object_statement_temporary(prelude, value, arg.type, arg.loc)
+            return self._object_statement_temporary(prelude, value, object_type, arg.loc)
         return prelude, value
 
     def _object_statement_temporary(
@@ -1255,12 +1256,13 @@ class _ObjectLowering:
         kw_args: dict[str, hir.AST],
         prelude: list[hir.AST],
     ) -> tuple[list[hir.AST], hir.AST]:
-        if not isinstance(node.type, ty.ObjectType):
+        object_type = ty.structural_base(node.type)
+        if not isinstance(object_type, ty.ObjectType):
             self._target_error(node, 'object call result is not an object')
         result = self.object_result_destinations.pop(id(node), None)
         if result is None:
             allocation, result = self._allocate_object_result_value(
-                node.type,
+                object_type,
                 node.loc,
             )
             prelude.extend(allocation)

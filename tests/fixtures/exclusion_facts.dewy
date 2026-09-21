@@ -1,0 +1,20 @@
+# Failed subtype tests remain useful at value boundaries, while the runtime
+# brand still distinguishes every surviving descendant of the family.
+let Base = type of [value:int64]
+let Child = type of Base & [extra:int64]
+let Other = type of Base & [padding:int64]
+read = (item:Base & ~Child):>int64 => item.value
+inspect = (item:Base):>int64 => {
+    if item isnt? Child {
+        let saved:(Base & ~Child)? = item
+        if saved isnt? none {
+            if typeof(saved) is? Other {
+                if saved.typename =? 'Other' return read(saved)
+            } else {
+                if saved.typename =? 'Base' return read(saved)
+            }
+        }
+    }
+    return 0
+}
+main = ():>int64 => if inspect(Base[42]) =? 42 and inspect(Other[42 7]) =? 42 42 else 1

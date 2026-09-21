@@ -5890,7 +5890,7 @@ type_of = (arguments_id:addr? id:addr env:Environment @session:contexts.Session)
     let source=types.node_at(session.types node.value_type)
     if types.is_primitive(source 'void') or types.is_primitive(source 'never') return problem(id '`typeof` operand needs a value' 'this expression does not produce one' env session)
     if metatype_of(node.value_type session) isnt? none return value
-    let plain=types.unfold(types.strip_refinement(node.value_type session.types) session.types)
+    let plain=views.structural_base(node.value_type session.types)
     let shape=types.node_at(session.types plain)
     let loc=contexts.node_at(id env.lexical session).loc
     if shape isnt? types.ObjectType or not shape.minted or shape.brand is? none return put(hir.TypeValue[loc types.primitive('type' @session.types) plain] @session)

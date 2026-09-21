@@ -836,3 +836,17 @@ bool|string[]    # bool | array<string>     postfix [] binds much tighter than |
   ```
 
   Probably it wouldn't quite look like this, and there would also be a dynamic process that would actually check if the python object supported whatever operation you were trying to do to it, or returning an error. And then usage within dewy would look pretty close to normal dewy code, just the type checking safety falls away
+
+### Record exclusions at value boundaries (2026-09-21)
+
+A failed minted subtype test now keeps `Base & ~Child` as the hosted
+expression's read type, matching native checking. Calls, annotations,
+optional storage and returns preserve that evidence; writes and uncertain
+joins invalidate it. A fresh mutable `let` still widens its store contract,
+so a narrowed initializer does not permanently forbid another family member.
+Layout, parameter/result ABI, common-field and bounds queries use the shared
+positive structural view without changing logical union alternatives.
+Both `.typename` and `typeof` retain the value's runtime brand after an
+exclusion (including surviving sibling descendants). The paired regression
+is `tests/fixtures/exclusion_facts.dewy`; focused cases also cover copying,
+mutation and rejection of stale evidence.

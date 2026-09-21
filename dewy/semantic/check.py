@@ -1075,7 +1075,7 @@ def _brand_dispatch(value: hir.AST, loc: Span, per_brand: 'Callable[[hir.AST, ty
     mint's descendants; the mints minted from a plain structure): one `is?`
     arm per brand, deepest first, reading the value narrowed to it; else the
     static form. None when the value has no such alternatives."""
-    plain = ty.unfold(ty.strip_refinement(value.type))
+    plain = ty.structural_base(value.type)
     if isinstance(plain, ty.MetaType):
         alternatives = ty.brand_alternatives(plain.family)
         narrowed_type = lambda brand: ty.MetaType(ty.USER_BRAND_TYPES[brand])
@@ -1100,7 +1100,7 @@ def _typename(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST:
     """`value.typename`: the minted name a value carries (read from its brand
     word when its static type has descendants), else its structural spelling."""
     def own(node: hir.AST) -> hir.AST:
-        plain = ty.unfold(ty.strip_refinement(node.type))
+        plain = ty.structural_base(node.type)
         if isinstance(plain, ty.MetaType):
             plain = plain.family   # a type value names its family's type
         text = plain.brand if isinstance(plain, ty.ObjectType) and ty.user_branded(plain) and plain.brand is not None else type_to_dewy(plain)
@@ -1444,6 +1444,12 @@ def _record_literal_totality(dictionary: hir.AST, keys_literal: hir.ArrayLiteral
 
 
 def _widen_inferred_let_value(expr: hir.AST, *, ctx: Context) -> hir.AST:
+    if isinstance(expr.type, ty.TypeAnd):
+        # An observed exclusion describes this read, not a new mutable
+        # binding's storage contract. Match native materialization here.
+        storage = ty.structural_base(expr.type)
+        if isinstance(storage, ty.ObjectType):
+            return hir.ValueCast(expr.loc, storage, expr)
     if isinstance(expr, hir.Integer) and isinstance(expr.type, ty.IntegerLiteralType):
         return replace(expr, type='int')
     if (
@@ -3117,7 +3123,7 @@ def _concrete_brands_under(brand: str) -> set[str]:
 
 def _brand_family(type_: ty.TypeExpr) -> ty.ObjectType | None:
     """The minted type a value's brand ranges over: itself for a minted object, its family for a `type<Family>` value."""
-    unfolded = ty.unfold(ty.strip_refinement(type_))
+    unfolded = ty.structural_base(type_)
     if isinstance(unfolded, ty.MetaType):
         return unfolded.family
     return unfolded if isinstance(unfolded, ty.ObjectType) and ty.user_branded(unfolded) else None
@@ -3560,6 +3566,13 @@ def _in_declared_order(joined: ty.Type, binding_id: int, *, ctx: Context) -> ty.
     binding = ctx.binding_registry.by_id.get(binding_id)
     declared = ty.strip_refinement(binding.type) if binding is not None and binding.type is not None else None
     declared = _number_and_dimension(declared)[0] if declared is not None else None
+    if (isinstance(declared, ty.ObjectType)
+            and all(isinstance(ty.structural_base(member), ty.ObjectType) for member in joined.items)
+            and ctx.type_system.is_subtype(declared, joined)):
+        # Rejoining a test and its complement recovers the declared family.
+        # Preserve genuinely narrower joins; logical coverage, not spelling
+        # or a shared parent layout, justifies forgetting the alternatives.
+        return declared
     if not isinstance(declared, ty.TypeOr):
         return joined
     if all(item in declared.items for item in joined.items):
@@ -3577,7 +3590,7 @@ def _tcr_typeof(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         user_error(ctx.srcfile, '`typeof` takes one value', Pointer(span=binop.right.loc, message='the value whose type is wanted'))
     value = typecheck_and_resolve_inner(arguments[0], ctx=ctx)
     require_valued(value.type, ctx.srcfile, value.loc, '`typeof` operand')
-    plain = ty.unfold(ty.strip_refinement(value.type))
+    plain = ty.structural_base(value.type)
     if isinstance(plain, ty.MetaType):
         return value   # a type value's type is itself
     if not (isinstance(plain, ty.ObjectType) and ty.user_branded(plain)):
@@ -3694,6 +3707,32 @@ def _refine_type_test(
     )
     selected: list[ty.TypeExpr] = []
     for variant in variants:
+        if isinstance(ty.structural_base(variant), ty.ObjectType):
+            # Record-family exclusions have a stable positive layout. Keep
+            # them in the read type so all ordinary type checks can use the
+            # same branch evidence, including calls and annotated stores.
+            # Scalar complement representations remain on their existing path.
+            tested = ty.unfold(test)
+            if isinstance(tested, ty.TypeOr):
+                if matches:
+                    selected.extend(_refine_type_test(variant, member, matches=True, ctx=ctx)
+                                    for member in tested.items)
+                else:
+                    remainder = variant
+                    for member in tested.items:
+                        remainder = _refine_type_test(remainder, member, matches=False, ctx=ctx)
+                    selected.append(remainder)
+            elif ctx.type_system.is_subtype(variant, test):
+                if matches:
+                    selected.append(variant)
+            elif _disjoint_types(variant, test, ctx=ctx):
+                if not matches:
+                    selected.append(variant)
+            elif matches and ctx.type_system.is_subtype(test, variant):
+                selected.append(test)
+            else:
+                selected.append(ty.TypeAnd([variant, test if matches else ty.TypeNot(test)]))
+            continue
         if ctx.type_system.is_subtype(variant, test):
             if matches:
                 selected.append(variant)
@@ -9059,7 +9098,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         )
     if name == 'copy':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
-        plain = ty.unfold(ty.strip_refinement(value.type))
+        plain = ty.structural_base(value.type)
         if (isinstance(plain, (ty.ArrayType, ty.ObjectType, ty.TypeOr)) or _is_string_type(plain)) and _builtin_copy_available(plain):
             signature = ty.FunctionType([], [], None, value.type)
             return hir.CopyMethod(binop.loc, signature, value)
@@ -9438,11 +9477,11 @@ def _forwarding_member_access(value: hir.AST, name: str, binop: p0.BinOp, *, ctx
     ordinary = [m for m in members if m not in exceptions]
     if not ordinary:
         return None
-    if not all(isinstance(ty.unfold(m), ty.ObjectType) for m in ordinary):
+    if not all(isinstance(ty.structural_base(m), ty.ObjectType) for m in ordinary):
         return None  # strings, arrays, …: the ordinary error paths explain
     results: list[ty.TypeExpr] = []
     for member in ordinary:
-        unfolded = ty.unfold(member)
+        unfolded = ty.structural_base(member)
         field = unfolded.field(name) if isinstance(unfolded, ty.ObjectType) else None
         if field is None:
             type_error(
@@ -16922,7 +16961,7 @@ def _field_expectation(field: ty.ObjectField) -> ty.Type:
 
 def _missing_invariants(source: ty.Type, target: ty.ObjectType) -> list[ty.Proposition]:
     """The target's field invariants the source type does not already guarantee."""
-    unfolded = ty.unfold(ty.strip_refinement(source))
+    unfolded = ty.structural_base(source)
     if unfolded is target:
         return []
     missing: list[ty.Proposition] = []

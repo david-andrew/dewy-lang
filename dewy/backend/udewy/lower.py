@@ -722,9 +722,8 @@ class _Lowerer(
             _field, field_type, _symbol = projection
             assert isinstance(literal.type, ty.FunctionType)
             literal = replace(literal, rettype=field_type, type=replace(literal.type, ret=field_type))
-        if isinstance(literal.rettype, ty.RefinedType):
-            # a refined result is proven at every return during checking; the target sees the base type
-            literal = replace(literal, rettype=literal.rettype.base)
+        # Return facts and exclusions are checked before storage lowering.
+        literal = replace(literal, rettype=ty.structural_base(literal.rettype))
         if literal.rest_args is not None:
             self._target_error(literal, 'rest parameters and argument spreading')
         result_payload = ty.optional_payload(literal.rettype)
@@ -778,6 +777,7 @@ class _Lowerer(
         place_parameter_cells: dict[int, hir.ExpressedIdentifier] = {}
 
         def lower_param(param: hir.Param) -> hir.Param:
+            param = replace(param, type=ty.structural_base(param.type))
             # a union with `none` and several other members is an ordinary
             # general union (`none` is member 0, so its tag matches optionals)
             if param.place:
@@ -1330,7 +1330,7 @@ class _Lowerer(
                 pos.append(ty.PosOrKwArg(None, 'bool'))
         rettype: ty.TypeExpr = self._lower_runtime_value_type(type_.ret)
         if (
-            isinstance(type_.ret, ty.ObjectType)
+            isinstance(ty.structural_base(type_.ret), ty.ObjectType)
             or ty.optional_payload(type_.ret) is not None
             or (
                 isinstance(type_.ret, ty.ArrayType)
@@ -1426,11 +1426,11 @@ class _Lowerer(
         for index, member in enumerate(members):
             if system.is_subtype(member, ty.EXCEPTION_TYPE):
                 continue
-            unfolded = ty.unfold(member)
+            unfolded = ty.structural_base(member)
             assert isinstance(unfolded, ty.ObjectType)
             field = unfolded.field(node.field)
             assert field is not None
-            receiver = hir.ExpressedIdentifier(loc, unfolded, node.name, binding_id=node.binding_id)
+            receiver = hir.ExpressedIdentifier(loc, member, node.name, binding_id=node.binding_id)
             access = hir.MemberAccess(loc, field.type, receiver, node.field)
             arms.append(hir.IfArm(
                 loc, ty.VOID_TYPE,
@@ -1452,7 +1452,7 @@ class _Lowerer(
         return statements, result
 
     def _lower_runtime_value_type(self, type_: ty.TypeExpr) -> ty.TypeExpr:
-        type_ = ty.strip_refinement(type_)   # a refinement (`string<length >? 0>`) is the checker's; the value is the base's
+        type_ = ty.structural_base(type_)   # facts and exclusions do not change the positive storage layout
         if isinstance(type_, ty.MetaType):
             return 'int64'   # a type value is its brand id
         if isinstance(type_, ty.TypeOr) and ty.string_valued(type_):
@@ -1860,7 +1860,7 @@ class _Lowerer(
             definition_scope,
             overload_member,
         )
-        rettype = ty.strip_refinement(literal.rettype)   # `:>bigint<sign =? 1>` is an object result
+        rettype = ty.structural_base(literal.rettype)
         if (
             ty.optional_payload(rettype) is not None
             or ty.runtime_union_members(rettype) is not None
@@ -1937,7 +1937,7 @@ class _Lowerer(
             if enum is not None and param.binding_id is not None:
                 self.enum_words[param.binding_id] = enum
         for param in [*literal.pos_or_kw_args, *literal.kw_only_args]:
-            object_type = ty.unfold(ty.strip_refinement(param.type))
+            object_type = ty.structural_base(param.type)
             if param.binding_id is not None and isinstance(object_type, ty.ObjectType):
                 self.object_storage[param.binding_id] = object_type
         if literal.rest_args is not None:
@@ -4250,7 +4250,7 @@ class _Lowerer(
                 statements.extend(self._loop_signal_checkpoint(node.loc))
             return statements
         if isinstance(node, hir.Declare):
-            declared_type = node.annotation or node.expr.type
+            declared_type = ty.structural_base(node.annotation or node.expr.type)
             if node.view:
                 if not self._borrowed_route_local(node, declared_type):
                     self._required_view_error(node)
@@ -5011,7 +5011,7 @@ class _Lowerer(
 
     def _extract_expression_inner(self, node: hir.AST) -> tuple[list[hir.AST], hir.AST]:
         if isinstance(node, hir.CopyValue):
-            plain = ty.unfold(ty.strip_refinement(node.type))
+            plain = ty.structural_base(node.type)
             if self._is_string_valued(plain):
                 prelude, value = self._escaping_string_value(node.value, explicit=True)
                 return self._string_result_temporary(node, value, prelude)
@@ -5064,7 +5064,7 @@ class _Lowerer(
             return [], hir.Integer(node.loc, 'int64', t0.base10, self.brand_numbers[node.brand][0])
         if isinstance(node, hir.TypeOf):
             # the brand word of the value (0 for a plain value of a carried structure)
-            static = ty.unfold(ty.strip_refinement(node.value.type))
+            static = ty.structural_base(node.value.type)
             assert isinstance(static, ty.ObjectType)
             prelude, pointer = self._extract_object_pointer(node.value)
             return prelude, self._brand_word_load(pointer, static, node.loc)
@@ -5544,7 +5544,7 @@ class _Lowerer(
                         arg,
                         arg_members, temporary=True,
                     )
-                elif isinstance(arg.type, ty.ObjectType) or isinstance(expected_type, ty.ObjectType):
+                elif isinstance(ty.structural_base(arg.type), ty.ObjectType) or isinstance(ty.structural_base(expected_type), ty.ObjectType):
                     arg_prelude, lowered_arg = self._lower_object_argument(node, arg, index)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
@@ -5578,13 +5578,13 @@ class _Lowerer(
                         arg,
                         ty.runtime_union_members(arg.type), temporary=True,
                     )
-                elif isinstance(arg.type, ty.ObjectType):
+                elif isinstance(ty.structural_base(arg.type), ty.ObjectType):
                     arg_prelude, lowered_arg = self._lower_object_argument(node, arg, name)
                 else:
                     arg_prelude, lowered_arg = self._extract_expression(arg)
                 append_argument_prelude(arg_prelude)
                 kw_args[name] = lowered_arg
-            if isinstance(node.type, ty.ObjectType):
+            if isinstance(ty.structural_base(node.type), ty.ObjectType):
                 call_prelude, result = self._finish_object_call(
                     node,
                     func,
