@@ -1973,3 +1973,20 @@ ran the paired cases. The pop fixture brings the explicit manifest to 184.
 An `af12b397` seed analysis of this source reports 4,926 bootstrap copy sites
 (105.715/KLOC), within unchanged gates; this is not an inventory from a newly
 certified native generation.
+
+### Resource dictionary snapshots (2026-09-21)
+
+The public `.values` snapshot now uses checked component-copy helpers after
+compacting dead entries. `.keys` retains ordinary key value semantics while
+borrowing the resource dictionary receiver. Both routes preserve single receiver
+selection; independent values survive later clear/drop of the dictionary.
+The focused positive fixture and two rejection cases passed hosted/native with
+direct and C output, including repeated snapshots without retained-memory growth.
+The fixture brings the explicit manifest to 185 cases.
+
+Separately, source `5e4281cb` closed the direct native bootstrap loop. Generations
+2 and 3 are byte-identical; execution checks passed through direct and C output.
+Those generations took 67 s and 80 s during ongoing development, not an isolated
+performance baseline. The certified pair is in
+`phase1-dictionary-5e4281cb-2026-09-21`, built from the frozen matching worktree.
+This certificate does not cover the snapshot changes added afterward.

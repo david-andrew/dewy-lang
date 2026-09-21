@@ -1,0 +1,21 @@
+# Values snapshots copy only live resource entries; keys retain ordinary value semantics.
+let drops:int64=0
+let copies:int64=0
+Handle=type of [id:int64 values:array<int64>
+$__drop__ release=():>void=>{drops+=id values.clear}
+$__copy__ clone=():>Handle=>{copies+=1 Handle[id values.copy()]}
+]
+work=():>int64=>{
+ let d:dict<int64 Handle>=[1->Handle[10 [1]] 2->Handle[20 [2]] 3->Handle[30 [3]]]
+ d.pop(1);
+ let values=d.values
+ let keys=d.keys
+ if copies not=?2 or values.length not=?2 or keys.length not=?2 return 1
+ d.clear
+ if drops not=?60 return 2
+ if values.length=?2 {if values[0].id not=?20 or values[1].id not=?30 return 3}
+ return 42}
+check=():>int64=>{drops=0 copies=0 if work() not=?42 or drops not=?110 return 1 return 42}
+main=():>int64=>{if check() not=?42 return 1 let before:int64=_arena_live_bytes
+ loop i in 0.. and i <?100 {if check() not=?42 return 2}
+ $runtime_assert _arena_live_bytes=?before return 42}

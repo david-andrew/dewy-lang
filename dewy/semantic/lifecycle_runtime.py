@@ -408,6 +408,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     def fresh(node, allowed, inherited, components=frozenset(), control=None):
         if resource(node.type) is None:
             return expression(node, allowed, inherited=inherited, control=control)
+        if isinstance(node, hir.DictView):
+            return dictionary_view(node, allowed, inherited, control)
         if isinstance(node, hir.DictLookup) and not node.proven:
             return dictionary_get(node, allowed, inherited, control)
         if isinstance(node, hir.DictRemove) and node.key is not None:
@@ -646,6 +648,23 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         return hir.Block(node.loc, node.type, [*prefix, *cleanup((), node.loc, selected=selected),
                                               replace(node, keys=keys, values=values)], False)
 
+    def dictionary_view(node, allowed, inherited, control):
+        owner = expression(hir.Place(node.loc, node.dictionary.type, node.dictionary), allowed,
+                           inherited=inherited, control=control).target
+        shape = ty.structural_base(owner.type)
+        assert isinstance(shape, ty.ObjectType)
+        prefix = []
+        selected = freeze_route(owner, node.loc, bindings.access_path(owner).binding_id, prefix)
+        if resource(node.type) is None:
+            return hir.Block(node.loc, node.type, [*prefix, replace(node, dictionary=selected)], False)
+        # The public values view owns independent elements. Compact before
+        # copying so tombstones never trigger component hooks.
+        field = shape.field(node.name)
+        assert field is not None
+        values = hir.MemberAccess(node.loc, field.type, selected, field.name)
+        return hir.Block(node.loc, node.type, [*prefix, compact_dictionary(selected, shape, node.loc),
+                                               copy_value(values, implicit=True)], False)
+
     def dictionary_pop(node, allowed, inherited, control):
         assert isinstance(node.keys, hir.MemberAccess) and isinstance(node.values, hir.MemberAccess)
         owner = node.keys.value
@@ -732,6 +751,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                          replace(node, keys=keys, values=values, key=key, value=value)], False)
 
     def expression(node, allowed, *, inherited=False, control=None):
+        if isinstance(node, hir.DictView) and resource(node.dictionary.type) is not None:
+            return dictionary_view(node, allowed, inherited, control)
         if isinstance(node, hir.DictStore) and node.values is not None and resource(node.values.type) is not None:
             return dictionary_store(node, allowed, inherited, control)
         if (isinstance(node, hir.DictRemove) and node.key is None and node.values is not None

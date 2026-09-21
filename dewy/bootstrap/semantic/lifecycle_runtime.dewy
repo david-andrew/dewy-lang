@@ -444,6 +444,10 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
     # The checked custom-copy call carries its effects and result contract.
     let candidate=hir.node_at(session.hir id)
     if resource(candidate.value_type session.types) is? none {expression(id allowed inherited @plan @session frame=frame) return}
+    if candidate is? hir.DictView {
+        dictionary_view(id candidate allowed inherited @plan @session frame)
+        return
+    }
     if candidate is? hir.DictLookup and not candidate.proven {
         dictionary_get(id candidate allowed inherited @plan @session frame)
         return
@@ -731,6 +735,28 @@ dictionary_clear = (id:addr node:hir.DictRemove allowed:set<addr> inherited:bool
     prefix.push(put(node @session))
     store(id hir.Block[node.loc node.value_type prefix false] @session)
 }
+dictionary_view=(id:addr node:hir.DictView allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?):>void=>{
+    let owner=hir.node_at(session.hir node.dictionary)
+    let borrowed=put(hir.Place[node.loc owner.value_type node.dictionary] @session)
+    expression(borrowed allowed inherited @plan @session frame=frame)
+    let shape=types.node_at(session.types views.structural_base(owner.value_type session.types))
+    $runtime_assert shape is? types.ObjectType
+    let prefix:array<addr>=[]
+    let selected=freeze_route(node.dictionary node.loc receiver_root(node.dictionary session.hir) @prefix @plan @session)
+    if resource(node.value_type session.types) is? none {
+        node.dictionary=selected
+        prefix.push(put(node @session))
+    } else {
+        # Snapshot live values through logical component copies; dead slots
+        # retain only backing storage and must never invoke copy hooks.
+        let field=types.object_field(shape node.name)
+        $runtime_assert field isnt? none
+        let values=put(hir.MemberAccess[node.loc field.value_type selected field.name] @session)
+        prefix.push(compact_dictionary(selected shape node.loc @session))
+        prefix.push(copy_component(values true @plan @session))
+    }
+    store(id hir.Block[node.loc node.value_type prefix false] @session)
+}
 dictionary_pop=(id:addr node:hir.DictRemove allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?):>void=>{
     $runtime_assert node.values isnt? none and node.key isnt? none
     let keys=hir.node_at(session.hir node.keys) let values=hir.node_at(session.hir node.values)
@@ -848,6 +874,10 @@ dictionary_store=(id:addr node:hir.DictStore allowed:set<addr> inherited:bool @p
 expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?=none):>void => {
     if plan.problem isnt? none return
     let node=hir.node_at(session.hir id)
+    if node is? hir.DictView and resource(hir.node_at(session.hir node.dictionary).value_type session.types) isnt? none {
+        dictionary_view(id node allowed inherited @plan @session frame)
+        return
+    }
     if node is? hir.DictStore and node.values isnt? none and resource(hir.node_at(session.hir node.values).value_type session.types) isnt? none {
         dictionary_store(id node allowed inherited @plan @session frame)
         return

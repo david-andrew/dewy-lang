@@ -447,7 +447,9 @@ in both lowerings and the parity tool is the gate.
   ownership, including eager default cleanup. Logical copy/drop first compacts
   tombstones, without adding linear work to each pop. Cached resource-entry
   positions are reprobed because synthesized copies can compact the receiver.
-  Resource iteration/views and entry-place lifetimes remain pending.
+  Dictionary values snapshots copy live components through their hooks; keys
+  keep ordinary value semantics. Resource iteration and entry-place lifetimes
+  remain pending.
   Field and element overwrite now capture selectors and replacement values
   once, then drop the previous owner before installing the new one. This
   includes optional fields, nested arrays and borrowed receivers; side effects

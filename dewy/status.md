@@ -933,7 +933,10 @@ This preserves cheap individual pops instead of shifting the table each time.
 Resource-entry reads currently reprobe after membership proof because a
 synthesized copy can compact the source and invalidate a cached physical slot.
 That is a conservative representation choice, not a loss of membership facts.
-Entry-place lifetimes and resource iteration/views still need implementation.
+Dictionary `.values` snapshots now copy live components through their hooks;
+`.keys` retains ordinary value semantics. Snapshotting skips tombstones, and
+dictionary mutation/cleanup leaves the saved values independently owned.
+Entry-place lifetimes and general resource iteration still need implementation.
 
 ### Scalar record placement and allocation contracts (2026-09-21)
 
