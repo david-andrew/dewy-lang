@@ -1190,3 +1190,12 @@ materialization and proof validation need an ordered shared pipeline; the
 final post-materialization validation is necessary but cannot undo an earlier
 false rejection. Keep this as a Phase 1 correctness task, not a source-style
 requirement to split such guards.
+
+Full-suite checkpoint: commit `744f25d7` passed 3,379 tests with 14 skips
+(1,985 seconds). The test inputs stayed fixed while later work proceeded in
+separate checkouts. The combined local-move/array/parameter tree then passed
+100 hosted checks and built two byte-identical native generations with both
+backend execution checks. The final generation took 60 seconds under load.
+Artifacts: `../dewy-build-artifacts/phase1-resource-ownership-integration-2026-09-21`.
+Targeted second-generation lifecycle parity is running separately; CI is still
+running on the full-suite checkpoint, with the merged ownership commit queued.
