@@ -1914,3 +1914,20 @@ The frozen pair is recorded in the local artifact directory
 `phase1-placement-af12b397-2026-09-21`, with its source and generation hashes;
 the explicit parity output is `phase1-placement-af12b397-parity`. This
 certificate applies to `af12b397`, not subsequent changes.
+
+### Indexed dictionary evaluation and CI closure (2026-09-21)
+
+Full CI at `400c1d51` passed: 3,739 tests, 32 skipped. This closes the broad
+conversion/callable-ownership failures described above; later source changes
+still need their own integration checks.
+
+Both bounds passes now visit a dictionary receiver once, before its arguments,
+including index obligations previously missed by hosted checking. Indexed
+stores can insert new keys without first requiring membership. Indexed
+mutations reject selector/argument effects that may invalidate the enclosing
+owner, including writes through captured helpers. The current guard tracks the
+whole owner conservatively; ordinary named-dictionary compound operations keep
+their existing evaluation behavior. Read-only place selectors remain allowed.
+The focused and adjacent hosted batch passed 61 tests; three positive and eight
+negative cases passed both compilers with direct and C output. The updated
+native driver also checked and emitted its own source successfully.

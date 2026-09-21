@@ -636,3 +636,38 @@ read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.T
     loop arg in unsafe {safe.pop(arg default=arg);}
     return safe
 }
+
+# Captures/globals are distinct from a function's own activation. Include
+# default expressions, but scan nested bodies in their own binding scope.
+nonlocal_bindings=(root:addr nodes:array<hir.AST>):>set<addr>=>{
+    let result:set<addr>=set[] let pending:array<addr>=[root] let seen:set<addr>=set[]
+    loop pending.length>?0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let literal=hir.node_at(nodes id)
+        hir.push_children(literal @pending)
+        if literal isnt? hir.FunctionLiteral continue
+        let local:set<addr>=set[] let reads:set<addr>=set[]
+        let body:array<addr>=[literal.body] let visited:set<addr>=set[]
+        loop parameter in literal_params(literal) {
+            if parameter.binding_id isnt? none {local.add(parameter.binding_id)}
+            if parameter is? hir.BoundParam {body.push(parameter.value)}
+        }
+        loop body.length>?0 {
+            let item=body.pop
+            if item in? visited continue
+            visited.add(item)
+            let node=hir.node_at(nodes item)
+            if node is? hir.FunctionLiteral continue
+            if node is? hir.Declare and node.binding_id isnt? none {local.add(node.binding_id)}
+            else if node is? hir.IteratorExpression {
+                let target=hir.node_at(nodes node.target)
+                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {local.add(target.binding_id)}
+            } else if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {reads.add(node.binding_id)}
+            hir.push_children(node @body)
+        }
+        loop binding in reads {if binding not in? local {result.add(binding)}}
+    }
+    return result
+}

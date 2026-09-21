@@ -845,7 +845,11 @@ class _BoundsValidator:
         }
 
     def validate(self, root: hir.Block, *, effect_context: hir.AST | None = None) -> None:
-        self.call_writes = effects.analyze_global_writes(root, self.mutable_globals)
+        receivers = {sb.access_path(node.keys).binding_id for node in hir.walk(root)
+                     if isinstance(node, (hir.DictStore, hir.DictRemove))
+                     and any(isinstance(step, hir.Index) for step in sb.access_path(node.keys).steps)}
+        captured_receivers = receivers & effects.nonlocal_bindings(root) if receivers else set()
+        self.call_writes = effects.analyze_global_writes(root, self.mutable_globals | captured_receivers)
         self.read_only_places = effects.read_only_places(root, effect_context)
         self.predicate_bindings = predicate_effects.BindingQueries(self.call_writes)
         # module-level function bodies are analyzed after the module's own
@@ -2609,7 +2613,27 @@ class _BoundsValidator:
         self._eval(node.array, state, validate=validate)
         return None
 
+    def _dictionary_receiver(self, node, state, *, validate):
+        if not isinstance(node.keys, hir.MemberAccess):
+            return
+        owner = node.keys.value
+        path = sb.access_path(owner)
+        if validate and isinstance(node, (hir.DictStore, hir.DictRemove)) and any(isinstance(step, hir.Index) for step in path.steps):
+            selected = [step.index for step in path.steps if isinstance(step, hir.Index)]
+            arguments = [getattr(node, name, None) for name in ('key', 'value', 'default')]
+            for value in [*selected, *(argument for argument in arguments if argument is not None)]:
+                writes = predicate_effects.mutated_bindings(value, call_writes=self.call_writes,
+                                                           read_only_places=self.read_only_places)
+                if path.binding_id is not None and path.binding_id in writes:
+                    user_error(self.srcfile, 'container receiver changes during evaluation',
+                               Pointer(span=value.loc, message='the selected storage must survive its selectors and arguments'))
+        # keys/values are hidden projections of one evaluated dictionary.
+        # Visiting neither misses index obligations; visiting both would
+        # apply selector effects twice although lowering evaluates them once.
+        self._eval(owner, state, validate=validate)
+
     def _eval_dict_lookup(self, node: hir.DictLookup, state: State, *, validate: bool) -> Interval | None:
+        self._dictionary_receiver(node, state, validate=validate)
         self._eval(node.key, state, validate=validate)
         if node.default is not None:
             self._eval(node.default, state, validate=validate)
@@ -2620,6 +2644,7 @@ class _BoundsValidator:
         return None
 
     def _eval_dict_contains(self, node: hir.DictContains, state: State, *, validate: bool) -> Interval | None:
+        self._dictionary_receiver(node, state, validate=validate)
         self._eval(node.key, state, validate=validate)
         return None
 
@@ -2637,6 +2662,7 @@ class _BoundsValidator:
                 self._set_interval(state, route, Interval.exact(0))
 
     def _eval_dict_remove(self, node: hir.DictRemove, state: State, *, validate: bool) -> Interval | None:
+        self._dictionary_receiver(node, state, validate=validate)
         if node.key is not None:
             self._eval(node.key, state, validate=validate)
         if node.default is not None:
@@ -2669,6 +2695,7 @@ class _BoundsValidator:
         return None
 
     def _eval_dict_store(self, node: hir.DictStore, state: State, *, validate: bool) -> Interval | None:
+        self._dictionary_receiver(node, state, validate=validate)
         self._eval(node.key, state, validate=validate)
         if node.value is not None:
             self._eval(node.value, state, validate=validate)

@@ -773,3 +773,34 @@ def analyze_global_writes(root: hir.AST, globals: set[int]) -> dict[int, set[int
         key: set(globals) if resolved is None else set().union(*(summaries[id(callee)] for callee in resolved))
         for key, resolved in targets.items()
     }
+
+
+def nonlocal_bindings(root: hir.AST) -> set[int]:
+    """Lexical captures and globals, excluding each function's own storage.
+
+    This lets mutation queries track captured receivers without treating a
+    recursive callee's local binding ids as the caller's current activation.
+    """
+    result = set()
+    for literal in hir.walk(root):
+        if not isinstance(literal, hir.FunctionLiteral):
+            continue
+        params = _literal_params(literal)
+        local = {param.binding_id for param in params}
+        reads = set()
+        pending = [literal.body, *(p.value for p in params if isinstance(p, hir.BoundParam))]
+        seen = set()
+        while pending:
+            node = pending.pop()
+            if id(node) in seen or isinstance(node, hir.FunctionLiteral):
+                continue
+            seen.add(id(node))
+            if isinstance(node, hir.Declare):
+                local.add(node.binding_id)
+            elif isinstance(node, hir.IteratorExpression):
+                local.add(node.target.binding_id)
+            elif isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+                reads.add(node.binding_id)
+            pending.extend(hir.children(node))
+        result.update(reads - local)
+    return result

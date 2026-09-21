@@ -2183,6 +2183,22 @@ def _dict_assignment_target(left: p0.AST, *, ctx: Context) -> hir.AST | None:
         if ty.dict_key_value(dictionary.type) is None:
             return None
         binding = _member_root_binding(dictionary, ctx=ctx)
+    elif isinstance(left.left, p0.BinOp) and isinstance(left.left.op, (t2.IndexJuxtapose, t2.QJuxtapose)):
+        # An indexed dictionary is still a named storage route. Check the
+        # receiver once; reading the final key here would incorrectly require
+        # membership before a store is allowed to insert that key.
+        trial = replace(ctx, refinements=dict(ctx.refinements), length_bounds=dict(ctx.length_bounds),
+                        key_facts=dict(ctx.key_facts))
+        dictionary = typecheck_and_resolve_inner(left.left, ctx=trial)
+        if ty.dict_key_value(dictionary.type) is None:
+            return None
+        ctx.refinements.clear()
+        ctx.refinements.update(trial.refinements)
+        ctx.length_bounds.clear()
+        ctx.length_bounds.update(trial.length_bounds)
+        ctx.key_facts.clear()
+        ctx.key_facts.update(trial.key_facts)
+        binding = _member_root_binding(dictionary, ctx=ctx)
     else:
         return None
     if binding is None:

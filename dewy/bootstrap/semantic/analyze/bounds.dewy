@@ -9,6 +9,7 @@ import p"value_bounds.dewy" as values
 import p"expression_intervals.dewy" as intervals
 import p"predicate_facts.dewy" as predicates
 import p"predicate_paths.dewy" as paths
+import p"predicate_effects.dewy" as predicate_effects
 import p"refinement_facts.dewy" as refinements
 import p"binding_facts.dewy" as stores
 import p"element_facts.dewy" as elements
@@ -54,6 +55,7 @@ Checker:type = [
     # ordinary widening path remains sound, though less precise.
     finite_loop_budget:bigint=64
     loop_qualifier_pairs:dict<addr array<facts.TermPair>>=[]
+    container_receivers:set<addr>=set[]
 ]
 # Construct the same declared-width environment for every invocation. Tests
 # and module drivers must not quietly use different loop-widening contracts.
@@ -413,6 +415,37 @@ analyze_result = (id:addr state:facts.State required:array<addr> @checker:Checke
     checker.result_obligations=previous
     return result
 }
+# Hidden key/value arrays share one receiver evaluation. Mutating operations
+# need that selected place to survive every selector and later argument.
+dictionary_children=(node:hir.DictLookup|hir.DictContains|hir.DictStore|hir.DictRemove @checker:Checker validate:bool):>array<addr>=>{
+    let keys=node_at(node.keys checker)
+    if keys isnt? hir.MemberAccess return hir.children(node)
+    let arguments:array<addr>=[]
+    let key=node.key
+    if key isnt? none {arguments.push(key)}
+    if node is? hir.DictStore {let value=node.value if value isnt? none {arguments.push(value)}}
+    if node is? hir.DictLookup|hir.DictRemove {let fallback=node.default if fallback isnt? none {arguments.push(fallback)}}
+    if validate and node is? hir.DictStore|hir.DictRemove {
+        let access=bindings.access_path(keys.value checker.data.env.nodes)
+        let root=node_at(access.root checker)
+        let indexed=false
+        loop step in access.steps {if node_at(step checker) is? hir.Index {indexed=true}}
+        if indexed and root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
+            let selected=arguments
+            loop step in access.steps {
+                let selector=node_at(step checker)
+                if selector is? hir.Index {selected.push(selector.index)}
+            }
+            loop value in selected {
+                if root.binding_id in? predicate_effects.mutated_bindings(value checker.data.env.nodes checker.call_writes checker.read_only_places) {
+                    fail(value 'container receiver changes during evaluation' 'the selected storage must survive its selectors and arguments' @checker)
+                    break
+                }
+            }
+        }
+    }
+    return [keys.value arguments...]
+}
 evaluate = (id:addr @state:facts.State @checker:Checker validate:bool):>void => {
     let node=node_at(id checker)
     let prototype=checker.prototype
@@ -704,7 +737,8 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         if output.normal isnt? none {state=output.normal}
         return
     }
-    loop child in hir.children(node) {evaluate(child @state @checker validate)}
+    let children=if node is? hir.DictLookup|hir.DictContains|hir.DictStore|hir.DictRemove dictionary_children(node @checker validate) else hir.children(node)
+    loop child in children {evaluate(child @state @checker validate)}
     if node is? hir.MemberAccess {refinements.seed_siblings(@state node checker.data.env @checker.data.registry)}
     if node is? hir.MemberAssign {
         let target=node_at(node.target checker)
@@ -1144,7 +1178,14 @@ collect = (root:addr @checker:Checker):>void => {
         let node=node_at(id checker)
         let target:addr?=none
         if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place {target=node.target}
-        else if node is? hir.DictStore|hir.DictRemove {target=node.keys}
+        else if node is? hir.DictStore|hir.DictRemove {
+            target=node.keys
+            let path=bindings.access_path(node.keys checker.data.env.nodes)
+            let owner=node_at(path.root checker)
+            let indexed=false
+            loop step in path.steps {if node_at(step checker) is? hir.Index {indexed=true}}
+            if indexed and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.container_receivers.add(owner.binding_id)}
+        }
         else if node is? hir.FunctionCall {
             let method=node_at(node.func checker)
             if method is? hir.ArrayMethod and method.name not=? 'join' {target=method.array}
@@ -1166,7 +1207,13 @@ collect = (root:addr @checker:Checker):>void => {
 }
 validate = (root:addr @checker:Checker read_only:set<addr> | none=none):>void => {
     collect(root @checker)
-    checker.call_writes=effects.analyze_global_writes(root checker.data.env.nodes checker.mutable_globals checker.data.env.registry)
+    let tracked=checker.mutable_globals
+    if checker.container_receivers.length>?0 {
+        loop binding in effects.nonlocal_bindings(root checker.data.env.nodes) {
+            if binding in? checker.container_receivers {tracked.add(binding)}
+        }
+    }
+    checker.call_writes=effects.analyze_global_writes(root checker.data.env.nodes tracked checker.data.env.registry)
     checker.read_only_places=if read_only isnt? none read_only else effects.read_only_places(root checker.data.env.nodes checker.data.env.types)
     checker.path_context=paths.Context[checker.data.env.nodes checker.data.relations.facts checker.call_writes]
     let node=node_at(root checker)
