@@ -1,0 +1,51 @@
+# Array copies run component hooks in source order and retain the exact
+# copied length. Nested arrays and unions use the same checked construction.
+let copies:int64=0
+let drops:int64=0
+Handle=type of [id:int64 data:array<int64>
+$__drop__
+release=():>void=>{drops+=1 data.clear}
+$__copy__
+duplicate=():>Handle=>{copies+=1 Handle[id+1 data.copy()]}
+]
+exercise=():>int64=>{
+    let source:array<Handle>=[Handle[10 [42]] Handle[20 [2]]]
+    let copied=source.copy()
+    $assert copied.length=?2
+    if copied[0].id not=?11 or copied[1].id not=?21 return 1
+    let inferred=source
+    inferred[0].id=99
+    source[0].id=5
+    $assert inferred.length=?2
+    if inferred[0].id not=?99 or source[0].id not=?5 return 2
+    let nested:array<array<Handle>>=[[Handle[30 [3]]]]
+    let nested_copy=nested.copy()
+    $assert nested_copy.length=?1
+    if nested_copy[0].length not=?1 return 3
+    if nested_copy[0][0].id not=?31 or nested[0][0].id not=?30 return 4
+    let optional:array<Handle?>=[none Handle[40 [4]]]
+    let optional_copy=optional.copy()
+    $assert optional_copy.length=?2
+    if optional_copy[0] isnt? none return 5
+    let present=optional_copy[1].id
+    if present isnt? int64 or present not=?41 return 6
+    let fixed:array<Handle length=1>=[Handle[50 [5]]]
+    let fixed_copy=fixed.copy()
+    if fixed_copy[0].id not=?51 return 7
+    if copies not=?7 return 8
+    return 42
+}
+verify=():>int64=>{
+    copies=0 drops=0
+    let result=exercise()
+    if result not=?42 return result
+    if drops not=?12 return 9
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if verify() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

@@ -109,9 +109,47 @@ sources = (id:addr env:values.Environment @registry:bindings.Registry):>array<So
     return result
 }
 
+# Static type evidence belongs to the evaluated value, not a mutable source
+# binding which a later argument may already have changed.
+static_length = (id:addr env:values.Environment):>bigint? => {
+    let node=hir.node_at(env.nodes expressions.strip_casts(id env.nodes))
+    let type=types.node_at(env.types types.unfold(types.strip_refinement(node.value_type env.types) env.types))
+    if type is? types.ArrayType|types.StringType return type.length
+    if type is? types.StringLiteralType return type.value.length
+    if types.is_primitive(type 'char') or types.is_primitive(type 'grapheme') return 1
+    return none
+}
+literal_lengths = (@state:facts.State array:addr literal:hir.ArrayLiteral word_type:addr loc:Span env:values.Environment @registry:bindings.Registry):>void => {
+    if literal.items.length =? 0 return
+    let common:ranges.Interval?=none
+    loop item in literal.items {
+        let exact=static_length(item env)
+        if exact is? none return
+        common=if common is? none ranges.exact(exact) else ranges.union(common ranges.exact(exact))
+    }
+    if common isnt? none {
+        let target=route(array [] word_type loc @registry)
+        facts.put(@state facts.value(facts.Term[target 'length']) common)
+    }
+}
+
 store = (@state:facts.State array:addr value:addr word_type:addr loc:Span env:values.Environment @registry:bindings.Registry):>void => {
     let length = facts.lookup(state facts.value(facts.Term[array 'length']))
     let empty = length isnt? none and ranges.same_bounds(length ranges.exact(0))
+    let exact=static_length(value env)
+    let target:addr?=none
+    loop item in routes(array registry) {if item.path.length =? 1 {target=item.id}}
+    if exact isnt? none and empty {
+        target=route(array [] word_type loc @registry)
+        facts.put(@state facts.value(facts.Term[target 'length']) ranges.exact(exact))
+    } else if target isnt? none {
+        let key=facts.value(facts.Term[target 'length'])
+        let previous=facts.lookup(state key)
+        if previous isnt? none {
+            if exact is? none {facts.remove(@state key)}
+            else {facts.put(@state key ranges.union(previous ranges.exact(exact)))}
+        }
+    }
     let stored:dict<addr facts.State> = []
     loop source in sources(value env @registry) {
         let target = route(array source.path word_type loc @registry)
@@ -153,6 +191,8 @@ read = (@state:facts.State array:addr target:addr word_type:addr loc:Span @regis
         let path:array<string> = []
         loop i in 1.. and i <? item.path.length { path.push(item.path[i]) }
         let subject = if path.length =? 0 target else bindings.route_id(@registry target path word_type loc)
+        let length=facts.lookup(state facts.value(facts.Term[item.id 'length']))
+        if length isnt? none {facts.put(@state facts.value(facts.Term[subject 'length']) length)}
         loop entry in relations.facts_of(state facts.Term[item.id]).values {
             facts.put(@state relations.rekey(entry.fact facts.Term[subject]) entry.interval)
         }
@@ -161,6 +201,8 @@ read = (@state:facts.State array:addr target:addr word_type:addr loc:Span @regis
 copy = (@state:facts.State source:addr target:addr word_type:addr loc:Span @registry:bindings.Registry):>void => {
     loop item in routes(source registry) {
         let mirrored = bindings.route_id(@registry target item.path word_type loc)
+        let length=facts.lookup(state facts.value(facts.Term[item.id 'length']))
+        if length isnt? none {facts.put(@state facts.value(facts.Term[mirrored 'length']) length)}
         loop entry in relations.facts_of(state facts.Term[item.id]).values {
             facts.put(@state relations.rekey(entry.fact facts.Term[mirrored]) entry.interval)
         }

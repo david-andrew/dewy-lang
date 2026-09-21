@@ -176,7 +176,10 @@ class _PlaceLowering:
                     target.type,
                     target.loc,
                 )
-        if isinstance(ty.unfold(ty.strip_refinement(target.type)), ty.ObjectType):
+        if (isinstance(ty.unfold(ty.strip_refinement(target.type)), ty.ObjectType)
+                or ty.optional_payload(target.type) is not None):
+            # Records and optional values borrow their storage directly;
+            # an array slot contains a handle to that storage.
             return prelude, self._read_index_storage(address, target)
         return prelude, address
 

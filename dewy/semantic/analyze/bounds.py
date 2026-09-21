@@ -1194,6 +1194,10 @@ class _BoundsValidator:
         if sequence_id is None:
             return None if declared is None else self._length_default().intersect(declared)
         interval = state.get(_length_key(sequence_id), self._length_default())
+        element = self._element_route_of(node)
+        common = state.get(_length_key(element)) if element is not None else None
+        if common is not None:
+            interval = interval.intersect(common)
         return interval if declared is None else interval.intersect(declared)
 
     def _slice_length_interval(self, node: hir.StringSlice, state: State) -> Interval | None:
@@ -3254,6 +3258,9 @@ class _BoundsValidator:
         if isinstance(node, hir.MemberAccess):
             self._forget_container_value(node.value, state)
         elif isinstance(node, hir.Index):
+            array = self._array_id(node.array)
+            if array is not None:
+                self._drop_route_facts(state, array, ('*',))
             self._forget_container_value(node.array, state)
 
     def _drop_route_facts(self, state: State, root_id: int, prefix: tuple[str, ...] = ()) -> None:
@@ -3697,6 +3704,11 @@ class _BoundsValidator:
         self._seed_call_term_facts(subject, value, state)
         self._seed_sum_facts(subject, value, state)
         stripped = _strip_casts(value)
+        if isinstance(stripped, hir.ArrayLiteral) and stripped.items:
+            lengths = [self._static_element_length(item) for item in stripped.items]
+            if all(length is not None for length in lengths):
+                route = self._element_route(subject, (), loc)
+                state[_length_key(route)] = Interval(min(lengths), max(lengths))
         if isinstance(stripped, hir.StringSlice):
             # `let chunk = src[..n)`: the slice is never longer than its source,
             # and a head slice's length is its end (`n`, or `n + 1` for `..n]`)
@@ -4030,9 +4042,25 @@ class _BoundsValidator:
         assert index_fact is not None
         return _index_fact_key(subject, index_fact[1])
 
+    def _static_element_length(self, value: hir.AST) -> int | None:
+        # Type evidence describes the evaluated value even if a later
+        # argument mutates one of its source bindings. Never replay it.
+        shape = ty.unfold(ty.strip_refinement(_strip_casts(value).type))
+        return shape.length if isinstance(shape, ty.ArrayType) else self._string_length(shape)
+
     def _store_element(self, state: State, array_id: int, value: hir.AST, loc: Span) -> None:
         """An element joins the array: its facts become (or narrow) the element facts."""
         empty = state.get(_length_key(array_id)) == Interval.exact(0)
+        route = self.registry.route_ids.get((array_id, ('*',)))
+        known = self._static_element_length(value)
+        if known is not None and empty:
+            route = self._element_route(array_id, (), loc)
+            state[_length_key(route)] = Interval.exact(known)
+        elif route is not None and _length_key(route) in state:
+            if known is None:
+                state.pop(_length_key(route))
+            else:
+                state[_length_key(route)] = state[_length_key(route)].union(Interval.exact(known))
         stored: dict[int, dict[int, Interval]] = {}
         for path, source in self._value_fact_sources(value):
             stored[self._element_route(array_id, path, loc)] = self._facts_of(state, source)
@@ -4059,6 +4087,8 @@ class _BoundsValidator:
         for route in self._element_routes(array_id):
             path = self.registry.route_paths[route][1:]
             subject = target if not path else self.registry.route_id(target, path, 'int64', loc)
+            if _length_key(route) in state:
+                state[_length_key(subject)] = state[_length_key(route)]
             for key, interval in self._facts_of(state, route).items():
                 state[self._rekey(key, subject)] = interval
 
@@ -4067,6 +4097,8 @@ class _BoundsValidator:
         for route in self._element_routes(source):
             path = self.registry.route_paths[route]
             mirrored = self.registry.route_id(target, path, 'int64', loc)
+            if _length_key(route) in state:
+                state[_length_key(mirrored)] = state[_length_key(route)]
             for key, interval in self._facts_of(state, route).items():
                 state[self._rekey(key, mirrored)] = interval
 

@@ -321,11 +321,11 @@ let replace_saved = ():>void => {
 """))
 
 
-def test_exact_array_returns_reject_unresolved_handle_storage() -> None:
-    with pytest.raises(NotImplementedYet, match='recursively fixed result layout'):
-        codegen(SrcFile(None, '''
+def test_exact_array_returns_support_owned_handle_storage() -> None:
+    emitted = codegen(SrcFile(None, '''
 let make = ():>array<string length=1> => ["local"]
 '''))
+    assert 'let make = (__dewy_result_' in emitted
 
 
 def test_nested_exact_array_returns_prepare_storage_in_the_caller() -> None:
@@ -344,8 +344,10 @@ let main = ():>int64 => {
     assert '__alloca__(' not in make_body
     assert '__alloca__(' not in forward_body
     assert 'make(__dewy_result_' in forward_body
-    assert main_body.count('__alloca__(48)') == 3
-    assert main_body.count('__alloca__(16)') == 3
+    # Only the outer descriptor/data are caller-frame storage. Rows are
+    # arena-owned so ordinary array cleanup can reclaim them safely.
+    assert main_body.count('__alloca__(48)') == 1
+    assert main_body.count('__alloca__(16)') == 1
     assert 'forward(__dewy_array_' in main_body
 
 

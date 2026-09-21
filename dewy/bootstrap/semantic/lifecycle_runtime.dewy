@@ -224,7 +224,7 @@ copy_operation = (owner:addr loc:Span @plan:Plan @session:contexts.Session):>add
     }
     let operation=plan.component_copies.get(owner)
     if operation isnt? none return operation
-    if type isnt? types.ObjectType|types.TypeOr {
+    if type isnt? types.ObjectType|types.TypeOr|types.ArrayType {
         reject(hir.Void[loc types.primitive('void' @session.types)] 'synthesized copies of this resource container' @plan)
         return put(hir.Void[loc owner] @session)
     }
@@ -234,11 +234,45 @@ copy_operation = (owner:addr loc:Span @plan:Plan @session:contexts.Session):>add
     let parameter=bindings.binding_at(session.registry parameter_id)
     parameter.value_type=owner parameter.store_type=owner
     bindings.store_binding(@session.registry parameter_id parameter)
-    let signature=types.function_type([types.PosOrKwArg['__source' owner place=true]] [] none owner [] @session.types)
+    let result_type=if type is? types.ArrayType types.refined_type(owner [facts.Proposition['length' '=?' term='__source' term_id=parameter_id]] @session.types) else owner
+    let signature=types.function_type([types.PosOrKwArg['__source' owner place=true]] [] none result_type [] @session.types)
     operation=put(hir.ExpressedIdentifier[loc signature name binding_id] @session)
     plan.component_copies[owner]=operation
     let receiver=put(hir.ExpressedIdentifier[loc owner '__source' parameter_id] @session)
-    let value=if type is? types.ObjectType {
+    let prefix:array<addr>=[]
+    let value=if type is? types.ArrayType {
+        let dynamic=types.array_type(type.element none @session.types)
+        let empty_type=types.array_type(type.element 0 @session.types)
+        let output_id=bindings.allocate(@session.registry none '__result' 'value' loc)
+        let output=bindings.binding_at(session.registry output_id)
+        output.value_type=dynamic
+        let empty=types.primitive('void' @session.types)
+        let word=types.primitive('int64' @session.types)
+        let boolean=types.primitive('bool' @session.types)
+        let initial=put(hir.ArrayLiteral[loc empty_type []] @session)
+        let declaration=put(hir.Declare[loc empty 'let' '__result' dynamic initial output_id] @session)
+        output.declaration=declaration
+        bindings.store_binding(@session.registry output_id output)
+        let result=put(hir.ExpressedIdentifier[loc dynamic '__result' output_id] @session)
+        let zero=put(hir.Integer[loc word '0d' 0] @session)
+        let one=put(hir.Integer[loc word '0d' 1] @session)
+        let cursor=capture_result(zero loc @session)
+        let comparison_type=types.function_type([types.PosOrKwArg[none word] types.PosOrKwArg[none word]] [] none boolean [] @session.types)
+        let comparison=put(hir.ExpressedIdentifier[loc comparison_type '__lt__' none] @session)
+        let length=put(hir.ArrayLength[loc word receiver] @session)
+        let condition=put(hir.FunctionCall[loc boolean comparison [cursor.value length] []] @session)
+        let selected=put(hir.Index[loc type.element receiver cursor.value none] @session)
+        let element=copy_component(selected false @plan @session)
+        let push_type=types.function_type([types.PosOrKwArg['value' type.element]] [] none empty [] @session.types)
+        let push=put(hir.ArrayMethod[loc push_type result 'push'] @session)
+        let append=put(hir.FunctionCall[loc empty push [element] []] @session)
+        let advance=put(hir.Assign[loc empty cursor.value '+=' one] @session)
+        let body=put(hir.Block[loc empty [append advance] true] @session)
+        let arm=put(hir.LoopArm[loc empty condition body] @session)
+        let loop_body=put(hir.Flow[loc empty [arm] none] @session)
+        prefix=[declaration cursor.declaration loop_body]
+        put(hir.Obligation[loc owner result result_type 'the generated array copy return contract'] @session)
+    } else if type is? types.ObjectType {
         let fields:array<hir.ObjectField>=[]
         loop field in type.fields {
             let source=put(hir.MemberAccess[loc field.value_type receiver field.name] @session)
@@ -267,7 +301,8 @@ copy_operation = (owner:addr loc:Span @plan:Plan @session:contexts.Session):>add
     let bottom=types.primitive('never' @session.types)
     let empty=types.primitive('void' @session.types)
     let returned=put(hir.Return[loc bottom value] @session)
-    let body=put(hir.Block[loc bottom [returned] true] @session)
+    prefix.push(returned)
+    let body=put(hir.Block[loc bottom prefix true] @session)
     let function=put(hir.FunctionLiteral[loc signature [hir.Param['__source' owner parameter_id place=true]] [] none owner body source=plan.function_source] @session)
     let declaration=put(hir.Declare[loc empty 'const' name signature function binding_id] @session)
     let binding=bindings.binding_at(session.registry binding_id)
@@ -431,6 +466,10 @@ clear_operation = (owner:addr loc:Span @plan:Plan @session:contexts.Session):>ad
     let method_type=types.function_type([] [] none empty [] @session.types)
     let method=put(hir.ArrayMethod[loc method_type receiver 'clear'] @session)
     body.push(put(hir.FunctionCall[loc empty method [] []] @session))
+    # This signature bypassed source checking, so install its return proof
+    # obligation explicitly just as checking an ordinary procedure does.
+    let returned=put(hir.Void[loc empty] @session)
+    body.push(put(hir.Obligation[loc empty returned result 'the generated clear return contract'] @session))
     let block=put(hir.Block[loc empty body true] @session)
     let function=put(hir.FunctionLiteral[loc signature [hir.Param['__items' owner parameter_id place=true]] [] none empty block source=plan.function_source] @session)
     let declaration=put(hir.Declare[loc empty 'const' name signature function binding_id] @session)

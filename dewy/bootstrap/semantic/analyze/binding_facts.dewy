@@ -78,6 +78,10 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
         return
     }
     call_result(@state subject value @data)
+    if copied is? hir.ArrayLiteral {
+        elements.literal_lengths(@state subject copied word_type loc data.env @data.registry)
+        note_element_routes(subject @data)
+    }
     if not intervals.stable(value data.snapshot data.env.nodes) return
     terms.seed_sum(@state subject value data.env data.relations @data.registry)
     let id=expressions.strip_casts(value data.env.nodes)

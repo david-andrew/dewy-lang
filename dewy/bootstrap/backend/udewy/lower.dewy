@@ -606,7 +606,8 @@ expression = (id:addr @state:State):>addr => {
     }
     if node is? hir.FunctionCall {
         if node.implicit_copy {
-            let kind=if types.node_at(state.type_nodes types.strip_refinement(node.value_type state.type_nodes)) is? types.TypeOr 'cell' else 'record'
+            let copied_shape=types.node_at(state.type_nodes views.structural_base(node.value_type state.type_nodes))
+            let kind=if copied_shape is? types.TypeOr 'cell' else if copied_shape is? types.ArrayType 'array' else 'record'
             note_copy(kind node.value_type 'implicit resource copy' 'the source remains live and an independent owner is required' node @state)
         }
         let args:array<addr>=[]

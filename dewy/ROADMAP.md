@@ -433,15 +433,17 @@ in both lowerings and the parity tool is the gate.
   once. `clear` drops elements in reverse order, retaining its checked
   zero-length result fact even through an indexed receiver. Element overwrite,
   `truncate`, transfers from existing
-  move-only bindings and synthesized element copies remain outstanding. Resource unions
+  move-only bindings remain outstanding. Resource unions
   and optional owners now select cleanup by the active alternative, including
   array elements; custom union moves consume only that alternative's resources. Explicit custom copies can construct fresh results,
   including nested hook calls. When a surviving source needs an independent
   owner, its declared copy hook now supplies local bindings, projected values
   and owning arguments; its effects and implicit-copy cost remain checked.
   Synthesized record and union copies now call the active components' copy
-  hooks, including nested wrappers and temporary receivers. Array/container
-  element copies remain pending. Fresh record results now transfer from factories
+  hooks, including nested wrappers and temporary receivers. Synthesized array
+  copies now run component hooks and prove their returned length; nested arrays
+  and optional elements use the same construction. General dictionary ownership
+  operations remain pending. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch
   owners. Ordinary `@` parameters borrow resource records, including nested

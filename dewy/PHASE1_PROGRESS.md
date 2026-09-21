@@ -1456,3 +1456,40 @@ Validation: nine hosted call-fact checks passed. The imported reader/mutator
 harness passed native/hosted acceptance, rejection and execution on both
 backends using the current integration driver. A new fixed-point integration
 is still required; this local comparison alone does not certify it.
+
+Synthesized array copies now build each resource element through checked copy
+operations, including nested arrays, optional elements and fixed-length arrays.
+The helper proves its result length against the borrowed source; inferred
+copies retain an implicit-cost note, while explicit copies work under
+`$explicit_copies`. Component hooks may change values, so their output is
+constructed rather than treated as a physical snapshot of the source.
+
+Generated clear helpers now contain an explicit return proof obligation.
+Their earlier signature declared the zero-length fact but did not itself
+cause the body to be checked. Tests remove the clear operation, or the append
+from a generated copy loop, and require bounds validation to reject the broken
+helper. This corrects that validation gap rather than trusting generated HIR.
+
+Array element facts now retain common static lengths from literal elements,
+copy them to independent arrays, and widen or forget them on insertion and
+mutation. Evidence comes from evaluated values' static types, not reevaluating
+an argument or reading a binding after another argument changed it. Mutating
+an indexed child invalidates the parent's common element facts.
+
+The hosted result ABI now supports exact outer arrays containing dynamic rows,
+strings and optional cells. Nested rows own their storage; result writes retain
+owned elements rather than leaving handles into a released source. Optional
+array places lend the selected cell, matching the parameter ABI.
+
+Validation: 78 focused checks passed, including three native comparison groups,
+strict explicit-copy acceptance and implicit-copy rejection, generated-contract
+corruption checks, and existing fixed-array lowering. The shared resource-copy
+fixture checks seven copies, twelve drops, independent mutation and zero retained
+storage over 100 repetitions on both output backends. Imported-effect integration
+and broader ownership regressions are checked separately before the native
+fixed-point checkpoint.
+
+After importing the module-effect fix, all 181 adjacent hosted lifecycle, array
+storage, projected-place, borrowed-call and generated-contract checks passed.
+The remote pytest checkpoint at `40586e70` and the post-packaging-fix native
+release at `d858cf4e` both completed successfully.

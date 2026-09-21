@@ -5,8 +5,8 @@ by-value parameters and results transfer fresh owners. Checked @ parameters
 borrow. Same-scope bindings can move at last use, and custom copy/move hooks
 remain checked calls. Drop precedes field/element storage cleanup.
 
-Conditional consumption of outer owners, field transfers, synthesized array copies
-and the remaining resource-container mutations still need the general lifetime plan.
+Conditional consumption of outer owners, field transfers and the remaining
+resource-container mutations still need the general lifetime plan.
 """
 from dataclasses import replace
 
@@ -218,18 +218,44 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             (operation for known, operation in component_copies.values() if known == shape), None)
         if operation is not None:
             return replace(operation, loc=loc)
-        if not isinstance(shape, (ty.ObjectType, ty.TypeOr)):
+        if not isinstance(shape, (ty.ObjectType, ty.TypeOr, ty.ArrayType)):
             reject(root, 'synthesized copies of this resource container')
         name = f'__dewy_copy_components_{registry.next_id}'
         binding = registry.allocate(object(), name, 'value', loc)
         parameter = registry.allocate(object(), '__source', 'param', loc)
         parameter.type = shape
-        signature = ty.FunctionType([ty.PosOrKwArg('__source', shape, place=True)], [], None, shape)
+        result_type = ty.RefinedType(shape, (ty.Proposition('length', '=?', 0,
+            term='__source', term_id=parameter.id),)) if isinstance(shape, ty.ArrayType) else shape
+        signature = ty.FunctionType([ty.PosOrKwArg('__source', shape, place=True)], [], None, result_type)
         binding.type = signature
         operation = hir.ExpressedIdentifier(loc, signature, name, binding_id=binding.id)
         component_copies[id(shape)] = (shape, operation)
         receiver = hir.ExpressedIdentifier(loc, shape, parameter.name, binding_id=parameter.id)
-        if isinstance(shape, ty.ObjectType):
+        prefix = []
+        if isinstance(shape, ty.ArrayType):
+            dynamic = ty.ArrayType(shape.element, None)
+            output = registry.allocate(object(), '__result', 'value', loc)
+            output.type = dynamic
+            empty = hir.ArrayLiteral(loc, ty.ArrayType(shape.element, 0), [])
+            declaration = hir.Declare(loc, ty.VOID_TYPE, 'let', output.name, dynamic, empty, binding_id=output.id)
+            output.declaration = declaration
+            value = hir.ExpressedIdentifier(loc, dynamic, output.name, binding_id=output.id)
+            zero = hir.Integer(loc, 'int64', t0.base10, 0)
+            one = hir.Integer(loc, 'int64', t0.base10, 1)
+            cursor_decl, cursor = capture(zero, loc)
+            comparison = hir.ExpressedIdentifier(loc, ty.FunctionType(
+                [ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, 'bool'), '__lt__')
+            condition = hir.FunctionCall(loc, 'bool', comparison, [cursor, hir.ArrayLength(loc, 'int64', receiver)], {})
+            element = copy_value(hir.Index(loc, shape.element, receiver, cursor, None), implicit=False)
+            push_type = ty.FunctionType([ty.PosOrKwArg('value', shape.element)], [], None, ty.VOID_TYPE)
+            push = hir.FunctionCall(loc, ty.VOID_TYPE, hir.ArrayMethod(loc, push_type, value, 'push'), [element], {})
+            loop_body = hir.Block(loc, ty.VOID_TYPE, [push, hir.Assign(loc, ty.VOID_TYPE, cursor, '+=', one)], True)
+            loop = hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, condition, loop_body)])
+            prefix = [declaration, cursor_decl, loop]
+            # Both dynamic and fixed-size results owe the source's length.
+            # The ordinary loop proof, not synthesized metadata, establishes it.
+            value = hir.Obligation(loc, shape, value, result_type, 'the generated array copy return contract')
+        elif isinstance(shape, ty.ObjectType):
             value = hir.ObjectLiteral(loc, shape, [hir.ObjectField(loc, field.name,
                 copy_value(hir.MemberAccess(loc, field.type, receiver, field.name), implicit=False))
                 for field in shape.fields])
@@ -242,7 +268,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             value = hir.Flow(loc, shape, [hir.IfArm(loc, shape,
                 hir.TypeTest(loc, 'bool', receiver, member, False), result)
                 for member, result in alternatives[:-1]], alternatives[-1][1])
-        body = hir.Block(loc, ty.BOTTOM_TYPE, [hir.Return(loc, ty.BOTTOM_TYPE, value)], True)
+        body = hir.Block(loc, ty.BOTTOM_TYPE, [*prefix, hir.Return(loc, ty.BOTTOM_TYPE, value)], True)
         literal = hir.FunctionLiteral(loc, signature,
             [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)], [], None,
             shape, body, source=current_source)
@@ -395,7 +421,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             method_type = ty.FunctionType([], [], None, ty.VOID_TYPE)
             method = hir.ArrayMethod(loc, method_type, receiver, 'clear')
             clear = hir.FunctionCall(loc, ty.VOID_TYPE, method, [], {})
-            body = hir.Block(loc, ty.VOID_TYPE, [*cleanup([borrowed], loc), clear], True)
+            # Generated signatures bypass source return checking. Materialize
+            # the same obligation explicitly; the signature alone is no proof.
+            verified = hir.Obligation(loc, ty.VOID_TYPE, hir.Void(loc, ty.VOID_TYPE),
+                                      result, 'the generated clear return contract')
+            body = hir.Block(loc, ty.VOID_TYPE, [*cleanup([borrowed], loc), clear, verified], True)
             literal = hir.FunctionLiteral(loc, signature,
                 [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)],
                 [], None, ty.VOID_TYPE, body, source=current_source)

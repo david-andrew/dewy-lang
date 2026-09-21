@@ -2823,10 +2823,12 @@ class _ArrayLowering(_ArraySharing):
         self,
         array_type: ty.ArrayType,
         loc: Span,
+        *,
+        arena: bool = False,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
-        """Allocate the complete exact array storage tree in the caller."""
+        """Allocate the fixed part of an array result in its owner's storage."""
 
-        statements, target = self._allocate_array_value(array_type, loc)
+        statements, target = self._allocate_array_value(array_type, loc, arena=arena)
         descriptor = replace(target, type='int64')
         for index in range(array_type.length or 0):
             address = self._array_element_address(
@@ -2835,10 +2837,17 @@ class _ArrayLowering(_ArraySharing):
                 array_type.element,
                 loc,
             )
-            if isinstance(array_type.element, ty.ArrayType):
+            if isinstance(array_type.element, ty.ArrayType) and array_type.element.length is None:
+                # Runtime-length rows are owned handles. The callee fills
+                # this slot once its result is available; no frame-local
+                # descriptor can stand in for that escaping row.
+                statements.append(self._array_store(
+                    self._int64_literal(loc, 0), address, array_type.element, loc))
+            elif isinstance(array_type.element, ty.ArrayType):
                 nested_statements, nested = self._allocate_array_result_value(
                     array_type.element,
                     loc,
+                    arena=self._has_arena(),
                 )
                 statements.extend(nested_statements)
                 statements.append(
@@ -3119,22 +3128,11 @@ class _ArrayLowering(_ArraySharing):
                     for member in map(ty.strip_refinement, members)
                 )
             return False
-        element_type = ty.strip_refinement(array_type.element)
-        return (
-            array_type.length == 0
-            or element_type == 'bool'
-            or ty.enum_members(element_type) is not None
-            or ty.fixed_integer_layout(element_type) is not None
-            or isinstance(element_type, ty.FunctionType)
-            or (
-                isinstance(element_type, ty.ArrayType)
-                and cls._array_result_elements_are_returnable(element_type)
-            )
-            or (
-                isinstance(element_type, ty.ObjectType)
-                and cls._object_result_fields_are_returnable(element_type)
-            )
-        )
+        # Exact outer storage still contains owned handle slots for strings,
+        # cells and dynamic rows. Their returnability is the same as elements
+        # of a runtime-length container.
+        return array_type.length == 0 or cls._array_result_elements_are_returnable(
+            replace(array_type, length=None))
 
     def _array_element_address(
         self,
@@ -3445,7 +3443,11 @@ class _ArrayLowering(_ArraySharing):
                     array_type.element,
                     element.loc,
                 )
-                if isinstance(array_type.element, ty.ArrayType):
+                if isinstance(array_type.element, ty.ArrayType) and array_type.element.length is None:
+                    prelude, value = self._arena_array_field_value(element, array_type.element)
+                    statements.extend(prelude)
+                    statements.append(self._array_store(value, target_address, array_type.element, element.loc))
+                elif isinstance(array_type.element, ty.ArrayType):
                     nested_dest = self._array_load(
                         target_address,
                         array_type.element,
@@ -3555,7 +3557,7 @@ class _ArrayLowering(_ArraySharing):
                 loc,
             )
             if isinstance(array_type.element, ty.ArrayType):
-                target_value = self._array_load(
+                target_value = target_address if array_type.element.length is None else self._array_load(
                     target_address,
                     array_type.element,
                     loc,
@@ -3584,14 +3586,9 @@ class _ArrayLowering(_ArraySharing):
                     )
                 )
             else:
-                statements.append(
-                    self._array_store(
-                        source_value,
-                        target_address,
-                        array_type.element,
-                        loc,
-                    )
-                )
+                statements.extend(self._copy_array_element_between_addresses(
+                    source_address, target_address, array_type.element, loc,
+                    arena=self._has_arena()))
         return statements
 
     def _lower_array_iterator_flow(

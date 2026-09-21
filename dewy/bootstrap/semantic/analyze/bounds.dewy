@@ -131,7 +131,14 @@ forget_value = (id:addr @state:facts.State @checker:Checker):>void => {
         }
     }
     let ids:array<addr>=[path.root]
-    loop step in path.steps {ids.push(step)}
+    loop step in path.steps {
+        ids.push(step)
+        let node=node_at(step checker)
+        if node is? hir.Index {
+            let array=terms.sequence_id(node.array checker.data.env @checker.data.registry)
+            if array isnt? none {stores.forget(@state array @checker.data prefix=['*'])}
+        }
+    }
     loop value in ids {
         let term=terms.binding_term(value checker.data.env @checker.data.registry)
         if term isnt? none {facts.forget(@state term)}

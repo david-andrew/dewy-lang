@@ -5432,7 +5432,8 @@ class _Lowerer(
             return self._extract_dict_view(node)
         if isinstance(node, hir.FunctionCall):
             if node.implicit_copy:
-                kind = 'cell' if isinstance(ty.strip_refinement(node.type), ty.TypeOr) else 'record'
+                copied_shape = ty.unfold(ty.strip_refinement(node.type))
+                kind = 'cell' if isinstance(copied_shape, ty.TypeOr) else 'array' if isinstance(copied_shape, ty.ArrayType) else 'record'
                 self._note_copy(kind, node.type, 'implicit resource copy',
                                 'the source remains live and an independent owner is required', node.loc)
             raw = self._raw_aggregate_intrinsic(node)

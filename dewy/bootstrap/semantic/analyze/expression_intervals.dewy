@@ -6,6 +6,7 @@ import p"hir_facts.dewy" as expressions
 import p"value_bounds.dewy" as values
 import p"refinement_facts.dewy" as refinements
 import p"term_facts.dewy" as terms
+import p"element_facts.dewy" as elements
 import p"fact_state.dewy" as facts
 import p"intervals.dewy" as ranges
 
@@ -105,6 +106,8 @@ length = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @re
     let sequence=terms.sequence_id(id env @registry)
     if sequence is? none return if declared is? none none else ranges.intersect(values.length_default(env.cap) declared)
     let known=facts.lookup(state facts.value(facts.Term[sequence 'length']))
+    let element=elements.route_of(id env @registry)
+    if element isnt? none {known=meet(known facts.lookup(state facts.value(facts.Term[element 'length'])))}
     return meet((if known is? none values.length_default(env.cap) else known) declared)
 }
 slice_length = (node:hir.StringSlice state:facts.State snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
