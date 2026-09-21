@@ -6961,14 +6961,31 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
     return minted
 
 
-def _place_fits(actual: ty.Type, required: ty.Type) -> bool:
-    """A place of a minted child may stand where a place of its parent (or of the
-    structure it carries) is required: the parent's fields sit at the same
-    offsets with the same types, so every store the callee can make is one the
-    child's layout accepts; the child's own fields are simply not visible."""
-    actual, required = ty.unfold(ty.strip_refinement(actual)), ty.unfold(ty.strip_refinement(required))
-    return isinstance(actual, ty.ObjectType) and isinstance(required, ty.ObjectType) and (
-        ty.user_brand_descends(actual, required) or ty.user_brand_carries(actual, required)
+def _place_fits(actual: ty.Type, required: ty.Type, *, readonly: bool = False) -> bool:
+    """Nominal prefix compatibility does not make writable fields covariant.
+
+    A parent-typed callee can store any value its declared fields accept.
+    A child may strengthen those fields for ordinary value subtyping, but
+    lending that stronger storage through the wider contract is unsound.
+    Keep outer storage refinements invariant as well as individual fields.
+    """
+    if readonly:
+        actual, required = ty.strip_refinement(actual), ty.strip_refinement(required)
+    actual, required = ty.unfold(actual), ty.unfold(required)
+    if not isinstance(actual, ty.ObjectType) or not isinstance(required, ty.ObjectType):
+        return False
+    if not (ty.user_brand_descends(actual, required) or ty.user_brand_carries(actual, required)):
+        return False
+    if readonly:
+        # Compiler-only copy receivers cannot write through the wider view.
+        # Still require the same field representation, rather than assuming
+        # that arbitrary value subtyping implies a compatible memory layout.
+        return all(mine.name == theirs.name and ty.strip_refinement(mine.type) == ty.strip_refinement(theirs.type)
+                   for mine, theirs in zip(actual.fields, required.fields))
+    return actual.immutable == required.immutable and all(
+        mine.name == theirs.name and mine.type == theirs.type
+        and mine.refinement == theirs.refinement and mine.mutable == theirs.mutable
+        for mine, theirs in zip(actual.fields, required.fields)
     )
 
 
@@ -15216,6 +15233,7 @@ def _validate_place_call_arguments(
     kw_args: dict[str, hir.AST],
     *,
     ctx: Context,
+    readonly_receiver: bool = False,
 ) -> None:
     """Require `@` on both sides and reject overlapping mutable places."""
 
@@ -15256,7 +15274,8 @@ def _validate_place_call_arguments(
             )
         if place is None:
             continue
-        if place.target.type != parameter.type and not _place_fits(place.target.type, parameter.type):
+        readonly = readonly_receiver and bool(method.pos_or_kw) and parameter is method.pos_or_kw[0]
+        if place.target.type != parameter.type and not _place_fits(place.target.type, parameter.type, readonly=readonly):
             type_error(
                 ctx.srcfile,
                 'place parameter types are invariant',
@@ -16039,6 +16058,15 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
                     for index, arg in enumerate(pos_args)]
         named_parameters = {param.name: param.type for param in [*left.type.pos_or_kw, *left.type.kw_only] if param.name is not None}
         kw_args = {name: prepare_generic_argument(arg, named_parameters.get(name)) for name, arg in kw_args.items()}
+    # Only a known compiler-only copy hook gets a read-only parent view.
+    # Its internal place ABI must not impose writable field invariance on
+    # the child; ordinary source place arguments keep the stronger rule.
+    copy_binding = ctx.binding_registry.by_id.get(left.binding_id) if isinstance(left, hir.ExpressedIdentifier) else None
+    readonly_receiver = copy_binding is not None and copy_binding.function is not None and copy_binding.function.lifecycle == 'copy'
+    if readonly_receiver and pos_args and isinstance(pos_args[0], hir.Place) and len(methods) == 1:
+        required = methods[0].pos_or_kw[0].type
+        if _place_fits(pos_args[0].target.type, required, readonly=True):
+            pos_args[0] = replace(pos_args[0], type=required)
     pos_types = [require_valued(a.type, ctx.srcfile, a.loc, 'function call argument') for a in pos_args]
     kw_types = {k: require_valued(v.type, ctx.srcfile, v.loc, f'keyword argument `{k}`') for k, v in kw_args.items()}
     try:
@@ -16190,6 +16218,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         pos_args,
         kw_args,
         ctx=ctx,
+        readonly_receiver=readonly_receiver,
     )
 
     arguments_by_name = {

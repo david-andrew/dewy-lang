@@ -1130,6 +1130,21 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     let shape = types.node_at(session.types func.value_type)
     if shape isnt? types.CallableType return problem(id 'value is not callable' display.type_to_dewy(func.value_type session.types) env session)
     let methods:array<addr> = if shape is? types.OverloadType shape.methods else [func.value_type]
+    let readonly_receiver=false
+    if func is? hir.ExpressedIdentifier and func.binding_id isnt? none {
+        let binding=bindings.binding_at(session.registry func.binding_id)
+        if binding.function isnt? none {
+            let literal=node_at(binding.function session)
+            readonly_receiver=literal is? hir.FunctionLiteral and literal.lifecycle =? 'copy'
+        }
+    }
+    if readonly_receiver and positional.length >? 0 and shape is? types.FunctionType and shape.pos_or_kw.length >? 0 {
+        let argument=node_at(positional[0] session)
+        let required=shape.pos_or_kw[0].value_type
+        if argument is? hir.Place and place_fits(node_at(argument.target session).value_type required @session readonly=true) {
+            positional[0]=put(hir.Place[argument.loc required argument.target] @session)
+        }
+    }
     let pos_types:array<addr> = []
     let kw_types:dict<string addr> = []
     loop argument in positional { pos_types.push(node_at(argument session).value_type) }
@@ -1176,7 +1191,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     loop i in 0.. and i <? positional.length {
         if i >=? method.pos_or_kw.length return pending(id 'variadic argument materialization' env session)
         let slot = method.pos_or_kw[i]
-        let checked = call_argument(positional[i] slot.value_type slot.place id env @session arguments=named)
+        let checked = call_argument(positional[i] slot.value_type slot.place id env @session arguments=named readonly=readonly_receiver and i =? 0)
         if checked is? Error return checked
         let error = remember_place(checked @places id env session)
         if error isnt? none return error
@@ -3644,12 +3659,13 @@ place = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Err
     let loc = contexts.node_at(id env.lexical session).loc
     return put(hir.Place[loc store_type value] @session)
 }
-call_argument = (argument:addr required:addr place_parameter:bool id:addr env:Environment @session:contexts.Session arguments:dict<string addr>=[]):>addr|Error => {
+call_argument = (argument:addr required:addr place_parameter:bool id:addr env:Environment @session:contexts.Session arguments:dict<string addr>=[] readonly:bool=false):>addr|Error => {
     let node = node_at(argument session)
     if place_parameter and node isnt? hir.Place return problem(id 'place argument requires `@`' 'the parameter can write its caller binding' env session)
     if not place_parameter and node is? hir.Place return problem(id 'value parameter does not accept a place' 'remove `@` to pass an independent value' env session)
     if node is? hir.Place {
-        if not place_fits(node.value_type required @session) return problem(id 'place parameter types are invariant' 'the storage and parameter types must agree' env session)
+        let actual=if readonly node_at(node.target session).value_type else node.value_type
+        if not place_fits(actual required @session readonly=readonly) return problem(id 'place parameter types are invariant' 'the storage and parameter types must agree' env session)
         return argument
     }
     let rebound=contracts.at_call(required arguments session.hir @session.types @session.registry)
@@ -3688,13 +3704,31 @@ remember_place = (argument:addr @places:array<addr> id:addr env:Environment sess
     return none
 }
 
-# The established nominal exception keeps the parent's leading field layout.
-# It does not make ordinary mutable containers covariant.
-place_fits = (actual:addr required:addr @session:contexts.Session):>bool => {
+# A nominal prefix must preserve every writable field's storage contract,
+# not just the layout or ordinary value subtype relation. A parent method
+# must not overwrite a child's stronger invariant with a wider parent value.
+place_fits = (actual:addr required:addr @session:contexts.Session readonly:bool=false):>bool => {
     if types.same_type(actual required session.types) return true
-    let a = types.node_at(session.types types.unfold(types.strip_refinement(actual session.types) session.types))
-    let r = types.node_at(session.types types.unfold(types.strip_refinement(required session.types) session.types))
+    if readonly {actual=types.strip_refinement(actual session.types) required=types.strip_refinement(required session.types)}
+    let a = types.node_at(session.types types.unfold(actual session.types))
+    let r = types.node_at(session.types types.unfold(required session.types))
     if a isnt? types.ObjectType or not a.minted or r isnt? types.ObjectType return false
+    if (not readonly and a.immutable not=? r.immutable) or a.fields.length <? r.fields.length return false
+    loop i in 0.. and i <? r.fields.length {
+        $runtime_assert i <? a.fields.length
+        let mine=a.fields[i]
+        let theirs=r.fields[i]
+        if mine.name not=? theirs.name return false
+        if readonly {
+            if not types.same_type(types.strip_refinement(mine.value_type session.types) types.strip_refinement(theirs.value_type session.types) session.types) return false
+        } else if not types.same_type(mine.value_type theirs.value_type session.types) or mine.mutable not=? theirs.mutable or mine.refinement not=? theirs.refinement return false
+    }
+    if readonly {
+        # The mint checker established value subtyping; only constness may
+        # differ for this compiler-owned read-only borrow of the parent.
+        let parent=types.object_type(r.fields r.brand a.immutable r.methods r.constructors @session.types minted=r.minted parent=r.parent abstract=r.abstract)
+        return subtyping.is_subtype(actual parent session.links @session.types)
+    }
     return subtyping.is_subtype(actual required session.links @session.types)
 }
 

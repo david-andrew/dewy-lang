@@ -1,0 +1,12 @@
+BaseHandle=type of [
+    token:int64
+    reset=():>void=>{token=-1}
+]
+PositiveHandle=type of BaseHandle & [token:int64<v=>v>=?0>]
+main=():>int64=>{
+    let handle=PositiveHandle[42]
+    # A wider writable parent view could violate the child's invariant.
+    handle.reset()
+    $assert handle.token>=?0
+    return handle.token
+}

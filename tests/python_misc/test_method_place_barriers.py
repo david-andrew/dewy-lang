@@ -1,9 +1,13 @@
 """An implicit method receiver has the same write barriers as explicit @."""
 import pytest
+from pathlib import Path
 
 from dewy.reporting import SrcFile
 from dewy.semantic import check
 from dewy.semantic.errors import TypeCheckError, UserError
+from dewy.reporting import ReportException
+from dewy.backend.udewy import codegen
+from tests.python_misc.test_scalar_projection import execute
 
 METHOD = 'T:type=[x:int64 set=(n:int64)=>{x=n}]\n'
 
@@ -41,3 +45,33 @@ def test_method_call_expires_field_type_narrowing():
         'let t=T[1]\nif t.x is? int64 {t.set t.x+1}')
     with pytest.raises(TypeCheckError):
         check.typecheck_and_resolve(SrcFile(None, '$no_prelude=true\n' + source))
+
+
+@pytest.mark.parametrize('field', ['int64<v=>v>=?0>', 'int64<v=>v<=?42>'])
+@pytest.mark.parametrize('call', ['d.reset()', 'reset(@d)'])
+def test_parent_place_cannot_weaken_child_field_storage(field, call):
+    source = ('Parent=type of [token:int64 reset=():>void=>{token=-1}]\n'
+              f'Derived=type of Parent & [token:{field}]\n'
+              'reset=(@value:Parent):>void=>{value.token=-1}\n'
+              f'f=():>void=>{{let d=Derived[1] {call}}}')
+    with pytest.raises(ReportException, match='place parameter types are invariant'):
+        check.typecheck_and_resolve(SrcFile(None, '$no_prelude=true\n' + source))
+
+
+def test_unchanged_parent_field_storage_remains_compatible():
+    source = ('Parent=type of [token:int64 reset=():>void=>{token=-1}]\n'
+              'Derived=type of Parent & [extra:string]\n'
+              'f=():>void=>{let d=Derived[1 "kept"] d.reset()}')
+    check.typecheck_and_resolve(SrcFile(None, '$no_prelude=true\n' + source))
+
+
+def test_read_only_parent_method_accepts_strengthened_child():
+    source = ('Parent=type of [token:int64 read=():>int64=>token]\n'
+              'Derived=type of Parent & [token:int64<v=>v>=?0>]\n'
+              'f=():>int64=>{let d=Derived[42] return d.read()}')
+    check.typecheck_and_resolve(SrcFile(None, '$no_prelude=true\n' + source))
+
+
+def test_nominal_parent_prefix_executes_on_both_targets(tmp_path):
+    source = Path(__file__).resolve().parents[1] / 'fixtures/nominal_place_prefix.dewy'
+    execute(tmp_path, 'nominal_prefix', codegen(SrcFile.from_path(source)))

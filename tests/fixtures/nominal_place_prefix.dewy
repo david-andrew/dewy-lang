@@ -1,0 +1,15 @@
+BaseHandle=type of [
+    token:int64
+    increment=():>void=>{token+=1}
+    read=():>int64=>token
+]
+ExtraHandle=type of BaseHandle & [extra:int64]
+PositiveHandle=type of BaseHandle & [token:int64<v=>v>=?0>]
+main=():>int64=>{
+    let handle=ExtraHandle[40 1]
+    handle.increment()
+    if handle.token not=?41 return 1
+    let positive=PositiveHandle[handle.token]
+    # Reading through a parent value remains valid for the narrower child.
+    return positive.read()+handle.extra
+}

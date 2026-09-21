@@ -868,3 +868,22 @@ manifest to 109. The broad runs used unchanged sources while the follow-up
 was prepared in an isolated checkout. Artifacts:
 `../dewy-build-artifacts/phase1-view-last-use-full-parity-2026-09-20` and
 `../dewy-build-artifacts/phase1-view-last-use-full-phase1-parity-2026-09-20`.
+
+Nominal writable-prefix correction: an inherited mutating method could write
+a wider parent value into a child's strengthened field while checking still
+trusted the child invariant. Both checkers now require matching writable
+field types, refinements and mutability across that prefix. Read-only value
+methods retain ordinary subtyping. The compiler-only copy receiver has a
+separate read-only compatibility check that preserves field representation;
+this also permits inherited copies of const children without granting source
+code a mutable alias. Constructor checking still owes the child's result
+invariants. This correction does not yet settle whole-value replacement or
+escape through a parent place; those need the existing effect summaries to
+prove that the complete child's identity and additional invariants survive.
+
+Validation: 90 hosted declaration/place/method checks and 15 final method
+barrier checks passed, including execution on x86 and C. Native passed six
+focused probes and both new paired fixtures. A fresh generation built in
+63.57 seconds and executed the three existing kernels (42). Artifacts:
+`../dewy-build-artifacts/phase1-nominal-place-contracts-2026-09-20` and
+`../dewy-build-artifacts/phase1-nominal-place-contract-parity-2026-09-20`.
