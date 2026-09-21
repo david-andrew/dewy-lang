@@ -463,6 +463,9 @@ in both lowerings and the parity tool is the gate.
   during code generation. Fresh arguments, factory results and explicit copies
   can supply ordinary by-value parameters, which own and clean up the value.
   This includes callbacks and defaults; returning a parameter transfers it.
+  Replacing a local owner or owning parameter now evaluates the new value
+  before dropping the old one, including optional owners currently absent.
+  The current stored value remains owned across branches and until scope exit.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a
   last use turns out to be needed it should be a meta-level form (a

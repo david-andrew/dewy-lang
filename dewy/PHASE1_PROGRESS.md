@@ -1344,3 +1344,26 @@ passed; the existing native driver also rejected both discarded-element
 fact/effect violations. The fixture retains zero storage across 100 calls.
 The preceding inferred-copy revision additionally passed all 134 broader
 hosted lifecycle, explicit-copy, copy-source and prelude-cache checks.
+
+
+The `c277e5d8` integration reached a native fixed point: generations 2 and 3
+were byte-identical for both compilers, and paired execution checks passed
+with both output backends. The seed predates the lowering changes, so its
+first generation differed as expected and a third generation was required.
+The final two generations took 63 and 71 seconds under concurrent test load.
+All 41 lifecycle/result-order/receiver-lifetime cases then passed against that
+native pair. This is an integration checkpoint, not a performance claim.
+
+Replacing a local or owning parameter now evaluates the new value before
+running the old owner's drop, then stores the replacement. The binding keeps
+one current owner on branch and scope exits. Ownership follows the declared
+storage even when an optional is currently `none`; a narrowed read type does
+not erase that storage's lifetime. Borrowed owners still cannot be replaced.
+
+Validation: three focused replacement checks passed in both compilers; the
+expanded shared fixture also passed hosted/native execution on both backends.
+It covers initializer reads from the old owner, optional absence/reentry,
+owning parameters, conditional replacement, invalidated facts and zero retained
+storage across 100 calls. The preceding integration also passed 11 adjacent
+array/inferred-copy checks. Field replacement and conditional consumption of
+outer owners remain pending.

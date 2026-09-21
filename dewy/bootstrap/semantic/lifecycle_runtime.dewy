@@ -458,16 +458,23 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         if not current.scoped {owners=active}
         return
     }
-    if node is? hir.Declare and resource(hir.node_at(session.hir node.expr).value_type session.types) isnt? none {
+    if node is? hir.Declare and resource((if node.annotation is? none hir.node_at(session.hir node.expr).value_type else node.annotation) session.types) isnt? none {
         let declared:hir.Declare=node
         let value=hir.node_at(session.hir declared.expr)
         let same_array=false
+        let same_union=false
         if declared.annotation isnt? none {
             let expected=types.node_at(session.types views.structural_base(declared.annotation session.types))
             let actual=types.node_at(session.types views.structural_base(value.value_type session.types))
             same_array=expected is? types.ArrayType and actual is? types.ArrayType and types.same_type(expected.element actual.element session.types)
+            if expected is? types.TypeOr {
+                same_union=resource(value.value_type session.types) is? none
+                loop member in expected.items {
+                    if types.same_type(views.structural_base(member session.types) views.structural_base(value.value_type session.types) session.types) {same_union=true}
+                }
+            }
         }
-        if declared.binding_id is? none or (declared.annotation isnt? none and not types.same_type(declared.annotation value.value_type session.types) and not same_array) {reject(declared 'a non-fresh local owner' @plan) return}
+        if declared.binding_id is? none or (declared.annotation isnt? none and not types.same_type(declared.annotation value.value_type session.types) and not same_array and not same_union) {reject(declared 'a non-fresh local owner' @plan) return}
         if id in? plan.transfer_sites and value is? hir.ExpressedIdentifier {
             let retained:array<addr>=[]
             let source:addr?=none
@@ -503,6 +510,27 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         if declared.view {reject(declared 'a resource view without a stable lifetime' @plan) return}
         fresh(declared.expr live inherited @plan @session frame=frame)
         owners.push(id)
+        return
+    }
+    let assigned=if node is? hir.Assign hir.node_at(session.hir node.target) else node
+    if node is? hir.Assign and (resource(assigned.value_type session.types) isnt? none or (assigned is? hir.ExpressedIdentifier and assigned.binding_id isnt? none and assigned.binding_id in? live)) {
+        let target=assigned
+        let source:addr?=none
+        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
+            loop owner in owners {
+                let declaration=hir.node_at(session.hir owner)
+                $runtime_assert declaration is? hir.Declare
+                if declaration.binding_id =? target.binding_id {source=owner break}
+            }
+        }
+        if source is? none or node.op not=? '=' {reject(node 'replacement without a local owning binding' @plan) return}
+        # Capture first: the old drop may mutate fields used by the new value.
+        fresh(node.value live false @plan @session frame=frame)
+        let replacement=capture_result(node.value node.loc @session)
+        let items:array<addr>=[replacement.declaration]
+        loop call in cleanup([source] node.loc @plan @session) {items.push(call)}
+        items.push(put(hir.Assign[node.loc node.value_type node.target node.op replacement.value] @session))
+        store(id hir.Block[node.loc node.value_type items false] @session)
         return
     }
     if node is? hir.Return {

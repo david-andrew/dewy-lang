@@ -534,12 +534,14 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     if result is not None:
                         items.append(result)
                 return replace(node, items=items)
-            if isinstance(node, hir.Declare) and resource(node.expr.type) is not None:
+            if isinstance(node, hir.Declare) and resource(node.annotation or node.expr.type) is not None:
                 expected = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
                 actual = ty.unfold(ty.strip_refinement(node.expr.type))
                 same_array = isinstance(expected, ty.ArrayType) and isinstance(actual, ty.ArrayType) and expected.element == actual.element
+                same_union = isinstance(expected, ty.TypeOr) and (resource(actual) is None or any(
+                    ty.unfold(ty.strip_refinement(member)) == actual for member in expected.items))
                 if (node.binding_id is None
-                        or node.annotation is not None and node.annotation != node.expr.type and not same_array):
+                        or node.annotation is not None and node.annotation != node.expr.type and not same_array and not same_union):
                     reject(node, 'a non-fresh local owner')
                 if id(node) in transfers:
                     source = next((owner for owner in owners if owner.binding_id == node.expr.binding_id), None)
@@ -562,6 +564,16 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 node = replace(node, expr=fresh(node.expr, live, literal.lifecycle == 'drop', control=control))
                 owners.append(node)
                 return node
+            if isinstance(node, hir.Assign) and (node.target.binding_id in live or resource(node.target.type) is not None):
+                source = next((owner for owner in owners if owner.binding_id == node.target.binding_id), None)
+                if source is None or node.op != '=':
+                    reject(node, 'replacement without a local owning binding')
+                # Evaluate the replacement before the old owner's drop can
+                # change fields used by its initializer. The same binding
+                # remains the owner and is cleaned up again at scope exit.
+                declaration, value = capture(fresh(node.value, live, False, control=control), node.loc)
+                return hir.Block(node.loc, node.type, [declaration, *cleanup([source], node.loc),
+                                                       replace(node, value=value)], False)
             if isinstance(node, hir.Return):
                 consumed = None
                 moved = False

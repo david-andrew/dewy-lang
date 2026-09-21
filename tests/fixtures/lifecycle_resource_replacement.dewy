@@ -1,0 +1,54 @@
+# Replacement creates the new value before dropping the old one. The binding
+# still owns its current value on every exit, including optional absence.
+let trace:int64=0
+Handle=type of [id:int64 values:array<int64>
+$__drop__
+release=():>void=>{trace=trace*10+id id=99 values.clear}
+]
+exercise=():>int64=>{
+    let owner=Handle[1 [40 2]]
+    owner=Handle[owner.id+1 owner.values]
+    if trace not=?1 or owner.id not=?2 return 1
+    if owner.values.length not=?2 or owner.values[0] not=?40 return 2
+    owner=Handle[3 [42]]
+    if trace not=?12 or owner.id not=?3 return 3
+    return 42
+}
+optional=():>int64=>{
+    let slot:Handle?=none
+    slot=Handle[4 [40]]
+    if trace not=?0 return 1
+    slot=none
+    if trace not=?4 return 2
+    slot=Handle[5 [50]]
+    return 42
+}
+parameter=(value:Handle):>int64=>{
+    value=Handle[value.id+1 value.values]
+    return value.id
+}
+conditional=(replace:bool):>int64=>{
+    let owner=Handle[1 [10]]
+    if replace {owner=Handle[2 [20]]}
+    return owner.id
+}
+verify=():>int64=>{
+    trace=0
+    if exercise() not=?42 or trace not=?123 return 1
+    trace=0
+    if optional() not=?42 or trace not=?45 return 2
+    trace=0
+    if parameter(Handle[6 [60]]) not=?7 or trace not=?67 return 3
+    trace=0
+    if conditional(true) not=?2 or trace not=?12 return 4
+    trace=0
+    if conditional(false) not=?1 or trace not=?1 return 5
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if verify() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}
