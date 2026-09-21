@@ -300,32 +300,60 @@ widen = (previous:State current:State context:Context):>State => {
     return result
 }
 
-# Exact entry values establish bounded difference qualifiers. The fixed
-# point keeps only those preserved by every backedge. Equality stars within
-# value groups plus an affine star between groups use linear space. Keeping
-# the equality stars matters when the first term changes at another rate.
-LoopCandidate:type = const [number:bigint term:Term capped:bool]
-seed_loop_relations = (state:State changing:set<addr>):>State => {
+# Exact entry values retain their bounded equality/difference stars. Ranged
+# terms only add source-selected pairs: connecting unrelated machine-width
+# intervals creates expensive qualifiers with no useful proof obligation.
+# Every advancing edge must establish each relation again.
+TermPair:type = const [left:Term right:Term]
+LoopCandidate:type = const [interval:ranges.Interval term:Term]
+seed_loop_relations = (state:State changing:set<addr> mentioned:array<TermPair>=[]):>State => {
     let result=state
     let representatives:array<LoopCandidate>=[]
     let remaining:addr=64
-    loop entry in state.values {
-        let fact=entry.fact
-        if fact isnt? Value or fact.term.binding_id not in? changing or entry.interval.lower is? none or not ranges.same_endpoint(entry.interval.lower entry.interval.upper) continue
+    loop fact_entry in state.values {
+        let fact=fact_entry.fact
+        if fact isnt? Value or fact.term.binding_id not in? changing or fact_entry.interval.lower is? none or not ranges.same_endpoint(fact_entry.interval.lower fact_entry.interval.upper) continue
         if remaining =? 0 break
         remaining-=1
-        let exact=entry.interval.lower
+        let entry=LoopCandidate[fact_entry.interval fact.term]
         let other:LoopCandidate?=none
-        loop candidate in representatives {if candidate.number =? exact {other=candidate break}}
+        loop candidate in representatives {if ranges.same_bounds(candidate.interval entry.interval) {other=candidate break}}
         if other is? none {
-            representatives.push(LoopCandidate[exact fact.term entry.interval.capped])
+            representatives.push(LoopCandidate[entry.interval entry.term])
             other=representatives[0]
         }
-        if same_term(other.term fact.term) continue
-        let capped=entry.interval.capped or other.capped
-        let gap=other.number-exact
-        put(@result order(fact.term other.term) ranges.Interval[gap none capped])
-        put(@result order(other.term fact.term) ranges.Interval[-gap none capped])
+        if same_term(other.term entry.term) continue
+        let capped=entry.interval.capped or other.interval.capped
+        if other.interval.lower isnt? none and entry.interval.upper isnt? none {
+            let relation=order(entry.term other.term)
+            let evidence=ranges.Interval[other.interval.lower-entry.interval.upper none capped]
+            let previous=lookup(result relation)
+            put(@result relation if previous is? none evidence else ranges.intersect(previous evidence))
+        }
+        if entry.interval.lower isnt? none and other.interval.upper isnt? none {
+            let relation=order(other.term entry.term)
+            let evidence=ranges.Interval[entry.interval.lower-other.interval.upper none capped]
+            let previous=lookup(result relation)
+            put(@result relation if previous is? none evidence else ranges.intersect(previous evidence))
+        }
+    }
+    # Mentioned predicates select candidates, never assumed conclusions.
+    loop pair in mentioned {
+        let left=lookup(state value(pair.left)) let right=lookup(state value(pair.right))
+        if left is? none or right is? none continue
+        let capped=left.capped or right.capped
+        if right.lower isnt? none and left.upper isnt? none {
+            let relation=order(pair.left pair.right)
+            let evidence=ranges.Interval[right.lower-left.upper none capped]
+            let previous=lookup(result relation)
+            put(@result relation if previous is? none evidence else ranges.intersect(previous evidence))
+        }
+        if left.lower isnt? none and right.upper isnt? none {
+            let relation=order(pair.right pair.left)
+            let evidence=ranges.Interval[left.lower-right.upper none capped]
+            let previous=lookup(result relation)
+            put(@result relation if previous is? none evidence else ranges.intersect(previous evidence))
+        }
     }
     return result
 }

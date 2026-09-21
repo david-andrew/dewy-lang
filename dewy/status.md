@@ -878,3 +878,25 @@ across mutable compiler states. The paired `aggregate_borrow_effects.dewy`
 fixture checks that these calls perform zero arena allocation; negative cases
 retain allocation requirements for private mutation, copies, unknown callbacks
 and conflicting later arguments. General return/move placement remains work.
+
+### Interval and source-selected loop qualifiers (2026-09-21)
+
+Both bounds engines propose constant-difference inequalities from entry
+intervals, in addition to exact equalities. The existing 64-term exact-value
+stars remain; a separate 64-pair vocabulary selects terms mentioned in loop
+comparisons and subtraction. Unrelated changing
+counters therefore need not hide a useful candidate. Neither an assertion nor
+its requested offset is assumed. Entry intervals supply both directional
+bounds, and every normal/continue backedge must preserve them. Stronger
+existing evidence survives candidate insertion. Source-pair discovery is
+cached per loop body, with binding/route identities retained. Paired cases
+check interval bounds, branch/continue paths and rejection of unequal updates,
+invalid entry conditions and invalidating calls. This extends the difference
+vocabulary; arbitrary linear combinations and exact unsafe-proof provenance
+remain separate work.
+
+The initial all-interval grouping made native self-check/lower/emission take
+87.4 s against a 67.8 s baseline. Restricting ranged pairs to source-selected
+terms brought it to 70.2 s on the same frozen source with fresh prelude caches
+and no concurrent local build (about 3.0 GiB peak RSS). These are isolated
+single-process front-end measurements, not complete compiler build timings.

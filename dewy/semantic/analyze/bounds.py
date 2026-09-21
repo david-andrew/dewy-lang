@@ -658,19 +658,16 @@ class _LoopTransfer:
     continues: dict[int, list[State]]
 
 
-def _seed_loop_relations(state: State, assigned: set[int], registry: sb.BindingRegistry) -> State:
-    """Offer bounded difference qualifiers established by exact entry values.
+def _seed_loop_relations(state: State, assigned: set[int], registry: sb.BindingRegistry, mentioned=()) -> State:
+    """Offer finite difference qualifiers justified by entry intervals.
 
-    Every backedge must preserve them. Keep equality stars within each value
-    group, plus an affine star connecting the groups to the first term. This
-    retains equality proofs even if that first term changes at another rate,
-    without introducing quadratically many pairs. Negative gaps express the
-    reverse bound of an exact difference; they are not assumed invariants.
+    Exact-value groups retain their equality stars in linear space. Ranged
+    terms only add pairs selected by source predicates/arithmetic: connecting
+    unrelated machine-width intervals creates expensive, useless qualifiers.
+    Every advancing edge must establish the proposed relation again.
     """
     result = dict(state)
-    representatives: dict[int, int] = {}
-    anchor = None
-    remaining = 64
+    exact = []
     for term, interval in state.items():
         if not (term >= 0 or _is_length_key(term)):
             continue
@@ -679,19 +676,34 @@ def _seed_loop_relations(state: State, assigned: set[int], registry: sb.BindingR
         root = binding.route_root if binding is not None and binding.route_root is not None else binding_id
         if root not in assigned or interval.lower is None or interval.lower != interval.upper:
             continue
-        if remaining == 0:
-            break
-        remaining -= 1
+        exact.append(term)
+    def offer(smaller, larger):
+        lower, upper = state.get(larger), state.get(smaller)
+        if lower is None or upper is None or lower.lower is None or upper.upper is None:
+            return
+        key = _order_key(smaller, larger)
+        evidence = Interval(lower.lower - upper.upper, None, capped=lower.capped or upper.capped)
+        result[key] = result[key].intersect(evidence) if key in result else evidence
+
+    representatives = {}
+    anchor = None
+    for term in exact[:64]:
+        interval = state[term]
         if anchor is None:
             anchor = term
-        other = representatives.setdefault(interval.lower, term)
+        other = representatives.setdefault((interval.lower, interval.upper), term)
         if other == term:
             other = anchor
-        if other != term:
-            gap = state[other].lower - interval.lower
-            capped = interval.capped or state[other].capped
-            result[_order_key(term, other)] = Interval(gap, None, capped=capped)
-            result[_order_key(other, term)] = Interval(-gap, None, capped=capped)
+        if other == term:
+            continue
+        offer(term, other)
+        offer(other, term)
+    # Source predicates and arithmetic select useful pairs even when an
+    # unrelated changing term is the interval group's anchor. Their claimed
+    # conclusion supplies no evidence: both bounds still come from entry.
+    for left, right in mentioned:
+        offer(left, right)
+        offer(right, left)
     return result
 
 
@@ -807,6 +819,7 @@ class _BoundsValidator:
         # Bound finite-loop exploration across nested loops. Exhausting the
         # budget falls back to widening, never to an assumed proof.
         self.finite_loop_budget = 64
+        self.loop_qualifier_pairs = {}
         self.call_writes: dict[int, set[int]] = {}
         self.predicate_bindings = predicate_effects.BindingQueries()
         self.declared_intervals: dict[int, tuple[ty.Type, Interval | None]] = {}
@@ -1830,6 +1843,28 @@ class _BoundsValidator:
             exits.append(remaining)
         return dict(state) if not exits else self._join_states(exits)
 
+    def _mentioned_loop_pairs(self, body):
+        cached = self.loop_qualifier_pairs.get(id(body))
+        if cached is not None:
+            return cached[1]
+        pairs, seen, pending = [], set(), [body]
+        while pending and len(pairs) < 64:
+            node = pending.pop()
+            if id(node) in seen or isinstance(node, hir.FunctionLiteral):
+                continue
+            seen.add(id(node))
+            if (isinstance(node, hir.FunctionCall) and len(node.pos_args) == 2
+                    and isinstance(node.func, hir.ExpressedIdentifier)
+                    and node.func.name in {'__lt__', '__le__', '__gt__', '__ge__', '__eq__', '__ne__', '__sub__'}):
+                left, right = (self._offset_term(arg) for arg in node.pos_args)
+                if left is not None and right is not None and left[0] != right[0]:
+                    pair = (left[0], right[0])
+                    if pair not in pairs and pair[::-1] not in pairs:
+                        pairs.append(pair)
+            pending.extend(reversed(tuple(hir.children(node))))
+        self.loop_qualifier_pairs[id(body)] = (body, pairs)
+        return pairs
+
     def _analyze_while_loop(
         self,
         condition: hir.AST,
@@ -1838,7 +1873,7 @@ class _BoundsValidator:
         *,
         validate: bool,
     ) -> State:
-        state = _seed_loop_relations(state, self.assigned, self.registry)
+        state = _seed_loop_relations(state, self.assigned, self.registry, self._mentioned_loop_pairs(body))
         head = dict(state)
         for _ in range(8):
             true_state = self._refine(head, condition, truth=True)
@@ -1977,7 +2012,7 @@ class _BoundsValidator:
         analyzed from the entry state only and its growth across iterations
         would be invisible.
         """
-        state = _seed_loop_relations(state, self.assigned, self.registry)
+        state = _seed_loop_relations(state, self.assigned, self.registry, self._mentioned_loop_pairs(body))
         head = dict(state)
         for _ in range(8):
             transfer = self._loop_transfer(body, enter(head, word_candidates), validate=False)

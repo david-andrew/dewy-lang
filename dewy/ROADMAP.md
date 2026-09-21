@@ -550,8 +550,11 @@ Progress on 2026-09-20: shared array-length equality invariants and nested
 range-counter fixtures now pass in both compilers. Counter storage uses an
 inductive word-range candidate, checked on every advancing edge; failed
 candidates are discarded before ordinary body validation. Bounded constant-difference
-qualifiers now connect distinct exact entry values as well as equal ones;
-every backedge must preserve them. Word updates keep affine facts only when
+qualifiers now connect entry intervals as well as exact values; every
+backedge must preserve them. A bounded vocabulary also selects term pairs
+mentioned in loop predicates/arithmetic, so an unrelated counter need not
+displace a useful relation. A source assertion selects a candidate but never
+establishes it: the incoming intervals and each advancing edge supply proof. Word updates keep affine facts only when
 neither the arithmetic nor its destination can wrap. The general liquid
 qualifier/invariant work remains broader than these completed fixtures.
 

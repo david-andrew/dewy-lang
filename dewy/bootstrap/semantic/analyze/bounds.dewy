@@ -53,6 +53,7 @@ Checker:type = [
     # Nested finite-loop exploration shares a budget. On exhaustion the
     # ordinary widening path remains sound, though less precise.
     finite_loop_budget:bigint=64
+    loop_qualifier_pairs:dict<addr array<facts.TermPair>>=[]
 ]
 # Construct the same declared-width environment for every invocation. Tests
 # and module drivers must not quietly use different loop-widening contracts.
@@ -959,6 +960,37 @@ iterator_steps_fit = (iterators:array<addr> transfer:Transfer checker:Checker):>
     return true
 }
 
+# Cache a bounded vocabulary from each loop body. A relation mentioned in
+# source only identifies a pair; entry intervals and backedges prove it.
+mentioned_loop_pairs=(body:addr @checker:Checker):>array<facts.TermPair>=>{
+    let cached=checker.loop_qualifier_pairs.get(body)
+    if cached isnt? none return cached
+    let pairs:array<facts.TermPair>=[] let pending:array<addr>=[body] let seen:set<addr>=set[]
+    loop pending.length>?0 and pairs.length<?64 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.add(id)
+        let node=node_at(id checker)
+        if node is? hir.FunctionLiteral continue
+        let function=if node is? hir.FunctionCall node_at(node.func checker) else none
+        if node is? hir.FunctionCall and node.pos_args.length=?2 and function is? hir.ExpressedIdentifier and function.name in? set['__lt__' '__le__' '__gt__' '__ge__' '__eq__' '__ne__' '__sub__'] {
+            let left=terms.offset_term(node.pos_args[0] checker.data.env @checker.data.registry)
+            let right=terms.offset_term(node.pos_args[1] checker.data.env @checker.data.registry)
+            if left isnt? none and right isnt? none and not facts.same_term(left.term right.term) {
+                let found=false
+                loop pair in pairs {
+                    if facts.same_term(pair.left left.term) and facts.same_term(pair.right right.term) or facts.same_term(pair.left right.term) and facts.same_term(pair.right left.term) {found=true break}
+                }
+                if not found {pairs.push(facts.TermPair[left.term right.term])}
+            }
+        }
+        let children=hir.children(node)
+        let cursor=children.length
+        loop cursor>?0 {cursor-=1 pending.push(children[cursor])}
+    }
+    checker.loop_qualifier_pairs[body]=pairs
+    return pairs
+}
 loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool word_candidates:bool=true):>Transfer => {
     let iterators=iterators_of(arm.condition checker)
     let incoming=state
@@ -994,7 +1026,8 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool wo
         let root=if route is? none fact.term.binding_id else route.root
         if root in? checker.assigned {changing.push(fact.term.binding_id)}
     }
-    incoming=facts.seed_loop_relations(incoming changing)
+    let mentioned=mentioned_loop_pairs(arm.body @checker)
+    incoming=facts.seed_loop_relations(incoming changing mentioned)
     let head=incoming
     # Widening prevents an accumulator from retaining the entry interval
     # forever. Narrowing then recovers bounds imposed by a while guard.
