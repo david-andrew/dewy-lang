@@ -1878,3 +1878,16 @@ compiler's output. Fixture `dewy/tests/copy_report.dewy`; tests
 `test_escape_copies.py::test_copy_report_names_kind_site_and_reason` and
 the native command test.
 
+
+## Phase 1 flow/storage checkpoint (2026-09-21)
+
+Source `4f4d2fe4` reached a direct x86-64 fixed point: native generations 2
+and 3 are byte-identical, with the direct and C execution checks passing.
+The 176-case Phase 1 manifest passed on the native compiler; the hosted run
+exposed three regressions. Two array/callback fixtures now preserve ABI
+membership through return-layout rewrites by querying the original checked
+function declaration. Record exclusions now also retain ordinary custom and
+structural string conversion. All three failed fixtures pass on both runtime
+backends after those fixes; focused paired cases cover refined callback
+returns and excluded-record conversions. This is a source checkpoint, not a
+certification of later ownership/proof changes or a replacement for full CI.

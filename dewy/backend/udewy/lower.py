@@ -825,7 +825,9 @@ class _Lowerer(
                 )
             if isinstance(param.type, ty.ArrayType) and param.binding_id is not None:
                 summary = self.program_effects.for_param_binding(param.binding_id)
-                if id(literal) in self.value_function_ids and (summary is None or not summary.read_only):
+                # ABI membership belongs to the checked declaration, even when
+                # a return-layout rewrite produces a new literal node.
+                if id(function.literal) in self.value_function_ids and (summary is None or not summary.read_only):
                     incoming_name = self._new_array_name(f'arg_{param.name}')
                     incoming = hir.ExpressedIdentifier(literal.loc, param.type, incoming_name)
                     copied, value = self._clone_array_value(incoming, param.type)

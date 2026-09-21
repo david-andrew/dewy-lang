@@ -30,6 +30,17 @@ CASES += [
     'read=(item:Base):>int64=>{if item isnt? Child {if typeof(item) is? Other return item.value} return 1}\n'
     'main=():>int64=>read(Other[42 7])',
 ]
+CASES += [
+    PREFIX+'let Other=type of Base & [padding:int64]\n'
+    'read=(item:Base):>string=>if item isnt? Child "{item}" else "child"\n'
+    'main=():>int64=>if read(Base[42])=?(Base[42] as string) and read(Other[40 2])=?(Other[40 2] as string) 42 else 1',
+    'let Base=type of [value:int64 __as__=():>string=>"base"]\n'
+    'let Child=type of Base & [extra:int64]\n'
+    'let Other=type of Base & [padding:int64 __as__=():>string=>"other"]\n'
+    'read=(item:Base):>string=>if item isnt? Child item as string else "child"\n'
+    'main=():>int64=>if read(Base[42])=?"base" and read(Other[40 2])=?"other" 42 else 1',
+]
+
 ERRORS=[
     PREFIX+'main=():>int64=>{let item:Base=Base[1] if item isnt? Child {item=Child[40 2] let saved:Base & ~Child=item return saved.value} return 42}',
     PREFIX+'Box:type=[item:Base]\nmain=():>int64=>{let box=Box[Base[1]] if box.item isnt? Child {box.item=Child[40 2] let saved:Base & ~Child=box.item return saved.value} return 42}',

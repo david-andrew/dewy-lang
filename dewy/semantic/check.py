@@ -1261,7 +1261,7 @@ def _conversion_method_call(value: hir.AST, target: ty.Type, loc: Span, *, ctx: 
     """
     if _is_string_type(target) and _is_bigint(ty.strip_refinement(value.type), ctx=ctx):
         return _prelude_call('_bigint_as_string', [value], loc=loc, ctx=ctx)
-    unfolded = ty.unfold(ty.strip_refinement(value.type))
+    unfolded = ty.structural_base(value.type)
     if not isinstance(unfolded, ty.ObjectType):
         return None
     function_binding = _conversion_method_binding(unfolded, target, loc, ctx=ctx)
@@ -15639,7 +15639,7 @@ _NUMBER_OBJECT_NAMES = (RATIONAL_TYPE_NAME, BIG_RATIONAL_TYPE_NAME, FIXED_TYPE_N
 
 def _structure_members(type_: ty.TypeExpr) -> tuple[str, list[ty.TypeExpr]] | None:
     """The container kind and member types of a container type, else None."""
-    unfolded = ty.unfold(ty.strip_refinement(type_))
+    unfolded = ty.structural_base(type_)
     if isinstance(unfolded, ty.ArrayType):
         return 'array', [unfolded.element]
     key_value = ty.dict_key_value(unfolded)
@@ -15653,7 +15653,7 @@ def _structure_members(type_: ty.TypeExpr) -> tuple[str, list[ty.TypeExpr]] | No
 
 def _plain_object_type(type_: ty.TypeExpr) -> ty.ObjectType | None:
     """The object type of a value that converts field by field (no compiler-provided family)."""
-    unfolded = ty.unfold(ty.strip_refinement(type_))
+    unfolded = ty.structural_base(type_)
     if isinstance(unfolded, ty.ObjectType) and (unfolded.brand is None or ty.user_branded(unfolded)):
         return unfolded
     return None
