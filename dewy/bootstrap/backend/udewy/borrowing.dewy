@@ -791,7 +791,9 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         if node is? hir.Declare and node.binding_id isnt? none {
             let expr=hir.node_at(nodes node.expr)
             let source=route(node.expr nodes)
-            let inferred=node.decltype =? 'const' and not word_value(expr.value_type type_nodes) and expr is? hir.Index|hir.MemberAccess|hir.DictLookup and node.binding_id in? stable and source isnt? none and not stable_owner(source stable stable_parameters)
+            # An unwritten let uses the same lifetime proof as const. Skip
+            # excluded owners before preparing per-scope dependency graphs.
+            let inferred=not word_value(expr.value_type type_nodes) and expr is? hir.Index|hir.MemberAccess|hir.DictLookup and node.binding_id in? stable and source isnt? none and source.binding not in? plan.globals and source.binding not in? captured and source.binding not in? exposed and source.binding not in? places and not stable_owner(source stable stable_parameters)
             if node.view or inferred {view_demands.add(node.binding_id)}
         }
         if node is? hir.Index {

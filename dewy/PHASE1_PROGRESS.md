@@ -1881,3 +1881,18 @@ the latency target. Direct and C execution checks pass, and all 168 expanded
 hosted/native parity cases pass. The pair and parity outputs are under
 `../dewy-build-artifacts/phase1-affine-{integration,parity}-2026-09-21`.
 The concise-report change is subsequent to this fixed-point certification.
+## Unwritten local view lifetimes (2026-09-21)
+
+An unwritten `let` projection now uses the same shorter lifetime proof as a
+`const` projection in both compilers. The source must remain stable through
+the last use of the view and its derived aliases; captured, exposed, written
+or escaping bindings still need independent values. This introduces no new
+aliasing semantics. Early source eligibility checks avoid scanning scopes
+whose owners cannot satisfy the private-storage proof.
+
+Validation: 71 adjacent hosted checks passed. A freshly built native program
+driver passed 12 positive and one negative case against the hosted compiler,
+with accepted programs executed through both direct and C backends. The
+strict-copy fixture checks zero allocation during reads and zero retained
+storage after repeated calls; writes through scalar and array fields, owner
+mutation, and a captured local retain independent values.

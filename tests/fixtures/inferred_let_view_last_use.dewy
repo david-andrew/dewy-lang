@@ -1,0 +1,25 @@
+# Unwritten let bindings use the same last-use proof as const and @ views.
+$explicit_copies
+Box:type=[value:int64 items:array<int64>]
+exercise=():>int64=>{
+    let rows:array<Box>=[]
+    rows.push([42 [7]])
+    let before:int64=_arena_allocated_bytes
+    let view=rows[0]
+    let items=view.items
+    if items.length=?0 return 1
+    let answer=view.value
+    if items[0] not=?7 return 2
+    if _arena_allocated_bytes not=?before return 3
+    # Both views are dead here, despite remaining in the same lexical block.
+    rows.clear()
+    rows.push([9 [1]])
+    return answer
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {if exercise() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

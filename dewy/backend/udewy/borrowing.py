@@ -468,9 +468,10 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
         for node in _walk_function(function.literal):
             if isinstance(node, hir.Declare) and node.binding_id is not None:
                 source = route(node.expr)
-                inferred = (node.decltype in {'const', 'local_const'} and not _word_value(node.expr.type)
+                inferred = (not _word_value(node.expr.type)
                             and isinstance(unwrap(node.expr), (hir.Index, hir.MemberAccess, hir.DictLookup))
                             and node.binding_id in plan.stable_bindings and source is not None
+                            and source.binding in function.locals and source.binding not in excluded_owners
                             and not stable_owner(source, plan))
                 if node.view or inferred:
                     view_candidates.add(node.binding_id)
@@ -488,8 +489,8 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
                     source = None
                 if expression_conflicts(node.key, source, plan, source_bindings):
                     plan.array_snapshots.add(id(node))
-        # Only inferred views that failed the whole-function proof need the
-        # interval scan. Share its dependency graph across each block's views.
+        # An unwritten let is as read-only as a const for this proof. Only
+        # private owners that failed the whole-function proof need a scan. Share its dependency graph across each block's views.
         if not view_candidates:
             continue
         pending = [(function.literal.body, None)]
