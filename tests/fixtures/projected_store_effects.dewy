@@ -1,0 +1,25 @@
+Record:type = [value:int64]
+
+# Writing a scalar through a record place does not allocate. A compound
+# store also reads the previous field value and states that permission.
+increment = (@record:Record):>void & reads<record.value> & mutates<record.value> & no allocates => {
+    record.value+=1
+}
+# By-value mutation needs its independent parameter storage.
+changed = (record:Record):>int64 & allocates => {
+    record.value=41
+    return record.value
+}
+# A scalar element store can still detach an array's shared storage.
+replace_element = (@values:array<int64 length=1>):>void & mutates<values> & allocates => {
+    values[0]=42
+}
+main = ():>int64 => {
+    let record:Record=[value=0]
+    increment(@record)
+    let result=changed(record)
+    if record.value not=? 1 return 1
+    let values:array<int64 length=1>=[0]
+    replace_element(@values)
+    return if result =? 41 and values[0] =? 42 42 else 2
+}

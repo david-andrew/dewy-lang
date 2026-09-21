@@ -528,6 +528,8 @@ FunctionLiteral = type of AST & [
     # debug locations. Copying HIR never copies the complete source text.
     # None for compiler-synthesized functions without a source origin.
     proof:bool=false
+    # Ownership analyses and reachability use identity, not hidden spelling.
+    lifecycle:string?=none
 ]
 
 # A callable value formed by combining callable operands with `&`.

@@ -5926,10 +5926,11 @@ def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
     return found
 
 
-def _hoist_hidden_function(name: str, literal: p0.BinOp, *, ctx: Context, expected: ty.Type | None = None, readonly_receiver: bool = False) -> sb.Binding:
+def _hoist_hidden_function(name: str, literal: p0.BinOp, *, ctx: Context, expected: ty.Type | None = None, lifecycle: str | None = None) -> sb.Binding:
     """Typecheck a synthesized function literal as a module-level function (like a generic instance)."""
     binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'function', literal.loc)
-    checked = tcr_function_literal(literal, ctx=ctx, expected=expected, readonly_receiver=readonly_receiver)
+    checked = tcr_function_literal(literal, ctx=ctx, expected=expected, readonly_receiver=lifecycle == 'copy')
+    checked.lifecycle = lifecycle
     binding.type = checked.type
     declaration = hir.Declare(literal.loc, ty.VOID_TYPE, 'let', name, None, checked, binding_id=binding.id)
     binding.declaration = declaration
@@ -5969,6 +5970,8 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
             continue
         if not ty.user_branded(object_type):
             user_error(ctx.srcfile, 'lifecycle hooks require a nominal type', Pointer(span=alias.loc, message='declare the owner with `type of [...]`'))
+        if object_type.field(method.name) is not None:
+            user_error(ctx.srcfile, 'a lifecycle hook cannot implement a callable field', Pointer(span=alias.loc, message='lifecycle members are compiler-only, not runtime function values'))
         if method.lifecycle in hooks:
             user_error(ctx.srcfile, f'duplicate lifecycle hook `$__{method.lifecycle}__`', Pointer(span=alias.loc, message='a type has at most one member for each lifecycle operation'))
         hooks[method.lifecycle] = method
@@ -6063,7 +6066,7 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         # refinements are what the method's returns must prove
         slot = object_type.field(method.name) if method.name in statics else None
         expected = slot.type if slot is not None and isinstance(slot.type, ty.FunctionType) else None
-        hoisted = _hoist_hidden_function(hidden_name, new_literal, ctx=ctx, expected=expected, readonly_receiver=method.lifecycle == 'copy')
+        hoisted = _hoist_hidden_function(hidden_name, new_literal, ctx=ctx, expected=expected, lifecycle=method.lifecycle)
         method.binding_id = hoisted.id
         if method.lifecycle is not None:
             assert isinstance(hoisted.type, ty.FunctionType)
@@ -8108,7 +8111,7 @@ def _string_method(receiver: hir.AST, name: str, binop: p0.BinOp, *, ctx: Contex
 
 def _maybe_auto_call_member(node: hir.AST, *, ctx: Context) -> hir.AST:
     if isinstance(node, hir.CopyMethod):
-        return hir.CopyValue(node.loc, node.value.type, node.value)
+        return _checked_copy(node.value, node.loc, ctx=ctx)
     if isinstance(node, hir.BoundMethod):
         if ty.is_zero_arg_function(node.type):
             return tcr_function_call(node, p0.Block(node.loc, [], '()', None), ctx=ctx)
@@ -8834,9 +8837,38 @@ def _builtin_copy_available(type_: ty.Type) -> bool:
     if isinstance(plain, ty.TypeOr):
         return all(_builtin_copy_available(member) for member in plain.items)
     if isinstance(plain, ty.ObjectType):
-        return plain.field('copy') is None and plain.method('copy') is None
+        method = plain.method('copy')
+        return plain.field('copy') is None and (method is None or method.lifecycle == 'copy')
     return (isinstance(plain, (str, ty.ArrayType, ty.IntegerLiteralType, ty.StringLiteralType, ty.StringType))
             or _is_string_type(plain))
+
+
+def _checked_copy(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST:
+    """A custom copy is a real call in checked HIR, not a backend surprise.
+
+    That call exposes its effects and result contract to ordinary analyses.
+    In particular, do not transfer facts from the source as the memberwise
+    CopyValue operation does: a hook's result owes its own declared facts.
+    Its internal read-only receiver may borrow a const source.
+    """
+    plain = ty.unfold(ty.strip_refinement(value.type))
+    if isinstance(plain, ty.ObjectType):
+        hook = next((method for method in plain.methods if method.lifecycle == 'copy'), None)
+        if hook is None and any(method.lifecycle == 'drop' for method in plain.methods):
+            user_error(ctx.srcfile, 'cannot copy a move-only value', Pointer(span=loc, message='this type declares `$__drop__` without `$__copy__`'))
+        if hook is not None:
+            if hook.binding_id is None:
+                _declare_pending_methods(ctx=ctx, for_type=plain)
+            if hook.binding_id is None:
+                not_implemented(ctx.srcfile, loc, 'a recursive lifecycle copy before its signature is available')
+            binding = ctx.binding_registry.by_id[hook.binding_id]
+            assert isinstance(binding.type, ty.FunctionType)
+            function = hir.ExpressedIdentifier(loc, binding.type, binding.name, binding_id=binding.id)
+            receiver = hir.Place(value.loc, plain, value)
+            call = hir.FunctionCall(loc, ty.strip_result_refinement(binding.type.ret), function, [receiver], {})
+            _establish_call_facts(call, ctx=ctx)
+            return call
+    return hir.CopyValue(loc, value.type, value)
 
 
 def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
@@ -16163,7 +16195,7 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
     if isinstance(left, hir.DictMethod):
         return _dict_method_call(left, call, ctx=ctx)
     if isinstance(left, hir.CopyMethod):
-        return hir.CopyValue(call.loc, left.value.type, left.value)
+        return _checked_copy(left.value, call.loc, ctx=ctx)
     _establish_call_facts(call, ctx=ctx)
     return call
 

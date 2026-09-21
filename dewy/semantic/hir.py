@@ -706,6 +706,10 @@ class FunctionLiteral(AST):
     """The file the literal (and so every span in its body) was written in:
     debug locations point there. None for compiler-synthesized functions."""
     proof: bool = field(default=False, kw_only=True)
+    lifecycle: str | None = field(default=None, kw_only=True)
+    """Compiler-only ownership operation; the first parameter is its receiver.
+    Kept in HIR so analyses and reachability need not decode hidden names.
+    """
 
 # TODO: Partial evaluation is roughly a stack of function calls. Explicitly
 # supplied values are evaluated and saved immediately; signature defaults stay

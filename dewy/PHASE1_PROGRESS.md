@@ -760,8 +760,8 @@ This is declaration support, not automatic resource lifetime support. Both
 code-generation routes reject runtime hooks explicitly. The native guard
 runs before reachability pruning, which would otherwise erase a hidden hook
 and silently compile its object with ordinary memberwise semantics. Inherited
-hooks are explicitly pending, with a separate parent-portion proposal awaiting
-review. Next, implicit ownership operations must be visible to effect/fact
+hooks were explicitly pending at this checkpoint; the parent-portion direction
+has since been approved. Next, implicit ownership operations must be visible to effect/fact
 analysis and reachability as well as to cleanup and copy lowering.
 
 Validation: the initial hosted declaration/method suites passed 39 tests;
@@ -773,3 +773,32 @@ build took 65.66 seconds, still above target. The focused manifest has 97
 cases; no new full-corpus result is claimed for this batch. Artifacts:
 `../dewy-build-artifacts/phase1-lifecycle-declarations-stage1-2026-09-20` and
 `../dewy-build-artifacts/phase1-lifecycle-declarations-parity-2026-09-20`.
+
+Lifecycle call checking and cleanup foundation: explicit custom `.copy()`
+operations now resolve to checked calls with an internal read-only receiver,
+including const sources. Their effects and returned facts come from the hook,
+not from a memberwise copy of the source. Drop-only explicit copies are
+rejected. Lifecycle members cannot escape through inherited callable fields.
+HIR and native snapshot codecs retain each function's lifecycle role.
+
+The internal receiver is private to the lifecycle operation for public effect
+contracts; ordinary alias analysis still sees its place accesses. Both effect
+checkers now include projected member/index writes, including possible storage
+detachment and independent by-value parameter storage. Cleanup releases nested
+scopes and record fields in reverse order. Runtime lifecycle invocation remains
+explicitly gated until automatic ownership operations have correct checking
+and lowering; these declaration/call checks alone do not enable resources.
+
+Validation: all 101 Phase 1 paired cases passed, including seven lifecycle
+rejections whose expected diagnostic fragments are now checked. Hosted checks
+passed 142 effect/allocation/declaration tests, 37 final declaration tests,
+35 copy/method/report regressions and 26 ownership/cleanup tests. Native passed
+26 focused probes and three execution kernels; the projected-store kernel also
+passed hosted x86 and C. The final native generation built in 64.35 seconds,
+still above the performance target. Artifacts:
+`../dewy-build-artifacts/phase1-lifecycle-calls-stage3-2026-09-20` and
+`../dewy-build-artifacts/phase1-lifecycle-calls-parity-2026-09-20`.
+
+David approved parent-portion lifecycle inheritance and clarified the review
+policy: proceed provisionally with obvious choices consistent with Dewy and
+report them; seek advance review for fundamental new language directions.

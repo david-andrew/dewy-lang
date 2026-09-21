@@ -5742,7 +5742,12 @@ release_record_fields_body = (pointer:addr type:addr node:hir.AST @state:State):
     $runtime_assert record isnt? none
     let layout=object_layout(type node @state)
     let prefix:array<addr>=[]
-    loop field in record.fields {
+    # Initialization follows field declaration order; cleanup unwinds it.
+    let index=record.fields.length
+    loop index >? 0 {
+        index-=1
+        $runtime_assert index <? record.fields.length
+        let field=record.fields[index]
         let offset=layout.offsets.get(field.name)
         $runtime_assert offset isnt? none
         let value=field_read(address(pointer offset node @state) field.value_type node @state)

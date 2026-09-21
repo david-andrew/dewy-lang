@@ -1,0 +1,15 @@
+let changed:int64=0
+Handle = type of [
+    token:int64
+    $__copy__
+    duplicate = ():>Handle => {
+        changed=1
+        return Handle[token]
+    }
+]
+# An explicit copy is a checked call, including its external effects.
+f = ():>Handle & no mutates => {
+    let handle=Handle[42]
+    return handle.copy()
+}
+main = ():>int64 => 42

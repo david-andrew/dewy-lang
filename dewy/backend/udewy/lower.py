@@ -3811,7 +3811,9 @@ class _Lowerer(
 
         def releases(scopes: list[list[hir.ExpressedIdentifier]], moved: str | None = None) -> list[hir.AST]:
             released: list[hir.AST] = []
-            for scope in scopes:
+            # An exit unwinds the innermost lexical lifetime first. Within
+            # each scope, the most recently initialized owner goes first.
+            for scope in reversed(scopes):
                 for local in reversed(scope):
                     if local.name == moved:
                         continue   # `return s`: the caller takes the string over
@@ -6072,9 +6074,9 @@ def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main'
     # Declaration checking lands before ownership lowering. Never accept a
     # resource type and silently give it ordinary memberwise value behavior.
     for item in root.items:
-        if isinstance(item, hir.Declare) and item.name.endswith('$lifecycle'):
+        if isinstance(item, hir.Declare) and isinstance(item.expr, hir.FunctionLiteral) and item.expr.lifecycle is not None:
             from ...semantic.errors import not_implemented
-            origin = item.expr.source if isinstance(item.expr, hir.FunctionLiteral) else None
+            origin = item.expr.source
             not_implemented(origin or srcfile, item.loc, 'lifecycle ownership lowering')
     from ...semantic import proofs
     root = proofs.erase(root)

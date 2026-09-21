@@ -103,3 +103,28 @@ def test_a_returned_local_object_hands_its_strings_to_the_result_and_releases_no
     assert re.search(r'__dewy_release_string\(__dewy_string_field_string_\d+\)', _function(emitted, released[1]))
     string_release = _function(emitted, '__dewy_release_string')
     assert string_release.index('if __dewy_value =? 0') < string_release.index('__dewy_value + 40')
+
+
+def test_nested_return_unwinds_inner_owners_before_outer_owners() -> None:
+    emitted = _compile(POINT + '''
+round = (early:bool):>int64 => {
+    let outer = make(1)
+    {
+        let inner = make(2)
+        if early return inner.name.length + outer.name.length
+    }
+    return outer.name.length
+}
+main = ():>int64 => round(true)
+''')
+    releases = re.findall(r'__dewy_release_object_\d+\((inner|outer)\)', _function(emitted, 'round'))
+    # The early return closes both scopes; the fallthrough closes each once.
+    assert releases == ['inner', 'outer', 'inner', 'outer']
+
+
+def test_record_fields_release_in_reverse_declaration_order() -> None:
+    emitted = _compile(POINT + 'main=():>int64=>{let value=make(3) return value.name.length}')
+    release = re.search(r'(__dewy_release_object_\d+)\(value\)', _function(emitted, 'main'))
+    assert release is not None
+    body = _function(emitted, release[1])
+    assert body.index('__dewy_release_array_') < body.index('__dewy_release_string(')

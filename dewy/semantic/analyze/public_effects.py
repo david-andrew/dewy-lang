@@ -56,8 +56,14 @@ def validate(root, registry, srcfile):
     for literal in analysis.literals:
         key = id(literal)
         params = _literal_params(literal)
-        private = {p.binding_id for p in params if not p.place}
-        places = {p.binding_id: str(index) for index, p in enumerate(params) if p.place}
+        # A lifecycle receiver is logically the operated-on value. Its
+        # internal place ABI does not introduce a public external resource:
+        # copy reads it; move/drop consume it. Storage alias analysis still
+        # sees the place and checks all actual reads, writes and escapes.
+        receiver = params[0].binding_id if literal.lifecycle is not None and params else None
+        private = {p.binding_id for p in params if not p.place or p.binding_id == receiver}
+        places = {p.binding_id: str(index) for index, p in enumerate(params) if p.place and p.binding_id != receiver}
+        value_parameters = {p.binding_id for p in params if not p.place}
         word_bindings = set()
         pending = [literal.body]
         while pending:
@@ -200,11 +206,17 @@ def validate(root, registry, srcfile):
                     storage()
                 visit(node.expr)
                 return
-            if isinstance(node, hir.Assign):
-                if not scalar(node.target.type):
+            if isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign)):
+                path = bindings.access_path(node.target, unwrap=_unwrap)
+                # Projected writes may detach a shared array or require an
+                # independent by-value parameter. Do not infer no allocation
+                # merely because the final stored element is a scalar.
+                projected_storage = (any(isinstance(step, hir.Index) for step in path.steps)
+                                     or bool(path.steps) and path.binding_id in value_parameters)
+                if not scalar(node.target.type) or projected_storage:
                     storage()
                 access(node.target, 'mutates')
-                if node.op != '=':
+                if isinstance(node, hir.Assign) and node.op != '=':
                     access(node.target, 'reads')
                 visit(node.value)
                 return

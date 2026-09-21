@@ -1,8 +1,11 @@
 # Phase 1 proof and effect surfaces — proposals for review
 
 This document separates approved direction from proposals still awaiting
-review. David requested review before implementation on 2026-09-20. The settled ownership work can proceed
-independently. The existing `$runtime_assert` and `$prototype` rules remain
+review. David initially requested review before implementation on 2026-09-20.
+In the subsequent lifecycle review he relaxed that rule: clear choices that
+fit Dewy's direction may proceed provisionally and be reported; fundamental
+new language directions still need advance review. The existing
+`$runtime_assert` and `$prototype` rules remain
 unchanged.
 
 ## Checked and unchecked local facts
@@ -309,7 +312,11 @@ nonescaping places. It adds no uninitialized-place syntax. Approval does not
 mean the compiler implements their runtime ownership behavior yet. Both
 checkers now validate declarations, result identity, compiler-only access and
 the read-only copy receiver. The native snapshot codec retains this metadata.
-Code generation explicitly rejects hooks until ownership lowering is ready;
+Explicit `.copy()` now resolves a custom copy hook into an ordinary checked
+call, so its effects and result facts are visible before lowering. A direct
+copy of a drop-only nominal value is rejected as move-only. Implicit copies
+and lifecycle invocation are still incomplete. Code generation explicitly
+rejects hooks until ownership lowering is ready;
 in particular, hidden hooks must not disappear through reachability pruning
 and leave a resource with ordinary memberwise behavior.
 
@@ -330,6 +337,9 @@ Handle = type of [
 - One tagged member per operation, on a nominal mint. The ordinary member
   name is descriptive; the metatag selects its compiler role. Tagged members
   are compiler-invoked only, not manually callable or first-class values.
+  They cannot implement a stored callable field. The builtin `.copy()`
+  operation selects a copy hook even when that member is itself named
+  `copy`; this does not expose the member as a callable value.
 - Each hook has no explicit arguments. Its implicit receiver is passed by an
   internal nonescaping place; invoking a hook never copies the source first.
   The copy receiver is read-only. Drop/move receivers may consume or update
@@ -357,6 +367,14 @@ participate in ordinary effect inference and written contracts. Being a hook
 does not exempt a function from `no_effects`, `no allocates`, or other
 guarantees; unresolved effects remain unknown.
 
+The receiver's internal place ABI is not itself a public external resource.
+Copy reads the operated-on value; move/drop consume it. Ordinary operations
+on its own fields are private for public-effect accounting, while storage
+alias summaries still track the actual receiver reads, writes and escapes.
+Calling a helper that touches external state remains effectful, and aggregate
+construction/copying still owes its allocation contract. This keeps internal
+borrowing from changing the source effect model of value operations.
+
 Implicit copy/move operations may be elided, and last-use copies may become
 moves. Hook authors therefore cannot rely on a fixed invocation count or on
 an implicit copy's side effects to implement behavior that must occur. For
@@ -380,12 +398,11 @@ user-minted resources with allocator ownership. The allocation-capability
 protocol and remaining failure behavior need their own design before useful
 resource-owning hooks can be declared complete.
 
-### Inheritance — awaiting review
+### Inheritance — approved direction, implementation pending
 
 If `Child = type of Parent & [extra:string]`, an inherited parent copy/move
-hook returns `Parent`, not the complete `Child`. The implementation currently
-rejects inherited hooks explicitly. A proposed extension is to apply the
-parent hook to the parent portion, handle the added fields normally, and keep
-the complete result's child identity. The alternative is to require explicit
-hooks on each child mint. This question was sent to David for review; neither
-behavior is implemented or implied by the root-type call protocol.
+hook returns `Parent`, not the complete `Child`. David approved applying the
+parent hook to the parent portion, handling the added fields normally, and
+keeping the complete result's child identity. The implementation still
+rejects inherited hooks explicitly until that composition is implemented;
+reusing the parent's returned value alone would lose the child's state.

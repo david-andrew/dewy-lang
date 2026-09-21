@@ -432,18 +432,56 @@
   },
   {
     "source": "tests/fixtures/lifecycle_call_rejected.dewy",
-    "accepts": false
+    "accepts": false,
+    "compile_diagnostic_stderr": [
+      "compiler-only"
+    ]
   },
   {
     "source": "tests/fixtures/lifecycle_copy_write_rejected.dewy",
-    "accepts": false
+    "accepts": false,
+    "compile_diagnostic_stderr": [
+      "read-only"
+    ]
   },
   {
     "source": "tests/fixtures/lifecycle_result_rejected.dewy",
-    "accepts": false
+    "accepts": false,
+    "compile_diagnostic_stderr": [
+      "invalid lifecycle hook result"
+    ]
   },
   {
     "source": "tests/fixtures/lifecycle_duplicate_rejected.dewy",
-    "accepts": false
+    "accepts": false,
+    "compile_diagnostic_stderr": [
+      "duplicate lifecycle"
+    ]
+  },
+  {
+    "source": "tests/fixtures/lifecycle_copy_effect_rejected.dewy",
+    "accepts": false,
+    "compile_diagnostic_stderr": [
+      "effect contract"
+    ]
+  },
+  {
+    "source": "tests/fixtures/lifecycle_copy_fact_rejected.dewy",
+    "accepts": false,
+    "compile_diagnostic_stderr": [
+      "assert"
+    ]
+  },
+  {
+    "source": "tests/fixtures/lifecycle_move_only_copy_rejected.dewy",
+    "accepts": false,
+    "compile_diagnostic_stderr": [
+      "cannot copy a move-only"
+    ]
+  },
+  {
+    "source": "tests/fixtures/projected_store_effects.dewy",
+    "accepts": true,
+    "exit": 42
   }
 ]

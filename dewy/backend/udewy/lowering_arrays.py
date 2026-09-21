@@ -1493,14 +1493,15 @@ class _ArrayLowering(_ArraySharing):
                 statements.append(nested_declare)
                 statements.extend(self._release_object_members(nested_ident, unfolded, loc))
 
-        for field in object_type.fields:
+        # Field order is initialization order; unwind it for destruction.
+        for field in reversed(object_type.fields):
             release_field(field, offsets[field.name])
 
         def child_fields(child_type: ty.ObjectType, extras: list[ty.ObjectField]) -> list[hir.AST]:
             # a child's own fields, released by the brand the value carries
             _child_size, child_offsets = self._object_layout(child_type, hir.Void(loc, ty.VOID_TYPE))
             mark = len(statements)
-            for field in extras:
+            for field in reversed(extras):
                 release_field(field, child_offsets[field.name])
             released = statements[mark:]
             del statements[mark:]

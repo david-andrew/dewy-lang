@@ -1,0 +1,12 @@
+Handle = type of [
+    token:int64
+    $__copy__
+    duplicate = ():>Handle => Handle[0]
+]
+f = ():>void => {
+    let handle=Handle[42]
+    let copied=handle.copy()
+    # A custom hook's result has its own facts; it is not a field snapshot.
+    $assert copied.token =? 42
+}
+main = ():>int64 => 42

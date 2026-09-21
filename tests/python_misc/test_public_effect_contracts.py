@@ -160,3 +160,24 @@ def test_position_only_effects_and_effect_only_prefix(source):
     else:
         with pytest.raises(ReportException, match='only an effect exclusion'):
             codegen(SrcFile(None, source))
+
+
+@pytest.mark.parametrize('source', [
+    'f=(@r:[value:int64]):>void & mutates<r.value> & no allocates=>{r.value=42}',
+    'f=(@r:[value:int64]):>void & reads<r.value> & mutates<r.value> & no allocates=>{r.value+=1}',
+    'f=(@xs:array<int64 length=1>):>void & mutates<xs> & allocates=>{xs[0]=42}',
+    'f=(r:[value:int64]):>void & allocates=>{r.value=42}',
+])
+def test_projected_store_effects_follow_the_storage_route(source):
+    codegen(SrcFile(None, source))
+
+
+@pytest.mark.parametrize('source', [
+    'f=(@r:[value:int64]):>void & no mutates=>{r.value=42}',
+    'f=(@r:[value:int64]):>void & mutates<r.value> & no reads=>{r.value+=1}',
+    'f=(@xs:array<int64 length=1>):>void & no allocates=>{xs[0]=42}',
+    'f=(r:[value:int64]):>void & no allocates=>{r.value=42}',
+])
+def test_scalar_destination_does_not_hide_a_write_or_container_copy(source):
+    with pytest.raises(ReportException, match='effect contract'):
+        codegen(SrcFile(None, source))

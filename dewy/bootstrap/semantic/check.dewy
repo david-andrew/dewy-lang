@@ -1198,7 +1198,8 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
     let selected:addr? = if shape is? types.OverloadType matched.method_index else none
     let source = contexts.node_at(id env.lexical session)
     if func is? hir.CopyMethod {
-        let result=put(hir.CopyValue[source.loc node_at(func.value session).value_type func.value] @session)
+        let result=checked_copy(func.value id env @session)
+        if result is? Error return result
         return if expected is? none result else against(result expected id env @session)
     }
     if func is? hir.DictMethod {
@@ -2597,7 +2598,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     }
     loop slot in shape.pos_or_kw {slots.push(slot)}
     let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types effects=effect_contract)
-    let value=put(hir.FunctionLiteral[literal.loc function_type parameters keyword_parameters none returns body source=env.lexical.source proof=is_proof_literal(literal env session)] @session)
+    let value=put(hir.FunctionLiteral[literal.loc function_type parameters keyword_parameters none returns body source=env.lexical.source proof=is_proof_literal(literal env session) lifecycle=if method is? none none else method.lifecycle] @session)
     return if expected_signature is? none value else against(value expected_signature id env @session)
 }
 
@@ -3110,8 +3111,42 @@ builtin_copy_available = (id:addr nodes:types.Table):>bool => {
         loop member in type.items {if not builtin_copy_available(member nodes) return false}
         return true
     }
-    if type is? types.ObjectType return types.object_field(type 'copy') is? none and types.object_method(type 'copy') is? none
+    if type is? types.ObjectType {
+        let method=types.object_method(type 'copy')
+        return types.object_field(type 'copy') is? none and (method is? none or method.lifecycle =? 'copy')
+    }
     return type is? types.Primitive|types.ArrayType|types.IntegerLiteralType|types.StringLiteralType|types.StringType
+}
+# A custom copy enters the ordinary call graph before fact/effect analysis.
+# Its result contract, not the source's current facts, describes the result.
+checked_copy = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let node=node_at(value session)
+    let loc=contexts.node_at(id env.lexical session).loc
+    let owner=views.structural_base(node.value_type session.types)
+    let type=types.node_at(session.types owner)
+    if type is? types.ObjectType {
+        let hook:types.MethodSpec?=none
+        let has_drop=false
+        loop method in type.methods {
+            if method.lifecycle =? 'copy' {hook=method}
+            if method.lifecycle =? 'drop' {has_drop=true}
+        }
+        if hook is? none and has_drop return problem(id 'cannot copy a move-only value' 'this type declares `$__drop__` without `$__copy__`' env session)
+        if hook isnt? none {
+            let alias=if type.brand is? none display.type_to_dewy(owner session.types) else type.brand
+            let error=prepare_methods(owner alias env @session)
+            if error isnt? none return error
+            let entry=session.methods.get(method_key(owner hook))
+            if entry is? none return pending(id 'a recursive lifecycle copy before its signature is available' env session)
+            let binding=bindings.binding_at(session.registry entry.binding)
+            $runtime_assert binding.value_type isnt? none
+            let signature=dispatch.method_at(session.types binding.value_type)
+            let function=put(hir.ExpressedIdentifier[loc binding.value_type binding.name binding.id] @session)
+            let receiver=put(hir.Place[node.loc owner value] @session)
+            return put(hir.FunctionCall[loc views.strip_result_refinement(signature.ret @session.types) function [receiver] []] @session)
+        }
+    }
+    return put(hir.CopyValue[loc node.value_type value] @session)
 }
 member_named = (receiver:addr name:string id:addr env:Environment @session:contexts.Session):>addr|Error => {
     if name =? 'length' {receiver=binary_array(receiver @session)}
@@ -3143,6 +3178,7 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
     if type is? types.ObjectType {
         let field = types.object_field(type name)
         if field isnt? none return match_read(put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session) env @session)
+        if name =? 'copy' and builtin_copy_available(value.value_type session.types) return copy_method(receiver loc @session)
         let selected=method_member(views.structural_base(value.value_type session.types) receiver name id env @session)
         if selected is? Error return selected
         if selected isnt? none return selected
@@ -5468,6 +5504,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let reference=session.syntax_refs[method.literal]
         let defining=Environment[contexts.Context[reference.source reference.scope] env.state]
         if not type.minted return problem(reference.node 'lifecycle hooks require a nominal type' 'declare the owner with `type of [...]`' defining session)
+        if types.object_field(type method.name) isnt? none return problem(reference.node 'a lifecycle hook cannot implement a callable field' 'lifecycle members are compiler-only, not runtime function values' defining session)
         if method.lifecycle in? lifecycle_roles return problem(reference.node 'duplicate lifecycle hook' method.lifecycle defining session)
         lifecycle_roles.add(method.lifecycle)
         if method.owner isnt? none and method.owner not=? alias return pending(reference.node 'inherited lifecycle hooks' defining session)

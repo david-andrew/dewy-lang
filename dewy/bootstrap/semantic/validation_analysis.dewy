@@ -40,7 +40,9 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
     if root is? hir.Block {
         loop item in root.items {
             let declaration=hir.node_at(env.nodes item)
-            if declaration is? hir.Declare and declaration.name.endswith('$lifecycle') return Error[srcfile=source title='not implemented: lifecycle ownership lowering' pointers=[Pointer[declaration.loc 'lifecycle declarations are checked; runtime ownership is pending']]]
+            if declaration isnt? hir.Declare continue
+            let function=hir.node_at(env.nodes declaration.expr)
+            if function is? hir.FunctionLiteral and function.lifecycle isnt? none return Error[srcfile=source title='not implemented: lifecycle ownership lowering' pointers=[Pointer[declaration.loc 'lifecycle declarations are checked; runtime ownership is pending']]]
         }
     }
     let strict=module.prelude or module.no_prelude or 'BigInt' not in? prelude

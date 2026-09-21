@@ -5341,6 +5341,7 @@ encode_Value268=(value:Value268 @out:bytes.Writer):>void=>{
     encode_Value47(value.object_type @out)
     encode_Value47(value.source @out)
     encode_Value32(value.proof @out)
+    encode_Value36(value.lifecycle @out)
 }
 decode_Value268=(@input:bytes.Reader):>Value268|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -5368,7 +5369,9 @@ decode_Value268=(@input:bytes.Reader):>Value268|CacheMiss=>{
     if field_10 is? CacheMiss return field_10
     let field_11=decode_Value32(@input)
     if field_11 is? CacheMiss return field_11
-    return Value268[loc=field_0 value_type=field_1 pos_or_kw_args=field_2 kw_only_args=field_3 rest_args=field_4 rettype=field_5 body=field_6 object_receiver=field_7 object_fields=field_8 object_type=field_9 source=field_10 proof=field_11]
+    let field_12=decode_Value36(@input)
+    if field_12 is? CacheMiss return field_12
+    return Value268[loc=field_0 value_type=field_1 pos_or_kw_args=field_2 kw_only_args=field_3 rest_args=field_4 rettype=field_5 body=field_6 object_receiver=field_7 object_fields=field_8 object_type=field_9 source=field_10 proof=field_11 lifecycle=field_12]
 }
 
 encode_Value269=(value:Value269 @out:bytes.Writer):>void=>{

@@ -23,6 +23,7 @@ $__move__
 transfer=():>Handle=>Handle[token]'''))
     functions = [item.expr for item in root.items if isinstance(item, hir.Declare) and isinstance(item.expr, hir.FunctionLiteral)]
     assert len(functions) == 3
+    assert [fn.lifecycle for fn in functions] == ['drop', 'copy', 'move']
     assert all(len(fn.pos_or_kw_args) == 1 and fn.pos_or_kw_args[0].place for fn in functions)
     declaration = next(item for item in root.items if isinstance(item, hir.Declare) and item.name == 'Handle')
     assert [m.lifecycle for m in declaration.expr.value.methods] == ['drop', 'copy', 'move']
@@ -99,3 +100,49 @@ def test_nested_function_cannot_write_through_copy_receiver():
     body = '$__copy__\nf=():>Handle=>{let write=():>void=>{token=1} write() return Handle[token]}'
     with pytest.raises(ReportException, match='read-only receiver'):
         checked(owner(body))
+
+
+@pytest.mark.parametrize('name', ['duplicate', 'copy'])
+@pytest.mark.parametrize('call', ['h.copy()', 'h.copy'])
+def test_custom_copy_is_a_checked_call_on_a_const_receiver(name, call):
+    root = checked(owner(f'$__copy__\n{name}=():>Handle=>Handle[token]') + f'f=():>Handle=>{{const h=Handle[42] return {call}}}')
+    declaration = next(item for item in root.items if isinstance(item, hir.Declare) and item.name == 'f')
+    calls = [item for item in hir.walk(declaration.expr.body) if isinstance(item, hir.FunctionCall)]
+    hook_call = next(item for item in calls if isinstance(item.func, hir.ExpressedIdentifier) and item.func.name.endswith('$lifecycle'))
+    assert len(hook_call.pos_args) == 1 and isinstance(hook_call.pos_args[0], hir.Place)
+    assert not any(isinstance(item, hir.CopyValue) for item in hir.walk(declaration.expr.body))
+
+
+def test_explicit_copy_of_move_only_value_is_rejected():
+    with pytest.raises(ReportException, match='cannot copy a move-only value'):
+        checked(owner('$__drop__\nrelease=():>void=>{}') + 'f=():>Handle=>{let h=Handle[42] return h.copy()}')
+
+
+def test_custom_copy_cannot_hide_external_effects_from_caller():
+    source = ('let changed:int64=0\n' + owner('$__copy__\nduplicate=():>Handle=>{changed=1 return Handle[token]}')
+              + 'f=():>Handle & no mutates=>{let h=Handle[42] return h.copy()}')
+    with pytest.raises(ReportException, match='effect contract'):
+        checked(source)
+
+
+def test_custom_copy_does_not_inherit_source_field_facts():
+    source = (owner('$__copy__\nduplicate=():>Handle=>Handle[0]')
+              + 'f=():>void=>{let h=Handle[42] let c=h.copy() $assert c.token =? 42}')
+    with pytest.raises(ReportException, match='assert'):
+        checked(source)
+
+
+def test_internal_receiver_abi_does_not_introduce_external_effects():
+    checked(owner('$__drop__\nrelease=():>void & no_effects=>{if token >? 0 {token=0}}'))
+    checked(owner('$__copy__\nduplicate=():>Handle & no reads=>Handle[token]'))
+
+
+def test_hook_cannot_escape_through_an_inherited_function_slot():
+    source = '''Protocol=type of [release:():>void]
+Handle=type of Protocol & [
+    $__drop__
+    release=():>void=>{}
+]
+'''
+    with pytest.raises(ReportException, match='cannot implement a callable field'):
+        checked(source)

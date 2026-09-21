@@ -17,7 +17,7 @@ scalar = (id:addr nodes:types.Table):>bool => {
 }
 Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[]]
 Call:type = const [target:addr subjects:dict<string rows.Subject?>]
-Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[]]
+Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[] value_parameters:set<addr>=set[]]
 Location:type = const [known:bool subject:rows.Subject?=none]
 word_iterator = (id:addr node:hir.IteratorExpression input:Input):>bool => {
     if hir.node_at(input.nodes node.iterable) isnt? hir.Range return false
@@ -174,11 +174,16 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         visit(node.expr input @scan)
         return
     }
-    if node is? hir.Assign {
+    if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign {
         let target=hir.node_at(input.nodes node.target)
-        if not scalar(target.value_type input.types) {storage(@scan)}
+        let path=bindings.access_path(access.unwrap(node.target input.nodes) input.nodes)
+        let root=hir.node_at(input.nodes path.root)
+        let projected_storage=false
+        loop step in path.steps {if hir.node_at(input.nodes step) is? hir.Index {projected_storage=true}}
+        if path.steps.length >? 0 and root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.value_parameters {projected_storage=true}
+        if not scalar(target.value_type input.types) or projected_storage {storage(@scan)}
         record_access(node.target 'mutates' input @scan)
-        if node.op not=? '=' {record_access(node.target 'reads' input @scan)}
+        if node is? hir.Assign and node.op not=? '=' {record_access(node.target 'reads' input @scan)}
         visit(node.value input @scan)
         return
     }
@@ -230,7 +235,11 @@ validate = (root:addr source:SrcFile session:contexts.Session word_iterators:set
         loop index in 0.. and index <? params.length {
             let param=params[index]
             if param.binding_id is? none continue
-            if param.place {scan.places[param.binding_id]="{index}"}
+            if not param.place {scan.value_parameters.add(param.binding_id)}
+            # The internal receiver place is the operated-on value, not an
+            # external public-effect subject. Access summaries still track
+            # its physical storage for ownership and alias checking.
+            if param.place and not (index =? 0 and node.lifecycle isnt? none) {scan.places[param.binding_id]="{index}"}
             else {scan.private.add(param.binding_id)}
         }
         let pending:array<addr>=[node.body]
