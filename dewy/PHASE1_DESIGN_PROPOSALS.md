@@ -300,14 +300,15 @@ separately checked failure effect may also need permission depending on the
 allocator's settled failure policy. This spelling proposal neither grants a
 no-failure guarantee nor settles that policy.
 
-## Lifecycle call protocol — proposed, not approved or implemented
+## Lifecycle call protocol — approved, implementation pending
 
-The metatag names `$__drop__`, `$__copy__`, `$__move__`, inferred moves, and
-internal nonescaping places were approved in the roadmap. Their exact call
-signatures and interaction with member cleanup were not. This proposal fills
-that boundary without adding an uninitialized-place syntax.
+David approved the call shape and cleanup rules below on 2026-09-20, after
+reviewing an overview in the conversation. This extends the earlier approval
+of `$__drop__`, `$__copy__`, `$__move__`, inferred moves, and internal
+nonescaping places. It adds no uninitialized-place syntax. Approval does not
+mean the compiler implements these hooks yet.
 
-Proposed member shape (illustrative helpers, not currently executable):
+Approved member shape (illustrative helpers, not currently executable):
 
 ```dewy
 Handle = type of [
@@ -343,11 +344,33 @@ Handle = type of [
   selection, conflicting-write diagnostics and last-use transfers remain
   compiler decisions; this adds no explicit move operator.
 
-The outstanding effect boundary is separate: hooks must not make permitted
-copy elision observable through arbitrary I/O or unrelated state changes, and
-a drop must not replace an in-progress return or error. The current public
-resource rows do not yet prove that a raw address denotes a particular owned
-resource. This proposal does **not** silently authorize arbitrary raw calls
-inside hooks or equate user-minted resources with allocator ownership.
-That boundary needs a follow-up design/implementation decision before useful
+### Observable effects and elision
+
+David also approved allowing observable effects in these low-level hooks,
+rather than banning I/O or unrelated mutation outright. Such effects still
+participate in ordinary effect inference and written contracts. Being a hook
+does not exempt a function from `no_effects`, `no allocates`, or other
+guarantees; unresolved effects remain unknown.
+
+Implicit copy/move operations may be elided, and last-use copies may become
+moves. Hook authors therefore cannot rely on a fixed invocation count or on
+an implicit copy's side effects to implement behavior that must occur. For
+example, diagnostic logging in a copy hook is allowed, but the number of log
+entries may change when ownership analysis improves. An elided temporary
+also need not introduce a matching drop. Every actual remaining owner still
+requires its ordinary cleanup; observability is not permission to leak or
+double-release a resource. Ordinary explicit function calls retain their
+ordinary effect semantics.
+
+Checking must account for the effects of hooks that an operation can invoke;
+an optimization that happens to remove a call is not by itself a source-level
+promise that the hook has no effects. Copy/move elision remains an ownership
+decision, not permission to omit effects from a hook body that does execute.
+
+Separate boundaries remain: a drop must not replace an in-progress return or
+error, and the current public resource rows do not prove that a raw address
+denotes a particular owned resource. Allowing observable effects does not
+establish that relationship, bypass raw-operation checking, or equate
+user-minted resources with allocator ownership. The allocation-capability
+protocol and remaining failure behavior need their own design before useful
 resource-owning hooks can be declared complete.

@@ -2,7 +2,8 @@
 
 BLUF: Dewy should keep ordinary values on the compiler-managed static/arena/owned-storage path. As an explicit systems escape hatch, a library should be able to define resource-bearing value types such as `Rc<T>`, `Weak<T>`, `Arc<T>`, owning boxes, pools, and foreign handles. This needs a small unsafe allocation and lifecycle substrate; it should not make `@` into a general escaping pointer.
 
-This document records a provisional direction, not settled surface syntax or an implemented feature.
+The lifecycle call shape below is approved; its implementation is pending.
+The allocation and resource-access substrate remains a provisional direction.
 
 ## Relationship to value and place semantics
 
@@ -35,11 +36,28 @@ A resource-bearing type needs compiler-recognized operations for:
 - releasing a fully initialized value exactly once;
 - replacing an initialized destination, which is release followed by copy or transfer.
 
-The exact names and declaration syntax remain open. They may eventually resemble `__copy__`, `__move__`, and `__drop__`, but ordinary function-call rules are not enough by themselves: passing a value to its own release operation must not first copy it. The compiler can invoke these hooks with internal, nonescaping places for the relevant storage. (perhaps this indicates a reasonable case for metatagged methods, e.g. `$__copy__`, `$__move__`, `$__drop__`, since meta tags are supposed to indicate special behaviors, it might make sense for methods that need to deal with the arguments in a special way to be defined as such. TBD)
+The approved members carry `$__copy__`, `$__move__`, or `$__drop__` and have
+no explicit parameters. They are compiler-only operations with an internal,
+nonescaping borrowed receiver: passing a value to its own release operation
+never copies it first. Copy borrows read-only; move and drop may consume or
+update fields. Copy and move return the same nominal type; drop returns
+`void` before automatic reverse-order cleanup of remaining fields. A moved
+source does not run its outer drop hook, but any fields left behind still
+receive cleanup. Drop without copy makes the type move-only. See the
+[approved call protocol](../PHASE1_DESIGN_PROPOSALS.md#lifecycle-call-protocol--approved-implementation-pending)
+for the full rules and an example.
 
 Release must run on every path that ends a value's lifetime: normal scope exit, return, loop exit, exception forwarding, reassignment, and cleanup after partially completed aggregate construction. A release hook must not return an error, forward an exception, or otherwise replace the control flow already in progress.
 
-Lifecycle hooks cannot be unrestricted observable callbacks if the compiler is to preserve Dewy's move and copy-elision freedoms. Their contract must permit a retain immediately balanced by a release to be removed, and a last-use copy to become a move. At minimum, arbitrary I/O and unrelated mutation should be rejected in these hooks; the precise effect restriction belongs with the effect-system design. A reference-count inspection API, if provided, reports a useful snapshot rather than making transient compiler-elided retain/release pairs observable language semantics.
+Observable hook effects, including logging, are allowed under ordinary effect
+contracts (David's decision, 2026-09-20). Implicit copy/move operations and
+temporary owners may disappear through elision, so their hook invocation
+counts are not guaranteed. A last-use copy may become a move. Authors must
+not rely on those calls for behavior that must happen a particular number of
+times. Effects of potentially invoked hooks must still participate in
+checking; elision does not grant a hook an effect exemption. Actual owners
+still require cleanup exactly once. A reference-count inspection API, if
+provided, reports a snapshot, not a promise about elided retain/release pairs.
 
 ### 2. Allocator and layout capabilities
 
@@ -113,8 +131,8 @@ This order keeps the compiler's default arena-oriented roadmap intact. User-mana
 
 ## Open design questions
 
-- How a type opts into compiler-invoked lifecycle hooks, and the final hook names.
-- The smallest effect contract that makes lifecycle optimization sound without preventing useful cleanup.
+- How public resource identities connect to ownership of low-level storage;
+  observable effects and the lifecycle call shape are now approved above.
 - Surface syntax for read-only and lifetime-bounded places.
 - Whether explicit user-written moves are needed for predictable systems costs, in addition to moves inferred from last use.
 - The typed allocation-capability representation and how much layout reflection safe generic code may use.

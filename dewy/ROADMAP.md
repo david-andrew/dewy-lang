@@ -413,6 +413,12 @@ in both lowerings and the parity tool is the gate.
   copy, move and release. Hooks are invoked with internal nonescaping
   places, never by passing the value by copy. The intent throughout: the
   compiler infers sharing; the programmer is not asked to fight for it.
+  Follow-up approval (2026-09-20): zero-argument compiler-only members;
+  copy/move return the same nominal type, drop returns void before automatic
+  field cleanup. Observable hook effects are allowed under ordinary effect
+  contracts, with no guaranteed invocation count for elidable operations.
+  The [approved call protocol](PHASE1_DESIGN_PROPOSALS.md#lifecycle-call-protocol--approved-implementation-pending)
+  records the details. These hooks remain unimplemented.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a
   last use turns out to be needed it should be a meta-level form (a

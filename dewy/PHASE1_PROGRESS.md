@@ -729,3 +729,19 @@ Validation: 16 hosted dictionary/set tests passed; native rejects all five
 unsupported representation probes and executes the supported-key kernel (42).
 The hosted kernel executes on x86 and C. The change was prepared in an isolated
 checkout while the preceding full integration runs used unchanged sources.
+
+Integration closure for these checkpoints: the scoped-view second-generation
+compiler passed all 211 broad corpus cases and all 91 then-current Phase 1
+cases. The subsequent hosted-only dictionary-key correction passed both new
+paired cases, bringing the focused manifest to 93. Artifacts:
+`../dewy-build-artifacts/phase1-scoped-views-full-parity-2026-09-20`,
+`../dewy-build-artifacts/phase1-scoped-views-parity-2026-09-20`, and
+`../dewy-build-artifacts/phase1-key-validation-parity-2026-09-20`.
+
+Lifecycle design review: David approved the zero-argument compiler-only
+member shape, internal borrowed receiver, return types and automatic field
+cleanup order. Observable effects are allowed under ordinary effect
+contracts; implicit copy/move and temporary drop counts may change through
+elision. The proposal and storage design notes now reflect that decision.
+Hook implementation, raw-resource ownership contracts and remaining failure
+behavior are still outstanding. Phase 1 is not complete.
