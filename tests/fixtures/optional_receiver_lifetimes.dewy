@@ -1,0 +1,15 @@
+# Safe navigation borrows stored cells and releases freshly returned receivers.
+Box:type=[value:int64 items:array<int64>]
+make=(present:bool):>Box?=>if present Box[42 [1 2 3]] else none
+read=(present:bool):>int64?=>make(present).value
+exercise=():>int64=>{
+    if read(true) not=?42 or read(false) isnt? none return 1
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if exercise() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

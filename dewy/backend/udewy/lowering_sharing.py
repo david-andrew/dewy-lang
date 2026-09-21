@@ -60,15 +60,32 @@ class _ArraySharing:
         unfolded = ty.unfold(ty.strip_refinement(type_))
         return ty.string_valued(unfolded) or isinstance(unfolded, (ty.ArrayType, ty.ObjectType)) or ty.runtime_union_members(type_) is not None or ty.optional_payload(type_) is not None
 
+    @staticmethod
+    def _index_storage_type(node):
+        array = ty.unfold(ty.strip_refinement(node.array.type))
+        assert isinstance(array, ty.ArrayType)
+        return array.element
+
+    def _read_index_storage(self, address, node):
+        # Narrowing changes the read type, never the element stride or its
+        # tag/payload storage. This rule is shared by reads and mutable routes.
+        stored = self._index_storage_type(node)
+        value = self._array_load(address, stored, node.loc)
+        members = self._field_union_members(stored)
+        if members is not None:
+            return self._union_field_read(value, members, node.type, node)
+        return replace(value, type=node.type)
+
     def _extract_write_route(self, node):
         """Evaluate a nested place once, detaching enclosing array buffers."""
         if isinstance(node, hir.Index) and self._array_use_representation(node.array) is None:
             prelude, array = self._extract_write_route(node.array)
             before, index = self._extract_index_value(node.index, node.constant_index)
             prelude.extend(before)
-            prelude.extend(self._ensure_unique_array(array, node.type, node.loc))
-            address = self._array_element_address(array, index, node.type, node.loc)
-            return prelude, self._array_load(address, node.type, node.loc)
+            stored = self._index_storage_type(node)
+            prelude.extend(self._ensure_unique_array(array, stored, node.loc))
+            address = self._array_element_address(array, index, stored, node.loc)
+            return prelude, self._read_index_storage(address, node)
         if isinstance(node, hir.MemberAccess):
             prelude, value = self._extract_write_route(node.value)
             base = self._name('write_object', node.loc)

@@ -264,6 +264,14 @@ class _OptionalLowering:
                 'int64',
                 self._new_optional_name('value'),
             )
+            # A projection already supplied the stored cell. Bind that pointer
+            # once, just as for general unions; copying the original expression
+            # here both reevaluates its selector and invents an unowned payload.
+            statements = [*prelude, hir.Declare(
+                value.loc, ty.VOID_TYPE, 'let', target.name, 'int64', cell)]
+            if temporary and self._fresh_cell_expression(value):
+                return self._cell_statement_temporary(statements, target, ('none', payload), prepared=False)
+            return statements, target
         else:
             target = hir.ExpressedIdentifier(
                 value.loc,
@@ -444,6 +452,10 @@ class _OptionalLowering:
             return statements, dest
         if isinstance(unfolded, ty.ObjectType):
             prelude, source = self._extract_object_pointer(value)
+            if self._frame_record_call(value):
+                # The union owns its cloned payload. The call's frame-rooted
+                # result still owns fields until the enclosing statement ends.
+                prelude, source = self._object_statement_temporary(prelude, source, unfolded, loc)
             clone_prelude, handle = self._union_handle_clone(source, member, loc)
             return [*prelude, *clone_prelude], handle
         assert isinstance(unfolded, ty.ArrayType)

@@ -106,7 +106,33 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         calls.push(put(hir.FunctionCall[loc empty operation [place] []] @session))
         return
     }
-    if type isnt? types.ObjectType {reject(hir.node_at(session.hir value) 'resource union storage' @plan) return}
+    if type is? types.TypeOr {
+        let arms:array<addr>=[]
+        let empty=types.primitive('void' @session.types)
+        let boolean=types.primitive('bool' @session.types)
+        let nested=ancestors
+        nested.add(owner)
+        loop member in type.items {
+            if resource(member session.types) is? none continue
+            if not run_hook {
+                let member_type=types.node_at(session.types views.structural_base(member session.types))
+                let moved=false
+                if member_type is? types.ObjectType {loop method in member_type.methods {if method.lifecycle =? 'move' {moved=true}}}
+                if not moved continue
+            }
+            let narrowed=hir.node_at(session.hir value)
+            narrowed.value_type=member
+            let selected=put(narrowed @session)
+            let body:array<addr>=[]
+            drop_value(selected member loc nested @body @plan @session run_hook=run_hook)
+            let condition=put(hir.TypeTest[loc boolean value member false] @session)
+            let block=put(hir.Block[loc empty body true] @session)
+            arms.push(put(hir.IfArm[loc empty condition block] @session))
+        }
+        if arms.length >? 0 {calls.push(put(hir.Flow[loc empty arms none] @session))}
+        return
+    }
+    if type isnt? types.ObjectType {reject(hir.node_at(session.hir value) 'unsupported resource storage' @plan) return}
     loop method in type.methods {
         if method.lifecycle not=? 'drop' or not run_hook continue
         if type.brand is? none {reject(hir.node_at(session.hir value) 'an unavailable drop operation' @plan) return}
@@ -148,6 +174,26 @@ transfer = (id:addr expected:addr? @plan:Plan @session:contexts.Session):>addr =
     let value=hir.node_at(session.hir id)
     let shape=views.structural_base(value.value_type session.types)
     let type=types.node_at(session.types shape)
+    if type is? types.TypeOr {
+        let arms:array<addr>=[]
+        let boolean=types.primitive('bool' @session.types)
+        loop member in type.items {
+            let narrowed=value
+            narrowed.value_type=member
+            let selected=put(narrowed @session)
+            let result=transfer(selected member @plan @session)
+            if result not=? selected {
+                let condition=put(hir.TypeTest[value.loc boolean id member false] @session)
+                arms.push(put(hir.IfArm[value.loc hir.node_at(session.hir result).value_type condition result] @session))
+            }
+        }
+        if arms.length =? 0 return id
+        let result=put(hir.Flow[value.loc value.value_type arms id] @session)
+        if expected isnt? none and types.node_at(session.types expected) is? types.RefinedType {
+            result=put(hir.Obligation[value.loc value.value_type result expected 'the return contract after moving'] @session)
+        }
+        return result
+    }
     if type isnt? types.ObjectType return id
     if type.brand is? none return id
     let hook=plan.moves.get(type.brand)
@@ -166,6 +212,11 @@ transfer = (id:addr expected:addr? @plan:Plan @session:contexts.Session):>addr =
 fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session components:set<addr>=set[] frame:Frame?=none):>void => {
     # The checked custom-copy call carries its effects and result contract.
     let candidate=hir.node_at(session.hir id)
+    if resource(candidate.value_type session.types) is? none {expression(id allowed inherited @plan @session frame=frame) return}
+    if candidate is? hir.ValueCast|hir.RepresentationCast and types.node_at(session.types types.strip_refinement(candidate.value_type session.types)) is? types.TypeOr {
+        fresh(candidate.expr allowed inherited @plan @session components=components frame=frame)
+        return
+    }
     if candidate is? hir.MemberAccess {
         let owner=hir.node_at(session.hir candidate.value)
         loop owner is? hir.MemberAccess {owner=hir.node_at(session.hir owner.value)}
@@ -254,8 +305,8 @@ expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:conte
     }
     if node is? hir.FunctionLiteral {prepare_function(id @plan @session) return}
     if node is? hir.TypeValue or (node is? hir.FunctionCall and node.proof) or (node is? hir.Assert and not node.runtime and not node.expect) return
-    if node is? hir.MemberAccess|hir.ArrayLength {
-        let selected=if node is? hir.MemberAccess node.value else node.array
+    if node is? hir.MemberAccess|hir.ForwardingAccess|hir.ArrayLength {
+        let selected=if node is? hir.MemberAccess|hir.ForwardingAccess node.value else node.array
         if resource(hir.node_at(session.hir selected).value_type session.types) isnt? none {
         let owner=hir.node_at(session.hir selected)
         loop owner is? hir.MemberAccess|hir.Index {
@@ -265,6 +316,12 @@ expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:conte
         if owner isnt? hir.ExpressedIdentifier or owner.binding_id is? none or owner.binding_id not in? allowed or resource(node.value_type session.types) isnt? none {reject(node 'an escaping or projected resource owner' @plan)}
         return
         }
+    }
+    if node is? hir.TypeTest and resource(hir.node_at(session.hir node.value).value_type session.types) isnt? none {
+        let value=hir.node_at(session.hir node.value)
+        let borrowed=put(hir.Place[node.loc value.value_type node.value] @session)
+        expression(borrowed allowed inherited @plan @session frame=frame)
+        return
     }
     if node is? hir.FunctionCall and inherited {
         let function=hir.node_at(session.hir node.func)

@@ -715,6 +715,8 @@ box_value = (value:addr stored:addr node:hir.AST @state:State binding:addr?=none
 }
 place_address = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
+    # A narrowed record occupies the payload, not the enclosing union cell.
+    if object_valued(node.value_type state) and cell_members(stored_type(id state) @state) isnt? none return write_route(id @state)
     if node is? hir.ExpressedIdentifier return binding_storage(node stored_type(id state) @state)
     if node is? hir.MemberAccess return field_pointer(node @state writable=true)
     if node is? hir.Index {
@@ -764,6 +766,8 @@ expression_owns = (id:addr @state:State):>bool => {
         if node is? hir.RepresentationCast and array_valued(source.value_type state) return true
     }
     if node is? hir.ObjectLiteral|hir.ArrayLiteral|hir.DictView|hir.SetAlgebra return true
+    # Safe navigation constructs an independent result on every tag path.
+    if node is? hir.ForwardingAccess return true
     # A receiver read through a getter borrow is a view of arena storage,
     # so a field or element taken from it is not a fresh temporary either.
     if node is? hir.DictEntries and temporary_owner(node.dictionary @state) and not borrowed_getter_receiver(node.dictionary @state) return true
@@ -5178,15 +5182,25 @@ forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
         }
         if enum_members(node.value_type state) isnt? none {value=enum_pack(value actual node.value_type node @state)}
         else if enum_members(actual state) isnt? none {value=enum_read(value actual node.value_type node @state)}
-        else if cell_members(node.value_type @state) isnt? none {value=cell_pack(value actual node.value_type node @state)}
-        else {value=read_value(value actual node.value_type node @state)}
+        else if cell_members(node.value_type @state) isnt? none {
+            value=cell_pack(value actual node.value_type node @state)
+            # Packing a non-cell already creates an owner. An existing field
+            # cell is a borrowed read and needs its own result before release.
+            if cell_members(actual @state) isnt? none {value=copy_value(value node.value_type node @state)}
+        }
+        else {value=copy_value(read_value(value actual node.value_type node @state) node.value_type node @state)}
         let condition=intrinsic_call('__eq__' [tag word(member_tag(member @state) node @state)] types.primitive('bool' @state.type_nodes) node @state)
         arms.push(put(hir.IfArm[node.loc output condition value] @state))
     }
     if arms.length =? 0 return reject(node 'a forwarded field has no reachable member' @state)
     let last=hir.node_at(state.nodes arms.pop)
     $runtime_assert last is? hir.IfArm
-    prefix.push(put(hir.Flow[node.loc output arms last.body] @state))
+    let result=put(hir.Flow[node.loc output arms last.body] @state)
+    if temporary_owner(node.value @state) and not borrowed_getter_receiver(node.value @state) {
+        result=snapshot(result @prefix @state)
+        prefix.push(release_value(receiver source_type node @state))
+    }
+    prefix.push(result)
     return put(hir.Block[node.loc output prefix false] @state)
 }
 

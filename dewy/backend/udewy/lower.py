@@ -1375,13 +1375,13 @@ class _Lowerer(
         register its storage members; returns the statements and the members."""
         members = ty.runtime_union_members(value.type)
         if members is not None:
-            prelude, cell = self._materialize_union(value, members)
+            prelude, cell = self._materialize_union(value, members, temporary=True)
             self.union_cells[binding_id] = members
         else:
             payload = ty.optional_payload(value.type)
             if payload is None:
                 self._target_error(value, 'a union operand that is not a runtime union')
-            prelude, cell = self._materialize_optional(value, payload)
+            prelude, cell = self._materialize_optional(value, payload, temporary=True)
             self.optional_payloads[binding_id] = payload
             members = ('none', payload)
         holder = hir.Declare(loc, ty.VOID_TYPE, 'let', name, 'int64', replace(cell, type='int64'), binding_id=binding_id)
@@ -5364,6 +5364,7 @@ class _Lowerer(
                 node.loc,
             )
         if isinstance(node, hir.Index):
+            stored = self._index_storage_type(node)
             raw_representation = self._array_use_representation(node.array)
             static_bytes = self._static_binary_array_source(node.array)
             if id(node) in self.borrow_plan.array_snapshots and not self._array_expression_owns_fresh_storage(node.array):
@@ -5388,7 +5389,7 @@ class _Lowerer(
                 self._pointer_element_address(
                     array,
                     index,
-                    self._array_element_layout(node.type, node)[0],
+                    self._array_element_layout(stored, node)[0],
                     node.loc,
                 )
                 if raw_representation is not None
@@ -5397,11 +5398,11 @@ class _Lowerer(
                 else self._array_element_address(
                     array,
                     index,
-                    node.type,
+                    stored,
                     node.loc,
                 )
             )
-            return prelude, self._array_load(address, node.type, node.loc)
+            return prelude, self._read_index_storage(address, node)
         if isinstance(node, hir.DictLookup):
             return self._extract_dict_lookup(node)
         if isinstance(node, hir.DictContains):

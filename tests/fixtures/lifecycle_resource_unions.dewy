@@ -1,0 +1,82 @@
+# Only the active union alternative owns a resource. Other alternatives have
+# no lifecycle hook, including the absence of an optional owner.
+let trace:int64=0
+One=type of [id:int64 values:array<int64>
+$__drop__
+release=():>void=>{trace=trace*10+id values.clear}
+]
+Two=type of [id:int64 text:string
+$__drop__
+release=():>void=>{trace=trace*10+id text=''}
+]
+make=(tag:int64):>One|Two|none=>{
+    if tag=?1 return One[1 [40 2]]
+    if tag=?2 return Two[2 'two']
+    return none
+}
+exercise=():>int64=>{
+    let first=make(1)
+    let second=make(2)
+    let empty=make(0)
+    let saved=first
+    if saved isnt? One or saved.id not=?1 return 1
+    if second isnt? Two or second.text not=?'two' return 2
+    if empty isnt? none return 3
+    return 42
+}
+let moves:int64=0
+Moved=type of [id:int64 child:One
+$__drop__
+release=():>void=>{trace=trace*10+id}
+$__move__
+relocate=():>Moved=>{moves+=1 Moved[id+1 One[3 [30]]]}
+]
+Wrapped=type of [child:One]
+choice=(custom:bool):>Moved|Wrapped=>if custom Moved[1 One[2 [20]]] else Wrapped[One[4 [40]]]
+move_choice=(custom:bool):>Moved|Wrapped=>{
+    let original=choice(custom)
+    return original
+}
+check_moves=():>int64=>{
+    let first=move_choice(true)
+    if first isnt? Moved or first.id not=?2 or moves not=?1 or trace not=?2 return 1
+    let second=move_choice(false)
+    if second isnt? Wrapped or second.child.id not=?4 or trace not=?2 return 2
+    return 42
+}
+let selections:int64=0
+select=():>0=>{selections+=1 0}
+array_case=():>int64=>{
+    let items:array<One|none>=[One[1 [10]] none One[2 [20]]]
+    if items.length not=?3 return 1
+    if items[0] isnt? One or items[0].id not=?1 return 2
+    let selected=items[select()].id
+    if selected not=?1 or selections not=?1 return 3
+    return 42
+}
+consume=(owner:One?):>int64=>{
+    if owner is? none return 0
+    return owner.id
+}
+verify=():>int64=>{
+    if exercise() not=?42 or trace not=?12 return 1
+    trace=0
+    if check_moves() not=?42 or trace not=?2423 return 3
+    trace=0
+    selections=0
+    if array_case() not=?42 or trace not=?21 return 4
+    trace=0
+    if consume(One[5 [50]]) not=?5 or trace not=?5 return 5
+    if consume(none) not=?0 or trace not=?5 return 6
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {
+        trace=0 moves=0
+        if verify() not=?42 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

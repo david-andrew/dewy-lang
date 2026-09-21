@@ -130,6 +130,10 @@ class _PlaceLowering:
         """Evaluate a place route once and return its final storage address."""
 
         if isinstance(target, hir.MemberAccess):
+            owner = ty.unfold(ty.strip_refinement(target.value.type))
+            field = owner.field(target.name) if isinstance(owner, ty.ObjectType) else None
+            if field is not None and self._field_union_members(field.type) is not None and isinstance(ty.unfold(ty.strip_refinement(target.type)), ty.ObjectType):
+                return self._extract_write_route(target)
             prelude, obj = self._extract_write_route(target.value)
             if not isinstance(target.value.type, ty.ObjectType):
                 self._target_error(target, 'projected member place requires an object')
@@ -140,6 +144,7 @@ class _PlaceLowering:
                 target.loc,
             )
 
+        stored = self._index_storage_type(target)
         raw_representation = self._array_use_representation(target.array)
         prelude, array = self._extract_write_route(target.array)
         index_prelude, index = self._extract_index_value(target.index, target.constant_index)
@@ -148,20 +153,20 @@ class _PlaceLowering:
             self._pointer_element_address(
                 array,
                 index,
-                self._array_element_layout(target.type, target)[0],
+                self._array_element_layout(stored, target)[0],
                 target.loc,
             )
             if raw_representation is not None
             else self._array_element_address(
                 array,
                 index,
-                target.type,
+                stored,
                 target.loc,
             )
         )
         if raw_representation is None:
-            prelude.extend(self._ensure_unique_array(array, target.type, target.loc))
-        if target.type == 'uint8' and raw_representation is None:
+            prelude.extend(self._ensure_unique_array(array, stored, target.loc))
+        if stored == 'uint8' and raw_representation is None:
             cow = self._ensure_mutable_byte_array(array, target.loc)
             if cow:
                 prelude.extend(cow)
@@ -171,8 +176,8 @@ class _PlaceLowering:
                     target.type,
                     target.loc,
                 )
-        if isinstance(target.type, ty.ObjectType):
-            return prelude, self._array_load(address, target.type, target.loc)
+        if isinstance(ty.unfold(ty.strip_refinement(target.type)), ty.ObjectType):
+            return prelude, self._read_index_storage(address, target)
         return prelude, address
 
     def _finish_scalar_call_place_writebacks(

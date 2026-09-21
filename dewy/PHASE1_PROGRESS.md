@@ -1262,3 +1262,35 @@ native execution. After integration with expression exits and preserving the
 lexical fallback, all 56 combined hosted/native checks passed. Two obsolete
 rejections now test nonescaping calls outside the live interval and a genuine
 conflict inside it. Shared fixtures check one drop and no retained storage.
+
+
+The resource-view and expression-exit integration (`4deadf4e`) built two
+byte-identical native generations. Both generated backend execution checks
+passed, followed by all 36 lifecycle parity cases against the second-generation
+compiler. Generation times were 85 and 80 seconds while the full test suite
+was running; these are integration results, not isolated performance claims.
+
+Resource unions and optional owners now clean up only their active alternative,
+including union elements in resource arrays. A union transfer dispatches a
+custom move only for the alternatives that declare one; remaining fields of
+that consumed alternative drop, while intact alternatives transfer their
+nested owners. Drop calls still participate in effect and fact checking.
+
+Narrowed array elements retain their declared storage layout when loading or
+taking a place. Optional projections bind an already-evaluated cell rather
+than copying and reevaluating their selector. Fresh safe-navigation receivers
+and frame-rooted record results packed into unions release their temporary
+owned storage after the statement. Shared fixtures exercise custom moves,
+optional absence, selector evaluation once, and repeated calls without retained
+storage.
+
+The immutable `4deadf4e` integration passed the full local suite: **3,401
+passed, 14 skipped** in 1,870.74 seconds. The subsequent union changes have
+separate focused coverage. GitHub API rate limiting prevented a fresh CI status
+query at this checkpoint; the prior `744f25d7` CI run was successful.
+
+Validation: all six focused union/forward-reference checks passed, including
+native execution on both output backends. The preceding run also passed all
+21 adjacent hosted optional/union checks. Resource-union fixtures retain zero
+storage over 100 iterations; cleanup effects reject empty contracts and stale
+assertions in both compilers.

@@ -92,7 +92,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 # One checked helper per array shape: its borrowed receiver
                 # has a stable identity even for an outer array's element.
                 # Reuse also avoids duplicating nested cleanup loops at exits.
-                operation = array_drops.get(shape)
+                cached = array_drops.get(id(shape))
+                operation = cached[1] if cached is not None else next(
+                    (operation for known, operation in array_drops.values() if known == shape), None)
                 if operation is None:
                     name = f'__dewy_drop_array_{registry.next_id}'
                     binding = registry.allocate(object(), name, 'value', loc)
@@ -118,11 +120,31 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     binding.function = literal
                     binding.declaration = declared
                     generated.append(declared)
-                    array_drops[shape] = operation
+                array_drops[id(shape)] = (shape, operation)
                 into.append(hir.FunctionCall(loc, ty.VOID_TYPE, replace(operation, loc=loc), [hir.Place(loc, shape, value)], {}))
                 return
+            if isinstance(shape, ty.TypeOr):
+                # The tag selects the only live owner. A narrowed read keeps
+                # the original storage identity; it does not copy its payload.
+                arms = []
+                for member in shape.items:
+                    if resource(member) is None:
+                        continue
+                    member_shape = ty.unfold(ty.strip_refinement(member))
+                    if not run_hook and not (isinstance(member_shape, ty.ObjectType)
+                                             and any(method.lifecycle == 'move' for method in member_shape.methods)):
+                        # A different alternative moved intact; its nested
+                        # resources now belong to the destination too.
+                        continue
+                    calls = []
+                    drop(replace(value, type=member), member, ancestors | {id(shape)}, run_hook, into=calls)
+                    condition = hir.TypeTest(loc, 'bool', value, member, False)
+                    arms.append(hir.IfArm(loc, ty.VOID_TYPE, condition, hir.Block(loc, ty.VOID_TYPE, calls, True)))
+                if arms:
+                    into.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
+                return
             if not isinstance(shape, ty.ObjectType):
-                reject(value, 'resource union storage')
+                reject(value, 'unsupported resource storage')
             hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
             if hook is not None and run_hook:
                 declaration = declarations.get(hook.binding_id)
@@ -143,6 +165,20 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
 
     def transfer(value, expected):
         shape = ty.unfold(ty.strip_refinement(value.type))
+        if isinstance(shape, ty.TypeOr):
+            arms = []
+            for member in shape.items:
+                selected = replace(value, type=member)
+                result, moved = transfer(selected, member)
+                if moved:
+                    condition = hir.TypeTest(value.loc, 'bool', value, member, False)
+                    arms.append(hir.IfArm(value.loc, result.type, condition, result))
+            if not arms:
+                return value, False
+            result = hir.Flow(value.loc, value.type, arms, value)
+            if isinstance(expected, ty.RefinedType):
+                result = hir.Obligation(value.loc, value.type, result, expected, 'the return contract after moving')
+            return result, True
         if not isinstance(shape, ty.ObjectType):
             return value, False
         hook = next((method for method in shape.methods if method.lifecycle == 'move'), None)
@@ -162,6 +198,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         return result, True
 
     def fresh(node, allowed, inherited, components=frozenset(), control=None):
+        if resource(node.type) is None:
+            return expression(node, allowed, inherited=inherited, control=control)
+        if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and isinstance(ty.strip_refinement(node.type), ty.TypeOr):
+            return replace(node, expr=fresh(node.expr, allowed, inherited, components, control))
         if isinstance(node, hir.MemberAccess):
             owner = node.value
             while isinstance(owner, hir.MemberAccess):
@@ -260,9 +300,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 or isinstance(node, hir.FunctionCall) and node.proof
                 or isinstance(node, hir.Assert) and not node.runtime and not node.expect):
             return node
-        if (isinstance(node, hir.MemberAccess) and resource(node.value.type) is not None
+        if (isinstance(node, (hir.MemberAccess, hir.ForwardingAccess)) and resource(node.value.type) is not None
                 or isinstance(node, hir.ArrayLength) and resource(node.array.type) is not None):
-            selected = route_indices(node.value if isinstance(node, hir.MemberAccess) else node.array, allowed, inherited, control)
+            selected = route_indices(node.value if isinstance(node, (hir.MemberAccess, hir.ForwardingAccess)) else node.array, allowed, inherited, control)
             owner = selected
             while isinstance(owner, (hir.MemberAccess, hir.Index)):
                 if isinstance(owner, hir.Index):
@@ -272,7 +312,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if (not isinstance(owner, hir.ExpressedIdentifier) or owner.binding_id not in allowed
                     or resource(node.type) is not None):
                 reject(node, 'an escaping or projected resource owner')
-            return replace(node, **({'value': selected} if isinstance(node, hir.MemberAccess) else {'array': selected}))
+            return replace(node, **({'value': selected} if isinstance(node, (hir.MemberAccess, hir.ForwardingAccess)) else {'array': selected}))
+        if isinstance(node, hir.TypeTest) and resource(node.value.type) is not None:
+            borrowed = expression(hir.Place(node.loc, node.value.type, node.value), allowed,
+                                  inherited=inherited, control=control)
+            return replace(node, value=borrowed.target)
         if isinstance(node, hir.FunctionCall) and inherited and isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id in declarations:
             # The checker generated this parent-portion drop invocation.
             if len(node.pos_args) != 1 or not isinstance(node.pos_args[0], hir.Place):
