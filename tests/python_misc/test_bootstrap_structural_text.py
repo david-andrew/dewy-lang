@@ -32,13 +32,14 @@ ERRORS = [
 
 
 _PROGRAM_DRIVER = None
+_PROGRAM_PRELUDE_CACHES = {}
 
 
 def build_program_driver(tmp_path):
     # Like the lowerer driver, this executable is independent of the input
-    # case. Every invocation still starts a fresh process, and each test owns
-    # its prelude cache directory. Rebuild once per worker, not once per case
-    # group, and never carry the binary across pytest sessions.
+    # case. Every invocation still starts a fresh process. Rebuild once per
+    # worker, not once per case group; retain only the checked prelude on disk
+    # across groups using that binary. Neither cache crosses pytest sessions.
     global _PROGRAM_DRIVER
     if _PROGRAM_DRIVER is not None:
         return _PROGRAM_DRIVER
@@ -49,11 +50,17 @@ def build_program_driver(tmp_path):
     return _PROGRAM_DRIVER
 
 
-def check_structural_text(binary, tmp_path, *, cases=None, errors=None, outputs=None):
+def check_structural_text(binary, tmp_path, *, cases=None, errors=None, outputs=None, shared_prelude_cache=True):
     cases = CASES if cases is None else cases
     errors = ERRORS if errors is None else errors
+    # A new entry module still receives a fresh process and Session. Only
+    # the immutable checked prelude is shared, just as with the native CLI.
+    # Dedicated cache tests can opt out to exercise a cold prelude explicitly.
+    prelude_cache = tmp_path / 'prelude-cache'
+    if shared_prelude_cache:
+        prelude_cache = _PROGRAM_PRELUDE_CACHES.setdefault(binary.resolve(), prelude_cache)
     def compile_native(source):
-        return subprocess.run([binary, source, native_lowering.ROOT / 'library', tmp_path / 'prelude-cache'], capture_output=True, text=True, timeout=120)
+        return subprocess.run([binary, source, native_lowering.ROOT / 'library', prelude_cache], capture_output=True, text=True, timeout=120)
 
     for index, text in enumerate(cases):
         source = tmp_path / f'case-{index}.dewy'
