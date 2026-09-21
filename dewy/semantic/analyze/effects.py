@@ -683,7 +683,7 @@ def analyze_effects(root: hir.AST) -> ProgramEffects:
     return _EffectAnalyzer(root).solve()
 
 
-def read_only_places(root: hir.AST) -> set[int]:
+def read_only_places(root: hir.AST, context: hir.AST | None = None) -> set[int]:
     """Places whose callees neither write nor retain their borrowed storage.
 
     This is the same transitive may-effect proof used for storage borrows.
@@ -695,7 +695,7 @@ def read_only_places(root: hir.AST) -> set[int]:
     calls = [(call, places) for call, places in calls if places]
     if not calls:
         return set()
-    analysis = _EffectAnalyzer(root)
+    analysis = _EffectAnalyzer(root if context is None else context)
     summaries = analysis.solve()
     safe, unsafe = set(), set()
     for call, places in calls:

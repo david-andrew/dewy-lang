@@ -827,9 +827,9 @@ class _BoundsValidator:
             and item.binding_id in assigned
         }
 
-    def validate(self, root: hir.Block) -> None:
+    def validate(self, root: hir.Block, *, effect_context: hir.AST | None = None) -> None:
         self.call_writes = effects.analyze_global_writes(root, self.mutable_globals)
-        self.read_only_places = effects.read_only_places(root)
+        self.read_only_places = effects.read_only_places(root, effect_context)
         self.predicate_bindings = predicate_effects.BindingQueries(self.call_writes)
         # module-level function bodies are analyzed after the module's own
         # statements, in the module's final state: a method (a hidden function
@@ -4920,6 +4920,7 @@ def validate_bounds(
     unfit: dict[int, tuple[hir.AST, Interval | None, str]] | None = None,
     *,
     target: str = 'x86_64',
+    effect_context: hir.AST | None = None,
     prototype_sites: 'dict[int, tuple[str, Error]] | None' = None,
 ) -> None:
     """Validate every dynamic array index against its source-position facts.
@@ -4937,5 +4938,5 @@ def validate_bounds(
     validator = _BoundsValidator(registry, srcfile, root, target=target)
     validator.unfit = unfit
     validator.prototype_sites = prototype_sites
-    validator.validate(root)
+    validator.validate(root, effect_context=effect_context)
     last_cap_notes.extend(validator.cap_notes)

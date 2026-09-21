@@ -1443,3 +1443,16 @@ harness passed on both output backends. All 83 adjacent hosted effect,
 truncation, dependent-index and projected/length-fact checks passed. This does
 not yet preserve untouched subfields of a parameter that the callee mutates
 elsewhere; that needs finer route-specific invalidation.
+
+Imported read-only calls now use the loaded declaration graph in both
+compilers. Previously the source module's isolated effect scan could not
+resolve an imported body, so a safe borrow lost its facts. Native validation
+shares one transitive summary across the loaded modules, including generated
+lifecycle helpers placed in a different module. Standalone bounds-analysis
+clients retain the single-root default. Unknown calls and imported mutators
+still invalidate borrowed endpoints.
+
+Validation: nine hosted call-fact checks passed. The imported reader/mutator
+harness passed native/hosted acceptance, rejection and execution on both
+backends using the current integration driver. A new fixed-point integration
+is still required; this local comparison alone does not certify it.

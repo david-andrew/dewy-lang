@@ -1078,10 +1078,10 @@ collect = (root:addr @checker:Checker):>void => {
         if item is? hir.Declare and item.decltype =? 'let' and item.binding_id isnt? none and item.binding_id in? checker.assigned {checker.mutable_globals.add(item.binding_id)}
     }
 }
-validate = (root:addr @checker:Checker):>void => {
+validate = (root:addr @checker:Checker read_only:set<addr> | none=none):>void => {
     collect(root @checker)
     checker.call_writes=effects.analyze_global_writes(root checker.data.env.nodes checker.mutable_globals checker.data.env.registry)
-    checker.read_only_places=effects.read_only_places(root checker.data.env.nodes checker.data.env.types)
+    checker.read_only_places=if read_only isnt? none read_only else effects.read_only_places(root checker.data.env.nodes checker.data.env.types)
     checker.path_context=paths.Context[checker.data.env.nodes checker.data.relations.facts checker.call_writes]
     let node=node_at(root checker)
     $runtime_assert node is? hir.Block

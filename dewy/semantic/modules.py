@@ -702,14 +702,18 @@ class ModuleCompiler:
         """
         from . import check
 
+        # Imported bodies are already checked, but are not children of this
+        # module. Borrow proofs must resolve their calls in the loaded graph.
+        effect_context = hir.Block(root.loc, root.type,
+                                   [*(record.root for record in self.order), root], False)
         prototype_sites: dict | None = None
         if self.prototype is not None and ctx is not None and not prelude_module and not no_prelude:
             prototype_sites = {}
         if prelude_module or no_prelude or 'BigInt' not in self.prelude_bindings:
-            bounds.validate_bounds(root, self.registry, srcfile, target=self.target)
+            bounds.validate_bounds(root, self.registry, srcfile, target=self.target, effect_context=effect_context)
             return
         unfit: dict = {}
-        bounds.validate_bounds(root, self.registry, srcfile, unfit, target=self.target, prototype_sites=prototype_sites)
+        bounds.validate_bounds(root, self.registry, srcfile, unfit, target=self.target, prototype_sites=prototype_sites, effect_context=effect_context)
         if prototype_sites:
             assert ctx is not None
             unhandled = check.insert_prototype_checks(root, prototype_sites, ctx=ctx)

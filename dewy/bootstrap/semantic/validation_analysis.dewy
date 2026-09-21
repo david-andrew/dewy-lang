@@ -1,5 +1,6 @@
 from reporting import SrcFile, Error, Pointer, Warning
 import p"analyze/public_effects.dewy" as public_effects
+import p"analyze/effects.dewy" as effects
 import p"analyze/place_contracts.dewy" as place_contracts
 import p"module_state.dewy" as modules
 import p"context.dewy" as contexts
@@ -19,7 +20,7 @@ import p"analyze/representation.dewy" as representation
 # This boundary reads a frozen graph and returns decisions. It neither loads
 # modules nor discharges witnesses, so the prelude loader can use it before
 # entry checking without creating a loader/validation import cycle.
-validate_module = (module:modules.Module source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr prelude:dict<string addr> session:contexts.Session):>proofs.Decision|Error => {
+validate_module = (module:modules.Module source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr prelude:dict<string addr> session:contexts.Session read_only:set<addr> | none=none):>proofs.Decision|Error => {
     let source=sources.srcfile(module.context session)
     let proof_error=checked_proofs.validate(module.root source session)
     if proof_error isnt? none return proof_error
@@ -28,7 +29,7 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
     bounds.configure(@checker prepared)
     checker.data.links=session.links
     checker.prototype=module.options.prototype and not module.prelude
-    bounds.validate(module.root @checker)
+    bounds.validate(module.root @checker read_only=read_only)
     if checker.problem isnt? none return checker.problem
     let strict=module.prelude or module.no_prelude or 'BigInt' not in? prelude
     let unfit:dict<addr proofs.Unfit>=[]
@@ -71,13 +72,16 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
     if place_error isnt? none return place_error
     let env=values.Environment[session.hir session.types session.registry targets.max_length(session.target)]
     let prepared=bounds.prepare(env)
+    let ids:array<addr>=[]
+    loop module in loaded {ids.push(module.root)}
+    let read_only=effects.read_only_places_in(ids session.hir session.types)
     let decisions:array<proofs.Decision>=[]
     loop index in 0.. and index <? loaded.length {
         if cached isnt? none and index <? cached.decisions.length {
             decisions.push(cached.decisions[index])
             continue
         }
-        let checked=validate_module(loaded[index] source_files env prepared word prelude session)
+        let checked=validate_module(loaded[index] source_files env prepared word prelude session read_only=read_only)
         if checked is? Error return checked
         decisions.push(checked)
     }
@@ -85,8 +89,6 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
     # imported helpers and unused source functions. Only checked advancing
     # edges authorize frame-word counters in allocation contracts.
     if loaded.length >? 0 {
-        let ids:array<addr>=[]
-        loop module in loaded {ids.push(module.root)}
         let word_iterators:set<addr>=set[]
         loop decision in decisions {loop id in decision.word_iterators {word_iterators.add(id)}}
         let effect_error=public_effects.validate(ids sources.srcfile(loaded[0].context session) session word_iterators)
