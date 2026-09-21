@@ -429,6 +429,13 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
             return
         }
     }
+    if candidate is? hir.Block|hir.Flow and frame isnt? none {
+        # Capture a fresh value on each branch before cleaning its locals.
+        let active=frame.owners
+        if candidate is? hir.Block {store(id hir.Block[candidate.loc candidate.value_type candidate.items true] @session)}
+        statement(id @active frame.loops frame.allowed frame.inherited frame.owning_result @plan @session composed_parent=frame.composed_parent fresh_result=true)
+        return
+    }
     if candidate is? hir.Obligation {fresh(candidate.value allowed inherited @plan @session components=components frame=frame) return}
     if candidate is? hir.ValueCast|hir.RepresentationCast {
         let target=views.structural_base(candidate.value_type session.types)
@@ -738,7 +745,7 @@ scoped_body = (id:addr @session:contexts.Session):>addr => {
     }
     return put(hir.Block[node.loc node.value_type [id] true] @session)
 }
-statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inherited:bool owning_result:bool @plan:Plan @session:contexts.Session composed_parent:addr?=none entry:bool=false):>void => {
+statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inherited:bool owning_result:bool @plan:Plan @session:contexts.Session composed_parent:addr?=none entry:bool=false fresh_result:bool=false):>void => {
     if plan.problem isnt? none return
     let node=hir.node_at(session.hir id)
     let frame=Frame[owners loops allowed inherited owning_result composed_parent]
@@ -753,7 +760,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         let current:hir.Block=node
         let active=owners
         let start=if entry 0 else active.length
-        loop item in current.items {statement(item @active loops allowed inherited owning_result @plan @session composed_parent=composed_parent)}
+        loop item in current.items {statement(item @active loops allowed inherited owning_result @plan @session composed_parent=composed_parent fresh_result=fresh_result and resource(hir.node_at(session.hir item).value_type session.types) isnt? none)}
         if plan.problem isnt? none return
         if current.scoped and active.length >? start {
             let result:addr?=none
@@ -934,14 +941,14 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             if branch is? hir.LoopArm {boundaries.push(owners.length)}
             let body=scoped_body(branch.body @session)
             let active=owners
-            statement(body @active boundaries allowed inherited owning_result @plan @session composed_parent=composed_parent)
+            statement(body @active boundaries allowed inherited owning_result @plan @session composed_parent=composed_parent fresh_result=fresh_result)
             let rewritten=if branch is? hir.IfArm hir.IfArm[branch.loc branch.value_type branch.condition body] else hir.LoopArm[branch.loc branch.value_type branch.condition body]
             store(arm_id rewritten @session)
         }
         if current.default isnt? none {
             let body=scoped_body(current.default @session)
             let active=owners
-            statement(body @active loops allowed inherited owning_result @plan @session composed_parent=composed_parent)
+            statement(body @active loops allowed inherited owning_result @plan @session composed_parent=composed_parent fresh_result=fresh_result)
             current.default=body
         }
         store(id current @session)
@@ -967,7 +974,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         store(id hir.Block[node.loc node.value_type prefix false] @session)
         return
     }
-    if owning_result and resource(node.value_type session.types) isnt? none {fresh(id live false @plan @session frame=frame)}
+    if (owning_result or fresh_result) and resource(node.value_type session.types) isnt? none {fresh(id live false @plan @session frame=frame)}
     else {expression(id live inherited @plan @session frame=frame)}
 }
 mentions_resource = (root:addr session:contexts.Session):>bool => {

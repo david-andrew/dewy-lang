@@ -368,6 +368,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             consumed = control(node, consume=True)
             if consumed is not None:
                 return consumed
+        if isinstance(node, (hir.Block, hir.Flow)) and control is not None:
+            # Each arm supplies an independent owner. Its scoped temporaries
+            # must be cleaned up after capturing that arm's expressed value.
+            return control(node, fresh_result=True)
         if isinstance(node, hir.Obligation):
             return replace(node, value=fresh(node.value, allowed, inherited, components, control))
         if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
@@ -799,9 +803,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         if literal.lifecycle is None and not mentions_resource(literal):
             current_source = previous_source
             return literal
-        def statement(node, owners, loops, *, entry=False):
+        def statement(node, owners, loops, *, entry=False, fresh_result=False):
             live = allowed | {owner.binding_id for owner in owners}
-            def control(child, *, consume=False):
+            def control(child, *, consume=False, fresh_result=False):
                 if consume:
                     if id(child) not in consumes:
                         return None
@@ -818,7 +822,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 # from inside them leaves every surrounding owner too.
                 if isinstance(child, hir.Block):
                     child = replace(child, scoped=True)
-                return statement(child, list(owners), loops)
+                return statement(child, list(owners), loops, fresh_result=fresh_result)
             if isinstance(node, hir.OrThrow):
                 # Use the same checked control flow as the native checker.
                 # Backend-created returns are too late for lifecycle/effects.
@@ -836,7 +840,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 start = 0 if entry else len(active)
                 items = []
                 for item in node.items:
-                    items.append(statement(item, active, loops))
+                    items.append(statement(item, active, loops, fresh_result=fresh_result and resource(item.type) is not None))
                 local = active[start:]
                 if local and node.scoped:
                     result = None
@@ -929,13 +933,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     condition = expression(arm.condition, live, inherited=literal.lifecycle == 'drop', control=control)
                     boundaries = [*loops, len(owners)] if isinstance(arm, hir.LoopArm) else loops
                     body = arm.body if isinstance(arm.body, hir.Block) else hir.Block(arm.body.loc, arm.body.type, [arm.body], True)
-                    body = statement(body, list(owners), boundaries)
+                    body = statement(body, list(owners), boundaries, fresh_result=fresh_result)
                     arms.append(replace(arm, condition=condition, body=body))
                 default = node.default
                 if default is not None:
                     if not isinstance(default, hir.Block):
                         default = hir.Block(default.loc, default.type, [default], True)
-                    default = statement(default, list(owners), loops)
+                    default = statement(default, list(owners), loops, fresh_result=fresh_result)
                 return replace(node, arms=arms, default=default)
             if isinstance(node, hir.Declare) and isinstance(node.expr, hir.FunctionLiteral):
                 return replace(node, expr=function(node.expr))
@@ -956,7 +960,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if isinstance(node, hir.MemberAssign):
                 return replace(node, target=expression(node.target, live, inherited=literal.lifecycle == 'drop', control=control),
                                value=expression(node.value, live, inherited=literal.lifecycle == 'drop', control=control))
-            if owning_result and resource(node.type) is not None:
+            if (owning_result or fresh_result) and resource(node.type) is not None:
                 return fresh(node, live, False, control=control)
             return expression(node, live, inherited=literal.lifecycle == 'drop', control=control)
 

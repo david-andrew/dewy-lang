@@ -1797,3 +1797,18 @@ a worker and compiler binary. Each input still starts a fresh process and
 Session. Explicit cold-cache tests retain an opt-out. A paired two-group
 probe took 33.82 s cold and 4.38 s warm, with acceptance/rejection and both
 backends checked. This removes repeated setup rather than reducing coverage.
+
+Recursive-copy checkpoint (2026-09-21): hosted method hoisting now publishes
+a fully annotated signature before checking its body, matching native method
+predeclaration. A copy hook can therefore recursively copy its optional tail.
+Both ownership passes also accept fresh conditional/block initializers,
+capturing each branch's expressed value before releasing its local owners.
+Trailing statements retain their original evaluation order. Synthesized
+recursive wrapper copies use the same component-hook rules. This does not
+introduce first-class lifecycle hooks or conditional consumption of outer
+owners. Read-only receivers, move-only restrictions and effects remain checked.
+
+Validation: 92 hosted adjacent lifecycle cases passed; four positive and three
+negative cases passed on both compilers, with each positive executed through
+x86-64 and C. Cases cover custom and synthesized recursive copies, branch
+cleanup, trailing statements, receiver writes and empty effect contracts.

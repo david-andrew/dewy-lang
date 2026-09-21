@@ -5975,9 +5975,16 @@ def _body_mutates_members(body: p0.AST, members: set[str]) -> bool:
     return found
 
 
-def _hoist_hidden_function(name: str, literal: p0.BinOp, *, ctx: Context, expected: ty.Type | None = None, lifecycle: str | None = None) -> sb.Binding:
+def _hoist_hidden_function(name: str, literal: p0.BinOp, *, ctx: Context, expected: ty.Type | None = None, lifecycle: str | None = None, method: ty.MethodSpec | None = None) -> sb.Binding:
     """Typecheck a synthesized function literal as a module-level function (like a generic instance)."""
     binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'function', literal.loc)
+    if method is not None:
+        signature = signature_of(literal, ctx=ctx)
+        if signature is not None:
+            # A complete signature is available before its body, including
+            # compiler-only calls of a recursive copy hook through .copy().
+            binding.type = signature
+            method.binding_id = binding.id
     checked = tcr_function_literal(literal, ctx=ctx, expected=expected, readonly_receiver=lifecycle == 'copy')
     checked.lifecycle = lifecycle
     binding.type = checked.type
@@ -6170,7 +6177,7 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         # refinements are what the method's returns must prove
         slot = object_type.field(method.name) if method.name in statics else None
         expected = slot.type if slot is not None and isinstance(slot.type, ty.FunctionType) else None
-        hoisted = _hoist_hidden_function(hidden_name, new_literal, ctx=ctx, expected=expected, lifecycle=method.lifecycle)
+        hoisted = _hoist_hidden_function(hidden_name, new_literal, ctx=ctx, expected=expected, lifecycle=method.lifecycle, method=method)
         method.binding_id = hoisted.id
         if method.lifecycle is not None:
             assert isinstance(hoisted.type, ty.FunctionType)
