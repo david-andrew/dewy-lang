@@ -1951,3 +1951,25 @@ and both backends, as did repeated `.get` with a zero-retained-memory check;
 63 adjacent hosted tests passed. Both resource fixtures join the explicit
 Phase 1 parity manifest (now 183 cases). The native driver was built from this
 source with the certified `af12b397` pair; this is not a new fixed-point claim.
+
+### Resource dictionary removal (2026-09-21)
+
+Resource `pop` transfers the removed owner and handles eager defaults with the
+same owned-result boundary as `.get`. Dictionary cleanup and synthesized
+component copying now request the existing live-entry compaction before walking
+values. Dead entries retain only physical storage until compaction, so their
+resources do not receive another copy/drop hook. Native entry traversal, like
+hosted traversal, no longer builds a hash table for an untouched literal merely
+to expose its dense arrays.
+
+A dynamic-key regression caught cached positions surviving a synthesized copy
+that compacted its receiver. Resource reads retain membership proof but now
+reprobe physical positions. Five positive and three negative removal cases
+passed both compilers/backends, including that regression; ordinary dictionary
+traversal, compound replacement and rebuild fixtures also passed. The hosted
+adjacent batch passed 28 tests. The native driver processed its own source
+before the final position-cache correction; the final driver was rebuilt and
+ran the paired cases. The pop fixture brings the explicit manifest to 184.
+An `af12b397` seed analysis of this source reports 4,926 bootstrap copy sites
+(105.715/KLOC), within unchanged gates; this is not an inventory from a newly
+certified native generation.

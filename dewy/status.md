@@ -925,8 +925,15 @@ replacement. Optional and array-valued entries share the same helpers, with
 narrowed payloads retaining their storage layout. Selectors/arguments that may
 invalidate the chosen receiver are rejected. Paired tests include conditional
 transfers, move-only rejection, effect contracts and repeated operations with
-zero retained-memory growth. Resource `pop`, entry-place lifetimes and resource
-iteration/views still need implementation.
+zero retained-memory growth. Resource `pop` now transfers its result, including
+move-only, optional and array-valued entries. Defaults evaluate eagerly and
+unused defaults drop on a hit. Before logical dictionary cleanup or copying,
+existing entry compaction releases tombstone storage without repeating hooks.
+This preserves cheap individual pops instead of shifting the table each time.
+Resource-entry reads currently reprobe after membership proof because a
+synthesized copy can compact the source and invalidate a cached physical slot.
+That is a conservative representation choice, not a loss of membership facts.
+Entry-place lifetimes and resource iteration/views still need implementation.
 
 ### Scalar record placement and allocation contracts (2026-09-21)
 

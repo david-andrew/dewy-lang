@@ -313,8 +313,9 @@ mean the compiler implements all runtime ownership behavior yet. Fresh local
 record owners now run drop hooks, including inherited drops, with checked
 effects and lexical cleanup. Nested record fields drop after the containing hook in reverse field order;
 fresh resource arrays and active union alternatives also own their contained
-resources. Insertion/removal, clearing and local replacement are implemented;
-field transfers, truncation and overwrites of elements remain gated. Explicit custom copy
+resources. Array insertion/removal, clear/truncate and field/element replacement are
+implemented. Resource dictionaries now support read/copy, insertion/replacement,
+clear and pop; general field transfers and entry-place lifetimes remain pending. Explicit custom copy
 hooks now execute when they construct fresh results (including nested hook
 calls). Fresh results can return through factories/callbacks and cleanup scopes;
 the caller becomes their owner. A result is evaluated before local cleanup,
@@ -322,7 +323,8 @@ including an aggregate field whose owner's drop might mutate it. An explicit
 return can also transfer an existing local owner: that path exits without
 dropping the transferred value, while releasing the other locals. General
 local transfers now use last-use liveness, and read-only aliases share one
-owner. Conditional consumption of outer owners remains pending. Inherited copy wrappers consume the parent
+owner. Conditional consumption of outer owners now joins liveness and guards
+cleanup on the executed path. Inherited copy wrappers consume the parent
 result into the completed child without dropping it as an extra owner. Both
 checkers now validate declarations, result identity, compiler-only access and
 the read-only copy receiver. The native snapshot codec retains this metadata.
@@ -333,8 +335,9 @@ explicit copies apply that requirement recursively to stored record fields,
 array/dictionary elements and possible union alternatives; wrapping the value
 does not grant it a copy operation. A custom hook can instead construct fresh
 components and owns its result contract. Independent resource values now
-invoke an available copy hook; synthesized copies of containers and wrappers
-with custom-copy components remain incomplete. Code generation explicitly
+invoke an available copy hook; synthesized record, union, array and dictionary
+copies apply component hooks, including recursive records/arrays and only live
+dictionary entries. Code generation explicitly
 rejects unsupported ownership shapes until their lowering is ready;
 in particular, hidden hooks must not disappear through reachability pruning
 and leave a resource with ordinary memberwise behavior.
@@ -355,7 +358,7 @@ storage cleanup. Calls inserted by this pass participate in effect/fact
 checking, including callers' contracts. Move bodies currently construct fresh
 components or explicitly copy resource fields; general field transfers are
 still pending. A checked inherited move can consume its intermediate parent
-result, but moving added resource fields remains gated.
+result and transfers added resource fields through the checked composition.
 
 Approved member shape (illustrative helpers, not currently executable):
 

@@ -90,10 +90,16 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     receivers.update(bindings.access_path(node.target).binding_id
                      for node in hir.walk(root) if isinstance(node, (hir.MemberAssign, hir.IndexAssign))
                      and resource(node.target.type) is not None)
-    receivers.update(bindings.access_path(node.keys).binding_id
-                     for node in hir.walk(root) if isinstance(node, (hir.DictStore, hir.DictRemove, hir.DictLookup))
-                     and node.values is not None
-                     and resource(node.values.type) is not None)
+    for node in hir.walk(root):
+        if (isinstance(node, (hir.DictStore, hir.DictRemove, hir.DictLookup))
+                and node.values is not None and resource(node.values.type) is not None):
+            receivers.add(bindings.access_path(node.keys).binding_id)
+            if isinstance(node, hir.DictLookup):
+                # A synthesized component copy can compact its dictionary
+                # receiver. Membership survives, but cached physical slots do
+                # not. Reprobe resource entries until that representation
+                # effect can invalidate only the affected cached positions.
+                node.position = node.static_position = None
     receivers.discard(None)
     argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
     readonly_arguments = effects.read_only_places(root, effect_context) if receivers else set()
@@ -232,6 +238,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 return
             if not isinstance(shape, ty.ObjectType):
                 reject(value, 'unsupported resource storage')
+            if ty.dict_key_value(shape) is not None:
+                # Tombstones retain physical storage, but no logical owner.
+                # Compact once before walking values; rebuilding already
+                # releases dead backing storage without invoking hooks.
+                into.append(compact_dictionary(value, shape, loc))
             hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
             if hook is not None and run_hook:
                 declaration = declarations.get(hook.binding_id)
@@ -354,6 +365,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             # The ordinary loop proof, not synthesized metadata, establishes it.
             value = hir.Obligation(loc, shape, value, result_type, 'the generated array copy return contract')
         elif isinstance(shape, ty.ObjectType):
+            if ty.dict_key_value(shape) is not None:
+                prefix.append(compact_dictionary(receiver, shape, loc))
             value = hir.ObjectLiteral(loc, shape, [hir.ObjectField(loc, field.name,
                 copy_value(hir.MemberAccess(loc, field.type, receiver, field.name), implicit=False))
                 for field in shape.fields])
@@ -397,6 +410,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             return expression(node, allowed, inherited=inherited, control=control)
         if isinstance(node, hir.DictLookup) and not node.proven:
             return dictionary_get(node, allowed, inherited, control)
+        if isinstance(node, hir.DictRemove) and node.key is not None:
+            return dictionary_pop(node, allowed, inherited, control)
         if isinstance(node, hir.ExpressedIdentifier) and control is not None:
             consumed = control(node, consume=True)
             if consumed is not None:
@@ -606,6 +621,15 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                        pos_args=[argument(arg, allowed, inherited, control) for arg in node.pos_args],
                        kw_args={name: argument(arg, allowed, inherited, control) for name, arg in node.kw_args.items()})
 
+    def compact_dictionary(value, shape, loc):
+        # DictEntries is the existing representation operation for obtaining
+        # insertion-ordered live storage. Suppressing its borrowed descriptor
+        # only requests compaction; it creates no independent resource array.
+        field = shape.field('values')
+        assert field is not None
+        entries = hir.DictEntries(loc, field.type, value, 'values')
+        return hir.Suppress(loc, ty.VOID_TYPE, entries)
+
     def dictionary_clear(node, allowed, inherited, control):
         # Dictionary bookkeeping still belongs to DictRemove. Run checked
         # element cleanup first, then let it release storage and reset the
@@ -619,8 +643,38 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         selected = freeze_route(borrowed.target, node.loc, bindings.access_path(owner).binding_id, prefix)
         keys = replace(node.keys, value=selected)
         values = replace(node.values, value=selected)
-        return hir.Block(node.loc, node.type, [*prefix, *cleanup((), node.loc, selected=values),
+        return hir.Block(node.loc, node.type, [*prefix, *cleanup((), node.loc, selected=selected),
                                               replace(node, keys=keys, values=values)], False)
+
+    def dictionary_pop(node, allowed, inherited, control):
+        assert isinstance(node.keys, hir.MemberAccess) and isinstance(node.values, hir.MemberAccess)
+        owner = node.keys.value
+        expression(hir.Place(node.loc, owner.type, owner), allowed, inherited=inherited, control=control)
+        prefix = []
+        root_id = bindings.access_path(owner).binding_id
+        selected = freeze_route(owner, node.loc, root_id, prefix)
+        check_selection(node.key, root_id)
+        key = freeze_value(expression(node.key, allowed, inherited=inherited, control=control), node.loc, prefix)
+        default_owner = None
+        fallback = None
+        if node.default is not None:
+            check_selection(node.default, root_id)
+            default_owner, fallback = capture(fresh(node.default, allowed, inherited, control=control), node.loc)
+            prefix.append(default_owner)
+        keys, values = replace(node.keys, value=selected), replace(node.values, value=selected)
+        shape = ty.structural_base(values.type)
+        assert isinstance(shape, ty.ArrayType)
+        removed = replace(node, type=shape.element, keys=keys, values=values, key=key,
+                          default=None, position=None, static_position=None)
+        held, result = capture(removed, node.loc)
+        taken = hir.Block(node.loc, node.type, [held,
+            *cleanup([default_owner] if default_owner is not None else [], node.loc),
+            hir.ValueCast(node.loc, node.type, result)], False)
+        if fallback is not None:
+            condition = hir.DictContains(node.loc, 'bool', keys, key)
+            taken = hir.Flow(node.loc, node.type, [hir.IfArm(node.loc, node.type, condition, taken)],
+                             hir.ValueCast(node.loc, node.type, fallback))
+        return hir.Block(node.loc, node.type, [*prefix, taken], False)
 
     def dictionary_get(node, allowed, inherited, control):
         # A default is eagerly evaluated, even when the entry exists. Each

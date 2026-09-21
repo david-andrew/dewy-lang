@@ -233,6 +233,7 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         return
     }
     if type isnt? types.ObjectType {reject(hir.node_at(session.hir value) 'unsupported resource storage' @plan) return}
+    if type.brand =? 'dict' {calls.push(compact_dictionary(value type loc @session))}
     loop method in type.methods {
         if method.lifecycle not=? 'drop' or not run_hook continue
         if type.brand is? none {reject(hir.node_at(session.hir value) 'an unavailable drop operation' @plan) return}
@@ -379,6 +380,7 @@ copy_operation = (owner:addr loc:Span @plan:Plan @session:contexts.Session):>add
         prefix=[declaration cursor.declaration loop_body]
         put(hir.Obligation[loc owner result result_type 'the generated array copy return contract'] @session)
     } else if type is? types.ObjectType {
+        if type.brand =? 'dict' {prefix.push(compact_dictionary(receiver type loc @session))}
         let fields:array<hir.ObjectField>=[]
         loop field in type.fields {
             let source=put(hir.MemberAccess[loc field.value_type receiver field.name] @session)
@@ -444,6 +446,10 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
     if resource(candidate.value_type session.types) is? none {expression(id allowed inherited @plan @session frame=frame) return}
     if candidate is? hir.DictLookup and not candidate.proven {
         dictionary_get(id candidate allowed inherited @plan @session frame)
+        return
+    }
+    if candidate is? hir.DictRemove and candidate.key isnt? none {
+        dictionary_pop(id candidate allowed inherited @plan @session frame)
         return
     }
     if candidate is? hir.ExpressedIdentifier and candidate.binding_id isnt? none and id in? plan.consume_sites and frame isnt? none {
@@ -698,6 +704,14 @@ array_operation = (id:addr node:hir.FunctionCall method:hir.ArrayMethod allowed:
     loop argument in node.pos_args {owning_argument(argument allowed inherited @plan @session frame=frame)}
     loop [name argument] in node.kw_args {owning_argument(argument allowed inherited @plan @session frame=frame)}
 }
+compact_dictionary=(value:addr shape:types.ObjectType loc:Span @session:contexts.Session):>addr=>{
+    # Existing entry materialization compacts tombstones and releases their
+    # backing storage. Its suppressed descriptor is a borrow, not a new owner.
+    let field=types.object_field(shape 'values')
+    $runtime_assert field isnt? none
+    let entries=put(hir.DictEntries[loc field.value_type value 'values'] @session)
+    return put(hir.Suppress[loc types.primitive('void' @session.types) entries] @session)
+}
 dictionary_clear = (id:addr node:hir.DictRemove allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?):>void => {
     # Drop the logical elements before DictRemove releases their storage and
     # resets the hash table. Select the shared owner just once.
@@ -712,9 +726,49 @@ dictionary_clear = (id:addr node:hir.DictRemove allowed:set<addr> inherited:bool
     let selected=freeze_route(keys.value node.loc receiver_root(keys.value session.hir) @prefix @plan @session)
     keys.value=selected values.value=selected
     let selected_keys=put(keys @session) let selected_values=put(values @session)
-    drop_value(selected_values values.value_type node.loc set[] @prefix @plan @session)
+    drop_value(selected owner.value_type node.loc set[] @prefix @plan @session)
     node.keys=selected_keys node.values=selected_values
     prefix.push(put(node @session))
+    store(id hir.Block[node.loc node.value_type prefix false] @session)
+}
+dictionary_pop=(id:addr node:hir.DictRemove allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?):>void=>{
+    $runtime_assert node.values isnt? none and node.key isnt? none
+    let keys=hir.node_at(session.hir node.keys) let values=hir.node_at(session.hir node.values)
+    $runtime_assert keys is? hir.MemberAccess and values is? hir.MemberAccess
+    let owner=hir.node_at(session.hir keys.value)
+    let borrowed=put(hir.Place[node.loc owner.value_type keys.value] @session)
+    expression(borrowed allowed inherited @plan @session frame=frame)
+    let prefix:array<addr>=[]
+    let root=receiver_root(keys.value session.hir)
+    let selected=freeze_route(keys.value node.loc root @prefix @plan @session)
+    check_selection(node.key root @plan session)
+    expression(node.key allowed inherited @plan @session frame=frame)
+    let key=freeze_value(node.key node.loc @prefix @session)
+    let default_owner:addr?=none
+    let fallback:addr?=none
+    if node.default isnt? none {
+        check_selection(node.default root @plan session)
+        fresh(node.default allowed inherited @plan @session frame=frame)
+        let saved=capture_result(node.default node.loc @session)
+        prefix.push(saved.declaration) default_owner=saved.declaration fallback=saved.value
+    }
+    keys.value=selected values.value=selected
+    let selected_keys=put(keys @session) let selected_values=put(values @session)
+    let shape=types.node_at(session.types views.structural_base(values.value_type session.types))
+    $runtime_assert shape is? types.ArrayType
+    let removed=put(hir.DictRemove[node.loc shape.element selected_keys selected_values key] @session)
+    let saved=capture_result(removed node.loc @session)
+    let taken:array<addr>=[saved.declaration]
+    if default_owner isnt? none {loop call in cleanup([default_owner] node.loc @plan @session) {taken.push(call)}}
+    taken.push(put(hir.ValueCast[node.loc node.value_type saved.value] @session))
+    let result=put(hir.Block[node.loc node.value_type taken false] @session)
+    if fallback isnt? none {
+        let condition=put(hir.DictContains[node.loc types.primitive('bool' @session.types) selected_keys key] @session)
+        let arm=put(hir.IfArm[node.loc node.value_type condition result] @session)
+        let absent=put(hir.ValueCast[node.loc node.value_type fallback] @session)
+        result=put(hir.Flow[node.loc node.value_type [arm] absent] @session)
+    }
+    prefix.push(result)
     store(id hir.Block[node.loc node.value_type prefix false] @session)
 }
 dictionary_get=(id:addr node:hir.DictLookup allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?):>void=>{
@@ -1546,6 +1600,12 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
             if values isnt? none and resource(hir.node_at(session.hir values).value_type session.types) isnt? none {
                 let root=receiver_root(node.keys session.hir)
                 if root isnt? none {receivers.add(root)}
+                if node is? hir.DictLookup {
+                    # Synthesized copies may compact this dictionary. Keep
+                    # membership proof, but recompute its physical position.
+                    node.position=none node.static_position=none
+                    store(id node @session)
+                }
             }
         }
         hir.push_children(node @pending)

@@ -5735,7 +5735,12 @@ dict_remove = (node:hir.DictRemove @state:State):>addr => {
 dict_entries = (node:hir.DictEntries @state:State):>addr => {
     let prefix:array<addr>=[]
     let parts=dict_parts(node.dictionary @prefix @state)
-    prefix.push(dict_ensure(parts node @state compact=true))
+    # Entry traversal needs dense live storage, not a hash table. Match
+    # hosted lowering: untouched literals and empty dictionaries need no
+    # allocation or hashing merely to iterate, copy or drop their entries.
+    let entries=read_word(dict_field(parts 'keys' node @state) layouts.array_descriptor.length node @state)
+    let dead=compare('__gt__' entries dict_field(parts 'live' node @state) node @state)
+    prefix.push(conditional(dead dict_rebuild(parts 0 node @state) node @state))
     return finish_dictionary(dict_field(parts node.name node @state) parts node @prefix @state copy_result=true)
 }
 dict_view = (node:hir.DictView @state:State):>addr => {

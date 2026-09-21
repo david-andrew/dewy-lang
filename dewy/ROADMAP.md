@@ -443,8 +443,11 @@ in both lowerings and the parity tool is the gate.
   Proven entry reads and `.get` now perform logical component copies; unused
   eager defaults drop on a hit. Stores transfer fresh/last-use owners and drop
   replaced values after evaluating the replacement. Optional and array values
-  retain their storage layout. Resource pop, iteration/views and entry-place
-  lifetimes remain pending.
+  retain their storage layout. Resource pop transfers
+  ownership, including eager default cleanup. Logical copy/drop first compacts
+  tombstones, without adding linear work to each pop. Cached resource-entry
+  positions are reprobed because synthesized copies can compact the receiver.
+  Resource iteration/views and entry-place lifetimes remain pending.
   Field and element overwrite now capture selectors and replacement values
   once, then drop the previous owner before installing the new one. This
   includes optional fields, nested arrays and borrowed receivers; side effects
