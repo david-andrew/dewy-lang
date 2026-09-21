@@ -32,4 +32,12 @@ jobs:
       - name: Run pytest
         # Native compiler-kernel tests build whole compiler slices. Keep
         # their concurrent working sets within the hosted runner's memory.
-        run: uv run --group dev pytest -q -n 2
+        run: uv run --group dev pytest -q -n 2 --tb=short --junitxml=test-results.xml
+
+      - name: Preserve structured test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: test-results.xml
+          if-no-files-found: ignore
