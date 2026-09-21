@@ -179,3 +179,22 @@ def test_indexed_string_survives_releasing_a_dynamic_receiver(tmp_path):
     body = body.replace('table.entries.length =? 1', 'table.entries.length =? 2')
     body = body.replace('    return if item', "    let churn=make('z')\n    if churn not=? 'zz' return 2\n    return if item")
     execute(tmp_path, 'dynamic-indexed-string', codegen(SrcFile(None, body), debug_locations=False))
+
+
+def test_index_snapshot_accounts_for_transitive_global_writes(tmp_path):
+    source = '''
+Table:type=[entries:array<int64>]
+let table=Table[[42]]
+change=():>addr<i=>i=?0>=>{
+    $runtime_assert table.entries.length >? 0
+    table.entries[0]=7
+    return 0
+}
+relay=():>addr<i=>i=?0>=>change()
+main=():>int64=>{
+    $runtime_assert table.entries.length >? 0
+    let item=table.entries[relay()]
+    return item
+}
+'''
+    execute(tmp_path, 'transitive-index-write', codegen(SrcFile(None, source), debug_locations=False))

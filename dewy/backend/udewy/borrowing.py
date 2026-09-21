@@ -17,9 +17,9 @@ compilers make the same borrow decisions:
   *array snapshot*: the receiver is copied before indexing and the read
   never borrows.
 
-The native pass additionally tracks the ambient (opaque, global-writing)
-call graph to accept more place parameters and calls inside index
-expressions; this port is conservative there and borrows a subset.
+Transitive writes to globals and captured owners use the shared effect call
+graph. The native pass additionally proves stability for more place
+parameters; this port remains conservative there and borrows a subset.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ...semantic import hir, ty
-from ...semantic.analyze.effects import INDEX_STEP, ParameterEffects, ProgramEffects
+from ...semantic.analyze.effects import INDEX_STEP, ParameterEffects, ProgramEffects, analyze_global_writes
 
 # The operator spellings µDewy emits directly (emit.py's binop/prefix tables);
 # listed here to avoid a circular import with the emitter.
@@ -61,6 +61,7 @@ class Plan:
     stable_bindings: set[int] = field(default_factory=set)
     stable_parameters: dict[int, ParameterEffects] = field(default_factory=dict)
     array_snapshots: set[int] = field(default_factory=set)             # id(Index) whose index may write the array
+    ambient_writes: dict[int, set[int]] = field(default_factory=dict)  # call identity -> nonlocal owners written
     scoped_views: set[int] = field(default_factory=set)                # view binding -> interval/lexical proof
     view_scopes: dict[int, hir.Block] = field(default_factory=dict)
     view_regions: dict[int, list[hir.AST]] = field(default_factory=dict)
@@ -241,13 +242,15 @@ def expression_conflicts(root: hir.AST, source: Route | None, plan: Plan, source
     """Whether evaluating `root` may write or alias the `source` route (conservative)."""
     for node in _walk_function_subtree(root):
         if isinstance(node, hir.FunctionCall):
+            if source is not None and source.binding in plan.ambient_writes.get(id(node), ()):
+                return True
             callee = node.func
             if isinstance(callee, hir.ExpressedIdentifier) and callee.binding_id in plan.named:
                 writes = plan.functions[id(plan.named[callee.binding_id])].writes
                 if source is None or source.binding in writes:
                     return True
-                # The native pass also consults the ambient call graph; without it every
-                # user callee that is not provably write-free of the source is a conflict.
+                # Place arguments are examined below while walking the call's
+                # children; ambient writes were checked through the call graph.
                 continue
             pure = isinstance(callee, hir.ExpressedIdentifier) and (callee.binding_id is None or callee.binding_id not in source_bindings) and callee.name in PURE_OPERATORS
             if isinstance(callee, hir.ArrayMethod):
@@ -397,6 +400,7 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
             summary = effects.for_param_binding(binding)
             if summary is not None:
                 plan.stable_parameters[binding] = summary
+    plan.ambient_writes = analyze_global_writes(root, (plan.globals | captured) - plan.named.keys())
     excluded_owners = captured | exposed | places
     for function in plan.functions.values():
         view_candidates = set()

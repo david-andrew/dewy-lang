@@ -32,6 +32,7 @@ aggregate=():>int64=>{
 }
 let global_table=Table[[42]]
 clear_global=():>int64=>{global_table.entries=[] return 0}
+relay_global=():>int64=>clear_global()
 # A pure arithmetic index must not acquire descriptors on every iteration.
 read_only=(values:array<int64>):>int64=>{
     let total:int64=0
@@ -54,7 +55,7 @@ exercise=():>int64=>{
     return 42
 }
 main=():>int64=>{
-    if global_table.entries[clear_global()] not=? 42 return 9
+    if global_table.entries[relay_global()] not=? 42 return 9
     if exercise() not=? 42 return exercise()
     let before:int64=_arena_live_bytes
     loop i in 0.. and i <? 32 {if exercise() not=? 42 return 10}
