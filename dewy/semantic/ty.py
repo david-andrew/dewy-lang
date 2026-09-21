@@ -1496,6 +1496,11 @@ class TypeSystem:
                 )
             if isinstance(member, RefinedType):
                 return covered(member.base, other, seen)
+            if isinstance(other, ObjectType) and isinstance(member, (str, IntegerLiteralType, RationalLiteralType)):
+                # Numeric applicability includes constructing bigint/rational
+                # storage. A join only forgets facts; it cannot perform that
+                # conversion on existing values (including container fields).
+                return False
             if isinstance(member, ObjectType) and isinstance(other, ObjectType):
                 for required in other.fields:
                     actual = member.field(required.name)

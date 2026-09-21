@@ -30,6 +30,20 @@ def test_join_keeps_one_representative_of_equivalent_types() -> None:
     assert system.join('int64', alias) == 'int64'
 
 
+def test_join_does_not_imply_numeric_materialization() -> None:
+    system = ty.TypeSystem()
+    integer_object = ty.ObjectType((ty.ObjectField('limbs', ty.ArrayType('uint64')),))
+    system.bigint_object = integer_object
+    literal = ty.IntegerLiteralType(1)
+    assert system.is_subtype(literal, integer_object)
+    assert system.join(literal, integer_object) == ty.union(literal, integer_object)
+    # The same restriction applies recursively: joining arrays cannot
+    # silently rewrite their existing elements into allocated records.
+    exact = ty.ArrayType(literal)
+    allocated = ty.ArrayType(integer_object)
+    assert system.join(exact, allocated) == ty.union(exact, allocated)
+
+
 @pytest.mark.parametrize('first, second', [('parent', 'child'), ('child', 'parent')])
 def test_inferred_returns_join_a_child_into_its_family(first: str, second: str) -> None:
     root = check.typecheck_and_resolve(SrcFile(None, f'''
