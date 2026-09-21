@@ -91,8 +91,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                      for node in hir.walk(root) if isinstance(node, (hir.MemberAssign, hir.IndexAssign))
                      and resource(node.target.type) is not None)
     receivers.update(bindings.access_path(node.keys).binding_id
-                     for node in hir.walk(root) if isinstance(node, hir.DictRemove)
-                     and node.key is None and node.values is not None
+                     for node in hir.walk(root) if isinstance(node, (hir.DictStore, hir.DictRemove, hir.DictLookup))
+                     and node.values is not None
                      and resource(node.values.type) is not None)
     receivers.discard(None)
     argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
@@ -395,6 +395,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     def fresh(node, allowed, inherited, components=frozenset(), control=None):
         if resource(node.type) is None:
             return expression(node, allowed, inherited=inherited, control=control)
+        if isinstance(node, hir.DictLookup) and not node.proven:
+            return dictionary_get(node, allowed, inherited, control)
         if isinstance(node, hir.ExpressedIdentifier) and control is not None:
             consumed = control(node, consume=True)
             if consumed is not None:
@@ -420,12 +422,12 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 # The checked inheritance wrapper transfers every parent
                 # field into its complete child, consuming that intermediate.
                 return node
-        if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
+        if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)) or isinstance(node, hir.DictLookup) and node.proven:
             receiver = expression(hir.Place(node.loc, node.type, node), allowed,
                                   inherited=inherited, control=control)
             return copy_value(receiver.target, implicit=True)
         if isinstance(node, hir.CopyValue):
-            if isinstance(node.value, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
+            if isinstance(node.value, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)) or isinstance(node.value, hir.DictLookup) and node.value.proven:
                 receiver = expression(hir.Place(node.loc, node.value.type, node.value), allowed,
                                       inherited=inherited, control=control)
                 return copy_value(receiver.target, implicit=False)
@@ -450,11 +452,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     copied = replace(node, pos_args=[replace(node.pos_args[0], target=borrowed)])
                     result, value = capture(copied, node.loc)
                     return hir.Block(node.loc, node.type, [owner, result, *cleanup([owner], node.loc), value], False)
-                while isinstance(receiver, hir.MemberAccess):
-                    receiver = receiver.value
-                if not isinstance(receiver, hir.ExpressedIdentifier) or receiver.binding_id not in allowed:
-                    reject(node, 'an unavailable copy receiver')
-                return node
+                borrowed = expression(node.pos_args[0], allowed, inherited=inherited, control=control)
+                return replace(node, pos_args=[borrowed])
             # A function result is an owned value, including through a
             # callback. Every checked body owes the same return contract;
             # resource arguments still require their own ownership proof.
@@ -506,6 +505,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         return expression(node, allowed, inherited=inherited, control=control)
 
     def route_indices(node, allowed, inherited, control):
+        if isinstance(node, hir.DictLookup) and node.proven:
+            owner = route_indices(node.keys.value, allowed, inherited, control)
+            return replace(node, keys=replace(node.keys, value=owner), values=replace(node.values, value=owner),
+                           key=expression(node.key, allowed, inherited=inherited, control=control))
         # Hosted HIR is immutable-by-replacement: retain rewritten control
         # flow in a selector, not just its successful validation.
         if isinstance(node, hir.MemberAccess):
@@ -619,7 +622,64 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         return hir.Block(node.loc, node.type, [*prefix, *cleanup((), node.loc, selected=values),
                                               replace(node, keys=keys, values=values)], False)
 
+    def dictionary_get(node, allowed, inherited, control):
+        # A default is eagerly evaluated, even when the entry exists. Each
+        # path owns exactly one result; the found path drops its unused default.
+        assert isinstance(node.keys, hir.MemberAccess) and isinstance(node.values, hir.MemberAccess)
+        owner = node.keys.value
+        expression(hir.Place(node.loc, owner.type, owner), allowed, inherited=inherited, control=control)
+        prefix = []
+        root_id = bindings.access_path(owner).binding_id
+        selected = freeze_route(owner, node.loc, root_id, prefix)
+        check_selection(node.key, root_id)
+        key = freeze_value(expression(node.key, allowed, inherited=inherited, control=control), node.loc, prefix)
+        default_owner = None
+        fallback = hir.NoneValue(node.loc, 'none')
+        if node.default is not None:
+            check_selection(node.default, root_id)
+            default_owner, fallback = capture(fresh(node.default, allowed, inherited, control=control), node.loc)
+            prefix.append(default_owner)
+        keys, values = replace(node.keys, value=selected), replace(node.values, value=selected)
+        shape = ty.structural_base(values.type)
+        assert isinstance(shape, ty.ArrayType)
+        found = hir.DictLookup(node.loc, shape.element, keys, values, key, proven=True)
+        copied, result = capture(copy_value(found, implicit=True), node.loc)
+        taken = hir.Block(node.loc, node.type, [copied,
+            *cleanup([default_owner] if default_owner is not None else [], node.loc),
+            hir.ValueCast(node.loc, node.type, result)], False)
+        condition = hir.DictContains(node.loc, 'bool', keys, key)
+        flow = hir.Flow(node.loc, node.type, [hir.IfArm(node.loc, node.type, condition, taken)],
+                        hir.ValueCast(node.loc, node.type, fallback))
+        return hir.Block(node.loc, node.type, [*prefix, flow], False)
+
+    def dictionary_store(node, allowed, inherited, control):
+        # Evaluate receiver selectors, key and replacement before dropping
+        # the old owner. Ordinary dictionary lowering still owns hashing,
+        # growth and physical storage release.
+        assert isinstance(node.keys, hir.MemberAccess) and isinstance(node.values, hir.MemberAccess)
+        owner = node.keys.value
+        expression(hir.Place(node.loc, owner.type, owner), allowed, inherited=inherited, control=control)
+        prefix = []
+        root_id = bindings.access_path(owner).binding_id
+        selected = freeze_route(owner, node.loc, root_id, prefix)
+        for supplied in (node.key, node.value):
+            check_selection(supplied, root_id)
+        key = freeze_value(expression(node.key, allowed, inherited=inherited, control=control), node.loc, prefix)
+        value = freeze_value(fresh(node.value, allowed, inherited, control=control), node.loc, prefix)
+        keys, values = replace(node.keys, value=selected), replace(node.values, value=selected)
+        shape = ty.structural_base(values.type)
+        assert isinstance(shape, ty.ArrayType)
+        previous = hir.DictLookup(node.loc, shape.element, keys, values, key, proven=True)
+        calls = cleanup((), node.loc, selected=previous)
+        condition = hir.DictContains(node.loc, 'bool', keys, key)
+        drop = hir.Flow(node.loc, ty.VOID_TYPE, [hir.IfArm(node.loc, ty.VOID_TYPE, condition,
+                        hir.Block(node.loc, ty.VOID_TYPE, calls, True))])
+        return hir.Block(node.loc, node.type, [*prefix, drop,
+                         replace(node, keys=keys, values=values, key=key, value=value)], False)
+
     def expression(node, allowed, *, inherited=False, control=None):
+        if isinstance(node, hir.DictStore) and node.values is not None and resource(node.values.type) is not None:
+            return dictionary_store(node, allowed, inherited, control)
         if (isinstance(node, hir.DictRemove) and node.key is None and node.values is not None
                 and resource(node.values.type) is not None):
             return dictionary_clear(node, allowed, inherited, control)
@@ -640,8 +700,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 or isinstance(node, hir.ArrayLength) and resource(node.array.type) is not None):
             selected = route_indices(node.value if isinstance(node, (hir.MemberAccess, hir.ForwardingAccess)) else node.array, allowed, inherited, control)
             owner = selected
-            while isinstance(owner, (hir.MemberAccess, hir.Index)):
-                if isinstance(owner, hir.Index):
+            while isinstance(owner, (hir.MemberAccess, hir.Index, hir.DictLookup)):
+                if isinstance(owner, hir.DictLookup):
+                    owner = owner.keys.value
+                elif isinstance(owner, hir.Index):
                     owner = owner.array
                 else:
                     owner = owner.value
@@ -664,8 +726,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         if isinstance(node, hir.Place):
             selected = route_indices(node.target, allowed, inherited, control)
             path = selected
-            while isinstance(path, (hir.MemberAccess, hir.Index)):
-                path = path.value if isinstance(path, hir.MemberAccess) else path.array
+            while isinstance(path, (hir.MemberAccess, hir.Index, hir.DictLookup)):
+                path = path.keys.value if isinstance(path, hir.DictLookup) else path.value if isinstance(path, hir.MemberAccess) else path.array
             if resource(path.type) is not None:
                 # A checked place call borrows the existing owner. Its
                 # lifetime and overlapping routes are checked by the normal
@@ -707,6 +769,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 written_root(node.target)
             if isinstance(node, hir.ArrayMethod):
                 written_root(node.array)
+            if isinstance(node, (hir.DictStore, hir.DictRemove)):
+                written_root(node.keys)
             if isinstance(node, hir.Transmute):
                 written_root(node.expr)
             if isinstance(node, hir.ExpressedIdentifier):
@@ -746,8 +810,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 return [field.value for field in node.fields]
             if isinstance(node, hir.ArrayLiteral):
                 return node.items
-            if isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign)):
-                return [node.value]
+            if isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign, hir.DictStore)):
+                return [node.value] if node.value is not None else []
             return ()
         for block in blocks:
             local = {owner.binding_id for owner in parameter_owners} if block is body else set()

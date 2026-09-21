@@ -915,8 +915,18 @@ length, which can include tombstones. Bounds checking records zero after
 clear and invalidates earlier live-count relations after stores and removals.
 Indexed aliases also lose affected descendant facts. Paired tests cover
 empty-length proofs, mutation invalidation, value independence, const fields,
-single selector evaluation, drop order and zero retained arena bytes. Resource
-dictionary entry lookup/store/pop and entry-place lifetimes remain pending.
+single selector evaluation, drop order and zero retained arena bytes.
+
+Proven entry reads and `.get` now invoke logical component copy hooks when
+an independent owner is required. `.get` evaluates defaults eagerly, transfers
+them on a miss and drops unused resource defaults on a hit. Stores accept
+fresh or last-use owners and drop replaced values after evaluating the complete
+replacement. Optional and array-valued entries share the same helpers, with
+narrowed payloads retaining their storage layout. Selectors/arguments that may
+invalidate the chosen receiver are rejected. Paired tests include conditional
+transfers, move-only rejection, effect contracts and repeated operations with
+zero retained-memory growth. Resource `pop`, entry-place lifetimes and resource
+iteration/views still need implementation.
 
 ### Scalar record placement and allocation contracts (2026-09-21)
 

@@ -2818,7 +2818,7 @@ class _Lowerer(
             target = self._transform_node(node.target)
             if not isinstance(
                 target,
-                (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index),
+                (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index, hir.DictLookup),
             ):
                 raise TypeError('INTERNAL ERROR: place target was not preserved')
             return replace(node, target=target)

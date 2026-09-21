@@ -53,6 +53,8 @@ def conditional_consumptions(body, parameter_owners, resource):
             inputs = node.items
         elif isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign)):
             inputs = [node.value]
+        elif isinstance(node, hir.DictStore) and node.value is not None:
+            inputs = [node.value]
         elif isinstance(node, hir.Declare):
             inputs = [node.expr]
             if isinstance(node.expr, hir.ExpressedIdentifier):

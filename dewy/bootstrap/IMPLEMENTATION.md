@@ -1931,3 +1931,23 @@ their existing evaluation behavior. Read-only place selectors remain allowed.
 The focused and adjacent hosted batch passed 61 tests; three positive and eight
 negative cases passed both compilers with direct and C output. The updated
 native driver also checked and emitted its own source successfully.
+
+### Resource dictionary reads and stores (2026-09-21)
+
+Both lifecycle passes use checked copy/drop calls for dictionary entries.
+Proven reads borrow the stored value for its logical copy operation; stores
+capture receiver selectors, key and replacement before dropping an existing
+value. Last-use transfers include stores and conditional paths. `.get` evaluates
+its default eagerly, dropping an unused resource default after saving the found
+copy. Compiler-generated entry places preserve the stored optional/union layout
+when lending a narrowed payload. General source entry places and resource pop
+are still pending.
+
+This exposed a hosted lowering bug in sequencing blocks ending with promotion
+to an optional/union: the block's record payload was mistaken for a tagged cell.
+Those blocks now lower their final expression at the destination's value
+boundary. Seven positive and three negative entry cases passed both compilers
+and both backends, as did repeated `.get` with a zero-retained-memory check;
+63 adjacent hosted tests passed. Both resource fixtures join the explicit
+Phase 1 parity manifest (now 183 cases). The native driver was built from this
+source with the certified `af12b397` pair; this is not a new fixed-point claim.

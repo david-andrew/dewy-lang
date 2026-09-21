@@ -737,6 +737,23 @@ box_value = (value:addr stored:addr node:hir.AST @state:State binding:addr?=none
 }
 place_address = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
+    if node is? hir.DictLookup and node.proven {
+        # Lifecycle helpers borrow a proven entry instead of duplicating it.
+        # Array parameters address a handle slot; records/unions address the
+        # payload itself, matching the ordinary indexed-place ABI.
+        let prefix:array<addr>=[]
+        let parts=dict_from_keys(node.keys @prefix @state mutate=true)
+        $runtime_assert parts.value isnt? none
+        let key=snapshot(owned_value(node.key @state) @prefix @state)
+        prefix.push(dict_ensure(parts node @state))
+        let probe=dict_probe(parts key node @prefix @state)
+        let values=dict_array(parts 'values' parts.value node @prefix @state)
+        let address=dict_element_pointer(values probe.position parts.value node @state)
+        if inline_place(node.value_type @state) {address=read_value(array_load(address parts.value node @state) parts.value node.value_type node @state)}
+        prefix.push(release_value(key parts.key node @state))
+        prefix.push(address)
+        return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    }
     # A narrowed record occupies the payload, not the enclosing union cell.
     if object_valued(node.value_type state) and cell_members(stored_type(id state) @state) isnt? none return write_route(id @state)
     if node is? hir.ExpressedIdentifier return binding_storage(node stored_type(id state) @state)

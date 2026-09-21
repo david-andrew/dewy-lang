@@ -144,6 +144,13 @@ class _OptionalLowering:
         payload: ty.TypeExpr,
     ) -> list[hir.AST]:
         value = self._unwrap_transparent(value)
+        if isinstance(value, hir.Block) and not value.scoped and value.items:
+            # A sequencing block may end in a promotion from a member to
+            # this cell. Lower that final value at the destination boundary;
+            # extracting the whole block first would mistake a payload handle
+            # for an already-tagged cell.
+            prefix = [statement for item in value.items[:-1] for statement in self._lower_statement(item)]
+            return [*prefix, *self._optional_write(cell, value.items[-1], payload)]
         if isinstance(value, hir.ValueCast):
             return self._optional_write(cell, value.expr, payload)
         if (
@@ -903,6 +910,10 @@ class _OptionalLowering:
         whose target may be an argument of that very call.
         """
         value = self._unwrap_transparent(value)
+        if isinstance(value, hir.Block) and not value.scoped and value.items:
+            prefix = [statement for item in value.items[:-1] for statement in self._lower_statement(item)]
+            return [*prefix, *self._union_write(cell, value.items[-1], members,
+                                               prepared=prepared, fresh=fresh, reported=reported)]
         if isinstance(value, hir.CopyValue):
             # Write an explicit snapshot straight into its destination. Going
             # through a second temporary would copy the same payload twice.

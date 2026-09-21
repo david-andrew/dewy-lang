@@ -56,6 +56,18 @@ class _PlaceLowering:
         """Create one non-escaping pointer cell and a post-call writeback."""
 
         target = node.target
+        if isinstance(target, hir.DictLookup) and target.proven:
+            # Compiler-generated lifecycle calls borrow the live entry. The
+            # checked membership proof supplies a position; arrays lend the
+            # slot cell, whereas records/unions lend their stored payload.
+            prelude, parts = self._dict_parts(target.keys)
+            key_prefix, key = self._extract_expression(target.key)
+            probe, _found, position, _slot = self._dict_probe(parts, key, target.loc)
+            values = self._dict_descriptor(parts, 'values', target.loc)
+            address = self._array_element_address(values, position, parts.value_type, target.loc)
+            if isinstance(ty.structural_base(target.type), ty.ObjectType) or self._field_union_members(target.type) is not None:
+                address = self._read_index_storage(address, hir.Index(target.loc, target.type, target.values, position, None))
+            return [*prelude, *key_prefix, *self._dict_ensure_table(parts, target.loc), *probe], address, []
         if isinstance(target, (hir.MemberAccess, hir.Index)):
             prelude, storage = self._extract_projected_place_storage(target)
             return prelude, replace(storage, type='int64'), []

@@ -1,0 +1,25 @@
+# Defaults evaluate eagerly and unused resource defaults drop on the found path.
+let drops:int64=0
+let copies:int64=0
+Handle=type of [id:int64
+$__drop__
+release=():>void=>{drops+=id}
+$__copy__
+clone=():>Handle=>{copies+=1 Handle[id]}
+]
+work=():>int64=>{let d:dict<int64 Handle>=[1->Handle[10]]
+ let h=d.get(1 default=Handle[20])
+ if copies not=?1 or drops not=?20 or h.id not=?10 return 1
+ let missing=d.get(2 default=Handle[30])
+ let absent=d.get(3)
+ let present=d.get(1)
+ if missing.id not=?30 or absent isnt? none or present is? none or copies not=?2 return 2
+ return 42}
+check=():>int64=>{drops=0 copies=0 if work() not=?42 or drops not=?80 return 1 return 42}
+main=():>int64=>{
+ if check() not=?42 return 1
+ let before:int64=_arena_live_bytes
+ loop i in 0.. and i <?100 {if check() not=?42 return 2}
+ $runtime_assert _arena_live_bytes=?before
+ return 42
+}

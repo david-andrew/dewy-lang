@@ -440,7 +440,11 @@ in both lowerings and the parity tool is the gate.
   Dictionary `clear` also drops values in reverse order before resetting
   storage, including indexed receivers selected once. Dictionary/set live
   length facts become zero after clear and are invalidated by later mutations.
-  Resource entry lookup, store/pop and entry-place lifetimes remain pending.
+  Proven entry reads and `.get` now perform logical component copies; unused
+  eager defaults drop on a hit. Stores transfer fresh/last-use owners and drop
+  replaced values after evaluating the replacement. Optional and array values
+  retain their storage layout. Resource pop, iteration/views and entry-place
+  lifetimes remain pending.
   Field and element overwrite now capture selectors and replacement values
   once, then drop the previous owner before installing the new one. This
   includes optional fields, nested arrays and borrowed receivers; side effects
@@ -464,8 +468,8 @@ in both lowerings and the parity tool is the gate.
   use, including values followed by unrelated trailing statements. Recursive `array<Self>` and nested array edges now have checked ownership,
   component copying, growth/pop transfer and deterministic cleanup. Empty
   arrays provide a finite base case; nonempty required recursive storage
-  still needs a terminating alternative. General dictionary ownership
-  operations remain pending. Fresh record results now transfer from factories
+  still needs a terminating alternative. The remaining dictionary removal and entry-lifetime
+  operations are tracked above. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch
   owners. Ordinary `@` parameters borrow resource records, including nested

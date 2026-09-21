@@ -126,6 +126,7 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table)
         } else if node is? hir.ObjectLiteral {loop field in node.fields {inputs.push(field.value)}}
         else if node is? hir.ArrayLiteral {inputs=node.items}
         else if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign {inputs.push(node.value)}
+        else if node is? hir.DictStore and node.value isnt? none {inputs.push(node.value)}
         else if node is? hir.Declare {
             inputs.push(node.expr)
             if hir.node_at(nodes node.expr) is? hir.ExpressedIdentifier {analysis.declarations[node.expr]=id}
