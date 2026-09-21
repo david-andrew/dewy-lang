@@ -1,0 +1,8 @@
+# Each iteration creates an owner; a taken branch consumes it exactly once.
+let drops:int64=0
+Token=type of [id:int64 $__drop__ release=():>void=>{drops+=1}]
+consume=(item:Token):>int64=>item.id
+main=():>int64=>{let before:int64=_arena_live_bytes
+loop i in [0..20) {let owner=Token[42]
+if i%2=?0 {consume(owner); if drops not=?i+1 return 1} else {if drops not=?i return 2}}
+return if drops=?20 and before=?_arena_live_bytes 42 else 3}

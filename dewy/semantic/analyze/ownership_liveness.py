@@ -2,8 +2,8 @@
 
 The storage lowerer still decides how bytes travel. This analysis decides
 whether a resource may change owners, so cleanup can follow the executed path.
-Loops retain all their reads until a backedge proof is available; aliases and
-captures keep their root live. No traversal order is treated as a branch join.
+Loop backedges retain outer owners; locals are born anew each iteration.
+Aliases and captures keep their root live, while returns have no backedge. No traversal order is treated as a branch join.
 """
 from .. import hir
 
@@ -81,26 +81,35 @@ def conditional_consumptions(body, parameter_owners, resource):
                 candidates.add(id(value))
 
     consumes = {}
-    def visit(node, after, enabled=True):
+    def visit(node, after, enabled):
         live = set(after)
         if isinstance(node, hir.ExpressedIdentifier):
-            if enabled and id(node) in candidates and not any(node.binding_id in roots(binding) for binding in live):
+            if node.binding_id in enabled and id(node) in candidates and not any(node.binding_id in roots(binding) for binding in live):
                 consumes[id(node)] = node.binding_id
             live.add(node.binding_id)
             return live
         if isinstance(node, hir.FunctionLiteral):
             return live | reads(node)
         if isinstance(node, hir.Return):
-            return visit(node.item, set(), enabled) if node.item is not None else set()
+            return visit(node.item, set(), owners) if node.item is not None else set()
         if isinstance(node, hir.Flow):
             following = visit(node.default, live, enabled) if node.default is not None else live
             for arm in reversed(node.arms):
                 if isinstance(arm, hir.LoopArm):
-                    # Every repeated read is live across the backedge. Keep
-                    # same-block loop-local transfers in the existing proof.
-                    repeated = following | live | reads(arm)
-                    visit(arm.body, repeated, False)
-                    following = visit(arm.condition, repeated, False)
+                    # New iteration locals are born again after a backedge;
+                    # outer owners are not. Only the former can be consumed
+                    # on a repeating path. A return has no backedge at all.
+                    born, pending = set(), [arm.body]
+                    while pending:
+                        child = pending.pop()
+                        if isinstance(child, hir.FunctionLiteral):
+                            continue
+                        if isinstance(child, hir.Declare):
+                            born.add(child.binding_id)
+                        pending.extend(hir.children(child))
+                    repeated = (following | live | reads(arm)) - born
+                    visit(arm.body, repeated, enabled & born)
+                    following = visit(arm.condition, repeated, set())
                 else:
                     taken = visit(arm.body, live, enabled)
                     following = visit(arm.condition, following | taken, enabled)
@@ -110,5 +119,5 @@ def conditional_consumptions(body, parameter_owners, resource):
         for child in reversed(tuple(hir.children(node))):
             live = visit(child, live, enabled)
         return live
-    visit(body, set())
+    visit(body, set(), owners)
     return consumes, declarations

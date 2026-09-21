@@ -2,8 +2,9 @@ import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
 
 # Logical ownership liveness, independent of physical storage lowering.
-# Branches join their future reads; repeated loop reads remain live. A view
-# keeps its source alive, but disappears when walking backward past its birth.
+# Branches join future reads; loop backedges retain outer owners, while
+# iteration locals are born anew. A view keeps its source alive until its
+# birth is crossed walking backwards; a return has no advancing edge.
 Analysis:type=[
     owners:set<addr>
     aliases:dict<addr addr>=[]
@@ -38,12 +39,12 @@ alive=(binding:addr live:set<addr> aliases:dict<addr addr>):>bool=>{
     loop later in live {if binding in? roots(later aliases) return true}
     return false
 }
-visit=(id:addr after:set<addr> enabled:bool @analysis:Analysis nodes:array<hir.AST>):>set<addr>=>{
+visit=(id:addr after:set<addr> enabled:set<addr> @analysis:Analysis nodes:array<hir.AST>):>set<addr>=>{
     let node=hir.node_at(nodes id)
     let live=after
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none {
-            if enabled and id in? analysis.candidates and not alive(node.binding_id live analysis.aliases) {analysis.consumes[id]=node.binding_id}
+            if node.binding_id in? enabled and id in? analysis.candidates and not alive(node.binding_id live analysis.aliases) {analysis.consumes[id]=node.binding_id}
             live.add(node.binding_id)
         }
         return live
@@ -52,7 +53,7 @@ visit=(id:addr after:set<addr> enabled:bool @analysis:Analysis nodes:array<hir.A
         loop binding in read_roots(id analysis.aliases nodes) {live.add(binding)}
         return live
     }
-    if node is? hir.Return {return if node.item is? none set[] else visit(node.item set[] enabled @analysis nodes)}
+    if node is? hir.Return {return if node.item is? none set[] else visit(node.item set[] analysis.owners @analysis nodes)}
     if node is? hir.Flow {
         let following=if node.default is? none live else visit(node.default live enabled @analysis nodes)
         let index=node.arms.length
@@ -64,8 +65,23 @@ visit=(id:addr after:set<addr> enabled:bool @analysis:Analysis nodes:array<hir.A
                 let repeated=following
                 loop binding in live {repeated.add(binding)}
                 loop binding in read_roots(node.arms[index] analysis.aliases nodes) {repeated.add(binding)}
-                visit(arm.body repeated false @analysis nodes);
-                following=visit(arm.condition repeated false @analysis nodes)
+                # Iteration-local owners are created anew on the next pass;
+                # outer owners cannot be consumed on a repeating path.
+                let born:set<addr>=set[]
+                let pending:array<addr>=[arm.body]
+                loop pending.length >? 0 {
+                    let child=hir.node_at(nodes pending.pop)
+                    if child is? hir.FunctionLiteral continue
+                    if child is? hir.Declare and child.binding_id isnt? none {born.add(child.binding_id)}
+                    hir.push_children(child @pending)
+                }
+                let available:set<addr>=set[]
+                loop binding in born {
+                    repeated.pop(binding default=binding);
+                    if binding in? enabled {available.add(binding)}
+                }
+                visit(arm.body repeated available @analysis nodes);
+                following=visit(arm.condition repeated set[] @analysis nodes)
             } else {
                 let taken=visit(arm.body live enabled @analysis nodes)
                 loop binding in taken {following.add(binding)}
@@ -138,6 +154,6 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table)
             if value is? hir.ExpressedIdentifier and value.binding_id isnt? none and value.binding_id in? owners and value.binding_id not in? analysis.captured and analysis.occurrences.get(selected 0) =? 1 and counts.get(value.binding_id 0) =? 1 {analysis.candidates.add(selected)}
         }
     }
-    visit(body set[] true @analysis nodes);
+    visit(body set[] owners @analysis nodes);
     return analysis
 }

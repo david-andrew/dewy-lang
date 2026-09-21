@@ -1997,3 +1997,19 @@ array operations and ordinary container text cases pass on the same routes.
 The driver checked and emitted its own complete source (20,910,854 bytes;
 70.83 seconds, 3,016,084 KiB peak RSS). This batch follows the fixed-point
 checkpoint above and is not yet a new fixed-point certification.
+
+## Iteration-local ownership (2026-09-21)
+
+The branch liveness proof now distinguishes owners created during an iteration
+from owners that must survive its backedge. Iteration-local owners may transfer
+inside conditional branches, including break/continue paths and nested loops.
+A return ends the function rather than advancing the loop, so an owning input
+on that exit may also consume an outer owner. Other repeated consumption of
+outer owners remains rejected. No loop-count heuristic or source annotation
+is involved; the distinction comes from birth scopes and control-flow exits.
+
+Validation: 23 focused and 68 adjacent hosted checks passed. Four positive and
+three negative cases pass a freshly built native driver against hosted checking,
+with all accepted cases executed through x86-64 and C. They check immediate
+versus end-of-iteration drop timing, break/continue cleanup, function returns,
+nested loops, rejected repeated consumption, and complete storage reclamation.
