@@ -1121,3 +1121,72 @@ proofs for allocation contracts, and inferred callable effect rows remain
 work to finish. Existing rejection gates remain explicit until their
 ownership operations are implemented. New integration and second-generation
 checks are required before certifying the combined changes.
+
+Implicit resource results now follow the explicit-return ownership path.
+Conditional results and nested scopes preserve cleanup order; a value before
+trailing statements is saved before those statements and transferred after
+them. This also fixes a premature return in that resource-result case.
+All 42 hosted/native lifecycle checks passed. The combined committed snapshot
+then built three native generations; the last two are byte-identical and the
+bootstrap execution checks passed on both output backends. The final generation
+took 110 seconds under concurrent test load; this is an integration result,
+not a performance-target claim. Artifacts:
+`../dewy-build-artifacts/phase1-ownership-integration-2026-09-21`.
+
+Same-scope local resource bindings now transfer an owner at proven last use,
+invoking a custom move hook where declared and retaining nested cleanup for
+fields left behind. Captures, later uses and outer-owner conditional transfers
+do not acquire this proof. Lexical ownership is established before cleanup
+introduces artificial reads. All 102 lifecycle/declaration checks passed,
+including ordinary and custom moves, loops and branches, hook effect/fact
+rejection, and repeated-call storage accounting on hosted x86/C and native.
+Outer-owner conditional consumption, inferred resource views/copies and field
+transfers remain outstanding; this is not the complete ownership model.
+
+The fixed-point generation passed 135/136 original Phase 1 manifest entries;
+the sole failure was an obsolete rejection expectation for importing a
+move-hook declaration without moving it. Both compilers accepted that already
+supported program. Renamed it to `lifecycle_imported_owner`, required exit 42,
+and reran the case against the same native generation: passed. All 136
+integration cases therefore have checked expected outcomes. Artifacts:
+`../dewy-build-artifacts/phase1-ownership-parity-2026-09-21` and
+`../dewy-build-artifacts/phase1-imported-owner-parity-2026-09-21`.
+
+Fresh arrays now own their resource elements, including nested arrays, empty
+arrays, record array fields and factory results. Cleanup borrows each array
+through a checked helper, runs element hooks in reverse order, then leaves
+backing storage release to normal lowering. Helper reuse avoids duplicating
+nested loops at every exit and gives each receiver a stable proof identity.
+Generated bindings and module provenance remain explicit in HIR. Aggregate
+mutation, resource union/dictionary handling and inferred element copies are
+not covered by this batch.
+
+Validation: the hosted lifetime fixture passed on x86 and C; 27 hosted
+lifecycle checks passed before native compilation found an incorrect internal
+binding-kind spelling. After correcting it, all eight native lifecycle cases
+passed. Three final hosted lifetime/effect checks and two native rejection
+cases passed, including propagation of implicit element-drop effects and
+invalidation of caller facts. No storage remains after 100 repeated calls.
+
+Ordinary by-value resource parameters now receive ownership from fresh
+arguments, factory results and explicit custom copies, including callbacks
+and default arguments. Parameters drop in reverse order after later locals;
+returning a parameter transfers it to the caller. Scalar and aggregate field
+results are captured before parameter cleanup. Existing `@` parameters retain
+their borrowed lifetime. Named-owner argument transfers and implicit copies
+still need the general ownership plan.
+
+Validation: all 100 lifecycle/declaration checks passed, including the shared
+owning-parameter fixture on hosted x86/C and native. Two additional hosted and
+two native effect/fact rejection cases passed. Repeated calls retain no storage.
+
+Remaining correctness issue found while extending the fixture: preliminary
+source bounds validation runs before lifecycle operations are inserted. It
+can retain a counter fact across a call whose implicit drop will change that
+counter, then incorrectly consider a combined counter/length guard impossible.
+For example, a later `if drops not=?6 or values.length not=?2 return 7` can
+lose the length proof when earlier checks established `drops=?3`. Ownership
+materialization and proof validation need an ordered shared pipeline; the
+final post-materialization validation is necessary but cannot undo an earlier
+false rejection. Keep this as a Phase 1 correctness task, not a source-style
+requirement to split such guards.

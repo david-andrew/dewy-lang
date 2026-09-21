@@ -425,23 +425,33 @@ in both lowerings and the parity tool is the gate.
   owners whose fields use ordinary synthesized cleanup, including inherited
   drops, reverse scope cleanup, scalar implicit results and early returns/loop exits. Its calls participate in fact/effect checking.
   Nested resource records also drop in reverse field order, even when the
-  wrapper has no hook. Explicit custom copies can construct fresh results,
+  wrapper has no hook. Fresh arrays of resources, including nested arrays
+  and array fields, run element hooks in reverse order before releasing their
+  storage. Per-shape cleanup helpers retain ordinary bounds/effect checking;
+  array mutation and implicit element copies remain outstanding. Explicit custom copies can construct fresh results,
   including nested hook calls. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch
   owners. Ordinary `@` parameters borrow resource records, including nested
   fields and forwarding through callbacks; callees do not drop borrowed owners.
-  Explicit returns transfer existing local owners on the exiting path, including
-  returns from branches and loops; the other owners still drop in reverse order.
+  Explicit and implicit results transfer existing local owners on the exiting
+  path, including conditional results and nested scopes; other owners drop in
+  reverse order. A result before trailing statements is saved at its evaluation
+  point, and those statements still run before return. Same-scope local bindings
+  transfer resources at a proven last use, including inside branches and loops;
+  captures and later uses prevent that proof.
   Custom move hooks now run at these transfers. The consumed owner's own drop
   is skipped, while its remaining nested resources and backing storage are
   cleaned up; hook effects are checked through callers. Inherited moves compose
   parent results with ordinary added fields. Moving added resource fields still
   needs field-transfer analysis.
   Inherited copies consume their intermediate parent results, including nested
-  resources and multiple inheritance levels. General local/field transfers,
-  resource containers and general
-  owning arguments remain explicitly unsupported during code generation.
+  resources and multiple inheritance levels. Conditional transfers of outer
+  owners, field transfers, mutable resource containers and general owning
+  argument transfers from existing bindings remain explicitly unsupported
+  during code generation. Fresh arguments, factory results and explicit copies
+  can supply ordinary by-value parameters, which own and clean up the value.
+  This includes callbacks and defaults; returning a parameter transfers it.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a
   last use turns out to be needed it should be a meta-level form (a

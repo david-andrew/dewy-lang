@@ -1,0 +1,47 @@
+let drops:int64=0
+let moves:int64=0
+Handle=type of [token:int64 values:array<int64>
+$__drop__
+release=():>void=>{drops+=1 token=0 values.clear}
+]
+Moving=type of [token:int64 values:array<int64>
+$__drop__
+release=():>void=>{drops+=1 token=0 values.clear}
+$__move__
+relocate=():>Moving=>{moves+=1 Moving[token+1 values.copy()]}
+]
+exercise=():>int64=>{
+    let first=Handle[40 [1 2]]
+    let second=first
+    second.token+=2
+    let third=second
+    if third.token not=?42 or third.values.length not=?2 return 1
+    let origin=Moving[40 [3]]
+    let middle=origin
+    let final=middle
+    if final.token not=?42 or moves not=?2 or drops not=?0 return 2
+    loop i in 0..2 {
+        let a=Handle[42 [i]]
+        let b=a
+        if b.token not=?42 return 3
+        if i=?1 continue
+    }
+    if drops not=?3 return 4
+    if true {
+        let a=Handle[42 [4]]
+        let b=a
+        if b.token not=?42 return 5
+    }
+    if drops not=?4 return 6
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 or drops not=?6 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {
+        drops=0 moves=0
+        if exercise() not=?42 or drops not=?6 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}
