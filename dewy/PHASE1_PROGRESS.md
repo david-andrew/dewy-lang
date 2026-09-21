@@ -1712,3 +1712,25 @@ local usage is supported, while a module-level escaping selection is rejected.
 corrected to suppress its discarded call result. All corrected foreign-name,
 import mutation, explicit-shadow and local-view cases pass both compilers and
 both backends through a freshly hosted-built native program driver.
+
+
+Loop-entry repair: source checking now distinguishes one-time iterator inputs
+from repeated Boolean predicates and loop bodies. Both checkers retain entry
+facts for iterable evaluation, then invalidate facts about backedge writes
+before checking repeated code. This fixes a guarded pop nested inside an
+iterator expression without requiring a split source expression.
+
+The negative regression exposed an older native gap: unindexed pop had no
+final non-empty obligation, so a two-iteration loop could pop a one-element
+array twice. Both bounds visitors now prove positive length at each reachable
+pop. The hosted source visitor defers dynamic proofs to this stage, permitting
+valid finite-loop pops and retaining immediate empty-array diagnostics. Its
+bounds visitor also evaluates an array-method receiver before the arguments.
+
+Validation: 68 hosted iterator/array checks passed; four positive and four
+negative cases pass both compilers and both backends using a fresh native
+program driver. The old native pair accepted the over-pop counterexample;
+the repaired driver rejects it. Finite two-element/two-pop iteration and the
+nested guarded worklist loop execute with result 42. Repeated predicates and
+an unguarded parameter pop reject. The integration manifest now includes the
+worklist and over-pop cases.

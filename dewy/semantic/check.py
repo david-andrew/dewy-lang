@@ -8573,13 +8573,13 @@ def _apply_array_method_transition(
     ctx: Context,
     index: hir.AST | None = None,
 ) -> None:
-    """Update length facts after a growth method call, proving `pop` first.
+    """Transfer source length facts and diagnose immediate contradictions.
 
     An exact-length refinement steps by one on `push`/`insert`/`pop` and
     resets on `clear`; `truncate(n)` caps it; otherwise a proven minimum
-    length (from guards such as `xs.length >? 0`) steps the same way. `pop`
-    without an index requires one of them to prove the array is non-empty;
-    constant indexes for `pop`/`insert` are checked here and runtime ones by
+    length (from guards such as `xs.length >? 0`) steps the same way. Final
+    bounds validation proves every pop's non-emptiness across loop backedges.
+    Constant indexes for `pop`/`insert` are checked here and runtime ones by
     the bounds analysis.
     """
     receiver = method.array
@@ -8600,13 +8600,9 @@ def _apply_array_method_transition(
                     'pop on an empty array',
                     Pointer(span=loc, message='this array has length 0 here'),
                 )
-            if exact is None and minimum < 1:
-                user_error(
-                    ctx.srcfile,
-                    'cannot prove the array is non-empty',
-                    Pointer(span=loc, message='`pop` needs a proven positive length'),
-                    hint='guard the call with `if xs.length >? 0 { ... }`, or pop while the length is known',
-                )
+            # Dynamic non-emptiness is a HIR proof obligation. The bounds
+            # pass sees loop backedges and checked assertions; source-time
+            # narrowing alone is neither sufficient nor necessary.
         elif index_value is not None:
             # a constant index is proven here; runtime indexes are proven by
             # the bounds analysis from intervals and `i <? xs.length` facts

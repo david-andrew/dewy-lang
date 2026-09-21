@@ -6,6 +6,8 @@ from dewy.reporting import ReportException, SrcFile
 from test_scalar_projection import execute
 
 CASES = [
+    'main=():>int64=>{let xs:array<int64>=[20 22] let sum:int64=0 loop i in [0..2) {sum+=xs.pop} return sum}',
+
     '''main=():>int64=>{let pending:array<int64>=[1]
 let seen:set<int64>=set[] let children:dict<int64 set<int64>>=[1->set[42]]
 let result:int64=0
@@ -22,6 +24,9 @@ return result}''',
 loop xs.length>?0 {result=xs.pop} return result}''',
 ]
 ERRORS = [
+    'pop=(@xs:array<int64>):>int64=>xs.pop main=():>int64=>42',
+    'main=():>int64=>{let xs:array<int64>=[42] loop i in [0..2) and xs.pop>?0 {} return 42}',
+
     '''main=():>int64=>{let xs:array<int64>=[42]
 loop i in [0..2) {xs.pop;} return 42}''',
     '''main=():>int64=>{let xs:array<int64>=[42]

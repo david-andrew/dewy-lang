@@ -323,6 +323,10 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
     if index isnt? none {count=checker.data.snapshot.numbers.get(index)}
     let previous=facts.lookup(state facts.value(facts.Term[sequence 'length']))
     let before=if previous is? none values.length_default(checker.data.env.cap) else previous
+    if validate and method.name =? 'pop' and index is? none and (before.lower is? none or before.lower <? 1) {
+        fail(id 'cannot prove the array is non-empty' '`pop` needs a proven positive length on every reachable iteration' @checker)
+        return
+    }
     if validate and index isnt? none and method.name in? ['pop' 'insert'] {
         let error=indices.check_method_index(method.name index count state sequence before method.name =? 'insert' checker.proof_context checker.data.snapshot.numbers checker.srcfile @checker.data.registry symbolic=intervals.stable(index checker.data.snapshot checker.data.env.nodes))
         if error isnt? none {checker.problem=error}

@@ -2835,6 +2835,7 @@ class _BoundsValidator:
         order as the specialized array/capture and ordinary call rules.
         """
         if isinstance(node.func, hir.ArrayMethod):
+            self._eval(node.func.array, state, validate=validate)
             arguments = [self._eval(arg, state, validate=validate) for arg in node.pos_args]
             keyword_arguments = {
                 name: self._eval(arg, state, validate=validate) for name, arg in node.kw_args.items()
@@ -2856,6 +2857,10 @@ class _BoundsValidator:
             if array_id is not None:
                 key = _length_key(array_id)
                 current = state.get(key, self._length_default())
+                if validate and name == 'pop' and index_arg is None and (current.lower is None or current.lower < 1):
+                    user_error(self.srcfile, 'cannot prove the array is non-empty',
+                               Pointer(span=node.loc, message='`pop` needs a proven positive length on every reachable iteration'),
+                               hint='guard the call with a positive-length test or establish a checked length fact')
                 if validate and index_arg is not None and name in {'pop', 'insert'}:
                     self._validate_method_index(
                         node, index_arg, index_interval, state, array_id, current,
