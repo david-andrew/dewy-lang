@@ -41,12 +41,19 @@ def test_the_fact_drops_when_a_term_is_assigned() -> None:
         _check('let f = (a:int64 b:int64):>uint64 => {\n    if 0 <=? a <=? b { a = b + 1 }\n    let w:uint64 = b - a\n    return w\n}')
 
 
-def test_the_fact_drops_when_the_sequence_shrinks_or_at_a_join() -> None:
+def test_shrink_weakens_the_difference_and_join_requires_both_paths() -> None:
+    # One pop changes length-i >= 1 into length-i >= 0. The weaker fact is
+    # still valid, but it cannot prove positivity or permit another access.
+    shrunk = (
+        'let f = (xs:array<int64> i:int64):>uint64 => {\n    if 0 <=? i <? xs.length {\n'
+        '        let last = xs.pop\n        let rest:uint64 = xs.length - i\n'
+        '        CHECK\n        return rest\n    }\n    return 0\n}'
+    )
+    _check(shrunk.replace('CHECK', ''))
     with pytest.raises(UserError, match='cannot prove'):
-        _check(
-            'let f = (xs:array<int64> i:int64):>uint64 => {\n    if 0 <=? i <? xs.length {\n'
-            '        let last = xs.pop\n        let rest:uint64 = xs.length - i\n        return rest\n    }\n    return 0\n}'
-        )
+        _check(shrunk.replace('CHECK', '$assert rest >? 0'))
+    with pytest.raises(UserError, match='index is not proven'):
+        _check(shrunk.replace('CHECK', 'let value = xs[i]'))
     with pytest.raises(UserError, match='cannot prove this integer fits `uint64`'):
         _check('let f = (a:int64 b:int64 c:bool):>uint64 => {\n    if c { if not (0 <=? a <=? b) return 0 }\n    let w:uint64 = b - a\n    return w\n}')
 
