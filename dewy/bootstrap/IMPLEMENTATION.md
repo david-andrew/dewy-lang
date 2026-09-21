@@ -1891,3 +1891,26 @@ structural string conversion. All three failed fixtures pass on both runtime
 backends after those fixes; focused paired cases cover refined callback
 returns and excluded-record conversions. This is a source checkpoint, not a
 certification of later ownership/proof changes or a replacement for full CI.
+
+### Phase 1 placement integration checkpoint (2026-09-21, `af12b397`)
+
+The combined exclusion, callable ABI, recursive resource-array, aggregate
+forwarding, interval-qualifier, dictionary-clear and scalar-record placement
+changes reached a direct x86-64 fixed point. Generations two and three were
+byte-identical; the native pair passed execution checks through both direct
+and C output. Their complete generation times were 67 s and 78 s; this is
+not a new isolated performance baseline or a claim to meet the 30 s target.
+
+All 181 explicit Phase 1 parity cases passed with both the hosted and native
+compilers. This supersedes the three hosted failures recorded at the earlier
+`4f4d2fe4` integration checkpoint. The Python-hosted compiler also built the
+native program driver successfully at `d8b54c5b`, exercising the path that
+failed broadly on CI before the conversion/ownership fixes in `400c1d51`.
+
+The native bootstrap-source copy inventory is 4,905 sites over 46,316 lines
+(105.903/KLOC), within the unchanged limits of 5,000 and 110/KLOC. The hosted
+inventory is 5,567 sites. These remain static sites, not runtime copy volume.
+The frozen pair is recorded in the local artifact directory
+`phase1-placement-af12b397-2026-09-21`, with its source and generation hashes;
+the explicit parity output is `phase1-placement-af12b397-parity`. This
+certificate applies to `af12b397`, not subsequent changes.

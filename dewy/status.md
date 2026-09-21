@@ -935,3 +935,14 @@ public-effect checkers now consume the same placement proof. Paired kernels
 cover nominal/structural records, narrow fields, mutation, repeated loop
 execution and zero arena allocation. Aggregate fields, escaping results and
 unproved whole-value forwarding still require allocation permission.
+
+### First compiler modules under explicit-copy enforcement (2026-09-21)
+
+`$explicit_copies` now applies to `targets`, `literal_members`, `module_state`,
+`placement`, `text_formatting`, `validation_state`, and `analyze/dense_ids`.
+Both complete compiler analyses accepted these policies. The selection came
+from the intersection of the hosted/native copy inventories; no `.copy()`
+insertions or disabled diagnostics were needed. Later additions to these
+modules must retain a proven borrow/move or explicitly request a runtime-sized
+copy. The remaining compiler modules still need work before whole-compiler
+strict acceptance; report completeness and acceptance parity remain gates.
