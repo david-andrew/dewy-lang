@@ -424,8 +424,9 @@ in both lowerings and the parity tool is the gate.
   hook effects and result facts. Runtime drop now works for fresh local
   owners whose fields use ordinary synthesized cleanup, including inherited
   drops, reverse scope cleanup, scalar implicit results and early returns/loop exits. Its calls participate in fact/effect checking.
-  Copy/move hooks, nested resource fields, ownership transfers and resource
-  escapes remain explicitly unsupported during code generation.
+  Nested resource records also drop in reverse field order, even when the
+  wrapper has no hook. Copy/move hooks, resource containers, ownership
+  transfers and resource escapes remain explicitly unsupported during code generation.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a
   last use turns out to be needed it should be a meta-level form (a

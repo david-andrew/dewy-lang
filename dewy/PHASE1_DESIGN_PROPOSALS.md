@@ -310,8 +310,9 @@ reviewing an overview in the conversation. This extends the earlier approval
 of `$__drop__`, `$__copy__`, `$__move__`, inferred moves, and internal
 nonescaping places. It adds no uninitialized-place syntax. Approval does not
 mean the compiler implements all runtime ownership behavior yet. Fresh local
-owners without nested lifecycle-managed fields now run drop hooks, including inherited drops, with checked
-effects and lexical cleanup. Transfers and nested lifecycle-managed fields remain gated. Both
+record owners now run drop hooks, including inherited drops, with checked
+effects and lexical cleanup. Nested record fields drop after the containing hook in reverse field order;
+transfers and containers of resources remain gated. Both
 checkers now validate declarations, result identity, compiler-only access and
 the read-only copy receiver. The native snapshot codec retains this metadata.
 Explicit `.copy()` now resolves a custom copy hook into an ordinary checked
@@ -424,7 +425,7 @@ custom copies of added fields remain ordinary checked calls. Multi-level
 inheritance composes through the immediate parent, retaining each level's
 result identity. Runtime drop composition now executes for fresh local owners, including
 ordinary string/array fields and scalar implicit results. Copy/move and
-nested lifecycle-managed fields remain gated.
+containers of resources remain gated; nested record fields are supported.
 
 Provisional details following David's updated review guidance: an explicitly
 tagged child hook overrides by lifecycle role, even if it uses a different

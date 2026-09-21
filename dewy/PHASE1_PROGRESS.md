@@ -1039,3 +1039,23 @@ isolated checkout during this run. This is an integration checkpoint, not
 completion of Phase 1; native self-build time remains above the 30-second
 target. Artifacts: `../dewy-build-artifacts/phase1-drop-integration-2026-09-21`
 and `../dewy-build-artifacts/phase1-drop-full-parity-2026-09-21`.
+
+Nested record ownership now materializes containing hooks before reverse
+field cleanup, recursively, including wrappers with no hook of their own.
+Fresh constructor trees are supported; transferring an existing resource
+into a field, replacing a resource field, resource arrays/unions, and general
+owning arguments/results remain explicitly unsupported. The native pass
+resolves operations through the checked nominal-owner inventory, since
+method descriptors can precede binding resolution. Hosted fact revalidation
+now uses each function's original source for diagnostics across imports.
+
+Validation: 72 hosted lifecycle checks passed, followed by 34 runtime and
+refinement checks after adding the imported-diagnostic regression. Native
+built in 70.71 seconds during the independent integration run, passed the
+three ownership kernels, all seven paired drop-runtime cases, and both new
+nested effect/fact rejection cases. The nested fixture checks hook/field
+order and zero retained bytes across 100 calls. The focused manifest has
+129 cases. Artifacts:
+`../dewy-build-artifacts/phase1-lifecycle-nested-drop-2026-09-21`,
+`../dewy-build-artifacts/phase1-lifecycle-nested-drop-parity-final-2026-09-21`
+and `../dewy-build-artifacts/phase1-lifecycle-nested-drop-facts-2026-09-21`.
