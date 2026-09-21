@@ -922,3 +922,19 @@ kernel allocates nothing for the views and retains no storage across 100
 repetitions on hosted x86/C and native. The focused manifest has 115 cases.
 Artifacts: `../dewy-build-artifacts/phase1-inferred-view-last-use-2026-09-20`
 and `../dewy-build-artifacts/phase1-inferred-view-last-use-parity-2026-09-20`.
+
+Public effect checking now runs over the complete checked module graph,
+after bounds validation has certified iterator storage and before runtime
+pruning. Direct imported helpers, including transitive imports, participate
+in the same fixed point as local functions. An omitted row no longer turns
+a known imported helper into an unknown operation. Unused imported contracts
+are still checked, and unknown operations/allocations remain conservative.
+Native effect collection is shared with its access-summary solve rather than
+traversing the graph twice. This does not yet infer rows into callback types.
+
+Validation: 164 hosted public-effect, allocation and lifecycle checks passed.
+The fresh native generation built in 63.66 seconds, executed the three
+ownership kernels (42), and passed all 24 paired effect fixtures. The focused
+manifest now has 118 cases. Artifacts:
+`../dewy-build-artifacts/phase1-imported-effects-2026-09-20` and
+`../dewy-build-artifacts/phase1-imported-effects-parity-2026-09-20`.

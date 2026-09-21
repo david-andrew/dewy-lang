@@ -204,10 +204,10 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     }
     unknown(@scan)
 }
-validate = (root:addr source:SrcFile session:contexts.Session word_iterators:set<addr>=set[]):>Error? => {
+validate = (roots:array<addr> source:SrcFile session:contexts.Session word_iterators:set<addr>=set[]):>Error? => {
     if not session.types.effect_contracts return none
     let constrained:array<addr>=[]
-    let pending:array<addr>=[root]
+    let pending=roots
     let seen:set<addr>=set[]
     loop pending.length >? 0 {
         let id=pending.pop
@@ -221,8 +221,8 @@ validate = (root:addr source:SrcFile session:contexts.Session word_iterators:set
         }
     }
     if constrained.length =? 0 return none
-    let analysis=access.collect(root session.hir)
-    let input=Input[session.hir session.types session.registry analysis access.analyze_effects(root session.hir session.types) word_iterators]
+    let analysis=access.collect_roots(roots session.hir)
+    let input=Input[session.hir session.types session.registry analysis access.analyze_collected(analysis session.hir session.types) word_iterators]
     let local:dict<addr rows.Contract>=[]
     let calls:dict<addr array<Call>>=[]
     let edges:dict<addr set<addr>>=[]

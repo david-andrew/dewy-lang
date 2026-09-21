@@ -484,7 +484,8 @@ The transitive parameter effect analysis exists
 row separate from those access summaries: both compilers check `no_effects`
 (and `Effect<>`), nominal `reads<Resource>` / `mutates<Resource>` permissions,
 place-parameter routes, and `no reads<Resource>` / `no reads` exclusions.
-Direct calls translate place subjects; constrained callbacks retain open
+Direct calls, including imported helpers, infer effects across the checked
+module graph and translate place subjects; constrained callbacks retain open
 negative guarantees. Unknown operations cannot satisfy an empty row or an
 unproved exclusion. Separately kind-checked `<E:Effect>` parameters now infer
 and substitute callback rows in both compilers, including mixed type/row

@@ -30,22 +30,6 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
     checker.prototype=module.options.prototype and not module.prelude
     bounds.validate(module.root @checker)
     if checker.problem isnt? none return checker.problem
-    # Only checked advancing-edge proofs authorize frame-word counters in
-    # allocation contracts; the parser's guard hint is not such a proof.
-    let effect_error=public_effects.validate(module.root source session checker.word_iterators)
-    if effect_error isnt? none return effect_error
-    # This must precede reachability pruning: hidden hooks have no explicit
-    # source call edges yet. Accepting a used resource after pruning its hook
-    # would silently compile ordinary memberwise behavior instead.
-    let root=hir.node_at(env.nodes module.root)
-    if root is? hir.Block {
-        loop item in root.items {
-            let declaration=hir.node_at(env.nodes item)
-            if declaration isnt? hir.Declare continue
-            let function=hir.node_at(env.nodes declaration.expr)
-            if function is? hir.FunctionLiteral and function.lifecycle isnt? none return Error[srcfile=source title='not implemented: lifecycle ownership lowering' pointers=[Pointer[declaration.loc 'lifecycle declarations are checked; runtime ownership is pending']]]
-        }
-    }
     let strict=module.prelude or module.no_prelude or 'BigInt' not in? prelude
     let unfit:dict<addr proofs.Unfit>=[]
     loop [id flag] in checker.unfit {
@@ -96,6 +80,32 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
         let checked=validate_module(loaded[index] source_files env prepared word prelude session)
         if checked is? Error return checked
         decisions.push(checked)
+    }
+    # Infer direct-call effects across the complete loaded graph, including
+    # imported helpers and unused source functions. Only checked advancing
+    # edges authorize frame-word counters in allocation contracts.
+    if loaded.length >? 0 {
+        let ids:array<addr>=[]
+        loop module in loaded {ids.push(module.root)}
+        let word_iterators:set<addr>=set[]
+        loop decision in decisions {loop id in decision.word_iterators {word_iterators.add(id)}}
+        let effect_error=public_effects.validate(ids sources.srcfile(loaded[0].context session) session word_iterators)
+        if effect_error isnt? none return effect_error
+    }
+    loop module in loaded {
+        let source=sources.srcfile(module.context session)
+        # This must precede reachability pruning: hidden hooks have no explicit
+        # source call edges yet. Accepting a used resource after pruning its hook
+        # would silently compile ordinary memberwise behavior instead.
+        let root=hir.node_at(session.hir module.root)
+        if root is? hir.Block {
+            loop item in root.items {
+                let declaration=hir.node_at(session.hir item)
+                if declaration isnt? hir.Declare continue
+                let function=hir.node_at(session.hir declaration.expr)
+                if function is? hir.FunctionLiteral and function.lifecycle isnt? none return Error[srcfile=source title='not implemented: lifecycle ownership lowering' pointers=[Pointer[declaration.loc 'lifecycle declarations are checked; runtime ownership is pending']]]
+            }
+        }
     }
     return decisions
 }

@@ -1,0 +1,7 @@
+from p"effect_modules/helpers.dewy" import helper, fill
+# Both calls infer their bodies through two module boundaries.
+main=():>int64 & no_effects=>{
+    let result:int64=0
+    fill(@result)
+    return helper(result)
+}
