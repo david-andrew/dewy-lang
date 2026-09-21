@@ -118,7 +118,7 @@ install = (@state:facts.State subject:addr value:addr annotation:addr? loc:Span 
 # A child write changes the containing value's mathematical meaning (a BigInt
 # is no longer the same integer after writing a limb), while unrelated field
 # and length evidence remains useful.
-forget_value = (id:addr @state:facts.State @checker:Checker):>void => {
+forget_value = (id:addr @state:facts.State @checker:Checker keep_length:addr?=none):>void => {
     let path=bindings.access_path(id checker.data.env.nodes facts=true)
     let root=node_at(path.root checker)
     if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
@@ -127,7 +127,7 @@ forget_value = (id:addr @state:facts.State @checker:Checker):>void => {
         loop route in checker.data.registry.routes_by_root.get(root.binding_id []) {
             let indexed=false
             loop part in route.path {if part.startswith('[') {indexed=true break}}
-            if indexed {stores.forget(@state route.id @checker.data)}
+            if indexed {stores.forget(@state route.id @checker.data keep_length=keep_length)}
         }
     }
     let ids:array<addr>=[path.root]
@@ -360,7 +360,7 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
         checker.data.snapshot.lengths[method.array]=after
         if validate {length_contract(id method array=sequence after=after state=state @checker)}
     }
-    if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear' 'sort' 'reverse'] {forget_value(method.array @state @checker)}
+    if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear' 'sort' 'reverse'] {forget_value(method.array @state @checker keep_length=sequence)}
 }
 length_contract = (id:addr method:hir.ArrayMethod array:addr after:ranges.Interval state:facts.State @checker:Checker):>void => {
     let conditions=expressions.member_invariant(method.array checker.data.env.nodes checker.data.env.types)

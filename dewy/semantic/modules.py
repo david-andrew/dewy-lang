@@ -99,6 +99,13 @@ class _ResidentPrelude:
                         routes.remove(route_id)
                 registry.route_ids = {key: value for key, value in registry.route_ids.items() if value != route_id}
             registry.next_route_id = self.next_route_id
+        # Selector dependencies are analysis-created route identities too.
+        # Resident reuse must discard routes created by the previous program.
+        registry.index_routes = {
+            binding: kept for binding, routes in registry.index_routes.items()
+            if binding in registry.by_id
+            and (kept := {route for route in routes if route in registry.route_paths})
+        }
         state['records'].clear()
         state['records'].update(self.records)
         state['included_files'].clear()

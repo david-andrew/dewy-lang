@@ -64,6 +64,9 @@ class BindingRegistry:
     route_ids: dict[tuple[int, tuple[str, ...]], int] = field(default_factory=dict)
     routes_by_root: dict[int, list[int]] = field(default_factory=dict)
     route_paths: dict[int, tuple[str, ...]] = field(default_factory=dict)
+    # A const selector can be rebound on the next execution of its declaration
+    # (for example in a loop). Its dependent routes must lose old evidence.
+    index_routes: dict[int, set[int]] = field(default_factory=dict)
 
     def __setstate__(self, state: dict) -> None:
         self.__dict__.update(state)
@@ -209,22 +212,29 @@ def field_route(node: hir.AST, fields: tuple[str, ...]) -> hir.AST | None:
 
 
 def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = True) -> int | None:
-    """The fact id of a named sequence and stable field/constant-index route.
+    """The fact id of a named sequence and stable field/index route.
 
     Use ``create=False`` for reads that only consume an existing route fact.
-    Bracketed components cannot collide with field names. A dynamic index
-    needs an identity tied to its current value; it is not stable here yet.
+    A const selector identifies one evaluated index until its declaration is
+    executed again. Bracketed components cannot collide with field names.
     """
     path = access_path(node, unwrap=_unwrap_fact_route)
     root_id = path.binding_id
     if root_id is None:
         return None
     names = []
+    indices = []
     for step in path.steps:
         if isinstance(step, hir.Index):
-            if step.constant_index is None:
-                return None
-            names.append(f'[{step.constant_index}]')
+            if step.constant_index is not None:
+                names.append(f'[{step.constant_index}]')
+            else:
+                selected = _unwrap_fact_route(step.index)
+                binding = registry.by_id.get(selected.binding_id) if isinstance(selected, hir.ExpressedIdentifier) else None
+                if binding is None or binding.declaration is None or binding.declaration.decltype != 'const':
+                    return None
+                names.append(f'[@{binding.id}]')
+                indices.append(binding.id)
         else:
             names.append(step.name)
     fields = tuple(names)
@@ -234,7 +244,10 @@ def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = T
         return None
     if not create:
         return registry.route_ids.get((root_id, fields))
-    return registry.route_id(root_id, fields, node.type, node.loc)
+    result = registry.route_id(root_id, fields, node.type, node.loc)
+    for index in indices:
+        registry.index_routes.setdefault(index, set()).add(result)
+    return result
 
 
 def member_path(node: hir.AST) -> tuple[int, tuple[str, ...]] | None:

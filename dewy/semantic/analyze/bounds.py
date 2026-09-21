@@ -868,6 +868,8 @@ class _BoundsValidator:
                     current.pop(binding_id, None)
             return current
         if isinstance(node, hir.Declare):
+            if node.binding_id is not None:
+                self._forget_index_routes(node.binding_id, current)
             flow = _value_flow_of(node.expr)
             if flow is not None and node.binding_id is not None:
                 return self._bind_conditional(node, flow, current, validate=validate)
@@ -2910,7 +2912,7 @@ class _BoundsValidator:
                 if validate and name in {'push', 'insert', 'pop', 'truncate', 'clear'}:
                     self._validate_length_invariant(node, array_id, state[key], state)
             if name in {'push', 'insert', 'pop', 'truncate', 'clear', 'sort', 'reverse'}:
-                self._forget_container_value(node.func.array, state)
+                self._forget_container_value(node.func.array, state, keep_length=array_id)
             return None
         if isinstance(node.func, hir.ExpressedIdentifier) and node.func.name.startswith(('_capture_push', '_capture_add')) and len(node.pos_args) == 2 and isinstance(node.pos_args[0], hir.Place):
             # `[loop … value]`: the capture's push — the element's facts join the array's
@@ -3226,6 +3228,15 @@ class _BoundsValidator:
                     route_id = self.registry.route_id(root_id, field_path, field.type, field_value.loc)
                     state[route_id] = interval
 
+    def _forget_index_routes(self, binding_id: int, state: State) -> None:
+        for route in self.registry.index_routes.get(binding_id, ()):
+            state.pop(route, None)
+            self._invalidate_length(route, state)
+            self._drop_route_facts(state, route)
+            parent = self.registry.by_id[route].route_root
+            if parent is not None:
+                self._drop_route_facts(state, parent, self.registry.route_paths[route])
+
     def _forget_global(self, binding_id: int, state: State) -> None:
         state.pop(binding_id, None)
         self._invalidate_length(binding_id, state)
@@ -3235,7 +3246,7 @@ class _BoundsValidator:
         for route_id in self.registry.routes_under(binding_id):
             self.member_facts.pop(route_id, None)
 
-    def _forget_container_value(self, node: hir.AST, state: State) -> None:
+    def _forget_container_value(self, node: hir.AST, state: State, *, keep_length: int | None = None) -> None:
         """A component write invalidates a containing value's numeric meaning.
 
         Length and unrelated field facts survive; the mathematical integer
@@ -3252,18 +3263,19 @@ class _BoundsValidator:
             for route_id in self.registry.routes_under(binding_id):
                 if any(part.startswith('[') for part in self.registry.route_paths[route_id]):
                     state.pop(route_id, None)
-                    self._invalidate_length(route_id, state)
+                    if route_id != keep_length:
+                        self._invalidate_length(route_id, state)
                     _drop_index_facts(state, index_id=route_id)
-                    self._drop_route_facts(state, route_id)
+                    self._drop_route_facts(state, route_id, keep_length=keep_length)
         if isinstance(node, hir.MemberAccess):
-            self._forget_container_value(node.value, state)
+            self._forget_container_value(node.value, state, keep_length=keep_length)
         elif isinstance(node, hir.Index):
             array = self._array_id(node.array)
             if array is not None:
                 self._drop_route_facts(state, array, ('*',))
-            self._forget_container_value(node.array, state)
+            self._forget_container_value(node.array, state, keep_length=keep_length)
 
-    def _drop_route_facts(self, state: State, root_id: int, prefix: tuple[str, ...] = ()) -> None:
+    def _drop_route_facts(self, state: State, root_id: int, prefix: tuple[str, ...] = (), *, keep_length: int | None = None) -> None:
         """Member routes under a reassigned binding or field lose their length and index facts."""
         pending = self.registry.routes_under(root_id, prefix)
         seen = set()
@@ -3274,8 +3286,9 @@ class _BoundsValidator:
             seen.add(route_id)
             pending.extend(self.registry.routes_under(route_id))
             state.pop(route_id, None)
-            state.pop(_length_key(route_id), None)
-            _drop_index_facts(state, array_id=route_id)
+            if route_id != keep_length:
+                state.pop(_length_key(route_id), None)
+                _drop_index_facts(state, array_id=route_id)
             _drop_index_facts(state, index_id=route_id)
             self.member_facts.pop(route_id, None)
 

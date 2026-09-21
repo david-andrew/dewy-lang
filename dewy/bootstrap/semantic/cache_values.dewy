@@ -1358,6 +1358,7 @@ encode_Value60=(value:Value60 @out:bytes.Writer):>void=>{
     encode_Value62(value.current_bindings @out)
     encode_Value40(value.by_syntax @out)
     encode_Value85(value.routes_by_root @out)
+    encode_Value59(value.index_routes @out)
     encode_Value88(value.generic_instances @out)
 }
 decode_Value60=(@input:bytes.Reader):>Value60|CacheMiss=>{
@@ -1376,9 +1377,11 @@ decode_Value60=(@input:bytes.Reader):>Value60|CacheMiss=>{
     if field_5 is? CacheMiss return field_5
     let field_6=decode_Value85(@input)
     if field_6 is? CacheMiss return field_6
-    let field_7=decode_Value88(@input)
+    let field_7=decode_Value59(@input)
     if field_7 is? CacheMiss return field_7
-    return Value60[next_id=field_0 next_route_id=field_1 binding_pages=field_2 current_page=field_3 current_bindings=field_4 by_syntax=field_5 routes_by_root=field_6 generic_instances=field_7]
+    let field_8=decode_Value88(@input)
+    if field_8 is? CacheMiss return field_8
+    return Value60[next_id=field_0 next_route_id=field_1 binding_pages=field_2 current_page=field_3 current_bindings=field_4 by_syntax=field_5 routes_by_root=field_6 index_routes=field_7 generic_instances=field_8]
 }
 
 encode_Value61=(value:Value61 @out:bytes.Writer):>void=>{

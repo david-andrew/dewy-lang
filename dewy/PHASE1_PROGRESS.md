@@ -1493,3 +1493,16 @@ After importing the module-effect fix, all 181 adjacent hosted lifecycle, array
 storage, projected-place, borrowed-call and generated-contract checks passed.
 The remote pytest checkpoint at `40586e70` and the post-packaging-fix native
 release at `d858cf4e` both completed successfully.
+
+Checkpoint: indexed array and record-field routes now retain length facts
+when their selector is an immutable local. Re-entering that declaration in
+a loop invalidates the old selection; writes through other indices still
+invalidate potentially aliased routes. Receiver mutations preserve their
+newly established length while dropping dependent element evidence. The
+hosted resident-prelude rollback also removes selector dependencies for
+discarded routes, and the native cache schema includes this metadata.
+This prepares ordinary fact tracking for mutable local places; it does not
+yet implement those places or establish disjointness between indices.
+Validation: 39 hosted cache/bounds checks passed; the immutable-selector
+acceptance/rejection corpus, including record fields, executes through both
+compilers and both output backends.

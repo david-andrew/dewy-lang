@@ -32,10 +32,15 @@ A copied array or record owns its evidence too. Later replacement of the
 source loses source relationships without erasing the copy's own promises.
 """
 
-forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<string>=[]):>void => {
+forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<string>=[] keep_length:addr?=none):>void => {
     if prefix.length =? 0 {
+        loop dependent in data.registry.index_routes.get(subject set[]) {
+            forget(@state dependent @data)
+            let route=bindings.route_at(data.registry dependent)
+            if route isnt? none {forget(@state route.root @data prefix=route.path)}
+        }
         facts.forget(@state facts.Term[subject])
-        facts.forget(@state facts.Term[subject 'length'])
+        if subject not=? keep_length {facts.forget(@state facts.Term[subject 'length'])}
         intervals.forget(@data.snapshot subject)
         if subject in? data.member_calls {data.member_calls.pop(subject); }
     }
@@ -43,7 +48,7 @@ forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<str
         if bindings.path_starts_with(route.path prefix) {
             # Element evidence can itself be rooted at a projected sequence.
             # Invalidating its parent must remove that derived evidence too.
-            forget(@state route.id @data)
+            forget(@state route.id @data keep_length=keep_length)
         }
     }
 }

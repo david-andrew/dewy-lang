@@ -64,6 +64,8 @@ Registry:type = [
     # representation: queries and invalidation need only that root's fields.
     # Registry value snapshots carry the groups together with their bindings.
     routes_by_root:dict<addr array<Route>>=[]
+    # Reexecuting a const selector declaration invalidates its old routes.
+    index_routes:dict<addr set<addr>>=[]
     generic_instances:dict<addr GenericInstance>=[]
 ]
 
@@ -250,18 +252,36 @@ array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
     let path = access_path(id nodes facts=true)
     let root = hir.node_at(nodes path.root)
     if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return none
-    # Constant indices denote repeatable storage. Dynamic indices need a
-    # value-versioned identity and remain untracked by this initial rule.
-    # Brackets distinguish these components from ordinary member names.
+    # A const selector denotes one evaluated index until its declaration
+    # executes again. Record that dependency alongside the storage route.
     let fields:array<string>=[]
+    let indices:array<addr>=[]
     loop id in path.steps {
         let step=hir.node_at(nodes id)
         if step is? hir.MemberAccess {fields.push(step.name)}
-        else if step is? hir.Index and step.constant_index isnt? none {fields.push("[{step.constant_index}]")}
-        else return none
+        else if step is? hir.Index {
+            if step.constant_index isnt? none {fields.push("[{step.constant_index}]") continue}
+            let selected=hir.node_at(nodes step.index)
+            loop true {
+                if selected is? hir.ValueCast|hir.RepresentationCast {selected=hir.node_at(nodes selected.expr) continue}
+                if selected is? hir.Obligation {selected=hir.node_at(nodes selected.value) continue}
+                break
+            }
+            if selected isnt? hir.ExpressedIdentifier or selected.binding_id is? none return none
+            let binding=find_binding(registry selected.binding_id)
+            if binding is? none or binding.declaration is? none return none
+            let declaration=hir.node_at(nodes binding.declaration)
+            if declaration isnt? hir.Declare or declaration.decltype not=? 'const' return none
+            fields.push("[@{binding.id}]") indices.push(binding.id)
+        } else return none
     }
     if fields.length =? 0 return root.binding_id
     if not has_binding(registry root.binding_id) return none
     let node = hir.node_at(nodes id)
-    return route_id(@registry root.binding_id fields node.value_type node.loc)
+    let result=route_id(@registry root.binding_id fields node.value_type node.loc)
+    loop index in indices {
+        let routes=registry.index_routes.get(index set[])
+        if result not in? routes {routes.add(result) registry.index_routes[index]=routes}
+    }
+    return result
 }
