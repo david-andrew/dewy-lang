@@ -1031,3 +1031,11 @@ The fresh native generation built in 65.81 seconds and passed three ownership
 kernels. The focused manifest has 126 cases. Artifacts:
 `../dewy-build-artifacts/phase1-lifecycle-aggregate-drop-2026-09-21` and
 `../dewy-build-artifacts/phase1-lifecycle-aggregate-drop-parity-2026-09-21`.
+
+Integration checkpoint: the combined drop/adjacency generation built in
+65.21 seconds, passed the three ownership kernels, and passed all 126 Phase 1
+parity cases against fixed sources. Nested-field follow-up work stayed in an
+isolated checkout during this run. This is an integration checkpoint, not
+completion of Phase 1; native self-build time remains above the 30-second
+target. Artifacts: `../dewy-build-artifacts/phase1-drop-integration-2026-09-21`
+and `../dewy-build-artifacts/phase1-drop-full-parity-2026-09-21`.
