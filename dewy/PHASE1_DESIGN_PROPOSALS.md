@@ -312,7 +312,9 @@ nonescaping places. It adds no uninitialized-place syntax. Approval does not
 mean the compiler implements all runtime ownership behavior yet. Fresh local
 record owners now run drop hooks, including inherited drops, with checked
 effects and lexical cleanup. Nested record fields drop after the containing hook in reverse field order;
-transfers and containers of resources remain gated. Both
+transfers and containers of resources remain gated. Explicit custom copy
+hooks now execute when they construct fresh results (including nested hook
+calls); consuming an intermediate parent result still needs transfer lowering. Both
 checkers now validate declarations, result identity, compiler-only access and
 the read-only copy receiver. The native snapshot codec retains this metadata.
 Explicit `.copy()` now resolves a custom copy hook into an ordinary checked
@@ -424,8 +426,10 @@ proved, the child needs its own hook. Parent-hook effects and explicit
 custom copies of added fields remain ordinary checked calls. Multi-level
 inheritance composes through the immediate parent, retaining each level's
 result identity. Runtime drop composition now executes for fresh local owners, including
-ordinary string/array fields and scalar implicit results. Copy/move and
-containers of resources remain gated; nested record fields are supported.
+ordinary string/array fields and scalar implicit results. Nested record fields
+and explicit fresh-result copy hooks are supported. Inherited copy wrappers
+that consume an intermediate parent result, move hooks and containers of
+resources still need ownership lowering.
 
 Provisional details following David's updated review guidance: an explicitly
 tagged child hook overrides by lifecycle role, even if it uses a different

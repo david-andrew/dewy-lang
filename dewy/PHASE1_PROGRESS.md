@@ -1059,3 +1059,21 @@ order and zero retained bytes across 100 calls. The focused manifest has
 `../dewy-build-artifacts/phase1-lifecycle-nested-drop-2026-09-21`,
 `../dewy-build-artifacts/phase1-lifecycle-nested-drop-parity-final-2026-09-21`
 and `../dewy-build-artifacts/phase1-lifecycle-nested-drop-facts-2026-09-21`.
+
+Explicit custom copy hooks now execute when they construct a fresh result,
+including a fresh wrapper whose fields call their own copy hooks. Internal
+receivers stay borrowed and read-only; the result becomes a separate local
+owner and is dropped independently. Hook effects and return facts remain
+ordinary checked calls. This does not yet support inferred moves/copies,
+inherited copies consuming an intermediate parent result, general owning
+arguments/results, or containers of resources. Those forms still diagnose
+the missing ownership operation rather than falling back to memberwise copy.
+
+Validation: 84 hosted lifecycle/capability checks passed, followed by four
+runtime fixture checks after extending the copy fixture with nested hooks.
+The fresh native generation built in 67.26 seconds, passed three ownership
+kernels and all 24 paired lifecycle cases. The copy fixture checks independent
+mutation, exercised hook/drop counts, and zero retained bytes across 100
+iterations on hosted x86/C and native. The focused manifest has 130 cases.
+Artifacts: `../dewy-build-artifacts/phase1-lifecycle-copy-runtime-2026-09-21`
+and `../dewy-build-artifacts/phase1-lifecycle-copy-runtime-parity-2026-09-21`.
