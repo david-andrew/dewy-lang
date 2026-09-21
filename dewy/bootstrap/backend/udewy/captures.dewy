@@ -6,13 +6,19 @@ import p"../../semantic/hir.dewy" as hir
 # Capturing functions used as values and writes through captures still need
 # closure storage; keep those cases explicit rather than silently copying.
 Function:type = [id:addr locals:set<addr>=set[] direct:set<addr>=set[] dependencies:set<addr>=set[] captures:set<addr>=set[] writes:set<addr>=set[]]
-Plan:type = [functions:dict<addr Function>=[] named:dict<addr addr>=[] definitions:dict<addr addr>=[] names:dict<addr string>=[] globals:set<addr>=set[] source_bindings:set<addr>=set[]]
+Plan:type = [reassigned:set<addr>=set[] functions:dict<addr Function>=[] named:dict<addr addr>=[] definitions:dict<addr addr>=[] names:dict<addr string>=[] globals:set<addr>=set[] source_bindings:set<addr>=set[]]
 
 discover = (root:addr nodes:array<hir.AST> @plan:Plan @seen:set<addr>):>void => {
     if root in? seen return void
     seen.add(root)
     let node=hir.node_at(nodes root)
     if node is? hir.FunctionLiteral {plan.functions[root]=Function[root]}
+    # A stored callback is a runtime value after any assignment or writable
+    # exposure. Its initializer alone is not a call-target proof.
+    loop target in write_targets(node nodes) {
+        let binding=root_binding(target nodes)
+        if binding isnt? none {plan.reassigned.add(binding)}
+    }
     if node is? hir.Declare and node.binding_id isnt? none {
         plan.definitions[node.binding_id]=node.expr
         plan.names[node.binding_id]=node.name
@@ -30,6 +36,7 @@ callables = (id:addr plan:Plan nodes:array<hir.AST> seen:set<addr>=set[]):>array
     let node=hir.node_at(nodes id)
     if node is? hir.FunctionLiteral return [id]
     if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+        if node.binding_id in? plan.reassigned return none
         let definition=plan.definitions.get(node.binding_id)
         if definition isnt? none return callables(definition plan nodes seen)
     } else if node is? hir.OverloadedFunction {
@@ -47,7 +54,7 @@ resolve = (id:addr selected:addr? plan:Plan nodes:array<hir.AST>):>addr? => {
     let node=hir.node_at(nodes id)
     if node is? hir.FunctionLiteral return id
     if node is? hir.ExpressedIdentifier {
-        if node.binding_id is? none return none
+        if node.binding_id is? none or node.binding_id in? plan.reassigned return none
         let named=plan.named.get(node.binding_id)
         if named isnt? none return named
         if node.binding_id not in? plan.definitions return none

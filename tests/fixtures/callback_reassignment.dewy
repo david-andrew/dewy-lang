@@ -1,0 +1,13 @@
+low=():>int64=>21
+high=():>int64=>42
+main=():>int64=>{
+    let selected=@low
+    let saved=@selected
+    selected=@high
+    if selected() not=? 42 return 1
+    if saved() not=? 21 return 2
+    selected=@low
+    if selected() not=? 21 return 3
+    selected=@high
+    return selected()
+}

@@ -2084,3 +2084,13 @@ through both hosted and native checking on x86-64 and C. Three written-effect
 programs and five rejection cases also agree across the two compilers after
 the inventory refactor. This is an internal foundation checkpoint, not a
 claim that callable-type inference is complete.
+
+## Reassigned callback call targets (2026-09-21)
+
+The inferred-callable tests exposed an independent native lowering bug: a
+callback variable reassigned from one function to another could still call
+its initial function. Call-target discovery now invalidates initializer-only
+resolution after assignment or writable exposure. Saved function handles
+retain their value semantics. The focused regression passes hosted/native
+checking and x86-64/C execution, including repeated assignment and a saved
+handle. Function-handle place parameters remain separately unsupported.
