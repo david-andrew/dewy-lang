@@ -352,7 +352,7 @@ class _DirectEmitter:
             backend.binary_op(t1.Kind.TK_LEFT_SHIFT)
             backend.save_value()
             backend.push_const_i64(shift)
-            backend.signed_shr()
+            backend.emit_intrinsic("__signed_shr__", 2)
 
     def function(self, name, literal):
         backend, state = self.backend, self.state
