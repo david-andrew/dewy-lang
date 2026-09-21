@@ -23,9 +23,10 @@ decisions. Open design questions stay open until resolved with David.
   errors remain return alternatives, separate from effects.
 - 1.4: implement and test the settled juxtaposition, reserved-name,
   unit-nominal, and uniform-container decisions. Repair the right-side
-  number juxtaposition: `(x+1)5` and `(y)3.14159` are multiplications
-  (ROADMAP 1.4 item 1, corrected 2026-09-21); the 2026-09-20 blacklist
-  entries and `x 2` tests in both parsers pin the wrong behavior. Preserve the decisions to
+  number juxtaposition: `(x+1)5` and `(y)3.14159` multiply and `(f)2`
+  calls or multiplies by the type of `f` (ROADMAP 1.4 item 1, corrected
+  2026-09-21); the four 2026-09-20 blacklist entries in both parsers and
+  the tight-spelling tests pin the wrong behavior. Preserve the decisions to
   keep type brackets and conventional export privacy. Keep the explicitly
   open byte-packing and Unicode escape questions visible.
 

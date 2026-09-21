@@ -526,18 +526,38 @@ Decisions were made by David on 2026-09-13.
    diagnostic must show the explicit forms: `A |> B` or `B <| A` for a
    call, `A * B` for a multiplication. Parenthesizing is not offered as a
    fix, since the parentheses are gone by the time the operation is chosen.
-   Both precedences stay. A number on the right of an expression is a
-   multiplication like a number on the left: `(x+1)5` is `(x+1) * 5` and
-   `(y)3.14159` is `(y) * 3.14159`; `x 2` is `x * 2` when `x` is a number.
-   A number is never a call's argument by adjacency. **Correction
-   (2026-09-21):** the earlier record here said a number on the right
-   starts a separate expression; that was a misreading of a tentative
-   note in the hosted `t2` stage, not a decision. Both parsers currently
-   blacklist the right-side number case and the 2026-09-20 tests pin that
-   behavior. **Repair needed as part of the Phase 1.4 work:** remove the
-   right-side `Integer`/`Real` multiply-juxtapose entries in both parsers,
-   keep the call-side entries, invert the `x 2` tests, and extend the
-   precedence fixture with `(x+1)5`.
+   Both precedences stay. A bare number written directly after an
+   expression (no whitespace) is an ordinary juxtaposition, and the left
+   operand's type chooses the operation exactly as it does for any other
+   right operand: a number on the left multiplies, a callable calls, and
+   the callable-or-number union above is the ambiguity error. Whitespace
+   separates expressions, so `x 2` and `(x+1) 5` are two expressions.
+   Intended results (confirmed by David 2026-09-21):
+
+   ```dewy
+   2x            # multiply
+   2 x           # two expressions
+   (x+1)5        # multiply (a number on the left)
+   (y)3.14159    # multiply
+   (f)2          # call if `f` is callable, multiply if `f` is a number
+   g(1)2         # the call result decides: multiply for a numeric result
+   printl"hi"    # call
+   ```
+
+   **Correction (2026-09-21):** the earlier record here said a number on
+   the right starts a separate expression; that was a misreading of a
+   tentative note in the hosted `t2` stage, not a decision. **Where the
+   implementation does not match, to repair in the Phase 1.4 work:** both
+   parsers (hosted `t2`, native `t2.dewy`) blacklist `Integer`/`Real` on
+   the right of both the multiply and the call juxtaposition (added
+   2026-09-20), so `(x+1)5`, `(y)3.14159` and `(f)2` parse as two
+   expressions with a warning; before that change they parsed as calls
+   only. Remove those four entries so the number on the right leaves an
+   undecided call-or-multiply juxtaposition for the checker, as
+   `printl"hi"` already does; invert the tight-spelling tests in
+   `test_juxtaposition_decisions.py` (the whitespace cases stay); extend
+   `tests/fixtures/juxtaposition_precedence.dewy` with `(x+1)5` and a
+   callable `(f)2`.
 2. **Based byte literals (open, low priority).** Strings carry no `\x`
    escape because a string is a sequence of scalars, not bytes, so byte
    arrays need their own literal. The compiler already implements the
