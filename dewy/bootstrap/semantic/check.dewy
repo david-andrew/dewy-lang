@@ -1,6 +1,7 @@
 from reporting import Error, Span, Warning, Pointer, SrcFile
 import p"source_names.dewy" as source_names
 import p"effect_rows.dewy" as effect_rows
+import p"lifecycle.dewy" as lifecycle
 import p"source_views.dewy" as source_views
 import p"../parser/p0.dewy" as parser
 import p"../parser/t1.dewy" as tokens
@@ -3137,16 +3138,18 @@ builtin_copy_available = (id:addr nodes:types.Table):>bool => {
 checked_copy = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let node=node_at(value session)
     let loc=contexts.node_at(id env.lexical session).loc
+    let blocker=lifecycle.copy_blocker(node.value_type session.types)
+    if blocker isnt? none {
+        let component=if blocker.path =? '' 'this type' else "component `{blocker.path}`"
+        return problem(id 'cannot copy a move-only value' "{component} declares `$__drop__` without `$__copy__`" env session)
+    }
     let owner=views.structural_base(node.value_type session.types)
     let type=types.node_at(session.types owner)
     if type is? types.ObjectType {
         let hook:types.MethodSpec?=none
-        let has_drop=false
         loop method in type.methods {
             if method.lifecycle =? 'copy' {hook=method}
-            if method.lifecycle =? 'drop' {has_drop=true}
         }
-        if hook is? none and has_drop return problem(id 'cannot copy a move-only value' 'this type declares `$__drop__` without `$__copy__`' env session)
         if hook isnt? none {
             let alias=if type.brand is? none display.type_to_dewy(owner session.types) else type.brand
             let error=prepare_methods(owner alias env @session)

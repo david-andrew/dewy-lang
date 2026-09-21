@@ -1,0 +1,43 @@
+import p"ty.dewy" as types
+import p"type_queries.dewy" as views
+
+# Capability checking is separate from elision and runtime invocation. A
+# synthesized copy needs each component; a custom hook constructs its own
+# complete result and can acquire fresh members instead of copying them.
+CopyBlocker:type = const [owner:addr path:string]
+CopyItem:type = const [id:addr path:string]
+copy_blocker = (id:addr nodes:types.Table):>CopyBlocker? => {
+    let pending:array<CopyItem>=[CopyItem[id '']]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let item=pending.pop
+        let id=views.structural_base(item.id nodes)
+        if id in? seen {continue}
+        seen.add(id)
+        let type=types.node_at(nodes id)
+        if type is? types.ObjectType {
+            let copies=false
+            let drops=false
+            loop method in type.methods {
+                if method.lifecycle =? 'copy' {copies=true}
+                if method.lifecycle =? 'drop' {drops=true}
+            }
+            if copies {continue}
+            if drops return CopyBlocker[id item.path]
+            # Reverse the worklist insertion so diagnostics name the first
+            # offending field in declaration order, as the hosted query does.
+            let index=type.fields.length
+            loop index >? 0 {
+                index-=1
+                let field=type.fields[index]
+                pending.push(CopyItem[field.value_type "{item.path}.{field.name}"])
+            }
+        } else if type is? types.ArrayType {
+            pending.push(CopyItem[type.element "{item.path}[]"])
+        } else if type is? types.TypeOr {
+            let index=type.items.length
+            loop index >? 0 {index-=1 pending.push(CopyItem[type.items[index] item.path])}
+        }
+    }
+    return none
+}

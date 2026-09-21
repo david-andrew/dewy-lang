@@ -1,0 +1,8 @@
+OwnedToken=type of [token:int64
+$__drop__
+release=():>void=>{}
+]
+Bundle:type=[resources:array<OwnedToken>]
+# A synthesized record copy must not duplicate the move-only elements.
+invalid=(bundle:Bundle):>Bundle=>bundle.copy()
+main=():>int64=>42

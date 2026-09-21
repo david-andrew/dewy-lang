@@ -314,7 +314,11 @@ checkers now validate declarations, result identity, compiler-only access and
 the read-only copy receiver. The native snapshot codec retains this metadata.
 Explicit `.copy()` now resolves a custom copy hook into an ordinary checked
 call, so its effects and result facts are visible before lowering. A direct
-copy of a drop-only nominal value is rejected as move-only. Implicit copies
+copy of a drop-only nominal value is rejected as move-only. Synthesized
+explicit copies apply that requirement recursively to stored record fields,
+array/dictionary elements and possible union alternatives; wrapping the value
+does not grant it a copy operation. A custom hook can instead construct fresh
+components and owns its result contract. Implicit copies
 and lifecycle invocation are still incomplete. Code generation explicitly
 rejects hooks until ownership lowering is ready;
 in particular, hidden hooks must not disappear through reachability pruning

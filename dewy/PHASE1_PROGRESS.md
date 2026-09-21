@@ -938,3 +938,26 @@ ownership kernels (42), and passed all 24 paired effect fixtures. The focused
 manifest now has 118 cases. Artifacts:
 `../dewy-build-artifacts/phase1-imported-effects-2026-09-20` and
 `../dewy-build-artifacts/phase1-imported-effects-parity-2026-09-20`.
+
+Integration checkpoint: the imported-effect generation passed all 118 Phase 1
+parity cases on unchanged sources. Follow-up work was prepared in a separate
+checkout while that run completed. Artifact:
+`../dewy-build-artifacts/phase1-imported-effects-full-phase1-2026-09-20`.
+
+Synthesized explicit copies now propagate move-only capability through
+record fields, array elements, dictionary storage and union alternatives.
+A nested drop-only resource cannot acquire a copy operation merely by being
+wrapped in a container. Diagnostics identify the component path. A custom
+copy hook remains responsible for constructing its own complete result and
+may acquire fresh move-only members. Recursive capability queries terminate
+without treating a cycle itself as evidence of move-only storage. These are
+capability checks, not runtime lifecycle implementation: automatic copy/move
+and cleanup remain gated. This follows the existing resource rule and adds
+no syntax or ownership annotation.
+
+Validation: 72 hosted lifecycle/copy checks passed. A fresh native generation
+built in 68.32 seconds while the integration run was active, executed the
+three ownership kernels (42), and passed all six nested-resource probes plus
+the paired diagnostic fixture. The focused manifest now has 119 cases.
+Artifacts: `../dewy-build-artifacts/phase1-lifecycle-components-2026-09-20`
+and `../dewy-build-artifacts/phase1-lifecycle-components-parity-2026-09-20`.

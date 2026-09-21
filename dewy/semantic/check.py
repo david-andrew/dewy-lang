@@ -8930,11 +8930,14 @@ def _checked_copy(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST:
     CopyValue operation does: a hook's result owes its own declared facts.
     Its internal read-only receiver may borrow a const source.
     """
+    from . import lifecycle
+    if (blocker := lifecycle.copy_blocker(value.type)) is not None:
+        component = f'component `{blocker.path.lstrip(".")}`' if blocker.path else 'this type'
+        user_error(ctx.srcfile, 'cannot copy a move-only value',
+                   Pointer(span=loc, message=f'{component} declares `$__drop__` without `$__copy__`'))
     plain = ty.unfold(ty.strip_refinement(value.type))
     if isinstance(plain, ty.ObjectType):
         hook = next((method for method in plain.methods if method.lifecycle == 'copy'), None)
-        if hook is None and any(method.lifecycle == 'drop' for method in plain.methods):
-            user_error(ctx.srcfile, 'cannot copy a move-only value', Pointer(span=loc, message='this type declares `$__drop__` without `$__copy__`'))
         if hook is not None:
             if hook.binding_id is None:
                 _declare_pending_methods(ctx=ctx, for_type=plain)
