@@ -980,3 +980,21 @@ compiler/parser corpus cases on fixed sources. Together with the preceding
 118-case Phase 1 run and the two new paired lifecycle cases, this closes the
 current integration checkpoint; it does not complete Phase 1. Artifact:
 `../dewy-build-artifacts/phase1-lifecycle-components-full-parity-2026-09-20`.
+
+Runtime drop now supports fresh local nominal owners with word fields in both
+compilers, including inherited and imported drops, reverse lexical order,
+early returns and loop exits. Return values are captured before cleanup;
+backing storage is released after the hook. Calls are explicit checked HIR,
+so hook writes invalidate later facts and enter public effect contracts.
+Unsupported ownership shapes still receive source fact/effect diagnostics
+before the implementation-gap diagnostic. Copy/move hooks, aggregate fields,
+owning transfers, escaping resources and implicit value returns with local
+owners remain explicitly gated. No new source form was introduced.
+
+Validation: the hosted lifecycle/place/effect batch passed 92 checks, followed
+by all 14 final runtime tests on x86 and C. The fresh native generation built
+in 67.16 seconds and passed the three ownership kernels (42). All 18 paired
+lifecycle cases passed, including the new cleanup, no-retained-storage,
+effect and stale-fact fixtures. The focused manifest now has 124 cases.
+Artifacts: `../dewy-build-artifacts/phase1-lifecycle-drop-runtime-2026-09-20`
+and `../dewy-build-artifacts/phase1-lifecycle-drop-parity-final-2026-09-20`.
