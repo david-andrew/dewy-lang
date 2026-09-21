@@ -691,6 +691,10 @@ class ModuleCompiler:
         # Parent-place safety needs imported helper bodies and must also
         # check unused source functions before runtime reachability pruning.
         source_items = [record.root for record in self.order]
+        ownership_registry = self.registry if any(
+            isinstance(item, hir.Declare) and isinstance(item.expr, hir.FunctionLiteral)
+            and item.expr.lifecycle is not None for record in self.order for item in record.root.items
+        ) else None
         source_graph = hir.Program(
             entry.root.loc, entry.root.type, source_items, True,
             tuple(record.srcfile for record in self.order), (),
@@ -725,6 +729,7 @@ class ModuleCompiler:
                 renamed.loc, renamed.type, renamed.items, renamed.scoped,
                 tuple(record.srcfile for _ in renamed.items),
                 (record.srcfile,) if record.explicit_copies else (),
+                binding_registry=ownership_registry, target=self.target,
             )
             for item in renamed.items:
                 if isinstance(item, hir.Void):
@@ -743,6 +748,7 @@ class ModuleCompiler:
             True,
             tuple(item_sources),
             tuple(record.srcfile for record in self.order if record.explicit_copies),
+            binding_registry=ownership_registry, target=self.target,
         )
         initialization.validate_initialization(root, self.registry, entry.srcfile)
         return root

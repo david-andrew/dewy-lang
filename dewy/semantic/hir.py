@@ -856,6 +856,10 @@ class Program(Block):
     """
     item_sources: tuple[SrcFile, ...]
     explicit_copy_sources: tuple[SrcFile, ...] = ()
+    # Retained only for programs with implicit lifecycle operations: runtime
+    # elaboration must recheck facts with those calls present before erasure.
+    binding_registry: object | None = field(default=None, repr=False, compare=False)
+    target: str = 'x86_64'
 
 
 @dataclass(slots=True, weakref_slot=True)

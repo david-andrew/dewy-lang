@@ -6071,13 +6071,8 @@ def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main'
     """Legalize checked HIR function constructs for udewy source emission."""
     if not isinstance(root, hir.Block):
         raise TypeError(f'expected Block, got {type(root).__name__}')
-    # Declaration checking lands before ownership lowering. Never accept a
-    # resource type and silently give it ordinary memberwise value behavior.
-    for item in root.items:
-        if isinstance(item, hir.Declare) and isinstance(item.expr, hir.FunctionLiteral) and item.expr.lifecycle is not None:
-            from ...semantic.errors import not_implemented
-            origin = item.expr.source
-            not_implemented(origin or srcfile, item.loc, 'lifecycle ownership lowering')
+    from ...semantic import lifecycle_runtime
+    root = lifecycle_runtime.prepare(root, srcfile)
     from ...semantic import proofs
     root = proofs.erase(root)
     root = _uniquify_module_locals(root)   # every local of a function under a name of its own

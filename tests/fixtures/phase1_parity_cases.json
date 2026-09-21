@@ -607,5 +607,30 @@
     "compile_diagnostic_stderr": [
       "lifecycle ownership lowering"
     ]
+  },
+  {
+    "source": "tests/fixtures/lifecycle_drop_runtime.dewy",
+    "accepts": true,
+    "exit": 42,
+    "stdout": "2\n1\n0\n1\n2\n40\n"
+  },
+  {
+    "source": "tests/fixtures/lifecycle_drop_lifetimes.dewy",
+    "accepts": true,
+    "exit": 42
+  },
+  {
+    "source": "tests/fixtures/lifecycle_drop_effect_rejected.dewy",
+    "accepts": false,
+    "compile_diagnostic_stderr": [
+      "effect contract"
+    ]
+  },
+  {
+    "source": "tests/fixtures/lifecycle_drop_fact_rejected.dewy",
+    "accepts": false,
+    "compile_diagnostic_stderr": [
+      "assert"
+    ]
   }
 ]

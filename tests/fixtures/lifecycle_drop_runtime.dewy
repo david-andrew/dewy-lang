@@ -1,0 +1,16 @@
+TraceHandle=type of [token:int64
+$__drop__
+release=():>void=>{printl(token) token=0}
+]
+ExtraTrace=type of TraceHandle & [extra:int64]
+main=():>int64=>{
+    {let first=TraceHandle[1] let second=TraceHandle[2]}
+    let outer=ExtraTrace[40 2]
+    loop i in 0..3 {
+        let inner=TraceHandle[i]
+        if i=?1 {continue}
+        if i=?2 {break}
+    }
+    # Capture the result before the inherited drop changes the parent field.
+    return outer.token+outer.extra
+}

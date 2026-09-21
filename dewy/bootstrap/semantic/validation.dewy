@@ -10,6 +10,7 @@ import p"analyze/value_bounds.dewy" as values
 import p"analyze/fact_state.dewy" as facts
 import p"analyze/representation.dewy" as representation
 import p"runtime_reports.dewy" as runtime_reports
+import p"lifecycle_runtime.dewy" as lifecycle_runtime
 import p"validation_state.dewy" as proofs
 import p"validation_analysis.dewy" as analysis
 import p"analyze/prototype_checks.dewy" as prototype
@@ -68,8 +69,20 @@ analyze_modules = (word:addr engine:modules.Engine):>array<Decision>|Error => {
 }
 validate = (@engine:modules.Engine):>Result|Error => {
     let word=types.primitive('int64' @engine.session.types)
+    # Materialize ownership calls before checking facts/effects and before
+    # runtime reachability. A drop can invalidate facts used later in scope.
+    let ownership_error:Error?=none
+    if engine.modules.length >? 0 {
+        let roots:array<addr>=[]
+        loop module in engine.modules {roots.push(module.root)}
+        let source=sources.srcfile(engine.modules[0].context engine.session)
+        ownership_error=lifecycle_runtime.prepare(roots source @engine.session)
+    }
     let decisions=analyze_modules(word engine)
     if decisions is? Error return decisions
+    # Unsupported ownership still receives source fact/effect diagnostics.
+    # No rejected, partially prepared graph can reach runtime lowering.
+    if ownership_error isnt? none return ownership_error
     let result=Result[]
     let loaded=engine.modules
     $runtime_assert decisions.length =? loaded.length

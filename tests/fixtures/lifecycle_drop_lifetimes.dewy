@@ -1,0 +1,14 @@
+let dropped:int64=0
+CountedHandle=type of [token:int64
+$__drop__
+release=():>void=>{dropped+=token}
+]
+exercise=():>void=>{let h=CountedHandle[1]}
+main=():>int64=>{
+    exercise()
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 100 {exercise()}
+    if dropped not=?101 return 1
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}
