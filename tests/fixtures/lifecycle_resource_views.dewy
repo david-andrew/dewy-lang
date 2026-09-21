@@ -1,0 +1,21 @@
+let drops:int64=0
+Handle=type of [token:int64 values:array<int64>
+$__drop__
+release=():>void=>{drops+=1 token=0 values.clear}
+]
+exercise=():>int64=>{
+    let owner=Handle[21 [40 2]]
+    let alias=owner
+    let alias2=alias
+    if owner.token+alias2.token not=?42 return 1
+    if alias.values.length not=?2 return 2
+    const explicit=@owner
+    return explicit.token+owner.token
+}
+main=():>int64=>{
+    if exercise() not=?42 or drops not=?1 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if exercise() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

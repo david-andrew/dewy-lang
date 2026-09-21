@@ -309,7 +309,12 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         declared outside a branch/loop are excluded by the same-block rule;
         their conditional consumption needs a separate lifetime join.
         """
-        last, occurrences, captured = {}, {}, set()
+        last, occurrences, captured, written = {}, {}, set(), set()
+        def written_root(node):
+            while isinstance(node, (hir.MemberAccess, hir.Index)):
+                node = node.value if isinstance(node, hir.MemberAccess) else node.array
+            if isinstance(node, hir.ExpressedIdentifier):
+                written.add(node.binding_id)
         blocks = []
         pending = [body]
         while pending:
@@ -318,13 +323,19 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 captured.update(child.binding_id for child in hir.walk(node)
                                 if isinstance(child, hir.ExpressedIdentifier))
                 continue
+            if isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign, hir.Place)):
+                written_root(node.target)
+            if isinstance(node, hir.ArrayMethod):
+                written_root(node.array)
+            if isinstance(node, hir.Transmute):
+                written_root(node.expr)
             if isinstance(node, hir.ExpressedIdentifier):
                 last[node.binding_id] = id(node)
                 occurrences[id(node)] = occurrences.get(id(node), 0) + 1
             if isinstance(node, hir.Block):
                 blocks.append(node)
             pending.extend(reversed(tuple(hir.children(node))))
-        result = set()
+        result, views = set(), set()
         for block in blocks:
             local = set()
             for node in block.items:
@@ -335,9 +346,12 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         and source.binding_id in local and source.binding_id not in captured
                         and last.get(source.binding_id) == id(source) and occurrences[id(source)] == 1):
                     result.add(id(node))
+                if (isinstance(source, hir.ExpressedIdentifier) and source.binding_id in local
+                        and not {source.binding_id, node.binding_id} & (captured | written)):
+                    views.add(id(node))
                 if resource(source.type) is not None:
                     local.add(node.binding_id)
-        return result
+        return result, views
 
     def returnable_result(node):
         """Recognize a function result whose ownership can be made explicit."""
@@ -441,7 +455,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 expected = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
                 actual = ty.unfold(ty.strip_refinement(node.expr.type))
                 same_array = isinstance(expected, ty.ArrayType) and isinstance(actual, ty.ArrayType) and expected.element == actual.element
-                if (node.binding_id is None or node.view
+                if (node.binding_id is None
                         or node.annotation is not None and node.annotation != node.expr.type and not same_array):
                     reject(node, 'a non-fresh local owner')
                 if id(node) in transfers:
@@ -455,6 +469,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         # A hook consumes its owner, not every nested field.
                         calls = cleanup([source], node.loc, {source.binding_id}) if moved else []
                         return hir.Block(node.loc, node.type, [node, *calls], False) if calls else node
+                if id(node) in views and isinstance(node.expr, hir.ExpressedIdentifier) and node.expr.binding_id in live:
+                    # Both names only read. Keep one logical owner and require
+                    # lowering to preserve this checked, nonowning lifetime.
+                    allowed.add(node.binding_id)
+                    return replace(node, view=True)
+                if node.view:
+                    reject(node, 'a resource view without a stable lifetime')
                 node = replace(node, expr=fresh(node.expr, live, literal.lifecycle == 'drop', control=control))
                 owners.append(node)
                 return node
@@ -523,7 +544,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             body = hir.Block(body.loc, body.type, [body], True)
         elif not body.scoped:
             body = replace(body, scoped=True)
-        transfers = local_transfers(body)
+        transfers, views = local_transfers(body)
         prepared = replace(literal, body=statement(body, parameter_owners, [], entry=True))
         def parameter(param):
             return replace(param, value=argument(param.value, allowed, False)) if isinstance(param, hir.BoundParam) else param

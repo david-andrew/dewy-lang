@@ -1241,3 +1241,24 @@ passed. The extended selector-propagation fixture then passed hosted and
 native execution on both backends; the three hosted ownership-order and
 temporary-copy integration checks also passed. Full integration follows the
 next ownership batch; this does not complete Phase 1.
+
+
+Read-only local resource aliases now retain one logical owner. Same-scope
+bindings whose source and destination are never written or captured can
+share the original owner, including chains and explicit const views. Last-use
+owner transfers still take precedence. Writes, escaping owners, field moves
+and general cross-scope resource aliases need further ownership analysis.
+
+The common view lifetime proof now works backward through blocks and return
+edges. Cleanup after a captured return value is outside that view's live
+interval, while loop backedges retain aliases read on later iterations.
+Captured/outward aliases keep their conservative lexical lifetime. A known
+nonescaping place call before or after a view no longer disqualifies its owner
+for the entire function; overlapping writes during the view still fail.
+Unknown or retaining place calls keep their exclusion.
+
+Validation: the initial resource-view/lifetime batch passed 50 tests, including
+native execution. After integration with expression exits and preserving the
+lexical fallback, all 56 combined hosted/native checks passed. Two obsolete
+rejections now test nonescaping calls outside the live interval and a genuine
+conflict inside it. Shared fixtures check one drop and no retained storage.

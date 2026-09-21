@@ -320,6 +320,44 @@ def prepare_view_scope(scope: hir.Block) -> ViewScope:
     return ViewScope(scope.items, references, locals_, dependents, starts, ends)
 
 
+def view_conflicts(region: list[hir.AST], aliases: set[int], source: Route, plan: Plan, source_bindings: set[int], *, retained: bool = False) -> bool:
+    """Backward liveness within the statement interval, including exit edges.
+
+    A return ends the view's lifetime on that path. Writes after its last
+    read (notably implicit drop calls) cannot affect it. Loops conservatively
+    keep every referenced alias live across the backedge.
+    """
+    def reads(node):
+        return any(isinstance(child, hir.ExpressedIdentifier) and child.binding_id in aliases
+                   for child in _walk_function_subtree(node))
+
+    def visit(node, live):
+        if isinstance(node, hir.Return):
+            return visit(node.item, retained) if node.item is not None else (False, retained)
+        if isinstance(node, hir.Block):
+            conflict = False
+            for item in reversed(node.items):
+                bad, live = visit(item, live)
+                conflict |= bad
+            return conflict, live
+        if isinstance(node, hir.Flow):
+            conflict, remaining = visit(node.default, live) if node.default is not None else (False, live)
+            for arm in reversed(node.arms):
+                after = live or isinstance(arm, hir.LoopArm) and (reads(arm.condition) or reads(arm.body))
+                bad, before = visit(arm.body, after)
+                condition_bad, remaining = visit(arm.condition, before or remaining)
+                conflict |= bad or condition_bad
+            return conflict, remaining
+        before = live or reads(node)
+        return before and expression_conflicts(node, source, plan, source_bindings), before
+
+    conflict, live = False, retained
+    for item in reversed(region):
+        bad, live = visit(item, live)
+        conflict |= bad
+    return conflict
+
+
 def view_region(scope: ViewScope, declaration: hir.Declare, excluded: set[int]) -> list[hir.AST]:
     """End after every derived alias's last use; keep control flow indivisible.
 
@@ -401,6 +439,29 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
             if summary is not None:
                 plan.stable_parameters[binding] = summary
     plan.ambient_writes = analyze_global_writes(root, (plan.globals | captured) - plan.named.keys())
+    # A nonescaping place call only lends its owner for that call. It must
+    # conflict while a view is live, but need not lengthen the view past its
+    # last use. Unknown or retaining calls keep the whole-scope exclusion.
+    safe_places, unsafe_places = set(), set()
+    for function in plan.functions.values():
+        for node in _walk_function(function.literal):
+            if not isinstance(node, hir.FunctionCall):
+                continue
+            target = (node.func if isinstance(node.func, hir.FunctionLiteral) else
+                      plan.named.get(node.func.binding_id) if isinstance(node.func, hir.ExpressedIdentifier) else None)
+            if target is None:
+                unsafe_places.update(id(arg) for arg in [*node.pos_args, *node.kw_args.values()] if isinstance(arg, hir.Place))
+                continue
+            for index, param in enumerate(literal_params(target)):
+                arg = node.pos_args[index] if index < len(node.pos_args) else node.kw_args.get(param.name)
+                if not param.place or not isinstance(arg, hir.Place):
+                    continue
+                summary = effects.for_param_binding(param.binding_id)
+                if summary is not None and not summary.escapes:
+                    safe_places.add(id(arg))
+                else:
+                    unsafe_places.add(id(arg))
+    safe_places -= unsafe_places
     excluded_owners = captured | exposed | places
     for function in plan.functions.values():
         view_candidates = set()
@@ -413,7 +474,7 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
                             and not stable_owner(source, plan))
                 if node.view or inferred:
                     view_candidates.add(node.binding_id)
-            if isinstance(node, hir.Place) and (addressed := root_binding(node.target)) is not None:
+            if isinstance(node, hir.Place) and id(node) not in safe_places and (addressed := root_binding(node.target)) is not None:
                 excluded_owners.add(addressed)
             if isinstance(node, (hir.Index, hir.StringIndex)):
                 source = route(node.array if isinstance(node, hir.Index) else node.string)
@@ -456,9 +517,17 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
                     prepared_scopes[id(scope)] = prepare_view_scope(scope)
                 region = view_region(prepared_scopes[id(scope)], node, excluded_owners)
                 regions.extend(region)
+                aliases = {binding}
+                pending_aliases = [binding]
+                while pending_aliases:
+                    for dependent in prepared_scopes[id(scope)].dependents.get(pending_aliases.pop(), ()):
+                        if dependent not in aliases:
+                            aliases.add(dependent)
+                            pending_aliases.append(dependent)
                 if (source is None or source.binding not in function.locals
                         or source.binding in excluded_owners
-                        or any(expression_conflicts(item, source, plan, source_bindings) for item in region)):
+                        or view_conflicts(region, aliases, source, plan, source_bindings,
+                                          retained=bool(aliases & excluded_owners) or not aliases <= prepared_scopes[id(scope)].locals)):
                     safe = False
             plan.view_regions[binding] = regions
             if safe:

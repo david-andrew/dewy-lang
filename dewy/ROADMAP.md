@@ -439,7 +439,9 @@ in both lowerings and the parity tool is the gate.
   reverse order. A result before trailing statements is saved at its evaluation
   point, and those statements still run before return. Same-scope local bindings
   transfer resources at a proven last use, including inside branches and loops;
-  captures and later uses prevent that proof.
+  captures and later uses prevent that proof. Read-only same-scope aliases can
+  now share one resource owner, including derived aliases and explicit const
+  views; source or alias writes still require further lifetime analysis.
   Custom move hooks now run at these transfers. The consumed owner's own drop
   is skipped, while its remaining nested resources and backing storage are
   cleaned up; hook effects are checked through callers. Inherited moves compose
@@ -469,9 +471,11 @@ storage proof, retain owner liveness through dependent views, and report
 conflicting writes instead of copying. Inference first checks stability
 throughout the function; required views and inferred const projection views
 can also use a containing lexical block or a statement interval ending at the last use of all derived aliases
-when the owner is private, uncaptured and unexposed. Control-flow statements
-remain indivisible, and outward/captured/exposed aliases retain the lexical
-lifetime. Mutable local places and lifetimes for aliased/exposed owners remain pending.
+when the owner is private, uncaptured and unexposed. The live interval now distinguishes return edges inside control flow, so
+cleanup after saving a result does not invalidate an earlier view. Loop
+backedges retain repeated reads, and outward/captured/exposed aliases retain
+the lexical lifetime. Known nonescaping place calls outside the interval no
+longer exclude the owner for its entire function. Mutable local places and lifetimes for aliased/exposed owners remain pending.
 
 ### 1.2 The proof engine
 

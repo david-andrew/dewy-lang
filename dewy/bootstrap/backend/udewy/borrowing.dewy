@@ -437,6 +437,62 @@ view_region = (scope:ViewScope declaration:addr excluded:set<addr> nodes:array<h
     loop index in 0.. and index <? scope.items.length {if index >=? start and index <=? stop {result.push(scope.items[index])}}
     return result
 }
+# Backward liveness inside the interval distinguishes an exiting branch
+# from the continuing path. In particular, drop after saving a return value
+# cannot change the view used to compute that value.
+ViewLiveness:type = const [conflict:bool live:bool]
+view_reads = (id:addr aliases:set<addr> nodes:array<hir.AST>):>bool => {
+    loop child in view_nodes(id nodes) {
+        let node=hir.node_at(nodes child)
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and node.binding_id in? aliases return true
+    }
+    return false
+}
+view_liveness = (id:addr live:bool aliases:set<addr> source:Route nodes:array<hir.AST> plan:captures.Plan retained:bool=false):>ViewLiveness => {
+    let node=hir.node_at(nodes id)
+    if node is? hir.Return return if node.item is? none ViewLiveness[false retained] else view_liveness(node.item retained aliases source nodes plan retained=retained)
+    if node is? hir.Block {
+        let conflict=false
+        let index=node.items.length
+        loop index >? 0 {
+            index-=1
+            let prior=view_liveness(node.items[index] live aliases source nodes plan retained=retained)
+            conflict=conflict or prior.conflict
+            live=prior.live
+        }
+        return ViewLiveness[conflict live]
+    }
+    if node is? hir.Flow {
+        let previous=if node.default is? none ViewLiveness[false live] else view_liveness(node.default live aliases source nodes plan retained=retained)
+        let conflict=previous.conflict
+        let remaining=previous.live
+        let index=node.arms.length
+        loop index >? 0 {
+            index-=1
+            let arm=hir.node_at(nodes node.arms[index])
+            $runtime_assert arm is? hir.IfArm|hir.LoopArm
+            let after=live or (arm is? hir.LoopArm and (view_reads(arm.condition aliases nodes) or view_reads(arm.body aliases nodes)))
+            let body=view_liveness(arm.body after aliases source nodes plan retained=retained)
+            let condition=view_liveness(arm.condition body.live or remaining aliases source nodes plan retained=retained)
+            conflict=conflict or body.conflict or condition.conflict
+            remaining=condition.live
+        }
+        return ViewLiveness[conflict remaining]
+    }
+    let before=live or view_reads(id aliases nodes)
+    return ViewLiveness[before and expression_conflicts(id source nodes plan set[]) before]
+}
+view_conflicts = (region:array<addr> aliases:set<addr> source:Route nodes:array<hir.AST> plan:captures.Plan retained:bool=false):>bool => {
+    let live=retained
+    let index=region.length
+    loop index >? 0 {
+        index-=1
+        let prior=view_liveness(region[index] live aliases source nodes plan retained=retained)
+        if prior.conflict return true
+        live=prior.live
+    }
+    return false
+}
 ScopedViews:type = [bindings:set<addr>=set[] scopes:dict<addr addr>=[] regions:dict<addr array<addr>>=[]]
 ScopeItem:type = const [id:addr scope:addr?]
 scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan excluded:set<addr>):>ScopedViews => {
@@ -486,10 +542,19 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
             let regions:array<addr>=[]
             loop scope in scopes {
                 if scope not in? prepared {prepared[scope]=prepare_view_scope(scope nodes type_nodes)}
-                loop item in view_region(prepared[scope] declaration excluded nodes) {
-                    regions.push(item)
-                    if source isnt? none and expression_conflicts(item source nodes plan set[]) {safe=false}
+                let aliases:set<addr>=set[binding]
+                let pending_aliases:array<addr>=[binding]
+                loop pending_aliases.length >? 0 {
+                    let current=pending_aliases.pop
+                    loop dependent in prepared[scope].dependents.get(current set[]) {
+                        if dependent not in? aliases {aliases.add(dependent) pending_aliases.push(dependent)}
+                    }
                 }
+                let region=view_region(prepared[scope] declaration excluded nodes)
+                loop item in region {regions.push(item)}
+                let retained=false
+                loop alias in aliases {if alias in? excluded or alias not in? prepared[scope].locals {retained=true}}
+                if source isnt? none and view_conflicts(region aliases source nodes plan retained=retained) {safe=false}
             }
             result.regions[binding]=regions
             if safe {result.bindings.add(binding)}
@@ -822,13 +887,11 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         if consumed_all.length >? 0 {consumed_arguments[id]=consumed_all}
     }
     let escaping:set<addr>=set[]
-    let addressed:set<addr>=set[]
     loop id in seen {
         let node=hir.node_at(nodes id)
         if node is? hir.Place {
             let source=route(node.target nodes)
             if source isnt? none {
-                addressed.add(source.binding)
                 if id not in? safe_places or id in? unsafe_places {escaping.add(source.binding)}
             }
         }
@@ -836,7 +899,9 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let excluded=captured
     loop binding in exposed {excluded.add(binding)}
     loop binding in places {excluded.add(binding)}
-    loop binding in addressed {excluded.add(binding)}
+    # Nonescaping calls only lend storage during the call. Conflicts inside
+    # a view's live interval are still checked, including mutable places.
+    loop binding in escaping {excluded.add(binding)}
     let scoped=scoped_views(view_demands nodes type_nodes plan excluded)
     return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned scoped.bindings scoped.scopes scoped.regions]
 }

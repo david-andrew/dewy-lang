@@ -24,6 +24,8 @@ Plan:type = [
     moves:dict<string Hook>=[]
     prepared:set<addr>=set[]
     transfer_sites:set<addr>=set[]
+    view_sites:set<addr>=set[]
+    view_bindings:set<addr>=set[]
     array_drops:dict<addr addr>=[]
     generated:array<addr>=[]
     function_source:addr?=none
@@ -309,6 +311,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
     let node=hir.node_at(session.hir id)
     let frame=Frame[owners loops allowed inherited owning_result composed_parent]
     let live=allowed
+    loop binding in plan.view_bindings {live.add(binding)}
     loop owner in owners {
         let declaration=hir.node_at(session.hir owner)
         $runtime_assert declaration is? hir.Declare and declaration.binding_id isnt? none
@@ -354,7 +357,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             let actual=types.node_at(session.types views.structural_base(value.value_type session.types))
             same_array=expected is? types.ArrayType and actual is? types.ArrayType and types.same_type(expected.element actual.element session.types)
         }
-        if declared.binding_id is? none or declared.view or (declared.annotation isnt? none and not types.same_type(declared.annotation value.value_type session.types) and not same_array) {reject(declared 'a non-fresh local owner' @plan) return}
+        if declared.binding_id is? none or (declared.annotation isnt? none and not types.same_type(declared.annotation value.value_type session.types) and not same_array) {reject(declared 'a non-fresh local owner' @plan) return}
         if id in? plan.transfer_sites and value is? hir.ExpressedIdentifier {
             let retained:array<addr>=[]
             let source:addr?=none
@@ -381,6 +384,13 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                 return
             }
         }
+        if id in? plan.view_sites and value is? hir.ExpressedIdentifier and value.binding_id isnt? none and value.binding_id in? live {
+            plan.view_bindings.add(declared.binding_id)
+            declared.view=true
+            store(id declared @session)
+            return
+        }
+        if declared.view {reject(declared 'a resource view without a stable lifetime' @plan) return}
         fresh(declared.expr live inherited @plan @session frame=frame)
         owners.push(id)
         return
@@ -506,6 +516,7 @@ local_transfers = (body:addr @plan:Plan session:contexts.Session):>void => {
     let last:dict<addr addr>=[]
     let occurrences:dict<addr int>=[]
     let captured:set<addr>=set[]
+    let written:set<addr>=set[]
     let blocks:array<addr>=[]
     let pending:array<addr>=[body]
     loop pending.length >? 0 {
@@ -519,6 +530,15 @@ local_transfers = (body:addr @plan:Plan session:contexts.Session):>void => {
                 hir.push_children(child @nested)
             }
             continue
+        }
+        let target:addr?=none
+        if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place {target=node.target}
+        else if node is? hir.ArrayMethod {target=node.array}
+        else if node is? hir.Transmute {target=node.expr}
+        if target isnt? none {
+            let root=hir.node_at(session.hir target)
+            loop root is? hir.MemberAccess|hir.Index {root=hir.node_at(session.hir if root is? hir.MemberAccess root.value else root.array)}
+            if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {written.add(root.binding_id)}
         }
         if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
             last[node.binding_id]=id
@@ -541,6 +561,7 @@ local_transfers = (body:addr @plan:Plan session:contexts.Session):>void => {
             if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? locals and source.binding_id not in? captured {
                 if last.get(source.binding_id) =? declaration.expr and occurrences.get(declaration.expr 0) =? 1 {plan.transfer_sites.add(item)}
             }
+            if declaration.binding_id isnt? none and source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? locals and source.binding_id not in? captured and declaration.binding_id not in? captured and source.binding_id not in? written and declaration.binding_id not in? written {plan.view_sites.add(item)}
             if declaration.binding_id isnt? none and resource(source.value_type session.types) isnt? none {locals.add(declaration.binding_id)}
         }
     }

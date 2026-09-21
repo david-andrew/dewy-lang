@@ -53,10 +53,9 @@ def test_scoped_view_has_no_copy_or_retained_storage(tmp_path):
     execute(tmp_path, 'scoped_lifetime', codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-def test_addressed_owner_needs_more_than_the_lexical_proof():
+def test_nonescaping_place_call_preserves_a_later_view(tmp_path):
     source = SrcFile(None, 'Box:type=[value:int64]\n'
                      'change=(@rows:array<Box>):>void=>{rows.push([9])}\n'
                      'main=():>int64=>{let rows:array<Box>=[[42]] change(@rows) '
                      'if rows.length=?0 return 0 let answer:int64=0 {const view=@rows[0] answer=view.value} return answer}')
-    with pytest.raises(ReportException, match='required local view'):
-        codegen(source)
+    execute(tmp_path, 'previous-place-call', codegen(source, debug_locations=False))
