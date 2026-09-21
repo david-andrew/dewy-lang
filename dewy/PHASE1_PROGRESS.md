@@ -1121,3 +1121,24 @@ proofs for allocation contracts, and inferred callable effect rows remain
 work to finish. Existing rejection gates remain explicit until their
 ownership operations are implemented. New integration and second-generation
 checks are required before certifying the combined changes.
+
+Implicit resource results now follow the explicit-return ownership path.
+Conditional results and nested scopes preserve cleanup order; a value before
+trailing statements is saved before those statements and transferred after
+them. This also fixes a premature return in that resource-result case.
+All 42 hosted/native lifecycle checks passed. The combined committed snapshot
+then built three native generations; the last two are byte-identical and the
+bootstrap execution checks passed on both output backends. The final generation
+took 110 seconds under concurrent test load; this is an integration result,
+not a performance-target claim. Artifacts:
+`../dewy-build-artifacts/phase1-ownership-integration-2026-09-21`.
+
+Same-scope local resource bindings now transfer an owner at proven last use,
+invoking a custom move hook where declared and retaining nested cleanup for
+fields left behind. Captures, later uses and outer-owner conditional transfers
+do not acquire this proof. Lexical ownership is established before cleanup
+introduces artificial reads. All 102 lifecycle/declaration checks passed,
+including ordinary and custom moves, loops and branches, hook effect/fact
+rejection, and repeated-call storage accounting on hosted x86/C and native.
+Outer-owner conditional consumption, inferred resource views/copies and field
+transfers remain outstanding; this is not the complete ownership model.

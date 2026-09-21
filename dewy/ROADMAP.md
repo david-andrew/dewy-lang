@@ -431,8 +431,12 @@ in both lowerings and the parity tool is the gate.
   cleanup, including aggregate field snapshots and copy hooks with scratch
   owners. Ordinary `@` parameters borrow resource records, including nested
   fields and forwarding through callbacks; callees do not drop borrowed owners.
-  Explicit returns transfer existing local owners on the exiting path, including
-  returns from branches and loops; the other owners still drop in reverse order.
+  Explicit and implicit results transfer existing local owners on the exiting
+  path, including conditional results and nested scopes; other owners drop in
+  reverse order. A result before trailing statements is saved at its evaluation
+  point, and those statements still run before return. Same-scope local bindings
+  transfer resources at a proven last use, including inside branches and loops;
+  captures and later uses prevent that proof.
   Custom move hooks now run at these transfers. The consumed owner's own drop
   is skipped, while its remaining nested resources and backing storage are
   cleaned up; hook effects are checked through callers. Inherited moves compose
