@@ -303,7 +303,7 @@ separately checked failure effect may also need permission depending on the
 allocator's settled failure policy. This spelling proposal neither grants a
 no-failure guarantee nor settles that policy.
 
-## Lifecycle call protocol — approved, implementation pending
+## Lifecycle call protocol — approved, implementation in progress
 
 David approved the call shape and cleanup rules below on 2026-09-20, after
 reviewing an overview in the conversation. This extends the earlier approval
@@ -312,14 +312,17 @@ nonescaping places. It adds no uninitialized-place syntax. Approval does not
 mean the compiler implements all runtime ownership behavior yet. Fresh local
 record owners now run drop hooks, including inherited drops, with checked
 effects and lexical cleanup. Nested record fields drop after the containing hook in reverse field order;
-transfers and containers of resources remain gated. Explicit custom copy
+fresh resource arrays and active union alternatives also own their contained
+resources. Insertion/removal, clearing and local replacement are implemented;
+field transfers, truncation and overwrites of elements remain gated. Explicit custom copy
 hooks now execute when they construct fresh results (including nested hook
 calls). Fresh results can return through factories/callbacks and cleanup scopes;
 the caller becomes their owner. A result is evaluated before local cleanup,
 including an aggregate field whose owner's drop might mutate it. An explicit
 return can also transfer an existing local owner: that path exits without
 dropping the transferred value, while releasing the other locals. General
-local transfers remain pending. Inherited copy wrappers consume the parent
+local transfers now use last-use liveness, and read-only aliases share one
+owner. Conditional consumption of outer owners remains pending. Inherited copy wrappers consume the parent
 result into the completed child without dropping it as an extra owner. Both
 checkers now validate declarations, result identity, compiler-only access and
 the read-only copy receiver. The native snapshot codec retains this metadata.
@@ -329,8 +332,9 @@ copy of a drop-only nominal value is rejected as move-only. Synthesized
 explicit copies apply that requirement recursively to stored record fields,
 array/dictionary elements and possible union alternatives; wrapping the value
 does not grant it a copy operation. A custom hook can instead construct fresh
-components and owns its result contract. Implicit copies
-and lifecycle invocation are still incomplete. Code generation explicitly
+components and owns its result contract. Independent resource values now
+invoke an available copy hook; synthesized copies of containers and wrappers
+with custom-copy components remain incomplete. Code generation explicitly
 rejects unsupported ownership shapes until their lowering is ready;
 in particular, hidden hooks must not disappear through reachability pruning
 and leave a resource with ordinary memberwise behavior.
@@ -338,8 +342,9 @@ and leave a resource with ordinary memberwise behavior.
 Ordinary checked `@` parameters can borrow a resource record or its nested
 fields without taking ownership. Forwarding and callbacks use the existing
 place ABI and alias checks. Borrowed records receive no callee-side cleanup;
-copying, escaping, or replacing their complete resource value remains gated
-until transfer/replacement lowering can account for both owners. A write to
+copying a borrowed value into an independent owner uses its available copy
+hook. Transferring or replacing the borrowed owner's complete value remains
+rejected; local and by-value parameter owners can be replaced. A write to
 a projected place preserves enclosing array lengths and unrelated fields,
 while discarding evidence about the endpoint and its descendants.
 

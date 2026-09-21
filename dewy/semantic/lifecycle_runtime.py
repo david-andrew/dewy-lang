@@ -78,6 +78,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         reject(root, 'checked ownership binding metadata')
 
     array_drops = {}
+    array_clears = {}
     generated = []
 
     def cleanup(owners, loc, fields_only=frozenset()):
@@ -313,14 +314,50 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                            index=expression(node.index, allowed, inherited=inherited, control=control))
         return node
 
+    def clear_operation(shape, loc):
+        cached = array_clears.get(id(shape))
+        operation = cached[1] if cached is not None else next(
+            (operation for known, operation in array_clears.values() if known == shape), None)
+        if operation is None:
+            name = f'__dewy_clear_array_{registry.next_id}'
+            binding = registry.allocate(object(), name, 'value', loc)
+            parameter = registry.allocate(object(), '__items', 'param', loc)
+            parameter.type = shape
+            # A normal checked return fact retains the builtin's length
+            # guarantee, even though element drop is now a helper call.
+            result = ty.RefinedType(ty.VOID_TYPE, (ty.Proposition(
+                '@__items', '=?', 0, of='length', subject_id=parameter.id),))
+            signature = ty.FunctionType([ty.PosOrKwArg('__items', shape, place=True)], [], None, result)
+            binding.type = signature
+            operation = hir.ExpressedIdentifier(loc, signature, name, binding_id=binding.id)
+            receiver = hir.ExpressedIdentifier(loc, shape, parameter.name, binding_id=parameter.id)
+            borrowed = hir.Declare(loc, ty.VOID_TYPE, 'let', parameter.name, shape, receiver, binding_id=parameter.id)
+            method_type = ty.FunctionType([], [], None, ty.VOID_TYPE)
+            method = hir.ArrayMethod(loc, method_type, receiver, 'clear')
+            clear = hir.FunctionCall(loc, ty.VOID_TYPE, method, [], {})
+            body = hir.Block(loc, ty.VOID_TYPE, [*cleanup([borrowed], loc), clear], True)
+            literal = hir.FunctionLiteral(loc, signature,
+                [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)],
+                [], None, ty.VOID_TYPE, body, source=current_source)
+            declared = hir.Declare(loc, ty.VOID_TYPE, 'const', name, signature, literal, binding_id=binding.id)
+            binding.function = literal
+            binding.declaration = declared
+            generated.append(declared)
+        array_clears[id(shape)] = (shape, operation)
+        return replace(operation, loc=loc)
+
     def array_operation(node, allowed, inherited, control):
         method = node.func
-        if method.name not in ('push', 'insert', 'pop', 'reserve'):
+        if method.name not in ('push', 'insert', 'pop', 'reserve', 'clear'):
             reject(node, 'a resource array method without element lifetime handling')
-        # These operations either introduce a fresh owner, transfer a removed
-        # element, or only change capacity. They never discard a live element.
+        # Borrow the receiver once. Clearing uses a checked helper to drop
+        # live elements; insertion/removal otherwise transfers their owners.
         receiver = expression(hir.Place(method.loc, method.array.type, method.array), allowed,
                               inherited=inherited, control=control)
+        if method.name == 'clear':
+            shape = ty.unfold(ty.strip_refinement(method.array.type))
+            assert isinstance(shape, ty.ArrayType)
+            return hir.FunctionCall(node.loc, ty.VOID_TYPE, clear_operation(shape, node.loc), [receiver], {})
         return replace(node, func=replace(method, array=receiver.target),
                        pos_args=[argument(arg, allowed, inherited, control) for arg in node.pos_args],
                        kw_args={name: argument(arg, allowed, inherited, control) for name, arg in node.kw_args.items()})

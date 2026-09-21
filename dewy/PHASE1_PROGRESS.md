@@ -1367,3 +1367,22 @@ owning parameters, conditional replacement, invalidated facts and zero retained
 storage across 100 calls. The preceding integration also passed 11 adjacent
 array/inferred-copy checks. Field replacement and conditional consumption of
 outer owners remain pending.
+
+
+Clearing a resource array now drops its elements in reverse order before the
+normal storage release. One checked helper borrows the receiver, so an indexed
+route is evaluated once. Its ordinary `void & <items.length =? 0>` return
+contract preserves the builtin's length guarantee; no special proof assumption
+or caller guard is introduced. Hosted array methods now accept indexed stored
+arrays through the same root/immutability checks as fields, matching native
+checking. Const roots and explicitly fixed-length storage still reject mutation.
+
+Validation: all eight focused clear/narrowed-array checks passed, including
+hosted/native execution on both backends. The shared fixture checks empty and
+nonempty arrays, reinsertion, nested arrays, an effectful selector evaluated
+once, the static post-call length fact and zero retained storage. Additional
+paired checks reject const and fixed-length indexed mutation. Truncation,
+element overwrite and general field transfers remain outstanding.
+
+After integration with replacement, all eight hosted clear/replacement/narrowed
+array checks passed, including the const and fixed-length diagnostic assertions.

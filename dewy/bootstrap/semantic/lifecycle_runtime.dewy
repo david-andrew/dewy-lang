@@ -4,6 +4,7 @@ import p"hir.dewy" as hir
 import p"ty.dewy" as types
 import p"type_queries.dewy" as views
 import p"bindings.dewy" as bindings
+import p"propositions.dewy" as facts
 
 # Materialize operations before reachability and lowering. Fresh records and
 # arrays own their nested resources. Factories, by-value parameters and results
@@ -28,6 +29,7 @@ Plan:type = [
     view_sites:set<addr>=set[]
     view_bindings:set<addr>=set[]
     array_drops:dict<addr addr>=[]
+    array_clears:dict<addr addr>=[]
     generated:array<addr>=[]
     function_source:addr?=none
     source:SrcFile
@@ -322,13 +324,49 @@ owning_argument = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:
     if node isnt? hir.Place and resource(node.value_type session.types) isnt? none {fresh(id allowed inherited @plan @session frame=frame)}
     else {expression(id allowed inherited @plan @session frame=frame)}
 }
+clear_operation = (owner:addr loc:Span @plan:Plan @session:contexts.Session):>addr => {
+    let operation=plan.array_clears.get(owner)
+    if operation isnt? none return operation
+    let name="__dewy_clear_array_{session.registry.next_id}"
+    let binding_id=bindings.allocate(@session.registry none name 'value' loc)
+    let parameter_id=bindings.allocate(@session.registry none '__items' 'param' loc)
+    let parameter=bindings.binding_at(session.registry parameter_id)
+    parameter.value_type=owner parameter.store_type=owner
+    bindings.store_binding(@session.registry parameter_id parameter)
+    let empty=types.primitive('void' @session.types)
+    # Preserve the builtin's length fact through an ordinary checked contract.
+    let result=types.refined_type(empty [facts.Proposition['@__items' '=?' 0 projection='length' subject_id=parameter_id]] @session.types)
+    let signature=types.function_type([types.PosOrKwArg['__items' owner place=true]] [] none result [] @session.types)
+    let receiver=put(hir.ExpressedIdentifier[loc owner '__items' parameter_id] @session)
+    let borrowed=put(hir.Declare[loc empty 'let' '__items' owner receiver parameter_id] @session)
+    let body=cleanup([borrowed] loc @plan @session)
+    let method_type=types.function_type([] [] none empty [] @session.types)
+    let method=put(hir.ArrayMethod[loc method_type receiver 'clear'] @session)
+    body.push(put(hir.FunctionCall[loc empty method [] []] @session))
+    let block=put(hir.Block[loc empty body true] @session)
+    let function=put(hir.FunctionLiteral[loc signature [hir.Param['__items' owner parameter_id place=true]] [] none empty block source=plan.function_source] @session)
+    let declaration=put(hir.Declare[loc empty 'const' name signature function binding_id] @session)
+    let binding=bindings.binding_at(session.registry binding_id)
+    binding.value_type=signature binding.function=function binding.declaration=declaration
+    bindings.store_binding(@session.registry binding_id binding)
+    operation=put(hir.ExpressedIdentifier[loc signature name binding_id] @session)
+    plan.array_clears[owner]=operation
+    plan.generated.push(declaration)
+    return operation
+}
 array_operation = (id:addr node:hir.FunctionCall method:hir.ArrayMethod allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?=none):>void => {
-    if method.name not in? ['push' 'insert' 'pop' 'reserve'] {reject(node 'a resource array method without element lifetime handling' @plan) return}
+    if method.name not in? ['push' 'insert' 'pop' 'reserve' 'clear'] {reject(node 'a resource array method without element lifetime handling' @plan) return}
     # Insertion introduces owners; pop transfers one; reserve only changes
     # capacity. Other methods need explicit handling for discarded elements.
     let receiver=hir.node_at(session.hir method.array)
     let place=put(hir.Place[receiver.loc receiver.value_type method.array] @session)
     expression(place allowed inherited @plan @session frame=frame)
+    if method.name =? 'clear' {
+        let shape=views.structural_base(receiver.value_type session.types)
+        let function=clear_operation(shape node.loc @plan @session)
+        store(id hir.FunctionCall[node.loc node.value_type function [place] []] @session)
+        return
+    }
     loop argument in node.pos_args {owning_argument(argument allowed inherited @plan @session frame=frame)}
     loop [name argument] in node.kw_args {owning_argument(argument allowed inherited @plan @session frame=frame)}
 }

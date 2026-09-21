@@ -417,7 +417,7 @@ in both lowerings and the parity tool is the gate.
   copy/move return the same nominal type, drop returns void before automatic
   field cleanup. Observable hook effects are allowed under ordinary effect
   contracts, with no guaranteed invocation count for elidable operations.
-  The [approved call protocol](PHASE1_DESIGN_PROPOSALS.md#lifecycle-call-protocol--approved-implementation-pending)
+  The [approved call protocol](PHASE1_DESIGN_PROPOSALS.md#lifecycle-call-protocol--approved-implementation-in-progress)
   records the details. Both checkers now validate their declarations and
   read-only copy receivers, and compose inherited hooks with the child's
   added fields through checked constructors. Explicit custom copies expose
@@ -430,7 +430,9 @@ in both lowerings and the parity tool is the gate.
   storage. Per-shape cleanup helpers retain ordinary bounds/effect checking;
   `push`/`insert` accept fresh or copied owners, `pop` transfers the removed
   owner, and `reserve` preserves element lifetimes. Discarded results drop
-  once. Element overwrite, `clear`/`truncate`, transfers from existing
+  once. `clear` drops elements in reverse order, retaining its checked
+  zero-length result fact even through an indexed receiver. Element overwrite,
+  `truncate`, transfers from existing
   move-only bindings and synthesized element copies remain outstanding. Resource unions
   and optional owners now select cleanup by the active alternative, including
   array elements; custom union moves consume only that alternative's resources. Explicit custom copies can construct fresh results,

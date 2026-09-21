@@ -44,7 +44,7 @@ update fields. Copy and move return the same nominal type; drop returns
 `void` before automatic reverse-order cleanup of remaining fields. A moved
 source does not run its outer drop hook, but any fields left behind still
 receive cleanup. Drop without copy makes the type move-only. See the
-[approved call protocol](../PHASE1_DESIGN_PROPOSALS.md#lifecycle-call-protocol--approved-implementation-pending)
+[approved call protocol](../PHASE1_DESIGN_PROPOSALS.md#lifecycle-call-protocol--approved-implementation-in-progress)
 for the full rules and an example.
 
 Release must run on every path that ends a value's lifetime: normal scope exit, return, loop exit, exception forwarding, reassignment, and cleanup after partially completed aggregate construction. A release hook must not return an error, forward an exception, or otherwise replace the control flow already in progress.

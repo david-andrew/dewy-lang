@@ -1,0 +1,32 @@
+let trace:int64=0
+let selections:int64=0
+Handle=type of [id:int64 values:array<int64>
+$__drop__
+release=():>void=>{trace=trace*10+id values.clear}
+]
+select=():>0=>{selections+=1 0}
+exercise=():>int64=>{
+    let items:array<Handle>=[Handle[1 [10]] Handle[2 [20]]]
+    items.clear
+    $assert items.length=?0
+    if trace not=?21 return 1
+    items.clear
+    if trace not=?21 return 2
+    items.push(Handle[3 [30]])
+    let groups:array<array<Handle>>=[[Handle[4 [40]] Handle[5 [50]]]]
+    groups[select()].clear
+    if selections not=?1 or trace not=?2154 return 3
+    return 42
+}
+verify=():>int64=>{
+    trace=0 selections=0
+    if exercise() not=?42 or trace not=?21543 return 1
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if verify() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

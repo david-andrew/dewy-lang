@@ -8809,9 +8809,9 @@ def _tcr_array_method(
     if name in _READ_ONLY_ARRAY_METHOD_NAMES:
         # `xs.join`: reads any array value, named or not, of any length
         return _bind_array_method(value, value.type, name, loc, ctx=ctx)
-    if isinstance(value, hir.MemberAccess):
-        # `bag.items.push(x)`: a growable array field of a named object. Length
-        # and index facts are keyed by the member route (see `array_route_id`).
+    if isinstance(value, (hir.MemberAccess, hir.Index)):
+        # A growable array reached through a stored field or element uses
+        # the same root mutability and route checks as a named array.
         root = _member_root_binding(value, ctx=ctx)
         if root is None:
             not_implemented(ctx.srcfile, loc, 'array methods on an unnamed array value')
