@@ -11,7 +11,7 @@ from typing import Literal
 
 from ...parser import t0
 from ...reporting import Span
-from ...semantic import hir, ty
+from ...semantic import hir, ty, placement
 from ...semantic.hir_display import type_to_dewy
 from .lowering_shared import (
     ARRAY_ARENA_DESCRIPTOR,
@@ -632,6 +632,13 @@ class _ArrayLowering(_ArraySharing):
                 is not None
             ):
                 self.array_representations[binding_id] = 'static_bytes'
+
+        # The public no-allocation checker and lowering consume the same
+        # bounded nonescaping-array proof, independently of broader inference.
+        for function in self.function_by_literal.values():
+            for binding in placement.local_arrays(function.literal):
+                if binding in self.array_declarations:
+                    self.array_representations[binding] = 'stack_data'
 
     def _static_word_array_is_stable(
         self,

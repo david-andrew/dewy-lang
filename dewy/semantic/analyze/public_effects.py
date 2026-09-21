@@ -7,7 +7,7 @@ allocation/escape behavior has a checked model; unknown never means pure.
 """
 from collections import deque
 
-from .. import bindings, effect_rows as rows, hir, ty
+from .. import bindings, effect_rows as rows, hir, ty, placement
 from ..errors import user_error
 from ...reporting import Pointer
 from .effects import _EffectAnalyzer, _literal_params, _unwrap
@@ -64,6 +64,8 @@ def validate(root, registry, srcfile):
         private = {p.binding_id for p in params if not p.place or p.binding_id == receiver}
         places = {p.binding_id: str(index) for index, p in enumerate(params) if p.place and p.binding_id != receiver}
         value_parameters = {p.binding_id for p in params if not p.place}
+        frame_arrays = placement.local_arrays(literal)
+        frame_literals = {id(node.expr) for node in frame_arrays.values()}
         word_bindings = set()
         pending = [literal.body]
         while pending:
@@ -202,7 +204,7 @@ def validate(root, registry, srcfile):
             if isinstance(node, hir.Declare):
                 # A required view cannot silently allocate a replacement;
                 # lowering must prove the storage demand or reject it.
-                if not node.view and not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)):
+                if not node.view and node.binding_id not in frame_arrays and not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)):
                     storage()
                 visit(node.expr)
                 return
@@ -213,7 +215,7 @@ def validate(root, registry, srcfile):
                 # merely because the final stored element is a scalar.
                 projected_storage = (any(isinstance(step, hir.Index) for step in path.steps)
                                      or bool(path.steps) and path.binding_id in value_parameters)
-                if not scalar(node.target.type) or projected_storage:
+                if not scalar(node.target.type) or projected_storage and path.binding_id not in frame_arrays:
                     storage()
                 access(node.target, 'mutates')
                 if isinstance(node, hir.Assign) and node.op != '=':
@@ -221,7 +223,7 @@ def validate(root, registry, srcfile):
                 visit(node.value)
                 return
             if isinstance(node, (hir.CopyValue, hir.ArrayLiteral, hir.ObjectLiteral)):
-                if not scalar(node.type):
+                if not scalar(node.type) and id(node) not in frame_literals:
                     storage()
                 for child in hir.children(node):
                     visit(child)

@@ -8,6 +8,7 @@ import p"captures.dewy" as captures
 import p"borrowing.dewy" as borrowing
 import p"moves.dewy" as moves
 import p"../../semantic/analyze/effects.dewy" as effects
+import p"../../semantic/placement.dewy" as placement
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/type_queries.dewy" as views
@@ -104,6 +105,8 @@ State:type = [
     # Nonescaping scalar places use one slot in the function frame, reused
     # on loop iterations. Their addresses cannot outlive this invocation.
     frame_boxes:dict<addr addr>=[]
+    # Fixed scalar arrays proven local share reusable function-frame storage.
+    frame_arrays:dict<addr ArrayMemory>=[]
     addressed:set<addr>=set[]
     place_parameters:set<addr>=set[]
     union_tags:dict<string addr>=[]
@@ -446,7 +449,7 @@ expression = (id:addr @state:State):>addr => {
         if object_valued(stored state) or cell_members(stored @state) isnt? none {prefix.push(release_value(source stored node @state))}
         return sequence(prefix node @state)
     }
-    if node is? hir.ArrayLiteral return array_literal(node @state)
+    if node is? hir.ArrayLiteral return array_literal(id node @state)
     if node is? hir.ArrayLength {
         let prefix:array<addr>=[]
         let receiver=read_operand(node.array @prefix @state)
@@ -1146,7 +1149,7 @@ array_load = (pointer:addr element:addr node:hir.AST @state:State):>addr => {
     if layout is? none return reject(node 'array element load representation' @state)
     return intrinsic_call("__load_{if layout.signed 'i' else 'u'}{layout.bits}__" [pointer] runtime_type(element node @state) node @state)
 }
-array_literal = (node:hir.ArrayLiteral @state:State):>addr => {
+array_literal = (id:addr node:hir.ArrayLiteral @state:State):>addr => {
     let type=array_type(node.value_type state)
     $runtime_assert type isnt? none
     let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
@@ -1154,7 +1157,16 @@ array_literal = (node:hir.ArrayLiteral @state:State):>addr => {
     let spread=false
     loop item in node.items { if hir.node_at(state.input.nodes item) is? hir.Spread { spread=true } }
     if spread return spread_array_literal(node type.element layout.size @state)
-    let memory=array_memory(word(node.items.length node @state) layout.size node @state)
+    let frame=state.frame_arrays.get(id)
+    let memory=if frame is? none array_memory(word(node.items.length node @state) layout.size node @state) else frame
+    if frame isnt? none {
+        # owner=0 means the frame owns both blocks; mutable element writes
+        # need no COW detachment and ordinary release cannot free the frame.
+        let length=word(node.items.length node @state)
+        let fields:array<addr>=[memory.data length length word(layout.size node @state) word(layouts.array_flags.mutable node @state) word(0 node @state)]
+        let offset:addr=0
+        loop value in fields {memory.prefix.push(store_word(value memory.descriptor offset node @state)) offset+=8}
+    }
     let offset:addr=0
     loop item in node.items {
         memory.prefix.push(array_store(owned_value(item @state 'placed in an array literal') address(memory.data offset node @state) type.element node @state))
@@ -4294,6 +4306,24 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     }
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
     state.frame_boxes=[]
+    state.frame_arrays=[]
+    loop [binding declaration_id] in placement.local_arrays(node state.input.nodes state.type_nodes) {
+        let declaration=hir.node_at(state.input.nodes declaration_id)
+        $runtime_assert declaration is? hir.Declare
+        let literal=hir.node_at(state.input.nodes declaration.expr)
+        $runtime_assert literal is? hir.ArrayLiteral
+        let type=array_type(literal.value_type state)
+        $runtime_assert type isnt? none
+        let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
+        if layout is? layouts.Pending return reject(literal layout.detail @state)
+        let name=fresh('array_frame' @state)
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let size=layouts.array_descriptor.size+literal.items.length*layout.size
+        let allocated=intrinsic_call('__alloca__' [word(size literal @state)] word_type literal @state)
+        prologue.push(put(hir.Declare[literal.loc void_type 'const' name word_type allocated] @state))
+        let descriptor=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
+        state.frame_arrays[declaration.expr]=ArrayMemory[descriptor address(descriptor layouts.array_descriptor.size literal @state) []]
+    }
     loop binding in capture.locals {
         if binding not in? state.boxed or binding in? excluded or binding in? state.place_parameters continue
         let stored=state.storage_types.get(binding)

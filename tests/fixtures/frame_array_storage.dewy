@@ -1,0 +1,27 @@
+# The effect checker and both lowerers use the same nonescaping-storage proof.
+# Each declaration reuses one bounded frame slot across loop iterations.
+private_work=(seed:int64):>int64 & no_effects=>{
+    let i:int64=0
+    let result:int64=0
+    loop i <? 10000 {
+        let xs:array<int64>=[seed 2]
+        xs[0]=xs[0]+xs[1]
+        result=xs[0]
+        let flags:array<bool>=[false true]
+        flags[0]=flags[1]
+        if not flags[0] return 1
+        let bytes:array<int8>=[-7 2]
+        bytes[1]=bytes[0]
+        if bytes[1] not=? -7 return 2
+        let empty:array<uint16>=[]
+        if empty.length not=? 0 return 3
+        i+=1
+    }
+    return result
+}
+main=():>int64=>{
+    let before:int64=_arena_allocated_bytes
+    let answer=private_work(40)
+    $runtime_assert _arena_allocated_bytes-before=?0
+    return answer
+}

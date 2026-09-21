@@ -1734,3 +1734,28 @@ the repaired driver rejects it. Finite two-element/two-pop iteration and the
 nested guarded worklist loop execute with result 42. Repeated predicates and
 an unguarded parameter pop reject. The integration manifest now includes the
 worklist and over-pop cases.
+
+
+Placement checkpoint: both allocation-effect checkers and lowerers now use
+one bounded proof for fixed scalar local arrays. Only length/element accesses
+are permitted: descriptor escapes, captures, address-taking, replacement and
+resizing exclude this route. A conservative 4 KiB budget per function bounds
+frame storage. Each slot is allocated in the prologue and reused when its
+declaration executes again. Native descriptors mark the frame as owner;
+ordinary release does not free it and writes need no COW detach.
+
+This permits `no allocates`/`no_effects` for proven local array computation,
+including inferred calls and defaults, while retaining allocation permission
+for unproved aggregate storage. It is an implementation proof budget, not a
+source array-size limit. General placement, scoped arenas, escaping aggregates
+and placement through nonescaping calls remain further work.
+
+Validation: 119 adjacent hosted allocation/effect checks passed. Five runtime
+cases and eight rejection cases passed both compilers and x86-64/C backends
+through a freshly native-built driver. The kernel repeats 10,000 times with
+zero arena bytes allocated, covering mutable words, bools, narrow integers and
+empty arrays. Capture/escape, resize/rebinding and per-function budget limits
+reject. The hosted compiler also successfully emitted the updated native
+program driver. Additional iterator rejection probes exposed a pre-existing
+native unindexed-pop proof gap, repaired separately; they are not counted as
+passes here.

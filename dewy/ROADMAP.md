@@ -555,8 +555,10 @@ and substitute callback rows in both compilers, including mixed type/row
 signatures and distinct cached instances. Complete inference into callable
 types and scoped polymorphic place subjects remain in progress. Bare
 `allocates` / `no allocates` now classify logical copies and aggregate
-construction; sharing placement/move proofs with the public checker and
-covering further storage operations and failure remain in progress. The reviewed rules are in `PHASE1_DESIGN_PROPOSALS.md`.
+construction; fixed scalar local arrays now share a bounded nonescaping frame-placement
+proof with lowering. The proof is exercised by a zero-allocation loop kernel
+on both compilers/backends. Broader placement/move proofs and further storage
+operations and failure remain in progress. The reviewed rules are in `PHASE1_DESIGN_PROPOSALS.md`.
 Effect polymorphism, allocation and failure as effects, and the
 `noreturn`/escape set are prerequisites for compile-time purity (Phase 2),
 the resource-exhaustion policy (`semantic/resource_exhaustion.md`), and the

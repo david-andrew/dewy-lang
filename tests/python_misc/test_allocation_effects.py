@@ -24,6 +24,8 @@ from tests.python_misc.test_scalar_projection import execute
     'g=(xs:array<int64>):>array<int64>=>xs.copy()\nf=(xs:array<int64>):>array<int64> & allocates=>g(xs)',
     'g=():>int64=>{let xs=[42] return xs[0]}\nf=(x:int64=g()):>int64 & allocates=>x',
     'g=():>int64=>{let xs=[42] return xs[0]}\nf=(x:int64):>int64 & allocates=>if x>?0 f(x-1) else g()',
+    'g=():>int64=>{let xs=[42] return xs[0]}\nf=(x:int64=g()):>int64 & no allocates=>x',
+    'g=():>int64=>{let xs=[42] return xs[0]}\nf=(x:int64):>int64 & no allocates=>if x>?0 f(x-1) else g()',
 ])
 def test_known_storage_and_allocation_exclusions(source):
     codegen(SrcFile(None, source))
@@ -43,8 +45,6 @@ def test_known_storage_and_allocation_exclusions(source):
     'f=(callback:():>int64 & allocates):>int64 & no allocates=>callback()',
     'f=(xs:array<int64>):>array<int64> & allocates & no allocates=>xs.copy()',
     'f=():>int64 & allocates=>{printl("observable") return 42}',
-    'g=():>int64=>{let xs=[42] return xs[0]}\nf=(x:int64=g()):>int64 & no allocates=>x',
-    'g=():>int64=>{let xs=[42] return xs[0]}\nf=(x:int64):>int64 & no allocates=>if x>?0 f(x-1) else g()',
 ])
 def test_permission_does_not_hide_other_effects_or_copy_boundaries(source):
     with pytest.raises(ReportException, match='effect contract'):
