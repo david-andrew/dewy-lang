@@ -22,7 +22,10 @@ decisions. Open design questions stay open until resolved with David.
 - 1.3: effect vocabulary and propagation, effect polymorphism and contracts;
   errors remain return alternatives, separate from effects.
 - 1.4: implement and test the settled juxtaposition, reserved-name,
-  unit-nominal, and uniform-container decisions. Preserve the decisions to
+  unit-nominal, and uniform-container decisions. Repair the right-side
+  number juxtaposition: `(x+1)5` and `(y)3.14159` are multiplications
+  (ROADMAP 1.4 item 1, corrected 2026-09-21); the 2026-09-20 blacklist
+  entries and `x 2` tests in both parsers pin the wrong behavior. Preserve the decisions to
   keep type brackets and conventional export privacy. Keep the explicitly
   open byte-packing and Unicode escape questions visible.
 

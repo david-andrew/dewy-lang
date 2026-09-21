@@ -526,10 +526,18 @@ Decisions were made by David on 2026-09-13.
    diagnostic must show the explicit forms: `A |> B` or `B <| A` for a
    call, `A * B` for a multiplication. Parenthesizing is not offered as a
    fix, since the parentheses are gone by the time the operation is chosen.
-   Both precedences stay. Separately, a number on the right of a name
-   (`x 2`) is never a call and never a multiplication: it is two separate
-   expressions. The parser's tentative right-side multiply-juxtapose case
-   for numbers (noted in the hosted `t2` stage) is dropped.
+   Both precedences stay. A number on the right of an expression is a
+   multiplication like a number on the left: `(x+1)5` is `(x+1) * 5` and
+   `(y)3.14159` is `(y) * 3.14159`; `x 2` is `x * 2` when `x` is a number.
+   A number is never a call's argument by adjacency. **Correction
+   (2026-09-21):** the earlier record here said a number on the right
+   starts a separate expression; that was a misreading of a tentative
+   note in the hosted `t2` stage, not a decision. Both parsers currently
+   blacklist the right-side number case and the 2026-09-20 tests pin that
+   behavior. **Repair needed as part of the Phase 1.4 work:** remove the
+   right-side `Integer`/`Real` multiply-juxtapose entries in both parsers,
+   keep the call-side entries, invert the `x 2` tests, and extend the
+   precedence fixture with `(x+1)5`.
 2. **Based byte literals (open, low priority).** Strings carry no `\x`
    escape because a string is a sequence of scalars, not bytes, so byte
    arrays need their own literal. The compiler already implements the
