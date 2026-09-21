@@ -422,9 +422,9 @@ in both lowerings and the parity tool is the gate.
   read-only copy receivers, and compose inherited hooks with the child's
   added fields through checked constructors. Explicit custom copies expose
   hook effects and result facts. Runtime drop now works for fresh local
-  word-field owners, including inherited drops, reverse scope cleanup and
-  early returns/loop exits. Its calls participate in fact/effect checking.
-  Copy/move hooks, aggregate-field owners, ownership transfers and resource
+  owners whose fields use ordinary synthesized cleanup, including inherited
+  drops, reverse scope cleanup, scalar implicit results and early returns/loop exits. Its calls participate in fact/effect checking.
+  Copy/move hooks, nested resource fields, ownership transfers and resource
   escapes remain explicitly unsupported during code generation.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred
   at last use and reported by `dewy analyze`. If explicit assertion of a

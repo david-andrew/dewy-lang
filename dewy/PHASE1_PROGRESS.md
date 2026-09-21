@@ -1010,3 +1010,24 @@ kernels and the extended paired precedence fixture (including `g(1)2` and
 both call/multiply exponentiation). Artifacts:
 `../dewy-build-artifacts/phase1-tight-numeric-adjacency-2026-09-21` and
 `../dewy-build-artifacts/phase1-tight-numeric-adjacency-parity-2026-09-21`.
+
+Hosted lowering no longer erases refinements in place on the shared checked
+graph. The cached prelude retained some of those nodes, so a later compilation
+could lose parameter facts (observed in `Report.point`'s `addr` parameters).
+Erasure now rebuilds changed DAG paths before lowering constructs its identity
+indexes. A regression reuses one checked program twice and verifies that its
+parameter facts survive and its generated program remains identical.
+Validation: 28 lowering/physical-unit/union-refinement checks passed.
+
+Local drop now also handles ordinary aggregate fields, including strings and
+arrays: the hook runs while those fields are live and automatic storage
+cleanup follows. Scalar implicit results are captured before drop, just like
+explicit returns. Lifecycle-bearing nested fields, resource transfers and
+copy/move hooks remain pending. Validation: 69 hosted lifecycle checks passed,
+including x86/C execution, and all 20 paired lifecycle fixtures passed. The
+new aggregate fixture checks inherited cleanup, a snapshot across array
+mutation, field mutation inside drop, and zero retained bytes over 100 calls.
+The fresh native generation built in 65.81 seconds and passed three ownership
+kernels. The focused manifest has 126 cases. Artifacts:
+`../dewy-build-artifacts/phase1-lifecycle-aggregate-drop-2026-09-21` and
+`../dewy-build-artifacts/phase1-lifecycle-aggregate-drop-parity-2026-09-21`.
