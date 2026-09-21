@@ -1142,3 +1142,12 @@ including ordinary and custom moves, loops and branches, hook effect/fact
 rejection, and repeated-call storage accounting on hosted x86/C and native.
 Outer-owner conditional consumption, inferred resource views/copies and field
 transfers remain outstanding; this is not the complete ownership model.
+
+The fixed-point generation passed 135/136 original Phase 1 manifest entries;
+the sole failure was an obsolete rejection expectation for importing a
+move-hook declaration without moving it. Both compilers accepted that already
+supported program. Renamed it to `lifecycle_imported_owner`, required exit 42,
+and reran the case against the same native generation: passed. All 136
+integration cases therefore have checked expected outcomes. Artifacts:
+`../dewy-build-artifacts/phase1-ownership-parity-2026-09-21` and
+`../dewy-build-artifacts/phase1-imported-owner-parity-2026-09-21`.
