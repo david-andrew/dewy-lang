@@ -10,7 +10,7 @@ import p"bindings.dewy" as bindings
 # transfer fresh owners; checked @ parameters borrow. Same-scope bindings move
 # at last use. Custom copy/move hooks remain checked calls, and drop precedes
 # field/element storage cleanup. Conditional outer-owner consumption, field
-# transfers, inferred copies and resource-container mutation remain gaps.
+# transfers, synthesized copies and remaining array mutations remain gaps.
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 # An expression can contain a block, branch, or early return. Carry its
 # enclosing lexical lifetime explicitly through expression traversal.
@@ -248,6 +248,10 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
     }
     if candidate is? hir.FunctionCall {
         let function=hir.node_at(session.hir candidate.func)
+        if function is? hir.ArrayMethod and resource(hir.node_at(session.hir function.array).value_type session.types) isnt? none {
+            array_operation(id candidate function allowed inherited @plan @session frame=frame)
+            return
+        }
         if function is? hir.ExpressedIdentifier and function.binding_id isnt? none {
             let hook=plan.hooks.get(function.binding_id)
             if hook isnt? none and hook.role =? 'copy' {
@@ -318,9 +322,34 @@ owning_argument = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:
     if node isnt? hir.Place and resource(node.value_type session.types) isnt? none {fresh(id allowed inherited @plan @session frame=frame)}
     else {expression(id allowed inherited @plan @session frame=frame)}
 }
+array_operation = (id:addr node:hir.FunctionCall method:hir.ArrayMethod allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?=none):>void => {
+    if method.name not in? ['push' 'insert' 'pop' 'reserve'] {reject(node 'a resource array method without element lifetime handling' @plan) return}
+    # Insertion introduces owners; pop transfers one; reserve only changes
+    # capacity. Other methods need explicit handling for discarded elements.
+    let receiver=hir.node_at(session.hir method.array)
+    let place=put(hir.Place[receiver.loc receiver.value_type method.array] @session)
+    expression(place allowed inherited @plan @session frame=frame)
+    loop argument in node.pos_args {owning_argument(argument allowed inherited @plan @session frame=frame)}
+    loop [name argument] in node.kw_args {owning_argument(argument allowed inherited @plan @session frame=frame)}
+}
 expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?=none):>void => {
     if plan.problem isnt? none return
     let node=hir.node_at(session.hir id)
+    if node is? hir.Suppress and resource(hir.node_at(session.hir node.item).value_type session.types) isnt? none {
+        fresh(node.item allowed inherited @plan @session frame=frame)
+        let owner=capture_result(node.item node.loc @session)
+        let items:array<addr>=[owner.declaration]
+        loop call in cleanup([owner.declaration] node.loc @plan @session) {items.push(call)}
+        store(id hir.Block[node.loc node.value_type items false] @session)
+        return
+    }
+    if node is? hir.FunctionCall {
+        let method=hir.node_at(session.hir node.func)
+        if method is? hir.ArrayMethod and resource(hir.node_at(session.hir method.array).value_type session.types) isnt? none {
+            array_operation(id node method allowed inherited @plan @session frame=frame)
+            return
+        }
+    }
     if frame isnt? none and node is? hir.Block|hir.Flow|hir.Return|hir.Break|hir.Continue {
         let active=frame.owners
         if node is? hir.Block and not node.scoped {node.scoped=true store(id node @session)}

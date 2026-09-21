@@ -1,0 +1,34 @@
+# Insertion introduces an owner, removal transfers it, and discarding a
+# removed value ends its lifetime. Capacity changes do not run hooks.
+let trace:int64=0
+Handle=type of [id:int64 values:array<int64>
+$__drop__
+release=():>void=>{trace=trace*10+id values.clear}
+]
+make=(id:int64):>Handle=>Handle[id [id]]
+exercise=():>int64=>{
+    let items:array<Handle>=[]
+    items.reserve(16)
+    items.push(make(1))
+    items.insert(make(2) 0)
+    items.push(make(3))
+    let removed=items.pop(0)
+    if removed.id not=?2 or items.length not=?2 or trace not=?0 return 1
+    items.pop;
+    if trace not=?3 or items.length not=?1 return 2
+    make(4);
+    if trace not=?34 return 3
+    return 42
+}
+verify=():>int64=>{
+    trace=0
+    if exercise() not=?42 or trace not=?3421 return 1
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {if verify() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

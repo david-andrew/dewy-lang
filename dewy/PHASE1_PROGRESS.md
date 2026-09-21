@@ -1327,3 +1327,20 @@ The regenerated native snapshot codec passed all three snapshot/schema checks,
 including round-tripping an implicit-copy call and effect contracts on both
 output backends. The four hosted inferred-copy checks also passed after
 integration with the implicit-result ordering fix (seven checks total).
+
+
+Resource arrays now accept fresh/copied owners through `push` and `insert`,
+transfer ownership through `pop` (including indexed removal), and change
+capacity through `reserve`. Discarded resource-valued expressions capture and
+drop their result once, including discarded pops and factory calls. Their
+cleanup remains checked HIR, so its effects and invalidated facts reach callers.
+Element overwrite, `clear`/`truncate`, field transfers and transfers from
+existing move-only bindings still require further lifetime handling.
+
+Validation: all nine focused array-method, union and implicit-result-order
+checks passed, including hosted/native execution on both backends. After
+integration with inferred custom copies, all seven hosted array/copy checks
+passed; the existing native driver also rejected both discarded-element
+fact/effect violations. The fixture retains zero storage across 100 calls.
+The preceding inferred-copy revision additionally passed all 134 broader
+hosted lifecycle, explicit-copy, copy-source and prelude-cache checks.

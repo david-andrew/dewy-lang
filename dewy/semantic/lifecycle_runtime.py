@@ -5,8 +5,8 @@ by-value parameters and results transfer fresh owners. Checked @ parameters
 borrow. Same-scope bindings can move at last use, and custom copy/move hooks
 remain checked calls. Drop precedes field/element storage cleanup.
 
-Conditional consumption of outer owners, field transfers, inferred copies
-and resource-container mutation still need the general lifetime plan.
+Conditional consumption of outer owners, field transfers, synthesized component copies
+and the remaining resource-container mutations still need the general lifetime plan.
 """
 from dataclasses import replace
 
@@ -233,6 +233,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         # An explicit custom copy creates an independent owner. Its checked
         # call already carries the hook's effects and result contract.
         if isinstance(node, hir.FunctionCall):
+            if isinstance(node.func, hir.ArrayMethod) and resource(node.func.array.type) is not None:
+                return array_operation(node, allowed, inherited, control)
             operation = declarations.get(node.func.binding_id) if isinstance(node.func, hir.ExpressedIdentifier) else None
             if operation is not None and operation.expr.lifecycle == 'copy':
                 if len(node.pos_args) != 1 or node.kw_args or not isinstance(node.pos_args[0], hir.Place):
@@ -311,9 +313,26 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                            index=expression(node.index, allowed, inherited=inherited, control=control))
         return node
 
+    def array_operation(node, allowed, inherited, control):
+        method = node.func
+        if method.name not in ('push', 'insert', 'pop', 'reserve'):
+            reject(node, 'a resource array method without element lifetime handling')
+        # These operations either introduce a fresh owner, transfer a removed
+        # element, or only change capacity. They never discard a live element.
+        receiver = expression(hir.Place(method.loc, method.array.type, method.array), allowed,
+                              inherited=inherited, control=control)
+        return replace(node, func=replace(method, array=receiver.target),
+                       pos_args=[argument(arg, allowed, inherited, control) for arg in node.pos_args],
+                       kw_args={name: argument(arg, allowed, inherited, control) for name, arg in node.kw_args.items()})
+
     def expression(node, allowed, *, inherited=False, control=None):
         if control is not None and isinstance(node, (hir.Block, hir.Flow, hir.Return, hir.Break, hir.Continue, hir.OrThrow)):
             return control(node)
+        if isinstance(node, hir.Suppress) and resource(node.item.type) is not None:
+            owner, _value = capture(fresh(node.item, allowed, inherited, control=control), node.loc)
+            return hir.Block(node.loc, ty.VOID_TYPE, [owner, *cleanup([owner], node.loc)], False)
+        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod) and resource(node.func.array.type) is not None:
+            return array_operation(node, allowed, inherited, control)
         if isinstance(node, hir.FunctionLiteral):
             return function(node)
         if (isinstance(node, hir.TypeValue)

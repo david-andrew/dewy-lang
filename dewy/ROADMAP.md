@@ -428,7 +428,10 @@ in both lowerings and the parity tool is the gate.
   wrapper has no hook. Fresh arrays of resources, including nested arrays
   and array fields, run element hooks in reverse order before releasing their
   storage. Per-shape cleanup helpers retain ordinary bounds/effect checking;
-  array mutation and implicit element copies remain outstanding. Resource unions
+  `push`/`insert` accept fresh or copied owners, `pop` transfers the removed
+  owner, and `reserve` preserves element lifetimes. Discarded results drop
+  once. Element overwrite, `clear`/`truncate`, transfers from existing
+  move-only bindings and synthesized element copies remain outstanding. Resource unions
   and optional owners now select cleanup by the active alternative, including
   array elements; custom union moves consume only that alternative's resources. Explicit custom copies can construct fresh results,
   including nested hook calls. When a surviving source needs an independent
