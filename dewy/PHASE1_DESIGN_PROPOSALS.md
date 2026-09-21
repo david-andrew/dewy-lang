@@ -316,8 +316,10 @@ transfers and containers of resources remain gated. Explicit custom copy
 hooks now execute when they construct fresh results (including nested hook
 calls). Fresh results can return through factories/callbacks and cleanup scopes;
 the caller becomes their owner. A result is evaluated before local cleanup,
-including an aggregate field whose owner's drop might mutate it. Consuming an
-existing owner or intermediate parent result still needs transfer lowering. Both
+including an aggregate field whose owner's drop might mutate it. An explicit
+return can also transfer an existing local owner: that path exits without
+dropping the transferred value, while releasing the other locals. General
+local transfers and consumption of intermediate parent results remain pending. Both
 checkers now validate declarations, result identity, compiler-only access and
 the read-only copy receiver. The native snapshot codec retains this metadata.
 Explicit `.copy()` now resolves a custom copy hook into an ordinary checked

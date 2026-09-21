@@ -431,7 +431,9 @@ in both lowerings and the parity tool is the gate.
   cleanup, including aggregate field snapshots and copy hooks with scratch
   owners. Ordinary `@` parameters borrow resource records, including nested
   fields and forwarding through callbacks; callees do not drop borrowed owners.
-  Inferred transfers of existing owners, move hooks, inherited
+  Explicit returns transfer existing local owners on the exiting path, including
+  returns from branches and loops; the other owners still drop in reverse order.
+  General local transfers, move hooks, inherited
   copies needing parent-result consumption, resource containers and general
   owning arguments remain explicitly unsupported during code generation.
 - *Explicit moves.* No `move` operator or keyword for now; moves are inferred

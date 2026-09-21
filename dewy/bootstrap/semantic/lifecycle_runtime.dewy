@@ -226,8 +226,21 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
     }
     if node is? hir.Return {
         let current:hir.Return=node
+        let consumed:addr?=none
         if current.item isnt? none {
-            if owning_result and resource(hir.node_at(session.hir current.item).value_type session.types) isnt? none {fresh(current.item live false @plan @session)}
+            if owning_result and resource(hir.node_at(session.hir current.item).value_type session.types) isnt? none {
+                # An explicit return ends this path. Only a local owner,
+                # never a borrowed parameter, can transfer to the caller.
+                let returned=hir.node_at(session.hir current.item)
+                if returned is? hir.ExpressedIdentifier and returned.binding_id isnt? none {
+                    loop owner in owners {
+                        let declaration=hir.node_at(session.hir owner)
+                        $runtime_assert declaration is? hir.Declare
+                        if declaration.binding_id =? returned.binding_id {consumed=owner break}
+                    }
+                }
+                if consumed is? none {fresh(current.item live false @plan @session)}
+            }
             else {expression(current.item live inherited @plan @session)}
         }
         if plan.problem isnt? none or owners.length =? 0 return
@@ -239,7 +252,9 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             items.push(saved.declaration)
             current.item=saved.value
         }
-        loop call in cleanup(owners current.loc @plan @session) {items.push(call)}
+        let released:array<addr>=[]
+        loop owner in owners {if consumed is? none or owner not=? consumed {released.push(owner)}}
+        loop call in cleanup(released current.loc @plan @session) {items.push(call)}
         items.push(put(current @session))
         store(id hir.Block[current.loc current.value_type items false] @session)
         return

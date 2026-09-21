@@ -243,8 +243,16 @@ def prepare(root: hir.Block, srcfile):
                 owners.append(node)
                 return node
             if isinstance(node, hir.Return):
+                consumed = None
                 if node.item is not None and owning_result and resource(node.item.type) is not None:
-                    returned = fresh(node.item, live, False)
+                    # Returning leaves this path, so a named local owner is
+                    # at its last use. Borrowed parameters are deliberately
+                    # absent from owners: lending cannot transfer ownership.
+                    if isinstance(node.item, hir.ExpressedIdentifier) and any(owner.binding_id == node.item.binding_id for owner in owners):
+                        returned = node.item
+                        consumed = node.item.binding_id
+                    else:
+                        returned = fresh(node.item, live, False)
                 else:
                     returned = expression(node.item, live, inherited=literal.lifecycle == 'drop') if node.item is not None else None
                 if not owners:
@@ -253,7 +261,7 @@ def prepare(root: hir.Block, srcfile):
                 if returned is not None:
                     declaration, returned = capture(returned, node.loc)
                     result.append(declaration)
-                result.extend(cleanup(owners, node.loc))
+                result.extend(cleanup([owner for owner in owners if owner.binding_id != consumed], node.loc))
                 result.append(replace(node, item=returned))
                 return hir.Block(node.loc, node.type, result, False)
             if isinstance(node, (hir.Break, hir.Continue)):
