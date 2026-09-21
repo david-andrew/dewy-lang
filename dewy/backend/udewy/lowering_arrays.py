@@ -307,7 +307,7 @@ class _ArrayLowering(_ArraySharing):
     def _array_type_contains_object(cls, array_type: ty.ArrayType) -> bool:
         """Whether element mutation can be hidden behind an object handle."""
 
-        element = array_type.element
+        element = ty.structural_base(array_type.element)
         return isinstance(element, ty.ObjectType) or (
             isinstance(element, ty.ArrayType)
             and cls._array_type_contains_object(element)
@@ -1643,7 +1643,7 @@ class _ArrayLowering(_ArraySharing):
 
     def _is_growable_element(self, element: ty.Type) -> bool:
         """Elements a growable (arena-backed) array may hold: words, string handles, objects, arrays, and optional cells (as handles)."""
-        element = ty.strip_refinement(element)   # `array<nonemptystring>`: the element is a string with a fact
+        element = ty.structural_base(element)   # unfold recursive handles and storage refinements
         return self._is_word_element(element) or isinstance(element, (ty.ObjectType, ty.ArrayType)) or self._is_optional_element(element) or self._is_union_element(element)
 
     def _growable_element_value(
@@ -1652,6 +1652,7 @@ class _ArrayLowering(_ArraySharing):
         element_type: ty.Type,
     ) -> tuple[list[hir.AST], hir.AST]:
         """A value to store into a growable array: objects (and non-literal strings) are copied into the arena (value semantics)."""
+        element_type = ty.structural_base(element_type)
         if (members := ty.enum_members(element_type)) is not None:
             return self._enum_word_of(node, members)
         if isinstance(element_type, ty.ArrayType):
@@ -2901,6 +2902,7 @@ class _ArrayLowering(_ArraySharing):
         node: hir.AST,
         element_type: ty.Type,
     ) -> tuple[list[hir.AST], hir.AST]:
+        element_type = ty.structural_base(element_type)
         if (members := ty.enum_members(element_type)) is not None:
             return self._enum_word_of(node, members)
         if self._is_optional_element(element_type):
@@ -2949,6 +2951,7 @@ class _ArrayLowering(_ArraySharing):
         relocating an array): it is carried over as it is.
         """
 
+        element_type = ty.structural_base(element_type)
         source_value = self._array_load(source_address, element_type, loc)
         if isinstance(element_type, ty.ArrayType) and move:
             prelude, copied = [], source_value
@@ -3123,6 +3126,8 @@ class _ArrayLowering(_ArraySharing):
             # a pointer to a cell the array owns — so `array<A | B>` is a
             # handle like `array<A>` (`array<Candidate> | TokenError`)
             element = ty.strip_refinement(array_type.element)
+            if isinstance(element, ty.NamedType):
+                return True
             if cls._is_word_element_static(element):
                 return True
             if isinstance(element, ty.ObjectType):

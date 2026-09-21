@@ -457,8 +457,11 @@ in both lowerings and the parity tool is the gate.
   hooks and synthesized recursive wrapper copies now preserve independent
   owners. Fresh conditional/block initializers capture their value before
   local cleanup, and branch-local move-only results transfer at proven last
-  use, including values followed by unrelated trailing statements. General dictionary ownership
-  operations and recursion through `array<Self>` remain pending. Fresh record results now transfer from factories
+  use, including values followed by unrelated trailing statements. Recursive `array<Self>` and nested array edges now have checked ownership,
+  component copying, growth/pop transfer and deterministic cleanup. Empty
+  arrays provide a finite base case; nonempty required recursive storage
+  still needs a terminating alternative. General dictionary ownership
+  operations remain pending. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch
   owners. Ordinary `@` parameters borrow resource records, including nested

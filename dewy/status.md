@@ -850,3 +850,17 @@ Both `.typename` and `typeof` retain the value's runtime brand after an
 exclusion (including surviving sibling descendants). The paired regression
 is `tests/fixtures/exclusion_facts.dewy`; focused cases also cover copying,
 mutation and rejection of stale evidence.
+
+### Recursive array ownership (2026-09-21)
+
+Both compilers accept recursive record edges through dynamic arrays, whose
+empty value supplies a finite base case. Nonempty exact arrays still require
+finite elements (such as an optional recursive element). Array element
+contracts remain invariant: alias and resolved spellings agree without
+allowing arrays of a subtype to stand in for arrays of their parent.
+Hosted storage queries now unfold recursive elements for copying, growth,
+places and result ownership, using the existing handle representation.
+Recursive arrays use the same checked lifecycle helpers as optional links;
+factory results, independent custom/synthesized copies, array mutation and
+pop transfers retain ordinary ownership. Paired regressions check hook order,
+copy independence and zero retained arena storage, including nested arrays.

@@ -7157,8 +7157,8 @@ def _validate_recursive_alias(
 ) -> None:
     """A recursive reference is only allowed as a union member of an object field.
 
-    That is the one position with a finite representation: the member lives
-    behind a handle in the union cell. A required field of the alias's own
+    Union members and array elements live behind handles; a union alternative
+    or an empty array supplies the finite base case. A required field of the alias's own
     type would be an infinite value; an alias that is merely a union of itself
     has no base case.
     """
@@ -7204,14 +7204,10 @@ def _validate_recursive_alias(
                 check(field_.type, False)
             return
         if isinstance(type_, ty.ArrayType):
-            # `children:array<Node>` is finite (the elements live behind the
-            # array's descriptor) but the lowering does not unfold a recursive
-            # element yet (every element-kind decision reads the object type)
-            if ty.mentions_named_type(type_.element):
-                not_implemented(ctx.srcfile, binding.loc, f'`array<{binding.name}>` inside `{binding.name}` (arrays of the recursive type; hold the children in a separate array keyed by index for now)')
-            return
-        if isinstance(type_, ty.ArrayType):
-            check(type_.element, False)
+            # A dynamic array has an empty base case and stores its elements
+            # behind handles. A nonempty exact array still requires a finite
+            # element (for example `Node | none`).
+            check(type_.element, type_.length is None or type_.length == 0)
             return
         if isinstance(type_, ty.RefinedType):
             check(type_.base, in_union)

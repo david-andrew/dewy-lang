@@ -221,7 +221,7 @@ atom_implies = (a_id:addr b_id:addr links:Graph @nodes:types.Table):>bool => {
         return b.length is? none or a.name in? set['char' 'grapheme'] and b.length =? 1
     }
     if a is? types.ArrayType and b is? types.ArrayType {
-        let element_fits:bool = types.same_type(a.element b.element nodes)
+        let element_fits:bool = types.same_array_element(a.element b.element nodes)
         let ae = types.node_at(nodes a.element)
         let be = types.node_at(nodes b.element)
         if ae is? types.StringType and ae.length isnt? none {
@@ -339,7 +339,7 @@ meet_atoms = (a_id:addr b_id:addr links:Graph @nodes:types.Table):>addr? => {
     if a is? types.ArrayType and b is? types.ArrayType {
         # Writable array element types remain invariant even though ordinary
         # generic TypeParameterize arguments below are covariant.
-        if not types.same_type(a.element b.element nodes) return none
+        if not types.same_array_element(a.element b.element nodes) return none
         if a.length is? none return b_id
         if b.length is? none or a.length =? b.length return a_id
         return none

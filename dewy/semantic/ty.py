@@ -399,9 +399,8 @@ class NamedType:
     ``let Node:type = [value:int64 next:Node|none]`` cannot be a finite
     structural tree, so the recursive occurrence is this reference; it unfolds
     to the alias's object type on demand (``target``). Two references to the
-    same alias are equal. A reference may only appear as a union member, where
-    the lowering stores the member behind a handle; expression types are
-    always unfolded (see ``unfold``).
+    same alias are equal. A reference appears behind a union or array handle. Element contracts
+    may retain it; storage queries unfold it on demand (see ``unfold``).
     """
 
     name: str
@@ -425,6 +424,18 @@ class NamedType:
 
     def __repr__(self) -> str:
         return f'NamedType({self.name!r})'
+
+
+def same_array_element(a: Type, b: Type) -> bool:
+    """Invariant element equality, allowing a resolved recursive spelling.
+
+    Unfolding an alias changes no value contract. Do not substitute subtype
+    compatibility here: a writable array of children is not an array of their
+    parent. Nested arrays retain the same length and invariant element rule.
+    """
+    a, b = unfold(a), unfold(b)
+    return a == b or (isinstance(a, ArrayType) and isinstance(b, ArrayType)
+                      and a.length == b.length and same_array_element(a.element, b.element))
 
 
 def unfold(type_: Type) -> Type:
@@ -1707,7 +1718,7 @@ class TypeSystem:
                 return None
             return QuantityType(number, a.dimension)
         if isinstance(a, ArrayType) and isinstance(b, ArrayType):
-            if a.element != b.element:
+            if not same_array_element(a.element, b.element):
                 return None
             if a.length is None:
                 return b
@@ -1859,7 +1870,7 @@ class TypeSystem:
             return b == TOP_TYPE
         if isinstance(a, ArrayType) and isinstance(b, ArrayType):
             return (
-                (a.element == b.element or self._string_element_widens(a.element, b.element))
+                (same_array_element(a.element, b.element) or self._string_element_widens(a.element, b.element))
                 and (b.length is None or a.length == b.length)
             )
         if isinstance(a, ObjectType) and isinstance(b, ObjectType):

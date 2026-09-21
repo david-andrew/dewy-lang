@@ -618,6 +618,15 @@ unfold = (id:addr nodes:Table):>addr => {
     $runtime_assert node.target isnt? none
     return node.target
 }
+# Invariance permits an alias's resolved spelling, never a different subtype.
+# Array nesting preserves both length and this same element contract.
+same_array_element=(a:addr b:addr nodes:Table):>bool=>{
+    let left=unfold(a nodes) let right=unfold(b nodes)
+    if same_type(left right nodes) return true
+    let x=node_at(nodes left) let y=node_at(nodes right)
+    return x is? ArrayType and y is? ArrayType and x.length =? y.length and same_array_element(x.element y.element nodes)
+}
+
 meta_type = (family:addr @nodes:Table):>addr => {
     let key="H{family}"
     let known=nodes.positions.get(key)

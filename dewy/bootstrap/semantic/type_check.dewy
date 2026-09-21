@@ -1072,9 +1072,8 @@ contains_named = (id:addr nodes:types.Table):>bool => {
     return false
 }
 
-# A recursive record field is finite behind a union handle, with an actual
-# base case. The hosted lowerer still cannot lay out recursive array elements;
-# keep that pending work explicit rather than accepting an unusable type.
+# A union alternative or empty array supplies a finite base case. Required
+# fields and nonempty exact arrays must themselves have finite elements.
 recursive_member = (value:addr in_union:bool id:addr name:string context:contexts.Context session:contexts.Session):>Error? => {
     let node = types.node_at(session.types value)
     if node is? types.NamedType {
@@ -1082,7 +1081,7 @@ recursive_member = (value:addr in_union:bool id:addr name:string context:context
         return none
     }
     if node is? types.RefinedType return recursive_member(node.base in_union id name context session)
-    if node is? types.ArrayType and contains_named(node.element session.types) return contexts.unsupported(id 'arrays of a recursive alias (use an arena and indices for now, as in the hosted compiler)' context session)
+    if node is? types.ArrayType return recursive_member(node.element node.length is? none or node.length =? 0 id name context session)
     if node is? types.TypeOr {
         let base_case = false
         loop member in node.items { if types.node_at(session.types member) isnt? types.NamedType { base_case = true } }

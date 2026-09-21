@@ -130,14 +130,14 @@ class _PlaceLowering:
         """Evaluate a place route once and return its final storage address."""
 
         if isinstance(target, hir.MemberAccess):
-            owner = ty.unfold(ty.strip_refinement(target.value.type))
+            owner = ty.structural_base(target.value.type)
             field = owner.field(target.name) if isinstance(owner, ty.ObjectType) else None
             if field is not None and self._field_union_members(field.type) is not None and isinstance(ty.unfold(ty.strip_refinement(target.type)), ty.ObjectType):
                 return self._extract_write_route(target)
             prelude, obj = self._extract_write_route(target.value)
-            if not isinstance(target.value.type, ty.ObjectType):
+            if not isinstance(owner, ty.ObjectType):
                 self._target_error(target, 'projected member place requires an object')
-            _size, offsets = self._object_layout(target.value.type, target)
+            _size, offsets = self._object_layout(owner, target)
             return prelude, self._field_address(
                 obj,
                 offsets[target.name],
