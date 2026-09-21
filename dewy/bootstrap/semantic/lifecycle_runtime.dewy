@@ -540,7 +540,7 @@ receiver_root = (id:addr nodes:array<hir.AST>):>addr? => {
 }
 check_selection = (id:addr root:addr? @plan:Plan session:contexts.Session):>void => {
     if root isnt? none and root in? predicate_effects.mutated_bindings(id session.hir plan.argument_writes plan.readonly_arguments) {
-        if plan.problem is? none {plan.problem=Error[srcfile=plan.source title='resource array receiver changes during argument evaluation' pointers=[Pointer[hir.node_at(session.hir id).loc 'the selected place must survive its selector and count']]]}
+        if plan.problem is? none {plan.problem=Error[srcfile=plan.source title='resource receiver changes during evaluation' pointers=[Pointer[hir.node_at(session.hir id).loc 'the selected storage must survive its selectors and arguments']]]}
     }
 }
 freeze_route = (id:addr loc:Span root:addr? @prefix:array<addr> @plan:Plan @session:contexts.Session):>addr => {
@@ -884,6 +884,26 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         store(id current @session)
         return
     }
+    if node is? hir.MemberAssign|hir.IndexAssign and resource(hir.node_at(session.hir node.target).value_type session.types) isnt? none {
+        # Select once, construct the new owner, then end the old lifetime.
+        # Keep a rooted route so mutable-place lowering handles COW before
+        # dropping; a saved raw pointer could refer to the previous storage.
+        let target=hir.node_at(session.hir node.target)
+        let place=put(hir.Place[target.loc target.value_type node.target] @session)
+        expression(place live inherited @plan @session frame=frame)
+        let prefix:array<addr>=[]
+        let root=receiver_root(node.target session.hir)
+        let selected=freeze_route(node.target node.loc root @prefix @plan @session)
+        check_selection(node.value root @plan session)
+        fresh(node.value live false @plan @session frame=frame)
+        let replacement=capture_result(node.value node.loc @session)
+        prefix.push(replacement.declaration)
+        drop_value(selected target.value_type node.loc set[] @prefix @plan @session)
+        let stored=if node is? hir.MemberAssign hir.MemberAssign[node.loc node.value_type selected replacement.value] else hir.IndexAssign[node.loc node.value_type selected replacement.value]
+        prefix.push(put(stored @session))
+        store(id hir.Block[node.loc node.value_type prefix false] @session)
+        return
+    }
     if owning_result and resource(node.value_type session.types) isnt? none {fresh(id live false @plan @session frame=frame)}
     else {expression(id live inherited @plan @session frame=frame)}
 }
@@ -1124,6 +1144,10 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
         let node=hir.node_at(session.hir id)
         if node is? hir.ArrayMethod and node.name =? 'truncate' and resource(hir.node_at(session.hir node.array).value_type session.types) isnt? none {
             let root=receiver_root(node.array session.hir)
+            if root isnt? none {receivers.add(root)}
+        }
+        if node is? hir.MemberAssign|hir.IndexAssign and resource(hir.node_at(session.hir node.target).value_type session.types) isnt? none {
+            let root=receiver_root(node.target session.hir)
             if root isnt? none {receivers.add(root)}
         }
         hir.push_children(node @pending)

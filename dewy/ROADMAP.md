@@ -434,8 +434,11 @@ in both lowerings and the parity tool is the gate.
   zero-length result fact even through an indexed receiver. `truncate` drops
   only the removed suffix and preserves the builtin's minimum-length facts;
   selectors and counts are evaluated once, with receiver stability checked.
-  Element overwrite and transfers from existing
-  move-only bindings remain outstanding. Resource unions
+  Field and element overwrite now capture selectors and replacement values
+  once, then drop the previous owner before installing the new one. This
+  includes optional fields, nested arrays and borrowed receivers; side effects
+  that change the selected receiver during evaluation are rejected. Transfers
+  from existing move-only bindings remain outstanding. Resource unions
   and optional owners now select cleanup by the active alternative, including
   array elements; custom union moves consume only that alternative's resources. Explicit custom copies can construct fresh results,
   including nested hook calls. When a surviving source needs an independent

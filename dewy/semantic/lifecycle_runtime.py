@@ -86,6 +86,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                  for node in hir.walk(root) if isinstance(node, hir.FunctionCall)
                  and isinstance(node.func, hir.ArrayMethod) and node.func.name == 'truncate'
                  and resource(node.func.array.type) is not None}
+    receivers.update(bindings.access_path(node.target).binding_id
+                     for node in hir.walk(root) if isinstance(node, (hir.MemberAssign, hir.IndexAssign))
+                     and resource(node.target.type) is not None)
     receivers.discard(None)
     argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
     readonly_arguments = effects.read_only_places(root, effect_context) if receivers else set()
@@ -95,7 +98,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     component_copies = {}
     generated = []
 
-    def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None):
+    def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None):
         result = []
         def drop(value, type_, ancestors, run_hook=True, into=result, tail=None):
             if resource(type_) is None:
@@ -195,6 +198,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             owner_type = owner.annotation or owner.expr.type
             value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
             drop(value, owner_type, set(), owner.binding_id not in fields_only)
+        if selected is not None:
+            drop(selected, selected.type, set())
         if suffix is not None:
             value, first, before = suffix
             drop(value, value.type, set(), tail=(first, before))
@@ -471,6 +476,31 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         array_clears[id(shape)] = (shape, operation)
         return replace(operation, loc=loc)
 
+    def check_selection(value, root_id):
+        writes = predicate_effects.mutated_bindings(value, call_writes=argument_writes,
+                                                   read_only_places=readonly_arguments)
+        if root_id in writes:
+            user_error(current_source, 'resource receiver changes during evaluation',
+                       Pointer(span=value.loc, message='the selected storage must survive its selectors and arguments'))
+
+    def freeze_value(value, loc, prefix):
+        declaration, held = capture(value, loc)
+        declaration = replace(declaration, decltype='const')
+        registry.by_id[held.binding_id].declaration = declaration
+        prefix.append(declaration)
+        return held
+
+    def freeze_route(value, loc, root_id, prefix):
+        # Preserve the rooted place, capturing only selectors. A raw pointer
+        # could become stale when mutable-place lowering detaches COW storage.
+        if isinstance(value, hir.MemberAccess):
+            return replace(value, value=freeze_route(value.value, loc, root_id, prefix))
+        if isinstance(value, hir.Index):
+            array = freeze_route(value.array, loc, root_id, prefix)
+            check_selection(value.index, root_id)
+            return replace(value, array=array, index=freeze_value(value.index, loc, prefix))
+        return value
+
     def array_operation(node, allowed, inherited, control):
         method = node.func
         if method.name not in ('push', 'insert', 'pop', 'reserve', 'clear', 'truncate'):
@@ -482,31 +512,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         if method.name == 'truncate':
             prefix = []
             receiver_root = bindings.access_path(receiver.target).binding_id
-            def check_selection(value):
-                writes = predicate_effects.mutated_bindings(value, call_writes=argument_writes,
-                                                           read_only_places=readonly_arguments)
-                if receiver_root in writes:
-                    user_error(current_source, 'resource array receiver changes during argument evaluation',
-                               Pointer(span=value.loc, message='the selected place must survive its selector and count'))
-            def once(value):
-                declaration, held = capture(value, node.loc)
-                declaration = replace(declaration, decltype='const')
-                registry.by_id[held.binding_id].declaration = declaration
-                prefix.append(declaration)
-                return held
-            def freeze_route(value):
-                if isinstance(value, hir.MemberAccess):
-                    return replace(value, value=freeze_route(value.value))
-                if isinstance(value, hir.Index):
-                    array = freeze_route(value.array)
-                    check_selection(value.index)
-                    return replace(value, array=array, index=once(value.index))
-                return value
-            selected = freeze_route(receiver.target)
+            selected = freeze_route(receiver.target, node.loc, receiver_root, prefix)
             supplied = node.pos_args[0] if node.pos_args else node.kw_args['count']
-            check_selection(supplied)
-            count = once(expression(supplied, allowed, inherited=inherited, control=control))
-            before = once(hir.ArrayLength(node.loc, 'int64', selected))
+            check_selection(supplied, receiver_root)
+            count = freeze_value(expression(supplied, allowed, inherited=inherited, control=control), node.loc, prefix)
+            before = freeze_value(hir.ArrayLength(node.loc, 'int64', selected), node.loc, prefix)
             dropped = cleanup((), node.loc, suffix=(selected, count, before))
             truncated = replace(node, func=replace(method, array=selected), pos_args=[count], kw_args={})
             return hir.Block(node.loc, node.type, [*prefix, *dropped, truncated], False)
@@ -816,6 +826,20 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 return replace(node, arms=arms, default=default)
             if isinstance(node, hir.Declare) and isinstance(node.expr, hir.FunctionLiteral):
                 return replace(node, expr=function(node.expr))
+            if isinstance(node, (hir.MemberAssign, hir.IndexAssign)) and resource(node.target.type) is not None:
+                # Capture selectors before the replacement, and the replacement
+                # before drop. The route remains rooted in its actual owner;
+                # neither an index expression nor the old hook runs twice.
+                borrowed = expression(hir.Place(node.loc, node.target.type, node.target), live,
+                                      inherited=literal.lifecycle == 'drop', control=control)
+                selected = borrowed.target
+                root_id = bindings.access_path(selected).binding_id
+                prefix = []
+                selected = freeze_route(selected, node.loc, root_id, prefix)
+                check_selection(node.value, root_id)
+                declaration, value = capture(fresh(node.value, live, False, control=control), node.loc)
+                return hir.Block(node.loc, node.type, [*prefix, declaration,
+                    *cleanup((), node.loc, selected=selected), replace(node, target=selected, value=value)], False)
             if isinstance(node, hir.MemberAssign):
                 return replace(node, target=expression(node.target, live, inherited=literal.lifecycle == 'drop', control=control),
                                value=expression(node.value, live, inherited=literal.lifecycle == 'drop', control=control))

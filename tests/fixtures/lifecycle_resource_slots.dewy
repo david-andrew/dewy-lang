@@ -1,0 +1,69 @@
+# Replacing a field or element ends precisely that value's lifetime. Keep
+# selectors single-evaluation even when drop changes values they read.
+let trace:int64=0
+let selections:int64=0
+Handle=type of [id:int64 values:array<int64>
+$__drop__
+release=():>void=>{trace=trace*10+id id=99 values.clear}
+]
+Box:type=[item:Handle]
+select=():>int64<v=>v=?0>=>{selections+=1 return 0}
+fields=():>int64=>{
+    let box=Box[Handle[1 [40 2]]]
+    box.item=Handle[box.item.id+1 box.item.values]
+    if trace not=?1 or box.item.id not=?2 return 1
+    if box.item.values.length not=?2 or box.item.values[0] not=?40 return 2
+    return 42
+}
+elements=():>int64=>{
+    let items:array<Handle>=[Handle[3 [42]] Handle[4 [2]]]
+    items[select()]=Handle[5 items[0].values]
+    if trace not=?3 or selections not=?1 return 1
+    if items[0].id not=?5 or items[0].values.length not=?1 return 2
+    if items[0].values[0] not=?42 return 3
+    return 42
+}
+replace=(@items:array<Handle length=1>):>void=>{items[0]=Handle[7 [42]]}
+borrowed=():>int64=>{
+    let items:array<Handle length=1>=[Handle[6 [1]]]
+    replace(@items)
+    if trace not=?6 or items[0].id not=?7 return 1
+    return 42
+}
+Optional:type=[item:Handle?]
+optional=():>int64=>{
+    let box=Optional[none]
+    box.item=Handle[1 [42]]
+    if trace not=?0 return 1
+    box.item=none
+    if trace not=?1 return 2
+    box.item=Handle[2 [42]]
+    return 42
+}
+nested=():>int64=>{
+    let rows:array<array<Handle>>=[[Handle[1 [1]] Handle[2 [2]]]]
+    rows[select()]=[Handle[3 [42]]]
+    if trace not=?21 or selections not=?1 return 1
+    if rows[0].length not=?1 or rows[0][0].values.length not=?1 return 2
+    return rows[0][0].values[0]
+}
+verify=():>int64=>{
+    trace=0
+    if fields() not=?42 or trace not=?12 return 1
+    trace=0 selections=0
+    if elements() not=?42 or trace not=?345 return 2
+    trace=0
+    if borrowed() not=?42 or trace not=?67 return 3
+    trace=0
+    if optional() not=?42 or trace not=?12 return 4
+    trace=0 selections=0
+    if nested() not=?42 or trace not=?213 return 5
+    return 42
+}
+main=():>int64=>{
+    if verify() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i<?100 {if verify() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

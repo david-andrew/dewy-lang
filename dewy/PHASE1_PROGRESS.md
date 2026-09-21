@@ -1592,3 +1592,16 @@ native visitor agrees with hosted analysis, and a freshly native-built
 program driver passes the cases through both compilers and both backends.
 These are ordinary array facts, not a special rule for generated helpers or
 permission to assume distinct indices are disjoint.
+
+Checkpoint: resource field and element replacement now uses the same lifetime
+order as local-owner replacement. Selectors and the new value are evaluated
+once, the old value's drop and component cleanup run, and the replacement is
+stored through the rooted mutable place. Optional absence, nested arrays and
+borrowed receivers follow the same path. A shared selector helper also serves
+truncation; may-write summaries fence side effects that invalidate a selected
+receiver. Drop calls remain ordinary checked operations, so their fact and
+effect consequences are visible before lowering.
+Validation: 28 focused checks passed using a freshly native-built program
+driver, covering both compilers and both x86-64/C backends, adjacent clear and
+truncate behavior, imported effects, optional/nested replacement, single
+selector evaluation and zero retained bytes over repeated replacements.
