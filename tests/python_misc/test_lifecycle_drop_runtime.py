@@ -102,14 +102,14 @@ def test_dropped_local_owners_retain_no_storage(tmp_path):
     execute(tmp_path, 'drop-lifetime', codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime', 'lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime'])
+@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime', 'lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime', 'lifecycle_implicit_owner_result'])
 def test_aggregate_cleanup_and_implicit_results(tmp_path, name):
     from pathlib import Path
     source = Path(__file__).resolve().parents[1] / f'fixtures/{name}.dewy'
     execute(tmp_path, name, codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-@pytest.mark.parametrize('name', ['lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime'])
+@pytest.mark.parametrize('name', ['lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime', 'lifecycle_implicit_owner_result'])
 def test_native_factory_result_ownership(tmp_path, name):
     from pathlib import Path
     from test_bootstrap_structural_text import build_program_driver, check_structural_text
