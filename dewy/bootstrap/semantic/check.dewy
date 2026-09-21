@@ -448,6 +448,17 @@ against = (value:addr expected:addr id:addr env:Environment @session:contexts.Se
         loop member in target.items {
             if subtyping.is_subtype(node.value_type member session.links @session.types) { candidates.push(member) }
         }
+        if candidates.length =? 0 and types.node_at(session.types views.structural_base(node.value_type session.types)) is? types.ObjectType {
+            # The subtype proof above covers the union collectively. A parent
+            # family can span disjoint descendant/exclusion alternatives;
+            # packing selects its tag from the existing dynamic brand rather
+            # than choosing a new value conversion here.
+            let records=true
+            loop member in target.items {
+                if types.node_at(session.types views.structural_base(member session.types)) isnt? types.ObjectType {records=false}
+            }
+            if records return put(hir.RepresentationCast[node.loc expected value] @session)
+        }
         if candidates.length not=? 1 return pending(id 'selecting among overlapping union materializations' env session)
         let inner = against(value candidates[0] id env @session)
         if inner is? Error return inner

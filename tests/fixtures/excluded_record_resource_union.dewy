@@ -1,0 +1,19 @@
+let drops:int64=0
+let Base=type of [value:int64
+$__drop__
+release=():>void=>{drops+=1}
+]
+let Child=type of Base & [extra:int64]
+Choice:type=(Base & ~Child)|Child
+make=(child:bool):>Choice=>if child Child[40 2] else Base[42]
+exercise=(child:bool):>int64=>{
+    let item=make(child)
+    let moved=item
+    if moved is? Child return moved.value+moved.extra
+    return moved.value
+}
+main=():>int64=>{
+    if exercise(false) not=?42 or drops not=?1 return 1
+    if exercise(true) not=?42 or drops not=?2 return 2
+    return 42
+}

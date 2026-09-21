@@ -109,6 +109,20 @@ class _ObjectLowering:
             return replace(body, item=hir.MemberAccess(body.item.loc, type_, body.item, field))
         return hir.MemberAccess(body.loc, type_, body, field)
 
+    def _family_member_test(self, word: hir.AST, member: ty.Type, node: hir.AST) -> hir.AST:
+        if isinstance(member, ty.TypeNot):
+            return self._intrinsic_call('__not__', [self._family_member_test(word, member.type, node)], 'bool', node.loc)
+        if isinstance(member, (ty.TypeAnd, ty.TypeOr)):
+            tests = [self._family_member_test(word, item, node) for item in member.items]
+            result = tests[0]
+            for test in tests[1:]:
+                result = hir.ShortCircuit(node.loc, 'bool', 'and' if isinstance(member, ty.TypeAnd) else 'or', result, test)
+            return result
+        brand = self._brand_under_test(member)
+        if brand is None:
+            self._target_error(node, 'non-object member in a narrowed object family')
+        return self._brand_range_test(word, brand, node.loc)
+
     def _family_union_view(
         self, pointer: hir.AST, stored: ty.ObjectType,
         members: tuple[ty.TypeExpr, ...], node: hir.AST,
@@ -128,29 +142,26 @@ class _ObjectLowering:
         brand_word = self._brand_word_load(source, stored, loc)
         arms = []
         for member in members:
-            brand = self._brand_under_test(member)
-            if brand is None:
-                self._target_error(node, 'non-object member in a narrowed object family')
             body = [self._tag_write(cell, member, loc),
                     self._intrinsic_call('__store_i64__', [source, self._optional_payload_address(cell, loc)], ty.VOID_TYPE, loc)]
-            arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._brand_range_test(brand_word, brand, loc),
+            arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._family_member_test(brand_word, member, node),
                                   hir.Block(loc, ty.VOID_TYPE, body, True)))
         statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
         return statements, cell
 
     def _union_family_conversions(
         self, stored: tuple[ty.TypeExpr, ...], members: tuple[ty.TypeExpr, ...],
-    ) -> list[tuple[ty.ObjectType, tuple[ty.ObjectType, ...]]]:
+    ) -> list[tuple[ty.TypeExpr, tuple[ty.TypeExpr, ...]]]:
         """Parent alternatives whose checked read uses child tags."""
         if stored == members:
             return []
         system = self.runtime_type_system
         conversions = []
         for parent in stored:
-            if not isinstance(parent, ty.ObjectType) or parent in members:
+            if not isinstance(ty.structural_base(parent), ty.ObjectType) or parent in members:
                 continue
             children = tuple(member for member in members
-                             if isinstance(member, ty.ObjectType) and system.is_subtype(member, parent))
+                             if isinstance(ty.structural_base(member), ty.ObjectType) and system.is_subtype(member, parent))
             if children:
                 conversions.append((parent, children))
         return conversions
@@ -172,7 +183,7 @@ class _ObjectLowering:
         ]
         arms = []
         for parent, children in conversions:
-            extra, view = self._family_union_view(self._optional_load_payload(source, parent, loc), parent, children, node)
+            extra, view = self._family_union_view(self._optional_load_payload(source, parent, loc), ty.structural_base(parent), children, node)
             body = [*extra, hir.Assign(loc, ty.VOID_TYPE, result, '=', view)]
             arms.append(hir.IfArm(loc, ty.VOID_TYPE, self._tag_is(self._optional_tag(source, loc), parent, loc),
                                   hir.Block(loc, ty.VOID_TYPE, body, True)))
@@ -981,7 +992,7 @@ class _ObjectLowering:
             return self._extract_expression(node)
         prelude, value = self._extract_expression(node)
         members = ty.runtime_union_members(node.type)
-        if members is not None and all(isinstance(ty.unfold(member), ty.ObjectType) for member in members):
+        if members is not None and all(isinstance(ty.structural_base(member), ty.ObjectType) for member in members):
             # An object parameter accepts every member of this narrowed
             # family. Its ABI takes the object, not the union view's cell.
             return prelude, self._union_source_pointer(value, node.loc)
@@ -992,17 +1003,18 @@ class _ObjectLowering:
         node: hir.MemberAccess,
     ) -> tuple[list[hir.AST], hir.AST]:
         prelude, obj = self._extract_object_pointer(node.value)
-        if not isinstance(node.value.type, ty.ObjectType):
+        object_type = ty.structural_base(node.value.type)
+        if not isinstance(object_type, ty.ObjectType):
             self._target_error(node, 'member access requires an object')
         if (self._has_arena() and not self.lowering_module_startup
                 and self._frame_record_call(node.value)):
             # A field view keeps its returned receiver alive for the whole
             # statement. Retained fields are copied by their ordinary value
             # boundary before this receiver's owned members are released.
-            prelude, obj = self._object_statement_temporary(prelude, obj, node.value.type, node.loc)
-        _size, offsets = self._object_layout(node.value.type, node)
+            prelude, obj = self._object_statement_temporary(prelude, obj, object_type, node.loc)
+        _size, offsets = self._object_layout(object_type, node)
         address = self._field_address(obj, offsets[node.name], node.loc)
-        field = node.value.type.field(node.name)
+        field = object_type.field(node.name)
         field_type = field.type if field is not None else node.type
         if isinstance(field_type, ty.ObjectType):
             narrowed = ty.runtime_union_members(node.type)
@@ -1527,11 +1539,12 @@ class _ObjectLowering:
 
     def _lower_member_assign(self, node: hir.MemberAssign) -> list[hir.AST]:
         prelude, obj = self._extract_write_route(node.target.value)
-        if not isinstance(node.target.value.type, ty.ObjectType):
+        object_type = ty.structural_base(node.target.value.type)
+        if not isinstance(object_type, ty.ObjectType):
             self._target_error(node, 'member assignment requires an object')
-        _size, offsets = self._object_layout(node.target.value.type, node)
+        _size, offsets = self._object_layout(object_type, node)
         address = self._field_address(obj, offsets[node.target.name], node.loc)
-        field = node.target.value.type.field(node.target.name)
+        field = object_type.field(node.target.name)
         field_type = field.type if field is not None else node.target.type
         if isinstance(field_type, ty.ArrayType) and field_type.length is None and isinstance(node.target.value, hir.ExpressedIdentifier):
             fields = self.borrowed_fields.setdefault(local_binding_key(node.target.value), set())

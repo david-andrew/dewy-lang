@@ -5152,8 +5152,8 @@ class _Lowerer(
                     index
                     for index, member in enumerate(members)
                     if tested_brand is not None and not system.is_subtype(member, node.test_type)
-                    and isinstance(ty.unfold(member), ty.ObjectType)
-                    and (ty.user_brand_descends(ty.unfold(node.test_type), ty.unfold(member)) or ty.user_brand_carries(ty.unfold(node.test_type), ty.unfold(member)))
+                    and isinstance(ty.structural_base(member), ty.ObjectType)
+                    and (ty.user_brand_descends(ty.unfold(node.test_type), ty.structural_base(member)) or ty.user_brand_carries(ty.unfold(node.test_type), ty.structural_base(member)))
                 ]
                 # A parent only partially overlaps the tested child. Negation
                 # still needs its dynamic brand test, not a static true tag.
@@ -5198,7 +5198,7 @@ class _Lowerer(
                         )
                     )
                 for index in branded:
-                    member_type = ty.unfold(members[index])
+                    member_type = ty.structural_base(members[index])
                     assert isinstance(member_type, ty.ObjectType) and tested_brand is not None
                     pointer = self._union_source_pointer(cell, node.loc)
                     in_brand = self._brand_range_test(self._brand_word_load(pointer, member_type, node.loc), tested_brand, node.loc)
@@ -5234,7 +5234,7 @@ class _Lowerer(
                     test = comparison if test is None else hir.ShortCircuit(node.loc, 'bool', 'or', test, comparison)
                 assert test is not None
                 return union_prelude, test
-            value_object = ty.unfold(node.value.type)
+            value_object = ty.structural_base(node.value.type)
             if tested_brand is not None and isinstance(value_object, ty.MetaType):
                 # `kind is? Whitespace` on a type value: the value is the brand id
                 prelude, word = self._extract_expression(node.value)

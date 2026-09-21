@@ -1184,6 +1184,35 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
     return tuple(members)
 
 
+@_runtime_query
+def structural_base(type_: Type) -> Type:
+    """Locate storage without erasing logical exclusions from a read type.
+
+    A descendant exclusion changes inhabitants, not its family's layout.
+    Comparable positive records use the most specific structure; unrelated
+    intersections keep their normal composition rules. Matches the native
+    type_queries.structural_base representation query.
+    """
+    base = unfold(strip_refinement(type_))
+    if not isinstance(base, TypeAnd):
+        return base
+    positive = None
+    for member in base.items:
+        if isinstance(member, TypeNot):
+            continue
+        candidate = structural_base(member)
+        if positive is None or candidate == positive:
+            positive = candidate
+            continue
+        if not isinstance(positive, ObjectType) or not isinstance(candidate, ObjectType):
+            return base
+        if TypeSystem._object_subtype(candidate, positive):
+            positive = candidate
+        elif not TypeSystem._object_subtype(positive, candidate):
+            return base
+    return base if positive is None else positive
+
+
 def is_zero_arg_function(type_: Type) -> bool:
     """Whether a type is a function that takes no arguments."""
 

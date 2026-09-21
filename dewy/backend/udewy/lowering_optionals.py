@@ -337,7 +337,7 @@ class _OptionalLowering:
     # present, matching optional tags) and one payload word at offset 8.
 
     def _union_member_supported(self, member: ty.TypeExpr) -> bool:
-        member = ty.strip_refinement(member)
+        member = ty.structural_base(member) if isinstance(member, ty.TypeAnd) else ty.strip_refinement(member)
         if isinstance(member, ty.NamedType):
             return True  # a recursive reference is always a handle member
         if ty.is_user_nominal(member):
@@ -351,7 +351,7 @@ class _OptionalLowering:
             or member == 'bool'
             or ty.fixed_integer_layout(member) is not None
             or isinstance(member, (ty.StringType, ty.StringLiteralType, ty.IntegerLiteralType, ty.BinaryLiteralType))
-            or member in {'string', 'grapheme', 'char'}
+            or isinstance(member, str) and member in {'string', 'grapheme', 'char'}
         )
 
     # Aggregate members requiring caller-prepared storage get a
@@ -376,6 +376,7 @@ class _OptionalLowering:
     # word is the object pointer in both cases.
 
     def _union_member_kind(self, member: ty.TypeExpr, *, prepared: bool = True) -> str:
+        member = ty.structural_base(member) if isinstance(member, ty.TypeAnd) else member
         if isinstance(member, ty.NamedType):
             return 'handle'
         if isinstance(member, ty.ArrayType) and member.length is None:
@@ -418,6 +419,7 @@ class _OptionalLowering:
         loc: Span,
     ) -> tuple[list[hir.AST], hir.AST]:
         """A fresh arena copy of the aggregate ``source`` points to, as a handle."""
+        member = ty.structural_base(member) if isinstance(member, ty.TypeAnd) else member
         if isinstance(member, ty.NamedType):
             # recursion is dynamic: a synthesized function copies the alias
             return [], self._named_copy_call(member, source, loc)
@@ -440,7 +442,7 @@ class _OptionalLowering:
         loc: Span,
     ) -> tuple[list[hir.AST], hir.AST]:
         """Materialize ``value`` as arena storage of the member, as a handle."""
-        unfolded = ty.unfold(member)
+        unfolded = ty.structural_base(member)
         if isinstance(unfolded, ty.ObjectType) and isinstance(value, hir.ObjectLiteral):
             size, _offsets = self._object_layout(unfolded, value)
             dest = self._new_object_temp(loc)
@@ -628,8 +630,9 @@ class _OptionalLowering:
         ))
         for index, offset in slots.items():
             member = members[index]
-            if isinstance(member, ty.ObjectType):
-                tree_statements, root = self._allocate_object_result_value(member, loc)
+            layout = ty.structural_base(member)
+            if isinstance(layout, ty.ObjectType):
+                tree_statements, root = self._allocate_object_result_value(layout, loc)
             else:
                 assert isinstance(member, ty.ArrayType)
                 tree_statements, root = self._allocate_array_result_value(member, loc)
@@ -731,7 +734,7 @@ class _OptionalLowering:
             # fixed arrays and records containing them still construct some
             # storage in the caller's frame; leave those paths at the site.
             frame_storage = any(
-                isinstance(plain := ty.unfold(ty.strip_refinement(member)), ty.ArrayType) and plain.length is not None
+                isinstance(plain := ty.structural_base(member), ty.ArrayType) and plain.length is not None
                 or isinstance(plain, ty.ObjectType) and self._object_copy_uses_frame_storage(plain)
                 for member in members
             )
@@ -808,13 +811,14 @@ class _OptionalLowering:
     ) -> list[hir.AST]:
         """Copy the aggregate at ``source_pointer`` into ``dest``'s member storage
         (its prepared tree at ``slot``, else a fresh handle) and point the payload at it."""
+        layout = ty.structural_base(member)
         if slot is not None:
             dest_prelude, dest_root = self._union_tree_root(dest, slot, member, loc)
             source_root = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('source'))
             source_prelude = [hir.Declare(loc, ty.VOID_TYPE, 'let', source_root.name, 'int64', source_pointer)]
-            if isinstance(member, ty.ObjectType):
+            if isinstance(layout, ty.ObjectType):
                 copy = self._copy_object_into_result_storage(
-                    replace(dest_root, type='int64'), source_root, member, loc, move=move,
+                    replace(dest_root, type='int64'), source_root, layout, loc, move=move,
                 )
             else:
                 assert isinstance(member, ty.ArrayType)
@@ -1019,6 +1023,17 @@ class _OptionalLowering:
                 value,
                 'retagging between differently shaped union types',
             )
+        if (isinstance(shape := ty.structural_base(value.type), ty.ObjectType)
+                and not any(self.runtime_type_system.is_subtype(value.type, member) for member in members)
+                and self.runtime_type_system.is_subtype(value.type, ty.union(*members))
+                and all(isinstance(ty.structural_base(member), ty.ObjectType) for member in members)):
+            # A parent value can occupy several disjoint family alternatives.
+            # Its dynamic brand selects the logical tag; layout uses only the
+            # positive structure. Evaluate the source once before copying it.
+            prelude, pointer = self._extract_object_pointer(value)
+            viewed, view = self._family_union_view(pointer, shape, members, value)
+            return [*prelude, *viewed, *self._union_copy_cell(cell, view, members, value.loc, prepared=prepared),
+                    *(self._discarded_call_result(value, pointer) or [])]
         index = self._union_member_index(members, value.type, value)
         member = members[index]
         slots = self._union_tree_slots(members, prepared=prepared)
@@ -1036,9 +1051,9 @@ class _OptionalLowering:
             ]
         if index in slots:
             root_prelude, root = self._union_tree_root(cell, slots[index], member, value.loc)
-            if isinstance(member, ty.ObjectType):
+            if isinstance(layout := ty.structural_base(member), ty.ObjectType):
                 write = self._write_object_result_value(
-                    replace(root, type='int64'), value, member
+                    replace(root, type='int64'), value, layout
                 )
             else:
                 assert isinstance(member, ty.ArrayType)
@@ -1083,10 +1098,10 @@ class _OptionalLowering:
         # A child record fits its ancestor's reserved family storage. It
         # keeps its dynamic brand, but the enclosing union uses the ancestor
         # tag. Other representation conversions keep their existing rules.
-        if isinstance(source, ty.ObjectType):
+        if isinstance(ty.structural_base(source), ty.ObjectType):
             system = self.runtime_type_system
             candidates = [index for index, target in enumerate(targets)
-                          if isinstance(target, ty.ObjectType) and system.is_subtype(source, target)]
+                          if isinstance(ty.structural_base(target), ty.ObjectType) and system.is_subtype(source, target)]
             if len(candidates) == 1:
                 return candidates[0]
         return None

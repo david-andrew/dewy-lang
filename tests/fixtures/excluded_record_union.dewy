@@ -1,0 +1,30 @@
+# Logical alternatives keep their exclusions; storage uses the positive family.
+let Base=type of [value:int64 text:string]
+let Child=type of Base & [extra:int64 tail:string]
+let Grandchild=type of Child & [last:string]
+Choice:type=(Base & ~Child)|Child
+make=(kind:int64):>Choice=>{
+    if kind=?0 return Base[42 "base"]
+    if kind=?1 return Child[40 "child" 2 "tail"]
+    return Grandchild[40 "grandchild" 2 "tail" "last"]
+}
+read=(item:Choice):>int64=>{
+    if item is? Child return item.value+item.extra
+    return item.value
+}
+exercise=(kind:int64):>int64=>{
+    let item=make(kind)
+    let saved=item.copy()
+    if read(saved) not=?42 return 1
+    if item is? Child {
+        if kind=?2 and item isnt? Grandchild return 2
+        return item.value+item.extra
+    }
+    return item.value
+}
+main=():>int64=>{
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <? 30 {if exercise(i%3) not=?42 return 1}
+    if _arena_live_bytes not=?before return 2
+    return 42
+}

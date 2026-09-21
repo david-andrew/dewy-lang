@@ -27,7 +27,7 @@ def copy_blocker(type_: ty.Type) -> CopyBlocker | None:
     seen = set()
     while pending:
         type_, path = pending.pop()
-        type_ = ty.unfold(ty.strip_refinement(type_))
+        type_ = ty.structural_base(type_)
         if id(type_) in seen:
             continue
         seen.add(id(type_))

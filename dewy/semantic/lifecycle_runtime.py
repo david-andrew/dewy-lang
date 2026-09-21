@@ -38,7 +38,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             return resource_cache[key]
         pending, seen = [type_], set()
         while pending:
-            type_ = ty.unfold(ty.strip_refinement(pending.pop()))
+            type_ = ty.structural_base(pending.pop())
             if id(type_) in seen:
                 continue
             seen.add(id(type_))
@@ -57,7 +57,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     for declaration in declarations.values():
         literal = declaration.expr
         current_source = literal.source or srcfile
-        receiver = ty.unfold(ty.strip_refinement(literal.pos_or_kw_args[0].type))
+        receiver = ty.structural_base(literal.pos_or_kw_args[0].type)
         if literal.lifecycle not in ('drop', 'copy', 'move') or not isinstance(receiver, ty.ObjectType):
             reject(declaration, 'an invalid lifecycle receiver')
 
@@ -104,7 +104,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         def drop(value, type_, ancestors, run_hook=True, into=result, tail=None):
             if resource(type_) is None:
                 return
-            shape = ty.unfold(ty.strip_refinement(type_))
+            shape = ty.structural_base(type_)
             if id(shape) in ancestors:
                 # A recursive value has finite runtime storage but an infinite
                 # structural expansion. Close that expansion with a borrowed
@@ -194,7 +194,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 for member in shape.items:
                     if resource(member) is None:
                         continue
-                    member_shape = ty.unfold(ty.strip_refinement(member))
+                    member_shape = ty.structural_base(member)
                     if not run_hook and not (isinstance(member_shape, ty.ObjectType)
                                              and any(method.lifecycle == 'move' for method in member_shape.methods)):
                         # A different alternative moved intact; its nested
@@ -233,7 +233,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         return result
 
     def transfer(value, expected):
-        shape = ty.unfold(ty.strip_refinement(value.type))
+        shape = ty.structural_base(value.type)
         if isinstance(shape, ty.TypeOr):
             arms = []
             for member in shape.items:
@@ -257,7 +257,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         if operation is None:
             reject(value, 'an unavailable move operation')
         result_type = operation.expr.rettype
-        if ty.unfold(ty.strip_refinement(result_type)) != shape:
+        if ty.structural_base(result_type) != shape:
             reject(value, 'an adapted move receiver without a checked composition')
         function = hir.ExpressedIdentifier(value.loc, operation.expr.type, operation.name, binding_id=operation.binding_id)
         result = hir.FunctionCall(value.loc, result_type, function, [hir.Place(value.loc, shape, value)], {})
@@ -347,13 +347,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
 
     def copy_value(value, *, implicit):
         if resource(value.type) is None:
-            shape = ty.unfold(ty.strip_refinement(value.type))
+            shape = ty.structural_base(value.type)
             return hir.CopyValue(value.loc, value.type, value) if isinstance(shape, (ty.ArrayType, ty.ObjectType, ty.TypeOr)) or ty.string_valued(shape) else value
         if lifecycle.copy_blocker(value.type) is not None:
             user_error(current_source, 'lifecycle ownership lowering requires an independent copy',
                        Pointer(span=value.loc, message='this move-only value is still owned elsewhere'),
                        hint='declare $__copy__ for independent owners, or keep this use within a proven borrow or last-use transfer')
-        shape = ty.unfold(ty.strip_refinement(value.type))
+        shape = ty.structural_base(value.type)
         operation = copy_operation(shape, value.loc)
         result = hir.FunctionCall(value.loc, operation.type.ret, operation,
                                   [hir.Place(value.loc, shape, value)], {}, implicit_copy=implicit)
@@ -375,8 +375,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         if isinstance(node, hir.Obligation):
             return replace(node, value=fresh(node.value, allowed, inherited, components, control))
         if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
-            target = ty.unfold(ty.strip_refinement(node.type))
-            source = ty.unfold(ty.strip_refinement(node.expr.type))
+            target = ty.structural_base(node.type)
+            source = ty.structural_base(node.expr.type)
             if isinstance(target, ty.TypeOr) or source == target:
                 # Naming the same storage through a recursive alias does not
                 # change whether the underlying constructor is fresh.
@@ -430,7 +430,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             return replace(node, func=expression(node.func, allowed, inherited=inherited, control=control),
                            pos_args=[argument(arg, allowed, inherited, control) for arg in node.pos_args],
                            kw_args={name: argument(arg, allowed, inherited, control) for name, arg in node.kw_args.items()})
-        shape = ty.unfold(ty.strip_refinement(node.type))
+        shape = ty.structural_base(node.type)
         if isinstance(node, hir.ArrayLiteral) and isinstance(shape, ty.ArrayType):
             return replace(node, items=[fresh(item, allowed, inherited, components, control) for item in node.items])
         if not isinstance(node, hir.ObjectLiteral) or not isinstance(shape, ty.ObjectType):
@@ -438,7 +438,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
         if hook is not None:
             operation = declarations.get(hook.binding_id)
-            if operation is None or ty.unfold(ty.strip_refinement(operation.expr.pos_or_kw_args[0].type)) != shape:
+            if operation is None or ty.structural_base(operation.expr.pos_or_kw_args[0].type) != shape:
                 reject(node, 'an adapted drop receiver without a checked composition')
         return replace(node, fields=[replace(field, value=fresh(field.value, allowed, inherited, components, control)
                                             if resource(field.value.type) is not None else expression(field.value, allowed, inherited=inherited, control=control))
@@ -565,7 +565,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             truncated = replace(node, func=replace(method, array=selected), pos_args=[count], kw_args={})
             return hir.Block(node.loc, node.type, [*prefix, *dropped, truncated], False)
         if method.name == 'clear':
-            shape = ty.unfold(ty.strip_refinement(method.array.type))
+            shape = ty.structural_base(method.array.type)
             assert isinstance(shape, ty.ArrayType)
             return hir.FunctionCall(node.loc, ty.VOID_TYPE, clear_operation(shape, node.loc), [receiver], {})
         return replace(node, func=replace(method, array=receiver.target),
@@ -861,11 +861,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         items.append(result)
                 return replace(node, items=items)
             if isinstance(node, hir.Declare) and resource(node.annotation or node.expr.type) is not None:
-                expected = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
-                actual = ty.unfold(ty.strip_refinement(node.expr.type))
+                expected = ty.structural_base(node.annotation or node.expr.type)
+                actual = ty.structural_base(node.expr.type)
                 same_array = isinstance(expected, ty.ArrayType) and isinstance(actual, ty.ArrayType) and expected.element == actual.element
                 same_union = isinstance(expected, ty.TypeOr) and (resource(actual) is None or any(
-                    ty.unfold(ty.strip_refinement(member)) == actual for member in expected.items))
+                    ty.structural_base(member) == actual for member in expected.items))
                 if (node.binding_id is None
                         or node.annotation is not None and node.annotation != node.expr.type and not same_array and not same_union):
                     reject(node, 'a non-fresh local owner')

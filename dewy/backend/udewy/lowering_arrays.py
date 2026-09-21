@@ -1414,7 +1414,7 @@ class _ArrayLowering(_ArraySharing):
         """
         if not inline and self._has_arena():
             if not any((strings and self._is_string_valued(member)) or
-                       isinstance(ty.unfold(ty.strip_refinement(member)), (ty.ArrayType, ty.ObjectType))
+                       isinstance(ty.structural_base(member), (ty.ArrayType, ty.ObjectType))
                        for member in members):
                 return []
             key = (members, prepared, strings)
@@ -1432,7 +1432,7 @@ class _ArrayLowering(_ArraySharing):
         payload = self._new_string_temp(loc, 'int64', 'cell_payload')
         arms: list[hir.IfArm | hir.LoopArm] = []
         for member in members:
-            unfolded = ty.unfold(ty.strip_refinement(member))
+            unfolded = ty.structural_base(member)
             release: list[hir.AST] = []
             if self._is_string_valued(member):
                 if strings:

@@ -3627,6 +3627,8 @@ def _disjoint_types(a: ty.TypeExpr, b: ty.TypeExpr, *, ctx: Context) -> bool:
 
     def disjoint(x: ty.TypeExpr, y: ty.TypeExpr) -> bool:
         x, y = ty.unfold(ty.strip_refinement(x)), ty.unfold(ty.strip_refinement(y))
+        if isinstance(x, (ty.TypeAnd, ty.TypeNot)) or isinstance(y, (ty.TypeAnd, ty.TypeNot)):
+            return ctx.type_system.is_empty(ty.intersect(x, y))
         if isinstance(x, ty.ObjectType) and isinstance(y, ty.ObjectType):
             return not (ctx.type_system.is_subtype(x, y) or ctx.type_system.is_subtype(y, x))
         for object_type, name in ((x, y), (y, x)):
@@ -8965,7 +8967,7 @@ def _builtin_copy_available(type_: ty.Type) -> bool:
     Do not inspect fields recursively: their storage ownership is already the
     ordinary copy operation's responsibility, including recursive records.
     """
-    plain = ty.unfold(ty.strip_refinement(type_))
+    plain = ty.structural_base(type_)
     if isinstance(plain, ty.TypeOr):
         return all(_builtin_copy_available(member) for member in plain.items)
     if isinstance(plain, ty.ObjectType):
@@ -8988,7 +8990,7 @@ def _checked_copy(value: hir.AST, loc: Span, *, ctx: Context) -> hir.AST:
         component = f'component `{blocker.path.lstrip(".")}`' if blocker.path else 'this type'
         user_error(ctx.srcfile, 'cannot copy a move-only value',
                    Pointer(span=loc, message=f'{component} declares `$__drop__` without `$__copy__`'))
-    plain = ty.unfold(ty.strip_refinement(value.type))
+    plain = ty.structural_base(value.type)
     if isinstance(plain, ty.ObjectType):
         hook = next((method for method in plain.methods if method.lifecycle == 'copy'), None)
         if hook is not None:
@@ -9189,7 +9191,8 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
         return _metatype_member(value, name, binop, ctx=ctx)
     if isinstance(value, hir.TypeValue) and isinstance(ty.unfold(value.value), ty.ObjectType):
         return _type_name_member(value, name, binop, ctx=ctx)
-    if not isinstance(value.type, ty.ObjectType):
+    object_type = ty.structural_base(value.type)
+    if not isinstance(object_type, ty.ObjectType):
         if name == 'length':
             type_error(
                 ctx.srcfile,
@@ -9207,15 +9210,15 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 message=f'this has type `{type_to_dewy(value.type)}`',
             ),
         )
-    field = value.type.field(name)
-    if field is None and name == 'typename' and value.type.method(name) is None:
+    field = object_type.field(name)
+    if field is None and name == 'typename' and object_type.method(name) is None:
         return _typename(value, binop.loc, ctx=ctx)
     if field is None:
-        method = value.type.method(name)
+        method = object_type.method(name)
         if method is not None and method.lifecycle is not None:
             user_error(ctx.srcfile, 'a lifecycle hook is compiler-only', Pointer(span=binop.loc, message=f'`{name}` cannot be called or used as a function value'))
         if method is not None and method.binding_id is None:
-            _declare_pending_methods(ctx=ctx, for_type=value.type)
+            _declare_pending_methods(ctx=ctx, for_type=object_type)
         if method is not None and method.binding_id is not None:
             function_binding = ctx.binding_registry.by_id[method.binding_id]
             assert isinstance(function_binding.type, ty.FunctionType)
@@ -9228,7 +9231,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             ctx.srcfile,
             f'unknown object field `{name}`',
             Pointer(span=binop.right.loc, message='this field is not present'),
-            hint=f'available fields: {", ".join(item.name for item in value.type.fields) or "(none)"}',
+            hint=f'available fields: {", ".join(item.name for item in object_type.fields) or "(none)"}',
         )
     access = hir.MemberAccess(binop.loc, field.type, value, name, field.mutable)
     if isinstance(field.type, (ty.ObjectType, ty.TypeOr)):

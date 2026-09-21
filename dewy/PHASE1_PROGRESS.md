@@ -1525,9 +1525,9 @@ An earlier version of the native conversion also produced byte-identical
 second and third generations and passed the three warm-cache regressions.
 
 Follow-up from the reduced case: explicit stored `(Base & ~Child) | Child`
-currently reaches an unhandled `TypeAnd` in hosted union-storage selection.
-Retain this parity gap for the record-family representation work; the concrete
-child-union reproducer above independently covers the flow ownership fix.
+reached an unhandled `TypeAnd` in hosted union-storage selection. The record-
+family checkpoint below closes that storage gap; the concrete child-union
+reproducer above independently covers the earlier flow ownership fix.
 
 Full-suite checkpoint at `b23ff134`: 3,481 passed, 14 skipped, two failures
 in stale harness interfaces. The query-cache spy now forwards the shared
@@ -1881,6 +1881,7 @@ the latency target. Direct and C execution checks pass, and all 168 expanded
 hosted/native parity cases pass. The pair and parity outputs are under
 `../dewy-build-artifacts/phase1-affine-{integration,parity}-2026-09-21`.
 The concise-report change is subsequent to this fixed-point certification.
+
 ## Unwritten local view lifetimes (2026-09-21)
 
 An unwritten `let` projection now uses the same shorter lifetime proof as a
@@ -1919,3 +1920,30 @@ Full CI checkpoint at `bd17c8c5`: **3,636 passed, 32 skipped**, in 2,618.68 s.
 The website and native release checks are also green. Subsequent concise
 reporting, unwritten-let views and forwarding proofs have their own targeted
 validation and await the next full integration run.
+
+## Excluded record-family storage (2026-09-21)
+
+Hosted checking and lowering now share the native compiler's structural-base
+query: exclusions restrict values while comparable positive record types
+determine layout. Logical alternatives retain their own tags and predicates.
+Union packing selects among descendant/exclusion alternatives by dynamic
+brand when the source fits the union collectively. Native checking now permits
+that already-proven case to reach its existing dynamic packing path.
+
+Field reads/writes, copies, release and lifecycle capability queries use the
+positive storage view. Nested descendant tests no longer treat every excluded
+record family as disjoint from all other records. Splitting a stored parent
+alternative into several descendants preserves the correct child field offsets.
+
+Validation: 58 adjacent hosted checks passed, followed by all 12 final focused
+cases. Nine positive and three negative programs pass both compilers, with
+positives executed through x86-64 and C. They cover parent/child/grandchild
+values, sibling narrowing, independent fixed-array copies, frame-only storage,
+move-only resources and rejected copies, logical fact retention and zero
+retained allocation after repeated calls. The hosted compiler also checked
+and emitted the complete native test driver (49,897,821 bytes).
+
+The preceding forwarding-proof snapshot's native own-source inventory passes
+the unchanged 5,000-site / 110-per-KLOC gate at **4,865 sites / 45,841 lines =
+106.128 per KLOC** (67.85 s; 2,712,860 KiB peak RSS). This is a static inventory,
+not a runtime byte count or a full native build latency measurement.
