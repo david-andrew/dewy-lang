@@ -1,0 +1,42 @@
+let moved:int64=0
+let dropped:int64=0
+let leaf_drops:int64=0
+LeafHandle=type of [token:int64
+$__drop__
+release=():>void=>{leaf_drops+=1}
+$__copy__
+duplicate=():>LeafHandle=>LeafHandle[token]
+]
+MovingHandle=type of [token:int64 leaf:LeafHandle values:array<int64>
+$__drop__
+release=():>void=>{dropped+=1 token=0 values.clear}
+$__move__
+transfer=():>MovingHandle=>{
+    moved+=1
+    token+=1
+    return MovingHandle[token leaf.copy() values.copy()]
+}
+]
+ExtendedHandle=type of MovingHandle & [text:string]
+FinalHandle=type of ExtendedHandle & [extra:int64]
+make=():>MovingHandle=>{let owner=MovingHandle[41 LeafHandle[9] [1 2]] return owner}
+derived=():>FinalHandle=>{let owner=FinalHandle[41 LeafHandle[9] [1 2] "kept {42}" 7] return owner}
+exercise=():>int64=>{
+    let first=make()
+    if moved not=?1 or dropped not=?0 or leaf_drops not=?1 return 1
+    let second=derived()
+    if moved not=?2 or dropped not=?0 or leaf_drops not=?2 return 2
+    if first.token not=?42 or second.token not=?42 or second.text not=?'kept 42' or second.extra not=?7 return 3
+    if first.values.length not=?2 or second.values.length not=?2 return 4
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 or dropped not=?2 or leaf_drops not=?4 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {
+        moved=0 dropped=0 leaf_drops=0
+        if exercise() not=?42 or dropped not=?2 or leaf_drops not=?4 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

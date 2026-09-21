@@ -343,6 +343,15 @@ until transfer/replacement lowering can account for both owners. A write to
 a projected place preserves enclosing array lengths and unrelated fields,
 while discarding evidence about the endpoint and its descendants.
 
+Explicit returns of existing locals now invoke a declared move hook. The
+result is captured before cleanup, and the consumed receiver's own drop is
+skipped. Its remaining nested resources still drop, followed by normal backing
+storage cleanup. Calls inserted by this pass participate in effect/fact
+checking, including callers' contracts. Move bodies currently construct fresh
+components or explicitly copy resource fields; general field transfers are
+still pending. A checked inherited move can consume its intermediate parent
+result, but moving added resource fields remains gated.
+
 Approved member shape (illustrative helpers, not currently executable):
 
 ```dewy
@@ -421,7 +430,7 @@ user-minted resources with allocator ownership. The allocation-capability
 protocol and remaining failure behavior need their own design before useful
 resource-owning hooks can be declared complete.
 
-### Inheritance — copy/drop composition implemented, move pending
+### Inheritance — copy/drop composition and ordinary move fields implemented
 
 If `Child = type of Parent & [extra:string]`, an inherited parent copy/move
 hook returns `Parent`, not the complete `Child`. David approved applying the
@@ -446,7 +455,7 @@ the complete intermediate parent, including nested resource fields, without
 running that intermediate's drop. Only the finished child owns those fields;
 the parent operation's effects and child constructor's fact checks remain
 visible. The checked HIR and snapshot codec retain this composition contract.
-Move hooks and containers of
+General field transfers in move hooks and containers of
 resources still need ownership lowering.
 
 Provisional details following David's updated review guidance: an explicitly

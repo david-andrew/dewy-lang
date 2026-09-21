@@ -9,10 +9,11 @@ import p"bindings.dewy" as bindings
 # are fresh records, including nested record resources and factory results
 # transferred to callers. Explicit copy hooks may construct fresh results;
 # drop runs before field cleanup. Checked place parameters borrow owners.
-# Implicit copies/moves, resource containers and owning parameters remain
+# Explicit returns transfer locals and invoke custom move hooks. General
+# local transfers, implicit copies, resource containers and owning parameters remain
 # implementation gaps, never silent memberwise fallbacks.
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
-Plan:type = [hooks:dict<addr Hook>=[] owners:dict<string Hook>=[] prepared:set<addr>=set[] source:SrcFile problem:Error?=none]
+Plan:type = [hooks:dict<addr Hook>=[] owners:dict<string Hook>=[] moves:dict<string Hook>=[] prepared:set<addr>=set[] source:SrcFile problem:Error?=none result_type:addr?=none]
 put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
 store = (id:addr node:hir.AST @session:contexts.Session):>void => {
     contexts.replace_hir(id node @session)
@@ -36,13 +37,13 @@ resource = (id:addr nodes:types.Table):>addr? => {
     }
     return none
 }
-drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session):>void => {
+drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true):>void => {
     if plan.problem isnt? none or resource(type_id session.types) is? none return
     let owner=views.structural_base(type_id session.types)
     let type=types.node_at(session.types owner)
     if type isnt? types.ObjectType or owner in? ancestors {reject(hir.node_at(session.hir value) 'resource containers or recursive resource storage' @plan) return}
     loop method in type.methods {
-        if method.lifecycle not=? 'drop' continue
+        if method.lifecycle not=? 'drop' or not run_hook continue
         if type.brand is? none {reject(hir.node_at(session.hir value) 'an unavailable drop operation' @plan) return}
         let hook=plan.owners.get(type.brand)
         if hook is? none {reject(hir.node_at(session.hir value) 'an unavailable drop operation' @plan) return}
@@ -64,7 +65,7 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         drop_value(member field.value_type loc nested @calls @plan @session)
     }
 }
-cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session):>array<addr> => {
+cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fields_only:addr?=none):>array<addr> => {
     let result:array<addr>=[]
     let index=owners.length
     loop index >? 0 {
@@ -74,7 +75,27 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session):>ar
         let declared:hir.Declare=declaration
         let owner=hir.node_at(session.hir declared.expr).value_type
         let value=put(hir.ExpressedIdentifier[loc owner declared.name declared.binding_id] @session)
-        drop_value(value owner loc set[] @result @plan @session)
+        drop_value(value owner loc set[] @result @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only)
+    }
+    return result
+}
+transfer = (id:addr @plan:Plan @session:contexts.Session):>addr => {
+    let value=hir.node_at(session.hir id)
+    let shape=views.structural_base(value.value_type session.types)
+    let type=types.node_at(session.types shape)
+    $runtime_assert type is? types.ObjectType
+    if type.brand is? none return id
+    let hook=plan.moves.get(type.brand)
+    if hook is? none return id
+    let signature=types.node_at(session.types hook.signature)
+    $runtime_assert signature is? types.FunctionType
+    if not types.same_type(views.structural_base(signature.ret session.types) shape session.types) {reject(value 'an adapted move receiver without a checked composition' @plan) return id}
+    let function=put(hir.ExpressedIdentifier[value.loc hook.signature hook.name hook.binding] @session)
+    let place=put(hir.Place[value.loc shape id] @session)
+    let result=put(hir.FunctionCall[value.loc signature.ret function [place] []] @session)
+    let expected=plan.result_type
+    if expected isnt? none and types.node_at(session.types expected) is? types.RefinedType {
+        result=put(hir.Obligation[value.loc signature.ret result expected 'the return contract after moving'] @session)
     }
     return result
 }
@@ -232,14 +253,16 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
     if node is? hir.Return {
         let current:hir.Return=node
         let consumed:addr?=none
+        let moved=false
         if current.item isnt? none {
             if owning_result and resource(hir.node_at(session.hir current.item).value_type session.types) isnt? none {
                 # An explicit return ends this path. Only a local owner,
                 # never a borrowed parameter, can transfer to the caller.
-                let returned=hir.node_at(session.hir current.item)
+                let returned_id:addr=current.item
+                let returned=hir.node_at(session.hir returned_id)
                 if composed_parent isnt? none {
                     $runtime_assert returned is? hir.ObjectLiteral
-                    fresh(current.item live false @plan @session components=set[composed_parent])
+                    fresh(returned_id live false @plan @session components=set[composed_parent])
                     loop owner in owners {
                         let declaration=hir.node_at(session.hir owner)
                         $runtime_assert declaration is? hir.Declare
@@ -250,10 +273,16 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                     loop owner in owners {
                         let declaration=hir.node_at(session.hir owner)
                         $runtime_assert declaration is? hir.Declare
-                        if declaration.binding_id =? returned.binding_id {consumed=owner break}
+                        if declaration.binding_id =? returned.binding_id {
+                            consumed=owner
+                            let result=transfer(returned_id @plan @session)
+                            moved=result not=? returned_id
+                            current.item=result
+                            break
+                        }
                     }
                 }
-                if consumed is? none {fresh(current.item live false @plan @session)}
+                if consumed is? none {fresh(returned_id live false @plan @session)}
             }
             else {expression(current.item live inherited @plan @session)}
         }
@@ -267,8 +296,8 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             current.item=saved.value
         }
         let released:array<addr>=[]
-        loop owner in owners {if consumed is? none or owner not=? consumed {released.push(owner)}}
-        loop call in cleanup(released current.loc @plan @session) {items.push(call)}
+        loop owner in owners {if moved or consumed is? none or owner not=? consumed {released.push(owner)}}
+        loop call in cleanup(released current.loc @plan @session fields_only=if moved consumed else none) {items.push(call)}
         items.push(put(current @session))
         store(id hir.Block[current.loc current.value_type items false] @session)
         return
@@ -343,6 +372,8 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     let function:hir.FunctionLiteral=node
     if function.proof return
     let previous=plan.source
+    let previous_result=plan.result_type
+    plan.result_type=function.rettype
     if function.source isnt? none {
         $runtime_assert function.source <? session.sources.length
         plan.source=session.sources[function.source].srcfile
@@ -361,10 +392,10 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     }
     # Leave ordinary helpers (especially the cached prelude) untouched.
     # Cleanup added inside another function is visible through its call edge.
-    if function.lifecycle is? none and not mentions_resource(id session) {plan.source=previous return}
+    if function.lifecycle is? none and not mentions_resource(id session) {plan.source=previous plan.result_type=previous_result return}
     function.body=scoped_body(function.body @session)
     let composed_parent:addr?=none
-    if function.lifecycle_composition and function.lifecycle =? 'copy' {
+    if function.lifecycle_composition and function.lifecycle in? ['copy' 'move'] {
         let body=hir.node_at(session.hir function.body)
         $runtime_assert body is? hir.Block and body.items.length =? 2
         let parent=hir.node_at(session.hir body.items[0])
@@ -375,6 +406,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     statement(function.body @owners [] allowed function.lifecycle =? 'drop' resource(function.rettype session.types) isnt? none @plan @session composed_parent=composed_parent)
     store(id function @session)
     plan.source=previous
+    plan.result_type=previous_result
 }
 prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? => {
     let plan=Plan[source=source]
@@ -395,13 +427,14 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
             $runtime_assert value.source <? session.sources.length
             plan.source=session.sources[value.source].srcfile
         }
-        if value.lifecycle not in? ['drop' 'copy'] or value.pos_or_kw_args.length =? 0 {reject(node 'move hooks' @plan) return plan.problem}
+        if value.lifecycle not in? ['drop' 'copy' 'move'] or value.pos_or_kw_args.length =? 0 {reject(node 'an invalid lifecycle receiver' @plan) return plan.problem}
         let owner=views.structural_base(value.pos_or_kw_args[0].value_type session.types)
         let type=types.node_at(session.types owner)
         $runtime_assert type is? types.ObjectType and type.brand isnt? none
         let hook=Hook[owner node.binding_id node.name value.value_type value.lifecycle]
         plan.hooks[node.binding_id]=hook
         if value.lifecycle =? 'drop' {plan.owners[type.brand]=hook}
+        if value.lifecycle =? 'move' {plan.moves[type.brand]=hook}
     }
     if plan.hooks.length =? 0 return none
     loop root in roots {

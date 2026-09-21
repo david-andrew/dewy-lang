@@ -81,9 +81,8 @@ def test_hook_effect_contract_is_checked_normally():
         checked('let outside:int64=0\ntouch=(@x:int64):>void=>{x=1}\n' + source)
 
 
-def test_ownership_lowering_does_not_silently_ignore_hooks():
-    with pytest.raises(ReportException, match='lifecycle ownership lowering'):
-        codegen(SrcFile(None, owner('$__move__\ntransfer=():>Handle=>Handle[token]') + 'main=():>int64=>{let h=Handle[42] return h.token}'))
+def test_a_move_hook_does_not_prevent_an_ordinary_field_read():
+    codegen(SrcFile(None, owner('$__move__\ntransfer=():>Handle=>Handle[token]') + 'main=():>int64=>{let h=Handle[42] return h.token}'))
 
 
 def test_observable_hook_effects_are_allowed_without_a_pure_contract():
@@ -247,10 +246,9 @@ Handle=type of Protocol & [
     'main=():>int64=>{let h=ImportedHandle[42] return h.token}',
     'main=():>int64=>42',
 ])
-def test_import_pruning_cannot_erase_the_runtime_lifecycle_gate(tmp_path, use):
+def test_imported_move_hooks_allow_unmoved_owners(tmp_path, use):
     module = tmp_path / 'resource.dewy'
     module.write_text('ImportedHandle=type of [token:int64 buffer:array<int64>=[]\n$__move__\ntransfer=():>ImportedHandle=>ImportedHandle[token buffer]\n]')
     source = tmp_path / 'main.dewy'
     source.write_text('from p"resource.dewy" import ImportedHandle\n' + use)
-    with pytest.raises(ReportException, match='lifecycle ownership lowering'):
-        codegen(SrcFile.from_path(source))
+    codegen(SrcFile.from_path(source))

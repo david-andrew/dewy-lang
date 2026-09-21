@@ -4,7 +4,8 @@ Supported owners are fresh records, including nested record resources and
 factory results transferred into their caller's ownership.
 Explicit copy hooks may construct fresh results; drop runs before field
 cleanup. Checked place parameters borrow without acquiring ownership.
-Implicit copies, moves, resource containers and owning parameters
+Explicit returns transfer locals and invoke custom move hooks when present.
+General local transfers, implicit copies, resource containers and owning parameters
 remain unsupported. Checked HIR calls expose effects and use the ordinary
 internal place call ABI.
 """
@@ -53,8 +54,8 @@ def prepare(root: hir.Block, srcfile):
         literal = declaration.expr
         current_source = literal.source or srcfile
         receiver = ty.unfold(ty.strip_refinement(literal.pos_or_kw_args[0].type))
-        if literal.lifecycle not in ('drop', 'copy') or not isinstance(receiver, ty.ObjectType):
-            reject(declaration, 'move hooks')
+        if literal.lifecycle not in ('drop', 'copy', 'move') or not isinstance(receiver, ty.ObjectType):
+            reject(declaration, 'an invalid lifecycle receiver')
 
     current_source = srcfile
 
@@ -74,16 +75,16 @@ def prepare(root: hir.Block, srcfile):
     if registry is None:
         reject(root, 'checked ownership binding metadata')
 
-    def cleanup(owners, loc):
+    def cleanup(owners, loc, fields_only=frozenset()):
         result = []
-        def drop(value, type_, ancestors):
+        def drop(value, type_, ancestors, run_hook=True):
             if resource(type_) is None:
                 return
             shape = ty.unfold(ty.strip_refinement(type_))
             if not isinstance(shape, ty.ObjectType) or id(shape) in ancestors:
                 reject(value, 'resource containers or recursive resource storage')
             hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
-            if hook is not None:
+            if hook is not None and run_hook:
                 declaration = declarations.get(hook.binding_id)
                 if declaration is None:
                     reject(value, 'an unavailable drop operation')
@@ -96,8 +97,27 @@ def prepare(root: hir.Block, srcfile):
                     drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)})
         for owner in reversed(owners):
             value = hir.ExpressedIdentifier(loc, owner.expr.type, owner.name, binding_id=owner.binding_id)
-            drop(value, owner.expr.type, set())
+            drop(value, owner.expr.type, set(), owner.binding_id not in fields_only)
         return result
+
+    def transfer(value, expected):
+        shape = ty.unfold(ty.strip_refinement(value.type))
+        assert isinstance(shape, ty.ObjectType)
+        hook = next((method for method in shape.methods if method.lifecycle == 'move'), None)
+        if hook is None:
+            return value, False
+        operation = declarations.get(hook.binding_id)
+        if operation is None:
+            reject(value, 'an unavailable move operation')
+        result_type = operation.expr.rettype
+        if ty.unfold(ty.strip_refinement(result_type)) != shape:
+            reject(value, 'an adapted move receiver without a checked composition')
+        function = hir.ExpressedIdentifier(value.loc, operation.expr.type, operation.name, binding_id=operation.binding_id)
+        result = hir.FunctionCall(value.loc, result_type, function, [hir.Place(value.loc, shape, value)], {})
+        if isinstance(expected, ty.RefinedType):
+            # The old value's facts are not facts about a hook's new result.
+            result = hir.Obligation(value.loc, result_type, result, expected, 'the return contract after moving')
+        return result, True
 
     def fresh(node, allowed, inherited, components=frozenset()):
         if isinstance(node, hir.MemberAccess):
@@ -220,7 +240,7 @@ def prepare(root: hir.Block, srcfile):
                 allowed.add(param.binding_id)
         owning_result = resource(literal.rettype) is not None
         composed_parent = None
-        if literal.lifecycle_composition and literal.lifecycle == 'copy':
+        if literal.lifecycle_composition and literal.lifecycle in ('copy', 'move'):
             assert isinstance(literal.body, hir.Block) and len(literal.body.items) == 2
             parent = literal.body.items[0]
             assert isinstance(parent, hir.Declare)
@@ -258,6 +278,7 @@ def prepare(root: hir.Block, srcfile):
                 return node
             if isinstance(node, hir.Return):
                 consumed = None
+                moved = False
                 if node.item is not None and owning_result and resource(node.item.type) is not None:
                     # Returning leaves this path, so a named local owner is
                     # at its last use. Borrowed parameters are deliberately
@@ -267,7 +288,7 @@ def prepare(root: hir.Block, srcfile):
                         returned = fresh(node.item, live, False, {composed_parent})
                         consumed = composed_parent
                     elif isinstance(node.item, hir.ExpressedIdentifier) and any(owner.binding_id == node.item.binding_id for owner in owners):
-                        returned = node.item
+                        returned, moved = transfer(node.item, literal.rettype)
                         consumed = node.item.binding_id
                     else:
                         returned = fresh(node.item, live, False)
@@ -279,7 +300,8 @@ def prepare(root: hir.Block, srcfile):
                 if returned is not None:
                     declaration, returned = capture(returned, node.loc)
                     result.append(declaration)
-                result.extend(cleanup([owner for owner in owners if owner.binding_id != consumed], node.loc))
+                result.extend(cleanup([owner for owner in owners if moved or owner.binding_id != consumed], node.loc,
+                                      {consumed} if moved else frozenset()))
                 result.append(replace(node, item=returned))
                 return hir.Block(node.loc, node.type, result, False)
             if isinstance(node, (hir.Break, hir.Continue)):

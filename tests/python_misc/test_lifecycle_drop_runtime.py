@@ -102,14 +102,14 @@ def test_dropped_local_owners_retain_no_storage(tmp_path):
     execute(tmp_path, 'drop-lifetime', codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime', 'lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime'])
+@pytest.mark.parametrize('name', ['lifecycle_drop_aggregate_fields', 'lifecycle_drop_implicit_result', 'lifecycle_drop_nested_fields', 'lifecycle_copy_runtime', 'lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime'])
 def test_aggregate_cleanup_and_implicit_results(tmp_path, name):
     from pathlib import Path
     source = Path(__file__).resolve().parents[1] / f'fixtures/{name}.dewy'
     execute(tmp_path, name, codegen(SrcFile.from_path(source), debug_locations=False))
 
 
-@pytest.mark.parametrize('name', ['lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime'])
+@pytest.mark.parametrize('name', ['lifecycle_factory_results', 'lifecycle_borrowed_parameters', 'lifecycle_return_owner', 'lifecycle_inherited_copy_runtime', 'lifecycle_move_runtime'])
 def test_native_factory_result_ownership(tmp_path, name):
     from pathlib import Path
     from test_bootstrap_structural_text import build_program_driver, check_structural_text
@@ -164,6 +164,50 @@ main=():>int64=>{changed=0 let owner=make() $assert changed=?0 return owner.toke
     check.typecheck_and_resolve(source)
     with pytest.raises(ReportException, match='assert'):
         codegen(source)
+
+
+MOVE_WITH_EFFECT = '''let changed:int64=0
+Handle=type of [token:int64
+$__move__
+transfer=():>Handle=>{changed=1 return Handle[token]}
+]
+'''
+
+
+def test_implicit_move_hook_is_in_the_returning_functions_effects():
+    source = SrcFile(None, MOVE_WITH_EFFECT + '''
+make=():>Handle & allocates=>{let owner=Handle[42] return owner}
+main=():>int64=>{let owner=make() return owner.token}
+''')
+    check.typecheck_and_resolve(source)
+    with pytest.raises(ReportException, match='effect contract'):
+        codegen(source)
+
+
+def test_implicit_move_hook_invalidates_caller_facts():
+    source = SrcFile(None, MOVE_WITH_EFFECT + '''
+make=():>Handle=>{let owner=Handle[42] return owner}
+main=():>int64=>{changed=0 let owner=make() $assert changed=?0 return owner.token}
+''')
+    check.typecheck_and_resolve(source)
+    with pytest.raises(ReportException, match='assert'):
+        codegen(source)
+
+
+def test_native_move_hook_contracts(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+
+    cases = [
+        MOVE_WITH_EFFECT + '''
+make=():>Handle & allocates=>{let owner=Handle[42] return owner}
+main=():>int64=>{let owner=make() return owner.token}
+''',
+        MOVE_WITH_EFFECT + '''
+make=():>Handle=>{let owner=Handle[42] return owner}
+main=():>int64=>{changed=0 let owner=make() $assert changed=?0 return owner.token}
+''',
+    ]
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[], errors=cases)
 
 
 @pytest.mark.parametrize('body', [
