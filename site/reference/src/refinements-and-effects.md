@@ -340,7 +340,22 @@ aggregate construction, explicit copies and implicit aggregate value
 boundaries. Required local views and read-only input inspection avoid those
 obligations. Proven nonescaping scalar places use reusable frame slots in
 native lowering; unresolved callback escape paths still need storage
-permission. Numeric range iterators use allocation-free word counters when
+permission. Fixed scalar local arrays also share a nonescaping placement proof
+with both lowerers: length and element reads/writes use reusable frame storage,
+without a COW detach. Escaping, capturing, resizing, rebinding or taking the
+array's address excludes this proof. A conservative per-function frame budget
+currently limits it to 4 KiB; larger arrays remain valid but need allocation
+permission unless another proof applies.
+
+```dewy
+answer = ():>int64 & no_effects => {
+    let xs:array<int64> = [40 2]
+    xs[0] = xs[0] + xs[1]
+    return xs[0]
+}
+```
+
+Numeric range iterators use allocation-free word counters when
 their finite extent fits or the bounds checker proves every advancing edge
 stays within the word range. A guard alone does not establish that proof:
 an unbounded `continue` path can defeat it. The loop body retains its own

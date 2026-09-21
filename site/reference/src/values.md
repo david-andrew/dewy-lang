@@ -152,7 +152,24 @@ The future systems escape hatch builds on, but does not change, the rules above.
 
 `@rc` selects the place occupied by the handle, allowing a callee to replace that handle in the caller's binding. It does not select the allocation behind the handle. Payload access will instead use lifetime-bounded places supplied by the handle type: read-only while shared, and mutable only after unique ownership is established or through a separate checked-mutation abstraction.
 
-The required userland lifecycle and allocation hooks are provisional and not implemented. The current design direction is recorded in the compiler's [`user_managed_storage.md`](https://github.com/david-andrew/dewy-lang/blob/main/dewy/semantic/user_managed_storage.md) note.
+Minted types can declare compiler-only, zero-argument members tagged
+`$__drop__`, `$__copy__`, and `$__move__`. Drop returns `void` and runs before
+automatic field cleanup; copy and move return the same nominal type. The
+compiler supplies a borrowed receiver. A drop hook without a copy hook makes
+the resource move-only: proven last uses transfer it, proven read-only uses
+borrow it, and independent ownership requires a copy hook. Hooks participate
+in effect and fact checking. Copy/move elision can change whether an optional
+hook invocation occurs.
+
+Cleanup supports nested records, arrays and optional/union owners, including
+recursive records linked through optional fields. A parent's hook runs before
+its fields are cleaned up in reverse order; arrays clean up elements in reverse
+order. Conditional consumption of outer owners, general field transfers and
+resource dictionaries still need further ownership analysis. Recursion through
+`array<Self>` is a separate unsupported type shape.
+
+The broader typed allocation capabilities remain provisional. Their direction
+is recorded in the compiler's [`user_managed_storage.md`](https://github.com/david-andrew/dewy-lang/blob/main/dewy/semantic/user_managed_storage.md) note.
 
 ## Storage and Escape Copies
 

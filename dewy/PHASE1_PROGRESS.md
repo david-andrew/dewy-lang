@@ -1776,3 +1776,24 @@ program driver. Coverage includes linked and branching records, reverse array
 cleanup, recursive factories, exact hook order/counts, effect contracts and
 move-only independence. A 100-call kernel drops all 300 nodes and retains zero
 arena bytes. No new source syntax or lifecycle semantics were introduced.
+
+
+Integration checkpoint at `386475fb`: native generations 2/3 are byte
+identical and execution checks pass on the direct and C backends. Generation
+2/3 took 92/97 s with other tests running; these are not isolated performance
+measurements and remain above the latency target. Artifacts are under
+`../dewy-build-artifacts/phase1-placement-integration-2026-09-21`.
+
+The next interrupted full run at `fc9030f4` recorded 3,425 passes, 14 skips and
+two failures. One was the newly exposed unindexed-pop gap repaired above;
+the other was an outdated generated snapshot codec omitting `local_place_roots`.
+The codec is regenerated, its outer format is bumped to 7, and the snapshot
+fixture now checks that nonempty owner-map data survives. The generator
+freshness test passes. A new full run includes these fixes and recursive cleanup;
+these interrupted counts must not be represented as a full-suite success.
+
+Native execution-test groups now share only their checked prelude cache within
+a worker and compiler binary. Each input still starts a fresh process and
+Session. Explicit cold-cache tests retain an opt-out. A paired two-group
+probe took 33.82 s cold and 4.38 s warm, with acceptance/rejection and both
+backends checked. This removes repeated setup rather than reducing coverage.
