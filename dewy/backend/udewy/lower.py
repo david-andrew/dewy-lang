@@ -81,52 +81,49 @@ from .lowering_shared import (
 from .lowering_strings import _StringLowering
 
 
-def _erase_dimensions(root: object) -> None:
-    """Physical dimensions and refinements have no runtime representation.
+def _erase_dimensions(root: hir.Block) -> hir.Block:
+    """Erase compile-time types without changing cached checked HIR.
 
-    Every node and annotation typed as a quantity is retyped in place by its
-    numeric representation, so the rest of the lowering never sees a
-    ``QuantityType``. Nodes are mutated (not replaced) because the checker's
-    side tables are keyed by node identity.
+    The checked graph may share parameters and bodies with a restored
+    prelude. Rebuild only changed paths, once per DAG node. Lowering's
+    identity-indexed tables are created after this rewrite.
     """
-    seen: set[int] = set()
+    memo: dict[int, object] = {}
 
     def erase(type_: object) -> object:
         if isinstance(type_, ty.RefinedType):
-            type_ = type_.base  # refinements were proven during checking
+            type_ = type_.base
         if isinstance(type_, ty.TypeOr):
-            # `rational * Length | Overflow`: the members lose their dimensions too
             members = [erase(member) for member in type_.items]
-            # Erasure can merge alternatives (`int64 | addr` becomes one
-            # word). Retaining duplicate members would invent a tagged cell
-            # for a scalar, or hide a single-payload optional from lowering.
+            # Erasure can merge alternatives (`int64 | addr` is one word).
             return type_ if all(a is b for a, b in zip(members, type_.items)) else ty.union(*members)
         return type_.number if isinstance(type_, ty.QuantityType) else type_
 
-    def walk(value: object) -> None:
-        if isinstance(value, (list, tuple)):
-            for item in value:
-                walk(item)
-            return
-        if isinstance(value, dict):
-            for item in value.values():
-                walk(item)
-            return
+    def rewrite(value: object) -> object:
         child_names = _hir_child_fields(type(value))
-        if child_names is None or id(value) in seen:
-            return
-        seen.add(id(value))
-        # HIR node/parameter types and declaration annotations are rewritten;
-        # type descriptions, spans and other metadata are never traversed.
-        for name in ('type', 'annotation'):
-            current = getattr(value, name, None)
-            erased = erase(current)
-            if erased is not current:
-                setattr(value, name, erased)
-        for name in child_names:
-            walk(getattr(value, name))
+        if child_names is None and not isinstance(value, (list, tuple, dict)):
+            return value
+        key = id(value)
+        if key in memo:
+            return memo[key]
+        if child_names is not None:
+            changes = {name: rewrite(getattr(value, name)) for name in child_names}
+            for name in ('type', 'annotation'):
+                if hasattr(value, name):
+                    changes[name] = erase(getattr(value, name))
+            result = replace(value, **changes) if any(new is not getattr(value, name) for name, new in changes.items()) else value
+        elif isinstance(value, (list, tuple)):
+            items = [rewrite(item) for item in value]
+            result = (tuple(items) if isinstance(value, tuple) else items) if any(a is not b for a, b in zip(items, value)) else value
+        else:
+            items = {name: rewrite(item) for name, item in value.items()}
+            result = items if any(items[name] is not item for name, item in value.items()) else value
+        memo[key] = result
+        return result
 
-    walk(root)
+    rewritten = rewrite(root)
+    assert isinstance(rewritten, hir.Block)
+    return rewritten
 
 
 
@@ -272,7 +269,7 @@ class _Lowerer(
 
     def __init__(self, root: hir.Block, srcfile: SrcFile, entry_name: str = 'main'):
         """Initialize per-program identity maps and deterministic counters."""
-        _erase_dimensions(root)
+        root = _erase_dimensions(root)
         self.root = root
         # Checking has completed the nominal graph. Lowering's representation
         # queries share one default system instead of rebuilding that graph at
