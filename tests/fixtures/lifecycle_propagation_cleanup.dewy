@@ -1,0 +1,58 @@
+# Error propagation exits the function just like an explicit return. Both
+# paths release nested locals first and owning parameters last.
+let trace:int64=0
+Handle=type of [id:int64 values:array<int64>
+$__drop__
+release=():>void=>{trace=trace*10+id values.clear}
+]
+Detail=type of error & [code:int64]
+maybe=(ok:bool):>int64?=>if ok 42 else none
+checked=(ok:bool):>int64|Detail=>if ok 42 else Detail[7]
+optional=(owner:Handle ok:bool):>int64?=>{
+    let local=Handle[2 [20]]
+    let value=maybe(ok) or_throw
+    return value
+}
+exceptional=(owner:Handle ok:bool):>int64|Detail=>{
+    let local=Handle[2 [20]]
+    if true {
+        let inner=Handle[3 [30]]
+        let value=checked(ok) or_throw
+        return value
+    }
+    return 0
+}
+indexed=(ok:bool):>int64?=>{
+    let owners=[Handle[2 [20]]]
+    return owners[if (maybe(ok) or_throw) >?0 0 else 0].id
+}
+main=():>int64=>{
+    if optional(Handle[1 [10]] false) isnt? none return 1
+    if trace not=?21 return 2
+    trace=0
+    let success=optional(Handle[1 [10]] true)
+    if success isnt? int64 or success not=?42 return 3
+    if trace not=?21 return 4
+    trace=0
+    let failed=exceptional(Handle[1 [10]] false)
+    if failed isnt? Detail or failed.code not=?7 return 5
+    if trace not=?321 return 6
+    trace=0
+    let succeeded=exceptional(Handle[1 [10]] true)
+    if succeeded isnt? int64 or succeeded not=?42 return 7
+    if trace not=?321 return 8
+    trace=0
+    if indexed(false) isnt? none return 11
+    if trace not=?2 return 12
+    trace=0
+    let selected=indexed(true)
+    if selected isnt? int64 or selected not=?2 or trace not=?2 return 13
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i <?100 {
+        trace=0
+        if optional(Handle[1 [10]] false) isnt? none return 9
+        if trace not=?21 return 10
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

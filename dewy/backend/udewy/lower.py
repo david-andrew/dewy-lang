@@ -5296,7 +5296,7 @@ class _Lowerer(
                 if isinstance(node.type, (ty.ArrayType, ty.ObjectType))
                 or ty.enum_members(node.type) is not None
                 or isinstance(node.type, ty.TypeOr) and (ty.string_valued(node.type) or self._is_optional_element(node.type))
-                else node.type,
+                else target.type,
                 self._placeholder(node),
             )
             flow_prelude, flow = self._lower_flow(node, target=target)

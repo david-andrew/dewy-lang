@@ -1221,3 +1221,23 @@ Validation for this follow-up: 65 hosted/native lifecycle checks passed,
 including both output backends; all 53 module, prelude-cache, imported-effect,
 prototype and representation checks passed. The earlier hosted lifecycle
 coverage passed 108 cases before the temporary-receiver additions.
+
+
+Expression exits now carry their enclosing ownership context through blocks,
+conditions and selectors. Hosted `or_throw` is expanded to the same checked
+binding/test/return structure used natively before ownership validation.
+Propagated optional and record-error results release locals and owning
+parameters in reverse order; ordinary successful results keep their usual
+path. Rewritten selector expressions are retained in hosted HIR.
+
+A captured `none` return previously lost its unit tag during lowering; unit
+absence now needs no capture before cleanup. A literal-valued conditional
+also emitted its literal type as a micro-Dewy variable annotation: the flow
+temporary now uses its already-selected runtime type.
+
+Validation: 60 lifecycle checks passed on the initial hosted/native batch,
+including both output backends. All 12 hosted propagation/error checks
+passed. The extended selector-propagation fixture then passed hosted and
+native execution on both backends; the three hosted ownership-order and
+temporary-copy integration checks also passed. Full integration follows the
+next ownership batch; this does not complete Phase 1.

@@ -161,7 +161,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             result = hir.Obligation(value.loc, result_type, result, expected, 'the return contract after moving')
         return result, True
 
-    def fresh(node, allowed, inherited, components=frozenset()):
+    def fresh(node, allowed, inherited, components=frozenset(), control=None):
         if isinstance(node, hir.MemberAccess):
             owner = node.value
             while isinstance(owner, hir.MemberAccess):
@@ -182,7 +182,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     # A temporary receiver owns its resource until the copy
                     # finishes. Snapshot the result before dropping that
                     # receiver; neither evaluation nor cleanup is duplicated.
-                    owner, borrowed = capture(fresh(receiver, allowed, inherited), node.loc)
+                    owner, borrowed = capture(fresh(receiver, allowed, inherited, control=control), node.loc)
                     copied = replace(node, pos_args=[replace(node.pos_args[0], target=borrowed)])
                     result, value = capture(copied, node.loc)
                     return hir.Block(node.loc, node.type, [owner, result, *cleanup([owner], node.loc), value], False)
@@ -194,12 +194,12 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             # A function result is an owned value, including through a
             # callback. Every checked body owes the same return contract;
             # resource arguments still require their own ownership proof.
-            return replace(node, func=expression(node.func, allowed, inherited=inherited),
-                           pos_args=[argument(arg, allowed, inherited) for arg in node.pos_args],
-                           kw_args={name: argument(arg, allowed, inherited) for name, arg in node.kw_args.items()})
+            return replace(node, func=expression(node.func, allowed, inherited=inherited, control=control),
+                           pos_args=[argument(arg, allowed, inherited, control) for arg in node.pos_args],
+                           kw_args={name: argument(arg, allowed, inherited, control) for name, arg in node.kw_args.items()})
         shape = ty.unfold(ty.strip_refinement(node.type))
         if isinstance(node, hir.ArrayLiteral) and isinstance(shape, ty.ArrayType):
-            return replace(node, items=[fresh(item, allowed, inherited, components) for item in node.items])
+            return replace(node, items=[fresh(item, allowed, inherited, components, control) for item in node.items])
         if not isinstance(node, hir.ObjectLiteral) or not isinstance(shape, ty.ObjectType):
             reject(node, 'a non-fresh resource field or resource container')
         hook = next((method for method in shape.methods if method.lifecycle == 'drop'), None)
@@ -207,8 +207,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             operation = declarations.get(hook.binding_id)
             if operation is None or ty.unfold(ty.strip_refinement(operation.expr.pos_or_kw_args[0].type)) != shape:
                 reject(node, 'an adapted drop receiver without a checked composition')
-        return replace(node, fields=[replace(field, value=fresh(field.value, allowed, inherited, components)
-                                            if resource(field.value.type) is not None else expression(field.value, allowed, inherited=inherited))
+        return replace(node, fields=[replace(field, value=fresh(field.value, allowed, inherited, components, control)
+                                            if resource(field.value.type) is not None else expression(field.value, allowed, inherited=inherited, control=control))
                                      for field in node.fields])
 
     def capture(value, loc):
@@ -234,14 +234,26 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             return replace(value, **{name: mapped(getattr(value, name), visit) for name in hir.child_fields(type(value))})
         return value
 
-    def argument(node, allowed, inherited):
+    def argument(node, allowed, inherited, control=None):
         # A fresh value (including an explicit custom copy) supplies a new
         # owner to an ordinary by-value parameter. @ keeps lending the owner.
         if not isinstance(node, hir.Place) and resource(node.type) is not None:
-            return fresh(node, allowed, inherited)
-        return expression(node, allowed, inherited=inherited)
+            return fresh(node, allowed, inherited, control=control)
+        return expression(node, allowed, inherited=inherited, control=control)
 
-    def expression(node, allowed, *, inherited=False):
+    def route_indices(node, allowed, inherited, control):
+        # Hosted HIR is immutable-by-replacement: retain rewritten control
+        # flow in a selector, not just its successful validation.
+        if isinstance(node, hir.MemberAccess):
+            return replace(node, value=route_indices(node.value, allowed, inherited, control))
+        if isinstance(node, hir.Index):
+            return replace(node, array=route_indices(node.array, allowed, inherited, control),
+                           index=expression(node.index, allowed, inherited=inherited, control=control))
+        return node
+
+    def expression(node, allowed, *, inherited=False, control=None):
+        if control is not None and isinstance(node, (hir.Block, hir.Flow, hir.Return, hir.Break, hir.Continue, hir.OrThrow)):
+            return control(node)
         if isinstance(node, hir.FunctionLiteral):
             return function(node)
         if (isinstance(node, hir.TypeValue)
@@ -250,17 +262,17 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             return node
         if (isinstance(node, hir.MemberAccess) and resource(node.value.type) is not None
                 or isinstance(node, hir.ArrayLength) and resource(node.array.type) is not None):
-            owner = node.value if isinstance(node, hir.MemberAccess) else node.array
+            selected = route_indices(node.value if isinstance(node, hir.MemberAccess) else node.array, allowed, inherited, control)
+            owner = selected
             while isinstance(owner, (hir.MemberAccess, hir.Index)):
                 if isinstance(owner, hir.Index):
-                    expression(owner.index, allowed, inherited=inherited)
                     owner = owner.array
                 else:
                     owner = owner.value
             if (not isinstance(owner, hir.ExpressedIdentifier) or owner.binding_id not in allowed
                     or resource(node.type) is not None):
                 reject(node, 'an escaping or projected resource owner')
-            return node
+            return replace(node, **({'value': selected} if isinstance(node, hir.MemberAccess) else {'array': selected}))
         if isinstance(node, hir.FunctionCall) and inherited and isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id in declarations:
             # The checker generated this parent-portion drop invocation.
             if len(node.pos_args) != 1 or not isinstance(node.pos_args[0], hir.Place):
@@ -270,10 +282,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 reject(node, 'an escaping inherited drop receiver')
             return node
         if isinstance(node, hir.Place):
-            path = node.target
+            selected = route_indices(node.target, allowed, inherited, control)
+            path = selected
             while isinstance(path, (hir.MemberAccess, hir.Index)):
-                if isinstance(path, hir.Index):
-                    expression(path.index, allowed, inherited=inherited)
                 path = path.value if isinstance(path, hir.MemberAccess) else path.array
             if resource(path.type) is not None:
                 # A checked place call borrows the existing owner. Its
@@ -281,14 +292,14 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 # place rules; the callee must not acquire another owner.
                 if not isinstance(path, hir.ExpressedIdentifier) or path.binding_id not in allowed:
                     reject(node, 'an unavailable resource borrow')
-                return node
+                return replace(node, target=selected)
         if isinstance(node, hir.FunctionCall) and resource(node.type) is None:
-            return replace(node, func=expression(node.func, allowed, inherited=inherited),
-                           pos_args=[argument(arg, allowed, inherited) for arg in node.pos_args],
-                           kw_args={name: argument(arg, allowed, inherited) for name, arg in node.kw_args.items()})
+            return replace(node, func=expression(node.func, allowed, inherited=inherited, control=control),
+                           pos_args=[argument(arg, allowed, inherited, control) for arg in node.pos_args],
+                           kw_args={name: argument(arg, allowed, inherited, control) for name, arg in node.kw_args.items()})
         if resource(node.type) is not None:
             reject(node, 'a resource copy, move, temporary, or escape')
-        return replace(node, **{name: mapped(getattr(node, name), lambda child: expression(child, allowed, inherited=inherited))
+        return replace(node, **{name: mapped(getattr(node, name), lambda child: expression(child, allowed, inherited=inherited, control=control))
                                 for name in hir.child_fields(type(node))})
 
     def local_transfers(body):
@@ -389,6 +400,24 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             return literal
         def statement(node, owners, loops, *, entry=False):
             live = allowed | {owner.binding_id for owner in owners}
+            def control(child):
+                # Expression blocks have their own temporaries, but a return
+                # from inside them leaves every surrounding owner too.
+                if isinstance(child, hir.Block):
+                    child = replace(child, scoped=True)
+                return statement(child, list(owners), loops)
+            if isinstance(node, hir.OrThrow):
+                # Use the same checked control flow as the native checker.
+                # Backend-created returns are too late for lifecycle/effects.
+                binding = hir.Declare(node.loc, ty.VOID_TYPE, 'let', node.name,
+                                      node.value.type, node.value, binding_id=node.binding_id)
+                tested = hir.ExpressedIdentifier(node.loc, node.value.type, node.name, binding_id=node.binding_id)
+                condition = hir.TypeTest(node.loc, 'bool', tested, node.exception_type, False)
+                returned = hir.Return(node.loc, ty.BOTTOM_TYPE, node.propagated)
+                arm = hir.IfArm(node.loc, ty.VOID_TYPE, condition, returned)
+                value = hir.ExpressedIdentifier(node.loc, node.type, node.name, binding_id=node.binding_id)
+                block = hir.Block(node.loc, node.type, [binding, hir.Flow(node.loc, ty.VOID_TYPE, [arm], None), value], True)
+                return statement(block, list(owners), loops)
             if isinstance(node, hir.Block):
                 active = list(owners) if node.scoped else owners
                 start = 0 if entry else len(active)
@@ -426,7 +455,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         # A hook consumes its owner, not every nested field.
                         calls = cleanup([source], node.loc, {source.binding_id}) if moved else []
                         return hir.Block(node.loc, node.type, [node, *calls], False) if calls else node
-                node = replace(node, expr=fresh(node.expr, live, literal.lifecycle == 'drop'))
+                node = replace(node, expr=fresh(node.expr, live, literal.lifecycle == 'drop', control=control))
                 owners.append(node)
                 return node
             if isinstance(node, hir.Return):
@@ -438,19 +467,19 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     # absent from owners: lending cannot transfer ownership.
                     if composed_parent is not None:
                         assert isinstance(node.item, hir.ObjectLiteral)
-                        returned = fresh(node.item, live, False, {composed_parent})
+                        returned = fresh(node.item, live, False, {composed_parent}, control)
                         consumed = composed_parent
                     elif isinstance(node.item, hir.ExpressedIdentifier) and any(owner.binding_id == node.item.binding_id for owner in owners):
                         returned, moved = transfer(node.item, literal.rettype)
                         consumed = node.item.binding_id
                     else:
-                        returned = fresh(node.item, live, False)
+                        returned = fresh(node.item, live, False, control=control)
                 else:
-                    returned = expression(node.item, live, inherited=literal.lifecycle == 'drop') if node.item is not None else None
+                    returned = expression(node.item, live, inherited=literal.lifecycle == 'drop', control=control) if node.item is not None else None
                 if not owners:
                     return replace(node, item=returned)
                 result = []
-                if returned is not None:
+                if returned is not None and not isinstance(returned, hir.NoneValue):
                     declaration, returned = capture(returned, node.loc)
                     result.append(declaration)
                 result.extend(cleanup([owner for owner in owners if moved or owner.binding_id != consumed], node.loc,
@@ -465,7 +494,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if isinstance(node, hir.Flow):
                 arms = []
                 for arm in node.arms:
-                    condition = expression(arm.condition, live, inherited=literal.lifecycle == 'drop')
+                    condition = expression(arm.condition, live, inherited=literal.lifecycle == 'drop', control=control)
                     boundaries = [*loops, len(owners)] if isinstance(arm, hir.LoopArm) else loops
                     body = arm.body if isinstance(arm.body, hir.Block) else hir.Block(arm.body.loc, arm.body.type, [arm.body], True)
                     body = statement(body, list(owners), boundaries)
@@ -479,11 +508,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if isinstance(node, hir.Declare) and isinstance(node.expr, hir.FunctionLiteral):
                 return replace(node, expr=function(node.expr))
             if isinstance(node, hir.MemberAssign):
-                return replace(node, target=expression(node.target, live, inherited=literal.lifecycle == 'drop'),
-                               value=expression(node.value, live, inherited=literal.lifecycle == 'drop'))
+                return replace(node, target=expression(node.target, live, inherited=literal.lifecycle == 'drop', control=control),
+                               value=expression(node.value, live, inherited=literal.lifecycle == 'drop', control=control))
             if owning_result and resource(node.type) is not None:
-                return fresh(node, live, False)
-            return expression(node, live, inherited=literal.lifecycle == 'drop')
+                return fresh(node, live, False, control=control)
+            return expression(node, live, inherited=literal.lifecycle == 'drop', control=control)
 
         # A function body's unscoped block is nevertheless its lexical owner
         # scope, as in normal backend cleanup.
