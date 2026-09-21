@@ -92,6 +92,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     receivers.discard(None)
     argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
     readonly_arguments = effects.read_only_places(root, effect_context) if receivers else set()
+    recursive_drops = {}
     array_drops = {}
     array_clears = {}
     array_suffixes = {}
@@ -105,7 +106,33 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 return
             shape = ty.unfold(ty.strip_refinement(type_))
             if id(shape) in ancestors:
-                reject(value, 'recursive resource storage')
+                # A recursive value has finite runtime storage but an infinite
+                # structural expansion. Close that expansion with a borrowed
+                # helper call, publishing its identity before checking its body.
+                key = (id(shape), run_hook)
+                operation = recursive_drops.get(key)
+                if operation is None:
+                    name = f'__dewy_drop_recursive_{registry.next_id}'
+                    binding = registry.allocate(object(), name, 'value', loc)
+                    parameter = registry.allocate(object(), '__source', 'param', loc)
+                    parameter.type = shape
+                    signature = ty.FunctionType([ty.PosOrKwArg('__source', shape, place=True)], [], None, ty.VOID_TYPE)
+                    binding.type = signature
+                    operation = hir.ExpressedIdentifier(loc, signature, name, binding_id=binding.id)
+                    recursive_drops[key] = operation
+                    receiver = hir.ExpressedIdentifier(loc, shape, parameter.name, binding_id=parameter.id)
+                    body = []
+                    drop(receiver, shape, set(), run_hook, into=body)
+                    literal = hir.FunctionLiteral(loc, signature,
+                        [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)],
+                        [], None, ty.VOID_TYPE, hir.Block(loc, ty.VOID_TYPE, body, True), source=current_source)
+                    declared = hir.Declare(loc, ty.VOID_TYPE, 'const', name, signature, literal, binding_id=binding.id)
+                    binding.function = literal
+                    binding.declaration = declared
+                    generated.append(declared)
+                into.append(hir.FunctionCall(loc, ty.VOID_TYPE, replace(operation, loc=loc),
+                                             [hir.Place(loc, shape, value)], {}))
+                return
             if isinstance(shape, ty.ArrayType):
                 # One checked helper per array shape: its borrowed receiver
                 # has a stable identity even for an outer array's element.
@@ -343,8 +370,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 return consumed
         if isinstance(node, hir.Obligation):
             return replace(node, value=fresh(node.value, allowed, inherited, components, control))
-        if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and isinstance(ty.strip_refinement(node.type), ty.TypeOr):
-            return replace(node, expr=fresh(node.expr, allowed, inherited, components, control))
+        if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
+            target = ty.unfold(ty.strip_refinement(node.type))
+            source = ty.unfold(ty.strip_refinement(node.expr.type))
+            if isinstance(target, ty.TypeOr) or source == target:
+                # Naming the same storage through a recursive alias does not
+                # change whether the underlying constructor is fresh.
+                return replace(node, expr=fresh(node.expr, allowed, inherited, components, control))
         if isinstance(node, hir.MemberAccess):
             owner = node.value
             while isinstance(owner, hir.MemberAccess):

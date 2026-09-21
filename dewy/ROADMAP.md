@@ -449,8 +449,9 @@ in both lowerings and the parity tool is the gate.
   Synthesized record and union copies now call the active components' copy
   hooks, including nested wrappers and temporary receivers. Synthesized array
   copies now run component hooks and prove their returned length; nested arrays
-  and optional elements use the same construction. General dictionary ownership
-  operations remain pending. Fresh record results now transfer from factories
+  and optional elements use the same construction. Recursive optional-link records now use checked cleanup helpers, including
+  arrays containing those records and recursive factory results. General dictionary ownership
+  operations and recursion through `array<Self>` remain pending. Fresh record results now transfer from factories
   (including callbacks) to caller-owned bindings. Results are evaluated before
   cleanup, including aggregate field snapshots and copy hooks with scratch
   owners. Ordinary `@` parameters borrow resource records, including nested

@@ -1,0 +1,19 @@
+# Recursive value storage is finite even though its type repeats. Generated
+# cleanup helpers recurse through the active optional links without copies.
+let drops:int64=0
+Node=type of [id:int64 next:Node|none
+    $__drop__
+    release=():>void=>{drops+=1}
+]
+work=():>int64=>{
+    let node=Node[42 Node[1 Node[2 none]]]
+    return node.id
+}
+main=():>int64=>{
+    let before:int64=_arena_live_bytes
+    let answer:int64=0
+    loop i in [0..100) {answer=work()}
+    $runtime_assert drops=?300
+    $runtime_assert _arena_live_bytes-before=?0
+    return answer
+}

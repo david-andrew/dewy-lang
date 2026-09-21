@@ -33,6 +33,7 @@ Plan:type = [
     consumed_bindings:set<addr>=set[]
     view_sites:set<addr>=set[]
     view_bindings:set<addr>=set[]
+    recursive_drops:dict<string addr>=[]
     array_drops:dict<addr addr>=[]
     array_clears:dict<addr addr>=[]
     array_suffixes:dict<addr addr>=[]
@@ -73,7 +74,38 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
     if plan.problem isnt? none or resource(type_id session.types) is? none return
     let owner=views.structural_base(type_id session.types)
     let type=types.node_at(session.types owner)
-    if owner in? ancestors {reject(hir.node_at(session.hir value) 'recursive resource storage' @plan) return}
+    if owner in? ancestors {
+        # Close recursive structural expansion with a checked borrowed helper.
+        # Publish the callable before its body so recursive calls reuse it.
+        let key="{owner}:{run_hook}"
+        let operation=plan.recursive_drops.get(key)
+        let empty=types.primitive('void' @session.types)
+        if operation is? none {
+            let name="__dewy_drop_recursive_{session.registry.next_id}"
+            let binding_id=bindings.allocate(@session.registry none name 'value' loc)
+            let parameter_id=bindings.allocate(@session.registry none '__source' 'param' loc)
+            let parameter=bindings.binding_at(session.registry parameter_id)
+            parameter.value_type=owner parameter.store_type=owner
+            bindings.store_binding(@session.registry parameter_id parameter)
+            let signature=types.function_type([types.PosOrKwArg['__source' owner place=true]] [] none empty [] @session.types)
+            operation=put(hir.ExpressedIdentifier[loc signature name binding_id] @session)
+            plan.recursive_drops[key]=operation
+            let receiver=put(hir.ExpressedIdentifier[loc owner '__source' parameter_id] @session)
+            let body:array<addr>=[]
+            drop_value(receiver owner loc set[] @body @plan @session run_hook=run_hook)
+            let block=put(hir.Block[loc empty body true] @session)
+            let function=put(hir.FunctionLiteral[loc signature [hir.Param['__source' owner parameter_id place=true]] [] none empty block source=plan.function_source] @session)
+            let declaration=put(hir.Declare[loc empty 'const' name signature function binding_id] @session)
+            let binding=bindings.binding_at(session.registry binding_id)
+            binding.value_type=signature binding.function=function binding.declaration=declaration
+            bindings.store_binding(@session.registry binding_id binding)
+            plan.generated.push(declaration)
+        }
+        $runtime_assert operation isnt? none
+        let place=put(hir.Place[loc owner value] @session)
+        calls.push(put(hir.FunctionCall[loc empty operation [place] []] @session))
+        return
+    }
     if type is? types.ArrayType {
         let operation=if tail is? none plan.array_drops.get(owner) else plan.array_suffixes.get(owner)
         let empty=types.primitive('void' @session.types)
@@ -398,9 +430,15 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
         }
     }
     if candidate is? hir.Obligation {fresh(candidate.value allowed inherited @plan @session components=components frame=frame) return}
-    if candidate is? hir.ValueCast|hir.RepresentationCast and types.node_at(session.types types.strip_refinement(candidate.value_type session.types)) is? types.TypeOr {
-        fresh(candidate.expr allowed inherited @plan @session components=components frame=frame)
-        return
+    if candidate is? hir.ValueCast|hir.RepresentationCast {
+        let target=views.structural_base(candidate.value_type session.types)
+        let source=views.structural_base(hir.node_at(session.hir candidate.expr).value_type session.types)
+        # A recursive alias names the same stored object. Its transparent
+        # cast does not turn a fresh constructor into a borrowed value.
+        if types.node_at(session.types target) is? types.TypeOr or types.same_type(source target session.types) {
+            fresh(candidate.expr allowed inherited @plan @session components=components frame=frame)
+            return
+        }
     }
     if candidate is? hir.MemberAccess {
         let owner=hir.node_at(session.hir candidate.value)

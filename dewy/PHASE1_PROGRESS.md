@@ -1759,3 +1759,20 @@ reject. The hosted compiler also successfully emitted the updated native
 program driver. Additional iterator rejection probes exposed a pre-existing
 native unindexed-pop proof gap, repaired separately; they are not counted as
 passes here.
+
+
+Recursive ownership checkpoint: cleanup now closes recursive type expansion
+with checked borrowed helper calls, publishing each helper identity before
+building its body. Runtime recursion follows the active, finite stored values.
+Hooks still run before fields, and fields/array elements retain reverse cleanup
+order. Transparent casts naming a fresh value through a recursive alias retain
+its ownership; they do not create an implicit copy. Arrays containing recursive
+optional-link records work. The separate language gap for recursion *through*
+`array<Self>` remains unimplemented, as does general recursive field transfer.
+
+Validation: 66 hosted lifecycle checks passed. Five execution cases and two
+rejections pass both compilers and both backends through a fresh native-built
+program driver. Coverage includes linked and branching records, reverse array
+cleanup, recursive factories, exact hook order/counts, effect contracts and
+move-only independence. A 100-call kernel drops all 300 nodes and retains zero
+arena bytes. No new source syntax or lifecycle semantics were introduced.
