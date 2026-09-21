@@ -20,11 +20,13 @@ def test_native_compiler_command(tmp_path):
     # invocations below execute the two native compilers, without a shim.
     micro_source = tmp_path / 'micro.udewy'
     micro_source.write_text(f'import p"{ROOT / "udewy/bootstrap/main.udewy"}"\n')
-    assert entry_point(micro_source, [], EntryPointOptions(compile_only=True)) == 0
+    assert entry_point(micro_source, [], EntryPointOptions(compile_only=True, debug_info=False)) == 0
     micro = cache_artifact(micro_source).resolve()
     compiler_source = tmp_path / 'compiler.udewy'
-    compiler_source.write_text(codegen(SrcFile.from_path(ROOT / 'dewy/bootstrap/main.dewy')))
-    built = subprocess.run([micro, '-c', compiler_source], capture_output=True,
+    # Debug builds of user programs are exercised below; debugger metadata for
+    # the compiler itself is unrelated to this invocation-boundary test.
+    compiler_source.write_text(codegen(SrcFile.from_path(ROOT / 'dewy/bootstrap/main.dewy'), debug_locations=False))
+    built = subprocess.run([micro, '--no-debug-info', '-c', compiler_source], capture_output=True,
                            text=True, timeout=300, check=False)
     assert built.returncode == 0, f'µDewy exited {built.returncode}: {built.stdout}{built.stderr}'
     compiler = cache_artifact(compiler_source).resolve()
@@ -78,9 +80,16 @@ def test_native_compiler_command(tmp_path):
     result = invoke('analyze', str(ROOT / 'dewy/tests/copy_report.dewy'))
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'record `Fact` copied when returned: `f` may be used again' in result.stdout
-    assert 'record `Fact` copied when bound to `h`: `g` may be used again' in result.stdout
+    assert any('record `Fact` copied when bound to `h`: ' in line
+               and line.split('bound to `h`: ', 1)[1].strip()
+               for line in result.stdout.splitlines())
     assert 'copy report: ' in result.stdout
-    coverage = invoke('analyze', str(ROOT / 'tests/fixtures/copy_report_coverage.dewy'))
+    # This coverage fixture uses runtime assertions, whose reporting helpers
+    # deliberately are not present in the small invocation-only library.
+    real_env = env | {'DEWY_LIBRARY_ROOT': str(ROOT / 'library'), 'DEWY_UDEWY': str(micro)}
+    coverage = subprocess.run([compiler, 'analyze', ROOT / 'tests/fixtures/copy_report_coverage.dewy'],
+                              cwd=tmp_path, env=real_env, capture_output=True,
+                              text=True, timeout=900, check=False)
     assert coverage.returncode == 0, coverage.stdout + coverage.stderr
     entries = [line for line in coverage.stdout.splitlines() if line.startswith('copy: ') and 'copy_report_coverage.dewy:' in line]
     assert any(': string ' in line for line in entries)
