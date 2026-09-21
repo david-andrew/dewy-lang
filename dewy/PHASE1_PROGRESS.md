@@ -802,3 +802,28 @@ still above the performance target. Artifacts:
 David approved parent-portion lifecycle inheritance and clarified the review
 policy: proceed provisionally with obvious choices consistent with Dewy and
 report them; seek advance review for fundamental new language directions.
+
+Inherited lifecycle checking now composes through the immediate parent in
+both implementations. Each hidden helper borrows its child source once,
+invokes the parent operation once, and reconstructs the complete child from
+the returned parent portion and the added fields. The ordinary constructor
+checker rejects parent results that cannot establish a strengthened child
+contract. Added custom-copy effects remain visible. Inherited drop bodies
+delegate to the parent body; complete-child field cleanup remains the
+responsibility of the pending ownership lowering. Runtime hooks are still
+explicitly rejected, so this is not a resource-lifetime completion claim.
+
+The provisional override rule follows the role rather than the member name:
+an explicitly tagged child operation replaces that inherited role, while an
+ordinary same-named method cannot silently remove it. A child override
+supplies the complete operation; it does not also run the overridden body.
+
+Validation: 121 hosted lifecycle/method/effect checks and the final expanded
+47 lifecycle checks passed. Native passed the previous 26 focused probes
+and six additional inheritance probes, including multi-level copy, move,
+override and strengthened-contract checking. The build took 64.30 seconds
+and executed all three existing view/ownership/projected-store kernels (42).
+All 11 lifecycle parity cases passed with required diagnostic fragments;
+the focused manifest now has 105 cases. Artifacts:
+`../dewy-build-artifacts/phase1-lifecycle-inheritance-stage1-2026-09-20` and
+`../dewy-build-artifacts/phase1-lifecycle-inheritance-parity-2026-09-20`.

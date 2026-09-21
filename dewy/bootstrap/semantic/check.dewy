@@ -5507,7 +5507,6 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         if types.object_field(type method.name) isnt? none return problem(reference.node 'a lifecycle hook cannot implement a callable field' 'lifecycle members are compiler-only, not runtime function values' defining session)
         if method.lifecycle in? lifecycle_roles return problem(reference.node 'duplicate lifecycle hook' method.lifecycle defining session)
         lifecycle_roles.add(method.lifecycle)
-        if method.owner isnt? none and method.owner not=? alias return pending(reference.node 'inherited lifecycle hooks' defining session)
         let count:addr=0
         loop other in type.methods {if other.name =? method.name {count+=1}}
         if count not=? 1 return problem(reference.node 'a lifecycle hook cannot be overloaded' method.name defining session)
@@ -5535,6 +5534,13 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         # A minted child's inherited body belongs to its declaring family.
         # Reuse that family's receiver type and hidden binding.
         if method.owner isnt? none and method.owner not=? alias {
+            if method.lifecycle isnt? none {
+                let inherited=inherit_lifecycle(type_id method reference.node Environment[lexical env.state] @session)
+                if inherited is? Error return inherited
+                session.methods[method_key(type_id method)]=contexts.MethodEntry[inherited type_id true method.lifecycle]
+                instances.add(method.name)
+                continue
+            }
             let parent=method_owner(method.owner lexical @session)
             if parent is? Error return parent
             if parent isnt? none {
@@ -5883,6 +5889,38 @@ brand_type = (name:string session:contexts.Session):>addr => {
 # carry a disambiguating suffix, and a parameter type need not be nameable
 # where the helper is checked.
 HiddenAlias:type = const [name:string value:addr]
+# A lifecycle helper borrows the complete child once. The parent operation
+# supplies its portion; ordinary construction checks the resulting child's
+# field contracts instead of assuming the source's facts survived the hook.
+inherit_lifecycle = (owner:addr method:types.MethodSpec id:addr env:Environment @session:contexts.Session):>addr|Error => {
+    let child=types.node_at(session.types owner)
+    $runtime_assert child is? types.ObjectType and child.parent isnt? none and child.brand isnt? none
+    let parent_id=views.structural_base(child.parent session.types)
+    let parent=types.node_at(session.types parent_id)
+    $runtime_assert parent is? types.ObjectType and parent.brand isnt? none
+    let error=prepare_methods(parent_id parent.brand env @session)
+    if error isnt? none return error
+    let hook:types.MethodSpec?=none
+    loop candidate in parent.methods {if candidate.lifecycle =? method.lifecycle {hook=candidate}}
+    $runtime_assert hook isnt? none
+    let entry=session.methods.get(method_key(parent_id hook))
+    $runtime_assert entry isnt? none
+    let text:string='(@__dewy_value:__dewy_lifecycle_child):>void => __dewy_lifecycle_parent(@__dewy_value)'
+    if method.lifecycle not=? 'drop' {
+        let fields:array<string>=[]
+        loop field in parent.fields {fields.push("{field.name}=__dewy_parent_value.{field.name}")}
+        loop field in child.fields {
+            if types.object_field(parent field.name) isnt? none {continue}
+            let value="__dewy_value.{field.name}"
+            let field_type=types.node_at(session.types views.structural_base(field.value_type session.types))
+            let aggregate=field_type is? types.ObjectType|types.ArrayType|types.TypeOr or views.string_valued(field.value_type session.types)
+            if method.lifecycle =? 'copy' and aggregate and builtin_copy_available(field.value_type session.types) {value+='.copy()'}
+            fields.push("{field.name}={value}")
+        }
+        text="(@__dewy_value:__dewy_lifecycle_child):>__dewy_lifecycle_child => \{\nlet __dewy_parent_value=__dewy_lifecycle_parent(@__dewy_value)\nreturn __dewy_lifecycle_child[{fields.join(' ')}]\n}"
+    }
+    return hoist_hidden_function("{child.brand}__{method.name}$lifecycle" text [HiddenAlias['__dewy_lifecycle_child' owner]] id env @session values=[hir.FieldBinding[entry.binding '__dewy_lifecycle_parent']] lifecycle=method.lifecycle)
+}
 # Code point order, as the hosted `sorted` on brand names (UTF-8 bytes order
 # as code points do).
 string_before = (a:string b:string):>bool => {
@@ -6007,7 +6045,7 @@ module_scope = (scope:addr session:contexts.Session):>addr => {
 }
 # Typecheck a synthesized function literal as a module-level hidden
 # function, like a generic instance or a type's method.
-hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:addr env:Environment @session:contexts.Session):>addr|Error => {
+hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:addr env:Environment @session:contexts.Session values:array<hir.FieldBinding>=[] lifecycle:string?=none):>addr|Error => {
     let srcfile=SrcFile["<{name}>" text]
     let parsed=parser.parse(srcfile)
     if parsed is? Error return parsed
@@ -6023,6 +6061,7 @@ hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:a
         bindings.store_binding(@session.registry alias_id alias_binding)
         bindings.bind(@session.scopes lexical.scope canonical alias_id)
     }
+    loop value in values {bindings.bind(@session.scopes lexical.scope tokens.normalize_identifier(value.name) value.id)}
     let root=contexts.node_at(parsed.root lexical session)
     $runtime_assert root is? parser.Block and root.inner.length =? 1
     let literal_id=root.inner[0]
@@ -6033,6 +6072,9 @@ hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:a
     let value=function_literal(literal_id literal defining @session name=name)
     if value is? Error return value
     let checked=node_at(value session)
+    $runtime_assert checked is? hir.FunctionLiteral and value <? session.hir.length
+    checked.lifecycle=lifecycle
+    session.hir[value]=checked
     let binding=bindings.binding_at(session.registry binding_id)
     binding.value_type=checked.value_type binding.store_type=checked.value_type binding.function=value
     let declared=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'let' name none value binding_id] @session)

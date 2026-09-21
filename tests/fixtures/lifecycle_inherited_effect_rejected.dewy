@@ -1,0 +1,13 @@
+let changed:int64=0
+BaseHandle = type of [
+    token:int64
+    $__copy__
+    duplicate = ():>BaseHandle => {changed=1 return BaseHandle[0]}
+]
+DerivedHandle = type of BaseHandle & [extra:string]
+# Composition must retain both the child's type and the parent's effects.
+copy_handle = ():>DerivedHandle & no mutates => {
+    let handle=DerivedHandle[42 "kept"]
+    return handle.copy()
+}
+main = ():>int64 => 42

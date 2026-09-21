@@ -1,0 +1,8 @@
+BaseHandle = type of [
+    token:int64
+    $__copy__
+    duplicate = ():>BaseHandle => BaseHandle[0]
+]
+# The inherited hook's result does not establish this stronger contract.
+DerivedHandle = type of BaseHandle & [token:int64<v=>v >? 0>]
+main = ():>int64 => 42

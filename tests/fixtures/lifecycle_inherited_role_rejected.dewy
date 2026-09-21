@@ -1,0 +1,8 @@
+BaseHandle = type of [
+    token:int64
+    $__drop__
+    release = ():>void => {}
+]
+# An ordinary method cannot silently disable resource cleanup.
+DerivedHandle = type of BaseHandle & [release=():>void=>{}]
+main = ():>int64 => 42

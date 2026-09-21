@@ -91,9 +91,91 @@ def test_observable_hook_effects_are_allowed_without_a_pure_contract():
     check.typecheck_and_resolve(SrcFile(None, source), include_prelude=True)
 
 
-def test_inherited_hooks_are_explicitly_pending():
-    with pytest.raises(ReportException, match='inherited lifecycle hooks'):
-        checked(owner('$__drop__\nrelease=():>void=>{}') + 'DerivedHandle:type=type of Handle & [extra:int64]')
+@pytest.mark.parametrize('role, body', [('drop', '{}'), ('copy', 'Handle[0]'), ('move', 'Handle[token]')])
+def test_inherited_hooks_compose_the_parent_portion(role, body):
+    result = 'void' if role == 'drop' else 'Handle'
+    root = checked(owner(f'$__{role}__\noperation=():>{result}=>{body}')
+                   + 'DerivedHandle:type=type of Handle & [extra:string]\n'
+                     'Grandchild:type=type of DerivedHandle & [last:int64]')
+    functions = [item.expr for item in root.items if isinstance(item, hir.Declare) and isinstance(item.expr, hir.FunctionLiteral)]
+    assert len(functions) == 3
+    assert all(fn.lifecycle == role for fn in functions)
+    for fn, brand in zip(functions[1:], ['DerivedHandle', 'Grandchild']):
+        assert fn.pos_or_kw_args[0].type.brand == brand
+        calls = [node for node in hir.walk(fn.body) if isinstance(node, hir.FunctionCall)]
+        assert len(calls) == 1
+        assert isinstance(calls[0].pos_args[0], hir.Place)
+        if role != 'drop':
+            assert fn.rettype.brand == brand
+            constructed = next(node for node in hir.walk(fn.body) if isinstance(node, hir.ObjectLiteral))
+            assert [f.name for f in constructed.fields] == (['token', 'extra'] if brand == 'DerivedHandle' else ['token', 'extra', 'last'])
+
+
+def test_inherited_copy_retains_child_type_and_checks_parent_effects():
+    source = ('let changed:int64=0\n' + owner('$__copy__\nduplicate=():>Handle=>{changed=1 return Handle[0]}')
+              + 'Child=type of Handle & [extra:string]\n'
+                'f=():>Child & no mutates=>{let c=Child[42 "kept"] return c.copy()}')
+    with pytest.raises(ReportException, match='effect contract'):
+        checked(source)
+
+
+def test_inherited_copy_evaluates_its_source_once():
+    root = checked(owner('$__copy__\nduplicate=():>Handle=>Handle[0]')
+                   + 'Child=type of Handle & [extra:string]\n'
+                     'make=():>Child=>Child[42 "kept"]\n'
+                     'f=():>Child=>make().copy()')
+    function = next(item.expr for item in root.items if isinstance(item, hir.Declare) and item.name == 'f')
+    calls = [node for node in hir.walk(function.body) if isinstance(node, hir.FunctionCall)]
+    assert [call.func.name for call in calls].count('make') == 1
+    copied = next(call for call in calls if call.func.name.endswith('$lifecycle'))
+    assert copied.type.brand == 'Child'
+
+
+def test_inherited_drop_still_makes_child_move_only():
+    with pytest.raises(ReportException, match='cannot copy a move-only value'):
+        checked(owner('$__drop__\nrelease=():>void=>{}')
+                + 'Child=type of Handle & [extra:string]\n'
+                  'f=():>Child=>{let c=Child[42 "kept"] return c.copy()}')
+
+
+def test_inherited_copy_must_preserve_stronger_child_field_contract():
+    source = (owner('$__copy__\nduplicate=():>Handle=>Handle[0]')
+              + 'Child=type of Handle & [token:int64<v=>v >? 0>]')
+    with pytest.raises(ReportException):
+        checked(source)
+
+
+@pytest.mark.parametrize('name', ['duplicate', 'child_duplicate'])
+def test_child_hook_overrides_by_role(name):
+    root = checked(owner('$__copy__\nduplicate=():>Handle=>Handle[token]')
+                   + f'Child=type of Handle & [extra:int64\n$__copy__\n{name}=():>Child=>Child[token extra]]')
+    child = next(item.expr.value for item in root.items if isinstance(item, hir.Declare) and item.name == 'Child')
+    assert [(m.name, m.lifecycle) for m in child.methods] == [(name, 'copy')]
+
+
+def test_ordinary_override_cannot_remove_inherited_lifecycle_role():
+    with pytest.raises(ReportException, match='cannot change an inherited lifecycle role'):
+        checked(owner('$__drop__\nrelease=():>void=>{}')
+                + 'Child=type of Handle & [release=():>void=>{}]')
+
+
+def test_inherited_copy_checks_added_field_copy_effects():
+    source = '''let changed:int64=0
+Extra=type of [
+    token:int64
+    $__copy__
+    duplicate=():>Extra=>{changed=1 return Extra[token]}
+]
+Parent=type of [
+    token:int64
+    $__copy__
+    duplicate=():>Parent=>Parent[token]
+]
+Child=type of Parent & [extra:Extra]
+f=():>Child & no mutates=>{let c=Child[42 Extra[1]] return c.copy()}
+'''
+    with pytest.raises(ReportException, match='effect contract'):
+        checked(source)
 
 
 def test_nested_function_cannot_write_through_copy_receiver():

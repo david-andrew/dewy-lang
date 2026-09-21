@@ -1239,6 +1239,16 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
         if error isnt? none return error
         let declared_methods:array<types.MethodSpec>=[]
         loop method in node.methods {
+            loop previous in methods {
+                if previous.name =? method.name and previous.lifecycle isnt? none and previous.lifecycle not=? method.lifecycle return contexts.problem(id 'cannot change an inherited lifecycle role' "`{method.name}` must retain its lifecycle marker" context session)
+            }
+            if method.lifecycle isnt? none {
+                let retained:array<types.MethodSpec>=[]
+                loop previous in methods {
+                    if previous.lifecycle not=? method.lifecycle or previous.owner =? name {retained.push(previous)}
+                }
+                methods=retained
+            }
             let owner = if method.owner is? none name else method.owner
             let declared = types.MethodSpec[method.name method.literal method.binding_id method.place_self owner method.static method.lifecycle]
             declared_methods.push(declared)

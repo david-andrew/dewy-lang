@@ -5955,6 +5955,53 @@ def _declare_pending_methods(*, ctx: Context, for_type: ty.ObjectType | None = N
         _declare_type_methods(alias, object_type, ctx=module_ctx)
 
 
+def _inherit_lifecycle(alias: sb.Binding, owner: ty.ObjectType, method: ty.MethodSpec, *, ctx: Context) -> None:
+    """Compose a parent's operation with the child's additional storage.
+
+    Check the generated constructor normally: a parent hook is allowed to
+    change its fields, so it need not preserve a stronger child invariant.
+    The helper's single place parameter also evaluates the original source
+    only once. Ordinary source cannot name the hidden hook binding.
+    """
+    parent = ty.USER_BRAND_TYPES[ty.USER_BRAND_PARENTS[owner.brand]]
+    _declare_pending_methods(ctx=ctx, for_type=parent)
+    inherited = next(m for m in parent.methods if m.lifecycle == method.lifecycle)
+    assert inherited.binding_id is not None
+    callee = ctx.binding_registry.by_id[inherited.binding_id]
+    shape = ctx.binding_registry.allocate_param('__dewy_lifecycle_child', ty.TYPE_TYPE, alias.loc)
+    shape.type_value = owner
+    defining = replace(ctx, declarations=ctx.declarations.new_child({shape.name: ty.TYPE_TYPE, '__dewy_lifecycle_parent': callee.type}),
+                       binding_scopes=ctx.binding_scopes.new_child({shape.name: shape, '__dewy_lifecycle_parent': callee}))
+    if method.lifecycle == 'drop':
+        text = '(@__dewy_value:__dewy_lifecycle_child):>void => __dewy_lifecycle_parent(@__dewy_value)'
+    else:
+        fields = [f'{f.name}=__dewy_parent_value.{f.name}' for f in parent.fields]
+        for field_ in owner.fields:
+            if parent.field(field_.name) is not None:
+                continue
+            value = f'__dewy_value.{field_.name}'
+            field_type = ty.unfold(ty.strip_refinement(field_.type))
+            aggregate = isinstance(field_type, (ty.ObjectType, ty.ArrayType, ty.TypeOr)) or _is_string_type(field_type)
+            if method.lifecycle == 'copy' and aggregate and _builtin_copy_available(field_.type):
+                value += '.copy()'
+            fields.append(f'{field_.name}={value}')
+        text = ('(@__dewy_value:__dewy_lifecycle_child):>__dewy_lifecycle_child => {\n'
+                'let __dewy_parent_value=__dewy_lifecycle_parent(@__dewy_value)\n'
+                f'return __dewy_lifecycle_child[{" ".join(fields)}]\n}}')
+    source = SrcFile(f'<{alias.name} inherited {method.lifecycle}>', text + '\n')
+    parsed = p0.parse(source)
+    literal = parsed.inner[0]
+    assert isinstance(literal, p0.BinOp)
+    ctx.synthesized.append(literal)
+    # Only this compiler-generated body may forward the internal copy
+    # receiver. User-written copy bodies keep the ordinary read-only check.
+    binding = _hoist_hidden_function(f'{alias.name}__{method.name}$lifecycle', literal, ctx=replace(defining, srcfile=source))
+    assert binding.function is not None
+    binding.function.lifecycle = method.lifecycle
+    method.binding_id = binding.id
+    method.place_self = True
+
+
 def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx: Context) -> None:
     """Compile a type's methods as hidden functions `Type__method(self …)`.
 
@@ -5975,13 +6022,15 @@ def _declare_type_methods(alias: sb.Binding, object_type: ty.ObjectType, *, ctx:
         if method.lifecycle in hooks:
             user_error(ctx.srcfile, f'duplicate lifecycle hook `$__{method.lifecycle}__`', Pointer(span=alias.loc, message='a type has at most one member for each lifecycle operation'))
         hooks[method.lifecycle] = method
-        if method.owner not in (None, alias.name):
-            not_implemented(ctx.srcfile, alias.loc, 'inherited lifecycle hooks')
         if sum(m.name == method.name for m in object_type.methods) != 1:
             user_error(ctx.srcfile, 'a lifecycle hook cannot be overloaded', Pointer(span=alias.loc, message=f'`{method.name}` is a compiler-only operation'))
     members = {f.name for f in object_type.fields} | {m.name for m in object_type.methods}
     field_names = {f.name for f in object_type.fields}
     for method in object_type.methods:
+        if method.lifecycle is not None and method.owner not in (None, alias.name):
+            if method.binding_id is None:
+                _inherit_lifecycle(alias, object_type, method, ctx=ctx)
+            continue
         if method.binding_id is None and method.owner not in (None, alias.name):
             # inherited: its declaring type compiles it (now, if that is still pending)
             owner_entry = next(((a, t) for a, t in ctx.pending_methods if a.name == method.owner), None)
@@ -6833,7 +6882,9 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
                         Pointer(span=rhs.loc, message=f'`{ancestor}` already carries it'),
                     )
             fields[:0] = item.fields
-            methods[:0] = item.methods   # inherited: compiled once by their declaring type, a child receiver being a subtype
+            # Ordinary methods share their declaring family's function. A
+            # lifecycle operation needs a child-specific composition helper.
+            methods[:0] = [replace(m, binding_id=None) if m.lifecycle is not None else m for m in item.methods]
             continue
     for item in operands:
         if item == 'any' or ty.user_branded(item):
@@ -6845,6 +6896,14 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
             )
             replaced_names: set[str] = set()
             for method in item.methods:
+                previous_hook = next((m for m in methods if m.name == method.name and m.lifecycle is not None), None)
+                if previous_hook is not None and previous_hook.owner != binding.name and method.lifecycle != previous_hook.lifecycle:
+                    user_error(ctx.srcfile, 'cannot change an inherited lifecycle role', Pointer(span=rhs.loc, message=f'`{method.name}` must retain `$__{previous_hook.lifecycle}__`'))
+                if method.lifecycle is not None:
+                    # Lifecycle identity is the role, not its private member
+                    # spelling. An explicitly tagged child override replaces
+                    # the inherited operation even when it has another name.
+                    methods[:] = [m for m in methods if not (m.lifecycle == method.lifecycle and m.owner != binding.name)]
                 slot = next((index for index, existing in enumerate(fields) if existing.name == method.name), None)
                 if slot is not None and isinstance(fields[slot].type, ty.FunctionType):
                     # `type of Protocol & [eat = (…) => …]`: a method named like an
@@ -6889,8 +6948,6 @@ def _mint_branded_object(binding: sb.Binding, rhs: p0.AST, parent: ty.TypeExpr, 
     else:
         ty.USER_BRAND_PARENTS.pop(name, None)
     minted = ty.ObjectType.compose(operands, fields=fields, brand=name, methods=methods)
-    if ancestor is not None and any(method.lifecycle is not None and method.owner != binding.name for method in methods):
-        not_implemented(ctx.srcfile, rhs.loc, 'inherited lifecycle hooks')
     ty.USER_BRAND_TYPES[name] = minted
     if abstract:
         ty.USER_ABSTRACT_BRANDS.add(name)   # `$abstract`: values only of its children

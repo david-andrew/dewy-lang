@@ -398,11 +398,28 @@ user-minted resources with allocator ownership. The allocation-capability
 protocol and remaining failure behavior need their own design before useful
 resource-owning hooks can be declared complete.
 
-### Inheritance — approved direction, implementation pending
+### Inheritance — checked composition implemented, runtime pending
 
 If `Child = type of Parent & [extra:string]`, an inherited parent copy/move
 hook returns `Parent`, not the complete `Child`. David approved applying the
 parent hook to the parent portion, handling the added fields normally, and
-keeping the complete result's child identity. The implementation still
-rejects inherited hooks explicitly until that composition is implemented;
-reusing the parent's returned value alone would lose the child's state.
+keeping the complete result's child identity. Both checkers now synthesize a
+hidden composition function with one borrowed child receiver. It invokes the
+immediate parent's operation once, then constructs the complete child from
+the returned parent fields and the child's added fields. Added fields use
+their own copy operations for copy, or ordinary ownership transfer for move.
+The inherited drop body invokes the parent's drop body; eventual automatic
+cleanup still belongs to the complete child, in reverse field order.
+
+The generated constructor uses ordinary checking. A parent hook need not
+preserve a stronger child field contract; if that obligation cannot be
+proved, the child needs its own hook. Parent-hook effects and explicit
+custom copies of added fields remain ordinary checked calls. Multi-level
+inheritance composes through the immediate parent, retaining each level's
+result identity. Runtime ownership lowering remains gated for all hooks.
+
+Provisional details following David's updated review guidance: an explicitly
+tagged child hook overrides by lifecycle role, even if it uses a different
+member name. An ordinary member cannot silently remove a same-named
+inherited lifecycle role. An override supplies the complete child's hook;
+the compiler does not also invoke the overridden parent body.
