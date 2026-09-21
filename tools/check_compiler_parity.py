@@ -4,7 +4,9 @@ Use the existing end-to-end fixture expectations by default, or supply a JSON
 list of {source, accepts, exit, args, stdout} cases. An expected runtime report
 can specify diagnostic_stderr as a nonempty list of required report fragments;
 only those cases permit diagnostic formatting/notes to differ. Rejections need
-only source and accepts=false. Compiler errors, timeouts and runtime failures
+only source and accepts=false; compile_diagnostic_stderr can additionally
+require nonempty diagnostic fragments, so an unrelated rejection cannot pass.
+Compiler errors, timeouts and runtime failures
 are recorded separately. A failed fixture never prevents later fixtures from
 being checked.
 """
@@ -71,6 +73,9 @@ def expected_outcome(case: dict, result: dict, work: Path) -> bool:
     # language-level rejection. Keep this distinct from a program exiting 1.
     return (compiled['status'] == 1 and 'Error:' in compiled['stderr']
             and 'Traceback' not in compiled['stderr']
+            and ('compile_diagnostic_stderr' not in case or
+                 bool(case['compile_diagnostic_stderr']) and all(
+                     fragment in compiled['stderr'] for fragment in case['compile_diagnostic_stderr']))
             and not list(work.rglob('*.udewy')))
 
 

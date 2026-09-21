@@ -29,6 +29,16 @@ def test_expected_output_is_checked_independently(tmp_path):
     assert not expected_outcome({'accepts': True, 'exit': 1, 'stdout': 'expected'}, result, tmp_path)
 
 
+def test_unrelated_rejection_cannot_satisfy_required_compile_diagnostic(tmp_path):
+    case = {'accepts': False, 'compile_diagnostic_stderr': ['effect contract', 'no mutates']}
+    result = {'compile': {'status': 1, 'stderr': 'Error: effect contract violates no mutates'}}
+    assert expected_outcome(case, result, tmp_path)
+    for stderr in ('Error: not implemented: lifecycle ownership lowering',
+                   'Error: effect contract', 'Traceback\nError: effect contract no mutates'):
+        assert not expected_outcome(case, {'compile': {'status': 1, 'stderr': stderr}}, tmp_path)
+    assert not expected_outcome(case | {'compile_diagnostic_stderr': []}, result, tmp_path)
+
+
 def test_inventory_captures_raw_output_and_timeouts(tmp_path):
     result = invoke([sys.executable, '-c', 'import os; os.write(1, bytes([255]))'], tmp_path, os.environ, 5)
     assert result['status'] == 0
