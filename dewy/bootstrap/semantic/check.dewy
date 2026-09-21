@@ -5895,9 +5895,11 @@ HiddenAlias:type = const [name:string value:addr]
 inherit_lifecycle = (owner:addr method:types.MethodSpec id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let child=types.node_at(session.types owner)
     $runtime_assert child is? types.ObjectType and child.parent isnt? none and child.brand isnt? none
+    let registered=brands.lookup(child.brand session.brands)
+    if registered is? none or registered.value_type not=? owner return pending(id 'lifecycle hooks on structurally extended nominal types' env session)
     let parent_id=views.structural_base(child.parent session.types)
     let parent=types.node_at(session.types parent_id)
-    $runtime_assert parent is? types.ObjectType and parent.brand isnt? none
+    if parent isnt? types.ObjectType or parent.brand is? none return pending(id 'lifecycle hooks on structurally extended nominal types' env session)
     let error=prepare_methods(parent_id parent.brand env @session)
     if error isnt? none return error
     let hook:types.MethodSpec?=none

@@ -138,6 +138,13 @@ def test_inherited_drop_still_makes_child_move_only():
                   'f=():>Child=>{let c=Child[42 "kept"] return c.copy()}')
 
 
+def test_structural_extension_does_not_invent_a_nominal_parent():
+    with pytest.raises(ReportException, match='structurally extended nominal types'):
+        checked(owner('$__copy__\nduplicate=():>Handle=>Handle[token]')
+                + 'Extension:type=Handle & [extra:int64]\n'
+                  'f=(value:Extension):>Extension=>value.copy()')
+
+
 def test_inherited_copy_must_preserve_stronger_child_field_contract():
     source = (owner('$__copy__\nduplicate=():>Handle=>Handle[0]')
               + 'Child=type of Handle & [token:int64<v=>v >? 0>]')

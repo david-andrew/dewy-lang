@@ -5963,6 +5963,11 @@ def _inherit_lifecycle(alias: sb.Binding, owner: ty.ObjectType, method: ty.Metho
     The helper's single place parameter also evaluates the original source
     only once. Ordinary source cannot name the hidden hook binding.
     """
+    # A structural refinement keeps the same brand; it is not a new mint
+    # with a parent portion. Do not manufacture an inheritance edge (or
+    # overwrite that family's shared method binding) for such a view.
+    if ty.USER_BRAND_TYPES.get(owner.brand) != owner or owner.brand not in ty.USER_BRAND_PARENTS:
+        not_implemented(ctx.srcfile, alias.loc, 'lifecycle hooks on structurally extended nominal types')
     parent = ty.USER_BRAND_TYPES[ty.USER_BRAND_PARENTS[owner.brand]]
     _declare_pending_methods(ctx=ctx, for_type=parent)
     inherited = next(m for m in parent.methods if m.lifecycle == method.lifecycle)

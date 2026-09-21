@@ -423,3 +423,8 @@ tagged child hook overrides by lifecycle role, even if it uses a different
 member name. An ordinary member cannot silently remove a same-named
 inherited lifecycle role. An override supplies the complete child's hook;
 the compiler does not also invoke the overridden parent body.
+
+Composition currently covers nominal children. Structurally extending the
+same nominal identity (`Parent & [extra:...]`, without `type of`) still needs
+a separate composition path; requesting its inherited hook is diagnosed
+explicitly rather than inventing a nominal parent or failing internally.

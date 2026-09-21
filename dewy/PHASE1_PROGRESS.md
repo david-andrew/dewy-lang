@@ -850,3 +850,13 @@ and also executes the previous three kernels (42), still above target.
 The focused manifest now has 108 cases. Artifacts:
 `../dewy-build-artifacts/phase1-view-last-use-stage1-2026-09-20` and
 `../dewy-build-artifacts/phase1-view-last-use-parity-2026-09-20`.
+
+Lifecycle follow-up: structural extension of an existing nominal identity is
+not a new child mint. Its hook adaptation previously attempted to look up a
+nonexistent nominal parent and could fail internally. Both checkers now
+diagnose this unsupported composition explicitly. Hosted passed 48 lifecycle
+checks; the new paired fixture passed with the expected diagnostic. A fresh
+native generation built in 67.19 seconds while integration tests were also
+running, then executed the three existing kernels (42). Artifacts:
+`../dewy-build-artifacts/phase1-lifecycle-structural-guard-2026-09-20` and
+`../dewy-build-artifacts/phase1-lifecycle-structural-guard-parity-2026-09-20`.
