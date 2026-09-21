@@ -51,7 +51,7 @@ def validate(root, registry, srcfile):
         return
     analysis = _EffectAnalyzer(root)
     storage_effects = analysis.solve()
-    borrowed_arguments = storage_borrows.forwarded_arrays(analysis, storage_effects)
+    borrowed_arguments = storage_borrows.forwarded_values(analysis, storage_effects)
     local = {}
     calls = {}
     dependents = {}

@@ -864,3 +864,17 @@ Recursive arrays use the same checked lifecycle helpers as optional links;
 factory results, independent custom/synthesized copies, array mutation and
 pop transfers retain ordinary ownership. Paired regressions check hook order,
 copy independence and zero retained arena storage, including nested arrays.
+
+### Aggregate borrows in allocation contracts (2026-09-21)
+
+The shared storage proof now covers read-only arrays, records and strings,
+including field and element projections rooted in a stable by-value parameter.
+Both effect checking and lowering use the same closed-call-graph and access
+summaries: a callee must only read the value; the caller must not mutate or
+expose the root through later argument evaluation. Nonlocal/raw operations,
+unresolved callbacks, representation conversions and nested lifecycle hooks
+remain outside this proof. Eligibility is memoized within one analysis, not
+across mutable compiler states. The paired `aggregate_borrow_effects.dewy`
+fixture checks that these calls perform zero arena allocation; negative cases
+retain allocation requirements for private mutation, copies, unknown callbacks
+and conflicting later arguments. General return/move placement remains work.

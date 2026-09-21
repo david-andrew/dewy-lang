@@ -427,7 +427,7 @@ class _ArrayLowering(_ArraySharing):
                 )
                 # The shared parameter proof is also consumed by public
                 # allocation contracts; use exactly that storage decision.
-                safe |= id(argument) in self.forwarded_arrays.get(id(call), ())
+                safe |= id(argument) in self.forwarded_values.get(id(call), ())
                 if source_id is not None:
                     boundary_uses[source_id].add(
                         'safe_call_boundary' if safe else 'copy_call_boundary'

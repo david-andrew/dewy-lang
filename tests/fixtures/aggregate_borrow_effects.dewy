@@ -1,0 +1,27 @@
+# Forwarding ordinary read-only values preserves their storage without hidden
+# allocation, including a record's nested arrays and strings.
+Box:type = [items:array<int64> label:string]
+size = (text:string):>int64 & no_effects => text.length
+forward_text = (text:string):>int64 & no_effects => size(text)
+read = (box:Box):>int64 & no_effects => box.items.length + size(box.label)
+first = (boxes:array<Box>):>int64 & no_effects => {
+    if boxes.length >? 0 return read(boxes[0])
+    return 0
+}
+forward = (box:Box):>int64 & no_effects => read(box)
+again = (box:Box count:int64):>int64 & no allocates => {
+    if count >? 0 return again(box count-1)
+    return forward(box)
+}
+main = ():>int64 => {
+    let box = Box[[40 2] "ab"]
+    let text = "a{box.items.length}"
+    let boxes:array<Box>=[box]
+    let before:int64 = _arena_allocated_bytes
+    if forward_text(text) not=? 2 return 1
+    if forward(box) not=? 4 return 2
+    if again(box 4) not=? 4 return 3
+    if first(boxes) not=?4 return 5
+    if _arena_allocated_bytes not=? before return 4
+    return box.items[0] + box.items[1]
+}

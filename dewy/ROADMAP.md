@@ -571,7 +571,11 @@ signatures and distinct cached instances. Complete inference into callable
 types and scoped polymorphic place subjects remain in progress. Bare
 `allocates` / `no allocates` now classify logical copies and aggregate
 construction; fixed scalar local arrays now share a bounded nonescaping frame-placement
-proof with lowering. The proof is exercised by a zero-allocation loop kernel
+proof with lowering. Read-only aggregate forwarding now shares its storage
+proof with allocation contracts, including records, strings and field/element
+projections of stable by-value parameters. Lifecycle operations, unknown
+callbacks, raw exposure and conflicting argument evaluation retain their
+ordinary obligations. The placement proof is exercised by a zero-allocation loop kernel
 on both compilers/backends. Broader placement/move proofs and further storage
 operations and failure remain in progress. The reviewed rules are in `PHASE1_DESIGN_PROPOSALS.md`.
 Effect polymorphism, allocation and failure as effects, and the

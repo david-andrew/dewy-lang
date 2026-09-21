@@ -2,12 +2,13 @@ import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
 import p"effects.dewy" as effects
 import p"../bindings.dewy" as bindings
+import p"../type_queries.dewy" as views
 
 # A storage proof shared by allocation contracts and argument lowering.
-# A read-only by-value parameter stays stable throughout its caller, including
+# A read-only by-value parameter and its projections stay stable, including
 # later argument evaluation. Known calls operating only on their own bindings
-# cannot change an incoming alias through nonlocal or raw storage. This first
-# shared proof covers array forwarding without representation conversion.
+# cannot change an incoming alias through nonlocal or raw storage. The shared
+# proof covers ordinary aggregate forwarding without representation conversion.
 # More precise lowerer proofs may still borrow other expressions.
 const OPERATORS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
 # Native builtins carry stable identities. A source function with the same
@@ -18,7 +19,35 @@ primitive=(node:hir.AST registry:bindings.Registry):>bool=>{
     let binding=bindings.find_binding(registry node.binding_id)
     return binding isnt? none and binding.builtin
 }
-forwarded_arrays=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>{
+# Borrowing bytes must not skip logical resource copy/drop operations.
+borrowable=(type:addr table:types.Table):>bool=>{
+    let shape=views.structural_base(type table)
+    let first=types.node_at(table shape)
+    if first isnt? types.ArrayType|types.ObjectType|types.StringType|types.StringLiteralType and not views.string_valued(shape table) return false
+    let pending:array<addr>=[shape] let seen:set<addr>=set[]
+    loop pending.length>?0 {
+        let id=views.structural_base(pending.pop table)
+        if id in? seen continue
+        seen.add(id)
+        let item=types.node_at(table id)
+        if item is? types.ObjectType {
+            loop method in item.methods {if method.lifecycle isnt? none return false}
+            loop field in item.fields {pending.push(field.value_type)}
+        } else if item is? types.ArrayType {pending.push(item.element)}
+        else if item is? types.TypeOr {loop member in item.items {pending.push(member)}}
+    }
+    return true
+}
+
+ordinary=(type:addr table:types.Table @known:dict<addr bool>):>bool=>{
+    let found=known.get(type)
+    if found isnt? none return found
+    let result=borrowable(type table)
+    known[type]=result
+    return result
+}
+forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>{
+    let eligible:dict<addr bool>=[]
     let bodies:dict<addr array<addr>>=[]
     let edges:dict<addr set<addr>>=[]
     let blocked:set<addr>=set[]
@@ -99,14 +128,15 @@ forwarded_arrays=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
                 if pairs isnt? none {
                     loop pair in pairs {
                         let arg=hir.node_at(nodes pair.argument)
-                        let source=hir.node_at(nodes effects.unwrap(pair.argument nodes))
+                        let path=bindings.access_path(pair.argument nodes)
+                        let source=hir.node_at(nodes path.root)
                         let safe=false
                         if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and pair.parameter isnt? none {
                             let own=parameters.get(source.binding_id)
                             let expected=wanted.get(pair.parameter)
                             let incoming=summaries.by_param_binding.get(source.binding_id)
                             let outgoing=summaries.by_param_binding.get(pair.parameter)
-                            safe=own isnt? none and expected isnt? none and types.node_at(table arg.value_type) is? types.ArrayType and arg.value_type =? own and own =? expected and incoming isnt? none and effects.read_only(incoming) and outgoing isnt? none and effects.read_only(outgoing)
+                            safe=own isnt? none and expected isnt? none and ordinary(arg.value_type table @eligible) and arg.value_type =? expected and ordinary(own table @eligible) and incoming isnt? none and effects.read_only(incoming) and outgoing isnt? none and effects.read_only(outgoing)
                         }
                         if safe {current.add(pair.argument)} else {rejected.add(pair.argument)}
                     }

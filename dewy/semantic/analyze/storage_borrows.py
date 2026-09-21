@@ -1,6 +1,7 @@
 """Storage evidence shared by allocation contracts and argument lowering.
 
-A read-only value parameter can be forwarded without a snapshot when the
+A read-only aggregate parameter or one of its projections can be forwarded
+without a snapshot when the
 caller and callee operate on their own bindings through known calls. The
 whole-caller summary excludes writes through later arguments too. Nonlocal
 storage, raw operations, representation casts and unresolved callbacks keep
@@ -8,7 +9,7 @@ this proof unknown; ordinary lowering may have more precise borrow proofs.
 """
 from collections import deque
 
-from .. import hir, ty
+from .. import hir, ty, bindings
 from .effects import _EffectAnalyzer, _literal_params, _unwrap
 
 OPERATORS = frozenset({
@@ -19,8 +20,38 @@ OPERATORS = frozenset({
 })
 
 
-def forwarded_arrays(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]]:
+def borrowable(type_):
+    """Ordinary aggregate storage, without observable lifecycle operations."""
+    shape = ty.structural_base(type_)
+    if not isinstance(shape, (ty.ArrayType, ty.ObjectType, ty.StringType, ty.StringLiteralType)) and not ty.string_valued(shape):
+        return False
+    pending, seen = [shape], set()
+    while pending:
+        item = ty.structural_base(pending.pop())
+        if id(item) in seen:
+            continue
+        seen.add(id(item))
+        if isinstance(item, ty.ObjectType):
+            if any(method.lifecycle is not None for method in item.methods):
+                return False
+            pending.extend(field.type for field in item.fields)
+        elif isinstance(item, ty.ArrayType):
+            pending.append(item.element)
+        elif isinstance(item, ty.TypeOr):
+            pending.extend(item.items)
+    return True
+
+
+def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]]:
     bodies, edges, blocked = {}, {}, set()
+    eligible = {}
+
+    def ordinary(type_):
+        key = id(type_)
+        if key not in eligible:
+            eligible[key] = borrowable(type_)
+        return eligible[key]
+
     for literal in analysis.literals:
         key = id(literal)
         local = {p.binding_id for p in _literal_params(literal)}
@@ -79,13 +110,14 @@ def forwarded_arrays(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]
                 pairs = analysis._pair_arguments(node, target)
                 current, rejected = set(), set()
                 for argument, parameter in pairs or ():
-                    source = _unwrap(argument)
+                    path = bindings.access_path(argument, unwrap=_unwrap)
+                    source = path.root
                     own = parameters.get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
                     incoming = summaries.for_param_binding(own.binding_id) if own else None
                     outgoing = summaries.for_param_binding(parameter.binding_id) if parameter else None
                     # No conversion or lifecycle operation at this boundary.
-                    if (own is not None and parameter is not None and isinstance(argument.type, ty.ArrayType)
-                            and argument.type == own.type == parameter.type
+                    if (own is not None and parameter is not None and ordinary(argument.type)
+                            and argument.type == parameter.type and ordinary(own.type)
                             and not parameter.place and incoming is not None and incoming.read_only
                             and outgoing is not None and outgoing.read_only):
                         current.add(id(argument))
