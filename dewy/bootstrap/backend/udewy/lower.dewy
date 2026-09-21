@@ -109,6 +109,8 @@ State:type = [
     frame_boxes:dict<addr addr>=[]
     # Fixed scalar arrays proven local share reusable function-frame storage.
     frame_arrays:dict<addr ArrayMemory>=[]
+    frame_records:dict<addr addr>=[]
+    frame_record_bindings:set<addr>=set[]
     addressed:set<addr>=set[]
     place_parameters:set<addr>=set[]
     union_tags:dict<string addr>=[]
@@ -401,7 +403,7 @@ expression = (id:addr @state:State):>addr => {
         return expression(node.lowered @state)
     }
     if node is? hir.RepresentationCast return representation(node @state)
-    if node is? hir.ObjectLiteral return object_literal(node @state)
+    if node is? hir.ObjectLiteral return object_literal(id node @state)
     if node is? hir.TypeTest return runtime_test(node @state)
     if node is? hir.ForwardingAccess return forwarding_field(node @state)
     if node is? hir.DictContains return dict_contains(node @state)
@@ -548,6 +550,7 @@ expression = (id:addr @state:State):>addr => {
             if node.view return required_view_error(node @state)
             value=owned_value(node.expr @state "bound to `{node.name}`")
         }
+        if node.binding_id isnt? none and node.binding_id in? state.frame_record_bindings {borrowed=true}
         # An addressed optional local is written through its own cell, which
         # must therefore never be the shared static `none` cell.
         if state.none_cell isnt? none and node.binding_id isnt? none and node.binding_id in? state.addressed and node.binding_id not in? state.boxed and not borrowed {
@@ -3877,13 +3880,14 @@ peel_statement = (id:addr @state:State):>addr => {
         return current
     }
 }
-object_literal = (node:hir.ObjectLiteral @state:State):>addr => {
+object_literal = (id:addr node:hir.ObjectLiteral @state:State):>addr => {
     let layout=object_layout(node.value_type node @state)
     let record=object_type(node.value_type state)
     $runtime_assert record isnt? none
     let prefix:array<addr>=[]
     let temporary:array<OwnedLocal>=[]
-    let destination=snapshot(record_allocation(layout node @state) @prefix @state)
+    let frame=state.frame_records.get(id)
+    let destination=if frame is? none snapshot(record_allocation(layout node @state) @prefix @state) else frame
     loop item in node.fields {
         let field=types.object_field(record item.name)
         let offset=layout.offsets.get(item.name)
@@ -4317,11 +4321,23 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     }
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
     state.frame_boxes=[]
-    state.frame_arrays=[]
-    loop [binding declaration_id] in placement.local_arrays(node state.input.nodes state.type_nodes) {
+    state.frame_arrays=[] state.frame_records=[] state.frame_record_bindings=set[]
+    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes) {
         let declaration=hir.node_at(state.input.nodes declaration_id)
         $runtime_assert declaration is? hir.Declare
         let literal=hir.node_at(state.input.nodes declaration.expr)
+        if literal is? hir.ObjectLiteral {
+            # No whole-value use, capture or place can escape this record.
+            # It owns only scalar fields, so no release/header is required.
+            let layout=object_layout(literal.value_type literal @state)
+            let name=fresh('record_frame' @state)
+            let word_type=types.primitive('int64' @state.type_nodes)
+            let allocated=intrinsic_call('__alloca__' [word(layout.size literal @state)] word_type literal @state)
+            prologue.push(put(hir.Declare[literal.loc void_type 'const' name word_type allocated] @state))
+            state.frame_records[declaration.expr]=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
+            state.frame_record_bindings.add(binding)
+            continue
+        }
         $runtime_assert literal is? hir.ArrayLiteral
         let type=array_type(literal.value_type state)
         $runtime_assert type isnt? none

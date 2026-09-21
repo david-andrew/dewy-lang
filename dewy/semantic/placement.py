@@ -1,18 +1,18 @@
 """Storage proofs shared by public effects and runtime lowering.
 
-A fixed scalar array used only for its length and element reads/writes has
-no escaping descriptor or element address. One bounded frame slot suffices
-for every execution of its declaration, including loop iterations. These
-proofs describe actual placement, not a hope that COW postpones allocation.
+Fixed scalar arrays used only for length/element access, and scalar records
+used only for field access, have no escaping address. One bounded frame slot
+suffices for each declaration, including loop iterations. These proofs
+justify actual placement, not a hope that COW postpones allocation.
 """
 from . import hir, ty
 
 # An implementation budget, not a language limit. Larger storage retains the
 # ordinary allocation path; a no-allocation contract needs another proof.
-FRAME_ARRAY_BYTES = 4096
+FRAME_STORAGE_BYTES = 4096
 
 
-def local_arrays(literal: hir.FunctionLiteral) -> dict[int, hir.Declare]:
+def local_values(literal: hir.FunctionLiteral) -> dict[int, hir.Declare]:
     nodes = []
     captured = set()
     pending = [literal.body]
@@ -29,20 +29,30 @@ def local_arrays(literal: hir.FunctionLiteral) -> dict[int, hir.Declare]:
         if not isinstance(node, hir.Declare) or node.binding_id is None or node.view:
             continue
         value = node.expr
-        if not isinstance(value, hir.ArrayLiteral) or not isinstance(value.type, ty.ArrayType):
-            continue
-        element = ty.strip_refinement(value.type.element)
-        if element != 'bool' and ty.fixed_integer_layout(element) is None:
-            continue
-        if value.type.length != len(value.items) or any(isinstance(item, hir.Spread) for item in value.items):
-            continue
-        if 48 + 8 * len(value.items) <= FRAME_ARRAY_BYTES:
-            candidates[node.binding_id] = node
+        size = None
+        if isinstance(value, hir.ArrayLiteral) and isinstance(value.type, ty.ArrayType):
+            element = ty.strip_refinement(value.type.element)
+            scalar = element == 'bool' or ty.fixed_integer_layout(element) is not None
+            if scalar and value.type.length == len(value.items) and not any(isinstance(item, hir.Spread) for item in value.items):
+                size = 48 + 8 * len(value.items)
+        elif isinstance(value, hir.ObjectLiteral):
+            shape = ty.structural_base(value.type)
+            if (isinstance(shape, ty.ObjectType)
+                    and not any(method.lifecycle is not None for method in shape.methods)
+                    and all(ty.strip_refinement(field.type) == 'bool' or ty.fixed_integer_layout(field.type) is not None
+                            for field in shape.fields)):
+                # Include the optional nominal tag, with an upper bound for
+                # every scalar field. Actual layout may pack narrower words.
+                size = 8 + 8 * len(shape.fields)
+        if size is not None and size <= FRAME_STORAGE_BYTES:
+            candidates[node.binding_id] = (node, size)
     allowed, occurrences = {}, {}
     blocked = set(captured)
     for node in nodes:
         if isinstance(node, (hir.Index, hir.ArrayLength)) and isinstance(node.array, hir.ExpressedIdentifier):
             allowed[id(node.array)] = allowed.get(id(node.array), 0) + 1
+        if isinstance(node, hir.MemberAccess) and isinstance(node.value, hir.ExpressedIdentifier):
+            allowed[id(node.value)] = allowed.get(id(node.value), 0) + 1
         if isinstance(node, hir.Place):
             # Until the callee's escape proof is shared with this pass, even
             # a scalar element address conservatively excludes placement.
@@ -56,11 +66,15 @@ def local_arrays(literal: hir.FunctionLiteral) -> dict[int, hir.Declare]:
             blocked.add(node.binding_id)
     result = {}
     used = 0
-    for binding, declaration in candidates.items():
+    for binding, (declaration, size) in candidates.items():
         if binding in blocked:
             continue
-        size = 48 + 8 * len(declaration.expr.items)
-        if used + size <= FRAME_ARRAY_BYTES:
+        if used + size <= FRAME_STORAGE_BYTES:
             result[binding] = declaration
             used += size
     return result
+
+
+def local_arrays(literal: hir.FunctionLiteral) -> dict[int, hir.Declare]:
+    return {binding: declaration for binding, declaration in local_values(literal).items()
+            if isinstance(declaration.expr, hir.ArrayLiteral)}

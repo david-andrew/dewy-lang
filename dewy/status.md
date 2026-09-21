@@ -917,3 +917,21 @@ Indexed aliases also lose affected descendant facts. Paired tests cover
 empty-length proofs, mutation invalidation, value independence, const fields,
 single selector evaluation, drop order and zero retained arena bytes. Resource
 dictionary entry lookup/store/pop and entry-place lifetimes remain pending.
+
+### Scalar record placement and allocation contracts (2026-09-21)
+
+The shared storage proof now includes small local record literals containing
+only fixed-width scalar fields and no lifecycle hooks. Only direct field
+reads/writes are allowed: whole-value uses, captures and addresses exclude
+the record until their escape proofs are shared with placement. Arrays and
+records share a 4 KiB per-function storage budget. This is an implementation
+budget; larger values retain ordinary allocation obligations.
+
+Native lowering allocates each eligible record once in the function frame,
+reinitializing its fields at each declaration execution. It neither applies
+COW headers nor registers heap cleanup for this frame-owned scalar storage.
+Hosted lowering already uses bounded frame storage for these literals; both
+public-effect checkers now consume the same placement proof. Paired kernels
+cover nominal/structural records, narrow fields, mutation, repeated loop
+execution and zero arena allocation. Aggregate fields, escaping results and
+unproved whole-value forwarding still require allocation permission.

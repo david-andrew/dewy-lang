@@ -577,8 +577,9 @@ and substitute callback rows in both compilers, including mixed type/row
 signatures and distinct cached instances. Complete inference into callable
 types and scoped polymorphic place subjects remain in progress. Bare
 `allocates` / `no allocates` now classify logical copies and aggregate
-construction; fixed scalar local arrays now share a bounded nonescaping frame-placement
-proof with lowering. Read-only aggregate forwarding now shares its storage
+construction; fixed scalar local arrays and scalar record literals now share
+a bounded nonescaping frame-placement proof with lowering. Native record
+storage is allocated once per function frame and reused across loop iterations. Read-only aggregate forwarding now shares its storage
 proof with allocation contracts, including records, strings and field/element
 projections of stable by-value parameters. Lifecycle operations, unknown
 callbacks, raw exposure and conflicting argument evaluation retain their

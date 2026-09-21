@@ -1,0 +1,22 @@
+Point=type of [x:int64 y:int64]
+step=(n:int64):>int64 & no_effects=>{
+    let point=Point[n 2]
+    point.x+=point.y
+    point.y=point.x-1
+    return point.x+point.y
+}
+looped=():>int64 & no_effects=>{
+    let sum:int64=0
+    loop i in 0.. and i <?200000 {
+        let point=Point[i 2]
+        point.x=point.y+1
+        sum+=point.x
+    }
+    return sum
+}
+main=():>int64=>{
+    let before:int64=_arena_allocated_bytes
+    if step(19) not=?41 or looped() not=?600000 return 1
+    if _arena_allocated_bytes not=?before return 2
+    return 42
+}

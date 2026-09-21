@@ -19,7 +19,7 @@ scalar = (id:addr nodes:types.Table):>bool => {
 }
 Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[] borrowed_arguments:dict<addr set<addr>>=[]]
 Call:type = const [target:addr subjects:dict<string rows.Subject?>]
-Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[] value_parameters:set<addr>=set[] frame_arrays:set<addr>=set[] frame_literals:set<addr>=set[]]
+Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[] value_parameters:set<addr>=set[] frame_values:set<addr>=set[] frame_literals:set<addr>=set[]]
 Location:type = const [known:bool subject:rows.Subject?=none]
 word_iterator = (id:addr node:hir.IteratorExpression input:Input):>bool => {
     if hir.node_at(input.nodes node.iterable) isnt? hir.Range return false
@@ -172,7 +172,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     if node is? hir.Declare {
         let value=hir.node_at(input.nodes node.expr)
         # A required view has no copy fallback: lowering proves or rejects it.
-        if not node.view and (node.binding_id is? none or node.binding_id not in? scan.frame_arrays) and not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {storage(@scan)}
+        if not node.view and (node.binding_id is? none or node.binding_id not in? scan.frame_values) and not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral {storage(@scan)}
         visit(node.expr input @scan)
         return
     }
@@ -183,7 +183,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         let projected_storage=false
         loop step in path.steps {if hir.node_at(input.nodes step) is? hir.Index {projected_storage=true}}
         if path.steps.length >? 0 and root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.value_parameters {projected_storage=true}
-        let placed=root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.frame_arrays
+        let placed=root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.frame_values
         if not scalar(target.value_type input.types) or (projected_storage and not placed) {storage(@scan)}
         record_access(node.target 'mutates' input @scan)
         if node is? hir.Assign and node.op not=? '=' {record_access(node.target 'reads' input @scan)}
@@ -235,10 +235,10 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
         let scan=Scan[]
-        loop [binding declaration_id] in placement.local_arrays(node session.hir session.types) {
+        loop [binding declaration_id] in placement.local_values(node session.hir session.types) {
             let declaration=hir.node_at(session.hir declaration_id)
             $runtime_assert declaration is? hir.Declare
-            scan.frame_arrays.add(binding) scan.frame_literals.add(declaration.expr)
+            scan.frame_values.add(binding) scan.frame_literals.add(declaration.expr)
         }
         if not scalar(node.rettype session.types) {storage(@scan)}
         let params=access.literal_params(node)

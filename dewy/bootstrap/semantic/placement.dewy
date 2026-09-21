@@ -2,11 +2,12 @@ import p"hir.dewy" as hir
 import p"ty.dewy" as types
 import p"type_queries.dewy" as views
 
-# The same bounded local-array proof as semantic/placement.py. Whole-value
-# reads, captures, address formation and resizing exclude the frame route.
-const FRAME_ARRAY_BYTES:addr=4096
+# The same bounded array/record proof as semantic/placement.py. Whole-value
+# uses, captures, addresses and resizing exclude the frame route. Arrays and
+# records share one per-function budget; only scalar fields/elements qualify.
+const FRAME_STORAGE_BYTES:addr=4096
 Candidate:type=const [declaration:addr size:addr<v=>v<=?4096>]
-local_arrays=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table):>dict<addr addr>=>{
+local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table):>dict<addr addr>=>{
     let items:array<addr>=[]
     let blocked:set<addr>=set[]
     let pending:array<addr>=[literal.body]
@@ -36,16 +37,28 @@ local_arrays=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
             let value=hir.node_at(nodes node.expr)
             if value is? hir.ArrayLiteral {
                 let shape=types.node_at(table types.strip_refinement(value.value_type table))
-                if shape is? types.ArrayType and shape.length =? value.items.length and value.items.length <=? (FRAME_ARRAY_BYTES-48)//8 {
+                if shape is? types.ArrayType and shape.length =? value.items.length and value.items.length <=? (FRAME_STORAGE_BYTES-48)//8 {
                     let element=types.node_at(table types.strip_refinement(shape.element table))
                     let scalar=types.is_primitive(element 'bool') or views.fixed_integer_layout(shape.element table) isnt? none
                     let spread=false
                     loop item in value.items {if hir.node_at(nodes item) is? hir.Spread {spread=true}}
                     if scalar and not spread {candidates[node.binding_id]=Candidate[id 48+8*value.items.length]}
                 }
+            } else if value is? hir.ObjectLiteral {
+                let shape=types.node_at(table views.structural_base(value.value_type table))
+                if shape is? types.ObjectType and shape.fields.length <=? (FRAME_STORAGE_BYTES-8)//8 {
+                    let scalar=true
+                    loop method in shape.methods {if method.lifecycle isnt? none {scalar=false}}
+                    loop field in shape.fields {
+                        let type=types.node_at(table types.strip_refinement(field.value_type table))
+                        if not types.is_primitive(type 'bool') and views.fixed_integer_layout(field.value_type table) is? none {scalar=false}
+                    }
+                    if scalar {candidates[node.binding_id]=Candidate[id 8+8*shape.fields.length]}
+                }
             }
         }
         if node is? hir.Index|hir.ArrayLength and hir.node_at(nodes node.array) is? hir.ExpressedIdentifier {allowed[node.array]=allowed.get(node.array 0)+1}
+        if node is? hir.MemberAccess and hir.node_at(nodes node.value) is? hir.ExpressedIdentifier {allowed[node.value]=allowed.get(node.value 0)+1}
         if node is? hir.Place {
             let selected:array<addr>=[node.target]
             loop selected.length >? 0 {
@@ -65,7 +78,17 @@ local_arrays=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
         if binding in? blocked continue
         let size=candidate.size
         let next=used+size
-        if next <=? FRAME_ARRAY_BYTES {result[binding]=candidate.declaration used=next}
+        if next <=? FRAME_STORAGE_BYTES {result[binding]=candidate.declaration used=next}
+    }
+    return result
+}
+
+local_arrays=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table):>dict<addr addr>=>{
+    let result:dict<addr addr>=[]
+    loop [binding id] in local_values(literal nodes table) {
+        let declaration=hir.node_at(nodes id)
+        $runtime_assert declaration is? hir.Declare
+        if hir.node_at(nodes declaration.expr) is? hir.ArrayLiteral {result[binding]=id}
     }
     return result
 }
