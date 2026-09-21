@@ -1605,3 +1605,11 @@ Validation: 28 focused checks passed using a freshly native-built program
 driver, covering both compilers and both x86-64/C backends, adjacent clear and
 truncate behavior, imported effects, optional/nested replacement, single
 selector evaluation and zero retained bytes over repeated replacements.
+
+Integration checkpoint at `61a044bd`: the direct native pair reached a
+byte-identical generation 2/3 fixed point and passed its execution checks.
+All 155 Phase 1 parity cases passed with shared prelude caching against the
+final pair. Generations 2 and 3 took 131 s and 164 s while the full suite and
+other checks ran concurrently; these timings are not performance baselines.
+Artifacts: `../dewy-build-artifacts/phase1-truncate-integration-2026-09-21`
+and `../dewy-build-artifacts/phase1-truncate-parity-2026-09-21`.
