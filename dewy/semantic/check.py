@@ -4860,6 +4860,27 @@ def _join_continuation_facts(
     ctx.key_facts.update(joined_keys)
 
 
+def _invalidate_loop_writes(ctx: Context, mutated_names: set[str], replaced_names: set[str]) -> None:
+    """Forget backedge writes after one-time iterator initialization."""
+    for name in mutated_names:
+        binding = ctx.binding_scopes.get(name)
+        if binding is None:
+            continue
+        # Growing a narrowed array changes its contents/length, not its
+        # union tag. A whole-binding store or place argument may replace
+        # the value, so only those discard the selected array alternative.
+        held = ty.strip_refinement(ctx.refinements.get(binding.id, ty.TOP_TYPE))
+        array_view = replace(held, length=None) if name not in replaced_names and isinstance(held, ty.ArrayType) else None
+        for binding_id in (binding.id, *ctx.binding_registry.routes_under(binding.id)):
+            ctx.refinements.pop(binding_id, None)
+            ctx.refinements.pop(_exclusion_key(binding_id), None)
+            ctx.length_bounds.pop(binding_id, None)
+            _drop_key_facts(ctx, dictionary_id=binding_id)
+            _drop_key_facts(ctx, key_id=binding_id)
+        if array_view is not None:
+            ctx.refinements[binding.id] = array_view
+
+
 def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> hir.AST:
     """Typecheck supported structured `if` and while-style `loop` flows."""
     if not ast.arms:
@@ -5104,23 +5125,9 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
         # Facts established by the checked condition then hold at each entry
         # to the body, including iterator predicates.
         mutated_names, replaced_names = _binding_write_names(body_ast)
-        for name in mutated_names:
-            binding = ctx.binding_scopes.get(name)
-            if binding is None:
-                continue
-            # Growing a narrowed array changes its contents/length, not its
-            # union tag. A whole-binding store or place argument may replace
-            # the value, so only those discard the selected array alternative.
-            held = ty.strip_refinement(ctx.refinements.get(binding.id, ty.TOP_TYPE))
-            array_view = replace(held, length=None) if name not in replaced_names and isinstance(held, ty.ArrayType) else None
-            for binding_id in (binding.id, *ctx.binding_registry.routes_under(binding.id)):
-                ctx.refinements.pop(binding_id, None)
-                ctx.refinements.pop(_exclusion_key(binding_id), None)
-                ctx.length_bounds.pop(binding_id, None)
-                _drop_key_facts(ctx, dictionary_id=binding_id)
-                _drop_key_facts(ctx, key_id=binding_id)
-            if array_view is not None:
-                ctx.refinements[binding.id] = array_view
+        iterator_syntax = _contains_iterator_syntax(condition_ast)
+        if not iterator_syntax:
+            _invalidate_loop_writes(ctx, mutated_names, replaced_names)
         # iterator clauses mixed with Boolean predicates (`loop i in 0.. and
         # i <? n and src[i] in? ws`): the iterators advance, then the
         # predicates are tested with the targets bound — the loop ends at the
@@ -5143,6 +5150,10 @@ def tcr_flow(ast: p0.Flow, *, ctx: Context, expected: ty.Type | None = None) -> 
             body_ctx = _refine_condition_context(ctx, condition, truth=True)
         else:
             condition, body_ctx = iterator_result
+            # The iterable is evaluated once, before any loop-body write.
+            # Only predicates and the body recur across those writes.
+            _invalidate_loop_writes(ctx, mutated_names, replaced_names)
+            _invalidate_loop_writes(body_ctx, mutated_names, replaced_names)
             if nested_unpacks:
                 unpack_declares, body_ctx = _declare_nested_unpacks(nested_unpacks, body_ctx, ctx=ctx)
             if predicates:

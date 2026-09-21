@@ -4355,11 +4355,14 @@ loop_flow_inner = (id:addr arm:parser.KeywordExpr env:Environment @session:conte
     let replaced = source_views.mutations(arm.parts[2] env.lexical session true)
     loop name in source_views.mutations(arm.parts[1] env.lexical session) { changed.add(name) }
     loop name in source_views.mutations(arm.parts[1] env.lexical session true) { replaced.add(name) }
-    invalidate_loop_names(changed replaced env @session)
+    let iterator_syntax=source_views.contains_iterator(arm.parts[1] env.lexical session)
+    # Iterator inputs are evaluated once, before the body can mutate them.
+    # A Boolean condition repeats, so it starts with the backedge facts gone.
+    if not iterator_syntax {invalidate_loop_names(changed replaced env @session)}
     let body_env = fork(env @session)
     let condition:addr? = none
     let prefix:array<addr> = []
-    if source_views.contains_iterator(arm.parts[1] env.lexical session) {
+    if iterator_syntax {
         let iterators:array<addr> = []
         let predicates:array<addr> = []
         let guards:array<addr> = []
@@ -4375,6 +4378,8 @@ loop_flow_inner = (id:addr arm:parser.KeywordExpr env:Environment @session:conte
             joined=true
             body_env=collected
         }
+        invalidate_loop_names(changed replaced env @session)
+        invalidate_loop_names(changed replaced body_env @session)
         $runtime_assert iterators.length >? 0
         # Guards synthesized for runtime range ends precede the written
         # predicates, as in the hosted rewrite.
