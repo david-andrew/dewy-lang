@@ -1400,3 +1400,16 @@ again against evidence common to the argument snapshot and call-entry state,
 so later arguments cannot invalidate them silently. Endpoint writes are then
 applied before result facts. Fifteen focused hosted checks and the native
 acceptance/rejection harness passed, including execution on both backends.
+
+Full-suite checkpoint `40586e70`: 3,424 passed and 14 skipped in 1,855.84s.
+The subsequent truncation/call-entry change also passed all 76 adjacent hosted
+array, dependent-index, projected-place and length/order-fact checks.
+
+CI follow-up: the release job at `40586e70` reached packaging after verifying
+three native generations, but packaging still compared stages 1 and 2. It
+now compares the last two stages recorded in the checked manifest and verifies
+the distributed binaries against the final stage. Unrecorded stale stage files
+do not change that choice. Eight packaging checks passed, including valid-hash
+mismatches and three-generation builds with different stage-1 output. The
+updated script also packaged the actual verified `c277e5d8` three-generation
+pair successfully. The remote pytest workflow was still running at this check.

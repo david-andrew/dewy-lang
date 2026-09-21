@@ -2,6 +2,7 @@
 import hashlib
 import subprocess
 import tarfile
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,3 +56,49 @@ def test_package_rejects_changed_generation_or_source(tmp_path):
                             capture_output=True, check=False)
     assert result.returncode != 0
     assert not archive.exists()
+
+
+def rewrite_manifest(pair, names=None):
+    if names is None:
+        names = [line.split()[1] for line in (pair / 'SHA256SUMS').read_text().splitlines()]
+    (pair / 'SHA256SUMS').write_text(''.join(
+        f'{hashlib.sha256((pair / name).read_bytes()).hexdigest()}  {name}\n'
+        for name in names))
+
+
+def test_package_three_generations_after_lowering_change(tmp_path):
+    pair = tmp_path / 'pair'
+    pair_fixture(pair)
+    names = [line.split()[1] for line in (pair / 'SHA256SUMS').read_text().splitlines()]
+    for compiler in ('dewy', 'udewy'):
+        (pair / f'{compiler}-stage1').write_text('older lowering output')
+        (pair / f'{compiler}-stage3').write_bytes((pair / compiler).read_bytes())
+        names.append(f'{compiler}-stage3')
+    rewrite_manifest(pair, names)
+    result = subprocess.run([ROOT / 'tools/package_native.sh', pair, tmp_path / 'native.tar.gz'],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('changed', ['dewy-stage2', 'udewy-stage2', 'dewy', 'udewy'])
+def test_package_rejects_nonmatching_final_pair_with_valid_hashes(tmp_path, changed):
+    pair = tmp_path / 'pair'
+    pair_fixture(pair)
+    names = [line.split()[1] for line in (pair / 'SHA256SUMS').read_text().splitlines()]
+    for compiler in ('dewy', 'udewy'):
+        (pair / f'{compiler}-stage3').write_bytes((pair / compiler).read_bytes())
+        names.append(f'{compiler}-stage3')
+    (pair / changed).write_text('different compiler output')
+    rewrite_manifest(pair, names)
+    archive = tmp_path / 'native.tar.gz'
+    result = subprocess.run([ROOT / 'tools/package_native.sh', pair, archive], capture_output=True)
+    assert result.returncode != 0 and not archive.exists()
+
+
+def test_package_ignores_unrecorded_later_generation(tmp_path):
+    pair = tmp_path / 'pair'
+    pair_fixture(pair)
+    (pair / 'dewy-stage3').write_text('stale output from another build')
+    (pair / 'udewy-stage3').write_text('stale output from another build')
+    result = subprocess.run([ROOT / 'tools/package_native.sh', pair, tmp_path / 'native.tar.gz'], capture_output=True)
+    assert result.returncode == 0, result.stderr

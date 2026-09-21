@@ -13,10 +13,23 @@ sha256sum --check --status "$package_pair/SOURCE_SHA256SUMS"
 (
     cd -- "$package_pair"
     sha256sum --check --status SHA256SUMS
-    cmp -- dewy-stage1 dewy-stage2
-    cmp -- udewy-stage1 udewy-stage2
-    cmp -- dewy dewy-stage2
-    cmp -- udewy udewy-stage2
+    # The bootstrap certifies the last two generations. With an older seed,
+    # stage 1 may differ even though stages 2 and 3 have reached a fixed point.
+    # Use only stages recorded in the checked manifest: an old stage-3 file
+    # left in a reused output directory does not belong to a two-stage build.
+    mapfile -t package_dewy_stages < <(sed -nE 's/^[[:xdigit:]]{64}  dewy-stage([0-9]+)$/\1/p' SHA256SUMS | sort -n)
+    mapfile -t package_udewy_stages < <(sed -nE 's/^[[:xdigit:]]{64}  udewy-stage([0-9]+)$/\1/p' SHA256SUMS | sort -n)
+    if [[ "${package_dewy_stages[*]}" != "${package_udewy_stages[*]}" ||
+          ( "${package_dewy_stages[*]}" != '0 1 2' && "${package_dewy_stages[*]}" != '0 1 2 3' ) ]]; then
+        echo 'Expected matching two- or three-generation manifests for both compilers' >&2
+        exit 1
+    fi
+    package_last=${package_dewy_stages[-1]}
+    package_previous=$((package_last - 1))
+    cmp -- "dewy-stage$package_previous" "dewy-stage$package_last"
+    cmp -- "udewy-stage$package_previous" "udewy-stage$package_last"
+    cmp -- dewy "dewy-stage$package_last"
+    cmp -- udewy "udewy-stage$package_last"
 )
 mkdir -p -- "$(dirname -- "$package_archive")"
 package_stage=$(mktemp -d "$(dirname -- "$package_archive")/.native-package.XXXXXX")
