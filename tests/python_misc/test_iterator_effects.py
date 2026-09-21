@@ -9,6 +9,8 @@ from tests.python_misc.test_scalar_projection import execute
 
 
 @pytest.mark.parametrize('source', [
+    # Fixed nonescaping arrays have proven reusable frame storage.
+    'f=():>int64 & no allocates=>{loop i in [0..4) {let xs=[i]} return 42}',
     'f=():>int64 & no_effects=>{let n:int64=0 loop i in [0..4) {n+=1} return n}',
     'f=():>int64 & no_effects=>{let n:int64=0 loop i in 0.. and i <? 4 {n+=1} return n}',
     'f=(limit:int64):>int64 & no allocates=>{let n:int64=0 loop i in 0.. and i <? limit {n+=1} return n}',
@@ -24,7 +26,7 @@ def test_proven_word_iteration_is_effect_free(source):
     'f=():>int64 & no allocates=>{let n:int64=0 loop i in 0.. {n+=1} return n}',
     'f=():>int64 & no allocates=>{loop i in 0.. {if i>=?0 continue break} return 42}',
     'f=():>int64 & no allocates=>{loop i in [0..18446744073709551616) {break} return 42}',
-    'f=():>int64 & no allocates=>{loop i in [0..4) {let xs=[i]} return 42}',
+    'f=(limit:int64):>array<int64> & no allocates=>{let xs:array<int64>=[] loop i in [0..limit) {xs.push(i)} return xs}',
     'f=(@n:int64):>void & no_effects=>{loop i in [0..4) {n+=1}}',
     'f=():>int64 & no_effects=>{loop i in [0..4) {printl(i)} return 42}',
 ])
