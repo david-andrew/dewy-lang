@@ -1,0 +1,29 @@
+# A read-only local alias of a borrowed parameter is a view, not a new owner.
+let drops:int64=0
+Handle=type of [token:int64 values:array<int64>
+$__drop__
+release=():>void=>{drops+=1 token=0 values.clear}
+]
+read=(@h:Handle):>int64=>{
+    let unused=h
+    let other=h
+    if other.values.length =? 0 return 0
+    return other.token+other.values[0]
+}
+exercise=():>int64=>{
+    let owner=Handle[40 [2]]
+    if read(@owner) not=?42 or drops not=?0 return 1
+    # The caller still owns the resource after both local views expire.
+    if owner.token not=?40 or owner.values[0] not=?2 return 2
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 or drops not=?1 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0..100 {
+        drops=0
+        if exercise() not=?42 or drops not=?1 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

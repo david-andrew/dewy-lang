@@ -117,13 +117,26 @@ def test_native_factory_result_ownership(tmp_path, name):
 
 @pytest.mark.parametrize('helper', [
     'borrow=(@h:TraceHandle):>TraceHandle=>h',
-    'borrow=(@h:TraceHandle):>void=>{let other=h}',
+    'borrow=(@h:TraceHandle):>void=>{let other=h h.token=0 printl(other.token)}',
     'borrow=(@h:TraceHandle):>void=>{h=TraceHandle[1]}',
     'borrow=(@h:TraceHandle):>void=>{let get=():>int64=>h.token get();}',
 ])
 def test_resource_borrow_cannot_create_an_owner_or_escape(helper):
     with pytest.raises(ReportException, match='lifecycle ownership lowering'):
         codegen(SrcFile(None, OWNER + helper + '\nmain=():>int64=>{let h=TraceHandle[42] borrow(@h); return 42}'))
+
+
+def test_resource_parameter_local_view_keeps_the_callers_owner(tmp_path):
+    from pathlib import Path
+    fixture = Path(__file__).resolve().parents[1] / 'fixtures/lifecycle_parameter_local_view.dewy'
+    execute(tmp_path, 'parameter-local-view', codegen(SrcFile.from_path(fixture)))
+
+
+def test_native_resource_parameter_local_view(tmp_path):
+    from pathlib import Path
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    fixture = Path(__file__).resolve().parents[1] / 'fixtures/lifecycle_parameter_local_view.dewy'
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[fixture.read_text()], errors=[])
 
 
 def test_resource_borrow_mutation_invalidates_facts():
