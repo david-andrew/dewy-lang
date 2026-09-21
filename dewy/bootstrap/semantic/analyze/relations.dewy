@@ -25,6 +25,25 @@ interval_of = (term:facts.Term state:facts.State context:Context):>ranges.Interv
     let width = context.facts.widths.get(term.binding_id)
     return if width is? none ranges.UNKNOWN else width
 }
+# One-hop reduction combines interval and difference evidence without a
+# recursive solver or a new qualifier. It can prove a shifted term fits its
+# word even when only the related counter was tested by the loop guard.
+narrowed_interval = (term:facts.Term state:facts.State context:Context):>ranges.Interval => {
+    let result=interval_of(term state context)
+    loop entry in state.values {
+        let fact=entry.fact
+        let gap=entry.interval.lower
+        if fact isnt? facts.Order or gap is? none continue
+        if facts.same_term(fact.smaller term) and not facts.same_term(fact.larger term) {
+            let other=interval_of(fact.larger state context)
+            if other.upper isnt? none {result=ranges.intersect(result ranges.Interval[none other.upper-gap entry.interval.capped or other.capped])}
+        } else if facts.same_term(fact.larger term) and not facts.same_term(fact.smaller term) {
+            let other=interval_of(fact.smaller state context)
+            if other.lower isnt? none {result=ranges.intersect(result ranges.Interval[other.lower+gap none entry.interval.capped or other.capped])}
+        }
+    }
+    return result
+}
 minimum_length = (sequence:addr state:facts.State context:Context):>bigint => {
     let interval = facts.lookup(state facts.value(facts.Term[sequence 'length']))
     if interval isnt? none {

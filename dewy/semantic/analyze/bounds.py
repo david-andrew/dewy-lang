@@ -661,16 +661,18 @@ class _LoopTransfer:
     continues: dict[int, list[State]]
 
 
-def _seed_loop_equalities(state: State, assigned: set[int], registry: sb.BindingRegistry) -> State:
-    """Offer a bounded set of equality qualifiers to the loop fixed point.
+def _seed_loop_relations(state: State, assigned: set[int], registry: sb.BindingRegistry) -> State:
+    """Offer bounded difference qualifiers established by exact entry values.
 
-    Exact entry values establish the candidates; every backedge must preserve
-    them. A star per value group uses linear space rather than all pairs.
-    Once intervals widen, these relations can still connect two changing
-    lengths, or a length and a loop counter. This adds no assumed invariant.
+    Every backedge must preserve them. Keep equality stars within each value
+    group, plus an affine star connecting the groups to the first term. This
+    retains equality proofs even if that first term changes at another rate,
+    without introducing quadratically many pairs. Negative gaps express the
+    reverse bound of an exact difference; they are not assumed invariants.
     """
     result = dict(state)
     representatives: dict[int, int] = {}
+    anchor = None
     remaining = 64
     for term, interval in state.items():
         if not (term >= 0 or _is_length_key(term)):
@@ -683,11 +685,16 @@ def _seed_loop_equalities(state: State, assigned: set[int], registry: sb.Binding
         if remaining == 0:
             break
         remaining -= 1
+        if anchor is None:
+            anchor = term
         other = representatives.setdefault(interval.lower, term)
+        if other == term:
+            other = anchor
         if other != term:
-            equality = Interval(0, None, capped=interval.capped or state[other].capped)
-            result[_order_key(term, other)] = equality
-            result[_order_key(other, term)] = equality
+            gap = state[other].lower - interval.lower
+            capped = interval.capped or state[other].capped
+            result[_order_key(term, other)] = Interval(gap, None, capped=capped)
+            result[_order_key(other, term)] = Interval(-gap, None, capped=capped)
     return result
 
 
@@ -940,10 +947,10 @@ class _BoundsValidator:
                 )
             elif node.op != '=':
                 value = None
+            shift = self._assignment_shift(node)
+            shifted = self._shifted_facts(current, binding_id, shift) if shift is not None and self._shift_is_exact(node, current, shift) else {}
             self._set_interval(current, binding_id, value)
             self.member_facts.pop(binding_id, None)
-            shift = self._assignment_shift(node)
-            shifted = self._shifted_facts(current, binding_id, shift) if shift is not None else {}
             _drop_index_facts(current, index_id=binding_id)
             current.update(shifted)   # `i += 2` under `src.length - i >= 2`: `i <= src.length`
             if _has_sequence_length(node.target.type):
@@ -1837,7 +1844,7 @@ class _BoundsValidator:
         *,
         validate: bool,
     ) -> State:
-        state = _seed_loop_equalities(state, self.assigned, self.registry)
+        state = _seed_loop_relations(state, self.assigned, self.registry)
         head = dict(state)
         for _ in range(8):
             true_state = self._refine(head, condition, truth=True)
@@ -1976,7 +1983,7 @@ class _BoundsValidator:
         analyzed from the entry state only and its growth across iterations
         would be invisible.
         """
-        state = _seed_loop_equalities(state, self.assigned, self.registry)
+        state = _seed_loop_relations(state, self.assigned, self.registry)
         head = dict(state)
         for _ in range(8):
             transfer = self._loop_transfer(body, enter(head, word_candidates), validate=False)
@@ -3905,6 +3912,36 @@ class _BoundsValidator:
         if constant is None or constant.lower is None or constant.lower != constant.upper:
             return None
         return constant.lower if op == '+=' else -constant.lower
+
+    def _shift_is_exact(self, node: hir.Assign, state: State, shift: int) -> bool:
+        """Affine substitution requires mathematical addition, not rollover.
+
+        Check the arithmetic's own width as well as its destination: an int8
+        expression may wrap before its result is widened into an int64 slot.
+        Abstract integers have no representation overflow at this boundary.
+        """
+        subject = node.target.binding_id
+        before = self._binding_interval(state, subject)
+        for key, interval in state.items():
+            order = _decode_order_fact(key)
+            if order is None or interval.lower is None:
+                continue
+            smaller, larger = order
+            if smaller == subject and larger != subject:
+                other = self._binding_interval(state, larger)
+                if other.upper is not None:
+                    before = before.intersect(Interval(None, other.upper - interval.lower,
+                        capped=interval.capped or other.capped))
+            elif larger == subject and smaller != subject:
+                other = self._binding_interval(state, smaller)
+                if other.lower is not None:
+                    before = before.intersect(Interval(other.lower + interval.lower, None,
+                        capped=interval.capped or other.capped))
+        mathematical = Interval(_add(before.lower, shift), _add(before.upper, shift))
+        types = [node.target.type]
+        if node.op == '=':
+            types.append(_strip_casts(node.value).type)
+        return all(self._fit_type(mathematical, ty.strip_refinement(type_)) is not None for type_ in types)
 
     def _shifted_facts(self, state: State, term: int, shift: int) -> dict[int, Interval]:
         """Substitute a constant shift into both sides of an order relation.

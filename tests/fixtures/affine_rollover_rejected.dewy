@@ -1,0 +1,10 @@
+# A narrow operation can wrap before widening into its destination.
+work=():>int64=>{
+let i:int64=120 let j:int64=120
+loop 0<=?i<=?127 and j<?int64.max {
+i=(i as int8)+1 j+=1
+$assert i=?j
+}
+return 42
+}
+main=():>int64=>work()

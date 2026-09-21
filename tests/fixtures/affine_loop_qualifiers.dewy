@@ -1,0 +1,12 @@
+# A nonzero length difference is checked on every loop backedge.
+work=(n:int64):>int64=>{
+let xs:array<int64>=[42] let ys:array<int64>=[]
+let i:int64=0
+loop i<?n and i<?int64.max {
+$assert xs.length-ys.length=?1
+xs.push(i) ys.push(i) i+=1
+}
+$assert xs.length-ys.length=?1
+return 42
+}
+main=():>int64=>work(20)

@@ -300,13 +300,14 @@ widen = (previous:State current:State context:Context):>State => {
     return result
 }
 
-# Exact entry values suggest equality qualifiers, never assumptions. The
-# loop fixed point keeps only those preserved by every backedge. A star per
-# value group is linear in size; a shared vocabulary limit bounds the work.
-EqualityCandidate:type = const [number:bigint term:Term capped:bool]
-seed_loop_equalities = (state:State changing:set<addr>):>State => {
+# Exact entry values establish bounded difference qualifiers. The fixed
+# point keeps only those preserved by every backedge. Equality stars within
+# value groups plus an affine star between groups use linear space. Keeping
+# the equality stars matters when the first term changes at another rate.
+LoopCandidate:type = const [number:bigint term:Term capped:bool]
+seed_loop_relations = (state:State changing:set<addr>):>State => {
     let result=state
-    let representatives:array<EqualityCandidate>=[]
+    let representatives:array<LoopCandidate>=[]
     let remaining:addr=64
     loop entry in state.values {
         let fact=entry.fact
@@ -314,13 +315,17 @@ seed_loop_equalities = (state:State changing:set<addr>):>State => {
         if remaining =? 0 break
         remaining-=1
         let exact=entry.interval.lower
-        let other:EqualityCandidate?=none
+        let other:LoopCandidate?=none
         loop candidate in representatives {if candidate.number =? exact {other=candidate break}}
-        if other is? none {representatives.push(EqualityCandidate[exact fact.term entry.interval.capped]) continue}
+        if other is? none {
+            representatives.push(LoopCandidate[exact fact.term entry.interval.capped])
+            other=representatives[0]
+        }
         if same_term(other.term fact.term) continue
         let capped=entry.interval.capped or other.capped
-        put(@result order(fact.term other.term) ranges.Interval[0 none capped])
-        put(@result order(other.term fact.term) ranges.Interval[0 none capped])
+        let gap=other.number-exact
+        put(@result order(fact.term other.term) ranges.Interval[gap none capped])
+        put(@result order(other.term fact.term) ranges.Interval[-gap none capped])
     }
     return result
 }

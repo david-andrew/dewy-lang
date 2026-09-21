@@ -460,7 +460,18 @@ assign_value = (node:hir.Assign value:addr @current:facts.State @checker:Checker
     let rebound=hir.Assign[node.loc node.value_type node.target node.op value]
     let shift=terms.assignment_shift(rebound checker.data.env @checker.data.registry)
     let shifted:facts.State=facts.State[]
-    if shift isnt? none {shifted=facts.shifted(current facts.Term[subject] shift)}
+    if shift isnt? none {
+        # Preserve affine facts only if the update cannot roll over, including
+        # a narrow arithmetic expression widened into a wider destination.
+        let before=relations.narrowed_interval(facts.Term[subject] current checker.data.relations)
+        let mathematical=ranges.add(before ranges.exact(shift))
+        let exact=ranges.fits(mathematical values.fixed_bounds(target.value_type checker.data.env.types)) isnt? none
+        if node.op =? '=' {
+            let operation=node_at(expressions.strip_casts(value checker.data.env.nodes) checker)
+            exact=exact and ranges.fits(mathematical values.fixed_bounds(operation.value_type checker.data.env.types)) isnt? none
+        }
+        if exact {shifted=facts.shifted(current facts.Term[subject] shift)}
+    }
     if node.op in? ['+=' '-='] {interval=values.binary(if node.op =? '+=' '__add__' else '__sub__' facts.lookup(current facts.value(facts.Term[subject])) interval target.value_type checker.data.env.types)}
     else if node.op not=? '=' {interval=none}
     stores.forget(@current subject @checker.data)
@@ -983,7 +994,7 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool wo
         let root=if route is? none fact.term.binding_id else route.root
         if root in? checker.assigned {changing.push(fact.term.binding_id)}
     }
-    incoming=facts.seed_loop_equalities(incoming changing)
+    incoming=facts.seed_loop_relations(incoming changing)
     let head=incoming
     # Widening prevents an accumulator from retaining the entry interval
     # forever. Narrowing then recovers bounds imposed by a while guard.
