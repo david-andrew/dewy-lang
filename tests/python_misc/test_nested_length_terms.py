@@ -158,8 +158,24 @@ main=():>int64=>{{
 
 @pytest.mark.parametrize('type_, initial, replacement', [
     ('array<int64>', '[42]', '[]'),
+    ('array<int64>', '[42].copy()', '[7].copy()'),
     ('string', "'x'", "''"),
+    ('string', "'x'.copy()", "'y'.copy()"),
 ])
 def test_index_keeps_the_sequence_length_observed_before_its_operand(tmp_path, type_, initial, replacement):
     body = index_snapshot_source(type_, initial, replacement)
     execute(tmp_path, 'index-snapshot', codegen(SrcFile(None, body), debug_locations=False))
+
+
+def test_index_snapshots_elements_before_in_place_mutation(tmp_path):
+    body = index_snapshot_source('array<int64>', '[42].copy()', '[]').replace(
+        'table.entries=[]', '$runtime_assert table.entries.length >? 0 table.entries[0]=7')
+    execute(tmp_path, 'index-in-place', codegen(SrcFile(None, body), debug_locations=False))
+
+
+def test_indexed_string_survives_releasing_a_dynamic_receiver(tmp_path):
+    body = index_snapshot_source('string', "make('x')", "make('y')")
+    body = "make=(s:string):>string=>s+s\n" + body
+    body = body.replace('table.entries.length =? 1', 'table.entries.length =? 2')
+    body = body.replace('    return if item', "    let churn=make('z')\n    if churn not=? 'zz' return 2\n    return if item")
+    execute(tmp_path, 'dynamic-indexed-string', codegen(SrcFile(None, body), debug_locations=False))

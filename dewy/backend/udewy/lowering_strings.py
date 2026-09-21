@@ -4463,7 +4463,16 @@ class _StringLowering:
         node: hir.StringIndex,
     ) -> tuple[list[hir.AST], hir.ExpressedIdentifier]:
         prelude, string = self._extract_expression(node.string)
+        if id(node) in self.borrow_plan.array_snapshots and not self._is_owned_string_result(node.string):
+            self._note_copy('string', node.string.type, 'snapshotted before indexing',
+                            'the index expression may replace the string being read', node.loc)
+            prelude, string = self._string_result_temporary(
+                node.string, self._string_clone_call(string, node.loc), prelude)
         index_prelude, index = self._extract_index_value(node.index, node.constant_index)
+        if index_prelude:
+            held = self._new_string_temp(node.loc, 'int64', 'indexed_receiver')
+            prelude.append(hir.Declare(node.loc, ty.VOID_TYPE, 'let', held.name, 'int64', string))
+            string = held
         prelude.extend(index_prelude)
         if isinstance(index, int):
             index = self._int64_literal(node.loc, index)

@@ -2889,7 +2889,7 @@ class _Lowerer(
         if isinstance(node, (hir.CopyMethod, hir.CopyValue)):
             return replace(node, value=self._require_node(self._transform_node(node.value)))
         if isinstance(node, hir.DictLookup):
-            return replace(
+            transformed = replace(
                 node,
                 keys=self._transform_container_member(node.keys),
                 values=self._transform_container_member(node.values),
@@ -2900,6 +2900,11 @@ class _Lowerer(
                     else None
                 ),
             )
+            # Borrow analysis describes the checked graph; preserve its
+            # snapshot obligation when callable rewriting replaces this node.
+            if id(node) in self.borrow_plan.array_snapshots:
+                self.borrow_plan.array_snapshots.add(id(transformed))
+            return transformed
         if isinstance(node, hir.DictContains):
             return replace(
                 node,
@@ -2938,11 +2943,16 @@ class _Lowerer(
                 string=self._require_node(self._transform_node(node.string)),
             )
         if isinstance(node, hir.StringIndex):
-            return replace(
+            transformed = replace(
                 node,
                 string=self._require_node(self._transform_node(node.string)),
                 index=self._require_node(self._transform_node(node.index)),
             )
+            # Borrow analysis describes the checked graph; preserve its
+            # snapshot obligation when callable rewriting replaces this node.
+            if id(node) in self.borrow_plan.array_snapshots:
+                self.borrow_plan.array_snapshots.add(id(transformed))
+            return transformed
         if isinstance(node, hir.StringSlice):
             transformed_range = self._transform_node(node.range)
             if not isinstance(transformed_range, hir.Range):
@@ -2993,11 +3003,16 @@ class _Lowerer(
                 iterators.append(transformed)
             return replace(node, iterators=iterators)
         if isinstance(node, hir.Index):
-            return replace(
+            transformed = replace(
                 node,
                 array=self._require_node(self._transform_node(node.array)),
                 index=self._require_node(self._transform_node(node.index)),
             )
+            # Borrow analysis describes the checked graph; preserve its
+            # snapshot obligation when callable rewriting replaces this node.
+            if id(node) in self.borrow_plan.array_snapshots:
+                self.borrow_plan.array_snapshots.add(id(transformed))
+            return transformed
         if isinstance(node, hir.IndexAssign):
             target = self._transform_node(node.target)
             if not isinstance(target, hir.Index):
@@ -5328,13 +5343,23 @@ class _Lowerer(
         if isinstance(node, hir.Index):
             raw_representation = self._array_use_representation(node.array)
             static_bytes = self._static_binary_array_source(node.array)
-            if raw_representation is not None:
-                prelude, array = self._extract_expression(node.array)
-            elif static_bytes is not None:
-                prelude, array = self._extract_expression(static_bytes)
+            if id(node) in self.borrow_plan.array_snapshots and not self._array_expression_owns_fresh_storage(node.array):
+                # Index evaluation can replace/free the receiver or mutate its
+                # elements. A saved pointer alone is not a value snapshot.
+                array_type = ty.unfold(ty.strip_refinement(node.array.type))
+                assert isinstance(array_type, ty.ArrayType)
+                self._note_copy('array', array_type, 'snapshotted before indexing',
+                                'the index expression may write the array being read', node.loc)
+                prelude, array = self._clone_array_value(node.array, array_type)
+                prelude, array = self._array_result_temporary(node.array, array, prelude)
+                raw_representation = static_bytes = None
             else:
-                prelude, array = self._extract_expression(node.array)
+                prelude, array = self._extract_expression(static_bytes if static_bytes is not None else node.array)
             index_prelude, index = self._extract_index_value(node.index, node.constant_index)
+            if index_prelude and not isinstance(array, (hir.ExpressedIdentifier, hir.BasedString)):
+                held = self._name('indexed_receiver', node.loc)
+                prelude.append(self._declare(held, array, node.loc))
+                array = held
             prelude.extend(index_prelude)
             address = (
                 self._pointer_element_address(

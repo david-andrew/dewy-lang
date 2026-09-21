@@ -411,8 +411,8 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
                     view_candidates.add(node.binding_id)
             if isinstance(node, hir.Place) and (addressed := root_binding(node.target)) is not None:
                 excluded_owners.add(addressed)
-            if isinstance(node, hir.Index):
-                source = route(node.array)
+            if isinstance(node, (hir.Index, hir.StringIndex)):
+                source = route(node.array if isinstance(node, hir.Index) else node.string)
                 if source is not None and source.binding in places:
                     source = None
                 if expression_conflicts(node.index, source, plan, source_bindings):
