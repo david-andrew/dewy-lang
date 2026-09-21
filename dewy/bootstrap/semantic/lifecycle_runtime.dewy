@@ -24,6 +24,7 @@ Frame:type = const [
 ]
 Plan:type = [
     hooks:dict<addr Hook>=[]
+    composed_moves:dict<addr addr>=[]
     owners:dict<string Hook>=[]
     moves:dict<string Hook>=[]
     copies:dict<string Hook>=[]
@@ -70,6 +71,25 @@ resource = (id:addr nodes:types.Table):>addr? => {
     return none
 }
 Suffix:type = const [first:addr before:addr]
+# Added fields transfer through compiler-generated inherited moves. Follow
+# the composition chain to find the original hook's leftover parent fields.
+move_remainder=(shape:types.ObjectType plan:Plan session:contexts.Session):>array<types.ObjectField>=>{
+    let current=shape
+    loop current.brand isnt? none {
+        let hook=plan.moves.get(current.brand)
+        if hook is? none {break}
+        let binding=bindings.binding_at(session.registry hook.binding)
+        $runtime_assert binding.function isnt? none
+        let operation=hir.node_at(session.hir binding.function)
+        $runtime_assert operation is? hir.FunctionLiteral
+        if not operation.lifecycle_composition {break}
+        $runtime_assert current.parent isnt? none
+        let parent=types.node_at(session.types views.structural_base(current.parent session.types))
+        $runtime_assert parent is? types.ObjectType
+        current=parent
+    }
+    return current.fields
+}
 drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none):>void => {
     if plan.problem isnt? none or resource(type_id session.types) is? none return
     let owner=views.structural_base(type_id session.types)
@@ -224,10 +244,11 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
     # storage for the complete value is released by ordinary lowering later.
     let nested=ancestors
     nested.add(owner)
-    let index=type.fields.length
+    let fields=if run_hook type.fields else move_remainder(type plan session)
+    let index=fields.length
     loop index >? 0 {
         index-=1
-        let field=type.fields[index]
+        let field=fields[index]
         if resource(field.value_type session.types) is? none continue
         let member=put(hir.MemberAccess[loc field.value_type value field.name] @session)
         drop_value(member field.value_type loc nested @calls @plan @session)
@@ -874,7 +895,10 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                 let returned=hir.node_at(session.hir returned_id)
                 if composed_parent isnt? none {
                     $runtime_assert returned is? hir.ObjectLiteral
-                    fresh(returned_id live false @plan @session components=set[composed_parent] frame=frame)
+                    let components:set<addr>=set[composed_parent]
+                    let receiver=plan.composed_moves.get(id)
+                    if receiver isnt? none {components.add(receiver)}
+                    fresh(returned_id live false @plan @session components=components frame=frame)
                     loop owner in owners {
                         let declaration=hir.node_at(session.hir owner)
                         $runtime_assert declaration is? hir.Declare
@@ -1257,6 +1281,12 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
         let parent=hir.node_at(session.hir body.items[0])
         $runtime_assert parent is? hir.Declare
         composed_parent=parent.binding_id
+        if function.lifecycle =? 'move' {
+            $runtime_assert function.pos_or_kw_args.length >? 0
+            let receiver=function.pos_or_kw_args[0].binding_id
+            $runtime_assert receiver isnt? none and hir.node_at(session.hir body.items[1]) is? hir.Return
+            plan.composed_moves[body.items[1]]=receiver
+        }
     }
     let owners=parameter_owners
     statement(function.body @owners [] allowed function.lifecycle =? 'drop' resource(function.rettype session.types) isnt? none @plan @session composed_parent=composed_parent entry=true)

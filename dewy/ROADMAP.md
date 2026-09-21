@@ -474,8 +474,8 @@ in both lowerings and the parity tool is the gate.
   Custom move hooks now run at these transfers. The consumed owner's own drop
   is skipped, while its remaining nested resources and backing storage are
   cleaned up; hook effects are checked through callers. Inherited moves compose
-  parent results with ordinary added fields. Moving added resource fields still
-  needs field-transfer analysis.
+  parent results with added fields, including move-only resource fields and
+  arrays. Only the original hook’s parent portion needs leftover field cleanup.
   Inherited copies consume their intermediate parent results, including nested
   resources and multiple inheritance levels. Conditional transfers of outer
   owners, field transfers and remaining resource-container mutations remain

@@ -99,6 +99,23 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     component_copies = {}
     generated = []
 
+    def move_remainder(shape):
+        """Fields left behind by a custom move, excluding inherited transfers.
+
+        A generated inheritance wrapper adopts the added fields. Only the
+        portion handled by the original user hook still needs field cleanup;
+        walking through composed parents also handles deeper descendants.
+        """
+        current = shape
+        while True:
+            hook = next((method for method in current.methods if method.lifecycle == 'move'), None)
+            operation = declarations.get(hook.binding_id) if hook is not None else None
+            if operation is None or not operation.expr.lifecycle_composition:
+                return current.fields
+            parent = ty.USER_BRAND_PARENTS.get(current.brand)
+            assert parent is not None
+            current = ty.USER_BRAND_TYPES[parent]
+
     def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None):
         result = []
         def drop(value, type_, ancestors, run_hook=True, into=result, tail=None):
@@ -218,7 +235,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 into.append(hir.FunctionCall(loc, ty.VOID_TYPE, function, [hir.Place(loc, shape, value)], {}))
             # Parent body first; then fields in reverse declaration order.
             # Ordinary lowering releases the complete backing storage afterward.
-            for field in reversed(shape.fields):
+            fields = shape.fields if run_hook else move_remainder(shape)
+            for field in reversed(fields):
                 if resource(field.type) is not None:
                     drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)}, into=into)
         for owner in reversed(owners):
@@ -909,7 +927,12 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     # absent from owners: lending cannot transfer ownership.
                     if composed_parent is not None:
                         assert isinstance(node.item, hir.ObjectLiteral)
-                        returned = fresh(node.item, live, False, {composed_parent}, control)
+                        components = {composed_parent}
+                        if literal.lifecycle == 'move':
+                            # Only compiler-generated composition may adopt
+                            # fields through its internal borrowed receiver.
+                            components.add(params[0].binding_id)
+                        returned = fresh(node.item, live, False, components, control)
                         consumed = composed_parent
                     elif isinstance(node.item, hir.ExpressedIdentifier) and any(owner.binding_id == node.item.binding_id for owner in owners):
                         returned, moved = transfer(node.item, literal.rettype)

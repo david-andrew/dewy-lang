@@ -1,0 +1,54 @@
+# The inherited hook operates on its parent portion. Added owners transfer
+# with the generated child constructor and are dropped only by the result.
+let trace:int64=0
+Token=type of [id:int64
+$__drop__
+release=():>void=>{trace=trace*10+id}
+]
+Parent=type of [value:int64 token:Token
+$__drop__
+release=():>void=>{trace=trace*10+9}
+$__move__
+relocate=():>Parent=>Parent[value+1 Token[2]]
+]
+Derived=type of Parent & [added:Token]
+Leaf=type of Derived & [last:Token]
+make_child=():>Derived=>{
+    let source=Derived[41 Token[1] Token[3]]
+    return source
+}
+make_leaf=():>Leaf=>{
+    let source=Leaf[41 Token[1] Token[3] Token[4]]
+    return source
+}
+child=():>int64=>{
+    let value=make_child()
+    if trace not=?1 or value.added.id not=?3 return 1
+    return value.value
+}
+leaf=():>int64=>{
+    let value=make_leaf()
+    if trace not=?1 or value.added.id not=?3 or value.last.id not=?4 return 1
+    return value.value
+}
+ArrayChild=type of Parent & [added:array<Token>]
+make_array=():>ArrayChild=>{
+    let source=ArrayChild[41 Token[1] [Token[3] Token[4]]]
+    return source
+}
+array_child=():>int64=>{
+    let value=make_array()
+    if trace not=?1 or value.added.length not=?2 return 1
+    if value.added[0].id not=?3 or value.added[1].id not=?4 return 2
+    return value.value
+}
+main=():>int64=>{
+    let before:int64=_arena_live_bytes
+    if child() not=?42 or trace not=?1932 return 1
+    trace=0
+    if leaf() not=?42 or trace not=?19432 return 2
+    trace=0
+    if array_child() not=?42 or trace not=?19432 return 3
+    if _arena_live_bytes not=?before return 4
+    return 42
+}

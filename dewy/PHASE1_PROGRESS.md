@@ -1947,3 +1947,18 @@ The preceding forwarding-proof snapshot's native own-source inventory passes
 the unchanged 5,000-site / 110-per-KLOC gate at **4,865 sites / 45,841 lines =
 106.128 per KLOC** (67.85 s; 2,712,860 KiB peak RSS). This is a static inventory,
 not a runtime byte count or a full native build latency measurement.
+
+## Inherited resource moves (2026-09-21)
+
+Compiler-generated inherited move wrappers now adopt added resource fields,
+including arrays and multiple inheritance levels. The original user hook still
+operates on its parent portion. Cleanup follows the composition chain and drops
+only that hook's leftover fields; transferred child fields belong to the result.
+This privilege applies only to checked compiler-generated composition, not to
+ordinary borrowed receivers. Inherited copy hooks still require copyable added
+fields. No surface syntax or hook invocation guarantees change.
+
+Validation: 44 adjacent hosted checks passed. A fresh native driver passes the
+fixture and two rejection cases against hosted checking; accepted programs run
+on x86-64 and C. Exact drop traces distinguish the consumed parent fields from
+transferred children, and arena counters check complete storage reclamation.
