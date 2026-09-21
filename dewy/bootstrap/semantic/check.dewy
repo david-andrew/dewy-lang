@@ -251,6 +251,23 @@ carries_promises = (id:addr target:types.RefinedType session:contexts.Session):>
 against = (value:addr expected:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let node = node_at(value session)
     if types.is_primitive(types.node_at(session.types node.value_type) 'never') return value
+    if node is? hir.Block and not types.same_type(node.value_type expected session.types) {
+        # Preserve statements around a value when numeric materialization
+        # replaces that value with a constructor (even for a constant).
+        let expressed:array<addr>=[]
+        loop i in 0.. and i <? node.items.length {
+            let type=types.node_at(session.types node_at(node.items[i] session).value_type)
+            if not types.is_primitive(type 'void') and not types.is_primitive(type 'never') {expressed.push(i)}
+        }
+        if expressed.length =? 1 {
+            let index=expressed[0]
+            let checked=against(node.items[index] expected id env @session)
+            if checked is? Error return checked
+            let items=node.items
+            items[index]=checked
+            return put(hir.Block[node.loc node_at(checked session).value_type items node.scoped] @session)
+        }
+    }
     let target = types.node_at(session.types expected)
     if target is? types.MetaType and node is? hir.TypeValue return brand_value(node target expected id env @session)
     if target is? types.RefinedType {

@@ -16991,6 +16991,14 @@ def _check_against_shape(node: hir.AST, expected: ty.Type, *, ctx: Context) -> h
         return node
     if node.type == ty.BOTTOM_TYPE:
         return node  # unreachable; vacuously satisfies any expectation
+    if isinstance(node, hir.Block):
+        # Convert the expressed value in place. Folding a block's constant
+        # result into an object constructor must not discard its statements.
+        expressed = [i for i, item in enumerate(node.items) if item.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE)]
+        if len(expressed) == 1:
+            index = expressed[0]
+            checked = check_against(node.items[index], expected, ctx=ctx)
+            return replace(node, type=checked.type, items=[*node.items[:index], checked, *node.items[index + 1:]])
     materialized_union = _union_bigint_materialization(node, expected, ctx=ctx)
     if materialized_union is not None:
         return materialized_union
