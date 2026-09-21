@@ -227,12 +227,19 @@ main=():>int64=>{changed=0 let owner=make() $assert changed=?0 return owner.toke
 
 @pytest.mark.parametrize('body', [
     'let leaf=TraceHandle[42] let outer=Outer[leaf] return 42',
-    'let outer=Outer[TraceHandle[42]] outer.leaf=TraceHandle[1] return 42',
 ])
 def test_nested_owner_transfers_require_ownership_lowering(body):
     source = OWNER + 'Outer=type of [leaf:TraceHandle]\nmain=():>int64=>{'+body+'}'
     with pytest.raises(ReportException, match='lifecycle ownership lowering'):
         codegen(SrcFile(None, source))
+
+
+def test_nested_owner_replacement_releases_both_lifetimes(tmp_path):
+    source = OWNER + '''Outer=type of [leaf:TraceHandle]
+main=():>int64=>{let outer=Outer[TraceHandle[42]] outer.leaf=TraceHandle[1] return 42}
+'''
+    for result in execute(tmp_path, 'nested-replacement', codegen(SrcFile(None, source), debug_locations=False)):
+        assert result.stdout == '42\n1\n'
 
 
 def test_nested_implicit_drop_effect_is_in_the_enclosing_contract():

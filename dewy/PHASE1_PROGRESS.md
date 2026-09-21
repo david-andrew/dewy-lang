@@ -1663,3 +1663,10 @@ includes generic instances, loop selectors, dependent refinements, alias
 invalidation, resource replacement/drop, effects and explicit-copy policy.
 The former test requiring mutable places to be unsupported was removed;
 rejections for unstable selections and const storage remain.
+
+CI checkpoint at `1ef6c8d1`: 3,517 passed, 32 skipped, one failure. The
+remaining failure was an obsolete test expecting resource-field replacement
+to be unsupported, after that operation had landed. It now executes the
+replacement and checks the exact `42` then `1` drop trace; all 51 adjacent
+hosted lifecycle checks pass. This updates the expected supported behavior,
+not the compiler's acceptance rules. CI's release workflow passed separately.
