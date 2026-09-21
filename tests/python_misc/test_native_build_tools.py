@@ -278,3 +278,40 @@ def test_resume_rejects_modified_saved_inputs(tmp_path):
         assert result.returncode != 0, name
         assert (work / 'calls').read_text().splitlines() == ['micro', 'dewy', 'check']
         assert not (work / 'pair/SHA256SUMS').exists()
+
+
+@pytest.mark.parametrize('fail_dewy', [False, True])
+def test_hosted_seed_recovery_is_fresh_and_does_not_certify_itself(tmp_path, fail_dewy):
+    root = Path(__file__).resolve().parents[2]
+    work = tmp_path / 'source checkout'
+    for name in ('tools', 'dewy/bootstrap', 'udewy/bootstrap', 'library'):
+        (work / name).mkdir(parents=True, exist_ok=True)
+    script = work / 'tools/bootstrap_hosted_seed.sh'
+    shutil.copy2(root / 'tools/bootstrap_hosted_seed.sh', script)
+    (work / 'VERSION').write_text('test\n')
+    (work / 'dewy/bootstrap/main.dewy').write_text('main=()=>42\n')
+    (work / 'udewy/bootstrap/main.udewy').write_text('let main=()=>42\n')
+    python = tmp_path / 'python fixture'
+    python.write_text('''#!/usr/bin/env bash
+set -eu
+if [[ $1 == --version ]]; then echo 'fixture python'; exit 0; fi
+[[ $1 == -m && $3 == --target && $4 == x86_64 ]]
+[[ $DEWY_LIBRARY_ROOT == "$PWD/library" ]]
+if [[ $2 == dewy && $TEST_FAIL_DEWY == 1 ]]; then exit 37; fi
+mkdir -p "__dewycache__/$2/bootstrap"
+printf '#!/bin/sh\\nexit 0\\n' > "__dewycache__/$2/bootstrap/main"
+chmod +x "__dewycache__/$2/bootstrap/main"
+''')
+    python.chmod(0o755)
+    output = tmp_path / 'stage zero'
+    env = os.environ | {'PYTHON': str(python), 'TEST_FAIL_DEWY': str(int(fail_dewy))}
+    result = subprocess.run(['bash', script, output], env=env, capture_output=True, text=True)
+    assert result.returncode == (37 if fail_dewy else 0), result.stderr
+    assert (output / 'source/dewy/bootstrap/main.dewy').read_text() == 'main=()=>42\n'
+    assert (output / 'SOURCE_SHA256SUMS').exists()
+    assert not (output / 'GENERATION_1_SHA256SUMS').exists()
+    assert (output / 'SHA256SUMS').exists() != fail_dewy
+    if not fail_dewy:
+        subprocess.run(['sha256sum', '--check', 'SHA256SUMS'], cwd=output, check=True)
+        again = subprocess.run(['bash', script, output], env=env, capture_output=True, text=True)
+        assert again.returncode != 0  # never overwrite an existing pair or reuse its cache

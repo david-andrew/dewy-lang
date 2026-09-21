@@ -48,6 +48,35 @@ ca74388f8cbfae77197ee3856e4982ec4e27bae56e59ebd526f50de51dac5b1b  dewy
 2e08f57d7001cae239083cefe8b1ede53f526023d07c27d083f8b84dc2c99873  udewy
 ```
 
+## Recovering a seed after language changes
+
+The normal release job downloads a published native pair and rebuilds three
+native generations. An older seed can stop accepting the compiler's sources
+when those sources begin using a newer feature. That is a seed compatibility
+failure, not permission to weaken the source contracts or skip verification.
+For example, the September 14 published seed predates the nested field bounds
+used by the current type arena's `intern` result.
+
+`tools/bootstrap_hosted_seed.sh NEW_OUTPUT_DIRECTORY` is an explicit recovery
+route. It snapshots the current sources (including local edits), uses the
+standard-library-only Python compilers to build an x86-64 stage-zero pair,
+and records source and binary checksums. Set `PYTHON` to a Python 3.14
+executable when it is not `python3`. An existing output directory is rejected
+so a different target or an interrupted build cannot supply a cached seed.
+This script does **not** certify or publish the pair. Continue with:
+
+```sh
+bash tools/bootstrap_native.sh --target c --generations 3 \
+    RECOVERY_DIRECTORY/dewy RECOVERY_DIRECTORY/udewy native-pair
+```
+
+The release workflow exposes the same route as the manual `hosted_seed`
+boolean input, mutually exclusive with `seed_release`. Its normal push path
+still uses the published native seed. Recovery only changes stage zero:
+execution checks, the three native generations, matching last generations,
+and packaging remain mandatory. Release notes identify whether recovery was
+used. There is no automatic hosted fallback after a native build failure.
+
 ## Hosted parity gaps
 
 The subsequent [isolated Phase 0 inventory](PARITY_INVENTORY.md) completed

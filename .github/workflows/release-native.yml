@@ -11,6 +11,7 @@ on:
       - 'library/**/*.bin'
       - 'VERSION'
       - 'tools/bootstrap_native.sh'
+      - 'tools/bootstrap_hosted_seed.sh'
       - 'tools/check_native.sh'
       - 'tools/package_native.sh'
       - 'tools/dewy_test.dewy'
@@ -19,6 +20,11 @@ on:
       - '.github/workflows/release-native.yml'
   workflow_dispatch:
     inputs:
+      hosted_seed:
+        description: 'Explicit recovery: build stage zero from Python, then verify native generations'
+        required: false
+        default: false
+        type: boolean
       seed_release:
         description: Published native pair to use as the seed (empty means latest)
         required: false
@@ -37,7 +43,24 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: Check seed selection
+        env:
+          HOSTED_SEED: ${{ inputs.hosted_seed }}
+          SEED_RELEASE: ${{ inputs.seed_release }}
+        run: |
+          if [[ "$HOSTED_SEED" == true && -n "$SEED_RELEASE" ]]; then
+            echo 'Choose either hosted seed recovery or a published seed release.' >&2
+            exit 2
+          fi
+      - uses: actions/setup-python@v5
+        if: inputs.hosted_seed == true
+        with:
+          python-version: '3.14'
+      - name: Recover stage zero with the dependency-free hosted compiler
+        if: inputs.hosted_seed == true
+        run: bash tools/bootstrap_hosted_seed.sh seed
       - name: Download a published native seed pair
+        if: inputs.hosted_seed != true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SEED_RELEASE: ${{ inputs.seed_release }}
@@ -88,4 +111,4 @@ jobs:
           gh release create "$release_tag" dewy-linux-x86_64.tar.gz dewy-linux-x86_64.tar.gz.sha256 \
             udewy-linux-x86_64 udewy-linux-x86_64.sha256 \
             --latest --target "$GITHUB_SHA" --title "Dewy native ${GITHUB_SHA::12}" \
-            --notes "Development native Dewy/µDewy pair from ${GITHUB_SHA} for Linux x86_64; the last two of three native generations verified byte-for-byte, with matching runtime library. See dewy/bootstrap/IMPLEMENTATION.md at this commit for validation and remaining hosted-parity gaps."
+            --notes "Development native Dewy/µDewy pair from ${GITHUB_SHA} for Linux x86_64; the last two of three native generations verified byte-for-byte, with matching runtime library. Stage-zero seed recovery used the hosted compiler: ${{ inputs.hosted_seed == true }}. All verification generations are native. See dewy/bootstrap/IMPLEMENTATION.md at this commit for validation and remaining hosted-parity gaps."
