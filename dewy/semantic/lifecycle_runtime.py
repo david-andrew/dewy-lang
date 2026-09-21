@@ -186,8 +186,8 @@ def prepare(root: hir.Block, srcfile):
             # callback. Every checked body owes the same return contract;
             # resource arguments still require their own ownership proof.
             return replace(node, func=expression(node.func, allowed, inherited=inherited),
-                           pos_args=[expression(arg, allowed, inherited=inherited) for arg in node.pos_args],
-                           kw_args={name: expression(arg, allowed, inherited=inherited) for name, arg in node.kw_args.items()})
+                           pos_args=[argument(arg, allowed, inherited) for arg in node.pos_args],
+                           kw_args={name: argument(arg, allowed, inherited) for name, arg in node.kw_args.items()})
         shape = ty.unfold(ty.strip_refinement(node.type))
         if isinstance(node, hir.ArrayLiteral) and isinstance(shape, ty.ArrayType):
             return replace(node, items=[fresh(item, allowed, inherited, components) for item in node.items])
@@ -224,6 +224,13 @@ def prepare(root: hir.Block, srcfile):
         if isinstance(value, (hir.ObjectField, hir.Param)):
             return replace(value, **{name: mapped(getattr(value, name), visit) for name in hir.child_fields(type(value))})
         return value
+
+    def argument(node, allowed, inherited):
+        # A fresh value (including an explicit custom copy) supplies a new
+        # owner to an ordinary by-value parameter. @ keeps lending the owner.
+        if not isinstance(node, hir.Place) and resource(node.type) is not None:
+            return fresh(node, allowed, inherited)
+        return expression(node, allowed, inherited=inherited)
 
     def expression(node, allowed, *, inherited=False):
         if isinstance(node, hir.FunctionLiteral):
@@ -266,6 +273,10 @@ def prepare(root: hir.Block, srcfile):
                 if not isinstance(path, hir.ExpressedIdentifier) or path.binding_id not in allowed:
                     reject(node, 'an unavailable resource borrow')
                 return node
+        if isinstance(node, hir.FunctionCall) and resource(node.type) is None:
+            return replace(node, func=expression(node.func, allowed, inherited=inherited),
+                           pos_args=[argument(arg, allowed, inherited) for arg in node.pos_args],
+                           kw_args={name: argument(arg, allowed, inherited) for name, arg in node.kw_args.items()})
         if resource(node.type) is not None:
             reject(node, 'a resource copy, move, temporary, or escape')
         return replace(node, **{name: mapped(getattr(node, name), lambda child: expression(child, allowed, inherited=inherited))
@@ -350,10 +361,12 @@ def prepare(root: hir.Block, srcfile):
         if literal.rest_args is not None:
             params.append(literal.rest_args)
         allowed = set()
+        parameter_owners = []
         for param in params:
             if resource(param.type) is not None:
                 if not param.place:
-                    reject(literal, 'owning parameters')
+                    value = hir.ExpressedIdentifier(literal.loc, param.type, param.name, binding_id=param.binding_id)
+                    parameter_owners.append(hir.Declare(literal.loc, ty.VOID_TYPE, 'let', param.name, param.type, value, binding_id=param.binding_id))
                 allowed.add(param.binding_id)
         owning_result = resource(literal.rettype) is not None
         composed_parent = None
@@ -365,11 +378,11 @@ def prepare(root: hir.Block, srcfile):
         if literal.lifecycle is None and not mentions_resource(literal):
             current_source = previous_source
             return literal
-        def statement(node, owners, loops):
+        def statement(node, owners, loops, *, entry=False):
             live = allowed | {owner.binding_id for owner in owners}
             if isinstance(node, hir.Block):
                 active = list(owners) if node.scoped else owners
-                start = len(active)
+                start = 0 if entry else len(active)
                 items = []
                 for item in node.items:
                     items.append(statement(item, active, loops))
@@ -473,9 +486,9 @@ def prepare(root: hir.Block, srcfile):
         elif not body.scoped:
             body = replace(body, scoped=True)
         transfers = local_transfers(body)
-        prepared = replace(literal, body=statement(body, [], []))
+        prepared = replace(literal, body=statement(body, parameter_owners, [], entry=True))
         def parameter(param):
-            return replace(param, value=expression(param.value, allowed)) if isinstance(param, hir.BoundParam) else param
+            return replace(param, value=argument(param.value, allowed, False)) if isinstance(param, hir.BoundParam) else param
         result = replace(prepared, pos_or_kw_args=[parameter(p) for p in literal.pos_or_kw_args],
                          kw_only_args=[parameter(p) for p in literal.kw_only_args],
                          rest_args=parameter(literal.rest_args))

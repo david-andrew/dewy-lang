@@ -169,8 +169,8 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
         # Results are owned values, including through callbacks. Each checked
         # body owes this contract; arguments need their own ownership proof.
         expression(candidate.func allowed inherited @plan @session)
-        loop argument in candidate.pos_args {expression(argument allowed inherited @plan @session)}
-        loop [name argument] in candidate.kw_args {expression(argument allowed inherited @plan @session)}
+        loop argument in candidate.pos_args {owning_argument(argument allowed inherited @plan @session)}
+        loop [name argument] in candidate.kw_args {owning_argument(argument allowed inherited @plan @session)}
         return
     }
     let node=hir.node_at(session.hir id)
@@ -205,6 +205,12 @@ capture_result = (id:addr loc:Span @session:contexts.Session):>Captured => {
     let declaration=put(hir.Declare[loc empty 'let' name type id binding_id] @session)
     let value=put(hir.ExpressedIdentifier[loc type name binding_id] @session)
     return Captured[declaration value]
+}
+# Fresh arguments supply owners; a checked place argument only lends one.
+owning_argument = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session):>void => {
+    let node=hir.node_at(session.hir id)
+    if node isnt? hir.Place and resource(node.value_type session.types) isnt? none {fresh(id allowed inherited @plan @session)}
+    else {expression(id allowed inherited @plan @session)}
 }
 expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session):>void => {
     if plan.problem isnt? none return
@@ -246,6 +252,12 @@ expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:conte
             return
         }
     }
+    if node is? hir.FunctionCall and resource(node.value_type session.types) is? none {
+        expression(node.func allowed inherited @plan @session)
+        loop argument in node.pos_args {owning_argument(argument allowed inherited @plan @session)}
+        loop [name argument] in node.kw_args {owning_argument(argument allowed inherited @plan @session)}
+        return
+    }
     if resource(node.value_type session.types) isnt? none {reject(node 'a resource copy, move, temporary, or escape' @plan) return}
     loop child in hir.children(node) {expression(child allowed inherited @plan @session)}
 }
@@ -257,7 +269,7 @@ scoped_body = (id:addr @session:contexts.Session):>addr => {
     }
     return put(hir.Block[node.loc node.value_type [id] true] @session)
 }
-statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inherited:bool owning_result:bool @plan:Plan @session:contexts.Session composed_parent:addr?=none):>void => {
+statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inherited:bool owning_result:bool @plan:Plan @session:contexts.Session composed_parent:addr?=none entry:bool=false):>void => {
     if plan.problem isnt? none return
     let node=hir.node_at(session.hir id)
     let live=allowed
@@ -269,7 +281,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
     if node is? hir.Block {
         let current:hir.Block=node
         let active=owners
-        let start=active.length
+        let start=if entry 0 else active.length
         loop item in current.items {statement(item @active loops allowed inherited owning_result @plan @session composed_parent=composed_parent)}
         if plan.problem isnt? none return
         if current.scoped and active.length >? start {
@@ -581,13 +593,19 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     loop parameter in function.kw_only_args {params.push(parameter)}
     if function.rest_args isnt? none {params.push(function.rest_args)}
     let allowed:set<addr>=set[]
+    let parameter_owners:array<addr>=[]
     loop index in 0.. and index <? params.length {
         let parameter=params[index]
         if resource(parameter.value_type session.types) isnt? none {
-            if not parameter.place or parameter.binding_id is? none {reject(function 'owning parameters' @plan) return}
+            if parameter.binding_id is? none {reject(function 'unresolved owning parameter' @plan) return}
+            if not parameter.place {
+                let value=put(hir.ExpressedIdentifier[function.loc parameter.value_type parameter.name parameter.binding_id] @session)
+                let empty=types.primitive('void' @session.types)
+                parameter_owners.push(put(hir.Declare[function.loc empty 'let' parameter.name parameter.value_type value parameter.binding_id] @session))
+            }
             allowed.add(parameter.binding_id)
         }
-        if parameter is? hir.BoundParam {expression(parameter.value allowed false @plan @session)}
+        if parameter is? hir.BoundParam {owning_argument(parameter.value allowed false @plan @session)}
     }
     # Leave ordinary helpers (especially the cached prelude) untouched.
     # Cleanup added inside another function is visible through its call edge.
@@ -603,8 +621,8 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
         $runtime_assert parent is? hir.Declare
         composed_parent=parent.binding_id
     }
-    let owners:array<addr>=[]
-    statement(function.body @owners [] allowed function.lifecycle =? 'drop' resource(function.rettype session.types) isnt? none @plan @session composed_parent=composed_parent)
+    let owners=parameter_owners
+    statement(function.body @owners [] allowed function.lifecycle =? 'drop' resource(function.rettype session.types) isnt? none @plan @session composed_parent=composed_parent entry=true)
     store(id function @session)
     plan.source=previous
     plan.function_source=previous_function_source

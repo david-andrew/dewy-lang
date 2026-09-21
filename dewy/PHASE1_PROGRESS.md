@@ -1167,3 +1167,26 @@ binding-kind spelling. After correcting it, all eight native lifecycle cases
 passed. Three final hosted lifetime/effect checks and two native rejection
 cases passed, including propagation of implicit element-drop effects and
 invalidation of caller facts. No storage remains after 100 repeated calls.
+
+Ordinary by-value resource parameters now receive ownership from fresh
+arguments, factory results and explicit custom copies, including callbacks
+and default arguments. Parameters drop in reverse order after later locals;
+returning a parameter transfers it to the caller. Scalar and aggregate field
+results are captured before parameter cleanup. Existing `@` parameters retain
+their borrowed lifetime. Named-owner argument transfers and implicit copies
+still need the general ownership plan.
+
+Validation: all 100 lifecycle/declaration checks passed, including the shared
+owning-parameter fixture on hosted x86/C and native. Two additional hosted and
+two native effect/fact rejection cases passed. Repeated calls retain no storage.
+
+Remaining correctness issue found while extending the fixture: preliminary
+source bounds validation runs before lifecycle operations are inserted. It
+can retain a counter fact across a call whose implicit drop will change that
+counter, then incorrectly consider a combined counter/length guard impossible.
+For example, a later `if drops not=?6 or values.length not=?2 return 7` can
+lose the length proof when earlier checks established `drops=?3`. Ownership
+materialization and proof validation need an ordered shared pipeline; the
+final post-materialization validation is necessary but cannot undo an earlier
+false rejection. Keep this as a Phase 1 correctness task, not a source-style
+requirement to split such guards.
