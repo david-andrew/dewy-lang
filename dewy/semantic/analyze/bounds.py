@@ -2490,14 +2490,23 @@ class _BoundsValidator:
 
     def _eval_place(self, node: hir.Place, state: State, *, validate: bool) -> Interval | None:
         self._eval(node.target, state, validate=validate)
-        root = node.target
-        while isinstance(root, (hir.MemberAccess, hir.Index)):
-            root = root.value if isinstance(root, hir.MemberAccess) else root.array
-        if isinstance(root, hir.ExpressedIdentifier) and root.binding_id is not None:
-            state.pop(root.binding_id, None)
-            self._invalidate_length(root.binding_id, state)
-            _drop_index_facts(state, index_id=root.binding_id)
-            self._drop_route_facts(state, root.binding_id)   # the callee may store anything
+        # A place lends only its endpoint. Replacing an element cannot
+        # resize its containing array or replace a sibling field. Numeric
+        # meanings of containers and evidence about elements can change.
+        self._forget_container_value(node.target, state)
+        path = sb.access_path(node.target)
+        for step in path.steps:
+            if isinstance(step, hir.Index):
+                array = self._array_id(step.array)
+                if array is not None:
+                    self._drop_route_facts(state, array)
+        endpoint = sb.array_route_id(node.target, self.registry)
+        if endpoint is not None:
+            if path.binding_id is not None and path.binding_id != endpoint:
+                # Field identities are flattened under their original root,
+                # not necessarily nested under the endpoint's route id.
+                self._drop_route_facts(state, path.binding_id, self.registry.route_paths[endpoint])
+            self._forget_global(endpoint, state)
         return None
 
     def _eval_value_cast(self, node: hir.ValueCast, state: State, *, validate: bool) -> Interval | None:

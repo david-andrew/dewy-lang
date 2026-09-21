@@ -137,9 +137,26 @@ forget_value = (id:addr @state:facts.State @checker:Checker):>void => {
     }
 }
 forget_place = (id:addr @state:facts.State @checker:Checker):>void => {
+    # Mutation reaches the endpoint, not the whole containing record.
+    # Retain parent lengths and sibling fields, but discard element facts.
+    forget_value(id @state @checker)
     let access=bindings.access_path(id checker.data.env.nodes facts=true)
-    let root=node_at(access.root checker)
-    if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {stores.forget(@state root.binding_id @checker.data)}
+    loop step in access.steps {
+        let node=node_at(step checker)
+        if node is? hir.Index {
+            let array=terms.sequence_id(node.array checker.data.env @checker.data.registry)
+            if array isnt? none {
+                loop route in checker.data.registry.routes_by_root.get(array []) {stores.forget(@state route.id @checker.data)}
+            }
+        }
+    }
+    let endpoint=bindings.array_route_id(id checker.data.env.nodes @checker.data.registry)
+    if endpoint isnt? none {
+        let route=bindings.route_at(checker.data.registry endpoint)
+        let root=node_at(access.root checker)
+        if route isnt? none and root is? hir.ExpressedIdentifier and root.binding_id isnt? none {stores.forget(@state root.binding_id @checker.data prefix=route.path)}
+        stores.forget(@state endpoint @checker.data)
+    }
 }
 
 validate_assert = (id:addr node:hir.Assert state:facts.State @checker:Checker):>void => {
