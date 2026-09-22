@@ -3573,3 +3573,20 @@ native driver agrees with hosted on six runtime and five rejection cases on
 x86-64/C, both before and after route-table storage changes. The seeded source
 inventory is 4,495 sites / 92.047 per KLOC, within the unchanged gate. Fresh
 compiler integration remains necessary; static counts are not timings.
+
+## Nested-entry native and full-suite checkpoint (2026-09-22)
+
+Source `3139fe4a` completed a three-generation direct x86-64 bootstrap of both
+Dewy and µDewy. Generations two and three are byte-identical for both compilers;
+x86-64/C pipeline execution checks pass. Those generations took 154 and 207
+seconds with concurrent validation, not an isolated performance measurement.
+The fresh compiler inventory is 4,499 sites / 48,780 source lines / 92.230
+per KLOC, within the unchanged 4,500-site and 100/KLOC gates. All 211 corpus
+parity cases pass against the same frozen hosted source.
+
+The complete pytest invocation at that checkpoint finished with 4,465 passes,
+27 skips and one failure in 3,496.79 seconds. The failure is the lower-level
+native scalar-transmute case: lowering treated a scalar element's bit cast as
+a mutation and copied its containing array. The fix and a rerun of the full
+scalar-lowering case group are tracked separately below. This run is broader
+than the prior selections, but is not a clean full-suite/CI certificate.
