@@ -2620,3 +2620,41 @@ the proved loan; a new incoming-unknown-callback case still requires a copy.
 All 58 static-array tests pass after this test correction. This is the broader
 hosted selection plus a focused repair, not a complete all-route pytest run.
 The log is `../dewy-build-artifacts/phase1-effects-exits-hosted-suite.log`.
+
+
+## Mutable dictionary entry places (2026-09-22)
+
+Both compilers now accept local mutable places selecting proven dictionary
+entries. The shared lifetime rule retains the stored owner through the last
+use of all dependent aliases; other dictionary mutations in that interval
+remain conservatively conflicting. Keys and enclosing array selectors are
+captured once. The rewritten route probes the saved key instead of keeping a
+physical position that compaction can invalidate. Missing entries, const
+ancestors, captures and changed owners remain errors.
+
+Entry fact identities distinguish dictionary keys from array indices and
+retain const-selector reentry dependencies. Alias-dependent contracts rebind
+to those same identities. Payload writes invalidate value facts while keeping
+ancestor dictionary membership, without retaining cached entry positions.
+Native mutable routes now detach shared dictionary/value-array storage before
+selecting payload storage, and record/array payload detachment writes the new
+handle back into the entry slot. Optional record payloads retain their stored
+union layout. Resource replacement uses ordinary drop-before-store cleanup.
+
+Validation: 106 adjacent hosted checks passed, followed by 31 focused checks
+after correcting the optional-value fixture and adding a repeated-call kernel.
+Two additional strict-copy/dependent-contract cases passed paired execution.
+Together the fresh second-generation native driver agrees with hosted checking
+on 21 runtime kernels and 12 rejection cases, with execution on x86-64 and C.
+The repeated-call kernel preserves earlier snapshots and retains no arena
+bytes over 100 calls, including a dictionary with tombstones. The native
+snapshot tests initially caught shared record/array mutation and pass after
+routing detachment back through the entry slot. Logs/artifacts use
+`../dewy-build-artifacts/phase1-entry-` prefixes. This is a bounded checkpoint;
+the latest full fixed point is still `e145a7f2`.
+
+Additional probes identified existing gaps outside this slice: ordinary
+membership is forgotten at loop entry; unnamed `totaldict` receivers need
+better totality propagation; hosted array layout does not yet erase a nested
+`totaldict` refinement. These probes are not counted as passing coverage.
+Phase 1 remains in progress.

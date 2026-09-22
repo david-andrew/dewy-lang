@@ -1414,7 +1414,8 @@ def _complete_binding(
         _copy_dictionary_facts(declaration.expr, binding.id, ctx=ctx)   # `let copy = d`: the keys come along
     if declaration.view and declaration.decltype not in {'const', 'local_const'}:
         selected = _unwrap_write_path(declaration.expr)
-        owner = _member_root_binding(selected, ctx=ctx)
+        path = sb.access_path(selected, unwrap=_unwrap_write_path, dictionaries=True)
+        owner = ctx.binding_registry.by_id.get(path.binding_id)
         assert owner is not None
         ctx.local_place_roots[binding.id] = ctx.local_place_roots.get(owner.id, owner.id)
         stored = selected.type
@@ -1937,6 +1938,8 @@ def _seed_field_routes(
 
 def _invalidate_routes(root_id: int, *, ctx: Context, prefix: tuple[str, ...] = ()) -> None:
     """Drop length facts of the member routes under a reassigned binding or field."""
+    preserved = sb.local_place_containers(root_id, ctx.binding_registry) if ctx.local_place_roots else set()
+    memberships = {key: (None, None) for key in ctx.key_facts if key[0] in preserved}
     if ctx.local_place_roots:
         owner = ctx.local_place_roots.get(root_id, root_id)
         related = {alias for alias, source in ctx.local_place_roots.items() if source == owner}
@@ -1959,6 +1962,7 @@ def _invalidate_routes(root_id: int, *, ctx: Context, prefix: tuple[str, ...] = 
         _drop_key_facts(ctx, key_id=route_id)
     if not prefix:
         _drop_key_facts(ctx, dictionary_id=root_id)
+    ctx.key_facts.update(memberships)
 
 
 def _drop_key_facts(ctx: Context, *, dictionary_id: int | None = None, key_id: int | None = None) -> None:
@@ -6350,7 +6354,7 @@ def _unwrap_write_path(node: hir.AST) -> hir.AST:
 
 def _immutable_reason(node: hir.AST) -> str | None:
     """Why a write is refused: an access step reaches through an immutable record."""
-    path = sb.access_path(node, unwrap=_unwrap_write_path, forwarding=True)
+    path = sb.access_path(node, unwrap=_unwrap_write_path, forwarding=True, dictionaries=True)
     for step in reversed(path.steps):
         if isinstance(step, (hir.MemberAccess, hir.ForwardingAccess)):
             owner = ty.unfold(ty.strip_refinement(step.value.type))
@@ -11587,7 +11591,8 @@ def _mutable_place(target: hir.AST, loc: Span, *, ctx: Context) -> hir.Place:
     Borrowing can change the root and projected storage, so neither route
     refinements nor cached dictionary membership can survive the call.
     """
-    for step in sb.access_path(target, unwrap=_unwrap_write_path, forwarding=True).steps:
+    access = sb.access_path(target, unwrap=_unwrap_write_path, forwarding=True, dictionaries=True)
+    for step in access.steps:
         if isinstance(step, hir.MemberAccess) and not step.mutable:
             user_error(
                 ctx.srcfile,
@@ -11595,6 +11600,9 @@ def _mutable_place(target: hir.AST, loc: Span, *, ctx: Context) -> hir.Place:
                 Pointer(span=loc, message='this field is const'),
             )
     binding = _member_root_binding(target, ctx=ctx)
+    owner = ctx.binding_registry.by_id.get(access.binding_id)
+    if owner is not None and (reason := _read_only_reason(owner)) is not None:
+        user_error(ctx.srcfile, 'cannot pass a const binding as a mutable place', Pointer(span=loc, message=f'`{owner.name}` {reason}'))
     _refuse_immutable_write(target, loc, 'pass a member', ctx=ctx)
     if binding is not None:
         if (reason := _read_only_reason(binding)) is not None:

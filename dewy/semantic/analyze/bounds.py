@@ -2656,11 +2656,15 @@ class _BoundsValidator:
         self._eval(node.key, state, validate=validate)
         if node.default is not None:
             self._eval(node.default, state, validate=validate)
+        route = self._binding_id(node)
+        known = state.get(route) if route is not None else None
         if isinstance(node.type, ty.RefinedType):
             # The dictionary enforces its value contract at every store;
             # a checked fallback satisfies that same contract.
-            return self._bounds_of([p for p in node.type.propositions if p.subject == 'self' and p.term is None])
-        return None
+            declared = self._bounds_of([p for p in node.type.propositions if p.subject == 'self' and p.term is None])
+            if declared is not None:
+                known = declared if known is None else known.intersect(declared)
+        return known
 
     def _eval_dict_contains(self, node: hir.DictContains, state: State, *, validate: bool) -> Interval | None:
         self._dictionary_receiver(node, state, validate=validate)
@@ -3387,6 +3391,8 @@ class _BoundsValidator:
                     self._drop_route_facts(state, route_id, keep_length=keep_length)
         if isinstance(node, hir.MemberAccess):
             self._forget_container_value(node.value, state, keep_length=keep_length)
+        elif isinstance(node, hir.DictLookup):
+            self._forget_container_value(node.values, state, keep_length=keep_length)
         elif isinstance(node, hir.Index):
             array = self._array_id(node.array)
             if array is not None:
@@ -4855,7 +4861,7 @@ class _BoundsValidator:
             return None if array_id is None else _length_key(array_id)
         if isinstance(node, hir.ExpressedIdentifier):
             return node.binding_id
-        if isinstance(node, (hir.MemberAccess, hir.Index)):
+        if isinstance(node, (hir.MemberAccess, hir.Index, hir.DictLookup)):
             # Fields and stable element selections name storage routes.
             # Root/selector writes invalidate their facts through the registry.
             return sb.array_route_id(node, self.registry)

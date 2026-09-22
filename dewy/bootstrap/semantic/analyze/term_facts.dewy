@@ -49,7 +49,7 @@ binding_term = (id:addr env:values.Environment @registry:bindings.Registry):>fac
     if node is? hir.ExpressedIdentifier {
         return if node.binding_id is? none none else facts.Term[node.binding_id]
     }
-    if node is? hir.MemberAccess | hir.Index {
+    if node is? hir.MemberAccess | hir.Index | hir.DictLookup {
         let route = bindings.array_route_id(current env.nodes @registry)
         return if route is? none none else facts.Term[route]
     }

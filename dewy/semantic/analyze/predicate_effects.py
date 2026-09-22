@@ -41,7 +41,7 @@ def _binding_effects(root: hir.AST, *, reads: bool, writes: bool, call_writes: d
             if isinstance(node, hir.FunctionCall) and call_writes is not None:
                 written.update(call_writes.get(id(node), ()))
             if target is not None:
-                access = sb.access_path(target, unwrap=sb._unwrap_fact_route)
+                access = sb.access_path(target, unwrap=sb._unwrap_fact_route, dictionaries=True)
                 if isinstance(access.root, hir.ExpressedIdentifier) and access.root.binding_id is not None:
                     written.add(access.root.binding_id)
         pending.extend(hir.children(node))

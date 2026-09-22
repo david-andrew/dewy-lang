@@ -81,13 +81,19 @@ of aggregate storage.
 
 `let cursor = @xs[i]` creates a mutable local place. Writes through `cursor`
 update the selected element; `i` is evaluated once at the declaration. A
-place may also select a named binding or a record field. The selected storage
+place may also select a named binding, a record field, or a proven dictionary
+entry (`let entry = @table[key]`). A dictionary key is evaluated once; the
+entry must already be known present when the place is declared. The selected storage
 must remain available until the last use, including uses by derived aliases.
 Replacing or resizing its owner in that interval is rejected. A local place
 retains the selected storage's write contract and const barriers, and its
 reads/writes retain the owner's effects and facts. It is not a first-class
-reference: captured/escaping places and dictionary-entry places still require
-further lifetime support. Ordinary value reads can still produce independent
+reference: captured or escaping places still require further lifetime support.
+Removing, replacing or inserting dictionary entries while a place is live is
+currently rejected, including writes through another key; the analysis does
+not yet prove those entries disjoint. Writes through the selected alias keep
+the containing dictionary’s keys present, while invalidating changed value
+facts. Earlier value snapshots remain independent. Ordinary value reads can still produce independent
 snapshots. These aliases currently lower to rooted selections, so the debugger
 shows the owner rather than a separate stored alias variable.
 
@@ -172,7 +178,8 @@ a loop can move on a path that exits with `break`, including a labeled exit,
 when no later use or live alias needs it. A path that continues the loop still
 needs the owner for later iterations. For example, an owning `consume(owner)`
 immediately followed by `break` can move; following it with `continue` cannot.
-General field transfers and dictionary-entry place lifetimes remain
+Mutable entry places can replace resource values: the replacement is evaluated
+first, then the old value drops once. General field transfers remain
 conservative.
 
 The broader typed allocation capabilities remain provisional. Their direction

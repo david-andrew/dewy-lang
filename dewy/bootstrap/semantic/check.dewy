@@ -2177,7 +2177,10 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     }
     if view {
         if not constant {
-            let borrowed=place(value id env @session)
+            let access=bindings.access_path(value session.hir dictionaries=true)
+            let entry=false
+            loop step in access.steps {if node_at(step session) is? hir.DictLookup {entry=true}}
+            let borrowed=if entry writable(value id env session named=true) else place(value id env @session)
             if borrowed is? Error return borrowed
         }
         if env.return_collector is? none return problem(id 'a local view needs a function scope' 'bind the view inside its owning function' env session)
@@ -2209,7 +2212,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     binding.value_type = if annotation is? none checked.value_type else annotation
     binding.store_type = binding.value_type
     if view and not constant {
-        let path=bindings.access_path(value session.hir)
+        let path=bindings.access_path(value session.hir dictionaries=true)
         let root=node_at(path.root session)
         $runtime_assert root is? hir.ExpressedIdentifier and root.binding_id isnt? none
         let owner=bindings.binding_at(session.registry root.binding_id)
@@ -3757,7 +3760,7 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
 # field does not authorize a write through an immutable ancestor or a borrowed
 # iterator value. Checking the route itself does not discard sequence lengths.
 writable = (value:addr id:addr env:Environment session:contexts.Session named:bool=false):>Error? => {
-    let path = bindings.access_path(value session.hir)
+    let path = bindings.access_path(value session.hir dictionaries=true)
     loop step in path.steps {
         let member = node_at(step session)
         if member is? hir.MemberAccess and not member.mutable return problem(id 'cannot mutate an immutable field' member.name env session)

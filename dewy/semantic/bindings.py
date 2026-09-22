@@ -124,8 +124,8 @@ class BindingRegistry:
         return binding
 
 
-type AccessComponent = tuple[Literal['field'], str] | tuple[Literal['index'], int | None]
-type AccessStep = hir.MemberAccess | hir.ForwardingAccess | hir.Index
+type AccessComponent = tuple[Literal['field'], str] | tuple[Literal['index'], int | None] | tuple[Literal['key'], None]
+type AccessStep = hir.MemberAccess | hir.ForwardingAccess | hir.Index | hir.DictLookup
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,8 @@ class AccessPath:
     @property
     def components(self) -> tuple[AccessComponent, ...]:
         return tuple(
-            ('index', step.constant_index) if isinstance(step, hir.Index)
+            ('key', None) if isinstance(step, hir.DictLookup)
+            else ('index', step.constant_index) if isinstance(step, hir.Index)
             else ('field', step.name if isinstance(step, hir.MemberAccess) else step.field)
             for step in self.steps
         )
@@ -156,7 +157,7 @@ class AccessPath:
         """A pure member path, or None if an index intervenes."""
         names: list[str] = []
         for step in self.steps:
-            if isinstance(step, hir.Index):
+            if isinstance(step, (hir.Index, hir.DictLookup)):
                 return None
             names.append(step.name if isinstance(step, hir.MemberAccess) else step.field)
         return tuple(names)
@@ -167,6 +168,7 @@ def access_path(
     *,
     unwrap: Callable[[hir.AST], hir.AST] = lambda node: node,
     forwarding: bool = False,
+    dictionaries: bool = False,
 ) -> AccessPath:
     """Decompose access syntax with an explicit consumer-specific cast policy.
 
@@ -179,6 +181,9 @@ def access_path(
         if isinstance(node, hir.MemberAccess) or forwarding and isinstance(node, hir.ForwardingAccess):
             steps.append(node)
             node = node.value
+        elif dictionaries and isinstance(node, hir.DictLookup) and node.proven:
+            steps.append(node)
+            node = node.values
         elif isinstance(node, hir.Index):
             steps.append(node)
             node = node.array
@@ -218,14 +223,26 @@ def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = T
     A const selector identifies one evaluated index until its declaration is
     executed again. Bracketed components cannot collide with field names.
     """
-    path = access_path(node, unwrap=_unwrap_fact_route)
+    path = access_path(node, unwrap=_unwrap_fact_route, dictionaries=True)
     root_id = path.binding_id
     if root_id is None:
         return None
     names = []
     indices = []
     for step in path.steps:
-        if isinstance(step, hir.Index):
+        if isinstance(step, hir.DictLookup):
+            selected = _unwrap_fact_route(step.key)
+            if isinstance(selected, hir.Integer):
+                names.append(f"[key:i{selected.value}]")
+            elif isinstance(selected, hir.String):
+                names.append(f"[key:s{len(selected.content)}:{selected.content}]")
+            else:
+                binding = registry.by_id.get(selected.binding_id) if isinstance(selected, hir.ExpressedIdentifier) else None
+                if binding is None or binding.declaration is None or binding.declaration.decltype != 'const':
+                    return None
+                names.append(f"[key:@{binding.id}]")
+                indices.append(binding.id)
+        elif isinstance(step, hir.Index):
             selected = _unwrap_fact_route(step.index)
             if isinstance(selected, hir.Integer):
                 # Literal routes must exist during inference too, before
@@ -259,3 +276,23 @@ def member_path(node: hir.AST) -> tuple[int, tuple[str, ...]] | None:
     path = access_path(node)
     root_id, fields = path.binding_id, path.fields
     return (root_id, fields) if root_id is not None and fields is not None else None
+
+
+def local_place_containers(binding_id: int, registry: BindingRegistry) -> set[int]:
+    """Ancestor dictionaries whose keys survive a write through this alias."""
+    result = set()
+    seen = set()
+    while binding_id not in seen:
+        seen.add(binding_id)
+        binding = registry.by_id.get(binding_id)
+        declaration = binding.declaration if binding is not None else None
+        if declaration is None or not declaration.view:
+            break
+        path = access_path(declaration.expr, unwrap=_unwrap_fact_route, dictionaries=True)
+        for step in path.steps:
+            if isinstance(step, hir.DictLookup) and isinstance(step.keys, hir.MemberAccess):
+                container = array_route_id(step.keys.value, registry)
+                if container is not None:
+                    result.add(container)
+        binding_id = path.binding_id
+    return result

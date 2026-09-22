@@ -27,11 +27,13 @@ set_facts = (state:addr current:array<keys.Fact> @session:contexts.Session):>voi
 }
 route = (value:addr @session:contexts.Session):>addr? => bindings.array_route_id(value session.hir @session.registry)
 changed = (binding:addr state:addr @session:contexts.Session):>void => {
-    let current = keys.forget(facts(state session) changed=binding)
+    let original=facts(state session)
+    let current = keys.forget(original changed=binding)
     let owner = binding
     let prefix:array<string> = []
     let item=bindings.route_at(session.registry binding)
     if item isnt? none {owner=item.root prefix=item.path}
+    let preserved:set<addr>=if session.local_place_roots.length>?0 bindings.local_place_containers(owner session.hir @session.registry) else set[]
     if session.local_place_roots.length >? 0 {
         let selected=session.local_place_roots.get(owner default=owner)
         let related:array<addr>=[]
@@ -53,6 +55,7 @@ changed = (binding:addr state:addr @session:contexts.Session):>void => {
     let children = bindings.routes_under(session.registry owner prefix)
     loop child in children { current = keys.forget(current changed=child) }
     drop_types(@session.read_states[state] children)
+    loop fact in original {if fact.container in? preserved {keys.record(@current keys.Fact[fact.container fact.key])}}
     set_facts(state current @session)
 }
 replaced = (value:addr state:addr @session:contexts.Session):>void => {

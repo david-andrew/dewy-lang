@@ -76,6 +76,14 @@ def prepare(root, registry, srcfile):
             return routes.get(value.binding_id, value)
         if isinstance(value, hir.MemberAccess):
             return replace(value, value=freeze(value.value, prefix))
+        if isinstance(value, hir.DictLookup) and value.proven:
+            # Membership was checked at the declaration. The lifetime proof
+            # prevents entry replacement/removal while the place is live.
+            # Reprobe by the saved key: copies may compact dictionary storage.
+            keys = freeze(value.keys, prefix)
+            values = replace(value.values, value=keys.value)
+            key = value.key if isinstance(value.key, (hir.Integer, hir.String)) else capture(value.key, prefix)
+            return replace(value, keys=keys, values=values, key=key, position=None, static_position=None)
         if isinstance(value, hir.Index):
             array = freeze(value.array, prefix)
             index = value.index if isinstance(value.index, hir.Integer) else capture(value.index, prefix)
@@ -89,7 +97,7 @@ def prepare(root, registry, srcfile):
                 comparison = hir.FunctionCall(value.loc, 'bool', hir.ExpressedIdentifier(value.loc, signature, name), [left, right], {})
                 prefix.append(hir.Assert(value.loc, ty.VOID_TYPE, comparison, 'local place selector is within its owner'))
             return replace(value, array=array, index=index)
-        user_error(srcfile, 'unsupported local place selection', Pointer(span=value.loc, message='select a named variable, field, or array element'))
+        user_error(srcfile, 'unsupported local place selection', Pointer(span=value.loc, message='select a named variable, field, array element, or proven dictionary entry'))
 
     # Traversal order is lexical declaration order. Binding ids, rather than
     # names, distinguish shadowed declarations and dependent aliases.
@@ -163,6 +171,8 @@ def prepare(root, registry, srcfile):
                 name = builtins.BINOP_DUNDER_MAP[node.op[:-1]]
                 signature = ty.FunctionType([ty.PosOrKwArg(None, target.type), ty.PosOrKwArg(None, value.type)], [], None, target.type)
                 value = hir.FunctionCall(node.loc, target.type, hir.ExpressedIdentifier(node.loc, signature, name), [target, value], {})
+            if isinstance(target, hir.DictLookup):
+                return hir.DictStore(node.loc, node.type, target.keys, target.values, target.key, value)
             if isinstance(target, hir.Index):
                 return hir.IndexAssign(node.loc, node.type, target, value)
             if isinstance(target, hir.MemberAccess):

@@ -109,6 +109,20 @@ freeze = (id:addr plan:Plan @prefix:array<addr> @session:contexts.Session):>addr
         if value is? none return none
         return put(hir.MemberAccess[node.loc node.value_type value node.name node.mutable] @session)
     }
+    if node is? hir.DictLookup and node.proven {
+        # Save the key, never a backing-array position that a copy can compact.
+        # The source checker proved membership; lifetime checking above keeps
+        # the owner and entry available through every alias use.
+        let keys=freeze(node.keys plan @prefix @session)
+        if keys is? none return none
+        let key_array=hir.node_at(session.hir keys)
+        let value_array=hir.node_at(session.hir node.values)
+        if key_array isnt? hir.MemberAccess or value_array isnt? hir.MemberAccess return none
+        let values=put(hir.MemberAccess[value_array.loc value_array.value_type key_array.value value_array.name value_array.mutable] @session)
+        let original=hir.node_at(session.hir node.key)
+        let key=if original is? hir.Integer|hir.String node.key else capture(node.key @prefix @session)
+        return put(hir.DictLookup[node.loc node.value_type keys values key true] @session)
+    }
     if node is? hir.Index {
         let array=freeze(node.array plan @prefix @session)
         if array is? none return none
@@ -133,6 +147,7 @@ read = (route:addr loc:Span type:addr @session:contexts.Session):>hir.AST => {
     let node=hir.node_at(session.hir route)
     if node is? hir.ExpressedIdentifier return hir.ExpressedIdentifier[loc type node.name node.binding_id]
     if node is? hir.MemberAccess return hir.MemberAccess[loc type node.value node.name node.mutable]
+    if node is? hir.DictLookup return hir.DictLookup[loc type node.keys node.values node.key true]
     $runtime_assert node is? hir.Index
     return hir.Index[loc type node.array node.index node.constant_index]
 }
@@ -323,7 +338,8 @@ rewrite = (roots:array<addr> fallback:SrcFile @session:contexts.Session):>Error?
             let function=put(hir.ExpressedIdentifier[node.loc signature operation] @session)
             value=put(hir.FunctionCall[node.loc target.value_type function [node.target value] []] @session)
         }
-        if target is? hir.Index {store(id hir.IndexAssign[node.loc node.value_type node.target value] @session)}
+        if target is? hir.DictLookup {store(id hir.DictStore[node.loc node.value_type target.keys target.values target.key value] @session)}
+        else if target is? hir.Index {store(id hir.IndexAssign[node.loc node.value_type node.target value] @session)}
         else if target is? hir.MemberAccess {store(id hir.MemberAssign[node.loc node.value_type node.target value] @session)}
         else {store(id hir.Assign[node.loc node.value_type node.target '=' value] @session)}
     }

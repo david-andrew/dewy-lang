@@ -189,7 +189,7 @@ bind = (@scopes:array<Scope> scope:addr name:string binding:addr):>void => {
 # sequence identity for a length proof without preserving a storage location
 # for assignment. `transmute` is deliberately opaque to both policies.
 AccessPath:type = [root:addr steps:array<addr>]
-access_path = (id:addr nodes:array<hir.AST> facts:bool=false forwarding:bool=false):>AccessPath => {
+access_path = (id:addr nodes:array<hir.AST> facts:bool=false forwarding:bool=false dictionaries:bool=false):>AccessPath => {
     let current:addr = id
     let reversed:array<addr> = []
     loop true {
@@ -198,6 +198,7 @@ access_path = (id:addr nodes:array<hir.AST> facts:bool=false forwarding:bool=fal
         if facts and node is? hir.Obligation { current = node.value continue }
         if node is? hir.MemberAccess { reversed.push(current) current = node.value continue }
         if forwarding and node is? hir.ForwardingAccess { reversed.push(current) current = node.value continue }
+        if dictionaries and node is? hir.DictLookup and node.proven {reversed.push(current) current=node.values continue}
         if node is? hir.Index { reversed.push(current) current = node.array continue }
         break
     }
@@ -249,7 +250,7 @@ extend_route = (id:addr fields:array<string> type_nodes:types.Table @registry:Re
 }
 
 array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
-    let path = access_path(id nodes facts=true)
+    let path = access_path(id nodes facts=true dictionaries=true)
     let root = hir.node_at(nodes path.root)
     if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return none
     # A const selector denotes one evaluated index until its declaration
@@ -259,6 +260,22 @@ array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
     loop id in path.steps {
         let step=hir.node_at(nodes id)
         if step is? hir.MemberAccess {fields.push(step.name)}
+        else if step is? hir.DictLookup {
+            let selected=hir.node_at(nodes step.key)
+            loop true {
+                if selected is? hir.ValueCast|hir.RepresentationCast {selected=hir.node_at(nodes selected.expr) continue}
+                if selected is? hir.Obligation {selected=hir.node_at(nodes selected.value) continue}
+                break
+            }
+            if selected is? hir.Integer {fields.push("[key:i{selected.value}]") continue}
+            if selected is? hir.String {fields.push("[key:s{selected.content.length}:{selected.content}]") continue}
+            if selected isnt? hir.ExpressedIdentifier or selected.binding_id is? none return none
+            let binding=find_binding(registry selected.binding_id)
+            if binding is? none or binding.declaration is? none return none
+            let declaration=hir.node_at(nodes binding.declaration)
+            if declaration isnt? hir.Declare or declaration.decltype not=? 'const' return none
+            fields.push("[key:@{binding.id}]") indices.push(binding.id)
+        }
         else if step is? hir.Index {
             let selected=hir.node_at(nodes step.index)
             loop true {
@@ -283,6 +300,36 @@ array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
     loop index in indices {
         let routes=registry.index_routes.get(index set[])
         if result not in? routes {routes.add(result) registry.index_routes[index]=routes}
+    }
+    return result
+}
+
+# Writing an entry alias may change its payload, but cannot remove the key
+# from its ancestor dictionaries. Follow aliases without confusing fields of
+# the payload with membership in the containing dictionary.
+local_place_containers=(id:addr nodes:array<hir.AST> @registry:Registry):>set<addr>=>{
+    let result:set<addr>=set[]
+    let seen:set<addr>=set[]
+    let current:addr?=id
+    loop current isnt? none and current not in? seen {
+        seen.add(current)
+        let binding=find_binding(registry current)
+        if binding is? none or binding.declaration is? none break
+        let declaration=hir.node_at(nodes binding.declaration)
+        if declaration isnt? hir.Declare or not declaration.view break
+        let path=access_path(declaration.expr nodes facts=true dictionaries=true)
+        loop step in path.steps {
+            let node=hir.node_at(nodes step)
+            if node is? hir.DictLookup {
+                let keys=hir.node_at(nodes node.keys)
+                if keys is? hir.MemberAccess {
+                    let container=array_route_id(keys.value nodes @registry)
+                    if container isnt? none {result.add(container)}
+                }
+            }
+        }
+        let root=hir.node_at(nodes path.root)
+        current=if root is? hir.ExpressedIdentifier root.binding_id else none
     }
     return result
 }

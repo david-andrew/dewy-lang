@@ -122,7 +122,7 @@ install = (@state:facts.State subject:addr value:addr annotation:addr? loc:Span 
 # is no longer the same integer after writing a limb), while unrelated field
 # and length evidence remains useful.
 forget_value = (id:addr @state:facts.State @checker:Checker keep_length:addr?=none):>void => {
-    let path=bindings.access_path(id checker.data.env.nodes facts=true)
+    let path=bindings.access_path(id checker.data.env.nodes facts=true dictionaries=true)
     let root=node_at(path.root checker)
     if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
         # Any component write may replace/move an indexed child. Keep pure
@@ -151,7 +151,7 @@ forget_place = (id:addr @state:facts.State @checker:Checker):>void => {
     # Mutation reaches the endpoint, not the whole containing record.
     # Retain parent lengths and sibling fields, but discard element facts.
     forget_value(id @state @checker)
-    let access=bindings.access_path(id checker.data.env.nodes facts=true)
+    let access=bindings.access_path(id checker.data.env.nodes facts=true dictionaries=true)
     loop step in access.steps {
         let node=node_at(step checker)
         if node is? hir.Index {

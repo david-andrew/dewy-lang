@@ -744,20 +744,11 @@ box_value = (value:addr stored:addr node:hir.AST @state:State binding:addr?=none
 place_address = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.DictLookup and node.proven {
-        # Lifecycle helpers borrow a proven entry instead of duplicating it.
-        # Array parameters address a handle slot; records/unions address the
-        # payload itself, matching the ordinary indexed-place ABI.
+        if object_valued(node.value_type state) return write_route(id @state)
         let prefix:array<addr>=[]
-        let parts=dict_from_keys(node.keys @prefix @state mutate=true)
-        $runtime_assert parts.value isnt? none
-        let key=snapshot(owned_value(node.key @state) @prefix @state)
-        prefix.push(dict_ensure(parts node @state))
-        let probe=dict_probe(parts key node @prefix @state)
-        let values=dict_array(parts 'values' parts.value node @prefix @state)
-        let address=dict_element_pointer(values probe.position parts.value node @state)
-        if inline_place(node.value_type @state) {address=read_value(array_load(address parts.value node @state) parts.value node.value_type node @state)}
-        prefix.push(release_value(key parts.key node @state))
-        prefix.push(address)
+        let slot=dict_entry_slot(node @prefix @state)
+        let pointer=if inline_place(node.value_type @state) read_value(array_load(slot stored_type(id state) node @state) stored_type(id state) node.value_type node @state) else slot
+        prefix.push(pointer)
         return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
     }
     # A narrowed record occupies the payload, not the enclosing union cell.
@@ -1521,6 +1512,7 @@ array_route = (id:addr @prefix:array<addr> @state:State):>ArrayRoute => {
         }
         if node is? hir.MemberAccess return ArrayRoute[snapshot(field_pointer(node @state writable=true) @prefix @state) none none]
         if node is? hir.Index return ArrayRoute[snapshot(array_index(node @state writable=true) @prefix @state) none none]
+        if node is? hir.DictLookup and node.proven return ArrayRoute[dict_entry_slot(node @prefix @state) none none]
     }
     # An array narrowed out of an optional/union cell lives in the cell's
     # payload word; the cell itself is the stable place.
@@ -1532,6 +1524,7 @@ array_route = (id:addr @prefix:array<addr> @state:State):>ArrayRoute => {
             cell=if node.binding_id in? state.boxed array_load(raw stored node @state) else raw
         } else if node is? hir.MemberAccess {cell=field_pointer(node @state writable=true)}
         else if node is? hir.Index {cell=array_load(array_index(node @state writable=true) stored node @state)}
+        else if node is? hir.DictLookup and node.proven {cell=array_load(dict_entry_slot(node @prefix @state) stored node @state)}
         if cell isnt? none return ArrayRoute[snapshot(address(cell 8 node @state) @prefix @state) none none]
     }
     return ArrayRoute[none none snapshot(write_route(id @state) @prefix @state)]
@@ -1679,6 +1672,7 @@ record_route = (id:addr @prefix:array<addr> @state:State):>ArrayRoute => {
             return ArrayRoute[none target none]
         }
         if node is? hir.Index return ArrayRoute[snapshot(array_index(node @state writable=true) @prefix @state) none none]
+        if node is? hir.DictLookup and node.proven return ArrayRoute[dict_entry_slot(node @prefix @state) none none]
         if node is? hir.MemberAccess {
             let inline=snapshot(field_pointer(node @state writable=true) @prefix @state)
             return ArrayRoute[none none inline]
@@ -1691,6 +1685,7 @@ record_route = (id:addr @prefix:array<addr> @state:State):>ArrayRoute => {
             cell=if node.binding_id in? state.boxed array_load(raw stored node @state) else raw
         } else if node is? hir.MemberAccess {cell=field_pointer(node @state writable=true)}
         else if node is? hir.Index {cell=array_load(array_index(node @state writable=true) stored node @state)}
+        else if node is? hir.DictLookup and node.proven {cell=array_load(dict_entry_slot(node @prefix @state) stored node @state)}
         if cell isnt? none return ArrayRoute[snapshot(address(cell 8 node @state) @prefix @state) none none]
     }
     let temporary=snapshot(expression(id @state) @prefix @state)
@@ -1816,6 +1811,10 @@ stored_type = (id:addr state:State):>addr => {
     if node is? hir.Index {
         let array=array_type(hir.node_at(state.input.nodes node.array).value_type state)
         if array isnt? none return array.element
+    }
+    if node is? hir.DictLookup {
+        let values=array_type(hir.node_at(state.input.nodes node.values).value_type state)
+        if values isnt? none return values.element
     }
     return node.value_type
 }
@@ -5379,6 +5378,22 @@ dict_from_keys = (keys:addr @prefix:array<addr> @state:State mutate:bool=false):
     $runtime_assert member is? hir.MemberAccess
     return dict_parts(member.value @prefix @state mutate=mutate)
 }
+# A mutable entry denotes a slot in this dictionary's private values array.
+# Detach the containing record and array first; then a record/array payload
+# can detach its own handle and publish the replacement back to this slot.
+# Always probe the saved key: representation copies can compact tombstones.
+dict_entry_slot=(node:hir.DictLookup @prefix:array<addr> @state:State):>addr=>{
+    let parts=dict_from_keys(node.keys @prefix @state mutate=true)
+    $runtime_assert parts.value isnt? none
+    let key=snapshot(owned_value(node.key @state) @prefix @state)
+    prefix.push(dict_ensure(parts node @state))
+    let probe=dict_probe(parts key node @prefix @state)
+    let values=dict_array(parts 'values' parts.value node @prefix @state)
+    let slot=snapshot(dict_element_pointer(values probe.position parts.value node @state) @prefix @state)
+    prefix.push(release_value(key parts.key node @state))
+    return slot
+}
+
 # Container operations retain a temporary receiver until their result has
 # been materialized. Iteration instead keeps this owner for the whole arm.
 finish_dictionary = (value:addr parts:DictParts node:hir.AST @prefix:array<addr> @state:State copy_result:bool=false):>addr => {

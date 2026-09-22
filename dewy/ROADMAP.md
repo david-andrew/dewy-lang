@@ -452,7 +452,9 @@ in both lowerings and the parity tool is the gate.
   Resource iterator sources now use ordinary lexical owners: stable sources
   borrow, last uses move, and independent snapshots invoke checked copies.
   Read-only element loans end with each iteration; source cleanup covers
-  early returns and loop exits. Entry-place lifetimes remain pending.
+  early returns and loop exits. Mutable local entry places now retain their
+  dictionary through the last alias use, capture keys once, and reprobe after
+  representation changes. Resource replacement drops the previous owner once.
   Field and element overwrite now capture selectors and replacement values
   once, then drop the previous owner before installing the new one. This
   includes optional fields, nested arrays and borrowed receivers; side effects
@@ -535,8 +537,11 @@ the lexical lifetime. Known nonescaping place calls outside the interval no
 longer exclude the owner for its entire function. Mutable local places now use rooted bindings, fields and array selections,
 capturing selectors once and retaining checked storage/fact/effect contracts.
 Their private, uncaptured owners must remain stable through the last use of
-all dependent aliases. Dictionary-entry places and lifetimes for captured or
-exposed owners remain pending.
+all dependent aliases. Proven dictionary entries now use the same lifetime demand, including nested
+receivers and dependent aliases. Value writes retain ancestor membership,
+while mutable entry routes detach shared dictionary/payload storage and
+publish replacement handles back to their slots. Other entry writes remain
+conservative; lifetimes for captured or exposed owners remain pending.
 
 ### 1.2 The proof engine
 

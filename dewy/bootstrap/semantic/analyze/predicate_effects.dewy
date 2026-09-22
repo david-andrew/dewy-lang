@@ -48,7 +48,7 @@ mutated_bindings = (root:addr nodes:array<hir.AST> call_writes:dict<addr set<add
             loop binding in call_writes.get(id set[]) {result.add(binding)}
         }
         if target isnt? none {
-            let path = bindings.access_path(target nodes facts=true)
+            let path = bindings.access_path(target nodes facts=true dictionaries=true)
             let owner = hir.node_at(nodes path.root)
             if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none { result.add(owner.binding_id) }
         }

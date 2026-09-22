@@ -1,0 +1,22 @@
+# Entry places keep a logical route, not a pointer into a shared hash table.
+# Detaching either the containing dictionary or the selected payload must
+# publish its new handle through that route and leave earlier copies alone.
+Box:type=[value:int64 items:array<int64>]
+work=():>int64=>{
+    let table:dict<int64 Box>=[1->Box[0 [1]] 2->Box[0 [2]]]
+    table.pop(2);
+    let saved=table
+    let entry=@table[1]
+    entry.value=42
+    entry.items.push(2)
+    if saved[1].value not=?0 or saved[1].items.length not=?1 return 1
+    if entry.items.length not=?2 return 2
+    return entry.value
+}
+main=():>int64=>{
+    if work() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if work() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}
