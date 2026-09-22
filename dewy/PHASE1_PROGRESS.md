@@ -2207,3 +2207,54 @@ The preceding integrated revision, `181db533`, reached another byte-identical
 direct fixed point, with native execution checks on both backends. Its own
 rebuilt pair confirms 4,981 sites over 47,154 lines (105.633/KLOC). Generation
 2/3 took 70/80 seconds during concurrent work; the latency target remains open.
+
+## Full-suite regression repairs (2026-09-21)
+
+The user's failure report was reproducible in CI: revision `80a83728` had
+15 failures, 3,866 passes and 32 skips. Earlier selected parity checks did
+not establish that the full suite passed. Roadmap work paused for these
+repairs:
+
+- Callable arrays and loop captures join the effect rows of otherwise
+  identical signatures. Distinct inferred rows no longer cause a misleading
+  homogeneous-element error, and the join retains every possible effect.
+- Deferred effect checks preserve callable binding, receiver and default
+  metadata. This repairs method/default-argument errors and runtime crashes
+  without dropping the effect obligations carried by those checks.
+- Native method-body inference uses the complete parameter scope, including
+  the hidden receiver. Only written contracts need their source parameter
+  indices shifted. Prebound signatures retain their inference identity.
+- Generic-signature expectations now account for per-instance inferred rows.
+  The snapshot regression uses complete generic effect contracts, including
+  negative guarantees, rather than the superseded positive-row representation.
+
+The complete local run collected 3,923 tests and finished with **3,904 passed,
+14 skipped and five failures** in 76m54s. It started before the final snapshot
+fixture and native method repairs landed. The snapshot failure passes its
+focused pytest rerun; both method/ordered-call failures pass their original
+test functions against the rebuilt native checker. The other two failures
+were filesystem fixtures affected by this development session's `/tmp` quota;
+both pass their focused pytest rerun after old development artifacts were
+moved to disk-backed storage. There were no other failures. This is full-suite
+coverage followed by targeted repairs, **not a claim that one final full-suite
+invocation was all green**. Local evidence lives in
+`../dewy-build-artifacts/pytest-repairs-full.{log,xml}` and the focused repair
+logs alongside it.
+
+The first ten new callable regression tests passed in that full run. The final
+method repair adds five passing hosted cases and a native harness covering
+three valid programs and two rejected contracts, checked against hosted
+execution on x86-64 and C. Existing native move-hook and inferred-callback
+checks also pass with the rebuilt driver. These checks preserve rejection of
+unknown/effectful callbacks under pure contracts and of methods whose written
+mutation permission names the wrong argument.
+
+The final compiler repair (`3794df8b`, built in its isolated worktree as
+`c5095e30`) closes a three-generation C-backed native bootstrap of both Dewy
+and µDewy, with byte-identical final compiler generations and runtime checks
+on x86-64/C. The resulting pair is
+`../dewy-build-artifacts/pytest-repairs-native-pair`. Its own copy inventory is
+**4,985 sites over 47,211 lines (105.590/KLOC)**, within the unchanged 5,000/110
+gates (`pytest-repairs-final-copies.json`). Generation 2/3 took 199/201 seconds
+while the full suite was running; these are not isolated latency measurements.
+Phase 1 and the performance target remain unfinished.

@@ -8,6 +8,16 @@ This document tracks language features in the cleanparse compiler. Checked items
 
 ## Current focus
 
+**Test repair checkpoint (2026-09-21):** CI confirmed 15 failures after the
+effect-inference changes. Callable-container joins, deferred callable metadata,
+native method inference and two stale test expectations are repaired. A full
+local run passed 3,904 tests; its five remaining failures all pass targeted
+reruns after the final repairs or temporary-storage cleanup. This was not a
+single all-green full-suite invocation. The repaired native pair closes a
+byte-identical three-generation C-backed bootstrap. See
+[the verification record](PHASE1_PROGRESS.md#full-suite-regression-repairs-2026-09-21)
+for scope and limitations; Phase 1 remains in progress.
+
 **Review checkpoint (2026-09-20):** the intervening 70 commits broadly follow the
 right direction; the [review](bootstrap/REVIEW_2026_09_20.md) records corrections
 for aliased field stores, raw-exposed record arguments, imported copy-note
