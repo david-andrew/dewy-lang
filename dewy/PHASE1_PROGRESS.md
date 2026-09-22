@@ -3143,3 +3143,21 @@ adjacent tests and all 14 final focused tests. Artifacts use
 The previous seed's inventory reports 4,501 sites on this source; that seed
 does not implement the new borrow proof. A fresh integration inventory must
 pass the existing 4,500/100 gates before this checkpoint is certified.
+
+## Local union-view integration checkpoint (2026-09-22)
+
+Frozen source `582fbe53` completed the three-generation direct x86-64 bootstrap.
+Both Dewy and µDewy generations 2 and 3 are byte-identical; x86-64/C pipeline
+execution checks passed. The fresh pair reports 4,483 copies over 48,522
+bootstrap lines (92.391/KLOC), passing the unchanged 4,500/100 gates. The
+previous seed could not account for the new borrow optimization; the fresh
+inventory is the certificate. Static counts are not timing measurements.
+
+The broad selection excluding `bootstrap` and `native` names passed 3,694
+tests with 14 skips in 733.61 seconds. The preceding indexed-fact checkpoint
+(`4fe3cb18`) passed 3,680 with 14 skips in 677.61 seconds. These selections
+do not certify all-route pytest/CI. Bootstrap generations 2/3 took 69/83
+seconds under concurrent work, not isolated benchmark conditions.
+Artifacts: `phase1-union-views-582fbe53`, `phase1-union-views-bootstrap.log`,
+`phase1-union-views-inventory.json`, `phase1-union-views-broad.log`, and
+`phase1-indexed-facts-broad.log`.
