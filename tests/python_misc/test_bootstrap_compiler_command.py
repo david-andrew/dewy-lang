@@ -154,8 +154,8 @@ def test_native_compiler_command(tmp_path):
     # count. The tool verifies every summary entry before applying the scope.
     budget = subprocess.run([
         sys.executable, ROOT / 'tools/copy_report.py', '--compiler', shlex.quote(str(compiler)),
-        '--scope', ROOT / 'dewy/bootstrap', '--max-copies', '5000',
-        '--max-copies-per-kloc', '110', '--json', ROOT / 'dewy/bootstrap/main.dewy',
+        '--scope', ROOT / 'dewy/bootstrap', '--max-copies', '4500',
+        '--max-copies-per-kloc', '100', '--json', ROOT / 'dewy/bootstrap/main.dewy',
     ], cwd=ROOT, env=real_env, capture_output=True, text=True, timeout=900, check=False)
     (tmp_path / 'compiler-copy-inventory.json').write_text(budget.stdout)
     assert budget.returncode == 0, budget.stderr

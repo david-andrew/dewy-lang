@@ -2505,8 +2505,38 @@ Checkpoint `eea60209` closes another three-generation direct bootstrap: the fina
 Dewy and µDewy generations are byte-identical and runtime checks pass. Generation
 2/3 took 69/82 seconds with concurrent development, not isolated latency samples.
 The subsequent hosted-only default fix emits and links the complete compiler
-(54,290,861 bytes of µDewy); its executable reports the expected version. Full
-corpus parity is running separately. Artifacts use the
+(54,290,861 bytes of µDewy); its executable reports the expected version and compiles the frame-value
+fixture, which exits with the expected 42. Full corpus parity passed all
+211 explicit cases against the certified pair and hosted checkpoint `1e3eefa6`. Artifacts use the
 `../dewy-build-artifacts/phase1-dictionary-views-`, `phase1-dictionary-array-views-`,
 `phase1-optional-conditional-bounds-` and `phase1-readonly-defaults-` prefixes.
 These checkpoints do not complete Phase 1 or certify a new full pytest run.
+
+
+## Stable string comparison roots (2026-09-22)
+
+Native whole-string and slice/index comparisons borrow roots whose existing
+storage proof establishes stability. Other roots retain an owning snapshot
+through evaluation of the right operand. Nested spans retain the same owner,
+selectors execute once in source order, and only owned roots are released.
+The hosted comparison path now snapshots a left value when the right operand
+may replace its source, including transitive calls, module initializers,
+defaults and early returns. String-valued flow temporaries use their runtime
+handle representation even when the semantic type is a string literal.
+
+The native compiler inventory drops by 596 sites to **4,390 over 47,488 lines
+(92.444/KLOC)**. CI budgets ratchet to **4,500 sites and 100/KLOC**. This measures
+static copy sites, not elapsed time or runtime copied bytes. The Unicode
+comparison kernel runs 1,000 iterations without arena allocation under
+`$explicit_copies`. Eight hosted snapshot cases pass; paired x86-64/C runs
+also cover the allocation kernel, eleven existing descriptor/lifetime kernels,
+four text cases and three rejections.
+
+Checkpoint `a708b511` closes the three-generation direct x86-64 bootstrap with
+byte-identical final Dewy and µDewy generations and passing runtime checks.
+The certified pair reports the same 4,390 sites over 47,501 source lines
+(92.419/KLOC) in the integrated checkout and passes the tighter gates.
+Generation 2/3 took 64/82 seconds during concurrent work, not isolated latency
+measurements. Artifacts use `../dewy-build-artifacts/phase1-string-comparison-views-`
+and `phase1-string-views-` prefixes. These are focused checks and a fixed point,
+not a new complete pytest or corpus certification of this checkpoint.
