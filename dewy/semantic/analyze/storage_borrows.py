@@ -4,7 +4,7 @@ A read-only aggregate parameter, a stable fresh local owner, or one of their
 projections can be forwarded without a snapshot when the caller and callee
 operate on their own bindings through known calls. The whole-caller proof
 excludes writes through later arguments too. Nonlocal
-storage, raw operations, representation casts and unresolved callbacks keep
+storage, raw operations, casts of existing storage and unresolved callbacks keep
 this proof unknown; ordinary lowering may have more precise borrow proofs.
 """
 from collections import deque
@@ -24,7 +24,7 @@ OPERATORS = frozenset({
 def borrowable(type_):
     """Ordinary aggregate storage, without observable lifecycle operations."""
     shape = ty.structural_base(type_)
-    if not isinstance(shape, (ty.ArrayType, ty.ObjectType, ty.StringType, ty.StringLiteralType)) and not ty.string_valued(shape):
+    if not isinstance(shape, (ty.ArrayType, ty.ObjectType, ty.TypeOr, ty.StringType, ty.StringLiteralType)) and not ty.string_valued(shape):
         return False
     pending, seen = [shape], set()
     while pending:
@@ -41,6 +41,18 @@ def borrowable(type_):
         elif isinstance(item, ty.TypeOr):
             pending.extend(item.items)
     return True
+
+
+def independent_materialization(node):
+    """Literal construction cannot expose a caller's existing storage.
+
+    Keep casts of names/calls conservative, including byte views of strings.
+    A closed literal/default has no such source, regardless of how many
+    representation wrappers contextual typing inserts around it.
+    """
+    return all(isinstance(item, (hir.NoneValue, hir.Void, hir.Bool, hir.Integer,
+        hir.String, hir.ArrayLiteral, hir.ObjectLiteral, hir.ValueCast,
+        hir.RepresentationCast, hir.Obligation)) for item in hir.walk(node))
 
 
 def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]]:
@@ -85,7 +97,7 @@ def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]
                              and node.binding_id not in written
                              and isinstance(node.expr, (hir.ObjectLiteral, hir.ArrayLiteral))}
         for node in body:
-            if isinstance(node, hir.RepresentationCast):
+            if isinstance(node, hir.RepresentationCast) and not independent_materialization(node.expr):
                 blocked.add(key)
             elif isinstance(node, hir.ExpressedIdentifier):
                 if (node.binding_id not in local

@@ -507,7 +507,9 @@ in both lowerings and the parity tool is the gate.
   components. Nested selectors evaluate once and retain checked bounds. Custom wrapper
   hooks still require a complete receiver. Last-use component transfers now also
   supply owning bindings, calls and constructors, retaining the wrapper’s lexical
-  cleanup. Whole-owner replacements re-establish ownership across loop backedges;
+  cleanup. Direct same-block field/ancestor replacement restores partial record ownership,
+  preserving cleanup of remaining old components and the new value.
+  Whole-owner replacements re-establish ownership across loop backedges;
   every advancing path must provide a fresh value before another consuming use.
   Broader partial transfers and remaining resource-container mutations still
   require further lifetime analysis. Same-block owning input
@@ -630,8 +632,11 @@ checked separately and shared choices visited once.
 Projected writes and mutating place calls share their allocation obligations;
 an untouched sibling projection can still borrow its own storage.
 Read-only aggregate forwarding now shares its storage
-proof with allocation contracts, including records, strings and field/element
-projections of stable by-value parameters. Lifecycle operations, unknown
+proof with allocation contracts, including records, strings, tagged unions and field/element
+projections of stable by-value parameters. Read-only optional and general-union
+default parameters borrow supplied cells and own omitted defaults. Absent
+union values use static/frame storage; mutable container slots retain private
+tag cells. Lifecycle operations, unknown
 callbacks, raw exposure and conflicting argument evaluation retain their
 ordinary obligations. The placement proof is exercised by a zero-allocation loop kernel
 on both compilers/backends. Broader placement/move proofs and further storage

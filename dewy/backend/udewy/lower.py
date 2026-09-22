@@ -799,7 +799,7 @@ class _Lowerer(
                 )
                 direct_storage = (
                     isinstance(param.type, ty.ObjectType)
-                    or ty.optional_payload(param.type) is not None
+                    or self._field_union_members(param.type) is not None
                 )
                 if not direct_storage:
                     place_parameter_cells[param.binding_id] = incoming
@@ -997,6 +997,16 @@ class _Lowerer(
                 param.type,
                 incoming_name,
             )
+            summary = (self.program_effects.for_param_binding(param.binding_id)
+                       if param.binding_id is not None else None)
+            if summary is not None and summary.read_only:
+                # Optional payloads obey the same read-only ABI as general
+                # unions. Borrow the existing tag/payload cell; neither the
+                # cell nor its payload belongs to this callee's cleanup.
+                parameter_prologue.append(hir.Declare(
+                    literal.loc, ty.VOID_TYPE, 'let', param.name, 'int64',
+                    replace(incoming, type='int64'), binding_id=param.binding_id))
+                return replace(param, name=incoming_name, type='int64', binding_id=None)
             cell = hir.ExpressedIdentifier(
                 literal.loc,
                 'int64',
@@ -1015,7 +1025,7 @@ class _Lowerer(
                 )
             )
             self._note_copy('cell', param.type, f'copied on entry as `{param.name}`',
-                            'the optional parameter receives its own payload cell', literal.loc)
+                            'the body writes or retains its optional parameter', literal.loc)
             parameter_prologue.extend(self._optional_write(cell, incoming, payload))
             parameter_cells[param.name] = (('none', payload), False)
             return replace(
@@ -1041,6 +1051,22 @@ class _Lowerer(
                 incoming = hir.ExpressedIdentifier(literal.loc, param.type, incoming_name)
                 cell = hir.ExpressedIdentifier(literal.loc, 'int64', param.name, binding_id=param.binding_id)
                 default_value = self._require_node(self._transform_node(param.value))
+                summary = (self.program_effects.for_param_binding(param.binding_id)
+                           if param.binding_id is not None else None)
+                if summary is not None and summary.read_only and storage_borrows.borrowable(param.type):
+                    # The omitted default owns its payload; a supplied value
+                    # lends the caller's cell. Select before dereferencing the
+                    # ignored null argument used for an omitted value.
+                    present = hir.ExpressedIdentifier(literal.loc, 'bool', present_name)
+                    parameter_prologue.append(hir.Declare(literal.loc, ty.VOID_TYPE, 'let',
+                        param.name, 'int64', self._optional_allocation(literal.loc), binding_id=param.binding_id))
+                    supplied = hir.Assign(literal.loc, ty.VOID_TYPE, cell, '=', replace(incoming, type='int64'))
+                    parameter_prologue.append(hir.Flow(literal.loc, ty.VOID_TYPE,
+                        [hir.IfArm(literal.loc, ty.VOID_TYPE, present, supplied)],
+                        hir.Block(literal.loc, ty.VOID_TYPE, self._optional_write(cell, default_value, payload), True)))
+                    default_owner_conditions[local_binding_key(cell)] = self._bool_not(present)
+                    parameter_cells[param.name] = (('none', payload), False)
+                    continue
                 parameter_prologue.append(hir.Declare(
                     literal.loc,
                     ty.VOID_TYPE,
@@ -1084,7 +1110,24 @@ class _Lowerer(
                 binding_id=param.binding_id,
             )
             default = self._require_node(self._transform_node(param.value))
-            if isinstance(param.type, (ty.ArrayType, ty.ObjectType)) or ty.runtime_union_members(param.type) is not None:
+            members = ty.runtime_union_members(param.type)
+            summary = (self.program_effects.for_param_binding(param.binding_id)
+                       if param.binding_id is not None else None)
+            if (members is not None and summary is not None and summary.read_only
+                    and storage_borrows.borrowable(param.type)):
+                cell = replace(target, type='int64')
+                present = hir.ExpressedIdentifier(literal.loc, 'bool', present_name)
+                parameter_prologue.append(hir.Declare(literal.loc, ty.VOID_TYPE, 'let',
+                    param.name, 'int64', self._union_cell_allocation(members, literal.loc), binding_id=param.binding_id))
+                supplied = hir.Assign(literal.loc, ty.VOID_TYPE, cell, '=', replace(incoming, type='int64'))
+                missing = [*self._union_prepare_trees(cell, members, literal.loc), *self._union_write(cell, default, members)]
+                parameter_prologue.append(hir.Flow(literal.loc, ty.VOID_TYPE,
+                    [hir.IfArm(literal.loc, ty.VOID_TYPE, present, supplied)],
+                    hir.Block(literal.loc, ty.VOID_TYPE, missing, True)))
+                default_owner_conditions[local_binding_key(cell)] = self._bool_not(present)
+                parameter_cells[param.name] = (members, True)
+                continue
+            if isinstance(param.type, (ty.ArrayType, ty.ObjectType)) or members is not None:
                 summary = self.program_effects.for_param_binding(param.binding_id) if param.binding_id is not None else None
                 if (isinstance(param.type, ty.ObjectType) and summary is not None and summary.read_only
                         and storage_borrows.borrowable(param.type)):
@@ -3872,7 +3915,12 @@ class _Lowerer(
                         released.append(self._release_string_by_owner(local, local.loc))
                     elif local.name in self.owned_aggregate_cells:
                         members, prepared = self.owned_aggregate_cells[local.name]
-                        released.extend(self._release_cell_payload(local, members, local.loc, prepared=prepared, strings=local.name in self.owned_cells))
+                        cleanup = self._release_cell_payload(local, members, local.loc, prepared=prepared, strings=local.name in self.owned_cells)
+                        condition = self.default_owner_conditions.get(local_binding_key(local))
+                        if condition is not None:
+                            cleanup = [hir.Flow(local.loc, ty.VOID_TYPE, [hir.IfArm(local.loc, ty.VOID_TYPE, condition,
+                                       hir.Block(local.loc, ty.VOID_TYPE, cleanup, True))], None)]
+                        released.extend(cleanup)
                     elif local.name in self.owned_cells:
                         released.extend(self._release_cell_string_payload(local, self.owned_cells[local.name], local.loc))
                     elif local.name in self.owned_raw_arrays:

@@ -24,7 +24,7 @@ primitive=(node:hir.AST registry:bindings.Registry):>bool=>{
 borrowable=(type:addr table:types.Table):>bool=>{
     let shape=views.structural_base(type table)
     let first=types.node_at(table shape)
-    if first isnt? types.ArrayType|types.ObjectType|types.StringType|types.StringLiteralType and not views.string_valued(shape table) return false
+    if first isnt? types.ArrayType|types.ObjectType|types.TypeOr|types.StringType|types.StringLiteralType and not views.string_valued(shape table) return false
     let pending:array<addr>=[shape] let seen:set<addr>=set[]
     loop pending.length>?0 {
         let id=views.structural_base(pending.pop table)
@@ -56,6 +56,17 @@ stable_projection=(summary:effects.ParameterEffects path:bindings.AccessPath nod
         else {steps.push('[]')}
     }
     return effects.read_only_at(summary effects.Route[steps])
+}
+# Contextual boxing of a closed literal/default cannot expose existing
+# caller storage. Casts of names and calls retain the conservative boundary.
+independent_materialization=(id:addr nodes:array<hir.AST>):>bool=>{
+    let pending:array<addr>=[id]
+    loop pending.length>?0 {
+        let node=hir.node_at(nodes pending.pop)
+        if node isnt? hir.NoneValue|hir.Void|hir.Bool|hir.Integer|hir.String|hir.ArrayLiteral|hir.ObjectLiteral|hir.ValueCast|hir.RepresentationCast|hir.Obligation return false
+        hir.push_children(node @pending)
+    }
+    return true
 }
 forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>{
     let eligible:dict<addr bool>=[]
@@ -105,7 +116,7 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
         stable_locals[id]=candidates
         loop item in body {
             let node=hir.node_at(nodes item)
-            if node is? hir.RepresentationCast {blocked.add(id)}
+            if node is? hir.RepresentationCast and not independent_materialization(node.expr nodes) {blocked.add(id)}
             else if node is? hir.ExpressedIdentifier {
                 let local=node.binding_id isnt? none and node.binding_id in? locals
                 let operation=primitive(node registry)

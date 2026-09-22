@@ -74,7 +74,7 @@ class _PlaceLowering:
         if isinstance(node.type, ty.ObjectType):
             prelude, storage = self._extract_object_pointer(target)
             return prelude, replace(storage, type='int64'), []
-        if ty.optional_payload(node.type) is not None:
+        if self._field_union_members(node.type) is not None:
             return [], replace(target, type='int64'), []
         if (
             isinstance(node.type, ty.ArrayType)
@@ -200,8 +200,8 @@ class _PlaceLowering:
                     target.loc,
                 )
         if (isinstance(ty.unfold(ty.strip_refinement(target.type)), ty.ObjectType)
-                or ty.optional_payload(target.type) is not None):
-            # Records and optional values borrow their storage directly;
+                or self._field_union_members(target.type) is not None):
+            # Records and tagged unions borrow their storage directly;
             # an array slot contains a handle to that storage.
             return prelude, self._read_index_storage(address, target)
         return prelude, address

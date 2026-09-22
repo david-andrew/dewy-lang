@@ -3043,3 +3043,36 @@ caches. The report is `phase1-partial-records-corpus.json` and its log is
 `phase1-partial-records-corpus.log`. This certifies the corpus at those inputs;
 field renewal and subsequent source changes retain their separate focused
 validation until the next integration checkpoint.
+
+
+## Read-only tagged-union storage and defaults (2026-09-22)
+
+The shared forwarding proof now includes ordinary tagged unions, retaining
+lifecycle, mutation, raw-exposure and callback exclusions. Closed literal
+materialization cannot expose existing caller storage; casts of names/calls
+remain conservative. The hosted optional parameter ABI now borrows read-only
+cells like general unions. Supplied default arguments borrow, while omitted
+defaults initialize and clean up their own payloads.
+
+The native effect inventory recognizes absent-arm boxing as allocation-free,
+matching static empty cells. Native general unions now share that representation
+with optionals. Mutable container slots privatize empty tag cells at the owning
+store: a regression caught one array element changing another absent element
+through the shared cell. Hosted general-union places now use a consistent direct
+cell ABI for bindings, fields and elements, fixing a projected-field crash.
+
+Validation across the final focused runs covers 18 paired runtime kernels
+(16 new and two adjacent forwarding fixtures) and 15 rejections on hosted/native
+and x86-64/C. The first 12 kernels passed before the mutable-slot/ABI fixes;
+the remaining six and all rejections passed afterward. Hosted selections passed
+35 adjacent borrow/default checks and 25 of 26 later focused checks; the final
+fixture was changed from unsupported whole-dictionary-entry borrowing to entry
+replacement and passed paired validation. Allocation counters cover recursive
+forwarding, supplied defaults and 100 omitted empty defaults; owning defaults
+retain no arena growth over 100 calls. Artifacts use `phase1-union-borrows-*`.
+
+A seed inventory before the final empty-cell changes measured 4,496 copies
+over 48,434 lines (92.827/KLOC), within the existing gate. It is not a fresh
+compiler certificate. Stable indexed type-test facts are recorded but not yet
+consumed consistently on subsequent reads; general whole-entry dictionary
+places also remain a separate checker gap.

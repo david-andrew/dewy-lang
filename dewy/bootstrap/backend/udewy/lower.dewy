@@ -593,11 +593,11 @@ expression = (id:addr @state:State):>addr => {
             value=owned_value(node.expr @state "bound to `{node.name}`")
         }
         if node.binding_id isnt? none and (node.binding_id in? state.frame_record_bindings or node.expr in? state.frame_arrays) {borrowed=true}
-        # An addressed optional local is written through its own cell, which
+        # An addressed union local is written through its own cell, which
         # must therefore never be the shared static `none` cell.
         if state.none_cell isnt? none and node.binding_id isnt? none and node.binding_id in? state.addressed and node.binding_id not in? state.boxed and not borrowed {
             let stored=if node.annotation is? none hir.node_at(state.input.nodes node.expr).value_type else node.annotation
-            if views.optional_payload(stored @state.type_nodes) isnt? none {value=cell_private(value stored node @state)}
+            if cell_members(stored @state) isnt? none {value=cell_private(value stored node @state)}
         }
         # An addressed record local is written in place through its block, so
         # that block must not be shared with any other handle.
@@ -1194,6 +1194,12 @@ array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory 
     return ArrayMemory[descriptor data prefix]
 }
 array_store = (value:addr pointer:addr element:addr node:hir.AST @state:State):>addr => {
+    # A cell stored behind a mutable slot must own its tag words. Places into
+    # arrays/dictionaries pass this cell directly, so retaining the shared
+    # static `none` cell here would let one element change every absent value.
+    # Privatize at the owning store, whose allocation is already accounted
+    # for, rather than introducing a hidden allocation at a read-only loan.
+    if cell_members(element @state) isnt? none {value=cell_private(value element node @state)}
     let type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(element state.type_nodes) state.type_nodes))
     if type is? types.ObjectType|types.ArrayType|types.MetaType or cell_members(element @state) isnt? none or enum_members(element state) isnt? none or string_type(element state) or unit_type(element state) return store_word(value pointer 0 node @state)
     if type is? types.FunctionType {
@@ -2011,7 +2017,7 @@ cell_copy_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     fresh_cell.push(cell)
     let allocated=put(hir.Block[node.loc word_type fresh_cell false] @state)
     let shared_none=state.none_cell
-    if shared_none isnt? none and views.optional_payload(type @state.type_nodes) isnt? none {
+    if shared_none isnt? none {
         let absent=intrinsic_call('__eq__' [read_word(source 0 node @state) word(0 node @state)] types.primitive('bool' @state.type_nodes) node @state)
         let shared=put(hir.ExpressedIdentifier[node.loc word_type shared_none] @state)
         prefix.push(put(hir.Flow[node.loc word_type [put(hir.IfArm[node.loc word_type absent shared] @state)] allocated] @state))
@@ -2065,7 +2071,7 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owne
         return put(hir.Block[node.loc output prefix false] @state)
     }
     let shared_none=state.none_cell
-    if shared_none isnt? none and views.optional_payload(expected @state.type_nodes) isnt? none and types.is_primitive(types.node_at(state.type_nodes types.unfold(selected state.type_nodes)) 'none') {
+    if shared_none isnt? none and types.is_primitive(types.node_at(state.type_nodes types.unfold(selected state.type_nodes)) 'none') {
         return put(hir.ExpressedIdentifier[node.loc types.primitive('int64' @state.type_nodes) shared_none] @state)
     }
     let prefix:array<addr>=[]
@@ -4700,7 +4706,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let entry_literal:addr?=none
     let void_type=types.primitive('void' @state.type_nodes)
     if state.allocator isnt? none {
-        # Packing or copying `none` into an optional yields this static cell
+        # Packing or copying `none` into a union yields this static cell
         # instead of a fresh allocation; releases skip it by identity.
         let word_type=types.primitive('int64' @state.type_nodes)
         let name=fresh('none_cell' @state)

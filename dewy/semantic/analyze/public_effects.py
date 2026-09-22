@@ -333,6 +333,10 @@ def inventory(root, registry):
                 # boundary, if any, already owns the copy/allocation demand.
                 visit(node.expr)
                 return
+            if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and ty.structural_base(node.expr.type) == 'none':
+                # The absent union arm has no payload; its cell needs no heap.
+                visit(node.expr)
+                return
             if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and not scalar(node.type):
                 unknown()
                 return

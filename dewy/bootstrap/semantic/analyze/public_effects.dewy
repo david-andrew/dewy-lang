@@ -287,6 +287,11 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         # still account for their copy/allocation demands.
         visit(node.expr input @scan) return
     }
+    if node is? hir.ValueCast|hir.RepresentationCast and types.is_primitive(types.node_at(input.types views.structural_base(hir.node_at(input.nodes node.expr).value_type input.types)) 'none') {
+        # The absent union arm has no payload. Lowering uses its shared static
+        # tag cell; evaluating the source still contributes its own effects.
+        visit(node.expr input @scan) return
+    }
     if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {unknown(@scan) return}
     if node is? hir.IteratorExpression {
         if word_iterator(id node input) {
