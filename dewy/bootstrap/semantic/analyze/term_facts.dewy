@@ -147,7 +147,7 @@ directions = (op:propositions.Operator):>array<Bound> => {
     if op =? '=?' return [Bound['upper' 0] Bound['lower' 0]]
     return []
 }
-CallFact:type = const [upper:facts.Term offset:addr? gap:bigint direction:Direction]
+CallFact:type = const [upper:facts.Term offset:addr? gap:bigint direction:Direction capped:bool=false]
 call_facts = (id:addr subject:string env:values.Environment @registry:bindings.Registry):>array<CallFact> => {
     let output:array<CallFact> = []
     loop refined in expressions.call_result_refinements(id env.nodes env.types) {
@@ -203,20 +203,42 @@ call_facts = (id:addr subject:string env:values.Environment @registry:bindings.R
     return output
 }
 
+# Primitive arithmetic and written contracts feed the same named-term graph.
+# The operation tag identifies lowered library arithmetic; an ordinary source
+# function merely named __mod__ must never acquire an intrinsic theorem.
+value_facts=(id:addr state:facts.State context:relations.Context env:values.Environment @registry:bindings.Registry):>array<CallFact>=>{
+    let output=call_facts(id 'self' env @registry)
+    let node=hir.node_at(env.nodes expressions.strip_casts(id env.nodes))
+    if node isnt? hir.FunctionCall or node.pos_args.length not=? 2 return output
+    let function=hir.node_at(env.nodes node.func)
+    let primitive=false
+    if function is? hir.ExpressedIdentifier and function.name =? '__mod__' {
+        let binding=if function.binding_id is? none none else bindings.find_binding(registry function.binding_id)
+        primitive=function.binding_id is? none or (binding isnt? none and binding.builtin)
+    }
+    if not primitive and node.integer_operation not=? '__mod__' return output
+    let term=binding_term(node.pos_args[1] env @registry)
+    if term is? none return output
+    let divisor=relations.interval_of(term state context)
+    if divisor.lower isnt? none and divisor.lower >? 0 {output.push(CallFact[term none 1 'upper' divisor.capped])}
+    else if divisor.upper isnt? none and divisor.upper <? 0 {output.push(CallFact[term none 1 'lower' divisor.capped])}
+    return output
+}
+
 # Retain a contract's symbolic relation and its current numeric consequence.
 # The evaluator separately handles unnamed literal arguments.
 seed = (@state:facts.State subject:facts.Term promises:array<CallFact> context:relations.Context):>void => {
     loop promise in promises {
         let known=relations.interval_of(promise.upper state context)
         let constraint=ranges.UNKNOWN
-        if promise.direction =? 'lower' {constraint=ranges.Interval[ranges.shift_endpoint(known.lower promise.gap) none]}
+        if promise.direction =? 'lower' {constraint=ranges.Interval[ranges.shift_endpoint(known.lower promise.gap) none promise.capped or known.capped]}
         else {
             let offset:bigint?=0
             if promise.offset isnt? none {offset=relations.interval_of(facts.Term[promise.offset] state context).lower}
-            constraint=ranges.Interval[none (if offset is? none none else ranges.shift_endpoint(known.upper (-promise.gap-offset)))]
+            constraint=ranges.Interval[none (if offset is? none none else ranges.shift_endpoint(known.upper (-promise.gap-offset))) promise.capped or known.capped]
         }
         facts.put(@state facts.value(subject) ranges.intersect(relations.interval_of(subject state context) constraint))
-        let bound = ranges.Interval[promise.gap none]
+        let bound = ranges.Interval[promise.gap none promise.capped]
         if promise.direction =? 'lower' { facts.put(@state facts.order(promise.upper subject) bound) }
         else if promise.offset is? none { facts.put(@state facts.order(subject promise.upper) bound) }
         else {

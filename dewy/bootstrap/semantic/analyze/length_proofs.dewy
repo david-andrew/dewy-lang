@@ -95,7 +95,7 @@ upper = (id:addr sequence:addr gap:bigint state:facts.State context:Context obse
             }
         }
     }
-    loop promise in terms.call_facts(current 'self' context.env @registry) {
+    loop promise in terms.value_facts(current state context.relations context.env @registry) {
         if promise.direction not=? 'upper' continue
         if promise.offset isnt? none and not nonnegative(promise.offset state context) continue
         # A slice result is at most upper-offset-gap. Dropping offset is
@@ -135,7 +135,7 @@ lower = (id:addr sequence:addr gap:bigint state:facts.State context:Context obse
     }
     let named = subject(current context @registry)
     if named isnt? none and relations.ordered(length named gap state context.relations) return true
-    loop promise in terms.call_facts(current 'self' context.env @registry) {
+    loop promise in terms.value_facts(current state context.relations context.env @registry) {
         if promise.direction =? 'lower' and promise.offset is? none and facts.same_term(promise.upper length) and promise.gap >=? gap return true
     }
     return false

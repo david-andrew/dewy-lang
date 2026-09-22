@@ -3414,3 +3414,19 @@ refinements. A fresh driver passes all 12 runtime and five contract-rejection
 cases on both compilers and x86-64/C. The preliminary source inventory is
 4,499 sites (92.376/KLOC); the merged checkpoint still needs a fresh full
 compiler inventory, especially after the separate remainder-bound fix.
+
+## Remainder relations (2026-09-22)
+
+A checked primitive remainder now contributes a relation to its live named
+nonzero divisor: below a positive divisor, or above a negative divisor. Both
+compilers feed this into the existing term graph used by source contracts,
+including direct array-index expressions. The dividend's sign remains a
+separate obligation. Divisor/array mutation invalidates the relation, user
+functions named `__mod__` do not receive it, and address-cap metadata travels
+with the derived bounds.
+
+Validation: nine hosted runtime/rejection tests pass. A fresh native driver
+agrees on four runtime cases and five rejection cases, with both x86-64 and C
+execution. The direct native term-fact kernel comparison also passes. This
+extends the finite proof vocabulary; it does not complete the general liquid
+invariant engine or unsafe-assumption dependency reporting.

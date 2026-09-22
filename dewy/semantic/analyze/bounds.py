@@ -3552,8 +3552,8 @@ class _BoundsValidator:
                             return True
                     elif self._ordered(upper, _length_key(sequence_id), gap - interval.lower, state):
                         return True
-        for fact in self._call_term_facts(node):
-            fact_upper, fact_offset, fact_gap, direction = fact
+        for fact in self._call_term_facts(node, state):
+            fact_upper, fact_offset, fact_gap, direction, _capped = fact
             if direction != 'upper' or (fact_offset is not None and not self._nonnegative(fact_offset, state)):
                 continue
             # the call's result is at most `upper - offset - gap'`; enough when `upper <= length - (gap - gap')`
@@ -3732,8 +3732,8 @@ class _BoundsValidator:
             subject = self._element_route_of(node)
         if subject is not None and self._ordered(_length_key(sequence_id), subject, gap, state):
             return True
-        for fact in self._call_term_facts(node):
-            fact_upper, fact_offset, fact_gap, direction = fact
+        for fact in self._call_term_facts(node, state):
+            fact_upper, fact_offset, fact_gap, direction, _capped = fact
             if direction == 'lower' and fact_offset is None and fact_upper == _length_key(sequence_id) and fact_gap >= gap:
                 return True
         return False
@@ -3754,7 +3754,7 @@ class _BoundsValidator:
         interval = self._binding_interval(state, binding_id)
         return interval.lower is not None and interval.lower >= 0
 
-    def _call_term_facts(self, node: hir.AST) -> list[tuple[int, int | None, int, str]]:
+    def _call_term_facts(self, node: hir.AST, state: State) -> list[tuple[int, int | None, int, str, bool]]:
         """What a call's refined result promises about a term it was passed:
         `(upper term, offset binding or None, gap, direction)` per length or
         value term. `'upper'`: the result is at most `upper - offset - gap`,
@@ -3762,15 +3762,35 @@ class _BoundsValidator:
         value term), and `offset` the start of a slice argument (`src[i..]`,
         `src[i..j)` — then `upper` is `j`). `'lower'`: the result is at least
         `upper + gap` (`n >=? src.length`; no slices)."""
-        return self._call_facts(node, 'self')
+        facts = self._call_facts(node, 'self')
+        value = _strip_casts(node)
+        if not isinstance(value, hir.FunctionCall) or len(value.pos_args) != 2:
+            return facts
+        primitive = (isinstance(value.func, hir.ExpressedIdentifier)
+                     and value.func.binding_id is None and value.func.name == '__mod__')
+        if not primitive and value.integer_operation != '__mod__':
+            return facts
+        term = self._binding_id(value.pos_args[1])
+        if term is None:
+            return facts
+        divisor = self._eval(value.pos_args[1], state, validate=False)
+        if divisor is not None:
+            # Both floor modulo and truncating remainder lie strictly inside
+            # the divisor on its nonzero side. Sign of the result is a
+            # separate interval fact; a negative dividend is not an index.
+            if divisor.lower is not None and divisor.lower > 0:
+                facts.append((term, None, 1, 'upper', divisor.capped))
+            elif divisor.upper is not None and divisor.upper < 0:
+                facts.append((term, None, 1, 'lower', divisor.capped))
+        return facts
 
-    def _call_length_facts(self, node: hir.AST) -> list[tuple[int, int | None, int, str]]:
+    def _call_length_facts(self, node: hir.AST) -> list[tuple[int, int | None, int, str, bool]]:
         """The same, for what a call promises about its result's *length*
         (`:>string<v => v.length =? text.length>`)."""
         return self._call_facts(node, 'length')
 
-    def _call_facts(self, node: hir.AST, subject: str) -> list[tuple[int, int | None, int, str]]:
-        facts: list[tuple[int, int | None, int, str]] = []
+    def _call_facts(self, node: hir.AST, subject: str) -> list[tuple[int, int | None, int, str, bool]]:
+        facts: list[tuple[int, int | None, int, str, bool]] = []
         for refined in _call_result_refinements(node):
             for proposition in refined.propositions:
                 if proposition.term is None or proposition.subject != subject or proposition.field is not None:
@@ -3783,22 +3803,22 @@ class _BoundsValidator:
                 if proposition.term_of == 'value':
                     term_id = self._binding_id(argument)
                     if term_id is not None and term_id >= 0:
-                        facts.extend((term_id, None, gap, direction) for direction, gap in directions)
+                        facts.extend((term_id, None, gap, direction, False) for direction, gap in directions)
                         continue
                     # a length passed as the value (`min(k src.length)`): the term is the length key
                     sequence = _sequence_of(argument)
                     sequence_id = self._array_id(sequence) if sequence is not None else None
                     if sequence_id is not None:
-                        facts.extend((_length_key(sequence_id), None, gap, direction) for direction, gap in directions)
+                        facts.extend((_length_key(sequence_id), None, gap, direction, False) for direction, gap in directions)
                     continue
                 sequence_id = self._array_id(argument)
                 if sequence_id is not None:
-                    facts.extend((_length_key(sequence_id), None, gap, direction) for direction, gap in directions)
+                    facts.extend((_length_key(sequence_id), None, gap, direction, False) for direction, gap in directions)
                     continue
                 window = self._slice_bounds_of(argument)
                 if window is not None:
                     upper, offset_id, adjust = window
-                    facts.extend((upper, offset_id, gap - adjust, direction) for direction, gap in directions if direction == 'upper')
+                    facts.extend((upper, offset_id, gap - adjust, direction, False) for direction, gap in directions if direction == 'upper')
                     continue
                 if isinstance(argument, hir.StringSlice) and argument.range.left is None and argument.range.right is not None:
                     # a head slice `src[..n)`: its length is `n` (`n + 1` for `..n]`)
@@ -3806,7 +3826,7 @@ class _BoundsValidator:
                     bounds = argument.range.bounds or '[]'
                     if end_id is not None and end_id >= 0 and bounds[1] in (')', ']'):
                         extra = 1 if bounds[1] == ']' else 0
-                        facts.extend((end_id, None, gap - extra, direction) for direction, gap in directions if direction == 'upper')
+                        facts.extend((end_id, None, gap - extra, direction, False) for direction, gap in directions if direction == 'upper')
         return facts
 
     def _slice_bounds_of(self, node: hir.AST) -> tuple[int, int, int] | None:
@@ -3861,26 +3881,26 @@ class _BoundsValidator:
                     if bound is None:
                         continue
                     state[subject] = self._binding_interval(state, subject).intersect(bound)
-        for key, facts in ((subject, self._call_term_facts(value)), (_length_key(subject), self._call_length_facts(value))):
-            for upper, offset_id, gap, direction in facts:
+        for key, facts in ((subject, self._call_term_facts(value, state)), (_length_key(subject), self._call_length_facts(value))):
+            for upper, offset_id, gap, direction, capped in facts:
                 # Keep both the symbolic relation and its current numeric
                 # consequence. A length equal to a known length is exact,
                 # even when the function's written contract is relational.
                 known = _known_interval(state, upper, self.max_length)
                 if direction == 'lower':
-                    bound = Interval(_add(known.lower, gap), None)
+                    bound = Interval(_add(known.lower, gap), None, capped=capped or known.capped)
                 else:
                     offset = 0 if offset_id is None else _known_interval(state, offset_id, self.max_length).lower
-                    bound = Interval(None, None if offset is None else _subtract(known.upper, gap + offset))
+                    bound = Interval(None, None if offset is None else _subtract(known.upper, gap + offset), capped=capped or known.capped)
                 state[key] = _known_interval(state, key, self.max_length).intersect(bound)
                 if direction == 'lower':
-                    state[_order_key(upper, key)] = Interval(gap, None)   # `n >=? src.length`: `n - src.length >= gap`
+                    state[_order_key(upper, key)] = Interval(gap, None, capped=capped)   # `n >=? src.length`: `n - src.length >= gap`
                 elif offset_id is None:
-                    state[_order_key(key, upper)] = Interval(gap, None)
+                    state[_order_key(key, upper)] = Interval(gap, None, capped=capped)
                 elif self._nonnegative(offset_id, state):
-                    state[_remainder_key(key, upper, offset_id)] = Interval(gap, None)
+                    state[_remainder_key(key, upper, offset_id)] = Interval(gap, None, capped=capped)
                     if gap >= 0:
-                        state[_order_key(key, upper)] = Interval(gap, None)   # `n <= j - i <= j` since `i >= 0`
+                        state[_order_key(key, upper)] = Interval(gap, None, capped=capped)   # `n <= j - i <= j` since `i >= 0`
 
     def _seed_value_facts(self, subject: int, value: hir.AST, state: State, loc: Span) -> None:
         """What a stored value says about its new binding: a refined call's

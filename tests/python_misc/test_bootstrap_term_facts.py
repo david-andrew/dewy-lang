@@ -90,7 +90,7 @@ def test_native_term_facts_match_hosted(tmp_path):
     checks, expected = [], []
     for index, (subject, node) in enumerate(calls):
         promises = validator._call_facts(node, subject)
-        expected.extend(f'call{index}|{term(upper)}|{offset}|{gap}|{direction}' for upper, offset, gap, direction in promises)
+        expected.extend(f'call{index}|{term(upper)}|{offset}|{gap}|{direction}' for upper, offset, gap, direction, _capped in promises)
     for index, node in enumerate(expressions):
         offset = validator._offset_term(node)
         length_offset = validator._length_offset_index(node, text.binding_id)
