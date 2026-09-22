@@ -3742,15 +3742,30 @@ borrow_storage_matches = (stored:addr read:addr nodes:types.Table):>bool => {
     let b=types.node_at(nodes target)
     return a is? types.ArrayType and b is? types.ArrayType and types.same_type(a.element b.element nodes)
 }
+# Selecting existing alternatives reads the stored cell or one of its
+# payloads. Parent-to-child retagging is not a view: that builds a new cell.
+borrow_projection_matches = (stored:addr read:addr nodes:types.Table):>bool => {
+    if borrow_storage_matches(stored read nodes) return true
+    let source=types.node_at(nodes types.unfold(types.strip_refinement(stored nodes) nodes))
+    if source isnt? types.TypeOr return false
+    let target=types.node_at(nodes types.unfold(types.strip_refinement(read nodes) nodes))
+    let reads:array<addr>=if target is? types.TypeOr target.items else [read]
+    loop selected in reads {
+        let found=false
+        loop member in source.items {
+            if borrow_storage_matches(member selected nodes) {found=true break}
+        }
+        if not found return false
+    }
+    return true
+}
 borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     if state.allocator is? none and not node.view return false
     let expr=hir.node_at(state.input.nodes node.expr)
     if expr isnt? hir.Index|hir.MemberAccess|hir.DictLookup and not (node.view and expr is? hir.ExpressedIdentifier) return false
     # Proven array entries hand out the stored descriptor, just as records
     # expose their stored block. Optional/fallback lookups may rebuild storage.
-    if expr is? hir.DictLookup and not object_valued(expr.value_type state) {
-        if not expr.proven or types.node_at(state.type_nodes types.strip_refinement(expr.value_type state.type_nodes)) isnt? types.ArrayType return false
-    }
+    if expr is? hir.DictLookup and not expr.proven and not object_valued(expr.value_type state) return false
     # An unproven lookup may select a temporary fallback. Its lifetime is
     # independent of the dictionary's, so a stable dictionary is insufficient.
     if expr is? hir.DictLookup and expr.default isnt? none and not expr.proven return false
@@ -3765,7 +3780,7 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     # Do not confuse a refined word/aggregate with a representation conversion.
     let read_type=types.unfold(types.strip_refinement(expr.value_type state.type_nodes) state.type_nodes)
     if node.annotation isnt? none and not borrow_storage_matches(node.annotation read_type state.type_nodes) return false
-    if not borrow_storage_matches(stored_type(node.expr state) read_type state.type_nodes) return false
+    if not borrow_projection_matches(stored_type(node.expr state) read_type state.type_nodes) return false
     if node.expr in? state.array_snapshots return false
     let route=borrowing.route(node.expr state.input.nodes)
     if route is? none return false

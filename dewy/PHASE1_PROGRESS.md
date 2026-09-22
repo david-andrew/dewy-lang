@@ -3122,3 +3122,24 @@ All 211 default corpus cases passed with native pair
 direct x86-64 output and shared checked-prelude caches. Reports:
 `phase1-union-borrows-corpus.json` and `.log`. This checkpoint predates indexed
 type-fact changes, whose focused paired validation is recorded separately.
+
+## Inferred views of local tagged projections (2026-09-22)
+
+Hosted lowering now uses the ordinary stable-route proof for implicit local
+union views, retaining dependent-view liveness when considering moves of the
+container. Both lowerers allow proven dictionary entries to lend tagged
+storage. Native narrowing can lend an existing union alternative's payload
+without requiring the read and storage types to be identical. Conversions that
+retag a record family still need independent result storage.
+
+A fresh native driver passed 12 runtime kernels and two rejection cases against
+hosted compilation on x86-64 and C. Allocation counters cover 100 repeated
+reads of optional/general union elements, fields, dictionary entries, narrowed
+records, string payloads and array payloads. Mutation, source consumption and
+returned values retain independent ownership. Hosted selections passed 38
+adjacent tests and all 14 final focused tests. Artifacts use
+`phase1-inferred-union-views-*`.
+
+The previous seed's inventory reports 4,501 sites on this source; that seed
+does not implement the new borrow proof. A fresh integration inventory must
+pass the existing 4,500/100 gates before this checkpoint is certified.

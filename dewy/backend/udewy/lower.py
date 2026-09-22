@@ -3778,7 +3778,7 @@ class _Lowerer(
             if isinstance(node, hir.Declare):
                 if not nested and node.binding_id is not None:
                     declared = ty.unfold(ty.strip_refinement(node.annotation or node.expr.type))
-                    if (node.view or isinstance(declared, (ty.ArrayType, ty.ObjectType))) and self._borrowed_route_local(node, declared):
+                    if (node.view or isinstance(declared, (ty.ArrayType, ty.ObjectType, ty.TypeOr))) and self._borrowed_route_local(node, declared):
                         source = borrowing.route(node.expr)
                         if source is not None:
                             borrow_dependents.setdefault(source.binding, set()).add(node.binding_id)
@@ -4337,15 +4337,14 @@ class _Lowerer(
             return statements
         if isinstance(node, hir.Declare):
             declared_type = ty.structural_base(node.annotation or node.expr.type)
-            if node.view:
-                if not self._borrowed_route_local(node, declared_type):
-                    self._required_view_error(node)
-                if not isinstance(declared_type, (ty.ArrayType, ty.ObjectType)):
-                    # Stable scalar reads and aggregate handles keep their
-                    # runtime representation. Neither owns new storage;
-                    # later ordinary value boundaries retain their copies.
-                    prelude, value = self._extract_expression(node.expr)
-                    return [*prelude, replace(node, decltype='let', annotation=self._lower_runtime_value_type(declared_type), expr=value)]
+            if node.view and not self._borrowed_route_local(node, declared_type):
+                self._required_view_error(node)
+            if (node.view or isinstance(declared_type, ty.TypeOr)) and not isinstance(declared_type, (ty.ArrayType, ty.ObjectType)) and self._borrowed_route_local(node, declared_type):
+                # A stable tagged projection lends its cell (and payload)
+                # under the same lifetime proof as an explicit const view.
+                # Escaping value boundaries still acquire their own owner.
+                prelude, value = self._extract_expression(node.expr)
+                return [*prelude, replace(node, decltype='let', annotation=self._lower_runtime_value_type(declared_type), expr=value)]
             if isinstance(declared_type, ty.TypeOr) and ty.string_valued(declared_type):
                 node = replace(node, annotation='int64')   # one string handle
             members = ty.runtime_union_members(declared_type)
