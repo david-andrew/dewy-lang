@@ -29,6 +29,19 @@ scalar_record_size=(type:addr table:types.Table):>addr?=>{
     }
     return size
 }
+# Proof witnesses become unscoped one-value blocks after validation. Neither
+# form creates storage, but the proof itself must still pass ordinary checking.
+initializer=(id:addr nodes:array<hir.AST> table:types.Table):>addr=>{
+    loop true {
+        let node=hir.node_at(nodes id)
+        let inner:addr?=none
+        if node is? hir.Obligation {inner=node.value}
+        else if node is? hir.Block and not node.scoped and node.items.length=?1 {inner=node.items[0]}
+        if inner is? none return id
+        if not types.same_type(views.structural_base(node.value_type table) views.structural_base(hir.node_at(nodes inner).value_type table) table) return id
+        id=inner
+    }
+}
 literal_storage=(value:addr nodes:array<hir.AST> table:types.Table):>set<addr>=>{
     let result:set<addr>=set[]
     let pending:array<addr>=[value]
@@ -36,10 +49,12 @@ literal_storage=(value:addr nodes:array<hir.AST> table:types.Table):>set<addr>=>
         let id=pending.pop
         if id in? result continue
         result.add(id)
+        let unwrapped=initializer(id nodes table)
+        if unwrapped not=?id {pending.push(unwrapped) continue}
         let node=hir.node_at(nodes id)
         if node is? hir.CopyValue {
             let value=hir.node_at(nodes node.value)
-            if value is? hir.ObjectLiteral|hir.CopyValue and types.same_type(views.structural_base(value.value_type table) views.structural_base(node.value_type table) table) {pending.push(node.value)}
+            if value is? hir.ObjectLiteral|hir.ArrayLiteral|hir.CopyValue and types.same_type(views.structural_base(value.value_type table) views.structural_base(node.value_type table) table) {pending.push(node.value)}
         }
         if node is? hir.ObjectLiteral {
             let shape=types.node_at(table views.structural_base(node.value_type table))
@@ -82,15 +97,18 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
         let node=hir.node_at(nodes id)
         if node is? hir.ExpressedIdentifier {occurrences[id]=occurrences.get(id 0)+1}
         if node is? hir.Declare and node.binding_id isnt? none and not node.view {
-            let value=hir.node_at(nodes node.expr)
-            if value is? hir.ArrayLiteral {
-                let shape=types.node_at(table types.strip_refinement(value.value_type table))
-                if shape is? types.ArrayType and shape.length =? value.items.length and value.items.length <=? (FRAME_STORAGE_BYTES-48)//8 {
+            let value=hir.node_at(nodes initializer(node.expr nodes table))
+            let shape=types.node_at(table views.structural_base(value.value_type table))
+            if value is? hir.ArrayLiteral|hir.CopyValue and shape is? types.ArrayType {
+                if shape.length isnt? none and shape.length <=? (FRAME_STORAGE_BYTES-48)//8 {
                     let element=types.node_at(table types.strip_refinement(shape.element table))
                     let scalar=types.is_primitive(element 'bool') or views.fixed_integer_layout(shape.element table) isnt? none
                     let spread=false
-                    loop item in value.items {if hir.node_at(nodes item) is? hir.Spread {spread=true}}
-                    if scalar and not spread {candidates[node.binding_id]=Candidate[id 48+8*value.items.length]}
+                    if value is? hir.ArrayLiteral {
+                        if shape.length not=?value.items.length {spread=true}
+                        loop item in value.items {if hir.node_at(nodes item) is? hir.Spread {spread=true}}
+                    }
+                    if scalar and not spread {candidates[node.binding_id]=Candidate[id 48+8*shape.length]}
                 }
             } else if value is? hir.ObjectLiteral|hir.CopyValue {
                 let size=scalar_record_size(value.value_type table)
@@ -137,7 +155,7 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
         if binding in? whole_places {
             let declaration=hir.node_at(nodes candidate.declaration)
             $runtime_assert declaration is? hir.Declare
-            if hir.node_at(nodes declaration.expr) is? hir.ArrayLiteral {size+=8}
+            if types.node_at(table views.structural_base(hir.node_at(nodes declaration.expr).value_type table)) is? types.ArrayType {size+=8}
         }
         let next=used+size
         if next <=? FRAME_STORAGE_BYTES {result[binding]=candidate.declaration used=next}
@@ -150,7 +168,7 @@ local_arrays=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
     loop [binding id] in local_values(literal nodes table nonescaping_places fixed_places borrowed_values) {
         let declaration=hir.node_at(nodes id)
         $runtime_assert declaration is? hir.Declare
-        if hir.node_at(nodes declaration.expr) is? hir.ArrayLiteral {result[binding]=id}
+        if types.node_at(table views.structural_base(hir.node_at(nodes declaration.expr).value_type table)) is? types.ArrayType {result[binding]=id}
     }
     return result
 }

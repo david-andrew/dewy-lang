@@ -894,6 +894,15 @@ class _ArrayLowering(_ArraySharing):
         self,
         node: hir.Declare,
     ) -> list[hir.AST]:
+        node = replace(node, expr=placement.initializer(node.expr))
+        explicit = isinstance(node.expr, hir.CopyValue)
+        if explicit:
+            # The destination already owns fixed frame storage. Copy directly
+            # from the original source, without an intermediate arena copy.
+            source = node.expr
+            while isinstance(source, hir.CopyValue):
+                source = source.value
+            node = replace(node, expr=source)
         if not isinstance(node.expr, hir.ArrayLiteral):
             array_type = node.annotation or node.expr.type
             if isinstance(array_type, ty.ArrayType) and array_type.length is None and self._array_use_representation(node.expr) is not None:
@@ -904,7 +913,7 @@ class _ArrayLowering(_ArraySharing):
                 raise TypeError(
                     'INTERNAL ERROR: stack-data array copy requires an exact length'
                 )
-            self._note_copy('array', array_type, f'bound to `{node.name}`', self._copy_reason(node.expr), node.loc)
+            self._note_copy('array', array_type, f'bound to `{node.name}`', 'requested with `.copy()`' if explicit else self._copy_reason(node.expr), node.loc, explicit=explicit)
             source_is_raw = self._array_use_representation(node.expr) is not None
             prelude, source = self._extract_expression(node.expr)
             element_bytes, _signed = self._array_element_layout(

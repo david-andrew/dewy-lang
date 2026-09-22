@@ -2865,3 +2865,23 @@ Validation: seven focused hosted tests pass. A fresh native driver agrees on
 with x86-64/C execution. Kernels check value independence, by-value parameters,
 fresh-copy chains, inline-field copies and zero arena allocation over 100,000
 iterations. Artifacts use `../dewy-build-artifacts/phase1-frame-copy-*`.
+
+
+## Explicit fixed-array copies in frame storage (2026-09-22)
+
+Fixed scalar arrays now use the shared 4 KiB frame budget for explicit copies
+as well as literals. Copies of existing arrays write independent data; fresh
+literal/copy chains initialize the destination directly. Native descriptors
+mark frame ownership so writes need no COW detachment and cleanup cannot free
+the frame. Dynamic, resizing and escaping arrays keep allocation obligations.
+
+The paired tests exposed proof witnesses hiding an explicitly typed initializer
+from native placement. Both analyses now look through representation-preserving
+obligations and their discharged one-value blocks. Ordinary proof validation
+still rejects a false length; placement does not assert it.
+
+Validation: 25 adjacent hosted tests passed before adding two refinement cases.
+The final fresh native driver agrees with hosted checking on 17 runtime kernels
+and nine rejection cases on both x86-64 and C. This includes the added refinement
+cases, independent narrow-word/boolean copies, fresh chains and zero arena
+allocation over 100,000 iterations. Artifacts: `phase1-frame-array-copy-*`.

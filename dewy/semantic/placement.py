@@ -37,13 +37,35 @@ def scalar_record_size(type_):
     return size
 
 
+def initializer(value):
+    """See storage through proof witnesses, before and after discharge.
+
+    Obligations still require validation. Their one-value runtime blocks do
+    not allocate; no statements or representation-changing casts are skipped.
+    """
+    while True:
+        if isinstance(value, hir.Obligation):
+            inner = value.value
+        elif isinstance(value, hir.Block) and not value.scoped and len(value.items) == 1:
+            inner = value.items[0]
+        else:
+            return value
+        if ty.structural_base(inner.type) != ty.structural_base(value.type):
+            return value
+        value = inner
+
+
 def literal_storage(value):
     """Literal nodes initialized within one proven fixed record's storage."""
     result, pending = set(), [value]
     while pending:
         node = pending.pop()
         result.add(id(node))
-        if isinstance(node, hir.CopyValue) and isinstance(node.value, (hir.ObjectLiteral, hir.CopyValue)):
+        unwrapped = initializer(node)
+        if unwrapped is not node:
+            pending.append(unwrapped)
+            continue
+        if isinstance(node, hir.CopyValue) and isinstance(node.value, (hir.ObjectLiteral, hir.ArrayLiteral, hir.CopyValue)):
             if ty.structural_base(node.value.type) == ty.structural_base(node.type):
                 pending.append(node.value)
         if isinstance(node, hir.ObjectLiteral):
@@ -72,13 +94,16 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
     for node in nodes:
         if not isinstance(node, hir.Declare) or node.binding_id is None or node.view:
             continue
-        value = node.expr
+        value = initializer(node.expr)
         size = None
-        if isinstance(value, hir.ArrayLiteral) and isinstance(value.type, ty.ArrayType):
-            element = ty.strip_refinement(value.type.element)
+        shape = ty.structural_base(value.type)
+        if isinstance(value, (hir.ArrayLiteral, hir.CopyValue)) and isinstance(shape, ty.ArrayType):
+            element = ty.strip_refinement(shape.element)
             scalar = element == 'bool' or ty.fixed_integer_layout(element) is not None
-            if scalar and value.type.length == len(value.items) and not any(isinstance(item, hir.Spread) for item in value.items):
-                size = 48 + 8 * len(value.items)
+            literal = not isinstance(value, hir.ArrayLiteral) or (shape.length == len(value.items)
+                and not any(isinstance(item, hir.Spread) for item in value.items))
+            if scalar and shape.length is not None and literal:
+                size = 48 + 8 * shape.length
         elif isinstance(value, (hir.ObjectLiteral, hir.CopyValue)):
             size = scalar_record_size(value.type)
         if size is not None and size <= FRAME_STORAGE_BYTES:
@@ -118,7 +143,7 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
         if binding in blocked:
             continue
         # Whole-array places also need one frame slot for the descriptor handle.
-        if binding in whole_places and isinstance(declaration.expr, hir.ArrayLiteral):
+        if binding in whole_places and isinstance(ty.structural_base(declaration.expr.type), ty.ArrayType):
             size += 8
         if used + size <= FRAME_STORAGE_BYTES:
             result[binding] = declaration
@@ -128,4 +153,4 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
 
 def local_arrays(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset(), borrowed_values: dict[int, set[int]] | None = None) -> dict[int, hir.Declare]:
     return {binding: declaration for binding, declaration in local_values(literal, nonescaping_places, fixed_places, borrowed_values).items()
-            if isinstance(declaration.expr, hir.ArrayLiteral)}
+            if isinstance(ty.structural_base(declaration.expr.type), ty.ArrayType)}
