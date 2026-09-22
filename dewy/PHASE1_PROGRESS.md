@@ -2325,3 +2325,36 @@ array-element and record-field addresses through helpers. Initial compiler
 inventory was 4,995 sites over 47,295 lines (105.614/KLOC), within the unchanged
 gates. That inventory precedes the final set-update cleanup; a fresh native
 fixed point and final inventory are the next integration check.
+
+Integration follow-up: `23a0d7a6` completed the three-generation C-backed
+native bootstrap with byte-identical final Dewy and µDewy generations. The
+resulting pair passes all **211/211** cases in the hosted/native parity
+corpus on the direct x86-64 backend. Its final inventory is **4,986 sites over
+47,300 lines (105.412/KLOC)**, within the unchanged 5,000/110 gates. Artifacts:
+`../dewy-build-artifacts/phase1-frame-placement-23a0d7a6`,
+`phase1-frame-places-parity`, and `phase1-frame-places-final-copies.json`.
+Generation 2/3 took 190/198 seconds including C compilation and concurrent
+development work; these are not isolated latency measurements.
+
+## Nested getter projections (2026-09-21)
+
+Both lowerers extend the existing direct-getter specialization from one field
+to a checked field path, such as `node_at(nodes id).position.start`. They keep
+the original arguments, default evaluation, guards, prefix effects and cleanup.
+The complete source owner stays alive while the path is read; only the leaf
+needs an independent lifetime. Integers/bools pass directly, while selected
+strings and runtime-length arrays are retained before temporary-owner cleanup.
+Constructors and unsupported control-flow results keep the ordinary route.
+Variant identity includes the full path, so different nested fields with the
+same final name cannot share the wrong implementation.
+
+Validation: six existing hosted projection tests and four new hosted tests
+pass. The nested scalar kernel allocates/copies/retains zero arena bytes; its
+hosted positive control with specialization disabled allocates over 100 KB.
+The second-generation native driver agrees on this kernel, effects/defaults,
+temporary string/array lifetimes, and the failing runtime guard on x86-64/C.
+Its rebuilt native CLI reports **4,987 sites over 47,324 source lines
+(105.380/KLOC)** in the isolated checkout, within the unchanged gates.
+Artifacts use the `../dewy-build-artifacts/phase1-nested-projections-` prefix.
+This later slice has bounded second-generation validation, not another full
+fixed-point/parity-corpus certification. Phase 1 remains in progress.
