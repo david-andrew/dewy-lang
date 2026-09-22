@@ -5,7 +5,7 @@ doc"""
 Relational proofs and transfer, independent of HIR traversal.
 
 An order fact records a guaranteed gap, `larger - smaller >= gap`.
-The bounded chain search follows the hosted proof budget; not finding a
+A finite worklist follows established difference edges; not finding a
 proof is unknown, not evidence that the relation is false. Copying facts
 copies value evidence, not an alias between the two storage locations.
 """
@@ -53,19 +53,62 @@ minimum_length = (sequence:addr state:facts.State context:Context):>bigint => {
     let declared = context.minimum_lengths.get(sequence)
     return if declared is? none 0 else declared
 }
-ordered = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State context:Context depth:addr=2):>bool => {
+# Keep value and length identities separate instead of packing their ids.
+Step:type = const [term:facts.Term gap:bigint]
+Edges:type = dict<addr array<Step>>
+ordered = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State context:Context):>bool => {
+    if ordered_direct(smaller larger gap state context) return true
+    let values:Edges=[]
+    let lengths:Edges=[]
+    let count:addr=0
+    loop entry in state.values {
+        let fact=entry.fact
+        let weight=entry.interval.lower
+        if fact isnt? facts.Order or weight is? none continue
+        let step=Step[fact.larger weight]
+        let key=fact.smaller.binding_id
+        if fact.smaller.projection =? 'value' {
+            let edges=values.get(key [])
+            edges.push(step)
+            values[key]=edges
+        } else {
+            let edges=lengths.get(key [])
+            edges.push(step)
+            lengths[key]=edges
+        }
+        count+=1
+    }
+    let best_values:dict<addr bigint>=[]
+    let best_lengths:dict<addr bigint>=[]
+    if smaller.projection =? 'value' {best_values[smaller.binding_id]=0}
+    else {best_lengths[smaller.binding_id]=0}
+    let frontier:array<Step>=[Step[smaller 0]]
+    # At most one edge per round; every simple path fits this bound. A
+    # contradictory positive cycle must not make proof search diverge.
+    loop round in 0.. and round <? count {
+        let following:array<Step>=[]
+        loop reached in frontier {
+            let outgoing=if reached.term.projection =? 'value' values.get(reached.term.binding_id []) else lengths.get(reached.term.binding_id [])
+            loop edge in outgoing {
+                let target=edge.term
+                let candidate=reached.gap+edge.gap
+                let previous=if target.projection =? 'value' best_values.get(target.binding_id) else best_lengths.get(target.binding_id)
+                if previous isnt? none and previous >=? candidate continue
+                if ordered_direct(target larger gap-candidate state context) return true
+                if target.projection =? 'value' {best_values[target.binding_id]=candidate}
+                else {best_lengths[target.binding_id]=candidate}
+                following.push(Step[target candidate])
+            }
+        }
+        if following.length =? 0 break
+        frontier=following
+    }
+    return false
+}
+ordered_direct = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State context:Context):>bool => {
     if facts.same_term(smaller larger) return gap <=? 0
     let direct = facts.lookup(state facts.order(smaller larger))
     if direct isnt? none and direct.lower isnt? none and direct.lower >=? gap return true
-    if depth >? 0 {
-        loop entry in state.values {
-            let fact = entry.fact
-            let lower = entry.interval.lower
-            if fact is? facts.Order and lower isnt? none and facts.same_term(fact.smaller smaller) and not facts.same_term(fact.larger larger) {
-                if ordered(fact.larger larger gap-lower state context depth-1) return true
-            }
-        }
-    }
     let left = interval_of(smaller state context)
     let right = interval_of(larger state context)
     if larger.projection =? 'length' {

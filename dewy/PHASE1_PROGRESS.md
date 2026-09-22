@@ -3251,3 +3251,20 @@ by one. Fixtures now retain allocated identities. Both repaired native binding
 checks passed, followed by twelve hosted/native x86-64/C executions covering
 small/large snapshot tables and repeated subtree queries. Existing 4 MB/25 MB
 allocation budgets passed unchanged. Artifacts use `phase1-binding-ids-*`.
+
+
+## Finite relational-chain proof search (2026-09-22)
+
+Both proof engines now follow established order edges with a finite worklist
+instead of stopping after two recursive steps. Each edge contributes its
+signed difference bound; only stronger arrivals revisit a term. The edge
+count bounds relaxation even for contradictory positive cycles. Missing links,
+invalidated links and unreachable destinations still supply no evidence.
+
+Forty selected hosted proof/loop checks passed. The expanded direct native
+relation comparison covers long weighted chains, weak alternate paths and
+cycles. A fresh driver passed two runtime kernels and three rejections on
+both x86-64/C routes, including array access through an eight-term ordering
+chain and rejection of a contradictory unsafe assumption. Artifacts use
+`phase1-relational-closure-*`. Arithmetic difference-bound consumers still
+read direct edges and are the next integration step.

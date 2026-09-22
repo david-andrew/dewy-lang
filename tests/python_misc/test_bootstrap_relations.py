@@ -36,8 +36,10 @@ def test_native_relations_match_hosted(tmp_path):
         {bounds._index_fact_key(1, 2): interval(None, None), bounds._nonzero_key(1): interval.exact(1)},
         {bounds._remainder_key(1, length(2), 3): interval(3, None), 3: interval(0, 7)},
     ]
-    terms = [1, 3, length(2), length(4)]
-    gaps = [-1, 0, 1, 3]
+    chain = {order(i, i + 1): interval(1, None) for i in range(10, 22)}
+    states.extend([chain, {**chain, order(10, 18): interval(-10, None), order(18, 11): interval(-7, None)}])
+    terms = [1, 3, length(2), length(4), 10, 22, 99]
+    gaps = [-1, 0, 1, 3, 12, 13]
     lines, expected = [], []
     for i, state in enumerate(states):
         lines.append(f'    let s{i}:facts.State = facts.State[]')
@@ -76,7 +78,7 @@ main = ():>int64 => {{
     ]
 {chr(10).join(lines)}
     let terms:array<facts.Term> = [{' '.join(term(t) for t in terms)}]
-    let gaps:array<bigint> = [(-1) 0 1 3]
+    let gaps:array<bigint> = [(-1) 0 1 3 12 13]
     loop i in 0.. and i <? states.length {{
         let state = states[i]
         loop left in terms {{ loop right in terms {{ loop gap in gaps {{

@@ -3546,22 +3546,49 @@ class _BoundsValidator:
                 return True
         return False
 
-    def _ordered(self, smaller: int, larger: int, gap: int, state: State, depth: int = 2) -> bool:
-        """`larger - smaller >= gap` for two terms the facts name (bindings, routes,
-        length keys): an order fact, the intervals, a chain of order facts through
-        one intermediate (`i <=? j` and `j <=? text.length`), or — when `larger` is
-        a length — an index fact or a remainder fact against that length."""
+    def _ordered(self, smaller: int, larger: int, gap: int, state: State) -> bool:
+        """Prove a difference using the finite graph of established order facts.
+
+        Each edge contributes a lower bound on the difference. Revisit a term
+        only for a stronger bound, and cap relaxation by the number of edges:
+        that covers every simple path and terminates even for contradictory
+        positive cycles. Failure remains unknown; no candidate supplies proof.
+        """
+        if self._ordered_direct(smaller, larger, gap, state):
+            return True
+        edges: dict[int, list[tuple[int, int]]] = {}
+        count = 0
+        for key, interval in state.items():
+            pair = _decode_order_fact(key)
+            if pair is not None and interval.lower is not None:
+                edges.setdefault(pair[0], []).append((pair[1], interval.lower))
+                count += 1
+        best = {smaller: 0}
+        frontier = {smaller: 0}
+        for _ in range(count):
+            following = {}
+            for term, distance in frontier.items():
+                for target, weight in edges.get(term, ()):
+                    candidate = distance + weight
+                    previous = best.get(target)
+                    if previous is not None and previous >= candidate:
+                        continue
+                    if self._ordered_direct(target, larger, gap - candidate, state):
+                        return True
+                    best[target] = candidate
+                    following[target] = candidate
+            if not following:
+                break
+            frontier = following
+        return False
+
+    def _ordered_direct(self, smaller: int, larger: int, gap: int, state: State) -> bool:
+        """Evidence that does not traverse another order edge."""
         if smaller == larger:
             return gap <= 0
         order = state.get(_order_key(smaller, larger))
         if order is not None and order.lower is not None and order.lower >= gap:
             return True
-        if depth > 0:
-            for key, interval in state.items():
-                step = _decode_order_fact(key)
-                if step is not None and step[0] == smaller and step[1] != larger and interval.lower is not None:
-                    if self._ordered(step[1], larger, gap - interval.lower, state, depth - 1):
-                        return True
         smaller_interval = _known_interval(state, smaller, self.max_length) if smaller < 0 else self._binding_interval(state, smaller)
         larger_interval = _known_interval(state, larger, self.max_length) if larger < 0 else self._binding_interval(state, larger)
         if larger < 0:
