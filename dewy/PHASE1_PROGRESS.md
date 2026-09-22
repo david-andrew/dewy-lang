@@ -2758,3 +2758,14 @@ on both x86-64 and C. Cases include by-value snapshots, mutable record key
 arguments, captured receivers, transitive writes, effect-qualified keys and
 option evaluation. Artifacts use `phase1-sort-lifetimes-*` under
 `../dewy-build-artifacts`. Phase 1 remains in progress.
+
+
+Integration checkpoint: `f729d465` completed the three-generation direct x86-64
+bootstrap with byte-identical final Dewy and µDewy binaries and passing x86-64/C
+runtime checks. Generation 1/2/3 took 162/124/78 seconds under concurrent load;
+these are not isolated latency measurements. The pair is
+`../dewy-build-artifacts/phase1-totaldict-f729d465`. Copy inventory: **4,418 sites
+over 47,770 lines (92.485/KLOC)**, within the 4,500/100 gates. The broad hosted
+selection (`-k 'not bootstrap and not native'`) passed **3,488 tests with 14
+skipped** in 569.44 seconds. These integration results precede the sort storage
+lifetime change; its fresh paired checks are recorded separately above.
