@@ -3179,3 +3179,11 @@ contracted union view creates no storage. Mutated locals, replaced sources,
 escaping results and runtime-sized explicit copies still require allocation;
 fixed scalar copies retain their existing frame-placement permission. Artifacts
 use `phase1-local-view-effects-*`.
+
+The shared local-view proof also covers stored strings. Hosted declaration
+lowering now consumes that evidence for strings, extends the source owner's
+liveness, and excludes the borrowed descriptor from owning string moves.
+Three additional paired runtime kernels and one rejection passed on both
+backends, including zero-allocation field/element reads and an escaping string
+that survives source cleanup. All 38 hosted string/view/copy checks passed;
+artifacts are `phase1-local-view-effects-strings-*`.

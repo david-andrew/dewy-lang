@@ -62,6 +62,24 @@ if items.length=?0 return 1 let row=items[0].copy()
 if row.length=?0 return 2 return row[0]}''',
 ]]
 
+
+CASES += ['''read=(items:array<string>):>int64 & no_effects=>{
+if items.length=?0 return 1 let text=items[0] return text.length+40}
+work=(items:array<string>):>int64=>{let before=_arena_allocated_bytes let value=read(items)
+return if _arena_allocated_bytes=?before value else 2}
+main=():>int64=>work(["{42}"])''',
+'''Holder:type=[text:string]
+read=(holder:Holder):>int64 & no_effects=>{const text=holder.text return text.length+40}
+work=(holder:Holder):>int64=>{let before=_arena_allocated_bytes let value=read(holder)
+return if _arena_allocated_bytes=?before value else 2}
+main=():>int64=>work(Holder["{42}"])''',
+'''take=(items:array<string>):>string=>{if items.length=?0 return ""
+const text=items[0] return text}
+main=():>int64=>{let items:array<string>=["{42}"] let saved=take(items)
+items.clear() return if saved=?"42" 42 else 1}''']
+ERRORS += ['''take=(items:array<string>):>string & no allocates=>{
+if items.length=?0 return "" const text=items[0] return text}''']
+
 @pytest.mark.parametrize('source',CASES)
 def test_shared_local_view_allocation_proof(source,tmp_path):
     execute(tmp_path,'local-view-effect',codegen(SrcFile(None,source)))
