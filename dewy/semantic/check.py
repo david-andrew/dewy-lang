@@ -2273,7 +2273,7 @@ def _tcr_dict_store(ast: p0.BinOp, *, ctx: Context) -> hir.DictStore | None:
 
 
 def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
-    """Typecheck a simple compound assignment while retaining its source operator.
+    """Typecheck a compound assignment through the ordinary checked operation.
 
     `Type &= (…) => …` is not an assignment: it adds a constructor overload to
     an object type (see `_declare_constructor_overload`).
@@ -2364,15 +2364,20 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
             ast.left.loc,
             'compound indexed assignment',
         )
-    value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=target.type)
+    # The operand has the representation of the destination, not its store
+    # refinements. Shift counts instead keep their own unsigned operand type.
+    operand_type = ty.strip_refinement(target.type)
+    name = builtins.BINOP_DUNDER_MAP[symbol]
+    operand_hint = None if name in ('__lshift__', '__rshift__') else operand_type
+    value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=operand_hint)
     result = _dispatch_builtin(
-        builtins.BINOP_DUNDER_MAP[symbol],
+        name,
         [target, value],
         loc=ast.loc,
         op_loc=ast.op.loc,
         source_name=symbol,
         ctx=ctx,
-        expected=target.type,
+        expected=operand_type,
     )
     result = check_against(result, target.type, ctx=ctx)
     if isinstance(target, hir.ExpressedIdentifier) and target.binding_id is not None:
@@ -2389,17 +2394,12 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
             root_id, path = assigned
             _invalidate_routes(root_id, ctx=ctx, prefix=path)
         return hir.MemberAssign(ast.loc, ty.VOID_TYPE, target, result)
-    # Only the primitive operator may be handed to the target as `op=`.
-    # Library-backed arithmetic (bigint, rational, sets, strings, ...) has
-    # already selected a checked implementation; discarding that result here
-    # would bypass its conversions and ask the backend to redispatch it.
-    if _is_string_type(target.type) or not (
-        isinstance(result, hir.FunctionCall)
-        and isinstance(result.func, hir.ExpressedIdentifier)
-        and result.func.name == builtins.BINOP_DUNDER_MAP[symbol]
-    ):
-        return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', result)
-    return hir.Assign(ast.loc, ty.VOID_TYPE, target, f'{symbol}=', value)
+    # Keep the selected operation and its conversions on the RHS, matching
+    # native HIR. Every bounds, divisor and effect check then sees the same
+    # operation as `x = x op y`; discarding it used to bypass divisor checks
+    # and lose all compound bounds except the special-cased `+=` and `-=`.
+    return hir.Assign(ast.loc, ty.VOID_TYPE, target, '=', result)
+
 
 
 def tcr_import(ast: p0.KeywordExpr, *, ctx: Context, expected: ty.Type|None=None) -> hir.AST:

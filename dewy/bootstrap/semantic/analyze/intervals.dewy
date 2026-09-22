@@ -191,9 +191,11 @@ remainder=(left:Interval right:Interval floor:bool):>Interval?=>{
     }
     let magnitude:bigint?=none
     if right.lower isnt? none and right.upper isnt? none {
-        let a=if right.lower <? 0 {-right.lower} else right.lower
-        let b=if right.upper <? 0 {-right.upper} else right.upper
-        magnitude=(if a >? b a else b)-1
+        # For ordered endpoints, max(-lower, upper) is the maximum absolute
+        # value. Keep the subtraction in each arm so no selected boxed
+        # endpoint needs another owning temporary.
+        let opposite=-right.lower
+        magnitude=if opposite >? right.upper {opposite-1} else {right.upper-1}
     }
     let lower=if left.lower isnt? none and left.lower >=? 0 0 else maximum_lower(left.lower if magnitude is? none none else -magnitude)
     let upper=if left.upper isnt? none and left.upper <=? 0 0 else minimum_upper(left.upper magnitude)

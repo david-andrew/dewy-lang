@@ -3430,3 +3430,23 @@ agrees on four runtime cases and five rejection cases, with both x86-64 and C
 execution. The direct native term-fact kernel comparison also passes. This
 extends the finite proof vocabulary; it does not complete the general liquid
 invariant engine or unsafe-assumption dependency reporting.
+## Checked compound operations and interval storage (2026-09-22)
+
+Hosted HIR now retains the selected checked arithmetic call for a compound
+assignment, as native HIR already does. This closes both the missing bounds
+transfer for `//=` (exposed by bootstrap byte packing) and a bypass of ordinary
+nonzero-divisor checking for primitive `//=`/`%=`. Operand hints retain the
+destination representation without incorrectly requiring its store facts;
+shift counts retain their independent unsigned type. Runtime arithmetic and
+µDewy semantics are unchanged.
+
+The native remainder interval computes its maximum absolute divisor endpoint
+without copying boxed values into three temporary selections. Its direct
+interval-kernel comparison passes, and the preliminary source inventory falls
+from 4,503 to 4,499 sites (92.344/KLOC). This is a static storage measurement,
+not evidence of an elapsed-time improvement.
+
+Validation: 19 focused hosted bounds/runtime tests pass; four compound
+refinement/native interval kernel tests pass. A fresh native driver agrees
+on six runtime and five rejection cases with x86-64/C execution. The broader
+combined checkpoint, including the separate remainder relations, follows.
