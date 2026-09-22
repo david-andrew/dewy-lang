@@ -1285,8 +1285,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 same_array = isinstance(expected, ty.ArrayType) and isinstance(actual, ty.ArrayType) and expected.element == actual.element
                 same_union = isinstance(expected, ty.TypeOr) and (resource(actual) is None or any(
                     ty.structural_base(member) == actual for member in expected.items))
+                # A checked top-level refinement changes facts, not ownership
+                # layout (for example totaldict over an ordinary dict literal).
+                same_storage = expected == actual
                 if (node.binding_id is None
-                        or node.annotation is not None and node.annotation != node.expr.type and not same_array and not same_union):
+                        or node.annotation is not None and not same_storage and not same_array and not same_union):
                     reject(node, 'a non-fresh local owner')
                 if id(node) in transfers and not node.view:
                     source = next((owner for owner in owners if owner.binding_id == node.expr.binding_id), None)

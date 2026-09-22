@@ -3504,3 +3504,18 @@ must be checked against the unchanged 4,500-site gate. The adjacency change is
 in the fresh driver used for the nested-container tests. The final filter
 change is source-checked; its execution is covered by the next full native
 integration checkpoint. Static counts do not establish a latency improvement.
+
+## Refined resource storage (2026-09-22)
+
+A checked top-level refinement does not change a resource's ownership layout.
+Both lifecycle passes now compare the underlying storage types when accepting
+an annotated owner, retaining nominal identity and the original fact
+obligations. This permits total dictionaries containing resources and refined
+resource records without treating them as an unsupported non-fresh owner.
+The normal freshness/move/copy rules still apply afterward.
+
+Validation: seven hosted tests pass. A fresh native driver agrees on three
+runtime and four rejection cases with x86-64/C execution. Cases cover replacing
+a total dictionary entry, once-only nested cleanup, refined record cleanup,
+missing total keys, false field facts, forbidden total-key removal and hook
+effects. No facts or resource obligations are discharged by layout equality.

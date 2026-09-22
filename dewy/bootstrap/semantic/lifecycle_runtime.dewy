@@ -1338,7 +1338,11 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         let value=hir.node_at(session.hir declared.expr)
         let same_array=false
         let same_union=false
+        let same_storage=declared.annotation is? none
         if declared.annotation isnt? none {
+            # Source obligations retain their facts; ownership only needs the
+            # storage representation beneath the checked top-level refinement.
+            same_storage=types.same_type(views.structural_base(declared.annotation session.types) views.structural_base(value.value_type session.types) session.types)
             let expected=types.node_at(session.types views.structural_base(declared.annotation session.types))
             let actual=types.node_at(session.types views.structural_base(value.value_type session.types))
             same_array=expected is? types.ArrayType and actual is? types.ArrayType and types.same_type(expected.element actual.element session.types)
@@ -1349,7 +1353,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                 }
             }
         }
-        if declared.binding_id is? none or (declared.annotation isnt? none and not types.same_type(declared.annotation value.value_type session.types) and not same_array and not same_union) {reject(declared 'a non-fresh local owner' @plan) return}
+        if declared.binding_id is? none or (not same_storage and not same_array and not same_union) {reject(declared 'a non-fresh local owner' @plan) return}
         if id in? plan.transfer_sites and not declared.view and value is? hir.ExpressedIdentifier {
             let retained:array<addr>=[]
             let source:addr?=none
