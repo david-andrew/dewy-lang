@@ -53,17 +53,20 @@ def collect(root: hir.AST, source: SrcFile, scope: str = '<module>') -> list[Ent
     sites: list[hir.Assert] = []
     checks: list[Check] = []
     seen: set[int] = set()
-    pending = [root]
+    # Defaults are executable children of the function too. Start inside the
+    # function boundary, so its defaults and body share one audit scope while
+    # nested functions still open their own scopes.
+    pending = list(reversed(tuple(hir.children(root)))) if isinstance(root, hir.FunctionLiteral) else [root]
     while pending:
         node = pending.pop()
         if id(node) in seen:
             continue
         seen.add(id(node))
         if isinstance(node, hir.Declare) and isinstance(node.expr, hir.FunctionLiteral):
-            entries.extend(collect(node.expr.body, node.expr.source or source, node.name))
+            entries.extend(collect(node.expr, node.expr.source or source, node.name))
             continue
         if isinstance(node, hir.FunctionLiteral):
-            entries.extend(collect(node.body, node.source or source, '<anonymous>'))
+            entries.extend(collect(node, node.source or source, '<anonymous>'))
             continue
         if isinstance(node, hir.Assert) and node.unsafe:
             sites.append(node)

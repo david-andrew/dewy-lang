@@ -47,6 +47,41 @@ def test_native_compiler_command(tmp_path):
         return subprocess.run([compiler, *args], cwd=tmp_path, env=env,
                               capture_output=True, text=True, timeout=120, check=False)
 
+    # Audit executable defaults even when their function is unused or the
+    # caller overrides the default. Erasure/reachability must not hide them.
+    from test_unsafe_assertions import DEFAULT_SOURCE
+    audit_source = tmp_path / 'default-assumption.dewy'
+    audit_path = tmp_path / '__dewycache__/default-assumption.unsafe.json'
+    for main in ('42', 'fallback()', 'fallback(42)'):
+        audit_source.write_text('$no_prelude=true\n' + DEFAULT_SOURCE.replace('main=():>int64=>42', f'main=():>int64=>{main}'))
+        compiled = invoke('-c', audit_source)
+        assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+        entries = json.loads(audit_path.read_text())['assumptions']
+        assert len(entries) == 1
+        assert entries[0]['scope'] == 'fallback'
+        assert entries[0]['message'] == 'default guarantee'
+        assert entries[0]['line'] == 3
+    audit_source.write_text('$no_prelude=true\nmain=():>int64=>42')
+    assert invoke('-c', audit_source).returncode == 0
+    assert not json.loads(audit_path.read_text())['assumptions']
+    # The same metadata must survive cached imported defaults. The temporary
+    # library's empty files isolate this check from the full standard library.
+    audit_prelude = next(path for path in library.rglob('*.dewy') if not path.read_text())
+    audit_prelude.write_text(DEFAULT_SOURCE.split('main=')[0])
+    audit_source.write_text('main=():>int64=>42')
+    reports = []
+    for _ in range(2):
+        compiled = invoke('-c', audit_source)
+        assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+        report = json.loads(audit_path.read_text())
+        assert len(report['assumptions']) == 1
+        assert report['assumptions'][0]['path'] == str(audit_prelude)
+        reports.append(report)
+    assert reports[0] == reports[1]
+    audit_prelude.write_text('')
+    assert invoke('-c', audit_source).returncode == 0
+    assert not json.loads(audit_path.read_text())['assumptions']
+
     assert invoke('--help').returncode == 0
     version = invoke('--version')
     assert version.returncode == 0 and version.stdout.startswith('dewy ')

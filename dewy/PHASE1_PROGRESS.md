@@ -2415,3 +2415,23 @@ kernels and 16 rejections against hosted checking on x86-64/C. The inventory is
 4,991 sites over 47,432 lines (105.224/KLOC), within the unchanged gates.
 Artifacts use `../dewy-build-artifacts/phase1-conditional-place-` prefixes.
 These are focused checks, not a new complete pytest run or fixed point.
+
+
+## Default-argument assumption audit coverage (2026-09-21)
+
+The audit collector now enters a function through all of its executable HIR
+children, including parameter defaults, while keeping nested function scopes
+separate. Previously a default's assumption could disappear from the sidecar
+when the collector skipped straight to the body. Unused functions and explicitly
+overridden defaults still retain their source assumptions. This is inventory
+coverage; consumer lists remain the documented conservative function-scope
+candidates, not exact proof dependencies.
+
+Validation: all 18 hosted assumption checks pass, plus the two parameterized
+resident/persistent prelude-cache cases. The fresh native CLI retains the named
+default audit for unused, used and overridden defaults on x86-64/C; all six
+executables return 42. It rejects a proven-false unused default and replaces a
+stale sidecar after removal. Repeated native invocations also retain an unused
+imported default with its original source path. The native command regression
+now covers these cases alongside its existing invocation checks. Artifacts use
+the `../dewy-build-artifacts/phase1-default-audit-` prefix.

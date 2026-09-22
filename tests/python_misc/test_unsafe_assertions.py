@@ -86,12 +86,16 @@ def test_test_command_keeps_audit(tmp_path):
     assert json.loads(path.read_text())['assumptions'][0]['message'] == 'external guarantee'
 
 
-def test_cached_prelude_retains_unused_assumptions(tmp_path, monkeypatch):
+@pytest.mark.parametrize('body', [
+    'unused=()=>{$unsafe_assume true, "cached guarantee"}\n',
+    'unused=(value:int64={\n$unsafe_assume true, "cached guarantee"\n42\n}):>int64=>value\n',
+])
+def test_cached_prelude_retains_unused_assumptions(tmp_path, monkeypatch, body):
     from dewy.semantic import modules, prelude as prelude_config
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv('DEWY_NO_PRELUDE_CACHE', raising=False)
     prelude = tmp_path / 'prelude.dewy'
-    prelude.write_text('unused=()=>{$unsafe_assume true, "cached guarantee"}\n')
+    prelude.write_text(body)
     monkeypatch.setattr(prelude_config, 'library', tmp_path)
     monkeypatch.setattr(modules, 'prelude_files', lambda target: (prelude,))
     source = SrcFile(None, 'main=():>int64=>42\n')
@@ -118,3 +122,29 @@ def test_proven_false_assumptions_are_rejected(source):
 def test_superseded_unsafe_assert_spelling_is_not_an_assumption():
     with pytest.raises(UserError):
         codegen(SrcFile(None, 'main=():>int64=>{$unsafe_assert true\nreturn 42}'))
+
+
+DEFAULT_SOURCE = """fallback=(value:int64={
+    $unsafe_assume true, 'default guarantee'
+    42
+}):>int64=>value
+main=():>int64=>42
+"""
+
+
+@pytest.mark.parametrize('main', ['42', 'fallback()', 'fallback(42)'])
+def test_default_argument_assumptions_survive_reachability_and_overrides(main):
+    source = DEFAULT_SOURCE.replace('main=():>int64=>42', f'main=():>int64=>{main}')
+    codegen(SrcFile(None, source))
+    report = json.loads(unsafe_audit.render(unsafe_audit.last_entries))
+    assert len(report['assumptions']) == 1
+    entry = report['assumptions'][0]
+    assert entry['scope'] == 'fallback'
+    assert entry['condition'] == 'true'
+    assert entry['message'] == 'default guarantee'
+    assert entry['line'] == 2
+
+
+def test_proven_false_unused_default_assumption_is_rejected():
+    with pytest.raises(UserError, match='assertion refuted'):
+        codegen(SrcFile(None, DEFAULT_SOURCE.replace('$unsafe_assume true', '$unsafe_assume false')))

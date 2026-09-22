@@ -29,7 +29,15 @@ collect = (root:addr source:SrcFile session:contexts.Session scope:string='<modu
     let checks:array<Check>=[]
     let keys:set<string>=set[]
     let seen:set<addr>=set[]
-    let pending:array<addr>=[root]
+    # The function boundary includes default arguments as well as its body.
+    # Nested function literals still create their own audit scopes below.
+    let pending:array<addr>=[]
+    let initial=hir.node_at(session.hir root)
+    if initial is? hir.FunctionLiteral {
+        let children=hir.children(initial)
+        let index=children.length
+        loop index >? 0 {index-=1 pending.push(children[index])}
+    } else {pending.push(root)}
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
@@ -38,12 +46,12 @@ collect = (root:addr source:SrcFile session:contexts.Session scope:string='<modu
         if node is? hir.Declare {
             let value=hir.node_at(session.hir node.expr)
             if value is? hir.FunctionLiteral {
-                loop entry in collect(value.body source_at(value.source source session) session node.name) {entries.push(entry)}
+                loop entry in collect(node.expr source_at(value.source source session) session node.name) {entries.push(entry)}
                 continue
             }
         }
         if node is? hir.FunctionLiteral {
-            loop entry in collect(node.body source_at(node.source source session) session '<anonymous>') {entries.push(entry)}
+            loop entry in collect(id source_at(node.source source session) session '<anonymous>') {entries.push(entry)}
             continue
         }
         if node is? hir.Assert and node.unsafe {sites.push(node) continue}
