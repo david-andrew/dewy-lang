@@ -26,11 +26,11 @@ set_facts = (state:addr current:array<keys.Fact> @session:contexts.Session):>voi
     replace_keys(@session.read_states[state] current)
 }
 route = (value:addr @session:contexts.Session):>addr? => bindings.array_route_id(value session.hir @session.registry)
-changed = (binding:addr state:addr @session:contexts.Session):>void => {
+changed = (binding:addr state:addr @session:contexts.Session projection:array<string>=[]):>void => {
     let original=facts(state session)
-    let current = keys.forget(original changed=binding)
+    let current = if projection.length =? 0 keys.forget(original changed=binding) else original
     let owner = binding
-    let prefix:array<string> = []
+    let prefix:array<string> = projection
     let item=bindings.route_at(session.registry binding)
     if item isnt? none {owner=item.root prefix=item.path}
     let preserved:set<addr>=if session.local_place_roots.length>?0 bindings.local_place_containers(owner session.hir @session.registry) else set[]
@@ -58,9 +58,15 @@ changed = (binding:addr state:addr @session:contexts.Session):>void => {
     loop fact in original {if fact.container in? preserved {keys.record(@current keys.Fact[fact.container fact.key])}}
     set_facts(state current @session)
 }
-replaced = (value:addr state:addr @session:contexts.Session):>void => {
-    let binding = route(value @session)
-    if binding isnt? none { changed(binding state @session) }
+replaced = (value:addr state:addr @session:contexts.Session descendants:bool=false):>void => {
+    let path=bindings.access_path(value session.hir dictionaries=true)
+    let root=hir.node_at(session.hir path.root)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return void
+    # Different selectors may alias. Preserve ancestor type facts when only
+    # a field changes, but invalidate all possibly overlapping descendants.
+    let prefix=bindings.mutation_fields(path session.hir)
+    if descendants {prefix.push('[]')}
+    changed(root.binding_id state @session projection=prefix)
 }
 remember = (container:addr key:addr state:addr @session:contexts.Session position:string?=none static_position:addr?=none):>void => {
     let binding = route(container @session)
@@ -104,13 +110,25 @@ proven = (container:addr key:addr state:addr @session:contexts.Session):>keys.Fa
     if total isnt? none and subtyping.is_subtype(key_type total session.links @session.types) return keys.Fact[if binding is? none 0 else binding keys.Total[]]
     return none
 }
+forget_entry_facts = (container:addr state:addr @session:contexts.Session):>void => {
+    let path=bindings.access_path(container session.hir dictionaries=true)
+    let root=hir.node_at(session.hir path.root)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return void
+    let prefix=bindings.mutation_fields(path session.hir)
+    prefix.push('keys')
+    changed(root.binding_id state @session projection=prefix)
+    prefix.pop(); prefix.push('values')
+    changed(root.binding_id state @session projection=prefix)
+}
 forget_positions = (container:addr state:addr @session:contexts.Session):>void => {
     let binding = route(container @session)
-    if binding isnt? none { set_facts(state keys.forget_positions(facts(state session) binding) @session) }
+    if binding isnt? none {set_facts(state keys.forget_positions(facts(state session) binding) @session)}
+    forget_entry_facts(container state @session)
 }
 removed = (container:addr key:addr? state:addr @session:contexts.Session):>void => {
     let binding = route(container @session)
     if binding is? none return void
+    forget_entry_facts(container state @session)
     let current = facts(state session)
     if key is? none { current = keys.forget(current container=binding) }
     else {

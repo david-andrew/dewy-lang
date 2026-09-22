@@ -96,11 +96,13 @@ class BindingRegistry:
         return binding.id
 
     def routes_under(self, root_id: int, prefix: tuple[str, ...] = ()) -> list[int]:
-        """Route ids rooted at ``root_id`` whose path starts with ``prefix``."""
+        """Descendants of a route; mutation-only ``[]`` matches any selector."""
         return [
             route_id
             for route_id in self.routes_by_root.get(root_id, ())
-            if self.route_paths[route_id][:len(prefix)] == prefix
+            if len(self.route_paths[route_id]) >= len(prefix)
+            and all(left == right or left == '[]' and right.startswith('[')
+                    for left, right in zip(prefix, self.route_paths[route_id]))
         ]
 
     def allocate(
@@ -269,6 +271,14 @@ def array_route_id(node: hir.AST, registry: BindingRegistry, *, create: bool = T
     for index in indices:
         registry.index_routes.setdefault(index, set()).add(result)
     return result
+
+
+def mutation_path(node: hir.AST) -> tuple[int, tuple[str, ...]] | None:
+    """A write affects possibly aliased selectors but preserves ancestor facts."""
+    path = access_path(node, unwrap=_unwrap_fact_route, dictionaries=True)
+    if path.binding_id is None:
+        return None
+    return path.binding_id, tuple(step.name if isinstance(step, hir.MemberAccess) else '[]' for step in path.steps)
 
 
 def member_path(node: hir.AST) -> tuple[int, tuple[str, ...]] | None:

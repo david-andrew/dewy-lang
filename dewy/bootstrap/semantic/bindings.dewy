@@ -150,7 +150,15 @@ route_at = (registry:Registry id:addr):>Route? => {
 routes_under = (registry:Registry root:addr prefix:array<string>):>array<addr> => {
     let output:array<addr> = []
     loop route in registry.routes_by_root.get(root []) {
-        if path_starts_with(route.path prefix) { output.push(route.id) }
+        if route.path.length <? prefix.length continue
+        let matches=true
+        loop i in [0..prefix.length) {
+            if prefix[i] =? route.path[i] continue
+            # Mutation-only [] means any possibly aliased selector.
+            if prefix[i] =? '[]' and route.path[i].startswith('[') continue
+            matches=false break
+        }
+        if matches {output.push(route.id)}
     }
     return output
 }
@@ -205,6 +213,17 @@ access_path = (id:addr nodes:array<hir.AST> facts:bool=false forwarding:bool=fal
     let steps:array<addr> = []
     loop reversed.length >? 0 { steps.push(reversed.pop) }
     return AccessPath[root=current steps=steps]
+}
+
+# Mutation prefixes preserve ancestor facts and wildcard possibly equal
+# selectors. [] is query-only and never a stored identity.
+mutation_fields = (path:AccessPath nodes:array<hir.AST>):>array<string> => {
+    let fields:array<string>=[]
+    loop step in path.steps {
+        let node=hir.node_at(nodes step)
+        fields.push(if node is? hir.MemberAccess node.name else '[]')
+    }
+    return fields
 }
 
 member_fields = (path:AccessPath nodes:array<hir.AST>):>array<string> | none => {

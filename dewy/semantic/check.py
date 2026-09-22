@@ -1844,8 +1844,8 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
     value = typecheck_and_resolve_inner(ast.right, ctx=ctx, expected=ty.strip_refinement(store_expected))
     value = check_against(value, store_expected, ctx=ctx)
     if isinstance(target, hir.Index):
-        if ctx.local_place_roots and (owner := _member_root_binding(target, ctx=ctx)) is not None:
-            _invalidate_routes(owner.id, ctx=ctx)
+        if (assigned := sb.mutation_path(target)) is not None:
+            _invalidate_routes(assigned[0], ctx=ctx, prefix=assigned[1])
         return hir.IndexAssign(ast.loc, ty.VOID_TYPE, target, value)
     if isinstance(target, hir.MemberAccess):
         if isinstance(target.type, (ty.FunctionType, ty.OverloadType)):
@@ -1857,7 +1857,7 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
                 )
             assert isinstance(target.value.type, ty.ObjectType)
             value = _mark_object_receiver(value, (), target.value.type)
-        assigned = sb.member_path(target)
+        assigned = sb.mutation_path(target)
         if assigned is not None:
             root_id, path = assigned
             _invalidate_routes(root_id, ctx=ctx, prefix=path)
@@ -2384,7 +2384,7 @@ def tcr_combined_assign(ast: p0.BinOp, *, ctx: Context) -> hir.AST:
             result = check_against(result, contract, ctx=ctx)
     if isinstance(target, hir.MemberAccess):
         # `obj.field += v` is `obj.field = obj.field + v`
-        assigned = sb.member_path(target)
+        assigned = sb.mutation_path(target)
         if assigned is not None:
             root_id, path = assigned
             _invalidate_routes(root_id, ctx=ctx, prefix=path)
@@ -3926,7 +3926,7 @@ def _refine_condition_context(
                 fact_id = None
                 if isinstance(argument, hir.ExpressedIdentifier) and argument.binding_id is not None:
                     fact_id = argument.binding_id
-                elif isinstance(argument, hir.MemberAccess):
+                elif isinstance(argument, (hir.MemberAccess, hir.Index, hir.DictLookup)):
                     fact_id = sb.array_route_id(argument, ctx.binding_registry)
                 if fact_id is not None:
                     current = refinements.get(fact_id, argument.type)
@@ -3939,8 +3939,8 @@ def _refine_condition_context(
         fact_id: int | None = None
         if isinstance(value, hir.ExpressedIdentifier) and value.binding_id is not None:
             fact_id = value.binding_id
-        elif isinstance(value, hir.MemberAccess):
-            # `node.next is? Node` narrows the field's route, like a binding
+        elif isinstance(value, (hir.MemberAccess, hir.Index, hir.DictLookup)):
+            # Stable projections carry the same branch facts as bindings
             fact_id = sb.array_route_id(value, ctx.binding_registry)
         if fact_id is not None:
             current = refinements.get(fact_id, value.type)
@@ -3962,7 +3962,7 @@ def _refine_condition_context(
                         continue
                     argument = _call_argument(remembered, proposition.param)
                     argument = _strip_obligations(argument.target if isinstance(argument, hir.Place) else argument) if argument is not None else None
-                    target_id = argument.binding_id if isinstance(argument, hir.ExpressedIdentifier) else sb.array_route_id(argument, ctx.binding_registry) if isinstance(argument, hir.MemberAccess) else None
+                    target_id = argument.binding_id if isinstance(argument, hir.ExpressedIdentifier) else sb.array_route_id(argument, ctx.binding_registry) if isinstance(argument, (hir.MemberAccess, hir.Index, hir.DictLookup)) else None
                     if target_id is not None:
                         refinements[target_id] = _refine_type_test(refinements.get(target_id, argument.type), proposition.type_, matches=proposition.op == 'is?', ctx=ctx)
                         if proposition.op == 'isnt?':
@@ -8679,6 +8679,10 @@ def _apply_array_method_transition(
     the bounds analysis.
     """
     receiver = method.array
+    if method.name not in {'join', 'reserve'}:
+        assigned = sb.mutation_path(receiver)
+        if assigned is not None:
+            _invalidate_routes(assigned[0], ctx=ctx, prefix=(*assigned[1], '[]'))
     binding_id = sb.array_route_id(receiver, ctx.binding_registry)
     if binding_id is None:
         return
@@ -9324,16 +9328,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
     # Parameter/sibling relations remain in the separate fact environment.
     read_type = ty.strip_result_refinement(_field_expectation(field))
     access = hir.MemberAccess(binop.loc, read_type, value, name, field.mutable)
-    if isinstance(field.type, (ty.ObjectType, ty.TypeOr)):
-        # Membership tests refine a record family just as they refine a
-        # union. Consume its existing route fact without allocating a new
-        # identity on ordinary reads; root/prefix writes discard the fact.
-        # Array shape facts have a separate declared growth contract and
-        # cannot replace the field's ArrayType here.
-        route_id = sb.array_route_id(access, ctx.binding_registry, create=False)
-        refined = ctx.refinements.get(route_id) if route_id is not None else None
-        if refined is not None:
-            access = replace(access, type=ty.unfold(refined))
+    access = _refined_route_read(access, ctx=ctx)
     if source_place is None:
         return access
     if not field.mutable:
@@ -11896,6 +11891,20 @@ def _known_string_length(type_: ty.Type) -> int | None:
     return None
 
 
+def _refined_route_read(node: hir.AST, *, ctx: Context) -> hir.AST:
+    """Consume an existing stable projection fact without changing storage.
+
+    Array lengths have a separate growth contract. Only record alternatives
+    and unions use this read-type rule; writes retain their declared type.
+    """
+    if isinstance(ty.unfold(ty.strip_refinement(node.type)), (ty.ObjectType, ty.TypeOr)):
+        route = sb.array_route_id(node, ctx.binding_registry, create=False)
+        refined = ctx.refinements.get(route) if route is not None else None
+        if refined is not None:
+            return replace(node, type=ty.unfold(refined))
+    return node
+
+
 def _tcr_index(binop: p0.BinOp, *, ctx: Context, array: hir.AST | None = None) -> hir.AST:
     if array is None:
         array = typecheck_and_resolve_inner(binop.left, ctx=ctx)
@@ -11938,10 +11947,10 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context, array: hir.AST | None = None) -
                 'or use `d.get(key)` (optionally `d.get(key default)`) for a lookup that may miss',
             )
         position, static_position = fact
-        return hir.DictLookup(
+        return _refined_route_read(hir.DictLookup(
             binop.loc, value_type, keys, values, key,
             proven=True, position=position, static_position=static_position,
-        )
+        ), ctx=ctx)
     if isinstance(array.type, ty.BinaryLiteralType):
         array = hir.RepresentationCast(
             array.loc,
@@ -12155,7 +12164,7 @@ def _tcr_index(binop: p0.BinOp, *, ctx: Context, array: hir.AST | None = None) -
         constant_index,
     )
     if source_place is None:
-        return result
+        return _refined_route_read(result, ctx=ctx)
     return hir.Place(binop.loc, result.type, result)
 
 
@@ -12858,6 +12867,8 @@ def tcr_assignment_target(
                     Pointer(span=target.loc, message=f'`{binding.name}` {reason}'),
                     *_declaration_pointers(binding),
                 )
+            if not refined:
+                resolved = replace(resolved, type=resolved.array.type.element)
             return resolved
 
     not_implemented(ctx.srcfile, target.loc, 'this assignment target')
@@ -16541,7 +16552,7 @@ def _establish_call_facts(call: hir.FunctionCall, *, ctx: Context) -> None:
             continue
         argument = _strip_obligations(argument.target if isinstance(argument, hir.Place) else argument)
         if proposition.type_ is not None:
-            fact_id = argument.binding_id if isinstance(argument, hir.ExpressedIdentifier) else sb.array_route_id(argument, ctx.binding_registry) if isinstance(argument, hir.MemberAccess) else None
+            fact_id = argument.binding_id if isinstance(argument, hir.ExpressedIdentifier) else sb.array_route_id(argument, ctx.binding_registry) if isinstance(argument, (hir.MemberAccess, hir.Index, hir.DictLookup)) else None
             if fact_id is not None:
                 refinements = dict(held.refinements)
                 refinements[fact_id] = _refine_type_test(refinements.get(fact_id, argument.type), proposition.type_, matches=proposition.op == 'is?', ctx=ctx)
@@ -16656,6 +16667,7 @@ def _forget_dictionary(
     key, and any inferred totality. `clear` forgets every key.
     """
     dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
+    _forget_entry_facts(dictionary, ctx=ctx)
     removed_identity = _key_identity(removed, ctx=ctx) if removed is not None else None
     for fact_key in list(ctx.key_facts):
         route_id, identity = fact_key
@@ -16690,9 +16702,21 @@ def _forget_dictionary(
             ctx.length_bounds.pop(route_id, None)
 
 
+def _forget_entry_facts(dictionary: hir.AST, *, ctx: Context) -> None:
+    # Mutation paths wildcard selectors: aliases may select the same entry.
+    # The dictionary's membership survives; only its keys/values subtrees
+    # change. This also covers dictionaries nested inside fields or arrays.
+    assigned = sb.mutation_path(dictionary)
+    if assigned is not None:
+        root, prefix = assigned
+        for field in ('keys', 'values'):
+            _invalidate_routes(root, ctx=ctx, prefix=(*prefix, field))
+
+
 def _forget_positions(dictionary: hir.AST, *, ctx: Context) -> None:
     """Entries may move (compaction on resize or iteration): keys stay proven, positions do not."""
     dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
+    _forget_entry_facts(dictionary, ctx=ctx)
     for fact_key, fact in list(ctx.key_facts.items()):
         if fact_key[0] == dictionary_id and fact != (None, None):
             ctx.key_facts[fact_key] = (None, None)

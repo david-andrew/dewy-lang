@@ -2830,10 +2830,8 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
         }
     }
     if node is? hir.TypeTest {
-        # A named field path is stable storage just like its root binding.
-        # The route carries the declared contract; only this branch's read
-        # alternatives change. Indexed projections still need their own
-        # element-identity proof before they can participate in this rule.
+        # Fields and literal/const-selected elements have stable route ids.
+        # Only the branch's read alternatives change, never the storage type.
         let route=bindings.array_route_id(node.value session.hir @session.registry)
         if route isnt? none {
             let current = read_type(route result session fallback=node_at(node.value session).value_type)
@@ -3192,7 +3190,7 @@ index_syntax = (sequence:addr index_id:addr id:addr env:Environment @session:con
         $runtime_assert position >=? 0 and position <=? targets.max_length(session.target)
         constant = position as addr
     }
-    if type is? types.ArrayType return put(hir.Index[loc type.element sequence index constant] @session)
+    if type is? types.ArrayType return projected_read(put(hir.Index[loc type.element sequence index constant] @session) env @session)
     return put(hir.StringIndex[loc types.string_type(1 @session.types) sequence index constant] @session)
 }
 
@@ -3792,7 +3790,7 @@ place = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Err
     let root = node_at(path.root session)
     $runtime_assert root is? hir.ExpressedIdentifier and root.binding_id isnt? none
     let binding = bindings.binding_at(session.registry root.binding_id)
-    let store_type = target.value_type
+    let store_type = store_type(value @session)
     if target is? hir.ExpressedIdentifier {
         if binding.store_type isnt? none { store_type = binding.store_type }
         else if binding.value_type isnt? none { store_type = binding.value_type }
@@ -3931,7 +3929,9 @@ array_method = (receiver:addr read:types.ArrayType name:string id:addr env:Envir
 # transfers intervals, proves operation indices, and enforces the original
 # storage refinements; losing an exact length is not permission to skip it.
 array_transition = (method:hir.ArrayMethod positional:array<addr> keyword:dict<string addr> id:addr env:Environment @session:contexts.Session):>Error? => {
-    if method.name in? ['join' 'reserve' 'sort'] return none
+    if method.name in? ['join' 'reserve'] return none
+    container_state.replaced(method.array env.state @session descendants=true)
+    if method.name =? 'sort' return none
     let limit = targets.max_length(session.target)
     let route = bindings.array_route_id(method.array session.hir @session.registry)
     if route is? none return none
@@ -4881,7 +4881,7 @@ container_index = (receiver:addr index_id:addr id:addr env:Environment @session:
     }
     let fact = container_state.proven(receiver key env.state @session)
     if fact is? none return problem(id 'dictionary key is not proven present' 'guard the read with `in?`, or use `get` for an optional value' env session)
-    return put(hir.DictLookup[loc entry.value arrays.keys arrays.values key true fact.position fact.static_position] @session)
+    return projected_read(put(hir.DictLookup[loc entry.value arrays.keys arrays.values key true fact.position fact.static_position] @session) env @session)
 }
 
 prove_total = (value:addr key_type:addr id:addr env:Environment @session:contexts.Session):>Error? => {
@@ -5449,6 +5449,11 @@ match_plan = (arm:parser.KeywordExpr env:Environment @session:contexts.Session):
 }
 # Refresh named reads with this arm's alternatives while preserving their
 # binding identities. A shadowing pattern name must not redirect a subject.
+projected_read = (id:addr env:Environment @session:contexts.Session):>addr => {
+    let type=types.node_at(session.types views.structural_base(node_at(id session).value_type session.types))
+    if type is? types.ObjectType|types.TypeOr return match_read(id env @session)
+    return id
+}
 match_read = (id:addr env:Environment @session:contexts.Session):>addr => {
     let node=node_at(id session)
     let route=bindings.array_route_id(id session.hir @session.registry)
@@ -5458,8 +5463,11 @@ match_read = (id:addr env:Environment @session:contexts.Session):>addr => {
     # declaration (`Bool.value` and `Integer.value` can have different types).
     let type=read_type(route env session fallback=node.value_type)
     $runtime_assert type isnt? none
+    if type =? node.value_type return id
     if node is? hir.ExpressedIdentifier return put(hir.ExpressedIdentifier[node.loc type node.name node.binding_id] @session)
     if node is? hir.MemberAccess return put(hir.MemberAccess[node.loc type node.value node.name node.mutable] @session)
+    if node is? hir.Index return put(hir.Index[node.loc type node.array node.index node.constant_index] @session)
+    if node is? hir.DictLookup return put(hir.DictLookup[node.loc type node.keys node.values node.key node.proven node.position node.static_position node.default] @session)
     return id
 }
 # A narrowed read does not narrow the destination's assignment contract.
@@ -5471,6 +5479,10 @@ store_type = (id:addr @session:contexts.Session):>addr => {
             let field=types.object_field(owner node.name)
             if field isnt? none return if field.refinement.length =? 0 field.value_type else types.refined_type(field.value_type field.refinement @session.types)
         }
+    }
+    if node is? hir.Index {
+        let array=types.node_at(session.types views.structural_base(node_at(node.array session).value_type session.types))
+        if array is? types.ArrayType return array.element
     }
     let route=bindings.array_route_id(id session.hir @session.registry)
     if route isnt? none {

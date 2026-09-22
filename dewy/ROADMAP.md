@@ -587,8 +587,11 @@ backedge must preserve them. A bounded vocabulary also selects term pairs
 mentioned in loop predicates/arithmetic, so an unrelated counter need not
 displace a useful relation. A source assertion selects a candidate but never
 establishes it: the incoming intervals and each advancing edge supply proof. Word updates keep affine facts only when
-neither the arithmetic nor its destination can wrap. The general liquid
-qualifier/invariant work remains broader than these completed fixtures.
+neither the arithmetic nor its destination can wrap. Stable literal/const-selected array and dictionary reads also consume
+branch type alternatives and predicate-result facts, while writes retain their
+storage contracts. Mutation prefixes invalidate possibly aliased descendants
+without discarding ancestor type facts. The general liquid qualifier/invariant
+work remains broader than these completed fixtures.
 
 ### 1.3 Effects as a real vocabulary
 

@@ -3092,3 +3092,25 @@ took 146 and 119 seconds under concurrent regression load; these are not
 isolated performance samples. Artifacts: `phase1-union-borrows-a6f1f6bc`,
 `phase1-union-borrows-bootstrap.log`, `phase1-union-borrows-broad.log`, and
 `phase1-union-borrows-inventory.json` in the build-artifacts directory.
+
+## Stable indexed type alternatives (2026-09-22)
+
+Literal and const-selected array elements and proven dictionary entries now
+consume their branch type facts in both checkers. Predicate-result contracts
+use the same route identities. Reads narrow; assignments and place parameters
+retain the declared storage type. Hosted dictionary lowering now unpacks a
+narrowed payload from its original tagged storage, matching native lowering.
+
+Projected writes use one mutation-prefix rule: a selector may alias another
+selector, while a field write preserves facts about its ancestors. Array
+mutation and dictionary replacement/removal invalidate descendant facts,
+including nested containers. Dictionary membership and unaffected tombstone
+positions retain their existing contracts. Ordinary dynamic selectors remain
+conservative; this does not add disjoint-element ownership proofs.
+
+Validation: 73 adjacent hosted checks passed. A fresh native driver then passed
+14 runtime kernels and 10 rejection cases against hosted compilation on both
+x86-64 and C (the final dynamic nested-mutation pair has its own log).
+Artifacts use `phase1-indexed-facts-*`. The final source inventory using the
+previous native seed is exactly 4,500 sites over 48,494 lines (92.795/KLOC);
+the gate is unchanged, and this is not a fresh self-bootstrap certificate.
