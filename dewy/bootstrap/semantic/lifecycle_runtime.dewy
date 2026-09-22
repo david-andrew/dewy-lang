@@ -897,7 +897,7 @@ freeze_value = (id:addr loc:Span @prefix:array<addr> @session:contexts.Session):
     return held.value
 }
 receiver_root = (id:addr nodes:array<hir.AST>):>addr? => {
-    let path=bindings.access_path(id nodes)
+    let path=bindings.access_path(id nodes dictionaries=true)
     let node=hir.node_at(nodes path.root)
     return if node is? hir.ExpressedIdentifier node.binding_id else none
 }
@@ -929,6 +929,19 @@ freeze_route = (id:addr loc:Span root:addr? @prefix:array<addr> @plan:Plan @sess
         check_selection(node.index root @plan session)
         let index=freeze_value(node.index loc @prefix @session)
         return put(hir.Index[node.loc node.value_type array index node.constant_index] @session)
+    }
+    if node is? hir.DictLookup and node.proven {
+        # Reprobe the captured key: cleanup may compact the dictionary.
+        let keys=hir.node_at(session.hir node.keys)
+        let values=hir.node_at(session.hir node.values)
+        $runtime_assert keys is? hir.MemberAccess and values is? hir.MemberAccess
+        let owner=freeze_route(keys.value loc root @prefix @plan @session)
+        check_selection(node.key root @plan session)
+        let key=freeze_value(node.key loc @prefix @session)
+        keys.value=owner values.value=owner
+        node.keys=put(keys @session) node.values=put(values @session)
+        node.key=key node.position=none node.static_position=none
+        return put(node @session)
     }
     return id
 }

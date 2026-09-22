@@ -9226,13 +9226,18 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             else:
                 signature = ty.FunctionType([], [], None, ty.VOID_TYPE)
             if name != 'get':
-                root = _member_root_binding(dictionary, ctx=ctx)
+                access = sb.access_path(dictionary, unwrap=_unwrap_write_path, dictionaries=True)
+                root = ctx.binding_registry.by_id.get(access.binding_id)
                 if (reason := _read_only_reason(root)) is not None:
                     user_error(
                         ctx.srcfile,
                         'cannot mutate a const dictionary',
                         Pointer(span=binop.left.loc, message=f'`{root.name}` {reason}'),
                     )
+                for step in access.steps:
+                    if isinstance(step, hir.MemberAccess) and not step.mutable:
+                        user_error(ctx.srcfile, 'cannot mutate a const dictionary field',
+                                   Pointer(span=binop.left.loc, message=f'`{step.name}` is const'))
                 _refuse_immutable_write(dictionary, binop.left.loc, 'mutate a dictionary member', ctx=ctx)
             # One insertion operation in HIR; `push` is the uniform public
             # spelling. Keep `add` as a compatibility alias for existing code.

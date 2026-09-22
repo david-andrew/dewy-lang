@@ -426,15 +426,16 @@ dictionary_children=(node:hir.DictLookup|hir.DictContains|hir.DictStore|hir.Dict
     if node is? hir.DictStore {let value=node.value if value isnt? none {arguments.push(value)}}
     if node is? hir.DictLookup|hir.DictRemove {let fallback=node.default if fallback isnt? none {arguments.push(fallback)}}
     if validate and node is? hir.DictStore|hir.DictRemove {
-        let access=bindings.access_path(keys.value checker.data.env.nodes)
+        let access=bindings.access_path(keys.value checker.data.env.nodes dictionaries=true)
         let root=node_at(access.root checker)
         let indexed=false
-        loop step in access.steps {if node_at(step checker) is? hir.Index {indexed=true}}
+        loop step in access.steps {if node_at(step checker) is? hir.Index|hir.DictLookup {indexed=true}}
         if indexed and root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
             let selected=arguments
             loop step in access.steps {
                 let selector=node_at(step checker)
                 if selector is? hir.Index {selected.push(selector.index)}
+                else if selector is? hir.DictLookup {selected.push(selector.key)}
             }
             loop value in selected {
                 if root.binding_id in? predicate_effects.mutated_bindings(value checker.data.env.nodes checker.call_writes checker.read_only_places) {
@@ -1190,10 +1191,10 @@ collect = (root:addr @checker:Checker):>void => {
         if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place {target=node.target}
         else if node is? hir.DictStore|hir.DictRemove {
             target=node.keys
-            let path=bindings.access_path(node.keys checker.data.env.nodes)
+            let path=bindings.access_path(node.keys checker.data.env.nodes dictionaries=true)
             let owner=node_at(path.root checker)
             let indexed=false
-            loop step in path.steps {if node_at(step checker) is? hir.Index {indexed=true}}
+            loop step in path.steps {if node_at(step checker) is? hir.Index|hir.DictLookup {indexed=true}}
             if indexed and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.container_receivers.add(owner.binding_id)}
         }
         else if node is? hir.FunctionCall {

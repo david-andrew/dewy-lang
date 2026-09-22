@@ -4791,7 +4791,7 @@ container_member = (receiver:addr entry:views.EntryTypes name:string id:addr env
     return problem(id 'unknown container member' name env session)
 }
 writable_container = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
-    let path = bindings.access_path(value session.hir)
+    let path = bindings.access_path(value session.hir dictionaries=true)
     let root = node_at(path.root session)
     if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return problem(id 'container mutation needs a named place' 'bind the container before changing it' env session)
     let binding = bindings.binding_at(session.registry root.binding_id)

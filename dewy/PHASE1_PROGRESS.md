@@ -3466,3 +3466,25 @@ retained `+=` operator; they now check the ordinary assignment and preserved
 checked `__add__` call. The two complete containing test modules pass all
 34 tests afterward. The former imported native-driver build failure is fixed.
 This does not certify all-route pytest/CI or complete Phase 1.
+
+## Nested container mutation and lifecycle selections (2026-09-22)
+
+Native container methods now recognize proven dictionary entries as rooted
+places. Hosted const checks follow the same route to its owning binding and
+immutable fields. Both bounds analyzers include dictionary selectors in the
+existing receiver-stability check, rejecting arguments that invalidate the
+selected outer dictionary. Ordinary writes still preserve independent value
+snapshots through the existing entry storage lowering.
+
+Lifecycle cleanup and mutation now share captured dictionary keys, just as
+array routes already share captured indices. Cleanup may compact storage, so
+subsequent accesses recheck the captured key rather than retaining an old
+physical position. This fixes repeated key evaluation when clearing a nested
+resource dictionary; captured-root write summaries also follow entry routes.
+
+Validation: a fresh native driver agrees with hosted on nine runtime and seven
+rejection cases, with x86-64/C execution. Runtime cases include independent
+snapshots, tombstones, nested entries, and once-only resource cleanup. Rejection
+diagnostics were checked for receiver invalidation, missing membership, view
+conflicts, const storage and effect contracts. Nineteen focused hosted tests and
+82 adjacent ownership/borrow tests pass. Broader integration follows.

@@ -863,9 +863,9 @@ class _BoundsValidator:
         }
 
     def validate(self, root: hir.Block, *, effect_context: hir.AST | None = None) -> None:
-        receivers = {sb.access_path(node.keys).binding_id for node in hir.walk(root)
+        receivers = {sb.access_path(node.keys, dictionaries=True).binding_id for node in hir.walk(root)
                      if isinstance(node, (hir.DictStore, hir.DictRemove))
-                     and any(isinstance(step, hir.Index) for step in sb.access_path(node.keys).steps)}
+                     and any(isinstance(step, (hir.Index, hir.DictLookup)) for step in sb.access_path(node.keys, dictionaries=True).steps)}
         captured_receivers = receivers & effects.nonlocal_bindings(root) if receivers else set()
         self.call_writes = effects.analyze_global_writes(root, self.mutable_globals | captured_receivers)
         self.read_only_places = effects.read_only_places(root, effect_context)
@@ -2654,9 +2654,10 @@ class _BoundsValidator:
         if not isinstance(node.keys, hir.MemberAccess):
             return
         owner = node.keys.value
-        path = sb.access_path(owner)
-        if validate and isinstance(node, (hir.DictStore, hir.DictRemove)) and any(isinstance(step, hir.Index) for step in path.steps):
-            selected = [step.index for step in path.steps if isinstance(step, hir.Index)]
+        path = sb.access_path(owner, dictionaries=True)
+        if validate and isinstance(node, (hir.DictStore, hir.DictRemove)) and any(isinstance(step, (hir.Index, hir.DictLookup)) for step in path.steps):
+            selected = [step.index if isinstance(step, hir.Index) else step.key
+                        for step in path.steps if isinstance(step, (hir.Index, hir.DictLookup))]
             arguments = [getattr(node, name, None) for name in ('key', 'value', 'default')]
             for value in [*selected, *(argument for argument in arguments if argument is not None)]:
                 writes = predicate_effects.mutated_bindings(value, call_writes=self.call_writes,

@@ -86,27 +86,27 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     # Splitting a resource mutation into cleanup and storage operations must
     # not reselect a receiver changed by an argument or selector. Use the
     # existing transitive may-write summaries, including captured roots.
-    receivers = {bindings.access_path(node.func.array).binding_id
+    receivers = {bindings.access_path(node.func.array, dictionaries=True).binding_id
                  for node in hir.walk(root) if isinstance(node, hir.FunctionCall)
                  and isinstance(node.func, hir.ArrayMethod) and node.func.name == 'truncate'
                  and resource(node.func.array.type) is not None}
-    receivers.update(bindings.access_path(node.target).binding_id
+    receivers.update(bindings.access_path(node.target, dictionaries=True).binding_id
                      for node in hir.walk(root) if isinstance(node, (hir.MemberAssign, hir.IndexAssign))
                      and resource(node.target.type) is not None)
     for node in hir.walk(root):
         if (isinstance(node, (hir.DictStore, hir.DictRemove, hir.DictLookup))
                 and node.values is not None and resource(node.values.type) is not None):
-            receivers.add(bindings.access_path(node.keys).binding_id)
+            receivers.add(bindings.access_path(node.keys, dictionaries=True).binding_id)
             if isinstance(node, hir.DictLookup):
                 # A synthesized component copy can compact its dictionary
                 # receiver. Membership survives, but cached physical slots do
                 # not. Reprobe resource entries until that representation
                 # effect can invalidate only the affected cached positions.
                 node.position = node.static_position = None
-    receivers.update(bindings.access_path(node.item, unwrap=bindings._unwrap_fact_route).binding_id
+    receivers.update(bindings.access_path(node.item, unwrap=bindings._unwrap_fact_route, dictionaries=True).binding_id
                      for node in hir.walk(root) if isinstance(node, hir.Return) and node.item is not None
                      and resource(node.item.type) is not None)
-    receivers.update(bindings.access_path(node).binding_id for node in hir.walk(root)
+    receivers.update(bindings.access_path(node, dictionaries=True).binding_id for node in hir.walk(root)
                      if isinstance(node, (hir.MemberAccess, hir.Index)) and resource(node.type) is not None)
     receivers.discard(None)
     argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
@@ -714,6 +714,16 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             array = freeze_route(value.array, loc, root_id, prefix)
             check_selection(value.index, root_id)
             return replace(value, array=array, index=freeze_value(value.index, loc, prefix))
+        if isinstance(value, hir.DictLookup) and value.proven:
+            # Cleanup and the eventual mutation share one captured key and
+            # receiver. Their physical positions may change during cleanup.
+            assert isinstance(value.keys, hir.MemberAccess) and isinstance(value.values, hir.MemberAccess)
+            owner = freeze_route(value.keys.value, loc, root_id, prefix)
+            check_selection(value.key, root_id)
+            key = freeze_value(value.key, loc, prefix)
+            return replace(value, keys=replace(value.keys, value=owner),
+                           values=replace(value.values, value=owner), key=key,
+                           position=None, static_position=None)
         return value
 
     def array_operation(node, allowed, inherited, control):
@@ -726,7 +736,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                               inherited=inherited, control=control)
         if method.name == 'truncate':
             prefix = []
-            receiver_root = bindings.access_path(receiver.target).binding_id
+            receiver_root = bindings.access_path(receiver.target, dictionaries=True).binding_id
             selected = freeze_route(receiver.target, node.loc, receiver_root, prefix)
             supplied = node.pos_args[0] if node.pos_args else node.kw_args['count']
             check_selection(supplied, receiver_root)
@@ -762,7 +772,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         borrowed = expression(hir.Place(node.loc, owner.type, owner), allowed,
                               inherited=inherited, control=control)
         prefix = []
-        selected = freeze_route(borrowed.target, node.loc, bindings.access_path(owner).binding_id, prefix)
+        selected = freeze_route(borrowed.target, node.loc, bindings.access_path(owner, dictionaries=True).binding_id, prefix)
         keys = replace(node.keys, value=selected)
         values = replace(node.values, value=selected)
         return hir.Block(node.loc, node.type, [*prefix, *cleanup((), node.loc, selected=selected),
@@ -774,7 +784,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         shape = ty.structural_base(owner.type)
         assert isinstance(shape, ty.ObjectType)
         prefix = []
-        selected = freeze_route(owner, node.loc, bindings.access_path(owner).binding_id, prefix)
+        selected = freeze_route(owner, node.loc, bindings.access_path(owner, dictionaries=True).binding_id, prefix)
         if resource(node.type) is None:
             return hir.Block(node.loc, node.type, [*prefix, replace(node, dictionary=selected)], False)
         # The public values view owns independent elements. Compact before
@@ -790,7 +800,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         owner = node.keys.value
         expression(hir.Place(node.loc, owner.type, owner), allowed, inherited=inherited, control=control)
         prefix = []
-        root_id = bindings.access_path(owner).binding_id
+        root_id = bindings.access_path(owner, dictionaries=True).binding_id
         selected = freeze_route(owner, node.loc, root_id, prefix)
         check_selection(node.key, root_id)
         key = freeze_value(expression(node.key, allowed, inherited=inherited, control=control), node.loc, prefix)
@@ -822,7 +832,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         owner = node.keys.value
         expression(hir.Place(node.loc, owner.type, owner), allowed, inherited=inherited, control=control)
         prefix = []
-        root_id = bindings.access_path(owner).binding_id
+        root_id = bindings.access_path(owner, dictionaries=True).binding_id
         selected = freeze_route(owner, node.loc, root_id, prefix)
         check_selection(node.key, root_id)
         key = freeze_value(expression(node.key, allowed, inherited=inherited, control=control), node.loc, prefix)
@@ -853,7 +863,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         owner = node.keys.value
         expression(hir.Place(node.loc, owner.type, owner), allowed, inherited=inherited, control=control)
         prefix = []
-        root_id = bindings.access_path(owner).binding_id
+        root_id = bindings.access_path(owner, dictionaries=True).binding_id
         selected = freeze_route(owner, node.loc, root_id, prefix)
         for supplied in (node.key, node.value):
             check_selection(supplied, root_id)
@@ -1390,7 +1400,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 borrowed = expression(hir.Place(node.loc, node.target.type, node.target), live,
                                       inherited=literal.lifecycle == 'drop', control=control)
                 selected = borrowed.target
-                root_id = bindings.access_path(selected).binding_id
+                root_id = bindings.access_path(selected, dictionaries=True).binding_id
                 prefix = []
                 selected = freeze_route(selected, node.loc, root_id, prefix)
                 check_selection(node.value, root_id)
