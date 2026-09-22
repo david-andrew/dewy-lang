@@ -2667,3 +2667,31 @@ these are not isolated latency measurements. The pair is
 `../dewy-build-artifacts/phase1-entry-places-a240f952`. Its inventory is
 **4,414 sites over 47,648 lines (92.638/KLOC)**, within the 4,500/100 gates.
 The full corpus checkpoint remains the earlier 211-case dictionary-view run.
+
+
+## Public container storage effects (2026-09-22)
+
+Public inference now gives built-in array growth/removal/reservation/joining,
+dictionary/set operations and array iteration bounded read/mutation/allocation
+rows instead of making the whole operation unknown. Storage permission remains
+conservative: even lookup may construct/compact a hash index, and mutation can
+detach shared backing storage. These are permissions, not claims that every
+execution allocates. Selector, argument and eager-default effects propagate;
+unknown callees still cannot satisfy a closed row. Lifecycle hook calls remain
+subject to the ordinary validation after ownership rewriting.
+
+A dictionary entry selection uses its containing dictionary as its public
+subject, not an internal values-array path. Address formation itself reads the
+keys, so a write-only callee cannot silently justify `no reads<table>`. Array
+addresses retain their existing selector-only rule. Sort callbacks remain
+unknown until their implicit call equations are represented.
+
+Validation: 20 initial hosted container checks and 140 adjacent
+allocation/effect/lifecycle checks pass. A fresh second-generation native driver
+agrees with hosted execution on 16 container/scoped-effect kernels and 16
+rejections across x86-64/C, including eager defaults, effectful selectors,
+transitive wrappers, missing permissions and resource drop hooks. This includes
+the added dictionary-address read exclusion regression. Artifacts use
+`../dewy-build-artifacts/phase1-container-effects-` prefixes. The preceding
+dictionary-place commit is the latest complete native fixed point; Phase 1
+remains in progress.

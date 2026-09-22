@@ -367,6 +367,26 @@ answer = ():>int64 & no_effects => {
 }
 ```
 
+Built-in array growth, removal, reservation and joining now have bounded
+storage effects, as do dictionary/set lookup, membership, stores, removal,
+entry snapshots and built-in array iteration. They conservatively require
+`allocates`: dictionary reads may build or compact an index, and mutations
+may detach shared storage. Reads and mutations of a place parameter also
+require its corresponding permissions; private value parameters do not
+introduce external resources. For example:
+
+```dewy
+append = (@items:array<int64> value:int64):>void
+    & reads<items> & mutates<items> & allocates => items.push(value)
+```
+
+Selectors, inserted values and eager lookup defaults retain their own effects.
+Taking a dictionary entry's address still reads its dictionary to find the key;
+it cannot promise `no reads<table>` merely because the callee only writes the
+payload. Lifecycle hook effects are checked after their calls are inserted.
+Sort callbacks remain conservative until their implicit calls are included in
+the public call equations.
+
 Numeric range iterators use allocation-free word counters when
 their finite extent fits or the bounds checker proves every advancing edge
 stays within the word range. A guard alone does not establish that proof:

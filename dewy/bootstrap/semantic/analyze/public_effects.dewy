@@ -10,8 +10,8 @@ import p"effects.dewy" as access
 import p"../placement.dewy" as placement
 import p"storage_borrows.dewy" as storage_borrows
 
-# Initial public checking recognizes scalar computation and read-only value
-# access. Storage operations without a checked allocation model stay unknown.
+# Public checking separates storage permissions from external reads/writes.
+# Operations without a checked allocation or call model stay unknown.
 # Recursion may be pure without terminating: $proof checks termination itself.
 const SCALAR_OPERATIONS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
 scalar = (id:addr nodes:types.Table):>bool => {
@@ -42,7 +42,16 @@ word_value = (node:hir.AST input:Input scan:Scan):>bool => {
     return type is? types.Primitive and type.name in? ['int' 'uint']
 }
 location = (id:addr input:Input scan:Scan):>Location => {
-    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes)
+    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes dictionaries=true)
+    loop step in path.steps {
+        let node=hir.node_at(input.nodes step)
+        if node is? hir.DictLookup {
+            # Key lookup reads its dictionary, not merely a hidden values
+            # field. Use that public receiver as the conservative subject.
+            let keys=hir.node_at(input.nodes node.keys)
+            return if keys is? hir.MemberAccess location(keys.value input scan) else Location[false]
+        }
+    }
     let root=hir.node_at(input.nodes path.root)
     if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return Location[false]
     if root.binding_id in? scan.places {
@@ -62,19 +71,25 @@ unknown = (@scan:Scan):>void => {contribute(rows.Contract[] @scan)}
 storage = (@scan:Scan):>void => {contribute(rows.Contract[rows.Row[[rows.Atom['allocates']]]] @scan)}
 # A projected store and a mutating place call have the same storage demand.
 projected_storage = (id:addr input:Input scan:Scan):>bool => {
-    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes)
+    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes dictionaries=true)
     let root=hir.node_at(input.nodes path.root)
     if root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.frame_values return false
-    loop step in path.steps {if hir.node_at(input.nodes step) is? hir.Index return true}
+    loop step in path.steps {if hir.node_at(input.nodes step) is? hir.Index|hir.DictLookup return true}
     return path.steps.length >? 0 and root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.value_parameters
 }
-# Taking an address evaluates its index expressions, without reading the value
-# at the address. Read/write effects come from the callee after substitution.
+# Taking an array address evaluates selectors without reading its payload.
+# Dictionary selection also reads keys and may prepare/detach entry storage.
+# The callee supplies the effects of using the resulting address.
 indices = (id:addr input:Input @scan:Scan):>void => {
-    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes)
+    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes dictionaries=true)
     loop step in path.steps {
         let node=hir.node_at(input.nodes step)
         if node is? hir.Index {visit(node.index input @scan)}
+        else if node is? hir.DictLookup {
+            let keys=hir.node_at(input.nodes node.keys)
+            if keys is? hir.MemberAccess {record_access(keys.value 'reads' input @scan)} else {unknown(@scan)}
+            visit(node.key input @scan) storage(@scan)
+        }
     }
 }
 record_access = (id:addr family:string input:Input @scan:Scan):>void => {
@@ -82,7 +97,7 @@ record_access = (id:addr family:string input:Input @scan:Scan):>void => {
     if not target.known {unknown(@scan)}
     else if target.subject isnt? none {contribute(rows.Contract[rows.Row[[rows.Atom[family target.subject]]]] @scan)}
     indices(id input @scan)
-    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes)
+    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes dictionaries=true)
     if hir.node_at(input.nodes path.root) isnt? hir.ExpressedIdentifier {visit(path.root input @scan)}
 }
 call_subjects = (call:hir.FunctionCall signature:types.FunctionType input:Input scan:Scan):>dict<string rows.Subject?> | none => {
@@ -114,6 +129,17 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     if node is? hir.Assert and not node.runtime and not node.expect return
     if node is? hir.FunctionCall {
         if node.proof return
+        let method=hir.node_at(input.nodes node.func)
+        if method is? hir.ArrayMethod and method.name in? ['push' 'pop' 'insert' 'truncate' 'clear' 'reserve' 'join'] {
+            # Storage permission includes logical copies and COW detachments.
+            # Sort callbacks keep their distinct, currently unknown boundary.
+            record_access(method.array 'reads' input @scan)
+            if method.name not=? 'join' {record_access(method.array 'mutates' input @scan)}
+            storage(@scan)
+            loop arg in node.pos_args {visit(arg input @scan)}
+            loop arg in node.kw_args.values {visit(arg input @scan)}
+            return
+        }
         let targets=access.direct_targets(node input.analysis input.nodes)
         let callee=hir.node_at(input.nodes node.func)
         let signature=types.node_at(input.types callee.value_type)
@@ -184,6 +210,26 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         }
         return
     }
+    if node is? hir.DictLookup|hir.DictContains|hir.DictStore|hir.DictRemove {
+        let keys=hir.node_at(input.nodes node.keys)
+        if keys isnt? hir.MemberAccess {unknown(@scan) return}
+        # One logical receiver; hidden keys/values are not two evaluations.
+        record_access(keys.value 'reads' input @scan)
+        if node is? hir.DictStore|hir.DictRemove {record_access(keys.value 'mutates' input @scan)}
+        # Reads may rebuild the index; copies can invalidate cached positions.
+        storage(@scan)
+        if node is? hir.DictRemove {if node.key isnt? none {visit(node.key input @scan)}}
+        else {visit(node.key input @scan)}
+        if node is? hir.DictStore and node.value isnt? none {visit(node.value input @scan)}
+        if node is? hir.DictLookup|hir.DictRemove {let fallback=node.default if fallback isnt? none {visit(fallback input @scan)}}
+        return
+    }
+    if node is? hir.DictView|hir.DictEntries {
+        record_access(node.dictionary 'reads' input @scan) storage(@scan) return
+    }
+    if node is? hir.SetAlgebra {
+        visit(node.left input @scan) visit(node.right input @scan) storage(@scan) return
+    }
     if node is? hir.Declare {
         let value=hir.node_at(input.nodes node.expr)
         # A required view has no copy fallback: lowering proves or rejects it.
@@ -206,8 +252,14 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     }
     if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {unknown(@scan) return}
     if node is? hir.IteratorExpression {
-        if not word_iterator(id node input) {unknown(@scan)}
-        loop child in hir.children(hir.node_at(input.nodes node.iterable)) {visit(child input @scan)}
+        if word_iterator(id node input) {
+            loop child in hir.children(hir.node_at(input.nodes node.iterable)) {visit(child input @scan)}
+        } else {
+            let iterable=hir.node_at(input.nodes node.iterable)
+            if types.node_at(input.types types.strip_refinement(iterable.value_type input.types)) is? types.ArrayType {storage(@scan)}
+            else {unknown(@scan)}
+            visit(node.iterable input @scan)
+        }
         return
     }
     if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.OverloadedFunction|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.ValueCast|hir.RepresentationCast|hir.Spread|hir.MultiIteratorExpression {

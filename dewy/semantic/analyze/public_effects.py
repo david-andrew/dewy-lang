@@ -106,7 +106,13 @@ def inventory(root, registry):
                                         and ty.strip_refinement(node.type) in ('int', 'uint'))
 
         def location(node):
-            path = bindings.access_path(node, unwrap=_unwrap)
+            path = bindings.access_path(node, unwrap=_unwrap, dictionaries=True)
+            for step in path.steps:
+                if isinstance(step, hir.DictLookup):
+                    # A key selection searches the containing dictionary.
+                    # Do not expose its hidden values array as a narrower
+                    # public permission, or pretend keys are not read.
+                    return location(step.keys.value) if isinstance(step.keys, hir.MemberAccess) else False
             if path.binding_id in places:
                 fields = tuple(step.name if isinstance(step, hir.MemberAccess) else '[]' for step in path.steps)
                 return rows.Subject('parameter', places[path.binding_id], fields)
@@ -120,10 +126,14 @@ def inventory(root, registry):
                 unknown()
             elif subject is not None:
                 contribute(rows.Contract(rows.Row((rows.Atom(family, subject),))))
-            path = bindings.access_path(node, unwrap=_unwrap)
+            path = bindings.access_path(node, unwrap=_unwrap, dictionaries=True)
             for step in path.steps:
                 if isinstance(step, hir.Index):
                     visit(step.index)
+                elif isinstance(step, hir.DictLookup):
+                    access(step.keys.value, 'reads')
+                    visit(step.key)
+                    storage()
             if not isinstance(path.root, hir.ExpressedIdentifier):
                 visit(path.root)
 
@@ -145,7 +155,7 @@ def inventory(root, registry):
             # Mutating a projection can detach its owning aggregate. The
             # obligation is the same for a store and a forwarded place.
             return path.binding_id not in frame_values and (
-                any(isinstance(step, hir.Index) for step in path.steps)
+                any(isinstance(step, (hir.Index, hir.DictLookup)) for step in path.steps)
                 or bool(path.steps) and path.binding_id in value_parameters)
 
         def visit(node):
@@ -166,6 +176,19 @@ def inventory(root, registry):
                 return  # fact checking owns its purity/erasure boundary
             if isinstance(node, hir.FunctionCall):
                 if node.proof:
+                    return
+                if isinstance(node.func, hir.ArrayMethod) and node.func.name in {'push', 'pop', 'insert', 'truncate', 'clear', 'reserve', 'join'}:
+                    # Growth, detachment, returned storage and implicit value
+                    # copies need permission. COW postponement is not proof of
+                    # no allocation. Lifecycle calls added later are checked
+                    # again; a sort callback deliberately keeps its own call
+                    # boundary instead of being classified as a plain method.
+                    access(node.func.array, 'reads')
+                    if node.func.name != 'join':
+                        access(node.func.array, 'mutates')
+                    storage()
+                    for argument in [*node.pos_args, *node.kw_args.values()]:
+                        visit(argument)
                     return
                 targets = analysis._direct_targets(node)
                 if targets is not None:
@@ -194,10 +217,14 @@ def inventory(root, registry):
                     if isinstance(argument, hir.Place):
                         # Address formation evaluates indices, not the value
                         # at the address. The callee supplies reads/writes.
-                        path = bindings.access_path(argument.target, unwrap=_unwrap)
+                        path = bindings.access_path(argument.target, unwrap=_unwrap, dictionaries=True)
                         for step in path.steps:
                             if isinstance(step, hir.Index):
                                 visit(step.index)
+                            elif isinstance(step, hir.DictLookup):
+                                access(step.keys.value, 'reads')
+                                visit(step.key)
+                                storage()  # selecting a mutable entry can detach storage
                         # The native frame-slot proof uses the same escape
                         # summaries. An unresolved callback may obey its
                         # public row, but currently provides no such storage
@@ -221,6 +248,34 @@ def inventory(root, registry):
                                 and id(argument) not in borrowed_arguments.get(id(node), ())):
                             storage()  # logical aggregate transfer not proved
                 return
+            if isinstance(node, (hir.DictLookup, hir.DictContains, hir.DictStore, hir.DictRemove)):
+                # keys/values are implementation projections of one receiver.
+                # Model that receiver once, and keep eager default/argument
+                # evaluation even when the entry is known to exist.
+                if not isinstance(node.keys, hir.MemberAccess):
+                    unknown()
+                    return
+                access(node.keys.value, 'reads')
+                if isinstance(node, (hir.DictStore, hir.DictRemove)):
+                    access(node.keys.value, 'mutates')
+                # A lazy index rebuild/compaction may allocate even on reads.
+                # Proved positions are not used as a public no-allocation
+                # promise; subsequent lowering can invalidate cached slots.
+                storage()
+                for name in ('key', 'value', 'default'):
+                    argument = getattr(node, name, None)
+                    if argument is not None:
+                        visit(argument)
+                return
+            if isinstance(node, (hir.DictView, hir.DictEntries)):
+                access(node.dictionary, 'reads')
+                storage()
+                return
+            if isinstance(node, hir.SetAlgebra):
+                visit(node.left)
+                visit(node.right)
+                storage()
+                return
             if isinstance(node, hir.Declare):
                 # A required view cannot silently allocate a replacement;
                 # lowering must prove the storage demand or reject it.
@@ -229,7 +284,7 @@ def inventory(root, registry):
                 visit(node.expr)
                 return
             if isinstance(node, (hir.Assign, hir.MemberAssign, hir.IndexAssign)):
-                path = bindings.access_path(node.target, unwrap=_unwrap)
+                path = bindings.access_path(node.target, unwrap=_unwrap, dictionaries=True)
                 # Projected writes may detach a shared array or require an
                 # independent by-value parameter. Do not infer no allocation
                 # merely because the final stored element is a scalar.
@@ -250,10 +305,15 @@ def inventory(root, registry):
                 unknown()
                 return
             if isinstance(node, hir.IteratorExpression):
-                if not word_iterator(node):
+                if word_iterator(node):
+                    for child in hir.children(node.iterable):
+                        visit(child)
+                elif isinstance(ty.structural_base(node.iterable.type), ty.ArrayType):
+                    storage()
+                    visit(node.iterable)
+                else:
                     unknown()
-                for child in hir.children(node.iterable):
-                    visit(child)
+                    visit(node.iterable)
                 return
             if isinstance(node, (hir.Block, hir.Suppress, hir.Return, hir.Flow, hir.IfArm, hir.LoopArm, hir.OverloadedFunction,
                                  hir.ShortCircuit, hir.Obligation, hir.TypeTest, hir.ArrayLength,
