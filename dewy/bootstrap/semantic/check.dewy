@@ -4545,6 +4545,17 @@ loop_flow_inner = (id:addr arm:parser.KeywordExpr env:Environment @session:conte
 # Literal keys and values are separate homogeneous arrays, matching the
 # insertion-order HIR representation. The entry expressions still check in
 # source order within each array, as in the hosted implementation.
+join_container_callables = (left:addr right:addr @session:contexts.Session):>addr? => {
+    let a=types.node_at(session.types left)
+    let b=types.node_at(session.types right)
+    if a isnt? types.FunctionType or b isnt? types.FunctionType return none
+    let a_shape=types.function_type(a.pos_or_kw a.kw_only a.rest a.ret a.type_params @session.types)
+    let b_shape=types.function_type(b.pos_or_kw b.kw_only b.rest b.ret b.type_params @session.types)
+    if not types.same_type(a_shape b_shape session.types) return none
+    # Inferred rows are unresolved here. Subtyping alone can accept either
+    # direction provisionally; choosing one would lose the other body's effects.
+    return subtyping.join([left right] session.links @session.types)
+}
 container_array = (items:array<addr> wanted:addr? id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let values:array<addr> = []
     let element = wanted
@@ -4556,7 +4567,9 @@ container_array = (items:array<addr> wanted:addr? id:addr env:Environment @sessi
         let current = node_at(checked session).value_type
         if element is? none { element = current }
         else if wanted is? none {
-            if subtyping.is_subtype(current element session.links @session.types) {}
+            let callable=join_container_callables(element current @session)
+            if callable isnt? none { element=callable }
+            else if subtyping.is_subtype(current element session.links @session.types) {}
             else if subtyping.is_subtype(element current session.links @session.types) { element = current }
             else return problem(item 'container elements differ in type' 'annotate the container to select one element type' env session)
         }
@@ -6711,9 +6724,13 @@ capture_element = (values:array<addr> id:addr env:Environment @session:contexts.
         if widened is? Error return widened
         let current=node_at(widened session).value_type
         if element is? none {element=current}
-        else if subtyping.is_subtype(current element session.links @session.types) {}
-        else if subtyping.is_subtype(element current session.links @session.types) {element=current}
-        else return problem(id 'loop capture values differ in type' 'annotate the container to choose its element type' env session)
+        else {
+            let callable=join_container_callables(element current @session)
+            if callable isnt? none {element=callable}
+            else if subtyping.is_subtype(current element session.links @session.types) {}
+            else if subtyping.is_subtype(element current session.links @session.types) {element=current}
+            else return problem(id 'loop capture values differ in type' 'annotate the container to choose its element type' env session)
+        }
     }
     $runtime_assert element isnt? none
     return element

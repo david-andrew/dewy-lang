@@ -7850,6 +7850,13 @@ def _tcr_loop_capture(block: p0.Block, *, kind: Literal['array', 'set'], expecte
         widened = [_widen_type_argument(ty.strip_refinement(cast(ty.TypeExpr, node.type)), loc=node.loc, ctx=ctx) for node in nodes]
         chosen = widened[0]
         for index, other in enumerate(widened[1:], start=1):
+            if (
+                isinstance(chosen, ty.FunctionType)
+                and isinstance(other, ty.FunctionType)
+                and replace(chosen, effects=None) == replace(other, effects=None)
+            ):
+                chosen = ctx.type_system.join(chosen, other)
+                continue
             if other == chosen or ctx.type_system.is_subtype(other, chosen):
                 continue
             if ctx.type_system.is_subtype(chosen, other):
@@ -9648,6 +9655,15 @@ def _tcr_array_literal(
                 )
         elif len(concrete_types) == 1:
             element_type = concrete_types[0]
+        elif all(
+            isinstance(item, ty.FunctionType)
+            and replace(item, effects=None) == replace(concrete_types[0], effects=None)
+            for item in concrete_types
+        ):
+            # Distinct bodies have distinct inferred effect rows even when
+            # their call signatures match. An element can select any body,
+            # so retain every alternative's effects in the shared signature.
+            element_type = ctx.type_system.join(*concrete_types)
         else:
             type_error(
                 ctx.srcfile,
