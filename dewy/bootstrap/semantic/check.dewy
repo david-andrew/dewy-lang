@@ -253,6 +253,7 @@ carries_promises = (id:addr target:types.RefinedType session:contexts.Session):>
 against = (value:addr expected:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let checked=against_shape(value expected id env @session)
     if checked is? Error return checked
+    if types.same_type(node_at(value session).value_type expected session.types) return checked
     let node=node_at(checked session)
     loop edge in effect_boundaries.constraints(node_at(value session).value_type expected session.types) {
         if edge.required isnt? none and (effect_inference.pending(edge.actual) or effect_inference.pending(edge.required)) {
@@ -2091,7 +2092,7 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
                 if views.container_entry_types(node_at(container session).value_type session.types) isnt? none return container_index(container target.right id env @session store=node.right)
             }
         }
-        let place = expression(target_id env @session)
+        let place = expression(target_id env @session call_target=true)
         if place is? Error return place
         let member = node_at(place session)
         if member isnt? hir.MemberAccess|hir.Index return problem(id 'assignment requires mutable storage' 'select a binding, record field, or array element' env session)
@@ -2101,6 +2102,9 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
         if value is? Error return value
         container_state.replaced(place env.state @session)
         if member is? hir.Index return put(hir.IndexAssign[node.loc types.primitive('void' @session.types) place value] @session)
+        let marked=receiver_method(value store_type(place @session) id env @session)
+        if marked is? Error return marked
+        value=marked
         return put(hir.MemberAssign[node.loc types.primitive('void' @session.types) place value] @session)
     }
     let scope = bindings.scope_at(session.scopes env.lexical.scope)
@@ -2189,11 +2193,13 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     if annotation is? none and not constant { value = widen(value node.right env @session strings=false abstract=true) }
     if value is? Error return value
     let checked = node_at(value session)
+    let initializer=effect_boundary_value(value session)
+    let initial_node=node_at(initializer session)
     let syntax_id = contexts.syntax_ref(id env.lexical @session)
     let binding_id = if existing is? none bindings.allocate(@session.registry syntax_id name 'value' node.loc) else existing
     let binding = bindings.binding_at(session.registry binding_id)
     let signature=types.node_at(session.types checked.value_type)
-    if annotation is? none and signature is? types.FunctionType and checked isnt? hir.FunctionLiteral|hir.GenericFunction and signature.type_params.length =? 0 and not view {
+    if annotation is? none and signature is? types.FunctionType and initial_node isnt? hir.FunctionLiteral|hir.GenericFunction and signature.type_params.length =? 0 and not view {
         let name="{effect_inference.BINDING_PREFIX}{binding_id}"
         let effects=effect_rows.Contract[effect_rows.Row[variables=[name]]]
         let type=types.function_type(signature.pos_or_kw signature.kw_only signature.rest signature.ret signature.type_params @session.types effects=effects)
@@ -2254,8 +2260,8 @@ declaration = (id:addr env:Environment @session:contexts.Session constant:bool=f
     container_state.seed_fields(binding_id value env.state @session)
     let declared = put(hir.Declare[node.loc types.primitive('void' @session.types) if constant 'const' else 'let' name annotation value binding_id view] @session)
     binding.declaration = declared
-    if checked is? hir.FunctionLiteral | hir.GenericFunction {
-        binding.function = value binding.kind = 'function'
+    if initial_node is? hir.FunctionLiteral | hir.GenericFunction {
+        binding.function = initializer binding.kind = 'function'
         if rhs is? parser.BinOp {binding.literal_path_parameter=source_views.path_parameter(rhs env.lexical session)}
     }
     if checked is? hir.OverloadedFunction {binding.function=value binding.kind='overload'}
@@ -3391,15 +3397,27 @@ string_method = (receiver:addr name:string id:addr env:Environment @session:cont
 # can refer to earlier fields. These bindings identify the already evaluated
 # field values; they do not cause the initializer to run again.
 RecordEntry:type = const [name:string syntax:addr read:addr? read_type:addr? mutable:bool loc:Span]
+# Deferred effect checks retain the original callable underneath. Runtime
+# method metadata belongs to that literal, while the boundary stays in HIR
+# until its obligation has been checked.
+effect_boundary_value = (value:addr session:contexts.Session):>addr => {
+    let node=node_at(value session)
+    loop node is? hir.ValueCast and node.effect_target isnt? none {
+        value=node.expr
+        node=node_at(value session)
+    }
+    return value
+}
 # A function stored in a record field is a receiver method: a call through
 # the field passes the record as its hidden first argument. Only a literal
 # can be one; another function value (`Box[@twice]`) is rejected as in the
 # hosted checker, rather than wrapped, until closures exist.
 receiver_method = (value:addr type:addr id:addr env:Environment @session:contexts.Session forward:bool=false):>addr|Error => {
-    let node=node_at(value session)
+    let literal=effect_boundary_value(value session)
+    let node=node_at(literal session)
     if node is? hir.FunctionLiteral {
         if node.object_receiver return value
-        contexts.replace_hir(value hir.FunctionLiteral[node.loc node.value_type node.pos_or_kw_args node.kw_only_args node.rest_args node.rettype node.body object_receiver=true object_fields=node.object_fields object_type=node.object_type source=node.source] @session)
+        contexts.replace_hir(literal hir.FunctionLiteral[node.loc node.value_type node.pos_or_kw_args node.kw_only_args node.rest_args node.rettype node.body object_receiver=true object_fields=node.object_fields object_type=node.object_type source=node.source] @session)
         return value
     }
     let signature=types.node_at(session.types types.unfold(types.strip_refinement(type session.types) session.types))
@@ -3591,9 +3609,10 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
     let field_bindings:array<hir.FieldBinding> = []
     loop field in fields { if field.binding_id isnt? none { field_bindings.push(hir.FieldBinding[field.binding_id field.name]) } }
     loop field in fields {
-        let literal = node_at(field.value session)
+        let literal_id=effect_boundary_value(field.value session)
+        let literal = node_at(literal_id session)
         if literal isnt? hir.FunctionLiteral continue
-        contexts.replace_hir(field.value hir.FunctionLiteral[literal.loc literal.value_type literal.pos_or_kw_args literal.kw_only_args literal.rest_args literal.rettype literal.body object_receiver=true object_fields=field_bindings object_type=type source=literal.source] @session)
+        contexts.replace_hir(literal_id hir.FunctionLiteral[literal.loc literal.value_type literal.pos_or_kw_args literal.kw_only_args literal.rest_args literal.rettype literal.body object_receiver=true object_fields=field_bindings object_type=type source=literal.source] @session)
     }
     let value = put(hir.ObjectLiteral[node.loc type fields] @session)
     return if expected is? none value else against(value expected id env @session)

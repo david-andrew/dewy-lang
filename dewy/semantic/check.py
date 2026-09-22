@@ -1373,11 +1373,12 @@ def _complete_binding(
     *,
     ctx: Context,
 ) -> hir.Declare:
+    initializer = _unwrap_literal_value(declaration.expr)
     binding = ctx.binding_registry.by_syntax.get(id(ast))
     if binding is None:
         kind: sb.BindingKind = (
             'function'
-            if isinstance(declaration.expr, hir.FunctionLiteral)
+            if isinstance(initializer, hir.FunctionLiteral)
             else 'overload'
             if isinstance(declaration.expr.type, ty.OverloadType)
             else 'value'
@@ -1390,13 +1391,13 @@ def _complete_binding(
         )
     binding.kind = (
         'function'
-        if isinstance(declaration.expr, hir.FunctionLiteral)
+        if isinstance(initializer, hir.FunctionLiteral)
         else 'overload'
         if isinstance(declaration.expr.type, ty.OverloadType)
         else 'value'
     )
     if (declaration.annotation is None and isinstance(declaration.expr.type, ty.FunctionType)
-            and not isinstance(declaration.expr, (hir.FunctionLiteral, hir.GenericFunction))
+            and not isinstance(initializer, (hir.FunctionLiteral, hir.GenericFunction))
             and not declaration.expr.type.type_params and not declaration.view):
         # A copied handle can later change independently of its source. Give
         # its inferred storage row a fresh lower-bound variable rather than
@@ -1428,8 +1429,8 @@ def _complete_binding(
         binding.store_type = stored
         declaration = replace(declaration, annotation=stored)
     binding.declaration = declaration
-    if isinstance(declaration.expr, hir.FunctionLiteral):
-        binding.function = declaration.expr
+    if isinstance(initializer, hir.FunctionLiteral):
+        binding.function = initializer
     ctx.binding_scopes[declaration.name] = binding
     _seed_literal_facts(declaration, ctx=ctx)
     return declaration
@@ -1842,18 +1843,14 @@ def tcr_assign(ast: p0.BinOp, *, ctx: Context, expected: ty.Type|None=None) -> h
         return hir.IndexAssign(ast.loc, ty.VOID_TYPE, target, value)
     if isinstance(target, hir.MemberAccess):
         if isinstance(target.type, (ty.FunctionType, ty.OverloadType)):
-            if not isinstance(value, hir.FunctionLiteral):
+            if not isinstance(_unwrap_literal_value(value), hir.FunctionLiteral):
                 not_implemented(
                     ctx.srcfile,
                     value.loc,
                     'assigning a non-literal function to an object field',
                 )
             assert isinstance(target.value.type, ty.ObjectType)
-            value = replace(
-                value,
-                object_receiver=True,
-                object_type=target.value.type,
-            )
+            value = _mark_object_receiver(value, (), target.value.type)
         assigned = sb.member_path(target)
         if assigned is not None:
             root_id, path = assigned
@@ -8261,6 +8258,10 @@ def _mark_object_receiver(
     field_bindings: tuple[tuple[int, str], ...],
     object_type: ty.ObjectType,
 ) -> hir.AST:
+    # Effect boundaries defer a check; they do not turn a literal method
+    # into a different runtime callable or remove its hidden receiver.
+    if isinstance(value, hir.ValueCast) and value.effect_target is not None:
+        return replace(value, expr=_mark_object_receiver(value.expr, field_bindings, object_type))
     if not isinstance(value, hir.FunctionLiteral):
         return value
     binding_ids = {binding_id for binding_id, _name in field_bindings}
@@ -8551,7 +8552,7 @@ def _tcr_object_literal(
             value = typecheck_and_resolve_inner(value_ast, ctx=value_context, expected=field_expected)
         require_valued(value.type, ctx.srcfile, value.loc, 'object field')
         if isinstance(value.type, (ty.FunctionType, ty.OverloadType)) and not isinstance(
-            value,
+            _unwrap_literal_value(value),
             hir.FunctionLiteral,
         ):
             not_implemented(
@@ -8571,7 +8572,7 @@ def _tcr_object_literal(
         binding.type = field_type
         binding.kind = (
             'function'
-            if isinstance(value, hir.FunctionLiteral)
+            if isinstance(_unwrap_literal_value(value), hir.FunctionLiteral)
             else 'value'
         )
         ctx.declarations[name] = field_type
@@ -8594,8 +8595,9 @@ def _tcr_object_literal(
             field_type = value.type
         binding = field_bindings[index]
         binding.type = field_type
-        if isinstance(value, hir.FunctionLiteral):
-            binding.function = value
+        literal = _unwrap_literal_value(value)
+        if isinstance(literal, hir.FunctionLiteral):
+            binding.function = literal
         ctx.declarations[name] = field_type
         ctx.binding_scopes[name] = binding
         checked_fields[index] = value
@@ -8639,8 +8641,9 @@ def _tcr_object_literal(
             object_fields,
             object_type,
         )
-        if isinstance(value, hir.FunctionLiteral):
-            binding.function = value
+        literal = _unwrap_literal_value(value)
+        if isinstance(literal, hir.FunctionLiteral):
+            binding.function = literal
         marked.append(replace(object_field, value=value))
     return hir.ObjectLiteral(block.loc, object_type, marked)
 
@@ -17015,7 +17018,7 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
         missing = _missing_invariants(checked.type, target)
         if missing:
             checked = _prove_refinements(checked, ty.RefinedType(target, tuple(missing)), ctx=ctx)
-    if any(effect_inference.pending(edge.actual) or effect_inference.pending(edge.required)
+    if node.type != expected and any(effect_inference.pending(edge.actual) or effect_inference.pending(edge.required)
            for edge in effect_inference.type_constraints(node.type, expected)
            if edge.required is not None):
         return hir.ValueCast(node.loc, checked.type, checked, effect_target=expected)
