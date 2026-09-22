@@ -96,6 +96,17 @@ class ParameterEffects:
     def read_only(self) -> bool:
         return not self.writes and not self.escapes
 
+    def read_only_at(self, route: Route) -> bool:
+        """No write or exposure overlaps this projection's storage.
+
+        Ancestor replacement and descendant mutation both conflict. Sibling
+        record fields do not; array indices deliberately share one wildcard
+        step, so this does not assume that two selections are disjoint.
+        """
+        return all(not (route[:len(other)] == other or other[:len(route)] == route)
+                   for routes in (self.mutates, self.rebinds, self.escapes)
+                   for other in routes)
+
     def add_read(self, route: Route) -> bool:
         return _add_route(self.reads, route)
 

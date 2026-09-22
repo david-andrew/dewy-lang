@@ -42,6 +42,17 @@ Pairing:type = [target:addr pairs:array<ArgumentPair>]
 
 writes = (summary:ParameterEffects):>bool => summary.mutates.length >? 0 or summary.rebinds.length >? 0
 read_only = (summary:ParameterEffects):>bool => not writes(summary) and summary.escapes.length =? 0
+# A projection must be stable above and below its route. Sibling record
+# fields are independent; the shared [] step never proves indices disjoint.
+disjoint_routes = (routes:array<Route> route:Route):>bool => {
+    loop other in routes {
+        if bindings.path_starts_with(route.steps other.steps) or bindings.path_starts_with(other.steps route.steps) return false
+    }
+    return true
+}
+read_only_at = (summary:ParameterEffects route:Route):>bool => {
+    return disjoint_routes(summary.mutates route) and disjoint_routes(summary.rebinds route) and disjoint_routes(summary.escapes route)
+}
 # A word carries no storage: passing it to a raw operation exposes nothing.
 word_type = (id:addr type_nodes:types.Table):>bool => {
     let type=types.node_at(type_nodes types.unfold(types.strip_refinement(id type_nodes) type_nodes))

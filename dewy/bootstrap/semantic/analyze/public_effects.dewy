@@ -60,6 +60,14 @@ unknown = (@scan:Scan):>void => {contribute(rows.Contract[] @scan)}
 # Logical storage work includes copies even when COW defers the actual copy.
 # Without placement/move evidence, aggregate boundaries need permission.
 storage = (@scan:Scan):>void => {contribute(rows.Contract[rows.Row[[rows.Atom['allocates']]]] @scan)}
+# A projected store and a mutating place call have the same storage demand.
+projected_storage = (id:addr input:Input scan:Scan):>bool => {
+    let path=bindings.access_path(access.unwrap(id input.nodes) input.nodes)
+    let root=hir.node_at(input.nodes path.root)
+    if root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.frame_values return false
+    loop step in path.steps {if hir.node_at(input.nodes step) is? hir.Index return true}
+    return path.steps.length >? 0 and root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.value_parameters
+}
 # Taking an address evaluates its index expressions, without reading the value
 # at the address. Read/write effects come from the callee after substitution.
 indices = (id:addr input:Input @scan:Scan):>void => {
@@ -148,6 +156,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
                     # Match lowering's escape proof for a private frame slot.
                     # Public callback permissions alone do not yet supply it.
                     let safe=targets isnt? none and targets.length >? 0
+                    let writes=false
                     if targets isnt? none {
                         loop target_id in targets {
                             let target_node=hir.node_at(input.nodes target_id)
@@ -160,9 +169,10 @@ visit = (id:addr input:Input @scan:Scan):>void => {
                                 }
                             }
                             if summary is? none or summary.escapes.length >? 0 {safe=false}
+                            if summary isnt? none and access.writes(summary) {writes=true}
                         }
                     }
-                    if not safe {storage(@scan)}
+                    if not safe or (writes and projected_storage(value.target input scan)) {storage(@scan)}
                 }
             }
             else {
@@ -181,13 +191,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     }
     if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign {
         let target=hir.node_at(input.nodes node.target)
-        let path=bindings.access_path(access.unwrap(node.target input.nodes) input.nodes)
-        let root=hir.node_at(input.nodes path.root)
-        let projected_storage=false
-        loop step in path.steps {if hir.node_at(input.nodes step) is? hir.Index {projected_storage=true}}
-        if path.steps.length >? 0 and root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.value_parameters {projected_storage=true}
-        let placed=root is? hir.ExpressedIdentifier and root.binding_id isnt? none and root.binding_id in? scan.frame_values
-        if not scalar(target.value_type input.types) or (projected_storage and not placed) {storage(@scan)}
+        if not scalar(target.value_type input.types) or projected_storage(node.target input scan) {storage(@scan)}
         record_access(node.target 'mutates' input @scan)
         if node is? hir.Assign and node.op not=? '=' {record_access(node.target 'reads' input @scan)}
         visit(node.value input @scan)

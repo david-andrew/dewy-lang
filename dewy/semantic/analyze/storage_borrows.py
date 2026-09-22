@@ -10,7 +10,7 @@ this proof unknown; ordinary lowering may have more precise borrow proofs.
 from collections import deque
 
 from .. import hir, ty, bindings
-from .effects import _EffectAnalyzer, _literal_params, _unwrap
+from .effects import INDEX_STEP, _EffectAnalyzer, _literal_params, _unwrap
 
 OPERATORS = frozenset({
     '__add__', '__sub__', '__mul__', '__div__', '__floordiv__', '__mod__',
@@ -118,7 +118,9 @@ def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]
                     # No conversion or lifecycle operation at this boundary.
                     if (own is not None and parameter is not None and ordinary(argument.type)
                             and argument.type == parameter.type and ordinary(own.type)
-                            and not parameter.place and incoming is not None and incoming.read_only
+                            and not parameter.place and incoming is not None
+                            and (incoming.read_only or incoming.read_only_at(tuple(
+                                INDEX_STEP if isinstance(step, hir.Index) else step.name for step in path.steps)))
                             and outgoing is not None and outgoing.read_only):
                         current.add(id(argument))
                     else:

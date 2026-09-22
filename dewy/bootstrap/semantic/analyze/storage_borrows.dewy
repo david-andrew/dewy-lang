@@ -46,6 +46,16 @@ ordinary=(type:addr table:types.Table @known:dict<addr bool>):>bool=>{
     known[type]=result
     return result
 }
+stable_projection=(summary:effects.ParameterEffects path:bindings.AccessPath nodes:array<hir.AST>):>bool=>{
+    if effects.read_only(summary) return true
+    let steps:array<string>=[]
+    loop step_id in path.steps {
+        let step=hir.node_at(nodes step_id)
+        if step is? hir.MemberAccess {steps.push(step.name)}
+        else {steps.push('[]')}
+    }
+    return effects.read_only_at(summary effects.Route[steps])
+}
 forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>{
     let eligible:dict<addr bool>=[]
     let bodies:dict<addr array<addr>>=[]
@@ -136,7 +146,7 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
                             let expected=wanted.get(pair.parameter)
                             let incoming=summaries.by_param_binding.get(source.binding_id)
                             let outgoing=summaries.by_param_binding.get(pair.parameter)
-                            safe=own isnt? none and expected isnt? none and ordinary(arg.value_type table @eligible) and arg.value_type =? expected and ordinary(own table @eligible) and incoming isnt? none and effects.read_only(incoming) and outgoing isnt? none and effects.read_only(outgoing)
+                            safe=own isnt? none and expected isnt? none and ordinary(arg.value_type table @eligible) and arg.value_type =? expected and ordinary(own table @eligible) and incoming isnt? none and stable_projection(incoming path nodes) and outgoing isnt? none and effects.read_only(outgoing)
                         }
                         if safe {current.add(pair.argument)} else {rejected.add(pair.argument)}
                     }

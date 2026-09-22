@@ -134,6 +134,13 @@ def summarize(root, registry):
                 supplied[str(index)] = subject
             return supplied
 
+        def projected_storage(path):
+            # Mutating a projection can detach its owning aggregate. The
+            # obligation is the same for a store and a forwarded place.
+            return path.binding_id not in frame_values and (
+                any(isinstance(step, hir.Index) for step in path.steps)
+                or bool(path.steps) and path.binding_id in value_parameters)
+
         def visit(node):
             if isinstance(node, hir.ValueCast) and node.effect_target is not None:
                 visit(node.expr)
@@ -197,6 +204,8 @@ def summarize(root, registry):
                                                               storage_effects.for_param_binding(parameter.binding_id))
                             if not parameter_summaries or any(item is None or item.escapes for item in parameter_summaries):
                                 storage()
+                            elif projected_storage(path) and any(item.writes for item in parameter_summaries):
+                                storage()
                     else:
                         visit(argument)
                         if (not word_value(argument) and not isinstance(argument.type, (ty.FunctionType, ty.OverloadType))
@@ -215,9 +224,7 @@ def summarize(root, registry):
                 # Projected writes may detach a shared array or require an
                 # independent by-value parameter. Do not infer no allocation
                 # merely because the final stored element is a scalar.
-                projected_storage = (any(isinstance(step, hir.Index) for step in path.steps)
-                                     or bool(path.steps) and path.binding_id in value_parameters)
-                if not scalar(node.target.type) or projected_storage and path.binding_id not in frame_values:
+                if not scalar(node.target.type) or projected_storage(path):
                     storage()
                 access(node.target, 'mutates')
                 if isinstance(node, hir.Assign) and node.op != '=':

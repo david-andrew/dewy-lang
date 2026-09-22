@@ -2274,3 +2274,26 @@ passes the activation kernel and generic negative-guarantee fixture on x86-64
 and C against hosted execution, and rejects both lifecycle and generic
 guarantee violations. This removes unnecessary work without changing effect
 semantics; no isolated latency improvement has been measured yet.
+
+## Projection stability and forwarded place storage (2026-09-21)
+
+The storage evidence shared with allocation checking now asks whether writes,
+rebindings or escapes overlap the particular projection being forwarded.
+An untouched sibling field can remain borrowed; replacing an ancestor or
+mutating a descendant cannot. Array selectors still use the conservative
+shared index step. Ordinary whole-parameter read-only cases take the existing
+fast path without constructing a route. Raw exposure, unknown callees and
+lifecycle-bearing values retain their restrictions.
+
+The tests also exposed an accounting gap: forwarding a scalar field/element
+to a mutating helper could omit the storage obligation imposed on a direct
+projected write. Both public-effect analyzers now use the same projected-store
+rule for these calls. A disjoint borrow does not establish that mutating the
+other field is allocation-free. Known read-only element calls and proven
+scalar frame places still satisfy empty rows.
+
+Validation: 16 new hosted cases pass, with eight valid programs and eight
+rejections checked by a second-generation native driver against hosted
+checking/execution on x86-64 and C. The adjacent aggregate-borrow/access and
+public-allocation/effect checks pass (29 and 106 existing hosted cases).
+These are bounded checks, not another complete pytest or fixed-point run.
