@@ -206,7 +206,7 @@ change_length = (@state:State sequence:addr change:ranges.Interval):>void => {
         let lower = entry.interval.lower
         if lower is? none or adjustment is? none {
             remove(@state fact)
-        } else { put(@state fact ranges.Interval[lower+adjustment none]) }
+        } else { put(@state fact ranges.Interval[lower+adjustment none entry.interval.capped or change.capped]) }
     }
 }
 
@@ -230,7 +230,7 @@ implied = (state:State fact:Fact context:Context):>Evidence => {
     if smaller is? none or larger is? none or smaller.upper is? none or larger.lower is? none return none
     let gap = larger.lower - smaller.upper
     if gap <? 0 return none
-    return ranges.Interval[gap none]
+    return ranges.Interval[gap none smaller.capped or larger.capped]
 }
 evidence = (state:State fact:Fact context:Context):>Evidence => {
     let found = lookup(state fact)
@@ -288,7 +288,7 @@ widen = (previous:State current:State context:Context):>State => {
                 let upper = context.cap
                 if interval.lower isnt? none { lower = interval.lower }
                 if interval.upper isnt? none { upper = interval.upper }
-                interval = ranges.Interval[lower upper]
+                interval = ranges.Interval[lower upper interval.capped or interval.upper is? none]
             }
             else {
                 let width = context.widths.get(fact.term.binding_id)
@@ -378,7 +378,7 @@ shifted = (state:State term:Term shift:bigint):>State => {
         }
         if fact is? Remainder { eligible = term.projection =? 'value' and fact.offset =? term.binding_id }
         let gap = entry.interval.lower - shift
-        if eligible and gap >=? 0 { put(@result fact ranges.Interval[gap none]) }
+        if eligible and gap >=? 0 { put(@result fact ranges.Interval[gap none entry.interval.capped]) }
     }
     return result
 }

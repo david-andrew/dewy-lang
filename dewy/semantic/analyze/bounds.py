@@ -639,7 +639,7 @@ def _change_length_facts(state: State, array_id: int, change: Interval) -> None:
             if interval.lower is None or adjustment is None:
                 del state[key]
             else:
-                state[key] = Interval(interval.lower + adjustment, None)
+                state[key] = Interval(interval.lower + adjustment, None, capped=interval.capped or change.capped)
         else:
             index = _decode_index_fact(key)
             if index is not None and index[1] == array_id and (change.lower is None or change.lower < 0):
@@ -1044,7 +1044,7 @@ class _BoundsValidator:
             if self._nonzero_proven(node, None, state):
                 lower = 1 if interval.lower == 0 else interval.lower
                 upper = -1 if interval.upper == 0 else interval.upper
-                return Interval(lower, upper)
+                return Interval(lower, upper, capped=interval.capped)
         return interval
 
     def _validate_length_invariant(self, node: hir.FunctionCall, array_id: int, after: Interval, state: State) -> None:
@@ -2515,7 +2515,7 @@ class _BoundsValidator:
         if interval is not None:
             # a `not=? 0` fact moves a bound that sits on zero past it
             if node.binding_id is not None and _nonzero_key(node.binding_id) in state and (interval.lower == 0 or interval.upper == 0):
-                return Interval(1 if interval.lower == 0 else interval.lower, -1 if interval.upper == 0 else interval.upper)
+                return Interval(1 if interval.lower == 0 else interval.lower, -1 if interval.upper == 0 else interval.upper, capped=interval.capped)
             return interval
         constant = self._constant_binding(node.binding_id, set())
         if constant is not None:
@@ -4098,7 +4098,7 @@ class _BoundsValidator:
                 continue
             remainder = _decode_remainder_fact(key)
             if remainder is not None and remainder[2] == term and interval.lower - shift >= 0:
-                shifted[key] = Interval(interval.lower - shift, None)
+                shifted[key] = Interval(interval.lower - shift, None, capped=interval.capped)
         return shifted
 
     def _seed_sum_facts(self, subject: int, value: hir.AST, state: State) -> None:
@@ -4119,11 +4119,11 @@ class _BoundsValidator:
                 order = _decode_order_fact(key)
                 if order is not None and order[0] == term and order[1] != term:
                     if interval.lower - shift >= 0:
-                        state[_order_key(subject, order[1])] = Interval(interval.lower - shift, None)
+                        state[_order_key(subject, order[1])] = Interval(interval.lower - shift, None, capped=interval.capped or constant.capped)
                     continue
                 remainder = _decode_remainder_fact(key)
                 if remainder is not None and remainder[0] == term and interval.lower - shift >= 0:
-                    state[_remainder_key(subject, remainder[1], remainder[2])] = Interval(interval.lower - shift, None)
+                    state[_remainder_key(subject, remainder[1], remainder[2])] = Interval(interval.lower - shift, None, capped=interval.capped or constant.capped)
             return
         if value.func.name == '__sub__':
             # `let start = text.length - suffix.length` under `suffix.length <= text.length`
@@ -4143,7 +4143,7 @@ class _BoundsValidator:
         for key, interval in list(state.items()):
             remainder = _decode_remainder_fact(key)
             if remainder is not None and {remainder[0], remainder[2]} == {left_id, right_id} and interval.lower is not None:
-                state[_order_key(subject, remainder[1])] = Interval(interval.lower, None)
+                state[_order_key(subject, remainder[1])] = Interval(interval.lower, None, capped=interval.capped)
 
     def _copy_relational_facts(self, state: State, source: int, target: int) -> None:
         """`let x = y`: the order, remainder, index and nonzero facts of `y` hold of `x`."""
@@ -4327,7 +4327,7 @@ class _BoundsValidator:
         if smaller_interval is None or larger_interval is None or smaller_interval.upper is None or larger_interval.lower is None:
             return None
         gap = larger_interval.lower - smaller_interval.upper
-        return Interval(gap, None) if gap >= 0 else None
+        return Interval(gap, None, capped=smaller_interval.capped or larger_interval.capped) if gap >= 0 else None
 
     def _vacuous(self, state: State, key: FactKey) -> bool:
         """Whether an element fact holds of `state` because the array is empty there."""
@@ -5088,6 +5088,7 @@ class _BoundsValidator:
                 interval = Interval(
                     0 if interval.lower is None else interval.lower,
                     self.max_length if interval.upper is None else interval.upper,
+                    capped=interval.capped or interval.upper is None,
                 )
             else:
                 # nor a variable its width: a `uint64` counter widens to `[0, 2^64-1]`, not `[-∞, ∞]`

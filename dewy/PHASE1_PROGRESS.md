@@ -3304,3 +3304,19 @@ compilation on x86-64/C, including a nonnegative difference established through
 eight terms. Earlier adjacent hosted loop/proof checks also passed. Artifacts
 use `phase1-difference-closure-*`. The general qualifier engine and exact unsafe
 assumption provenance remain larger tasks.
+
+
+## Preserve address-cap provenance through fact transfers (2026-09-22)
+
+Nonzero narrowing, length changes, remainder shifts, affine fact transfers and
+implied order evidence now retain their input intervals' address-cap flag.
+Length widening records when an unbounded endpoint is replaced by the target
+cap, while an unchanged explicit bound stays uncapped. This fixes provenance
+loss without changing the numeric proof rules; it is not exact unsafe-assumption
+dependency tracking.
+
+Fifteen focused checks passed, including four direct hosted/native analysis
+comparisons with capped states and length changes. A fresh native driver passed
+four runtime kernels and three rejections on x86-64/C. The added runtime kernel
+checks the returned provenance after length transfer, remainder shifting,
+widening and implied evidence. Artifacts use `phase1-address-provenance-*`.

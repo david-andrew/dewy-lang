@@ -271,10 +271,10 @@ seed_sum = (@state:facts.State subject:addr id:addr env:values.Environment conte
             let lower = entry.interval.lower
             if lower is? none continue
             if fact is? facts.Order and facts.same_term(fact.smaller term) and not facts.same_term(fact.larger term) {
-                if lower - shift >=? 0 { facts.put(@state facts.order(facts.Term[subject] fact.larger) ranges.Interval[lower-shift none]) }
+                if lower - shift >=? 0 { facts.put(@state facts.order(facts.Term[subject] fact.larger) ranges.Interval[lower-shift none entry.interval.capped or constant.capped]) }
             }
             else if fact is? facts.Remainder and facts.same_term(fact.subject term) and lower - shift >=? 0 {
-                facts.put(@state facts.remainder(facts.Term[subject] fact.upper fact.offset) ranges.Interval[lower-shift none])
+                facts.put(@state facts.remainder(facts.Term[subject] fact.upper fact.offset) ranges.Interval[lower-shift none entry.interval.capped or constant.capped])
             }
         }
         return
@@ -303,7 +303,7 @@ seed_sum = (@state:facts.State subject:addr id:addr env:values.Environment conte
         let lower = entry.interval.lower
         if fact is? facts.Remainder and lower isnt? none {
             if (facts.same_term(fact.subject left) and fact.offset =? right.binding_id) or (facts.same_term(fact.subject right) and fact.offset =? left.binding_id) {
-                facts.put(@state facts.order(facts.Term[subject] fact.upper) ranges.Interval[lower none])
+                facts.put(@state facts.order(facts.Term[subject] fact.upper) ranges.Interval[lower none entry.interval.capped])
             }
         }
     }

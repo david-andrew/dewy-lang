@@ -76,7 +76,13 @@ def test_native_fact_state_matches_hosted(tmp_path):
                        remainder(1, length(large), large): interval(0, None),
                        bounds._index_fact_key(1, large): interval(None, None),
                        bounds._nonzero_key(1): interval(None, None)})
-    changes = [interval.exact(1), interval.exact(-1), interval(0, 2), interval(None, 0), interval(-7, 0), interval(None, None)]
+    states.extend([
+        {1: interval(0, 0, capped=True), length(2): interval(2, 5, capped=True),
+         order(1, length(2)): interval(2, None, capped=True),
+         remainder(1, length(2), 3): interval(4, None, capped=True)},
+        {1: interval(0, 0), length(2): interval(3, 7)},
+    ])
+    changes = [interval.exact(1), interval.exact(-1), interval(0, 2), interval(None, 0), interval(-7, 0), interval(None, None), interval(1, 2, capped=True)]
     lines = []
     for i, state in enumerate(states):
         lines.append(f'    let s{i}:facts.State = facts.State[]')
@@ -110,7 +116,7 @@ def test_native_fact_state_matches_hosted(tmp_path):
         result.pop(length(2), None)
         bounds._drop_index_facts(result, array_id=2)
         expected.extend(f'{i}:forget-length|{fact(key)[1]}|{spelling(value)}' for key, value in result.items())
-    changes_text = ' '.join(f'ranges.Interval[{"none" if c.lower is None else f"({c.lower})"} {"none" if c.upper is None else f"({c.upper})"}]' for c in changes)
+    changes_text = ' '.join(f'ranges.Interval[{"none" if c.lower is None else f"({c.lower})"} {"none" if c.upper is None else f"({c.upper})"} {str(c.capped).lower()}]' for c in changes)
     source = tmp_path / 'fact_state.dewy'
     source.write_text(f'''
 import p"{ROOT / 'dewy/bootstrap/semantic/analyze/fact_state.dewy'}" as facts
