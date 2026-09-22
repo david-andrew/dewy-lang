@@ -39,7 +39,8 @@ Escaping closures remain a subsequent step. An unsupported representation report
 pending-implementation diagnostic before program emission.
 """
 OwnedLocal:type = const [value:addr value_type:addr box:addr?=none condition:addr?=none]
-ScalarProjection:type = const [function:addr read:addr field:string result:addr symbol:string borrowed:bool=false]
+ProjectionField:type = const [name:string owner:addr result:addr]
+ScalarProjection:type = const [function:addr read:addr fields:array<ProjectionField> result:addr symbol:string borrowed:bool=false]
 # One dynamic aggregate copy the lowering decided, for `dewy analyze`: what
 # was copied, at which kind of site, and why no borrow or move applied.
 CopyNote:type = const [kind:string type:string site:string reason:string loc:Span source:addr? explicit:bool=false runtime_sized:bool=true]
@@ -427,12 +428,15 @@ expression = (id:addr @state:State):>addr => {
         # place before asking for a variant, avoiding a record/cell snapshot
         # on every ordinary field access just to rule this optimization out.
         $runtime_assert node.value <? state.input.nodes.length
-        if state.input.nodes[node.value] is? hir.FunctionCall {
-            let projection=scalar_getter_projection(node @state)
-            if projection isnt? none {
-                let call=hir.node_at(state.input.nodes node.value)
-                $runtime_assert call is? hir.FunctionCall
-                return ordinary_call(node.value call runtime_type(node.value_type node @state) @state projection=projection)
+        if state.input.nodes[node.value] is? hir.FunctionCall|hir.MemberAccess {
+            let call_id=projection_call(node.value state.input.nodes)
+            if call_id isnt? none {
+                let projection=scalar_getter_projection(node call_id @state)
+                if projection isnt? none {
+                    let call=hir.node_at(state.input.nodes call_id)
+                    $runtime_assert call is? hir.FunctionCall
+                    return ordinary_call(call_id call runtime_type(node.value_type node @state) @state projection=projection)
+                }
             }
         }
         let stored=stored_type(id state)
@@ -960,13 +964,20 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
         # Keep the selected field while the route and all enclosing locals
         # are alive. Scalars pass through; aggregate handles acquire their
         # own lifetime before ordinary return cleanup releases the source.
-        let member=hir.MemberAccess[node.loc projection.result id projection.field]
         let prefix:array<addr>=[]
         let receiver=read_operand(id @prefix @state)
-        let value=field_read(field_address(receiver.value member @state) projection.result member @state)
-        # finish_read already keeps a field of an owned temporary receiver.
-        if receiver.owner_type is? none {value=copy_value(value projection.result member @state)}
-        return finish_read(value receiver member @prefix @state)
+        let value=receiver.value
+        loop field in projection.fields {
+            let layout=object_layout(field.owner node @state)
+            let offset=layout.offsets.get(field.name)
+            if offset is? none return reject(node 'a projected field is absent from its record layout' @state)
+            value=field_read(address(value offset node @state) field.result node @state)
+        }
+        # Keep only the leaf, before finish_read releases the complete owner.
+        # No intermediate record acquires an independent lifetime.
+        let selected=hir.MemberAccess[node.loc projection.result id '']
+        if receiver.owner_type is? none {value=copy_value(value projection.result selected @state)}
+        return finish_read(value receiver selected @prefix @state)
     }
     if node is? hir.Suppress return owned_value(node.item @state site)
     # A statement block around a transferred local is transparent to
@@ -3571,27 +3582,53 @@ getter_read = (body:addr nodes:array<hir.AST>):>addr? => {
     }
     return terminal
 }
-scalar_getter_projection = (node:hir.MemberAccess @state:State):>ScalarProjection? => {
-    let call=hir.node_at(state.input.nodes node.value)
+# Follow field syntax only; indices and methods retain their own evaluation
+# rules. Ordinary field reads inspect the input arena without copying nodes.
+projection_call = (id:addr nodes:array<hir.AST>):>addr? => {
+    let current=id
+    loop true {
+        $runtime_assert current <? nodes.length
+        const node=@nodes[current]
+        if node is? hir.MemberAccess {current=node.value continue}
+        return if node is? hir.FunctionCall current else none
+    }
+}
+scalar_getter_projection = (node:hir.MemberAccess call_id:addr @state:State):>ScalarProjection? => {
+    let call=hir.node_at(state.input.nodes call_id)
     if call isnt? hir.FunctionCall return none
     let direct=captures.resolve(call.func call.selected_method_index state.capture_plan state.input.nodes)
     if direct is? none return none
     let literal=hir.node_at(state.input.nodes direct)
-    if literal isnt? hir.FunctionLiteral or literal.object_receiver return none
-    let record=object_type(literal.rettype state)
-    if record is? none or literal.rettype not=? call.value_type return none
-    let field=types.object_field(record node.name)
-    if field is? none or field.value_type not=? node.value_type return none
+    if literal isnt? hir.FunctionLiteral or literal.object_receiver or literal.rettype not=? call.value_type return none
+    let reverse:array<hir.MemberAccess>=[node]
+    let current=node.value
+    loop current not=? call_id {
+        let member=hir.node_at(state.input.nodes current)
+        if member isnt? hir.MemberAccess return none
+        reverse.push(member) current=member.value
+    }
+    let fields:array<ProjectionField>=[]
+    let owner=literal.rettype
+    let key="{direct}:"
+    loop reverse.length >? 0 {
+        let member=reverse.pop
+        let record=object_type(owner state)
+        if record is? none or hir.node_at(state.input.nodes member.value).value_type not=? owner return none
+        let field=types.object_field(record member.name)
+        if field is? none or field.value_type not=? member.value_type return none
+        fields.push(ProjectionField[member.name owner member.value_type])
+        key+="{member.name.length}:{member.name}"
+        owner=member.value_type
+    }
     let array=array_type(node.value_type state)
     let owned_handle=state.allocator isnt? none and (owned_string(node.value_type state) or array isnt? none and array.length is? none)
     if not types.is_primitive(types.node_at(state.type_nodes node.value_type) 'bool') and views.fixed_integer_layout(node.value_type state.type_nodes) is? none and not owned_handle return none
     if direct not in? state.getter_reads {state.getter_reads[direct]=getter_read(literal.body state.input.nodes)}
     let read=state.getter_reads.get(direct default=none)
     if read is? none return none
-    let key="{direct}:{node.name}"
     let existing=state.scalar_projections.get(key)
     if existing isnt? none return existing
-    let projection=ScalarProjection[direct read node.name node.value_type fresh('project' @state)]
+    let projection=ScalarProjection[direct read fields node.value_type fresh('project' @state)]
     state.scalar_projections[key]=projection
     state.pending_projections.push(projection)
     return projection
@@ -3756,7 +3793,7 @@ getter_borrow_projection = (id:addr call:hir.FunctionCall @state:State):>ScalarP
     let key="borrow:{direct}"
     let existing=state.scalar_projections.get(key)
     if existing isnt? none return existing
-    let projection=ScalarProjection[direct read '' literal.rettype fresh('borrow' @state) true]
+    let projection=ScalarProjection[direct read [] literal.rettype fresh('borrow' @state) true]
     state.scalar_projections[key]=projection
     state.pending_projections.push(projection)
     return projection

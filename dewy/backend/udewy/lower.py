@@ -59,6 +59,7 @@ from .lowering_shared import (
     STRING_DESCRIPTOR_SIZE,
     STRING_OWNER_OFFSET,
     LocalBindingKey,
+    ProjectionPath,
     local_binding_key,
     replace_changed,
     LoopRegion,
@@ -410,8 +411,8 @@ class _Lowerer(
         # before copying its record. Variants retain the original input ABI and
         # discovery identities; only their output and terminal read differ.
         self.scalar_projection_bodies: dict[int, bool] = {}
-        self.scalar_projections: dict[tuple[int, str], tuple[_FunctionDef, str, ty.Type, str]] = {}
-        self.pending_scalar_projections: list[tuple[_FunctionDef, str, ty.Type, str]] = []
+        self.scalar_projections: dict[tuple[int, tuple[str, ...]], tuple[_FunctionDef, ProjectionPath, ty.Type, str]] = {}
+        self.pending_scalar_projections: list[tuple[_FunctionDef, ProjectionPath, ty.Type, str]] = []
         # union-returning calls whose result cell is a fresh destination (a
         # declared binding, the enclosing function's result cell): the call
         # writes there directly instead of into a temporary that is then
@@ -707,7 +708,7 @@ class _Lowerer(
             raw[binding_id] = (array_type.length, element_bytes)
         return raw
 
-    def _lower_function(self, function: _FunctionDef, *, projection: tuple[str, ty.Type, str] | None = None) -> LoweredFunction:
+    def _lower_function(self, function: _FunctionDef, *, projection: tuple[ProjectionPath, ty.Type, str] | None = None) -> LoweredFunction:
         # Spans in an imported function are relative to its defining file,
         # including copy/move notes and errors raised while lowering parameters.
         previous_source = self.srcfile
@@ -717,7 +718,7 @@ class _Lowerer(
         finally:
             self.srcfile = previous_source
 
-    def _lower_function_in_source(self, function: _FunctionDef, *, projection: tuple[str, ty.Type, str] | None = None) -> LoweredFunction:
+    def _lower_function_in_source(self, function: _FunctionDef, *, projection: tuple[ProjectionPath, ty.Type, str] | None = None) -> LoweredFunction:
         literal = function.literal
         if projection is not None:
             _field, field_type, _symbol = projection
@@ -2775,7 +2776,7 @@ class _Lowerer(
             )
         return normalized, source_positions, optional_payloads
 
-    def _transform_node(self, node: hir.AST, *, scalar_projection: tuple[str, ty.Type, str] | None = None) -> hir.AST | None:
+    def _transform_node(self, node: hir.AST, *, scalar_projection: tuple[ProjectionPath, ty.Type, str] | None = None) -> hir.AST | None:
         """Rewrite callable references and elide compile-time declarations.
 
         Returning ``None`` is reserved for function and overload declarations:
@@ -2856,7 +2857,10 @@ class _Lowerer(
         if isinstance(node, hir.MemberAccess):
             projection = self._scalar_getter_projection(node)
             if projection is not None:
-                return self._transform_node(node.value, scalar_projection=projection)
+                call = node.value
+                while isinstance(call, hir.MemberAccess):
+                    call = call.value
+                return self._transform_node(call, scalar_projection=projection)
             return replace(
                 node,
                 value=self._require_node(self._transform_node(node.value)),

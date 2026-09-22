@@ -14,7 +14,7 @@ from ...semantic import builtins, hir, ty
 from ...parser import t0
 from . import borrowing
 from . import copy_policy
-from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, CopyNote, MoveNote, local_binding_key
+from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, CopyNote, MoveNote, ProjectionPath, local_binding_key
 from ...semantic.hir_display import type_to_dewy
 
 
@@ -63,26 +63,35 @@ class _ObjectLowering:
             body = body.item
         return isinstance(body, (hir.Index, hir.MemberAccess, hir.ExpressedIdentifier)) and not cls._projection_has_return(body)
 
-    def _scalar_getter_projection(self, node: hir.MemberAccess) -> tuple[str, ty.Type, str] | None:
-        if not isinstance(node.value, hir.FunctionCall):
+    def _scalar_getter_projection(self, node: hir.MemberAccess) -> tuple[ProjectionPath, ty.Type, str] | None:
+        members, call = [], node
+        while isinstance(call, hir.MemberAccess):
+            members.append(call)
+            call = call.value
+        if not isinstance(call, hir.FunctionCall):
             return None
-        function = self._direct_call_function(node.value)
+        function = self._direct_call_function(call)
         if function is None or function.literal.object_receiver:
             return None
         record = function.literal.rettype
-        if not isinstance(record, ty.ObjectType) or node.value.type != record:
+        if call.type != record:
             return None
-        field = record.field(node.name)
-        if field is None or node.type != field.type:
-            return None
-        # Scalars have no storage lifetime. Arena-backed strings and dynamic
-        # arrays use the normal owned-result path, retaining just the selected
-        # field before the callee's locals are released.
+        path = []
+        for member in reversed(members):
+            if not isinstance(record, ty.ObjectType) or member.value.type != record:
+                return None
+            field = record.field(member.name)
+            if field is None or member.type != field.type:
+                return None
+            path.append((field.name, field.type))
+            record = field.type
+        # Read the complete path while the original owner is alive. Only the
+        # selected leaf acquires a lifetime before normal return cleanup.
         owned_handle = self._has_arena() and (
-            self._is_string_valued(field.type)
-            or isinstance(field.type, ty.ArrayType) and field.type.length is None
+            self._is_string_valued(node.type)
+            or isinstance(node.type, ty.ArrayType) and node.type.length is None
         )
-        if field.type != 'bool' and ty.fixed_integer_layout(field.type) is None and not owned_handle:
+        if node.type != 'bool' and ty.fixed_integer_layout(node.type) is None and not owned_handle:
             return None
         eligible = self.scalar_projection_bodies.get(id(function))
         if eligible is None:
@@ -90,24 +99,26 @@ class _ObjectLowering:
             self.scalar_projection_bodies[id(function)] = eligible
         if not eligible:
             return None
-        key = (id(function), node.name)
+        key = (id(function), tuple(name for name, _ in path))
         variant = self.scalar_projections.get(key)
         if variant is None:
             symbol = self._internal_symbol(f'__dewy_project_{len(self.scalar_projections)}_{node.name}')
-            variant = (function, node.name, field.type, symbol)
+            variant = (function, tuple(path), node.type, symbol)
             self.scalar_projections[key] = variant
             self.pending_scalar_projections.append(variant)
         return variant[1:]
 
     @classmethod
-    def _project_getter_result(cls, body: hir.AST, field: str, type_: ty.Type) -> hir.AST:
+    def _project_getter_result(cls, body: hir.AST, path: ProjectionPath, type_: ty.Type) -> hir.AST:
         if isinstance(body, hir.Block):
             return replace(body, type=ty.BOTTOM_TYPE if body.type == ty.BOTTOM_TYPE else type_,
-                           items=[*body.items[:-1], cls._project_getter_result(body.items[-1], field, type_)])
+                           items=[*body.items[:-1], cls._project_getter_result(body.items[-1], path, type_)])
         if isinstance(body, hir.Return):
             assert body.item is not None
-            return replace(body, item=hir.MemberAccess(body.item.loc, type_, body.item, field))
-        return hir.MemberAccess(body.loc, type_, body, field)
+            return replace(body, item=cls._project_getter_result(body.item, path, type_))
+        for field, field_type in path:
+            body = hir.MemberAccess(body.loc, field_type, body, field)
+        return body
 
     def _family_member_test(self, word: hir.AST, member: ty.Type, node: hir.AST) -> hir.AST:
         if isinstance(member, ty.TypeNot):

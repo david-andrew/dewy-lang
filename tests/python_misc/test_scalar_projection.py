@@ -107,3 +107,87 @@ main=():>int64=>{
 '''
     for result in execute(tmp_path, 'guard', codegen(SrcFile(None, source), debug_locations=False), 101):
         assert 'assertion' in result.stderr.lower()
+
+
+def test_nested_scalar_getter_avoids_enclosing_record_copies(tmp_path, monkeypatch):
+    source = SrcFile.from_path(ROOT / 'tests/fixtures/nested_getter_projection.dewy')
+    optimized = codegen(source, debug_locations=False)
+    with monkeypatch.context() as patch:
+        patch.setattr(_ObjectLowering, '_scalar_getter_projection', lambda *_: None)
+        baseline = codegen(source, debug_locations=False)
+    for result in execute(tmp_path, 'nested-projected', optimized):
+        assert list(map(int, result.stdout.split())) == [0, 0, 0]
+    for result in execute(tmp_path, 'nested-copied', baseline):
+        allocated, _copied, retained = map(int, result.stdout.split())
+        assert allocated > 100_000
+        assert retained == 0
+
+
+NESTED_EFFECTS = '''Inner:type=[value:int64 text:string]
+Node:type=[left:Inner right:Inner]
+let calls:int64=0
+index=():>addr=>{calls+=1 return 0}
+read=(nodes:array<Node> id:addr=index()):>Node=>{
+    calls+=1
+    $runtime_assert id<?nodes.length
+    return nodes[id]
+}
+main=():>int64=>{
+    let nodes:array<Node>=[Node[Inner[20 "left"] Inner[22 "right"]]]
+    let a=read(nodes).left.value
+    let b=read(nodes).right.value
+    let text=read(nodes).right.text
+    if calls not=?6 or text not=?"right" return 1
+    return a+b
+}'''
+
+NESTED_TEMPORARY = '''Inner:type=[text:string items:array<int64>]
+Node:type=[inner:Inner]
+nodes=(text:string):>array<Node length=1>=>[Node[Inner["value:{text}" [40 2]]]]
+read=(text:string):>Node=>nodes(text)[0]
+exercise=():>int64=>{
+    let text=read("42").inner.text
+    let items=read("42").inner.items
+    if text not=?"value:42" or items.length not=?2 return 1
+    return items[0]+items[1]
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i<?100 {if exercise() not=?42 return 2}
+    if _arena_live_bytes not=?before return 3
+    return 42
+}'''
+
+
+def test_nested_projection_keeps_effects_and_distinguishes_paths(tmp_path):
+    execute(tmp_path, 'nested-effects', codegen(SrcFile(None, NESTED_EFFECTS)))
+
+
+def test_nested_handles_outlive_their_temporary_owner(tmp_path):
+    execute(tmp_path, 'nested-temporary', codegen(SrcFile(None, NESTED_TEMPORARY)))
+
+
+def test_native_nested_getter_projections(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    check_structural_text(build_program_driver(tmp_path), tmp_path,
+                          cases=[(ROOT / 'tests/fixtures/nested_getter_projection.dewy').read_text(),
+                                 NESTED_EFFECTS, NESTED_TEMPORARY], errors=[],
+                          outputs=['0 0 0\n', '', ''])
+    source = tmp_path / 'nested-guard.dewy'
+    source.write_text(NESTED_GUARD)
+    compiled = subprocess.run([build_program_driver(tmp_path), source, ROOT / 'library', tmp_path / 'guard-cache'],
+                              capture_output=True, text=True, timeout=120)
+    assert compiled.returncode == 0, compiled.stderr
+    for result in execute(tmp_path, 'native-nested-guard', compiled.stdout, 101):
+        assert 'assertion' in result.stderr.lower()
+
+
+NESTED_GUARD = NESTED_EFFECTS.split('main=', 1)[0] + '''main=():>int64=>{
+let nodes:array<Node>=[] return read(nodes).left.value
+}'''
+
+
+def test_nested_projection_keeps_its_runtime_guard(tmp_path):
+    for result in execute(tmp_path, 'nested-guard', codegen(SrcFile(None, NESTED_GUARD)), 101):
+        assert 'assertion' in result.stderr.lower()

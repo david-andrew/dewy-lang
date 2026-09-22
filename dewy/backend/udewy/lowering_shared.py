@@ -10,9 +10,11 @@ from ...utils import dataclass_replace as replace
 from typing import Literal
 
 from ...reporting import Span, SrcFile
-from ...semantic import hir
+from ...semantic import hir, ty
 
 type LocalBindingKey = int | str
+# Field names and their checked types, from the getter result to its leaf.
+type ProjectionPath = tuple[tuple[str, ty.Type], ...]
 
 
 def replace_changed[T](node: T, /, **changes) -> T:
