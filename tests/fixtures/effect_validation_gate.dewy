@@ -1,0 +1,19 @@
+import p"../../dewy/bootstrap/semantic/effect_rows.dewy" as rows
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+main=():>int64=>{
+    let table=types.Table[]
+    let word=types.primitive('int64' @table)
+    let marker=rows.Contract[rows.Row[variables=['inferred-effect:body']]]
+    types.function_type([] [] none word [] @table effects=marker inferred_effect='inferred-effect:body');
+    if table.effect_contracts return 1
+    types.function_type([] [] none word [] @table effects=rows.Contract[rows.Row[variables=['inferred-effect:binding:copy']]]);
+    if table.effect_contracts return 2
+    if rows.requires_validation(rows.Contract[]) return 3
+    if rows.requires_validation(rows.Contract[rows.Row[unknown=true]]) return 4
+    if not rows.requires_validation(rows.Contract[rows.Row[]]) return 5
+    if not rows.requires_validation(rows.Contract[rows.Row[variables=['user:E']]]) return 6
+    if not rows.requires_validation(rows.Contract[excluded=[rows.Atom['allocates']]]) return 7
+    types.function_type([] [] none word [] @table effects=rows.Contract[rows.Row[]]);
+    if not table.effect_contracts return 8
+    return 42
+}

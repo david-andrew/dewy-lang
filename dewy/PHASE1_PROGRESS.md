@@ -2258,3 +2258,19 @@ on x86-64/C. The resulting pair is
 gates (`pytest-repairs-final-copies.json`). Generation 2/3 took 199/201 seconds
 while the full suite was running; these are not isolated latency measurements.
 Phase 1 and the performance target remain unfinished.
+
+## Effect validation activation (2026-09-21)
+
+The native type table now distinguishes inferred body metadata from contracts
+that impose obligations. Omitted rows and private inference variables alone
+no longer trigger whole-program public-effect validation and erasure scans.
+Explicit permissions, empty rows, exclusions and user row parameters activate
+the existing complete validation path. Activation is monotone and remains
+part of the cached type table; importing a constrained callable cannot disable
+it. Proof functions retain their independent validation/erasure trigger.
+
+Validation: 123 hosted effect/proof checks pass. A freshly built native driver
+passes the activation kernel and generic negative-guarantee fixture on x86-64
+and C against hosted execution, and rejects both lifecycle and generic
+guarantee violations. This removes unnecessary work without changing effect
+semantics; no isolated latency improvement has been measured yet.

@@ -6,6 +6,18 @@ Atom:type = const [family:string subject:Subject?=none]
 Row:type = const [atoms:array<Atom>=[] variables:array<string>=[] unknown:bool=false]
 Contract:type = const [allowed:Row?=none excluded:array<Atom>=[]]
 
+# Internal inference variables describe bodies; they do not themselves impose
+# a source obligation. Once any written restriction appears, validation solves
+# the complete graph, including every such deferred body and value boundary.
+requires_validation = (contract:Contract):>bool => {
+    if contract.excluded.length >? 0 return true
+    if contract.allowed is? none or contract.allowed.unknown return false
+    let row=contract.allowed
+    if row.atoms.length >? 0 or row.variables.length =? 0 return true
+    loop name in row.variables {if not name.startswith('inferred-effect:') return true}
+    return false
+}
+
 subject_covers = (wide:Subject narrow:Subject):>bool => {
     if wide.kind not=? narrow.kind or wide.key not=? narrow.key return false
     if wide.kind =? 'resource' and wide.route.length not=? narrow.route.length return false

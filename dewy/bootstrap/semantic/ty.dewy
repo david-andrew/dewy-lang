@@ -430,7 +430,7 @@ type_variable = (name:string bound:addr @nodes:Table):>addr => {
 }
 
 function_type = (pos:array<PosOrKwArg> kw:array<KwOnlyArg> rest:string? ret:addr params:array<GenericParam> @nodes:Table effects:effect_rows.Contract?=none inferred_effect:string?=none):>addr => {
-    if effects isnt? none {nodes.effect_contracts=true}
+    if not nodes.effect_contracts and effects isnt? none and effect_rows.requires_validation(effects) {nodes.effect_contracts=true}
     let slots:array<string> = []
     loop p in pos {
         let name = if p.name is? none 'none' else _quoted(p.name)
