@@ -2,7 +2,8 @@
 
 The storage lowerer still decides how bytes travel. This analysis decides
 whether a resource may change owners, so cleanup can follow the executed path.
-Loop backedges retain outer owners; locals are born anew each iteration.
+Loop backedges solve a finite liveness fixed point; assignments kill the old
+value, so a fresh owner can replace it before the next iteration.
 Aliases and captures keep their root live, while returns have no backedge. No traversal order is treated as a branch join.
 """
 from .. import hir
@@ -88,6 +89,8 @@ def conditional_consumptions(body, parameter_owners, resource):
         if isinstance(node, hir.ExpressedIdentifier):
             if node.binding_id in enabled and id(node) in candidates and not any(node.binding_id in roots(binding) for binding in live):
                 consumes[id(node)] = node.binding_id
+            else:
+                consumes.pop(id(node), None)  # a later fixed-point iteration may reveal a use
             live.add(node.binding_id)
             return live
         if isinstance(node, hir.FunctionLiteral):
@@ -101,26 +104,26 @@ def conditional_consumptions(body, parameter_owners, resource):
             following = visit(node.default, live, enabled, exits) if node.default is not None else live
             for arm in reversed(node.arms):
                 if isinstance(arm, hir.LoopArm):
-                    # Backedges keep every repeatedly read outer owner live.
-                    # A break bypasses that edge and the loop's else arms;
-                    # only uses after this flow remain live on that path.
-                    # Nested loops retain their enclosing continuation.
-                    born, pending = set(), [arm.body]
-                    while pending:
-                        child = pending.pop()
-                        if isinstance(child, hir.FunctionLiteral):
-                            continue
-                        if isinstance(child, hir.Declare):
-                            born.add(child.binding_id)
-                        pending.extend(hir.children(child))
-                    repeated = (following | live | reads(arm)) - born
-                    nested = (*exits, (live, repeated))
-                    visit(arm.body, repeated, enabled, nested)
-                    following = visit(arm.condition, repeated, set(), nested)
+                    # Solve liveness at the condition, including each continue
+                    # edge. Reassignment kills the old value; every path back
+                    # to a consuming use must therefore provide a new owner.
+                    # The finite binding set only grows, so this terminates.
+                    head = set(following)
+                    while True:
+                        nested = (*exits, (live, head))
+                        entering = visit(arm.body, head, enabled, nested)
+                        next_head = head | visit(arm.condition, entering | following, enabled, nested)
+                        if next_head == head:
+                            break
+                        head = next_head
+                    following = head
                 else:
                     taken = visit(arm.body, live, enabled, exits)
                     following = visit(arm.condition, following | taken, enabled, exits)
             return following
+        if isinstance(node, hir.Assign) and node.op == '=' and isinstance(node.target, hir.ExpressedIdentifier):
+            live.discard(node.target.binding_id)
+            return visit(node.value, live, enabled, exits)
         if isinstance(node, hir.Declare):
             live.discard(node.binding_id)
         for child in reversed(tuple(hir.children(node))):

@@ -15,8 +15,9 @@ import p"analyze/predicate_effects.dewy" as predicate_effects
 # transfer fresh owners; checked @ parameters borrow. Same-scope bindings move
 # at last use. Custom copy/move hooks remain checked calls, and drop precedes
 # field/element storage cleanup. Branch consumption uses last-use proofs and
-# conditional cleanup. Exiting owners can transfer fields through synthesized
-# wrappers; repeated consumption and broader partial transfers remain pending.
+# conditional cleanup. Replacements re-establish ownership across checked
+# backedges. Last-use components transfer through synthesized wrappers; using
+# remaining parts of a partially transferred owner still needs further analysis.
 Extraction:type = const [binding:addr path:array<string|addr> moved:bool=false]
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 # An expression can contain a block, branch, or early return. Carry its
@@ -1381,6 +1382,12 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         let items:array<addr>=[replacement.declaration]
         loop call in cleanup([source] node.loc @plan @session) {items.push(call)}
         items.push(put(hir.Assign[node.loc node.value_type node.target node.op replacement.value] @session))
+        $runtime_assert target is? hir.ExpressedIdentifier and target.binding_id isnt? none
+        let flag=plan.flags.get(target.binding_id)
+        if flag isnt? none {
+            let present=put(hir.Bool[node.loc types.primitive('bool' @session.types) true] @session)
+            items.push(put(hir.Assign[node.loc types.primitive('void' @session.types) flag.value '=' present] @session))
+        }
         store(id hir.Block[node.loc node.value_type items false] @session)
         return
     }

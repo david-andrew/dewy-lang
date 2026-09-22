@@ -3,7 +3,7 @@ import p"../ty.dewy" as types
 
 # Logical ownership liveness, independent of physical storage lowering.
 # Branches join future reads; loop backedges retain outer owners, while
-# iteration locals are born anew. A view keeps its source alive until its
+# assignments kill the old value and iteration locals are born anew. A view keeps its source alive until its
 # birth is crossed walking backwards; a return has no advancing edge.
 Analysis:type=[
     owners:set<addr>
@@ -46,6 +46,7 @@ visit=(id:addr after:set<addr> enabled:set<addr> @analysis:Analysis nodes:array<
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none {
             if node.binding_id in? enabled and id in? analysis.candidates and not alive(node.binding_id live analysis.aliases) {analysis.consumes[id]=node.binding_id}
+            else {analysis.consumes.pop(id default=0);}
             live.add(node.binding_id)
         }
         return live
@@ -69,25 +70,21 @@ visit=(id:addr after:set<addr> enabled:set<addr> @analysis:Analysis nodes:array<
             let arm=hir.node_at(nodes node.arms[index])
             $runtime_assert arm is? hir.IfArm|hir.LoopArm
             if arm is? hir.LoopArm {
-                let repeated=following
-                loop binding in live {repeated.add(binding)}
-                loop binding in read_roots(node.arms[index] analysis.aliases nodes) {repeated.add(binding)}
-                # Repeated reads keep outer owners live on every backedge.
-                # A break instead uses this flow's continuation, bypassing its
-                # else arms; nested loops retain the enclosing continuation.
-                let born:set<addr>=set[]
-                let pending:array<addr>=[arm.body]
-                loop pending.length >? 0 {
-                    let child=hir.node_at(nodes pending.pop)
-                    if child is? hir.FunctionLiteral continue
-                    if child is? hir.Declare and child.binding_id isnt? none {born.add(child.binding_id)}
-                    hir.push_children(child @pending)
+                # Every advancing edge contributes to the condition's live
+                # set. Reassignment supplies a new owner; a skipped assignment
+                # through continue leaves the old one live on that backedge.
+                let head=following
+                loop true {
+                    let nested=exits
+                    nested.push(LoopExit[live head])
+                    let entering=visit(arm.body head enabled @analysis nodes nested)
+                    loop binding in following {entering.add(binding)}
+                    let next=visit(arm.condition entering enabled @analysis nodes nested)
+                    let before=head.length
+                    loop binding in next {head.add(binding)}
+                    if head.length=?before break
                 }
-                loop binding in born {repeated.pop(binding default=binding);}
-                let nested=exits
-                nested.push(LoopExit[live repeated])
-                visit(arm.body repeated enabled @analysis nodes nested);
-                following=visit(arm.condition repeated set[] @analysis nodes nested)
+                following=head
             } else {
                 let taken=visit(arm.body live enabled @analysis nodes exits)
                 loop binding in taken {following.add(binding)}
@@ -95,6 +92,13 @@ visit=(id:addr after:set<addr> enabled:set<addr> @analysis:Analysis nodes:array<
             }
         }
         return following
+    }
+    if node is? hir.Assign and node.op=?'=' {
+        let target=hir.node_at(nodes node.target)
+        if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
+            live.pop(target.binding_id default=target.binding_id);
+            return visit(node.value live enabled @analysis nodes exits)
+        }
     }
     if node is? hir.Declare and node.binding_id isnt? none {live.pop(node.binding_id default=node.binding_id);}
     let children=hir.children(node)

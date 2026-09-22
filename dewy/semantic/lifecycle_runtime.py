@@ -5,9 +5,10 @@ by-value parameters and results transfer fresh owners. Checked @ parameters
 borrow. Same-scope bindings can move at last use, and custom copy/move hooks
 remain checked calls. Drop precedes field/element storage cleanup.
 
-Branch consumption uses last-use proofs and conditional cleanup. Repeated
-outer-owner consumption and partial transfers still need further lifetime
-analysis; exiting owners can transfer fields through synthesized wrappers.
+Branch consumption uses last-use proofs and conditional cleanup. Replacing an
+owner re-establishes its lifetime, including across checked loop backedges.
+Last-use components transfer through synthesized wrappers; using the remaining
+parts of a partially transferred owner still needs further lifetime analysis.
 """
 from dataclasses import replace
 
@@ -1232,8 +1233,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 # change fields used by its initializer. The same binding
                 # remains the owner and is cleaned up again at scope exit.
                 declaration, value = capture(fresh(node.value, live, False, control=control), node.loc)
+                flag = ownership_flags.get(source.binding_id)
+                activate = [hir.Assign(node.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(node.loc, 'bool', True))] if flag is not None else []
                 return hir.Block(node.loc, node.type, [declaration, *cleanup([source], node.loc),
-                                                       replace(node, value=value)], False)
+                                                       replace(node, value=value), *activate], False)
             if isinstance(node, hir.Return):
                 consumed = None
                 moved = False

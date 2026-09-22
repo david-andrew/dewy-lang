@@ -2924,3 +2924,30 @@ calls without retained arena growth. The adjacent lifecycle selection passed
 kernels and 13 rejections on x86-64/C, including field/element returns.
 Artifacts use `phase1-component-moves-*`. This feature is newer than the
 `113146f1` integration certificate.
+
+
+## Re-established ownership across loop backedges (2026-09-22)
+
+Resource liveness now solves a finite backward fixed point at loop conditions.
+Whole-value assignment kills the previous value's future liveness; `continue`
+(including labeled exits) contributes to the selected loop's backedge, and
+`break` retains the continuation after that loop. A consuming input may move
+when every advancing path supplies a replacement before the next use. This
+also handles owning inputs in loop conditions. Captures, overlapping arguments
+and live aliases retain their existing exclusions.
+
+Replacement evaluates the new value first, conditionally cleans up the previous
+owner, stores the replacement, and re-enables its cleanup flag. A move does not
+leave that binding permanently exempt from cleanup. Custom move hooks and
+nested storage use the same protocol.
+
+Validation: 52 adjacent hosted checks passed. Fresh native/hosted comparisons
+passed 20 runtime kernels on x86-64/C and 16 rejection cases across renewal,
+iteration-local ownership and loop exits. The nested-array move kernel runs
+100 renewals with no retained arena growth. One initially selected explicit-view
+negative hit a pre-existing unsupported-lifetime diagnostic rather than the
+intended move rejection; the final case uses an inferred alias and reaches
+that rejection on both routes. Runtime cases were not rerun unnecessarily;
+rejection checks and the two final storage kernels ran separately.
+Artifacts use `phase1-renewed-owners-*`. Broader partial ownership and the
+remaining Phase 1 proof/effect work are still in progress.

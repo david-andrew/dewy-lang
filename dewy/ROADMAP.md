@@ -505,8 +505,11 @@ in both lowerings and the parity tool is the gate.
   read or alias needs it. Returning a field or array element from an exiting local or by-value owner
   now transfers it through synthesized wrappers and drops the remaining
   components. Nested selectors evaluate once and retain checked bounds. Custom wrapper
-  hooks still require a complete receiver. Repeated outer-owner consumption,
-  broader partial transfers and remaining resource-container mutations still
+  hooks still require a complete receiver. Last-use component transfers now also
+  supply owning bindings, calls and constructors, retaining the wrapper’s lexical
+  cleanup. Whole-owner replacements re-establish ownership across loop backedges;
+  every advancing path must provide a fresh value before another consuming use.
+  Broader partial transfers and remaining resource-container mutations still
   require further lifetime analysis. Same-block owning input
   transfers now include owning parameters, custom move hooks and union owners;
   first if conditions are unconditional input sites, while loop conditions
