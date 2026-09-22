@@ -188,21 +188,24 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 parameter.type = shape
                 params = [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)]
                 arguments = [hir.Place(loc, shape, value)]
-                path = []
-                for selector in extraction[0]:
-                    if isinstance(selector, str):
-                        path.append(selector)
-                        continue
-                    param = registry.allocate(object(), f'__index_{len(params)}', 'param', loc)
-                    param.type = 'int64'
-                    params.append(hir.Param(param.name, 'int64', binding_id=param.id))
-                    arguments.append(selector)
-                    path.append(hir.ExpressedIdentifier(loc, 'int64', param.name, binding_id=param.id))
+                translated = []
+                for route, moved in routes:
+                    path = []
+                    for selector in route:
+                        if isinstance(selector, (str, hir.Integer)):
+                            path.append(selector)
+                            continue
+                        param = registry.allocate(object(), f'__index_{len(params)}', 'param', loc)
+                        param.type = 'int64'
+                        params.append(hir.Param(param.name, 'int64', binding_id=param.id))
+                        arguments.append(selector)
+                        path.append(hir.ExpressedIdentifier(loc, 'int64', param.name, binding_id=param.id))
+                    translated.append((tuple(path), moved))
                 signature = ty.FunctionType([ty.PosOrKwArg(p.name, p.type, place=p.place) for p in params], [], None, ty.VOID_TYPE)
                 binding.type = signature
                 receiver = hir.ExpressedIdentifier(loc, shape, parameter.name, binding_id=parameter.id)
                 body = []
-                drop(receiver, shape, set(), into=body, extraction=(tuple(path), extraction[1]), inline_array=True)
+                drop(receiver, shape, set(), into=body, extraction=translated[0], additional=translated[1:], inline_array=True)
                 literal = hir.FunctionLiteral(loc, signature, params, [], None, ty.VOID_TYPE,
                     hir.Block(loc, ty.VOID_TYPE, body, True), source=current_source)
                 declared = hir.Declare(loc, ty.VOID_TYPE, 'const', name, signature, literal, binding_id=binding.id)
@@ -224,14 +227,23 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     function = hir.ExpressedIdentifier(loc, signature, name)
                     return hir.FunctionCall(loc, 'bool', function, [cursor, right], {})
                 element = hir.Index(loc, shape.element, value, cursor, None)
-                selected_calls, other_calls = [], []
-                drop(element, shape.element, ancestors | {id(shape)}, into=selected_calls,
-                     extraction=(extraction[0][1:], extraction[1]))
+                # Group paths sharing an element before descending into its
+                # fields. Every transferred component must be omitted once.
+                groups = {}
+                for route, moved in routes:
+                    selector = route[0]
+                    key = ('literal', selector.value) if isinstance(selector, hir.Integer) else ('saved', id(selector))
+                    groups.setdefault(key, (selector, []))[1].append((route[1:], moved))
+                selected_arms, other_calls = [], []
+                for selector, selected_routes in groups.values():
+                    selected_calls = []
+                    drop(element, shape.element, ancestors | {id(shape)}, into=selected_calls,
+                         extraction=selected_routes[0], additional=selected_routes[1:])
+                    selected_arms.append(hir.IfArm(loc, ty.VOID_TYPE, comparison('__eq__', selector),
+                                                  hir.Block(loc, ty.VOID_TYPE, selected_calls, True)))
                 drop(element, shape.element, ancestors | {id(shape)}, into=other_calls)
-                selected_arm = hir.IfArm(loc, ty.VOID_TYPE, comparison('__eq__', extraction[0][0]),
-                                         hir.Block(loc, ty.VOID_TYPE, selected_calls, True))
                 body = hir.Block(loc, ty.VOID_TYPE, [hir.Assign(loc, ty.VOID_TYPE, cursor, '-=', one),
-                    hir.Flow(loc, ty.VOID_TYPE, [selected_arm], hir.Block(loc, ty.VOID_TYPE, other_calls, True))], True)
+                    hir.Flow(loc, ty.VOID_TYPE, selected_arms, hir.Block(loc, ty.VOID_TYPE, other_calls, True))], True)
                 loop = hir.LoopArm(loc, ty.VOID_TYPE, comparison('__gt__', zero), body)
                 into.extend([declaration, hir.Flow(loc, ty.VOID_TYPE, [loop])])
                 return
@@ -695,6 +707,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                        Pointer(span=value.loc, message='the selected storage must survive its selectors and arguments'))
 
     def freeze_value(value, loc, prefix):
+        # Literals already denote stable selectors; retaining them also keeps
+        # equal constant indices recognizable across independent transfers.
+        if isinstance(value, hir.Integer):
+            return value
         declaration, held = capture(value, loc)
         declaration = replace(declaration, decltype='const')
         registry.by_id[held.binding_id].declaration = declaration
@@ -1006,6 +1022,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 continue
             if isinstance(node, hir.MemberAccess):
                 pending.append((node.value, (node.name, *route)))
+            elif isinstance(node, hir.Index) and isinstance(node.index, hir.Integer):
+                pending.append((node.array, (node.index.value, *route)))
             else:
                 if isinstance(node, hir.ExpressedIdentifier):
                     reads_by_binding.setdefault(node.binding_id, []).append(node)
@@ -1056,12 +1074,17 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         def last_component(value, owner, block):
             if isinstance(value, hir.ExpressedIdentifier):
                 return last.get(owner.binding_id) == id(owner)
-            # Distinct record fields have disjoint ownership. Indexed routes
-            # retain the whole-root last-use proof until index disjointness is
-            # carried by this analysis as well.
+            # Record fields and constant array indices denote disjoint
+            # components. Dynamic selectors still require a whole-root last
+            # use; resizing or passing the array observes its entire route.
             part = value
-            while isinstance(part, hir.MemberAccess):
-                part = part.value
+            while isinstance(part, (hir.MemberAccess, hir.Index)):
+                if isinstance(part, hir.Index):
+                    if not isinstance(part.index, hir.Integer):
+                        break
+                    part = part.array
+                else:
+                    part = part.value
             if not isinstance(part, hir.ExpressedIdentifier):
                 return last.get(owner.binding_id) == id(owner)
             route = read_routes[id(owner)]

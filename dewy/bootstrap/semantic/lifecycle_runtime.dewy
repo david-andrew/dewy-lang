@@ -153,25 +153,32 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         let params:array<hir.Param>=[hir.Param['__items' owner parameter_id place=true]]
         let signature_params:array<types.PosOrKwArg>=[types.PosOrKwArg['__items' owner place=true]]
         let arguments:array<addr>=[put(hir.Place[loc owner value] @session)]
-        let path:array<string|addr>=[]
+        let translated:array<Extraction>=[]
         let word=types.primitive('int64' @session.types)
         let empty=types.primitive('void' @session.types)
-        loop selector in extraction.path {
-            if selector is? string {path.push(selector) continue}
-            let param_name="__index_{params.length}"
-            let param_id=bindings.allocate(@session.registry none param_name 'param' loc)
-            let param=bindings.binding_at(session.registry param_id)
-            param.value_type=word param.store_type=word
-            bindings.store_binding(@session.registry param_id param)
-            params.push(hir.Param[param_name word param_id])
-            signature_params.push(types.PosOrKwArg[param_name word])
-            arguments.push(selector)
-            path.push(put(hir.ExpressedIdentifier[loc word param_name param_id] @session))
+        loop route in routes {
+            let path:array<string|addr>=[]
+            loop selector in route.path {
+                if selector is? string {path.push(selector) continue}
+                if hir.node_at(session.hir selector) is? hir.Integer {path.push(selector) continue}
+                let param_name="__index_{params.length}"
+                let param_id=bindings.allocate(@session.registry none param_name 'param' loc)
+                let param=bindings.binding_at(session.registry param_id)
+                param.value_type=word param.store_type=word
+                bindings.store_binding(@session.registry param_id param)
+                params.push(hir.Param[param_name word param_id])
+                signature_params.push(types.PosOrKwArg[param_name word])
+                arguments.push(selector)
+                path.push(put(hir.ExpressedIdentifier[loc word param_name param_id] @session))
+            }
+            translated.push(Extraction[route.binding path route.moved])
         }
+        $runtime_assert translated.length>?0
+        let first=translated.pop
         let signature=types.function_type(signature_params [] none empty [] @session.types)
         let receiver=put(hir.ExpressedIdentifier[loc owner '__items' parameter_id] @session)
         let body:array<addr>=[]
-        drop_value(receiver owner loc set[] @body @plan @session extraction=Extraction[extraction.binding path extraction.moved] inline_array=true)
+        drop_value(receiver owner loc set[] @body @plan @session extraction=first additional=translated inline_array=true)
         let block=put(hir.Block[loc empty body true] @session)
         let function=put(hir.FunctionLiteral[loc signature params [] none empty block source=plan.function_source] @session)
         let declaration=put(hir.Declare[loc empty 'const' name signature function binding_id] @session)
@@ -184,13 +191,6 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         return
     }
     if type is? types.ArrayType and extraction isnt? none {
-        $runtime_assert extraction.path.length>?0
-        let selected=extraction.path[0]
-        $runtime_assert selected is? addr
-        let path:array<string|addr>=[]
-        let i:addr=1
-        loop i<?extraction.path.length {path.push(extraction.path[i]) i+=1}
-        let remaining=Extraction[extraction.binding path extraction.moved]
         let empty=types.primitive('void' @session.types)
         let word=types.primitive('int64' @session.types)
         let boolean=types.primitive('bool' @session.types)
@@ -202,18 +202,49 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         let greater=put(hir.ExpressedIdentifier[loc signature '__gt__' none] @session)
         let equal=put(hir.ExpressedIdentifier[loc signature '__eq__' none] @session)
         let condition=put(hir.FunctionCall[loc boolean greater [cursor.value zero] []] @session)
-        let selected_condition=put(hir.FunctionCall[loc boolean equal [cursor.value selected] []] @session)
         let element=put(hir.Index[loc type.element value cursor.value none] @session)
         let nested=ancestors
         nested.add(owner)
-        let selected_calls:array<addr>=[]
+        # Equal literal selectors share one arm, so disjoint fields in the
+        # same element retain all their transferred-component exclusions.
+        let pending=routes
+        let selected_arms:array<addr>=[]
+        loop pending.length>?0 {
+            let selected_route=pending.pop
+            $runtime_assert selected_route.path.length>?0
+            let selector=selected_route.path[0]
+            $runtime_assert selector is? addr
+            let selected_node=hir.node_at(session.hir selector)
+            let matching:array<Extraction>=[selected_route]
+            let rest:array<Extraction>=[]
+            loop route in pending {
+                $runtime_assert route.path.length>?0
+                let other=route.path[0]
+                $runtime_assert other is? addr
+                let other_node=hir.node_at(session.hir other)
+                if other=?selector or (selected_node is? hir.Integer and other_node is? hir.Integer and selected_node.value=?other_node.value) {matching.push(route)}
+                else {rest.push(route)}
+            }
+            pending=rest
+            let children:array<Extraction>=[]
+            loop route in matching {
+                let path:array<string|addr>=[]
+                let i:addr=1
+                loop i<?route.path.length {path.push(route.path[i]) i+=1}
+                children.push(Extraction[route.binding path route.moved])
+            }
+            $runtime_assert children.length>?0
+            let first=children.pop
+            let selected_calls:array<addr>=[]
+            drop_value(element type.element loc nested @selected_calls @plan @session extraction=first additional=children)
+            let selected_condition=put(hir.FunctionCall[loc boolean equal [cursor.value selector] []] @session)
+            let selected_body=put(hir.Block[loc empty selected_calls true] @session)
+            selected_arms.push(put(hir.IfArm[loc empty selected_condition selected_body] @session))
+        }
         let other_calls:array<addr>=[]
-        drop_value(element type.element loc nested @selected_calls @plan @session extraction=remaining)
         drop_value(element type.element loc nested @other_calls @plan @session)
-        let selected_body=put(hir.Block[loc empty selected_calls true] @session)
         let other_body=put(hir.Block[loc empty other_calls true] @session)
-        let selected_arm=put(hir.IfArm[loc empty selected_condition selected_body] @session)
-        let choice=put(hir.Flow[loc empty [selected_arm] other_body] @session)
+        let choice=put(hir.Flow[loc empty selected_arms other_body] @session)
         let decrement=put(hir.Assign[loc empty cursor.value '-=' one] @session)
         let body=put(hir.Block[loc empty [decrement choice] true] @session)
         let arm=put(hir.LoopArm[loc empty condition body] @session)
@@ -885,6 +916,7 @@ clear_operation = (owner:addr loc:Span @plan:Plan @session:contexts.Session):>ad
 # Hidden selectors are immutable: route facts refer to the selected element,
 # and later cleanup/builtin calls do not evaluate a source index again.
 freeze_value = (id:addr loc:Span @prefix:array<addr> @session:contexts.Session):>addr => {
+    if hir.node_at(session.hir id) is? hir.Integer return id
     let held=capture_result(id loc @session)
     let node=hir.node_at(session.hir held.declaration)
     $runtime_assert node is? hir.Declare and node.binding_id isnt? none
@@ -1646,17 +1678,23 @@ alias_alive=(binding:addr read:addr dependent:dict<addr set<addr>> born:dict<add
 # Before cleanup adds artificial reads, identify last uses transferring
 # between declarations in one lexical block. Outer-owner conditional moves
 # need lifetime joins and are deliberately excluded by the same-block rule.
-# A maximal member route observes only that part of its owner. Indexing
-# observes the entire selected array; calls/whole values observe their root.
-ReadRoute:type=const [id:addr path:array<string>]
-ReadRoutes:type=[paths:dict<addr array<string>>=[] by_binding:dict<addr array<addr>>=[]]
-route_overlaps=(left:array<string> right:array<string>):>bool=>{
+# A maximal member/constant-index route observes only that component.
+# Dynamic indexing and calls/whole values still observe the containing root.
+# Numeric steps here are literal indices, not HIR ids as in Extraction.
+ReadRoute:type=const [id:addr path:array<string|int64>]
+ReadRoutes:type=[paths:dict<addr array<string|int64>>=[] by_binding:dict<addr array<addr>>=[]]
+route_overlaps=(left:array<string|int64> right:array<string|int64>):>bool=>{
     let i:addr=0
     loop i<?left.length and i<?right.length {
         if left[i] not=?right[i] return false
         i+=1
     }
     return true
+}
+literal_index=(id:addr nodes:array<hir.AST>):>int64?=>{
+    let node=hir.node_at(nodes id)
+    if node is? hir.Integer and node.value>=?-9223372036854775808 and node.value<=?9223372036854775807 return node.value as int64
+    return none
 }
 read_routes=(body:addr nodes:array<hir.AST>):>ReadRoutes=>{
     let result=ReadRoutes[]
@@ -1666,17 +1704,24 @@ read_routes=(body:addr nodes:array<hir.AST>):>ReadRoutes=>{
         let node=hir.node_at(nodes selected.id)
         if node is? hir.FunctionLiteral continue
         if node is? hir.MemberAccess {
-            let path:array<string>=[node.name]
+            let path:array<string|int64>=[node.name]
             loop name in selected.path {path.push(name)}
             pending.push(ReadRoute[node.value path])
+        } else if node is? hir.Index and literal_index(node.index nodes) isnt? none {
+            let index=literal_index(node.index nodes)
+            $runtime_assert index isnt? none
+            let path:array<string|int64>=[index]
+            loop step in selected.path {path.push(step)}
+            pending.push(ReadRoute[node.array path])
         } else {
             if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
-                let previous=result.paths.get(selected.id)
-                if previous is? none {
-                    let reads=result.by_binding.get(node.binding_id [])
-                    reads.push(selected.id) result.by_binding[node.binding_id]=reads
+                if selected.id not in? result.paths {
+                    if node.binding_id in? result.by_binding {
+                        let reads=@result.by_binding[node.binding_id]
+                        reads.push(selected.id)
+                    } else {result.by_binding[node.binding_id]=[selected.id]}
                     result.paths[selected.id]=selected.path
-                } else if previous.length not=?selected.path.length or not route_overlaps(previous selected.path) {result.paths[selected.id]=[]}
+                } else if result.paths[selected.id].length not=?selected.path.length or not route_overlaps(result.paths[selected.id] selected.path) {result.paths[selected.id]=[]}
             }
             loop child in hir.children(node) {pending.push(ReadRoute[child []])}
         }
@@ -1685,7 +1730,7 @@ read_routes=(body:addr nodes:array<hir.AST>):>ReadRoutes=>{
 }
 # Only direct same-block assignments can renew a component. All reads in
 # their RHS precede the new lifetime, regardless of HIR child traversal order.
-Renewal:type=const [target:addr path:array<string> stop:addr]
+Renewal:type=const [target:addr path:array<string|int64> stop:addr]
 block_renewals=(block:hir.Block positions:dict<addr addr> occurrences:dict<addr int> nodes:array<hir.AST>):>dict<addr array<Renewal>>=>{
     let result:dict<addr array<Renewal>>=[]
     loop item in block.items {
@@ -1694,13 +1739,13 @@ block_renewals=(block:hir.Block positions:dict<addr addr> occurrences:dict<addr 
         if node is? hir.Assign and node.op not=?'=' continue
         let target_id=node.target
         let target=hir.node_at(nodes target_id)
-        let reverse_path:array<string>=[]
+        let reverse_path:array<string|int64>=[]
         loop target is? hir.MemberAccess {
             reverse_path.push(target.name) target_id=target.value
             target=hir.node_at(nodes target_id)
         }
         if target isnt? hir.ExpressedIdentifier or target.binding_id is? none or occurrences.get(target_id 0) not=?1 continue
-        let path:array<string>=[]
+        let path:array<string|int64>=[]
         loop reverse_path.length>?0 {path.push(reverse_path.pop)}
         let stop:addr=0
         let pending:array<addr>=[item]
@@ -1709,8 +1754,11 @@ block_renewals=(block:hir.Block positions:dict<addr addr> occurrences:dict<addr 
             if read is? hir.ExpressedIdentifier and positions.get(id 0)>?stop {stop=positions.get(id 0)}
             hir.push_children(read @pending)
         }
-        let renewals=result.get(target.binding_id [])
-        renewals.push(Renewal[target_id path stop]) result[target.binding_id]=renewals
+        let renewal=Renewal[target_id path stop]
+        if target.binding_id in? result {
+            let renewals=@result[target.binding_id]
+            renewals.push(renewal)
+        } else {result[target.binding_id]=[renewal]}
     }
     return result
 }
@@ -1719,16 +1767,27 @@ last_component=(value:addr root:addr renewals:dict<addr array<Renewal>> last:dic
     $runtime_assert owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none
     let part=hir.node_at(nodes value)
     if part is? hir.ExpressedIdentifier return last.get(owner.binding_id)=?root
-    loop part is? hir.MemberAccess {part=hir.node_at(nodes part.value)}
-    if part isnt? hir.ExpressedIdentifier return last.get(owner.binding_id)=?root
-    let path=routes.paths.get(root [])
-    let renewal:Renewal?=none
-    loop candidate in renewals.get(owner.binding_id []) {
-        if positions.get(candidate.target 0)>?positions.get(root 0) and candidate.path.length<=?path.length and route_overlaps(candidate.path path) {renewal=candidate break}
+    loop part is? hir.MemberAccess|hir.Index {
+        if part is? hir.Index {
+            if literal_index(part.index nodes) is? none break
+            part=hir.node_at(nodes part.array)
+        } else {part=hir.node_at(nodes part.value)}
     }
-    loop read in routes.by_binding.get(owner.binding_id []) {
-        if renewal isnt? none and (read=?renewal.target or positions.get(read 0)>?renewal.stop) continue
-        if positions.get(read 0)>?positions.get(root 0) and route_overlaps(path routes.paths.get(read [])) return false
+    if part isnt? hir.ExpressedIdentifier return last.get(owner.binding_id)=?root
+    $runtime_assert root in? routes.paths
+    const path=@routes.paths[root]
+    let renewal:Renewal?=none
+    if owner.binding_id in? renewals {
+        loop candidate in renewals[owner.binding_id] {
+            if positions.get(candidate.target 0)>?positions.get(root 0) and candidate.path.length<=?path.length and route_overlaps(candidate.path path) {renewal=candidate break}
+        }
+    }
+    if owner.binding_id in? routes.by_binding {
+        loop read in routes.by_binding[owner.binding_id] {
+            if renewal isnt? none and (read=?renewal.target or positions.get(read 0)>?renewal.stop) {continue}
+            $runtime_assert read in? routes.paths
+            if positions.get(read 0)>?positions.get(root 0) and route_overlaps(path routes.paths[read]) return false
+        }
     }
     return true
 }

@@ -3552,3 +3552,24 @@ Validation: eleven focused hosted cases pass; the existing proof-boundary
 cases also pass. A fresh native driver agrees on four runtime and seven
 rejection cases, executing accepted programs on x86-64 and C. Aggregate local
 rejection protects erasure from hiding lifecycle effects.
+## Disjoint constant-index resource transfers (2026-09-22)
+
+The same-block last-use proof now distinguishes constant array indices as well
+as record fields. Moving `xs[0]` no longer prevents later use or transfer of
+`xs[1]`. Nested arrays and multiple fields within one element use the same
+route proof. Dynamic indices, whole-array uses, resize/clear and borrowed
+owners remain conservative; this does not infer arbitrary index disequality.
+
+Cleanup retains every transferred path. Equal literal indices group their
+field exclusions before recursive cleanup, including helper boundaries for
+nested arrays. Untransferred components still drop in reverse order; custom
+move hooks retain their normal remaining-field cleanup. Literal selectors need
+no extra capture binding. Native route tables now extend through checked entry
+places and read through views, avoiding copied lookup results.
+
+Validation: 27 initial hosted cases (including existing partial-record cases)
+pass, followed by all eleven focused cases including a custom move. A fresh
+native driver agrees with hosted on six runtime and five rejection cases on
+x86-64/C, both before and after route-table storage changes. The seeded source
+inventory is 4,495 sites / 92.047 per KLOC, within the unchanged gate. Fresh
+compiler integration remains necessary; static counts are not timings.
