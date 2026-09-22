@@ -194,19 +194,70 @@ flatten_callable = (id:addr seen:set<addr> analysis:Analysis nodes:array<hir.AST
     seen.add(binding_id)
     return flatten_callable(declared.expr seen analysis nodes)
 }
-direct_targets = (call:hir.FunctionCall analysis:Analysis nodes:array<hir.AST>):>array<addr> | none => {
-    let callback=analysis.callback_targets.get(call.func)
-    if callback isnt? none return callback
-    let targets = flatten_callable(call.func set[] analysis nodes)
-    if targets is? none return none
-    if call.selected_method_index isnt? none {
-        let selected = call.selected_method_index
+# Runtime alternatives are separate from the dispatch order inside one value.
+# An overload index selects within every arm; it must not select just one arm.
+select_targets = (targets:array<addr> selected:addr?):>array<addr> | none => {
+    if selected isnt? none {
         if selected >=? targets.length return none
         return [targets[selected]]
     }
-    if targets.length =? 0 return none
-    # With no recorded overload selection, conservatively merge every target.
-    return targets
+    return if targets.length >? 0 targets else none
+}
+TargetVisit:type = const [id:addr leaving:bool=false]
+value_targets = (id:addr selected:addr? analysis:Analysis nodes:array<hir.AST>):>array<addr> | none => {
+    let targets=flatten_callable(id set[] analysis nodes)
+    if targets isnt? none return select_targets(targets selected)
+    # Intrinsics and unresolved ingress are common; they need no search state.
+    let origin=hir.node_at(nodes unwrap(id nodes))
+    if origin is? hir.ExpressedIdentifier {
+        let binding=origin.binding_id
+        if binding is? none or binding in? analysis.param_ids or binding in? analysis.reassigned or binding not in? analysis.declares return none
+    } else if origin isnt? hir.ValueCast|hir.Flow return none
+    # Visit the graph, not all paths through shared conditional aliases.
+    # Active nodes detect unresolved cycles; completed nodes need no revisit.
+    let pending:array<TargetVisit>=[TargetVisit[id]]
+    let active:set<addr>=set[] let done:set<addr>=set[]
+    let result:array<addr>=[] let included:set<addr>=set[]
+    loop pending.length >? 0 {
+        let step=pending.pop
+        let current=unwrap(step.id nodes)
+        if step.leaving {active.pop(current default=current); done.add(current) continue}
+        if current in? active return none
+        if current in? done continue
+        active.add(current) pending.push(TargetVisit[current true])
+        let node=hir.node_at(nodes current)
+        if node is? hir.FunctionLiteral|hir.OverloadedFunction {
+            let choices=flatten_callable(current set[] analysis nodes)
+            if choices is? none return none
+            let selected_choices=select_targets(choices selected)
+            if selected_choices is? none return none
+            loop choice in selected_choices {if choice not in? included {included.add(choice) result.push(choice)}}
+        } else if node is? hir.ValueCast {pending.push(TargetVisit[node.expr])}
+        else if node is? hir.ExpressedIdentifier {
+            if node.binding_id is? none return none
+            let binding=node.binding_id
+            if binding in? analysis.param_ids or binding in? analysis.reassigned or binding not in? analysis.declares return none
+            let declaration=hir.node_at(nodes analysis.declares[binding])
+            $runtime_assert declaration is? hir.Declare
+            pending.push(TargetVisit[declaration.expr])
+        } else if node is? hir.Flow and node.default isnt? none {
+            pending.push(TargetVisit[node.default])
+            let position=node.arms.length
+            loop position >? 0 {
+                position-=1
+                $runtime_assert position <? node.arms.length
+                let arm=hir.node_at(nodes node.arms[position])
+                if arm isnt? hir.IfArm return none
+                pending.push(TargetVisit[arm.body])
+            }
+        } else return none
+    }
+    return if result.length >? 0 result else none
+}
+direct_targets = (call:hir.FunctionCall analysis:Analysis nodes:array<hir.AST>):>array<addr> | none => {
+    let callback=analysis.callback_targets.get(call.func)
+    if callback isnt? none return callback
+    return value_targets(call.func call.selected_method_index analysis nodes)
 }
 pair_arguments = (call:hir.FunctionCall literal:hir.FunctionLiteral):>array<ArgumentPair> | none => {
     let named:dict<string hir.Param> = []

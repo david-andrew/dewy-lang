@@ -108,6 +108,21 @@ def effect_program():
     raw = hir.ExpressedIdentifier(LOC, CALLABLE, '__store_i64__')
     function(126, [param(28)], [hir.FunctionCall(LOC, 'void', raw, [read(28), number()], {})])
     function(127, [param(29)], [hir.Transmute(LOC, 'int64', read(29))])
+    # Dispatch selection belongs inside each runtime alternative. Choosing
+    # method 1 here may read OR write; it must not pick only the left arm.
+    reversed_overload = hir.OverloadedFunction(LOC, overloaded.type, [reader, mutator])
+    conditional = hir.Flow(LOC, overloaded.type,
+        [hir.IfArm(LOC, overloaded.type, hir.Bool(LOC, 'bool', True), overloaded)], reversed_overload)
+    function(128, [param(30)], [hir.FunctionCall(LOC, 'void', conditional,
+        [place(read(30))], {}, selected_method_index=1)])
+    choice = hir.Flow(LOC, CALLABLE,
+        [hir.IfArm(LOC, CALLABLE, hir.Bool(LOC, 'bool', True), read(110, CALLABLE))], reader)
+    cast = hir.ValueCast(LOC, CALLABLE, choice)
+    function(129, [param(31)], [hir.FunctionCall(LOC, 'void', cast, [place(read(31))], {})])
+    shared = reader
+    for _ in range(16):
+        shared = hir.Flow(LOC, CALLABLE, [hir.IfArm(LOC, CALLABLE, hir.Bool(LOC, 'bool', True), shared)], shared)
+    function(130, [param(32)], [hir.FunctionCall(LOC, 'void', shared, [place(read(32))], {})])
     return hir.Block(LOC, 'void', declarations, True)
 
 
@@ -180,6 +195,10 @@ def emit_hir(root, *, type_value=None, with_names=False):
 def test_native_effect_analysis_matches_hosted(tmp_path):
     root = effect_program()
     expected = analyze_effects(root)
+    assert expected.by_param_binding[30].mutates == {('[]',)}
+    assert expected.by_param_binding[30].reads == {('[]',)}
+    assert expected.by_param_binding[32].read_only
+    assert expected.by_param_binding[31].read_only
     lines, root_id = emit_hir(root)
     source = tmp_path / 'effects.dewy'
     source.write_text(f'''

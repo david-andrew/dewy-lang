@@ -109,7 +109,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     if node is? hir.ValueCast and node.effect_target isnt? none {visit(node.expr input @scan) return}
     if node is? hir.FunctionLiteral return
     if node is? hir.Void|hir.NoneValue|hir.Bool|hir.Integer|hir.String|hir.Break|hir.Continue|hir.ScopeMetatag|hir.TypeValue return
-    if node is? hir.ExpressedIdentifier and access.flatten_callable(id set[] input.analysis input.nodes) isnt? none return
+    if node is? hir.ExpressedIdentifier and access.value_targets(id none input.analysis input.nodes) isnt? none return
     if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index {record_access(id 'reads' input @scan) return}
     if node is? hir.Assert and not node.runtime and not node.expect return
     if node is? hir.FunctionCall {
@@ -128,6 +128,8 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         let scalar_operation=callee is? hir.ExpressedIdentifier and builtin and callee.name in? SCALAR_OPERATIONS and scalar(node.value_type input.types)
         loop arg in node.pos_args {if not word_value(hir.node_at(input.nodes arg) input scan) {scalar_operation=false}}
         if targets isnt? none {
+            # Known targets do not erase effects of evaluating the selector.
+            visit(node.func input @scan)
             loop target in targets {
                 let value=hir.node_at(input.nodes target)
                 let shape=types.node_at(input.types value.value_type)
@@ -208,7 +210,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         loop child in hir.children(hir.node_at(input.nodes node.iterable)) {visit(child input @scan)}
         return
     }
-    if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.ValueCast|hir.RepresentationCast|hir.Spread|hir.MultiIteratorExpression {
+    if node is? hir.Block|hir.Suppress|hir.Return|hir.Flow|hir.IfArm|hir.LoopArm|hir.OverloadedFunction|hir.ShortCircuit|hir.Obligation|hir.TypeTest|hir.ArrayLength|hir.StringLength|hir.ValueCast|hir.RepresentationCast|hir.Spread|hir.MultiIteratorExpression {
         loop child in hir.children(node) {visit(child input @scan)}
         return
     }

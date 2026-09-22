@@ -291,22 +291,66 @@ class _EffectAnalyzer:
             )
         return None
 
-    def _direct_targets(
-        self,
-        call: hir.FunctionCall,
-    ) -> list[hir.FunctionLiteral] | None:
-        targets = self._flatten_callable(call.func, frozenset())
-        if targets is None:
-            return None
-        if call.selected_method_index is not None:
-            if call.selected_method_index >= len(targets):
+    def _value_targets(self, node: hir.AST, selected: int | None = None) -> list[hir.FunctionLiteral] | None:
+        """Resolve runtime choices separately from overload dispatch order.
+
+        Apply a selection inside each possible value. Visit a shared choice
+        once, so chains of conditional aliases do not enumerate every path.
+        Unknown arms and cycles retain the ordinary conservative boundary.
+        """
+        def select(targets):
+            if selected is not None:
+                return [targets[selected]] if selected < len(targets) else None
+            return targets or None
+
+        targets = self._flatten_callable(node, frozenset())
+        if targets is not None:
+            return select(targets)  # ordinary direct calls keep their fast path
+        node = _unwrap(node)
+        if isinstance(node, hir.ExpressedIdentifier):
+            if (node.binding_id is None or node.binding_id in self.param_binding_ids
+                    or node.binding_id in self.reassigned or node.binding_id not in self.declares):
                 return None
-            return [targets[call.selected_method_index]]
-        if len(targets) != 1:
-            # A multi-target call without a recorded selection: merge every
-            # alternative conservatively.
-            return targets if targets else None
-        return targets
+        elif not isinstance(node, (hir.ValueCast, hir.Flow)):
+            return None
+        pending = [(node, False)]
+        active, done, result = set(), set(), {}
+        while pending:
+            node, leaving = pending.pop()
+            node = _unwrap(node)
+            key = id(node)
+            if leaving:
+                active.remove(key)
+                done.add(key)
+                continue
+            if key in active:
+                return None
+            if key in done:
+                continue
+            active.add(key)
+            pending.append((node, True))
+            if isinstance(node, (hir.FunctionLiteral, hir.OverloadedFunction)):
+                targets = self._flatten_callable(node, frozenset())
+                if targets is None or (targets := select(targets)) is None:
+                    return None
+                result.update((id(target), target) for target in targets)
+            elif isinstance(node, hir.ValueCast):
+                pending.append((node.expr, False))
+            elif isinstance(node, hir.ExpressedIdentifier):
+                binding = node.binding_id
+                if (binding is None or binding in self.param_binding_ids
+                        or binding in self.reassigned or binding not in self.declares):
+                    return None
+                pending.append((self.declares[binding].expr, False))
+            elif isinstance(node, hir.Flow) and node.default is not None and all(isinstance(arm, hir.IfArm) for arm in node.arms):
+                pending.append((node.default, False))
+                pending.extend((arm.body, False) for arm in reversed(node.arms))
+            else:
+                return None
+        return list(result.values()) or None
+
+    def _direct_targets(self, call: hir.FunctionCall) -> list[hir.FunctionLiteral] | None:
+        return self._value_targets(call.func, call.selected_method_index)
 
     @staticmethod
     def _pair_arguments(

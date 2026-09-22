@@ -2388,3 +2388,30 @@ is 4,988 sites over 47,364 lines (105.312/KLOC), within the unchanged gates.
 Artifacts use `../dewy-build-artifacts/phase1-whole-frame-` prefixes. This slice
 has bounded second-generation validation; the preceding nested-getter checkpoint
 is the most recent full native fixed point.
+
+
+## Conditional callable access summaries (2026-09-21)
+
+Access/effect analysis now retains all known targets of a conditional callable
+value, including stable aliases and checked value wrappers. Dispatch selection
+is applied inside each possible overload value rather than selecting one
+runtime branch. Every alternative must justify a loan; unresolved arms,
+reassigned handles and alias cycles remain unknown. Public effects also check
+the selector expression, while constructing an overload set only evaluates its
+operands. Native borrowing reuses this target resolution and the already
+collected access graph.
+
+Shared choices use a bounded graph walk rather than enumerating paths; ordinary
+direct calls keep their fast path and unresolved ingress/intrinsics create no
+search state. A shared graph with 65,536 paths and an unresolved cycle have
+explicit regressions. Choosing either of two known read-only array helpers now
+retains frame placement and zero arena allocation across repeated calls.
+
+Validation: 94 adjacent hosted effect/placement tests passed initially; 38
+hosted callback/projection cases pass after the overload-evaluation correction.
+The final focused run passes 11 tests, including native/hosted effect-summary
+parity on the shared graph. A second-generation native driver passes 11 runtime
+kernels and 16 rejections against hosted checking on x86-64/C. The inventory is
+4,991 sites over 47,432 lines (105.224/KLOC), within the unchanged gates.
+Artifacts use `../dewy-build-artifacts/phase1-conditional-place-` prefixes.
+These are focused checks, not a new complete pytest run or fixed point.

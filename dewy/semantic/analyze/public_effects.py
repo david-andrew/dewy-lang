@@ -151,7 +151,7 @@ def summarize(root, registry):
             if isinstance(node, (hir.Void, hir.NoneValue, hir.Bool, hir.Integer, hir.String,
                                  hir.Break, hir.Continue, hir.ScopeMetatag, hir.TypeValue)):
                 return
-            if isinstance(node, hir.ExpressedIdentifier) and analysis._flatten_callable(node, frozenset()) is not None:
+            if isinstance(node, hir.ExpressedIdentifier) and analysis._value_targets(node) is not None:
                 return  # a statically known function handle has no storage read
             if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)):
                 access(node, 'reads')
@@ -163,6 +163,8 @@ def summarize(root, registry):
                     return
                 targets = analysis._direct_targets(node)
                 if targets is not None:
+                    # Resolving the result does not erase selector evaluation.
+                    visit(node.func)
                     for target in targets:
                         supplied = call_subjects(node, target.type)
                         if supplied is None:
@@ -247,7 +249,7 @@ def summarize(root, registry):
                 for child in hir.children(node.iterable):
                     visit(child)
                 return
-            if isinstance(node, (hir.Block, hir.Suppress, hir.Return, hir.Flow, hir.IfArm, hir.LoopArm,
+            if isinstance(node, (hir.Block, hir.Suppress, hir.Return, hir.Flow, hir.IfArm, hir.LoopArm, hir.OverloadedFunction,
                                  hir.ShortCircuit, hir.Obligation, hir.TypeTest, hir.ArrayLength,
                                  hir.StringLength, hir.ValueCast, hir.RepresentationCast, hir.Spread,
                                  hir.MultiIteratorExpression)):

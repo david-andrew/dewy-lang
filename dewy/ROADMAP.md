@@ -603,7 +603,9 @@ known nonescaping helpers, including forwarding and recursion, without losing
 frame placement. Whole-owner loans now include read-only scalar arrays and
 field-mutating scalar records when every known callee preserves their backing
 storage. Unknown callbacks, whole-owner replacement/resizing and by-value
-whole-owner uses remain conservative.
+whole-owner uses remain conservative. Conditional choices among known
+callees keep the guarantees common to every branch, with selector effects
+checked separately and shared choices visited once.
 Projected writes and mutating place calls share their allocation obligations;
 an untouched sibling projection can still borrow its own storage.
 Read-only aggregate forwarding now shares its storage
