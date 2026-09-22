@@ -788,6 +788,37 @@ def _multiply(interval: Interval, other: Interval) -> Interval:
     return Interval(min(products), max(products))
 
 
+def _quotient_interval(left: Interval, right: Interval, *, floor: bool) -> Interval | None:
+    """Endpoint bounds for a divisor confined to either nonzero half-line.
+
+    Normalize a negative divisor by negating both operands. With a positive
+    divisor the quotient increases with the numerator; the endpoint's sign
+    determines which divisor endpoint supplies its extremum. Infinite divisor
+    endpoints tend to zero (or -1 for a negative floor quotient).
+    """
+    if right.upper is not None and right.upper < 0:
+        left = Interval(None if left.upper is None else -left.upper,
+                        None if left.lower is None else -left.lower)
+        right = Interval(-right.upper, None if right.lower is None else -right.lower)
+    if right.lower is None or right.lower <= 0:
+        return None
+    divide = int.__floordiv__ if floor else _truncate_divide
+    lower = upper = None
+    if left.lower is not None:
+        if left.lower < 0:
+            lower = divide(left.lower, right.lower)
+        else:
+            lower = 0 if right.upper is None else divide(left.lower, right.upper)
+    if left.upper is not None:
+        if left.upper >= 0:
+            upper = divide(left.upper, right.lower)
+        elif right.upper is None:
+            upper = -1 if floor else 0
+        else:
+            upper = divide(left.upper, right.upper)
+    return Interval(lower, upper)
+
+
 def _remainder_interval(left: Interval, right: Interval, *, floor: bool) -> Interval | None:
     """Modulo follows the divisor for floor division, the dividend for truncation.
 
@@ -3281,36 +3312,10 @@ class _BoundsValidator:
             )
         elif name == '__lshift__' and right.lower is not None and right.lower == right.upper:
             result = _multiply(left, Interval.exact(1 << right.lower))
-        elif (
-            name == '__floordiv__'
-            and right.lower is not None
-            and right.lower > 0
-            and left.lower is not None
-            and left.upper is not None
-        ):
-            # Truncating division by a positive divisor is monotone in the
-            # numerator and largest in magnitude at the smallest divisor.
-            divisors = [right.lower] if right.upper is None else [right.lower, right.upper]
-            candidates = [
-                numerator // divisor if floor else _truncate_divide(numerator, divisor)
-                for numerator in (left.lower, left.upper)
-                for divisor in divisors
-            ]
-            if right.upper is None:
-                # Arbitrarily large positive divisors bring either sign's
-                # truncating quotient to zero. The smallest divisor alone
-                # cannot establish a positive lower (or negative upper) bound.
-                candidates.append(0)
-                if floor and left.lower < 0:
-                    candidates.append(-1)
-            result = Interval(min(candidates), max(candidates))
-        elif (
-            floor and name == '__floordiv__'
-            and right.lower is not None and right.upper is not None and right.upper < 0
-            and left.lower is not None and left.upper is not None
-        ):
-            candidates = [a // b for a in (left.lower, left.upper) for b in (right.lower, right.upper)]
-            result = Interval(min(candidates), max(candidates))
+        elif name == '__floordiv__':
+            result = _quotient_interval(left, right, floor=floor)
+            if result is None:
+                return None
         elif name == '__mod__':
             result = _remainder_interval(left, right, floor=floor)
             if result is None:

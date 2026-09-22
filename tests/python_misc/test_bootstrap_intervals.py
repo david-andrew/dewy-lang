@@ -51,6 +51,7 @@ def test_native_interval_operations_match_hosted(tmp_path):
         for left in (Interval(-8, -1), Interval(-8, 8), Interval(1, 8), Interval(None, None)):
             for right in (Interval(-5, -2), Interval(2, 5), Interval(-5, 5), Interval(1, None), Interval(None, -1)):
                 arithmetic.append(('__mod__', left, right, 'int', None, floor))
+                arithmetic.append(('__floordiv__', left, right, 'int', None, floor))
 
     def interval_literal(value):
         if value is None:

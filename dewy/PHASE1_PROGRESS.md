@@ -3519,3 +3519,17 @@ runtime and four rejection cases with x86-64/C execution. Cases cover replacing
 a total dictionary entry, once-only nested cleanup, refined record cleanup,
 missing total keys, false field facts, forbidden total-key removal and hook
 effects. No facts or resource obligations are discharged by layout equality.
+## Division interval endpoints (2026-09-22)
+
+Both proof kernels now calculate division bounds directly from monotone
+endpoints, normalizing negative divisor intervals by negating both operands.
+This covers one-sided unbounded ranges and negative machine-word divisors;
+truncation and floor division remain distinct. Divisor intervals crossing zero
+still require separate nonzero evidence and provide no quotient interval here.
+The native kernel no longer constructs numerator, divisor and candidate arrays.
+
+Validation: seven hosted tests pass, including an exhaustive small-integer
+interval oracle for both rounding rules. Three interval-kernel comparisons
+pass, and a fresh native driver agrees with hosted on three runtime and two
+rejection cases on x86-64/C. The seeded source inventory is 4,491 sites; a
+fresh integration checkpoint remains necessary. This count is not a timing.

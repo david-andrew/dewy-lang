@@ -179,6 +179,40 @@ truncate_divide = (numerator:bigint divisor:bigint & ~0):>bigint => {
     return if (numerator <? 0) not=? (divisor <? 0) (-quotient) else quotient
 }
 
+quotient_value=(numerator:bigint divisor:bigint floor:bool):>bigint=>{
+    $runtime_assert divisor not=? 0
+    return if floor numerator // divisor else truncate_divide(numerator divisor)
+}
+positive_quotient=(left:Interval right:Interval floor:bool):>Interval=>{
+    $runtime_assert right.lower isnt? none and right.lower >? 0
+    if right.upper isnt? none {$runtime_assert right.upper >? 0}
+    let lower:bigint?=none
+    let upper:bigint?=none
+    if left.lower isnt? none {
+        if left.lower <? 0 {lower=quotient_value(left.lower right.lower floor)}
+        else if right.upper is? none {lower=0}
+        else {lower=quotient_value(left.lower right.upper floor)}
+    }
+    if left.upper isnt? none {
+        if left.upper >=? 0 {upper=quotient_value(left.upper right.lower floor)}
+        else if right.upper is? none {upper=if floor {-1} else 0}
+        else {upper=quotient_value(left.upper right.upper floor)}
+    }
+    return Interval[lower upper]
+}
+quotient=(left:Interval right:Interval floor:bool=false):>Interval?=>{
+    # Negating both operands preserves their mathematical quotient. Once the
+    # divisor is positive, monotonicity selects each endpoint directly; no
+    # temporary numerator, divisor or candidate arrays are needed.
+    if right.upper isnt? none and right.upper <? 0 {
+        let numerator=Interval[(if left.upper is? none none else -left.upper) (if left.lower is? none none else -left.lower)]
+        let divisor=Interval[-right.upper (if right.lower is? none none else -right.lower)]
+        return positive_quotient(numerator divisor floor)
+    }
+    if right.lower is? none or right.lower <=? 0 return none
+    return positive_quotient(left right floor)
+}
+
 # Floor modulo follows the divisor's sign; machine remainder follows the
 # dividend. Nonzero evidence may live outside the interval (which can span
 # zero), but an exactly zero divisor has no mathematical result.
@@ -222,37 +256,7 @@ binary = (operation:Operation left:Interval? right:Interval? word:Interval?=none
         loop remaining >? 0 { factor *= 2 remaining -= 1 }
         result = multiply(left exact(factor))
     }
-    else if operation =? '__floordiv__' and right.lower isnt? none and right.lower >? 0 and left.lower isnt? none and left.upper isnt? none {
-        let divisors:array<bigint> = [right.lower]
-        if right.upper isnt? none { divisors.push(right.upper) }
-        let candidates:array<bigint> = []
-        let numerators:array<bigint> = [left.lower left.upper]
-        loop numerator in numerators {
-            loop divisor in divisors {
-                $runtime_assert divisor not=? 0
-                candidates.push(if floor numerator // divisor else truncate_divide(numerator divisor))
-            }
-        }
-        # An unbounded positive divisor can make either sign's quotient zero.
-        # This is a mathematical bound, not an assumed machine-width cap.
-        if right.upper is? none {
-            candidates.push(0)
-            if floor and left.lower <? 0 { candidates.push(-1) }
-        }
-        result = cover(candidates)
-    }
-    else if floor and operation =? '__floordiv__' and right.lower isnt? none and right.upper isnt? none and right.upper <? 0 and left.lower isnt? none and left.upper isnt? none {
-        let candidates:array<bigint> = []
-        let numerators:array<bigint> = [left.lower left.upper]
-        let divisors:array<bigint> = [right.lower right.upper]
-        loop numerator in numerators {
-            loop divisor in divisors {
-                $runtime_assert divisor not=? 0
-                candidates.push(numerator // divisor)
-            }
-        }
-        result = cover(candidates)
-    }
+    else if operation =? '__floordiv__' {result=quotient(left right floor)}
     else if operation =? '__mod__' {result=remainder(left right floor)}
     if result is? none return none
     if bound isnt? none { result = intersect(result bound) }
