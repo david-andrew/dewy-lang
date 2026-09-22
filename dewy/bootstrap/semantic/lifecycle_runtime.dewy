@@ -1396,6 +1396,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         loop call in cleanup([source] node.loc @plan @session) {items.push(call)}
         items.push(put(hir.Assign[node.loc node.value_type node.target node.op replacement.value] @session))
         $runtime_assert target is? hir.ExpressedIdentifier and target.binding_id isnt? none
+        plan.extractions[target.binding_id]=[]
         let flag=plan.flags.get(target.binding_id)
         if flag isnt? none {
             let present=put(hir.Bool[node.loc types.primitive('bool' @session.types) true] @session)
@@ -1535,7 +1536,35 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         fresh(node.value live false @plan @session frame=frame)
         let replacement=capture_result(node.value node.loc @session)
         prefix.push(replacement.declaration)
-        drop_value(selected target.value_type node.loc set[] @prefix @plan @session)
+        # Preserve still-owned descendants, then retire the old route's
+        # extraction metadata. Indexed replacements remain conservative.
+        let part=hir.node_at(session.hir selected)
+        let reverse_path:array<string>=[]
+        loop part is? hir.MemberAccess {reverse_path.push(part.name) part=hir.node_at(session.hir part.value)}
+        let removed:array<Extraction>=[]
+        if part is? hir.ExpressedIdentifier and part.binding_id isnt? none {
+            let path:array<string>=[]
+            loop reverse_path.length>?0 {path.push(reverse_path.pop)}
+            let retained:array<Extraction>=[]
+            loop route in plan.extractions.get(part.binding_id []) {
+                let inside=path.length<=?route.path.length
+                let i:addr=0
+                loop inside and i<?path.length and i<?route.path.length {
+                    if route.path[i] isnt? string or route.path[i] not=?path[i] {inside=false}
+                    i+=1
+                }
+                if inside {
+                    let rest:array<string|addr>=[]
+                    i=path.length
+                    loop i<?route.path.length {rest.push(route.path[i]) i+=1}
+                    removed.push(Extraction[route.binding rest route.moved])
+                } else {retained.push(route)}
+            }
+            plan.extractions[part.binding_id]=retained
+        }
+        let first:Extraction?=none
+        if removed.length>?0 {first=removed.pop}
+        drop_value(selected target.value_type node.loc set[] @prefix @plan @session extraction=first additional=removed)
         let stored=if node is? hir.MemberAssign hir.MemberAssign[node.loc node.value_type selected replacement.value] else hir.IndexAssign[node.loc node.value_type selected replacement.value]
         prefix.push(put(stored @session))
         store(id hir.Block[node.loc node.value_type prefix false] @session)
@@ -1637,7 +1666,38 @@ read_routes=(body:addr nodes:array<hir.AST>):>ReadRoutes=>{
     }
     return result
 }
-last_component=(value:addr root:addr last:dict<addr addr> positions:dict<addr addr> routes:ReadRoutes nodes:array<hir.AST>):>bool=>{
+# Only direct same-block assignments can renew a component. All reads in
+# their RHS precede the new lifetime, regardless of HIR child traversal order.
+Renewal:type=const [target:addr path:array<string> stop:addr]
+block_renewals=(block:hir.Block positions:dict<addr addr> occurrences:dict<addr int> nodes:array<hir.AST>):>dict<addr array<Renewal>>=>{
+    let result:dict<addr array<Renewal>>=[]
+    loop item in block.items {
+        let node=hir.node_at(nodes item)
+        if node isnt? hir.Assign|hir.MemberAssign continue
+        if node is? hir.Assign and node.op not=?'=' continue
+        let target_id=node.target
+        let target=hir.node_at(nodes target_id)
+        let reverse_path:array<string>=[]
+        loop target is? hir.MemberAccess {
+            reverse_path.push(target.name) target_id=target.value
+            target=hir.node_at(nodes target_id)
+        }
+        if target isnt? hir.ExpressedIdentifier or target.binding_id is? none or occurrences.get(target_id 0) not=?1 continue
+        let path:array<string>=[]
+        loop reverse_path.length>?0 {path.push(reverse_path.pop)}
+        let stop:addr=0
+        let pending:array<addr>=[item]
+        loop pending.length>?0 {
+            let id=pending.pop let read=hir.node_at(nodes id)
+            if read is? hir.ExpressedIdentifier and positions.get(id 0)>?stop {stop=positions.get(id 0)}
+            hir.push_children(read @pending)
+        }
+        let renewals=result.get(target.binding_id [])
+        renewals.push(Renewal[target_id path stop]) result[target.binding_id]=renewals
+    }
+    return result
+}
+last_component=(value:addr root:addr renewals:dict<addr array<Renewal>> last:dict<addr addr> positions:dict<addr addr> routes:ReadRoutes nodes:array<hir.AST>):>bool=>{
     let owner=hir.node_at(nodes root)
     $runtime_assert owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none
     let part=hir.node_at(nodes value)
@@ -1645,7 +1705,12 @@ last_component=(value:addr root:addr last:dict<addr addr> positions:dict<addr ad
     loop part is? hir.MemberAccess {part=hir.node_at(nodes part.value)}
     if part isnt? hir.ExpressedIdentifier return last.get(owner.binding_id)=?root
     let path=routes.paths.get(root [])
+    let renewal:Renewal?=none
+    loop candidate in renewals.get(owner.binding_id []) {
+        if positions.get(candidate.target 0)>?positions.get(root 0) and candidate.path.length<=?path.length and route_overlaps(candidate.path path) {renewal=candidate break}
+    }
     loop read in routes.by_binding.get(owner.binding_id []) {
+        if renewal isnt? none and (read=?renewal.target or positions.get(read 0)>?renewal.stop) continue
         if positions.get(read 0)>?positions.get(root 0) and route_overlaps(path routes.paths.get(read [])) return false
     }
     return true
@@ -1714,6 +1779,7 @@ local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Pla
     loop id in blocks {
         let block=hir.node_at(session.hir id)
         $runtime_assert block is? hir.Block
+        let renewals=block_renewals(block positions occurrences session.hir)
         let locals:set<addr>=set[]
         if id =? body {
             loop parameter in parameters {
@@ -1761,7 +1827,7 @@ local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Pla
                         root=if owner is? hir.MemberAccess owner.value else owner.array
                         owner=hir.node_at(session.hir root)
                     }
-                    if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none and resource(value.value_type session.types) isnt? none and owner.binding_id in? locals and owner.binding_id not in? captured and last_component(selected root last positions routes session.hir) and occurrences.get(root 0) =? 1 and references.get(owner.binding_id 0) =? 1 and not alias_alive(owner.binding_id root dependent born last positions) {plan.consume_sites.add(selected)}
+                    if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none and resource(value.value_type session.types) isnt? none and owner.binding_id in? locals and owner.binding_id not in? captured and last_component(selected root renewals last positions routes session.hir) and occurrences.get(root 0) =? 1 and references.get(owner.binding_id 0) =? 1 and not alias_alive(owner.binding_id root dependent born last positions) {plan.consume_sites.add(selected)}
                 }
                 hir.push_children(part @candidates)
             }

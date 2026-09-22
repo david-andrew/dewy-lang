@@ -3011,3 +3011,24 @@ with x86-64/C execution. Cold/restored prelude snapshots retain alias row kinds,
 emit byte-identical output, execute correctly and reject a value type supplied
 as a row. Artifacts use `phase1-effect-aliases-*`. Callback-relative place rows
 and other remaining Phase 1 work are still in progress.
+
+
+## Reinitializing transferred record fields (2026-09-22)
+
+A direct same-block assignment to a field, its containing record, or the whole
+owner now starts a new lifetime after a component transfer. The liveness proof
+checks every RHS read before that renewal; the target occurrence alone is not
+a read of the old value. Conditional replacements, live aliases and borrowed
+owners remain conservative.
+
+Cleanup drops the still-owned old descendants and custom-move remnants, then
+forgets only the replaced route's extraction metadata. The new value receives
+normal cleanup. Returning before replacement retains the earlier partial
+cleanup plan; returning the complete record after replacement transfers all
+its renewed fields.
+
+Validation: 62 adjacent hosted cases passed before adding two final exit/multi-
+field fixtures; the final focused selection passed 15. A freshly built native
+driver and the hosted compiler agree on 20 runtime kernels and 12 rejections,
+with x86-64/C execution. Repeated array-field replacement retained no arena
+allocation across 100 calls. Artifacts use `phase1-field-renewal-*`.

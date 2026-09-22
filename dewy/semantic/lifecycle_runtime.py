@@ -347,7 +347,19 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             else:
                 result.extend(calls)
         if selected is not None:
-            drop(selected, selected.type, set())
+            # Replacing an ancestor of a moved component cleans only the
+            # still-owned remainder. The new value then restores that route.
+            part, path = selected, []
+            while isinstance(part, hir.MemberAccess):
+                path.append(part.name)
+                part = part.value
+            routes = []
+            if isinstance(part, hir.ExpressedIdentifier):
+                path = tuple(reversed(path))
+                existing = extractions.get(part.binding_id, ())
+                routes = [(route[len(path):], moved) for route, moved in existing if route[:len(path)] == path]
+                extractions[part.binding_id] = [(route, moved) for route, moved in existing if route[:len(path)] != path]
+            drop(selected, selected.type, set(), extraction=routes[0] if routes else None, additional=routes[1:])
         if suffix is not None:
             value, first, before = suffix
             drop(value, value.type, set(), tail=(first, before))
@@ -1013,7 +1025,25 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     return True
                 pending.extend(dependent.get(alias, ()))
             return False
-        def last_component(value, owner):
+        # A direct replacement in this same block starts a new lifetime.
+        # Its RHS still observes the old value: stop only after all reads in
+        # that statement, exempting just the assignment's target occurrence.
+        renewals = {}
+        for block in blocks:
+            for node in block.items:
+                if not isinstance(node, (hir.Assign, hir.MemberAssign)) or isinstance(node, hir.Assign) and node.op != '=':
+                    continue
+                target, path = node.target, []
+                while isinstance(target, hir.MemberAccess):
+                    path.append(target.name)
+                    target = target.value
+                if not isinstance(target, hir.ExpressedIdentifier) or occurrences.get(id(target)) != 1:
+                    continue
+                end = max((positions[id(read)] for read in hir.walk(node)
+                           if isinstance(read, hir.ExpressedIdentifier)), default=-1)
+                renewals.setdefault((id(block), target.binding_id), []).append((id(target), tuple(reversed(path)), end))
+
+        def last_component(value, owner, block):
             if isinstance(value, hir.ExpressedIdentifier):
                 return last.get(owner.binding_id) == id(owner)
             # Distinct record fields have disjoint ownership. Indexed routes
@@ -1025,7 +1055,14 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if not isinstance(part, hir.ExpressedIdentifier):
                 return last.get(owner.binding_id) == id(owner)
             route = read_routes[id(owner)]
+            stop, target = None, None
+            for write, path, end in renewals.get((id(block), owner.binding_id), ()):
+                if positions[write] > positions[id(owner)] and route[:len(path)] == path:
+                    stop, target = end, write
+                    break
             for read in reads_by_binding.get(owner.binding_id, ()):
+                if id(read) == target or stop is not None and positions[id(read)] > stop:
+                    continue
                 if positions[id(read)] <= positions[id(owner)]:
                     continue
                 later = read_routes[id(read)]
@@ -1080,7 +1117,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                             owner = owner.value if isinstance(owner, hir.MemberAccess) else owner.array
                         if (isinstance(owner, hir.ExpressedIdentifier) and resource(value.type) is not None
                                 and owner.binding_id in local and owner.binding_id not in captured
-                                and last_component(value, owner) and occurrences[id(owner)] == 1
+                                and last_component(value, owner, block) and occurrences[id(owner)] == 1
                                 and references.get(owner.binding_id) == 1 and not alive_after(owner.binding_id, id(owner))):
                             consumes.add(id(value))
                     pending.extend(hir.children(part))
@@ -1274,7 +1311,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 declaration, value = capture(fresh(node.value, live, False, control=control), node.loc)
                 flag = ownership_flags.get(source.binding_id)
                 activate = [hir.Assign(node.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(node.loc, 'bool', True))] if flag is not None else []
-                return hir.Block(node.loc, node.type, [declaration, *cleanup([source], node.loc),
+                released = cleanup([source], node.loc)
+                extractions.pop(source.binding_id, None)
+                return hir.Block(node.loc, node.type, [declaration, *released,
                                                        replace(node, value=value), *activate], False)
             if isinstance(node, hir.Return):
                 consumed = None
