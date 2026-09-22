@@ -3114,3 +3114,11 @@ x86-64 and C (the final dynamic nested-mutation pair has its own log).
 Artifacts use `phase1-indexed-facts-*`. The final source inventory using the
 previous native seed is exactly 4,500 sites over 48,494 lines (92.795/KLOC);
 the gate is unchanged, and this is not a fresh self-bootstrap certificate.
+
+## Union-borrow corpus parity (2026-09-22)
+
+All 211 default corpus cases passed with native pair
+`phase1-union-borrows-a6f1f6bc` and frozen hosted source `d21ac971`, using
+direct x86-64 output and shared checked-prelude caches. Reports:
+`phase1-union-borrows-corpus.json` and `.log`. This checkpoint predates indexed
+type-fact changes, whose focused paired validation is recorded separately.
