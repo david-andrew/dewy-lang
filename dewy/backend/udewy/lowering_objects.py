@@ -1306,8 +1306,9 @@ class _ObjectLowering:
             node.view and isinstance(expr, hir.ExpressedIdentifier)
         ):
             return False
-        if isinstance(expr, hir.DictLookup) and not isinstance(value_type, ty.ObjectType):
-            return False  # only record lookups expose the stored value's block
+        if (isinstance(expr, hir.DictLookup) and not isinstance(value_type, ty.ObjectType)
+                and not (expr.proven and isinstance(value_type, ty.ArrayType))):
+            return False  # optional/fallback lookups may construct result storage
         if isinstance(expr, hir.DictLookup) and expr.default is not None and not expr.proven:
             # The fallback may be a temporary released after this statement.
             # Stability of the dictionary alone cannot lend that other owner.

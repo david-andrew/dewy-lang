@@ -3700,9 +3700,11 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     if state.allocator is? none and not node.view return false
     let expr=hir.node_at(state.input.nodes node.expr)
     if expr isnt? hir.Index|hir.MemberAccess|hir.DictLookup and not (node.view and expr is? hir.ExpressedIdentifier) return false
-    # A dictionary lookup hands out the stored record's block; other value
-    # kinds are rebuilt by the lookup and must be owned.
-    if expr is? hir.DictLookup and not object_valued(expr.value_type state) return false
+    # Proven array entries hand out the stored descriptor, just as records
+    # expose their stored block. Optional/fallback lookups may rebuild storage.
+    if expr is? hir.DictLookup and not object_valued(expr.value_type state) {
+        if not expr.proven or types.node_at(state.type_nodes types.strip_refinement(expr.value_type state.type_nodes)) isnt? types.ArrayType return false
+    }
     # An unproven lookup may select a temporary fallback. Its lifetime is
     # independent of the dictionary's, so a stable dictionary is insufficient.
     if expr is? hir.DictLookup and expr.default isnt? none and not expr.proven return false

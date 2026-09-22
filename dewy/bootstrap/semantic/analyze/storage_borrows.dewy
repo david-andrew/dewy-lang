@@ -84,7 +84,6 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
             }
             hir.push_children(node @pending)
         }
-        bodies[id]=body
         # Reuse the unique body inventory, including defaults. A local owner
         # must not be written or exposed through a place anywhere in this scope.
         let written:set<addr>=set[]
@@ -121,25 +120,31 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
                 }
             }
         }
+        # Retain the inventory only after its final local read, allowing a move.
+        bodies[id]=body
     }
     let pending:array<addr>=[]
     loop id in blocked {pending.push(id)}
     loop pending.length >? 0 {
-        loop caller in edges.get(pending.pop set[]) {
+        let target=pending.pop
+        if target not in? edges continue
+        const callers=@edges[target]
+        loop caller in callers {
             if caller not in? blocked {blocked.add(caller) pending.push(caller)}
         }
     }
     let result:dict<addr set<addr>>=[]
     loop id in analysis.literals {
-        if id in? blocked continue
+        if id in? blocked or id not in? bodies or id not in? stable_locals continue
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         let parameters:dict<addr addr>=[]
-        let local_owners=stable_locals.get(id [])
+        const local_owners=@stable_locals[id]
         loop param in effects.literal_params(literal) {
             if not param.place and param.binding_id isnt? none {parameters[param.binding_id]=param.value_type}
         }
-        loop item in bodies.get(id []) {
+        const body=@bodies[id]
+        loop item in body {
             let node=hir.node_at(nodes item)
             if node isnt? hir.FunctionCall continue
             let targets=effects.direct_targets(node analysis nodes)
@@ -166,10 +171,12 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
                         if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and pair.parameter isnt? none {
                             let own=parameters.get(source.binding_id)
                             let expected=wanted.get(pair.parameter)
-                            let incoming=summaries.by_param_binding.get(source.binding_id)
-                            let outgoing=summaries.by_param_binding.get(pair.parameter)
                             let local=local_owners.get(source.binding_id)
-                            let stable=local isnt? none and ordinary(local table @eligible) or own isnt? none and ordinary(own table @eligible) and incoming isnt? none and stable_projection(incoming path nodes)
+                            let stable=local isnt? none and ordinary(local table @eligible)
+                            if not stable and own isnt? none and ordinary(own table @eligible) and source.binding_id in? summaries.by_param_binding {
+                                const incoming=@summaries.by_param_binding[source.binding_id]
+                                stable=stable_projection(incoming path nodes)
+                            }
                             let same=false
                             if expected isnt? none {
                                 same=arg.value_type =? expected
@@ -177,7 +184,10 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
                                 let expected_type=types.node_at(table expected)
                                 if actual_type is? types.ArrayType and expected_type is? types.ArrayType and actual_type.element =? expected_type.element and expected_type.length is? none {same=true}
                             }
-                            safe=stable and expected isnt? none and ordinary(arg.value_type table @eligible) and same and outgoing isnt? none and effects.read_only(outgoing)
+                            if stable and expected isnt? none and ordinary(arg.value_type table @eligible) and same and pair.parameter in? summaries.by_param_binding {
+                                const outgoing=@summaries.by_param_binding[pair.parameter]
+                                safe=effects.read_only(outgoing)
+                            }
                         }
                         if safe {current.add(pair.argument)} else {rejected.add(pair.argument)}
                     }

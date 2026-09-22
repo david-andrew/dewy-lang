@@ -1504,7 +1504,12 @@ def _declaration_initializer(right: p0.AST, keyword: str, *, ctx: Context,
         if ctx.function_scope_depth == 0:
             user_error(ctx.srcfile, 'a local view needs a function scope', Pointer(span=right.loc, message='bind the view inside its owning function'))
         target = _unwrap_write_path(expr)
-        if not isinstance(target, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index, hir.DictLookup)) or _member_root_binding(target, ctx=ctx) is None:
+        # Entry views borrow the dictionary's stored values. Numerical member
+        # paths deliberately do not treat a dictionary key as an array index.
+        owner = sb.access_path(target, unwrap=_unwrap_write_path).root
+        while isinstance(owner, hir.DictLookup):
+            owner = sb.access_path(owner.values, unwrap=_unwrap_write_path).root
+        if not isinstance(target, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index, hir.DictLookup)) or _member_root_binding(owner, ctx=ctx) is None:
             user_error(ctx.srcfile, 'a local view needs a stored value', Pointer(span=right.loc, message='select a named binding, field, or element'))
     return expr, used[0]
 

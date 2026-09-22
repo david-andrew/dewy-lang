@@ -1,0 +1,19 @@
+# Read-only entry views keep the dictionary's array descriptor alive. Checking
+# allocation while the view is live distinguishes a view from a freed snapshot.
+main=():>int64=>{
+    let values:dict<int64 array<int64>>=[]
+    values[1]=[40 2]
+    if 1 not in? values return 1
+    let result:int64=0
+    loop i in 0.. and i<?1000 {
+        if 1 not in? values return 2
+        let before:int64=_arena_allocated_bytes
+        const view=@values[1]
+        if _arena_allocated_bytes not=?before return 3
+        result=0
+        loop item in view {result+=item}
+    }
+    # A write after the view's final use is fine.
+    values.clear()
+    return result
+}
