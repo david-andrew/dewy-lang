@@ -11,13 +11,12 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / 'tests/fixtures/frame_record_placement.dewy').read_text()
 CASES = [SOURCE,
     SOURCE.replace('Point=type of [x:int64 y:int64]', 'Point:type=[x:int64 y:int64]'),
+    'R:type=[x:int64] read=(value:R):>int64=>value.x\nmain=():>int64 & no allocates=>{let value=R[42] return read(value)}',
     'main=():>int64 & no_effects=>{let flags:[ok:bool n:uint8]=[true 42] flags.ok=not flags.ok return if flags.ok 1 else flags.n as int64}',
 ]
 ERRORS = [
     'R:type=[x:int64] make=():>R & no allocates=>{let value=R[42] return value}\nmain=():>int64=>make().x',
     'R:type=[items:array<int64>] main=():>int64 & no_effects=>{let value=R[[42]] return value.items[0]}',
-    # By-value record calls still need the separate forwarding/escape proof.
-    'R:type=[x:int64] read=(value:R):>int64=>value.x\nmain=():>int64 & no allocates=>{let value=R[42] return read(value)}',
 ]
 
 

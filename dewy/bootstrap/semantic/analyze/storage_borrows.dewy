@@ -1,14 +1,15 @@
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
 import p"effects.dewy" as effects
+import p"predicate_effects.dewy" as local_effects
 import p"../bindings.dewy" as bindings
 import p"../type_queries.dewy" as views
 
 # A storage proof shared by allocation contracts and argument lowering.
-# A read-only by-value parameter and its projections stay stable, including
-# later argument evaluation. Known calls operating only on their own bindings
+# Read-only by-value parameters, stable fresh local owners and their projections
+# stay stable, including later argument evaluation. Calls on their own bindings
 # cannot change an incoming alias through nonlocal or raw storage. The shared
-# proof covers ordinary aggregate forwarding without representation conversion.
+# proof permits fixed-to-dynamic outer array length, but no storage conversion.
 # More precise lowerer proofs may still borrow other expressions.
 const OPERATORS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
 # Native builtins carry stable identities. A source function with the same
@@ -59,6 +60,7 @@ stable_projection=(summary:effects.ParameterEffects path:bindings.AccessPath nod
 forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>{
     let eligible:dict<addr bool>=[]
     let bodies:dict<addr array<addr>>=[]
+    let stable_locals:dict<addr dict<addr addr>>=[]
     let edges:dict<addr set<addr>>=[]
     let blocked:set<addr>=set[]
     loop id in analysis.literals {
@@ -83,6 +85,25 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
             hir.push_children(node @pending)
         }
         bodies[id]=body
+        # Reuse the unique body inventory, including defaults. A local owner
+        # must not be written or exposed through a place anywhere in this scope.
+        let written:set<addr>=set[]
+        let candidates:dict<addr addr>=[]
+        loop item in body {
+            let node=hir.node_at(nodes item)
+            let target=if node is? hir.IteratorExpression node.target else local_effects.write_target(node nodes)
+            if target isnt? none {
+                let path=bindings.access_path(target nodes facts=true)
+                let root=hir.node_at(nodes path.root)
+                if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {written.add(root.binding_id)}
+            }
+            if node is? hir.Declare and node.binding_id isnt? none and not node.view {
+                let value=hir.node_at(nodes node.expr)
+                if value is? hir.ObjectLiteral|hir.ArrayLiteral {candidates[node.binding_id]=value.value_type}
+            }
+        }
+        loop binding in written {candidates.pop(binding default=0);}
+        stable_locals[id]=candidates
         loop item in body {
             let node=hir.node_at(nodes item)
             if node is? hir.RepresentationCast {blocked.add(id)}
@@ -114,6 +135,7 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         let parameters:dict<addr addr>=[]
+        let local_owners=stable_locals.get(id [])
         loop param in effects.literal_params(literal) {
             if not param.place and param.binding_id isnt? none {parameters[param.binding_id]=param.value_type}
         }
@@ -146,7 +168,16 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
                             let expected=wanted.get(pair.parameter)
                             let incoming=summaries.by_param_binding.get(source.binding_id)
                             let outgoing=summaries.by_param_binding.get(pair.parameter)
-                            safe=own isnt? none and expected isnt? none and ordinary(arg.value_type table @eligible) and arg.value_type =? expected and ordinary(own table @eligible) and incoming isnt? none and stable_projection(incoming path nodes) and outgoing isnt? none and effects.read_only(outgoing)
+                            let local=local_owners.get(source.binding_id)
+                            let stable=local isnt? none and ordinary(local table @eligible) or own isnt? none and ordinary(own table @eligible) and incoming isnt? none and stable_projection(incoming path nodes)
+                            let same=false
+                            if expected isnt? none {
+                                same=arg.value_type =? expected
+                                let actual_type=types.node_at(table arg.value_type)
+                                let expected_type=types.node_at(table expected)
+                                if actual_type is? types.ArrayType and expected_type is? types.ArrayType and actual_type.element =? expected_type.element and expected_type.length is? none {same=true}
+                            }
+                            safe=stable and expected isnt? none and ordinary(arg.value_type table @eligible) and same and outgoing isnt? none and effects.read_only(outgoing)
                         }
                         if safe {current.add(pair.argument)} else {rejected.add(pair.argument)}
                     }

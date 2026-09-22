@@ -231,7 +231,7 @@ summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
         let scan=Scan[]
-        loop [binding declaration_id] in placement.local_values(node session.hir session.types frame_places.nonescaping frame_places.fixed_storage) {
+        loop [binding declaration_id] in placement.local_values(node session.hir session.types frame_places.nonescaping frame_places.fixed_storage borrowed) {
             let declaration=hir.node_at(session.hir declaration_id)
             $runtime_assert declaration is? hir.Declare
             scan.frame_values.add(binding) scan.frame_literals.add(declaration.expr)

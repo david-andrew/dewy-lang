@@ -63,7 +63,7 @@ def summarize(root, registry):
         private = {p.binding_id for p in params if not p.place or p.binding_id == receiver}
         places = {p.binding_id: str(index) for index, p in enumerate(params) if p.place and p.binding_id != receiver}
         value_parameters = {p.binding_id for p in params if not p.place}
-        frame_values = placement.local_values(literal, frame_places.nonescaping, frame_places.fixed_storage)
+        frame_values = placement.local_values(literal, frame_places.nonescaping, frame_places.fixed_storage, borrowed_arguments)
         frame_literals = {id(node.expr) for node in frame_values.values()}
         word_bindings = set()
         pending = [literal.body]

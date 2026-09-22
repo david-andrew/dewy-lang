@@ -23,6 +23,18 @@ read_bindings = (root:addr nodes:array<hir.AST>):>set<addr> => {
     }
     return result
 }
+# The same direct-write edge is useful to lifetime/storage proofs. Call-graph
+# writes and proven read-only places are applied by each consuming analysis.
+write_target = (node:hir.AST nodes:array<hir.AST>):>addr? => {
+    if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place return node.target
+    if node is? hir.DictStore|hir.DictRemove return node.keys
+    if node is? hir.FunctionCall {
+        let func=hir.node_at(nodes node.func)
+        if func is? hir.ArrayMethod and func.name not=? 'join' return func.array
+        if func is? hir.DictMethod and func.name in? ['add' 'clear' 'remove'] return func.dictionary
+    }
+    return none
+}
 mutated_bindings = (root:addr nodes:array<hir.AST> call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[]):>set<addr> => {
     let result:set<addr> = set[]
     let pending:array<addr> = [root]
@@ -30,15 +42,10 @@ mutated_bindings = (root:addr nodes:array<hir.AST> call_writes:dict<addr set<add
         let id=pending.pop
         let node = hir.node_at(nodes id)
         if node is? hir.FunctionLiteral continue
-        let target:addr? = none
-        if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign { target = node.target }
-        else if node is? hir.Place and id not in? read_only_places { target = node.target }
-        else if node is? hir.DictStore|hir.DictRemove { target = node.keys }
-        else if node is? hir.FunctionCall {
+        let target=write_target(node nodes)
+        if node is? hir.Place and id in? read_only_places {target=none}
+        if node is? hir.FunctionCall {
             loop binding in call_writes.get(id set[]) {result.add(binding)}
-            let func = hir.node_at(nodes node.func)
-            if func is? hir.ArrayMethod and func.name not=? 'join' { target = func.array }
-            else if func is? hir.DictMethod and func.name in? ['add' 'clear' 'remove'] { target = func.dictionary }
         }
         if target isnt? none {
             let path = bindings.access_path(target nodes facts=true)

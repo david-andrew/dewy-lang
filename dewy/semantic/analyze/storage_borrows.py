@@ -1,9 +1,9 @@
 """Storage evidence shared by allocation contracts and argument lowering.
 
-A read-only aggregate parameter or one of its projections can be forwarded
-without a snapshot when the
-caller and callee operate on their own bindings through known calls. The
-whole-caller summary excludes writes through later arguments too. Nonlocal
+A read-only aggregate parameter, a stable fresh local owner, or one of their
+projections can be forwarded without a snapshot when the caller and callee
+operate on their own bindings through known calls. The whole-caller proof
+excludes writes through later arguments too. Nonlocal
 storage, raw operations, representation casts and unresolved callbacks keep
 this proof unknown; ordinary lowering may have more precise borrow proofs.
 """
@@ -11,6 +11,7 @@ from collections import deque
 
 from .. import hir, ty, bindings
 from .effects import INDEX_STEP, _EffectAnalyzer, _literal_params, _unwrap
+from . import predicate_effects
 
 OPERATORS = frozenset({
     '__add__', '__sub__', '__mul__', '__div__', '__floordiv__', '__mod__',
@@ -44,6 +45,7 @@ def borrowable(type_):
 
 def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]]:
     bodies, edges, blocked = {}, {}, set()
+    stable_locals = {}
     eligible = {}
 
     def ordinary(type_):
@@ -70,6 +72,18 @@ def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]
             pending.extend(hir.children(node))
         local.discard(None)
         bodies[key] = body
+        # Initial local-owner proof: no direct writes or exposed places during
+        # the function. The call graph below excludes nonlocal/raw mutation.
+        # Keep this conservative until statement-interval proofs are shared.
+        written = set()
+        for node in body:
+            target = node.target if isinstance(node, hir.IteratorExpression) else predicate_effects.write_target(node)
+            if target is not None:
+                written.add(bindings.access_path(target, unwrap=bindings._unwrap_fact_route).binding_id)
+        stable_locals[key] = {node.binding_id: node.expr.type for node in body
+                             if isinstance(node, hir.Declare) and node.binding_id is not None and not node.view
+                             and node.binding_id not in written
+                             and isinstance(node.expr, (hir.ObjectLiteral, hir.ArrayLiteral))}
         for node in body:
             if isinstance(node, hir.RepresentationCast):
                 blocked.add(key)
@@ -114,13 +128,19 @@ def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]
                     source = path.root
                     own = parameters.get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
                     incoming = summaries.for_param_binding(own.binding_id) if own else None
+                    local = stable_locals[id(literal)].get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
                     outgoing = summaries.for_param_binding(parameter.binding_id) if parameter else None
                     # No conversion or lifecycle operation at this boundary.
-                    if (own is not None and parameter is not None and ordinary(argument.type)
-                            and argument.type == parameter.type and ordinary(own.type)
-                            and not parameter.place and incoming is not None
-                            and (incoming.read_only or incoming.read_only_at(tuple(
-                                INDEX_STEP if isinstance(step, hir.Index) else step.name for step in path.steps)))
+                    stable = (local is not None and ordinary(local)) or (
+                        own is not None and ordinary(own.type) and incoming is not None
+                        and (incoming.read_only or incoming.read_only_at(tuple(
+                            INDEX_STEP if isinstance(step, hir.Index) else step.name for step in path.steps))))
+                    expected = parameter.type if parameter is not None else None
+                    same_storage = argument.type == expected or (
+                        isinstance(argument.type, ty.ArrayType) and isinstance(expected, ty.ArrayType)
+                        and argument.type.element == expected.element and expected.length is None)
+                    if (stable and parameter is not None and ordinary(argument.type)
+                            and same_storage and not parameter.place
                             and outgoing is not None and outgoing.read_only):
                         current.add(id(argument))
                     else:

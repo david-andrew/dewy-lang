@@ -8,10 +8,11 @@ import p"type_queries.dewy" as views
 # copies, captures, escaping addresses and resizing exclude the frame route.
 # Solved calls may borrow fields/elements, or a whole owner whose storage
 # they preserve: read-only arrays and field-mutating scalar records.
+# Proven read-only value arguments can lend stable owners without an explicit @.
 # Arrays and records share one budget; only scalar fields/elements qualify.
 const FRAME_STORAGE_BYTES:addr=4096
 Candidate:type=const [declaration:addr size:addr<v=>v<=?4096>]
-local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[]):>dict<addr addr>=>{
+local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[] borrowed_values:dict<addr set<addr>>=[]):>dict<addr addr>=>{
     let items:array<addr>=[]
     let blocked:set<addr>=set[]
     let pending:array<addr>=[literal.body]
@@ -62,6 +63,15 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
                 }
             }
         }
+        if node is? hir.FunctionCall and id in? borrowed_values {
+            const borrowed=@borrowed_values[id]
+            loop arg in node.pos_args {
+                if arg in? borrowed and hir.node_at(nodes arg) is? hir.ExpressedIdentifier {allowed[arg]=allowed.get(arg 0)+1}
+            }
+            loop arg in node.kw_args.values {
+                if arg in? borrowed and hir.node_at(nodes arg) is? hir.ExpressedIdentifier {allowed[arg]=allowed.get(arg 0)+1}
+            }
+        }
         if node is? hir.Index|hir.ArrayLength and hir.node_at(nodes node.array) is? hir.ExpressedIdentifier {allowed[node.array]=allowed.get(node.array 0)+1}
         if node is? hir.MemberAccess and hir.node_at(nodes node.value) is? hir.ExpressedIdentifier {allowed[node.value]=allowed.get(node.value 0)+1}
         if node is? hir.Place and id in? fixed_places {
@@ -100,9 +110,9 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
     return result
 }
 
-local_arrays=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[]):>dict<addr addr>=>{
+local_arrays=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[] borrowed_values:dict<addr set<addr>>=[]):>dict<addr addr>=>{
     let result:dict<addr addr>=[]
-    loop [binding id] in local_values(literal nodes table nonescaping_places fixed_places) {
+    loop [binding id] in local_values(literal nodes table nonescaping_places fixed_places borrowed_values) {
         let declaration=hir.node_at(nodes id)
         $runtime_assert declaration is? hir.Declare
         if hir.node_at(nodes declaration.expr) is? hir.ArrayLiteral {result[binding]=id}

@@ -4389,7 +4389,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.frame_boxes=[]
     state.frame_arrays=[] state.frame_records=[] state.frame_record_bindings=set[]
     let frame_array_bindings:set<addr>=set[]
-    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places state.fixed_places) {
+    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places state.fixed_places state.borrowed_arguments) {
         let declaration=hir.node_at(state.input.nodes declaration_id)
         $runtime_assert declaration is? hir.Declare
         let literal=hir.node_at(state.input.nodes declaration.expr)

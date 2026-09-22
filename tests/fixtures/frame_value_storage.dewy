@@ -1,0 +1,25 @@
+# Ordinary value arguments can lend a stable local owner to a read-only
+# helper. No explicit place annotation is needed at these call sites.
+Point=type of [x:int64 y:int64]
+read_point=(point:Point):>int64=>point.x+point.y
+forward_point=(point:Point):>int64=>read_point(point)
+read_array=(values:array<int64>):>int64=>{
+    if values.length>?0 return values[0]
+    return 0
+}
+work=(seed:int64):>int64 & no_effects=>{
+    let result:int64=0
+    loop i in 0.. and i<?10000 {
+        let point=Point[seed 2]
+        let values:array<int64>=[seed 2]
+        result=forward_point(point)
+        if read_array(values) not=?seed return 1
+    }
+    return result
+}
+main=():>int64=>{
+    let before:int64=_arena_allocated_bytes
+    let result=work(40)
+    if _arena_allocated_bytes not=?before return 2
+    return result
+}

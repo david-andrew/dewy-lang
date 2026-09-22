@@ -2,7 +2,8 @@
 
 Fixed scalar arrays and scalar records can lend nonescaping field/element
 addresses. Whole-owner loans also require proven stable storage: arrays may
-only be read; scalar records may change fields. One bounded frame slot
+only be read; scalar records may change fields. Proven read-only value arguments
+can also lend stable local owners, without an explicit place. One bounded frame slot
 suffices for each declaration, including loop iterations. These proofs
 justify actual placement, not a hope that COW postpones allocation.
 """
@@ -13,7 +14,7 @@ from . import hir, ty
 FRAME_STORAGE_BYTES = 4096
 
 
-def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
+def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset(), borrowed_values: dict[int, set[int]] | None = None) -> dict[int, hir.Declare]:
     nodes = []
     captured = set()
     pending = [literal.body]
@@ -51,6 +52,11 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
     blocked = set(captured)
     whole_places = set()
     for node in nodes:
+        if isinstance(node, hir.FunctionCall) and borrowed_values is not None:
+            borrowed = borrowed_values.get(id(node), ())
+            for arg in [*node.pos_args, *node.kw_args.values()]:
+                if id(arg) in borrowed and isinstance(arg, hir.ExpressedIdentifier):
+                    allowed[id(arg)] = allowed.get(id(arg), 0) + 1
         if isinstance(node, (hir.Index, hir.ArrayLength)) and isinstance(node.array, hir.ExpressedIdentifier):
             allowed[id(node.array)] = allowed.get(id(node.array), 0) + 1
         if isinstance(node, hir.MemberAccess) and isinstance(node.value, hir.ExpressedIdentifier):
@@ -83,6 +89,6 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
     return result
 
 
-def local_arrays(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
-    return {binding: declaration for binding, declaration in local_values(literal, nonescaping_places, fixed_places).items()
+def local_arrays(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset(), borrowed_values: dict[int, set[int]] | None = None) -> dict[int, hir.Declare]:
+    return {binding: declaration for binding, declaration in local_values(literal, nonescaping_places, fixed_places, borrowed_values).items()
             if isinstance(declaration.expr, hir.ArrayLiteral)}

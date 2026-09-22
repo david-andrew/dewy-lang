@@ -2445,3 +2445,31 @@ reports 4,991 copy sites over 47,440 lines (105.207/KLOC). Artifacts:
 `../dewy-build-artifacts/phase1-loans-audit-3e30f72a` and
 `phase1-loans-audit-copies.json`. Native cache invalidation after removing the
 imported default also replaces its audit with an empty report.
+
+## Stable local values at ordinary call boundaries (2026-09-21)
+
+The shared storage proof now lends fresh local array/record owners to known
+read-only by-value callees. Local owners must remain unwritten and unexposed
+throughout the containing function, including defaults; call-graph checks still
+exclude nonlocal/raw access and unresolved callbacks. Incoming parameter loans
+retain their existing route proofs. Fixed outer array lengths may erase at the
+boundary when the element representation stays identical. Lifecycle values and
+alias initializers retain their independent ownership requirements.
+
+Frame placement consumes the same per-call evidence, including keyword calls,
+so small scalar owners no longer need an explicit `@` to avoid allocation.
+Occurrence counting still rejects a separate escaping use of the same HIR node.
+The shared 4 KiB budget is unchanged. The direct-write query was extracted from
+predicate effects and reused over the existing unique function inventory rather
+than adding another recursive traversal.
+
+Validation: 34 initial hosted storage checks, 44 adjacent effect/borrow checks,
+and the final 11 local-value checks pass. Native/hosted predicate dependency
+parity passes. A second-generation native driver passes ten runtime kernels and
+14 rejections against hosted checking on x86-64/C, including snapshots across
+later argument mutation, captured-write rejection, keyword calls and the storage
+budget. The 10,000-iteration kernel observes no arena allocation. The measured
+compiler inventory is 4,992 sites over 47,474 lines (105.152/KLOC), within the
+unchanged gates; subsequent edits only clarify comments/tests. Artifacts use
+`../dewy-build-artifacts/phase1-frame-values-`. These are bounded checks, not a
+new full-suite or fixed-point certification.

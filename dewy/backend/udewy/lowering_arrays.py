@@ -640,7 +640,7 @@ class _ArrayLowering(_ArraySharing):
         # The public no-allocation checker and lowering consume the same
         # bounded nonescaping-array proof, independently of broader inference.
         for function in self.function_by_literal.values():
-            for binding in placement.local_arrays(function.literal, self.place_loans.nonescaping, self.place_loans.fixed_storage):
+            for binding in placement.local_arrays(function.literal, self.place_loans.nonescaping, self.place_loans.fixed_storage, self.forwarded_values):
                 if binding in self.array_declarations:
                     self.array_representations[binding] = 'stack_data'
                     self.frame_array_bindings.add(binding)
