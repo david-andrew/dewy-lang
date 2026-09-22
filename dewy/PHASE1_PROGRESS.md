@@ -2902,3 +2902,25 @@ a few selected import tests also exercise native drivers. The new pair reports
 4,457 bootstrap copy sites across 48,220 source lines (92.431/KLOC), within
 unchanged 4,500-site and 100/KLOC gates. Logs and JSON use the
 `phase1-frame-copies-*` artifact prefix. Phase 1 remains in progress.
+
+## Last-use component inputs (2026-09-22)
+
+Owning bindings, calls, record construction and array construction now transfer
+a field or element when its containing local/by-value owner has no later use.
+The proof is shared with whole-owner input transfers: it excludes captures,
+borrowed owners, surviving aliases and conditional/repeated parent-scope uses.
+Custom wrapper hooks still require complete receivers. Selectors are saved
+once, and receiver-changing selector effects remain rejected.
+
+The wrapper keeps its lexical cleanup. Cleanup skips the transferred component,
+or cleans only its remaining fields after a custom move, and drops siblings in
+reverse order. The selected owner cleans up independently, including after
+returns and loop exits. This does not yet allow transferring one component
+while subsequent code continues to use siblings of the same owner.
+
+Sixteen focused hosted cases passed, including dynamic selections over 100
+calls without retained arena growth. The adjacent lifecycle selection passed
+304 tests; a fresh native driver agrees with hosted checking on 26 runtime
+kernels and 13 rejections on x86-64/C, including field/element returns.
+Artifacts use `phase1-component-moves-*`. This feature is newer than the
+`113146f1` integration certificate.

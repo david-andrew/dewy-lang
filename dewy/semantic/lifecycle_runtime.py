@@ -105,6 +105,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     receivers.update(bindings.access_path(node.item, unwrap=bindings._unwrap_fact_route).binding_id
                      for node in hir.walk(root) if isinstance(node, hir.Return) and node.item is not None
                      and resource(node.item.type) is not None)
+    receivers.update(bindings.access_path(node).binding_id for node in hir.walk(root)
+                     if isinstance(node, (hir.MemberAccess, hir.Index)) and resource(node.type) is not None)
     receivers.discard(None)
     argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
     readonly_arguments = effects.read_only_places(root, effect_context) if receivers else set()
@@ -115,6 +117,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     component_copies = {}
     generated = []
     ownership_flags = {}
+    extractions = {}  # last-use components; the remaining owner keeps its lexical cleanup
 
     def move_remainder(shape):
         """Fields left behind by a custom move, excluding inherited transfers.
@@ -329,7 +332,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
             calls = []
             drop(value, owner_type, set(), owner.binding_id not in fields_only, into=calls,
-                 extraction=extracted[1:] if extracted is not None and extracted[0] == owner.binding_id else None)
+                 extraction=extracted[1:] if extracted is not None and extracted[0] == owner.binding_id else extractions.get(owner.binding_id))
             flag = ownership_flags.get(owner.binding_id)
             if flag is not None and owner.binding_id not in fields_only:
                 body = hir.Block(loc, ty.VOID_TYPE, calls, True)
@@ -508,7 +511,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             return dictionary_get(node, allowed, inherited, control)
         if isinstance(node, hir.DictRemove) and node.key is not None:
             return dictionary_pop(node, allowed, inherited, control)
-        if isinstance(node, hir.ExpressedIdentifier) and control is not None:
+        if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.Index)) and control is not None:
             consumed = control(node, consume=True)
             if consumed is not None:
                 return consumed
@@ -991,6 +994,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 pending.extend(dependent.get(alias, ()))
             return False
         def owning_inputs(node):
+            if isinstance(node, hir.Declare) and not node.view:
+                return [node.expr]
             if isinstance(node, hir.FunctionCall):
                 return [*node.pos_args, *node.kw_args.values()]
             if isinstance(node, hir.ObjectLiteral):
@@ -1030,10 +1035,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     for value in inputs:
                         while isinstance(value, (hir.ValueCast, hir.RepresentationCast, hir.Obligation)):
                             value = value.value if isinstance(value, hir.Obligation) else value.expr
-                        if (isinstance(value, hir.ExpressedIdentifier) and resource(value.type) is not None
-                                and value.binding_id in local and value.binding_id not in captured
-                                and last.get(value.binding_id) == id(value) and occurrences[id(value)] == 1
-                                and references.get(value.binding_id) == 1 and not alive_after(value.binding_id, id(value))):
+                        owner = value
+                        while isinstance(owner, (hir.MemberAccess, hir.Index)):
+                            owner = owner.value if isinstance(owner, hir.MemberAccess) else owner.array
+                        if (isinstance(owner, hir.ExpressedIdentifier) and resource(value.type) is not None
+                                and owner.binding_id in local and owner.binding_id not in captured
+                                and last.get(owner.binding_id) == id(owner) and occurrences[id(owner)] == 1
+                                and references.get(owner.binding_id) == 1 and not alive_after(owner.binding_id, id(owner))):
                             consumes.add(id(value))
                     pending.extend(hir.children(part))
                 if not isinstance(node, hir.Declare):
@@ -1122,6 +1130,19 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 if consume:
                     if id(child) not in consumes:
                         return None
+                    if isinstance(child, (hir.MemberAccess, hir.Index)):
+                        projection = returning_projection(child, owners)
+                        if projection is None:
+                            return None
+                        prefix = []
+                        selected = freeze_route(child, child.loc, projection[0], prefix)
+                        projection = returning_projection(selected, owners)
+                        value, moved = transfer(selected, child.type)
+                        saved, value = capture(value, child.loc)
+                        extractions[projection[0]] = (projection[1], moved)
+                        # Keep the wrapper alive until its lexical cleanup. Only
+                        # this component transfers; siblings still drop there.
+                        return hir.Block(child.loc, value.type, [*prefix, saved, value], False)
                     source = next((owner for owner in owners if owner.binding_id == child.binding_id), None)
                     if source is None:
                         return None

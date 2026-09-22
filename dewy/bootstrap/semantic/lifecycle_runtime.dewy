@@ -27,6 +27,7 @@ Frame:type = const [
 ]
 Plan:type = [
     flags:dict<addr Captured>=[]
+    extractions:dict<addr Extraction>=[]
     hooks:dict<addr Hook>=[]
     composed_moves:dict<addr addr>=[]
     owners:dict<string Hook>=[]
@@ -364,8 +365,8 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
         let owner=if declared.annotation isnt? none declared.annotation else hir.node_at(session.hir declared.expr).value_type
         let value=put(hir.ExpressedIdentifier[loc owner declared.name declared.binding_id] @session)
         let calls:array<addr>=[]
-        drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only extraction=if extracted isnt? none and extracted.binding=?declared.binding_id extracted else none)
         $runtime_assert declared.binding_id isnt? none
+        drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only extraction=if extracted isnt? none and extracted.binding=?declared.binding_id extracted else plan.extractions.get(declared.binding_id))
         let flag=plan.flags.get(declared.binding_id)
         if flag isnt? none and owners[index] not=? fields_only {
             let empty=types.primitive('void' @session.types)
@@ -581,6 +582,23 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
     if candidate is? hir.DictRemove and candidate.key isnt? none {
         dictionary_pop(id candidate allowed inherited @plan @session frame)
         return
+    }
+    if candidate is? hir.MemberAccess|hir.Index and id in? plan.consume_sites and frame isnt? none {
+        let projection=returning_projection(id frame.owners session)
+        if projection isnt? none {
+            let prefix:array<addr>=[]
+            let selected=freeze_route(id candidate.loc projection.binding @prefix @plan @session)
+            let frozen=returning_projection(selected frame.owners session)
+            $runtime_assert frozen isnt? none
+            let result=transfer(selected candidate.value_type @plan @session)
+            let saved=capture_result(result candidate.loc @session)
+            plan.extractions[frozen.binding]=Extraction[frozen.binding frozen.path result not=?selected]
+            # Preserve the wrapper's lexical lifetime. Its cleanup skips this
+            # transferred component but still visits the other fields/elements.
+            prefix.push(saved.declaration) prefix.push(saved.value)
+            store(id hir.Block[candidate.loc hir.node_at(session.hir saved.value).value_type prefix false] @session)
+            return
+        }
     }
     if candidate is? hir.ExpressedIdentifier and candidate.binding_id isnt? none and id in? plan.consume_sites and frame isnt? none {
         let source:addr?=none
@@ -1528,6 +1546,7 @@ mentions_resource = (root:addr session:contexts.Session):>bool => {
 # Ownership inputs share one last-use proof, independent of call/record/array
 # spelling. A surviving read-only alias extends the source owner's lifetime.
 owning_inputs=(node:hir.AST):>array<addr>=>{
+    if node is? hir.Declare and not node.view return [node.expr]
     if node is? hir.FunctionCall {
         let items=node.pos_args
         loop [name value] in node.kw_args {items.push(value)}
@@ -1665,7 +1684,13 @@ local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Pla
                         else break
                         value=hir.node_at(session.hir selected)
                     }
-                    if value is? hir.ExpressedIdentifier and value.binding_id isnt? none and resource(value.value_type session.types) isnt? none and value.binding_id in? locals and value.binding_id not in? captured and last.get(value.binding_id) =? selected and occurrences.get(selected 0) =? 1 and references.get(value.binding_id 0) =? 1 and not alias_alive(value.binding_id selected dependent born last positions) {plan.consume_sites.add(selected)}
+                    let root=selected
+                    let owner=value
+                    loop owner is? hir.MemberAccess|hir.Index {
+                        root=if owner is? hir.MemberAccess owner.value else owner.array
+                        owner=hir.node_at(session.hir root)
+                    }
+                    if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none and resource(value.value_type session.types) isnt? none and owner.binding_id in? locals and owner.binding_id not in? captured and last.get(owner.binding_id) =? root and occurrences.get(root 0) =? 1 and references.get(owner.binding_id 0) =? 1 and not alias_alive(owner.binding_id root dependent born last positions) {plan.consume_sites.add(selected)}
                 }
                 hir.push_children(part @candidates)
             }
@@ -1894,6 +1919,10 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
         }
         if node is? hir.MemberAssign|hir.IndexAssign and resource(hir.node_at(session.hir node.target).value_type session.types) isnt? none {
             let root=receiver_root(node.target session.hir)
+            if root isnt? none {receivers.add(root)}
+        }
+        if node is? hir.MemberAccess|hir.Index and resource(node.value_type session.types) isnt? none {
+            let root=receiver_root(id session.hir)
             if root isnt? none {receivers.add(root)}
         }
         if node is? hir.Return and node.item isnt? none and resource(hir.node_at(session.hir node.item).value_type session.types) isnt? none {
