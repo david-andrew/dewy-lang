@@ -3076,3 +3076,19 @@ over 48,434 lines (92.827/KLOC), within the existing gate. It is not a fresh
 compiler certificate. Stable indexed type-test facts are recorded but not yet
 consumed consistently on subsequent reads; general whole-entry dictionary
 places also remain a separate checker gap.
+
+## Union-borrow integration checkpoint (2026-09-22)
+
+Frozen source `a6f1f6bc` completed the three-generation direct x86-64 bootstrap;
+Dewy and µDewy generations 2 and 3 are byte-identical. The pipeline's x86-64
+and C execution checks passed. The broad `tests/python_misc` selection excluding
+`bootstrap` and `native` names passed 3,656 tests with 14 skips in 677.16 seconds.
+This selection is not all-route pytest or CI certification.
+
+The fresh native pair reports 4,496 static copy sites over 48,458 bootstrap
+source lines (92.781/KLOC), passing the unchanged 4,500/100 gates. The count
+is static inventory, not a speed measurement. Native generations 2 and 3
+took 146 and 119 seconds under concurrent regression load; these are not
+isolated performance samples. Artifacts: `phase1-union-borrows-a6f1f6bc`,
+`phase1-union-borrows-bootstrap.log`, `phase1-union-borrows-broad.log`, and
+`phase1-union-borrows-inventory.json` in the build-artifacts directory.
