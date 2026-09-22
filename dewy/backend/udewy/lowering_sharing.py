@@ -71,10 +71,7 @@ class _ArraySharing:
         # tag/payload storage. This rule is shared by reads and mutable routes.
         stored = self._index_storage_type(node)
         value = self._array_load(address, stored, node.loc)
-        members = self._field_union_members(stored)
-        if members is not None:
-            return self._union_field_read(value, members, node.type, node)
-        return replace(value, type=node.type)
+        return self._read_projected_storage(value, stored, node)
 
     def _extract_write_route(self, node):
         """Evaluate a nested place once, detaching enclosing array buffers."""
@@ -85,7 +82,8 @@ class _ArraySharing:
             stored = self._index_storage_type(node)
             prelude.extend(self._ensure_unique_array(array, stored, node.loc))
             address = self._array_element_address(array, index, stored, node.loc)
-            return prelude, self._read_index_storage(address, node)
+            extra, value = self._read_index_storage(address, node)
+            return [*prelude, *extra], value
         if isinstance(node, hir.MemberAccess):
             prelude, value = self._extract_write_route(node.value)
             base = self._name('write_object', node.loc)

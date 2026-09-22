@@ -5506,7 +5506,8 @@ class _Lowerer(
                     node.loc,
                 )
             )
-            return prelude, self._read_index_storage(address, node)
+            extra, value = self._read_index_storage(address, node)
+            return [*prelude, *extra], value
         if isinstance(node, hir.DictLookup):
             return self._extract_dict_lookup(node)
         if isinstance(node, hir.DictContains):

@@ -489,9 +489,8 @@ class _DictLowering:
                 probe, _found, position, _slot = self._dict_probe(parts, key, loc)
                 search.extend(probe)
             result = self._name('dict_value', loc, parts.value_type)
-            members = self._field_union_members(parts.value_type)
-            read = self._union_field_read(result, members, node.type, node) if members is not None else replace(result, type=node.type)
-            return [*prelude, *key_prelude, *search, self._declare(result, value_at(position), loc, parts.value_type)], read
+            extra, read = self._read_projected_storage(result, parts.value_type, node)
+            return [*prelude, *key_prelude, *search, self._declare(result, value_at(position), loc, parts.value_type), *extra], read
         search = [*self._dict_ensure_table(parts, loc)]
         probe, found, position, _slot = self._dict_probe(parts, key, loc)
         search.extend(probe)

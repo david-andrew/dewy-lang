@@ -1028,16 +1028,29 @@ class _ObjectLowering:
         address = self._field_address(obj, offsets[node.name], node.loc)
         field = object_type.field(node.name)
         field_type = field.type if field is not None else node.type
-        if isinstance(field_type, ty.ObjectType):
-            narrowed = ty.runtime_union_members(node.type)
-            if narrowed is not None:
-                extra, view = self._family_union_view(address, field_type, narrowed, node)
-                return [*prelude, *extra], view
-            return prelude, address
-        members = self._field_union_members(field_type)
-        if members is not None:
-            return prelude, self._union_field_read(address, members, node.type, node)
+        if isinstance(ty.structural_base(field_type), ty.ObjectType) or self._field_union_members(field_type) is not None:
+            extra, value = self._read_projected_storage(address, field_type, node)
+            return [*prelude, *extra], value
         return prelude, self._value_load(address, field_type, node.loc)
+
+    def _read_projected_storage(self, value, stored, node):
+        """Read a projection using its declared layout and current alternatives.
+
+        A parent record handle is not a child-union cell, and a parent tag
+        must be split before a narrowed child union dispatches on it. Keep
+        the conversion prelude explicit so receiver evaluation happens once.
+        """
+        shape = ty.structural_base(stored)
+        narrowed = self._field_union_members(node.type)
+        if isinstance(shape, ty.ObjectType) and narrowed is not None:
+            return self._family_union_view(value, shape, narrowed, node)
+        members = self._field_union_members(stored)
+        if members is not None:
+            if narrowed is not None:
+                prefix, view = self._union_family_view(value, members, narrowed, node)
+                return prefix, replace(view, type='int64')
+            return [], self._union_field_read(value, members, node.type, node)
+        return [], replace(value, type=node.type)
 
     def _union_field_read(
         self,
@@ -1071,11 +1084,8 @@ class _ObjectLowering:
         address = self._field_address(self.current_object_receiver, offsets[name], node.loc)
         field = self.current_object_type.field(name)
         field_type = field.type if field is not None else node.type
-        if isinstance(field_type, ty.ObjectType):
-            return [], address
-        members = self._field_union_members(field_type)
-        if members is not None:
-            return [], self._union_field_read(address, members, node.type, node)
+        if isinstance(ty.structural_base(field_type), ty.ObjectType) or self._field_union_members(field_type) is not None:
+            return self._read_projected_storage(address, field_type, node)
         return [], self._value_load(address, field_type, node.loc)
 
     def _extract_literal_field_identifier(
@@ -1089,11 +1099,8 @@ class _ObjectLowering:
         address = self._field_address(base, offsets[name], node.loc)
         field = object_type.field(name)
         field_type = field.type if field is not None else node.type
-        if isinstance(field_type, ty.ObjectType):
-            return [], address
-        members = self._field_union_members(field_type)
-        if members is not None:
-            return [], self._union_field_read(address, members, node.type, node)
+        if isinstance(ty.structural_base(field_type), ty.ObjectType) or self._field_union_members(field_type) is not None:
+            return self._read_projected_storage(address, field_type, node)
         return [], self._value_load(address, field_type, node.loc)
 
     def _is_object_method_func(self, func: hir.AST) -> bool:

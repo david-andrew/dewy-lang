@@ -65,9 +65,10 @@ class _PlaceLowering:
             probe, _found, position, _slot = self._dict_probe(parts, key, target.loc)
             values = self._dict_descriptor(parts, 'values', target.loc)
             address = self._array_element_address(values, position, parts.value_type, target.loc)
+            read_prefix = []
             if isinstance(ty.structural_base(target.type), ty.ObjectType) or self._field_union_members(target.type) is not None:
-                address = self._read_index_storage(address, hir.Index(target.loc, target.type, target.values, position, None))
-            return [*prelude, *key_prefix, *self._dict_ensure_table(parts, target.loc), *probe], address, []
+                read_prefix, address = self._read_index_storage(address, hir.Index(target.loc, target.type, target.values, position, None))
+            return [*prelude, *key_prefix, *self._dict_ensure_table(parts, target.loc), *probe, *read_prefix], address, []
         if isinstance(target, (hir.MemberAccess, hir.Index)):
             prelude, storage = self._extract_projected_place_storage(target)
             return prelude, replace(storage, type='int64'), []
@@ -203,7 +204,8 @@ class _PlaceLowering:
                 or self._field_union_members(target.type) is not None):
             # Records and tagged unions borrow their storage directly;
             # an array slot contains a handle to that storage.
-            return prelude, self._read_index_storage(address, target)
+            extra, value = self._read_index_storage(address, target)
+            return [*prelude, *extra], value
         return prelude, address
 
     def _finish_scalar_call_place_writebacks(

@@ -3187,3 +3187,18 @@ Three additional paired runtime kernels and one rejection passed on both
 backends, including zero-allocation field/element reads and an escaping string
 that survives source cleanup. All 38 hosted string/view/copy checks passed;
 artifacts are `phase1-local-view-effects-strings-*`.
+
+## Projected parent/child union representations (2026-09-22)
+
+Four runtime regressions reproduced a hosted mismatch: a parent record handle
+or a cell tagged as its parent was consumed as a cell tagged with child types.
+Projected reads now share one conversion boundary across arrays, dictionary
+entries, explicit fields and implicit receiver fields. Conversions preserve
+receiver evaluation order and keep a separate prelude; narrowing never changes
+the stored layout. Native lowering already follows this rule.
+
+All 73 hosted projection/family/view checks passed. Eight runtime kernels
+passed hosted/native and x86-64/C comparisons using the fresh local-view-effect
+driver. Cases cover parent records, optional parent cells, dictionary entries,
+implicit method fields and an escaping narrowed optional whose original array
+is cleared. Artifacts use `phase1-projected-family-*`.
