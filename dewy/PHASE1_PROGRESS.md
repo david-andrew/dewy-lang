@@ -3202,3 +3202,19 @@ passed hosted/native and x86-64/C comparisons using the fresh local-view-effect
 driver. Cases cover parent records, optional parent cells, dictionary entries,
 implicit method fields and an escaping narrowed optional whose original array
 is cleared. Artifacts use `phase1-projected-family-*`.
+
+
+## Shared-view integration checkpoint (2026-09-22)
+
+Frozen source `41a8eae2` passed the three-generation direct x86-64 bootstrap:
+both compiler executables are byte-identical in generations two and three,
+and the x86-64/C pipeline execution checks passed. The fresh native pair
+reports 4,485 copy sites over 48,563 bootstrap lines (92.354/KLOC), within the
+unchanged 4,500-site and 100/KLOC budgets. Concurrent generation timings of
+142/179 seconds are not isolated performance measurements.
+
+The broad `tests/python_misc` selection excluding `bootstrap` and `native`
+names passed 3,720 tests with 14 skips in 861.73 seconds. This is not an
+all-route pytest or CI certificate. Logs and the inventory use
+`phase1-shared-views-*`; the pair is `phase1-shared-views-41a8eae2`.
+Phase 1 remains in progress.

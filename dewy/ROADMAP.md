@@ -353,7 +353,7 @@ silently.
    "unexplained copies on the compiler's own sources" as a CI metric with a
    fixed budget per kernel and per thousand lines. The native command test now
    gates the bootstrap inventory at 4,500 static sites and 100 sites/KLOC;
-   the measured local-view checkpoint is 4,483 sites and 92.391/KLOC. Concise reporting
+   the measured shared-view checkpoint is 4,485 sites and 92.354/KLOC. Concise reporting
    retains every entry while avoiding repeated source rendering. Regressions
    surface in a pull request, not at 25 GB in a self-build.
 2. **Mechanisms in order of where the bytes went.** First: read-only
