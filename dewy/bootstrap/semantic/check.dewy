@@ -2721,7 +2721,12 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     let slots:array<types.PosOrKwArg>=[]
     if method isnt? none and method.receiver_type isnt? none {
         slots.push(types.PosOrKwArg['__dewy_receiver' method.receiver_type true method.place_self])
-        effect_contract=effect_rows.prepend_parameter(effect_contract shape.pos_or_kw.length+shape.kw_only.length)
+        # This body's inference variable is defined with the complete
+        # parameter list, including the receiver. Only a written contract
+        # still names the source slots and needs their indices shifted.
+        if inferred_effect is? none {
+            effect_contract=effect_rows.prepend_parameter(effect_contract shape.pos_or_kw.length+shape.kw_only.length)
+        }
     }
     loop slot in shape.pos_or_kw {slots.push(slot)}
     let function_type=types.function_type(slots shape.kw_only shape.rest returns [] @session.types effects=effect_contract inferred_effect=inferred_effect)
@@ -5792,8 +5797,8 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let place_self=mutates or spec.lifecycle isnt? none
         if instance {parameters.push(types.PosOrKwArg['__dewy_receiver' type_id true place_self])}
         loop parameter in signature.pos_or_kw {parameters.push(parameter)}
-        let effects=if instance effect_rows.prepend_parameter(signature.effects signature.pos_or_kw.length+signature.kw_only.length) else signature.effects
-        let full=types.function_type(parameters signature.kw_only signature.rest signature.ret [] @session.types effects=effects)
+        let effects=if instance and signature.inferred_effect is? none effect_rows.prepend_parameter(signature.effects signature.pos_or_kw.length+signature.kw_only.length) else signature.effects
+        let full=types.function_type(parameters signature.kw_only signature.rest signature.ret [] @session.types effects=effects inferred_effect=signature.inferred_effect)
         let ordinal:addr=0
         loop earlier in type.methods {
             if earlier.literal =? spec.literal break
