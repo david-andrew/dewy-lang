@@ -1,0 +1,32 @@
+# A whole borrowed owner can keep bounded frame storage when every helper
+# preserves it: records may update scalar fields; arrays here only lend reads.
+Point=type of [x:int64 y:int64]
+put=(@point:Point n:int64):>void & mutates<point.x>=>{point.x=n}
+forward=(@point:Point n:int64):>void=>put(@point n)
+recursive=(@point:Point count:int64):>void=>{
+    if count>?0 {recursive(@point count-1)} else {forward(@point 40)}
+}
+read=(@xs:array<int64>):>int64 & reads<xs>=>{
+    if xs.length>?0 return xs[0]
+    return 0
+}
+forward_read=(@xs:array<int64>):>int64=>read(@xs)
+work=(seed:int64):>int64 & no_effects=>{
+    let result:int64=0
+    loop i in 0.. and i<?10000 {
+        let point=Point[0 2]
+        recursive(@point 2)
+        let xs:array<int64>=[seed]
+        result=point.x+point.y
+        if forward_read(@xs) not=?seed return 1
+        forward(n=seed point=@point)
+        if point.x not=?seed return 3
+    }
+    return result
+}
+main=():>int64=>{
+    let before:int64=_arena_allocated_bytes
+    let result=work(40)
+    if _arena_allocated_bytes not=?before return 2
+    return result
+}

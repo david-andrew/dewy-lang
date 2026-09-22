@@ -1,5 +1,6 @@
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
+import p"../type_queries.dewy" as views
 import p"../bindings.dewy" as bindings
 import p"predicate_effects.dewy" as local_effects
 
@@ -493,11 +494,23 @@ analyze_collected = (analysis:Analysis nodes:array<hir.AST> type_nodes:types.Tab
 }
 
 
-# Addresses lent only until their call returns. Every target and repeated
-# argument position must have a known nonescaping parameter; writes are fine.
+# A scalar record may change fields without replacing its frame storage.
+# Arrays qualify only when read-only: writes may detach or resize backing data.
+# Placement separately excludes resource/aggregate fields and oversized owners.
+preserves_storage = (summary:ParameterEffects type:addr table:types.Table):>bool => {
+    if summary.escapes.length >? 0 return false
+    if read_only(summary) return true
+    if types.node_at(table views.structural_base(type table)) isnt? types.ObjectType return false
+    loop route in summary.mutates {if route.steps.length =? 0 return false}
+    loop route in summary.rebinds {if route.steps.length =? 0 return false}
+    return true
+}
+PlaceLoans:type = const [nonescaping:set<addr> fixed_storage:set<addr>]
+# Every target and repeated argument position must establish each guarantee.
 # Collection already retains call sites, so this needs no extra HIR traversal.
-nonescaping_places = (analysis:Analysis summaries:ProgramEffects nodes:array<hir.AST>):>set<addr> => {
+place_loans = (analysis:Analysis summaries:ProgramEffects nodes:array<hir.AST> table:types.Table):>PlaceLoans => {
     let safe:set<addr>=set[] let unsafe:set<addr>=set[]
+    let fixed:set<addr>=set[] let changed:set<addr>=set[]
     loop id in analysis.calls {
         let call=hir.node_at(nodes id)
         $runtime_assert call is? hir.FunctionCall
@@ -520,15 +533,19 @@ nonescaping_places = (analysis:Analysis summaries:ProgramEffects nodes:array<hir
                     if pair.argument not in? places continue
                     paired.add(pair.argument)
                     let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
-                    if summary isnt? none and summary.escapes.length =? 0 {safe.add(pair.argument)}
-                    else {unsafe.add(pair.argument)}
+                    if summary isnt? none and summary.escapes.length =? 0 {
+                        safe.add(pair.argument)
+                        if preserves_storage(summary hir.node_at(nodes pair.argument).value_type table) {fixed.add(pair.argument)}
+                        else {changed.add(pair.argument)}
+                    } else {unsafe.add(pair.argument)}
                 }
             }
             loop place in places {if place not in? paired {unsafe.add(place)}}
         }
     }
-    loop place in unsafe {safe.pop(place default=place);}
-    return safe
+    loop place in unsafe {safe.pop(place default=place); fixed.pop(place default=place);}
+    loop place in changed {fixed.pop(place default=place);}
+    return PlaceLoans[safe fixed]
 }
 
 # Implicit global writes have no argument route. Share callable resolution

@@ -10,7 +10,7 @@ from collections import deque
 from .. import bindings, effect_rows as rows, effect_inference as inference, hir, ty, placement
 from ..errors import user_error
 from ...reporting import Pointer
-from .effects import _EffectAnalyzer, _literal_params, _unwrap, nonescaping_places
+from .effects import _EffectAnalyzer, _literal_params, _unwrap, place_loans
 from . import storage_borrows
 
 SCALAR_OPERATIONS = frozenset({
@@ -47,7 +47,7 @@ def summarize(root, registry):
     """Infer behavior for every checked function, even without written rows."""
     analysis = _EffectAnalyzer(root)
     storage_effects = analysis.solve()
-    frame_places = nonescaping_places(analysis, storage_effects)
+    frame_places = place_loans(analysis, storage_effects)
     borrowed_arguments = storage_borrows.forwarded_values(analysis, storage_effects)
     local = {}
     calls = {}
@@ -63,7 +63,7 @@ def summarize(root, registry):
         private = {p.binding_id for p in params if not p.place or p.binding_id == receiver}
         places = {p.binding_id: str(index) for index, p in enumerate(params) if p.place and p.binding_id != receiver}
         value_parameters = {p.binding_id for p in params if not p.place}
-        frame_values = placement.local_values(literal, frame_places)
+        frame_values = placement.local_values(literal, frame_places.nonescaping, frame_places.fixed_storage)
         frame_literals = {id(node.expr) for node in frame_values.values()}
         word_bindings = set()
         pending = [literal.body]

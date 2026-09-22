@@ -355,7 +355,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
 }
 # `rejections` explains, per source binding, why its last considered use as
 # an argument was not borrowed (for `dewy analyze`).
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[] view_regions:dict<addr array<addr>>=[] nonescaping_places:set<addr>=set[]]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[] view_regions:dict<addr array<addr>>=[] nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[]]
 
 # Required views can end at the last use of all their derived aliases.
 # Statements containing control flow remain indivisible, so a read in a loop
@@ -776,6 +776,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let rejections:dict<addr string>=[]
     let safe_places:set<addr>=set[]
     let unsafe_places:set<addr>=set[]
+    let fixed_places:set<addr>=set[] let changed_places:set<addr>=set[]
     let view_demands:set<addr>=set[]
     let pending:array<addr>=[root]
     let seen:set<addr>=set[]
@@ -841,8 +842,11 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             loop pair in pairs {
                 if hir.node_at(nodes pair.argument) isnt? hir.Place continue
                 let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
-                if summary isnt? none and summary.escapes.length =? 0 {safe_places.add(pair.argument)}
-                else {unsafe_places.add(pair.argument)}
+                if summary isnt? none and summary.escapes.length =? 0 {
+                    safe_places.add(pair.argument)
+                    if effects.preserves_storage(summary hir.node_at(nodes pair.argument).value_type type_nodes) {fixed_places.add(pair.argument)}
+                    else {changed_places.add(pair.argument)}
+                } else {unsafe_places.add(pair.argument)}
             }
             let allowed:set<addr>=set[]
             let rejected:set<addr>=set[]
@@ -904,6 +908,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # a view's live interval are still checked, including mutable places.
     loop binding in escaping {excluded.add(binding)}
     let scoped=scoped_views(view_demands nodes type_nodes plan excluded)
-    loop id in unsafe_places {safe_places.pop(id default=id);}
-    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned scoped.bindings scoped.scopes scoped.regions safe_places]
+    loop id in unsafe_places {safe_places.pop(id default=id); fixed_places.pop(id default=id);}
+    loop id in changed_places {fixed_places.pop(id default=id);}
+    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned scoped.bindings scoped.scopes scoped.regions safe_places fixed_places]
 }

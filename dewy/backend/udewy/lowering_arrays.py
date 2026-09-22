@@ -573,6 +573,7 @@ class _ArrayLowering(_ArraySharing):
         return uses <= allowed
 
     def _classify_array_representations(self) -> None:
+        self.frame_array_bindings: set[int] = set()
         self._analyze_array_aliases_and_parameters()
         allowed_uses: set[ArrayUse] = {
             'length',
@@ -639,9 +640,10 @@ class _ArrayLowering(_ArraySharing):
         # The public no-allocation checker and lowering consume the same
         # bounded nonescaping-array proof, independently of broader inference.
         for function in self.function_by_literal.values():
-            for binding in placement.local_arrays(function.literal, self.nonescaping_places):
+            for binding in placement.local_arrays(function.literal, self.place_loans.nonescaping, self.place_loans.fixed_storage):
                 if binding in self.array_declarations:
                     self.array_representations[binding] = 'stack_data'
+                    self.frame_array_bindings.add(binding)
 
     def _static_word_array_is_stable(
         self,
@@ -814,6 +816,10 @@ class _ArrayLowering(_ArraySharing):
                 and declaration.expr.type.length is not None
             )
         )
+        return self._raw_array_descriptor(node, source_type, representation)
+
+    def _raw_array_descriptor(self, node, source_type, representation):
+        """Lend a descriptor for fixed data until the enclosing call returns."""
         assert isinstance(source_type, ty.ArrayType)
         assert source_type.length is not None
         element_bytes, _signed = self._array_element_layout(

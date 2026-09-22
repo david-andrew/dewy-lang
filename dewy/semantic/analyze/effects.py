@@ -697,14 +697,31 @@ def analyze_effects(root: hir.AST) -> ProgramEffects:
     return _EffectAnalyzer(root).solve()
 
 
-def nonescaping_places(analysis: _EffectAnalyzer, summaries: ProgramEffects) -> set[int]:
-    """Addresses borrowed only for their call, across every possible target.
+@dataclass(frozen=True)
+class PlaceLoans:
+    nonescaping: frozenset[int]
+    fixed_storage: frozenset[int]
 
-    A shared argument can occur at several positions or calls. Every use
-    must have a known, nonescaping parameter; writes themselves are allowed.
-    Reuse the collected call sites and solved graph, without another HIR walk.
+
+def preserves_storage(summary: ParameterEffects, type_) -> bool:
+    """A whole frame owner must keep its layout and backing storage.
+
+    Read-only arrays keep their descriptor. Scalar records may change fields,
+    but an opaque root mutation or replacement still excludes placement.
+    Candidate selection separately rules out resource and aggregate fields.
     """
-    safe, unsafe = set(), set()
+    return not summary.escapes and (summary.read_only or (
+        isinstance(ty.structural_base(type_), ty.ObjectType)
+        and ROOT not in summary.mutates and ROOT not in summary.rebinds))
+
+
+def place_loans(analysis: _EffectAnalyzer, summaries: ProgramEffects) -> PlaceLoans:
+    """Call-only addresses and whole owners whose storage stays fixed.
+
+    Every target and repeated argument position must establish each guarantee.
+    Reuse collected call sites and solved summaries, without another HIR walk.
+    """
+    safe, unsafe, fixed, changed = set(), set(), set(), set()
     for call in analysis.calls:
         places = {id(arg) for arg in [*call.pos_args, *call.kw_args.values()] if isinstance(arg, hir.Place)}
         if not places:
@@ -721,9 +738,13 @@ def nonescaping_places(analysis: _EffectAnalyzer, summaries: ProgramEffects) -> 
                     continue
                 paired.add(key)
                 summary = summaries.for_param_binding(parameter.binding_id) if parameter is not None else None
-                (safe if summary is not None and not summary.escapes else unsafe).add(key)
+                if summary is None or summary.escapes:
+                    unsafe.add(key)
+                else:
+                    safe.add(key)
+                    (fixed if preserves_storage(summary, argument.type) else changed).add(key)
             unsafe.update(places - paired)
-    return safe - unsafe
+    return PlaceLoans(frozenset(safe - unsafe), frozenset(fixed - unsafe - changed))
 
 
 def read_only_places(root: hir.AST, context: hir.AST | None = None) -> set[int]:

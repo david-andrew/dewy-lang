@@ -16,7 +16,7 @@ CASES = [SOURCE,
 ERRORS = [
     'R:type=[x:int64] make=():>R & no allocates=>{let value=R[42] return value}\nmain=():>int64=>make().x',
     'R:type=[items:array<int64>] main=():>int64 & no_effects=>{let value=R[[42]] return value.items[0]}',
-    # Passing a whole record still needs the separate forwarding/escape proof.
+    # By-value record calls still need the separate forwarding/escape proof.
     'R:type=[x:int64] read=(value:R):>int64=>value.x\nmain=():>int64 & no allocates=>{let value=R[42] return read(value)}',
 ]
 

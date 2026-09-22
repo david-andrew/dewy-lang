@@ -113,6 +113,7 @@ State:type = [
     frame_records:dict<addr addr>=[]
     frame_record_bindings:set<addr>=set[]
     nonescaping_places:set<addr>=set[]
+    fixed_places:set<addr>=set[]
     addressed:set<addr>=set[]
     place_parameters:set<addr>=set[]
     union_tags:dict<string addr>=[]
@@ -555,7 +556,7 @@ expression = (id:addr @state:State):>addr => {
             if node.view return required_view_error(node @state)
             value=owned_value(node.expr @state "bound to `{node.name}`")
         }
-        if node.binding_id isnt? none and node.binding_id in? state.frame_record_bindings {borrowed=true}
+        if node.binding_id isnt? none and (node.binding_id in? state.frame_record_bindings or node.expr in? state.frame_arrays) {borrowed=true}
         # An addressed optional local is written through its own cell, which
         # must therefore never be the shared static `none` cell.
         if state.none_cell isnt? none and node.binding_id isnt? none and node.binding_id in? state.addressed and node.binding_id not in? state.boxed and not borrowed {
@@ -4387,12 +4388,13 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
     state.frame_boxes=[]
     state.frame_arrays=[] state.frame_records=[] state.frame_record_bindings=set[]
-    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places) {
+    let frame_array_bindings:set<addr>=set[]
+    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places state.fixed_places) {
         let declaration=hir.node_at(state.input.nodes declaration_id)
         $runtime_assert declaration is? hir.Declare
         let literal=hir.node_at(state.input.nodes declaration.expr)
         if literal is? hir.ObjectLiteral {
-            # No whole-value use, capture or place can escape this record.
+            # No whole-value copy, capture or call can outlive this record.
             # It owns only scalar fields, so no release/header is required.
             let layout=object_layout(literal.value_type literal @state)
             let name=fresh('record_frame' @state)
@@ -4415,11 +4417,12 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         prologue.push(put(hir.Declare[literal.loc void_type 'const' name word_type allocated] @state))
         let descriptor=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
         state.frame_arrays[declaration.expr]=ArrayMemory[descriptor address(descriptor layouts.array_descriptor.size literal @state) []]
+        frame_array_bindings.add(binding)
     }
     loop binding in capture.locals {
         if binding not in? state.boxed or binding in? excluded or binding in? state.place_parameters continue
         let stored=state.storage_types.get(binding)
-        if stored is? none or not borrowing.word_value(stored state.type_nodes) continue
+        if stored is? none or (not borrowing.word_value(stored state.type_nodes) and binding not in? frame_array_bindings) continue
         let word_type=types.primitive('int64' @state.type_nodes)
         let name=fresh('place_slot' @state)
         let slot=intrinsic_call('__alloca__' [word(8 node @state)] word_type node @state)
@@ -4593,6 +4596,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers registry=source_registry)
     state.borrowed_arguments=borrowed.arguments
     state.nonescaping_places=borrowed.nonescaping_places
+    state.fixed_places=borrowed.fixed_places
     state.stable_bindings=borrowed.stable_bindings
     state.scoped_views=borrowed.scoped_views
     state.view_scopes=borrowed.view_scopes

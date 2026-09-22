@@ -5,12 +5,13 @@ import p"ty.dewy" as types
 import p"type_queries.dewy" as views
 
 # The same bounded array/record proof as semantic/placement.py. Whole-value
-# uses, captures, escaping addresses and resizing exclude the frame route.
-# Solved calls may borrow scalar field/element addresses until they return.
+# copies, captures, escaping addresses and resizing exclude the frame route.
+# Solved calls may borrow fields/elements, or a whole owner whose storage
+# they preserve: read-only arrays and field-mutating scalar records.
 # Arrays and records share one budget; only scalar fields/elements qualify.
 const FRAME_STORAGE_BYTES:addr=4096
 Candidate:type=const [declaration:addr size:addr<v=>v<=?4096>]
-local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table nonescaping_places:set<addr>=set[]):>dict<addr addr>=>{
+local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[]):>dict<addr addr>=>{
     let items:array<addr>=[]
     let blocked:set<addr>=set[]
     let pending:array<addr>=[literal.body]
@@ -32,6 +33,7 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
     }
     let candidates:dict<addr Candidate>=[]
     let allowed:dict<addr addr>=[]
+    let whole_places:set<addr>=set[]
     let occurrences:dict<addr addr>=[]
     loop id in items {
         let node=hir.node_at(nodes id)
@@ -62,6 +64,13 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
         }
         if node is? hir.Index|hir.ArrayLength and hir.node_at(nodes node.array) is? hir.ExpressedIdentifier {allowed[node.array]=allowed.get(node.array 0)+1}
         if node is? hir.MemberAccess and hir.node_at(nodes node.value) is? hir.ExpressedIdentifier {allowed[node.value]=allowed.get(node.value 0)+1}
+        if node is? hir.Place and id in? fixed_places {
+            let target=hir.node_at(nodes node.target)
+            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
+                allowed[node.target]=allowed.get(node.target 0)+1
+                whole_places.add(target.binding_id)
+            }
+        }
         if node is? hir.Place and id not in? nonescaping_places {
             let selected:array<addr>=[node.target]
             loop selected.length >? 0 {
@@ -79,16 +88,21 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
     let used:addr<v=>v<=?4096>=0
     loop [binding candidate] in candidates {
         if binding in? blocked continue
-        let size=candidate.size
+        let size:addr=candidate.size
+        if binding in? whole_places {
+            let declaration=hir.node_at(nodes candidate.declaration)
+            $runtime_assert declaration is? hir.Declare
+            if hir.node_at(nodes declaration.expr) is? hir.ArrayLiteral {size+=8}
+        }
         let next=used+size
         if next <=? FRAME_STORAGE_BYTES {result[binding]=candidate.declaration used=next}
     }
     return result
 }
 
-local_arrays=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table nonescaping_places:set<addr>=set[]):>dict<addr addr>=>{
+local_arrays=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[]):>dict<addr addr>=>{
     let result:dict<addr addr>=[]
-    loop [binding id] in local_values(literal nodes table nonescaping_places) {
+    loop [binding id] in local_values(literal nodes table nonescaping_places fixed_places) {
         let declaration=hir.node_at(nodes id)
         $runtime_assert declaration is? hir.Declare
         if hir.node_at(nodes declaration.expr) is? hir.ArrayLiteral {result[binding]=id}

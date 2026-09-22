@@ -219,7 +219,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
 summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[]):>dict<addr rows.Contract> => {
     let analysis=access.collect_roots(roots session.hir)
     let access_summaries=access.analyze_collected(analysis session.hir session.types)
-    let frame_places=access.nonescaping_places(analysis access_summaries session.hir)
+    let frame_places=access.place_loans(analysis access_summaries session.hir session.types)
     let borrowed=storage_borrows.forwarded_values(analysis access_summaries session.hir session.types session.registry)
     let input=Input[session.hir session.types session.registry analysis access_summaries word_iterators borrowed]
     let local:dict<addr rows.Contract>=[]
@@ -229,7 +229,7 @@ summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
         let scan=Scan[]
-        loop [binding declaration_id] in placement.local_values(node session.hir session.types frame_places) {
+        loop [binding declaration_id] in placement.local_values(node session.hir session.types frame_places.nonescaping frame_places.fixed_storage) {
             let declaration=hir.node_at(session.hir declaration_id)
             $runtime_assert declaration is? hir.Declare
             scan.frame_values.add(binding) scan.frame_literals.add(declaration.expr)

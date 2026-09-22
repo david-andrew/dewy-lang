@@ -1,7 +1,8 @@
 """Storage proofs shared by public effects and runtime lowering.
 
-Fixed scalar arrays used only for length/element access, and scalar records
-used only for field access, have no escaping address. One bounded frame slot
+Fixed scalar arrays and scalar records can lend nonescaping field/element
+addresses. Whole-owner loans also require proven stable storage: arrays may
+only be read; scalar records may change fields. One bounded frame slot
 suffices for each declaration, including loop iterations. These proofs
 justify actual placement, not a hope that COW postpones allocation.
 """
@@ -12,7 +13,7 @@ from . import hir, ty
 FRAME_STORAGE_BYTES = 4096
 
 
-def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
+def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
     nodes = []
     captured = set()
     pending = [literal.body]
@@ -48,14 +49,18 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
             candidates[node.binding_id] = (node, size)
     allowed, occurrences = {}, {}
     blocked = set(captured)
+    whole_places = set()
     for node in nodes:
         if isinstance(node, (hir.Index, hir.ArrayLength)) and isinstance(node.array, hir.ExpressedIdentifier):
             allowed[id(node.array)] = allowed.get(id(node.array), 0) + 1
         if isinstance(node, hir.MemberAccess) and isinstance(node.value, hir.ExpressedIdentifier):
             allowed[id(node.value)] = allowed.get(id(node.value), 0) + 1
+        if isinstance(node, hir.Place) and id(node) in fixed_places and isinstance(node.target, hir.ExpressedIdentifier):
+            allowed[id(node.target)] = allowed.get(id(node.target), 0) + 1
+            whole_places.add(node.target.binding_id)
         if isinstance(node, hir.Place) and id(node) not in nonescaping_places:
             # Only a solved call boundary can lend a field/element address.
-            # Whole-value uses and all other escapes still exclude placement.
+            # Whole owners additionally need the storage guarantee above.
             blocked.update(read.binding_id for read in hir.walk(node.target)
                            if isinstance(read, hir.ExpressedIdentifier))
     for node in nodes:
@@ -69,12 +74,15 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
     for binding, (declaration, size) in candidates.items():
         if binding in blocked:
             continue
+        # Whole-array places also need one frame slot for the descriptor handle.
+        if binding in whole_places and isinstance(declaration.expr, hir.ArrayLiteral):
+            size += 8
         if used + size <= FRAME_STORAGE_BYTES:
             result[binding] = declaration
             used += size
     return result
 
 
-def local_arrays(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
-    return {binding: declaration for binding, declaration in local_values(literal, nonescaping_places).items()
+def local_arrays(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
+    return {binding: declaration for binding, declaration in local_values(literal, nonescaping_places, fixed_places).items()
             if isinstance(declaration.expr, hir.ArrayLiteral)}

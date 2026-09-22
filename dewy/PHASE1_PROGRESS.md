@@ -2362,3 +2362,29 @@ runtime checks on x86-64/C. Generation 2/3 took 67/77 seconds during concurrent
 development; these are integration timings, not isolated latency measurements.
 The 211-case corpus certification above belongs to the preceding placement
 checkpoint. Phase 1 remains in progress.
+
+
+## Whole-owner frame loans (2026-09-21)
+
+The shared placement proof now distinguishes call-only addresses from whole
+owners whose storage remains fixed. Known nonescaping helpers may read whole
+fixed scalar arrays or update fields of scalar records in reusable frame
+storage. Every resolved target and argument position must establish the
+relevant guarantee; owner replacement, array mutation/resizing, raw exposure,
+captures, unknown callbacks and by-value whole-owner uses remain conservative.
+This extends the existing place protocol without a new source annotation.
+
+Hosted raw arrays receive a borrowed call descriptor and slot. Native frame
+arrays also keep the addressable handle slot in the frame, with no arena cleanup
+for either block. The storage budget includes that slot. A 10,000-iteration
+kernel observes zero arena allocation through forwarding, recursion and keyword
+calls, including whole-array reads and whole-record field mutation.
+
+Validation: 62 focused hosted allocation/access checks pass; the frame groups
+also passed (29 initial checks and 20 corrected checks after the hosted call
+adapter). A second-generation native driver agrees with hosted checking and
+execution on 15 kernels and 18 rejections across x86-64/C. The compiler inventory
+is 4,988 sites over 47,364 lines (105.312/KLOC), within the unchanged gates.
+Artifacts use `../dewy-build-artifacts/phase1-whole-frame-` prefixes. This slice
+has bounded second-generation validation; the preceding nested-getter checkpoint
+is the most recent full native fixed point.

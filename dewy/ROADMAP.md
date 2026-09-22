@@ -600,7 +600,10 @@ a bounded nonescaping frame-placement proof with lowering. Native record
 storage is allocated once per function frame and reused across loop iterations.
 Fixed local arrays and scalar records may lend field/element addresses through
 known nonescaping helpers, including forwarding and recursion, without losing
-frame placement. Unknown callbacks and whole-owner uses remain conservative.
+frame placement. Whole-owner loans now include read-only scalar arrays and
+field-mutating scalar records when every known callee preserves their backing
+storage. Unknown callbacks, whole-owner replacement/resizing and by-value
+whole-owner uses remain conservative.
 Projected writes and mutating place calls share their allocation obligations;
 an untouched sibling projection can still borrow its own storage.
 Read-only aggregate forwarding now shares its storage

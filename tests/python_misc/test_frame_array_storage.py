@@ -14,13 +14,13 @@ CASES = [
     'main=():>int64 & no_effects=>{let xs:array<uint32>=[40 2] return (xs[0]+xs[1]) as int64}',
     'g=():>int64=>{let xs=[42] return xs[0]} f=(x:int64=g()):>int64 & no allocates=>x main=():>int64=>f()',
     'g=():>int64=>{let xs=[42] return xs[0]} f=(x:int64):>int64 & no allocates=>if x>?0 f(x-1) else g() main=():>int64=>f(3)',
+    'take=(@x:array<int64>):>int64 & reads<x>=>x.length f=():>int64 & no allocates=>{let xs:array<int64>=[42] return take(@xs)} main=():>int64=>f()+41',
 ]
 ERRORS = [
     'f=():>array<int64> & no allocates=>{let xs=[42] return xs}',
     'f=():>int64 & no allocates=>{let xs=[42] xs.push(1) return xs[0]}',
     'f=():>int64 & no allocates=>{let xs=[42] let snapshot=xs xs[0]=1 return snapshot[0]}',
     'f=():>int64 & no allocates=>{let xs:array<int64>=[42] xs=[1] return xs[0]}',
-    'take=(@x:array<int64>):>int64 & reads<x>=>x.length f=():>int64 & no allocates=>{let xs:array<int64>=[42] return take(@xs)}',
     'f=():>int64 & no allocates=>{let xs=[42] let read=():>int64=>xs[0] return read()}',
     'f=():>int64 & no allocates=>{let xs=['+' '.join(['42']*507)+'] return xs[0]}',
     'f=():>int64 & no allocates=>{let xs=['+' '.join(['42']*300)+'] let ys=['+' '.join(['42']*300)+'] return xs[0]+ys[0]}',

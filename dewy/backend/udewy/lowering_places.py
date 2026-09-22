@@ -80,9 +80,20 @@ class _PlaceLowering:
             isinstance(node.type, ty.ArrayType)
             and self._array_use_representation(target) is not None
         ):
-            raise TypeError(
-                'INTERNAL ERROR: place argument retained a descriptor-free array'
-            )
+            # Only the shared placement proof may expose a raw frame array.
+            # Its whole-place callees are read-only and cannot keep the slot;
+            # neither descriptor nor data can be rebound, so no writeback is needed.
+            assert target.binding_id in self.frame_array_bindings
+            source_type = replace(node.type, length=self._raw_array_length(target))
+            prelude, descriptor = self._raw_array_descriptor(
+                target, source_type, self._array_use_representation(target))
+            cell = hir.ExpressedIdentifier(node.loc, 'int64', self._new_place_name('array_cell'))
+            prelude.extend([
+                hir.Declare(node.loc, ty.VOID_TYPE, 'let', cell.name, 'int64',
+                    self._intrinsic_call('__alloca__', [self._int64_literal(node.loc, 8)], 'int64', node.loc)),
+                *self._value_store(replace(descriptor, type='int64'), cell, 'int64', node.loc),
+            ])
+            return prelude, cell, []
         runtime_type = self._place_runtime_type(node.type, node)
         cell_name = self._new_place_name(f'cell_{target.name}')
         cell = hir.ExpressedIdentifier(node.loc, 'int64', cell_name)
