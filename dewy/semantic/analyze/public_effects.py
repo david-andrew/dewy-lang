@@ -71,7 +71,7 @@ def inventory(root, registry):
         places = {p.binding_id: str(index) for index, p in enumerate(params) if p.place and p.binding_id != receiver}
         value_parameters = {p.binding_id for p in params if not p.place}
         frame_values = placement.local_values(literal, frame_places.nonescaping, frame_places.fixed_storage, borrowed_arguments)
-        frame_literals = {id(node.expr) for node in frame_values.values()}
+        frame_literals = set().union(*(placement.literal_storage(node.expr) for node in frame_values.values()))
         word_bindings = set()
         pending = [literal.body]
         while pending:

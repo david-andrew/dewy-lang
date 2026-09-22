@@ -2828,3 +2828,23 @@ Copy inventory is **4,452 sites over 48,103 lines (92.551/KLOC)**, within the
 4,500/100 gates. The broad hosted selection (`-k 'not bootstrap and not native'`)
 passed **3,527 tests with 14 skipped** in 590.13 seconds. This is not a complete
 all-route pytest run; fresh paired checks for this batch are recorded above.
+
+## Nested scalar record placement (2026-09-22)
+
+The shared nonescaping frame proof now includes records containing nested scalar
+records, under the existing 4 KiB per-function budget. Repeated field shapes
+count separately; recursive, dynamic-storage and lifecycle-managed shapes do
+not qualify. Native lowering initializes compatible nested record literals
+directly in their parent's frame storage, preserving field order and earlier
+field bindings used by defaults. Nominal adaptation retains its existing
+storage obligations. Public allocation inference uses the same literal-tree
+proof, including ordinary read-only forwarding and known nonescaping places.
+
+Validation: 38 hosted adjacent placement/loan tests passed, followed by ten
+final nested-record checks. A fresh driver agrees with hosted checking on 14
+runtime kernels and 14 rejections on x86-64/C. The kernels verify zero arena
+allocation, including 100,000 loop iterations, nested nominal records, scalar
+field mutation, defaults and read-only/by-place calls. Copies that need an
+independent value, escapes, dynamic fields and oversized shapes remain
+conservative. Artifacts: `../dewy-build-artifacts/phase1-nested-frame-*`.
+Phase 1 continues.

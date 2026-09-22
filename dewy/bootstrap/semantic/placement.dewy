@@ -9,8 +9,46 @@ import p"type_queries.dewy" as views
 # Solved calls may borrow fields/elements, or a whole owner whose storage
 # they preserve: read-only arrays and field-mutating scalar records.
 # Proven read-only value arguments can lend stable owners without an explicit @.
-# Arrays and records share one budget; only scalar fields/elements qualify.
+# Arrays and records share one budget. Record fields may be nested records
+# of scalar words; dynamic storage and lifecycle hooks exclude this proof.
 const FRAME_STORAGE_BYTES:addr=4096
+scalar_record_size=(type:addr table:types.Table):>addr?=>{
+    let pending:array<addr>=[type]
+    let size:addr=0
+    loop pending.length>?0 {
+        if size>?FRAME_STORAGE_BYTES-8 return none
+        let selected=views.structural_base(pending.pop table)
+        let shape=types.node_at(table selected)
+        if shape is? types.ObjectType {
+            loop method in shape.methods {if method.lifecycle isnt? none return none}
+            loop field in shape.fields {pending.push(field.value_type)}
+        } else if not types.is_primitive(shape 'bool') and views.fixed_integer_layout(selected table) is? none {
+            return none
+        }
+        size+=8
+    }
+    return size
+}
+literal_storage=(value:addr nodes:array<hir.AST> table:types.Table):>set<addr>=>{
+    let result:set<addr>=set[]
+    let pending:array<addr>=[value]
+    loop pending.length>?0 {
+        let id=pending.pop
+        if id in? result continue
+        result.add(id)
+        let node=hir.node_at(nodes id)
+        if node is? hir.ObjectLiteral {
+            let shape=types.node_at(table views.structural_base(node.value_type table))
+            $runtime_assert shape is? types.ObjectType
+            loop field in node.fields {
+                let expected=types.object_field(shape field.name)
+                let value=hir.node_at(nodes field.value)
+                if value is? hir.ObjectLiteral and expected isnt? none and types.same_type(views.structural_base(value.value_type table) views.structural_base(expected.value_type table) table) {pending.push(field.value)}
+            }
+        }
+    }
+    return result
+}
 Candidate:type=const [declaration:addr size:addr<v=>v<=?4096>]
 local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[] borrowed_values:dict<addr set<addr>>=[]):>dict<addr addr>=>{
     let items:array<addr>=[]
@@ -51,16 +89,8 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
                     if scalar and not spread {candidates[node.binding_id]=Candidate[id 48+8*value.items.length]}
                 }
             } else if value is? hir.ObjectLiteral {
-                let shape=types.node_at(table views.structural_base(value.value_type table))
-                if shape is? types.ObjectType and shape.fields.length <=? (FRAME_STORAGE_BYTES-8)//8 {
-                    let scalar=true
-                    loop method in shape.methods {if method.lifecycle isnt? none {scalar=false}}
-                    loop field in shape.fields {
-                        let type=types.node_at(table types.strip_refinement(field.value_type table))
-                        if not types.is_primitive(type 'bool') and views.fixed_integer_layout(field.value_type table) is? none {scalar=false}
-                    }
-                    if scalar {candidates[node.binding_id]=Candidate[id 8+8*shape.fields.length]}
-                }
+                let size=scalar_record_size(value.value_type table)
+                if size isnt? none and size<=?FRAME_STORAGE_BYTES {candidates[node.binding_id]=Candidate[id size]}
             }
         }
         if node is? hir.FunctionCall and id in? borrowed_values {

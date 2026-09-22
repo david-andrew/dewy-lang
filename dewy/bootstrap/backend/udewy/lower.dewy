@@ -3966,6 +3966,22 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State):>addr => {
         # a local) is read at the write; only a source that owns fresh
         # storage needs the owned value, which is released after the write.
         let source=peel_statement(item.value @state)
+        if frame isnt? none and hir.node_at(state.input.nodes source) is? hir.ObjectLiteral and types.same_type(views.structural_base(hir.node_at(state.input.nodes source).value_type state.type_nodes) views.structural_base(field.value_type state.type_nodes) state.type_nodes) {
+            # The placement proof gives the entire scalar record tree one
+            # frame slot. Initialize nested literals directly in their inline
+            # field, without an arena temporary or a second component copy.
+            let previous=state.frame_records.get(source)
+            state.frame_records[source]=address(destination offset node @state)
+            let value=expression(item.value @state)
+            if previous is? none {state.frame_records.pop(source default=0);}
+            else {state.frame_records[source]=previous}
+            let type=runtime_type(field.value_type node @state)
+            if item.binding_id isnt? none {
+                let name=symbol(item.name item.binding_id @state)
+                prefix.push(put(hir.Declare[item.loc types.primitive('void' @state.type_nodes) 'let' name type value item.binding_id] @state))
+            } else {prefix.push(put(hir.Suppress[item.loc types.primitive('void' @state.type_nodes) value] @state))}
+            continue
+        }
         if not field_binding_referenced(node item.binding_id @state) and inline_place(field.value_type @state) and view_source(source @state) {
             prefix.push(field_write(address(destination offset node @state) expression(item.value @state) field.value_type node @state))
             continue
@@ -4397,7 +4413,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         let literal=hir.node_at(state.input.nodes declaration.expr)
         if literal is? hir.ObjectLiteral {
             # No whole-value copy, capture or call can outlive this record.
-            # It owns only scalar fields, so no release/header is required.
+            # It owns only inline scalar storage, so no release/header is required.
             let layout=object_layout(literal.value_type literal @state)
             let name=fresh('record_frame' @state)
             let word_type=types.primitive('int64' @state.type_nodes)

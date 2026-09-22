@@ -1,6 +1,6 @@
 """Storage proofs shared by public effects and runtime lowering.
 
-Fixed scalar arrays and scalar records can lend nonescaping field/element
+Fixed scalar arrays and records of nested scalar fields can lend nonescaping field/element
 addresses. Whole-owner loans also require proven stable storage: arrays may
 only be read; scalar records may change fields. Proven read-only value arguments
 can also lend stable local owners, without an explicit place. One bounded frame slot
@@ -12,6 +12,45 @@ from . import hir, ty
 # An implementation budget, not a language limit. Larger storage retains the
 # ordinary allocation path; a no-allocation contract needs another proof.
 FRAME_STORAGE_BYTES = 4096
+
+
+def scalar_record_size(type_):
+    """A bounded upper size for inline records containing only scalar words.
+
+    Count repeated field types each time; cycles or oversized shapes exhaust
+    the same budget and cannot authorize frame placement.
+    """
+    pending, size = [type_], 0
+    while pending:
+        shape = ty.structural_base(pending.pop())
+        if isinstance(shape, ty.ObjectType):
+            if any(method.lifecycle is not None for method in shape.methods):
+                return None
+            size += 8  # nominal tag/alignment upper bound
+            pending.extend(field.type for field in shape.fields)
+        elif shape == 'bool' or ty.fixed_integer_layout(shape) is not None:
+            size += 8
+        else:
+            return None
+        if size > FRAME_STORAGE_BYTES:
+            return None
+    return size
+
+
+def literal_storage(value):
+    """Literal nodes initialized within one proven fixed record's storage."""
+    result, pending = set(), [value]
+    while pending:
+        node = pending.pop()
+        result.add(id(node))
+        if isinstance(node, hir.ObjectLiteral):
+            shape = ty.structural_base(node.type)
+            for field in node.fields:
+                expected = shape.field(field.name)
+                if (isinstance(field.value, hir.ObjectLiteral) and expected is not None
+                        and ty.structural_base(field.value.type) == ty.structural_base(expected.type)):
+                    pending.append(field.value)
+    return result
 
 
 def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset(), fixed_places: set[int] | frozenset[int] = frozenset(), borrowed_values: dict[int, set[int]] | None = None) -> dict[int, hir.Declare]:
@@ -38,14 +77,7 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
             if scalar and value.type.length == len(value.items) and not any(isinstance(item, hir.Spread) for item in value.items):
                 size = 48 + 8 * len(value.items)
         elif isinstance(value, hir.ObjectLiteral):
-            shape = ty.structural_base(value.type)
-            if (isinstance(shape, ty.ObjectType)
-                    and not any(method.lifecycle is not None for method in shape.methods)
-                    and all(ty.strip_refinement(field.type) == 'bool' or ty.fixed_integer_layout(field.type) is not None
-                            for field in shape.fields)):
-                # Include the optional nominal tag, with an upper bound for
-                # every scalar field. Actual layout may pack narrower words.
-                size = 8 + 8 * len(shape.fields)
+            size = scalar_record_size(value.type)
         if size is not None and size <= FRAME_STORAGE_BYTES:
             candidates[node.binding_id] = (node, size)
     allowed, occurrences = {}, {}

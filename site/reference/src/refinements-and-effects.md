@@ -355,7 +355,12 @@ native lowering; unresolved callback escape paths still need storage
 permission. Fixed scalar local arrays also share a nonescaping placement proof
 with both lowerers: length and element reads/writes use reusable frame storage,
 without a COW detach. Escaping, capturing, resizing, rebinding or taking the
-array's address excludes this proof. A conservative per-function frame budget
+array's address through an unresolved call excludes this proof. Known
+nonescaping loans retain it when they also preserve the owner's storage.
+Local records containing scalar fields, including nested records, share this
+proof. Their compatible nested literals initialize directly in frame storage;
+resource hooks and dynamic fields keep their allocation obligations.
+A conservative per-function frame budget
 currently limits it to 4 KiB; larger arrays remain valid but need allocation
 permission unless another proof applies.
 
