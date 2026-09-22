@@ -230,7 +230,7 @@ preserves_union_payload=(actual:addr expected:addr table:types.Table):>bool=>{
     let wanted=union_cell_members(expected @table)
     if wanted is? none return false
     let members=union_cell_members(actual @table)
-    let supplied=if members is? none [actual] else members
+    let supplied:array<addr>=if members is? none [actual] else members
     loop member in supplied {
         let found=false
         loop candidate in wanted {
