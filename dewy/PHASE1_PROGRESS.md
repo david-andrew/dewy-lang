@@ -3218,3 +3218,19 @@ names passed 3,720 tests with 14 skips in 861.73 seconds. This is not an
 all-route pytest or CI certificate. Logs and the inventory use
 `phase1-shared-views-*`; the pair is `phase1-shared-views-41a8eae2`.
 Phase 1 remains in progress.
+
+## Structural hosted fact identities (2026-09-22)
+
+Hosted index, nonzero, order and remainder facts now use distinct immutable
+structural keys. Scalar and length terms retain their unbounded signed-id
+encoding. Fixed 20/21-bit packing could silently change the identity or kind
+of a fact at large binding ids, including confusing a real array with the
+nonzero sentinel. The native representation was already structural.
+
+Nine direct regressions cover identity, invalidation, transfer and proof
+separation through 80-bit synthetic ids. The expanded native fact-state
+comparison checks joins, widening, narrowing and invalidation past the old
+packing boundaries. All 56 selected proof/loop checks passed (including three
+paired native kernels), as did four direct native analysis comparisons.
+Artifacts use `phase1-structural-facts-*`. This removes an identity limit; it
+does not claim to complete the general liquid qualifier engine.

@@ -95,16 +95,35 @@ class Interval:
 UNKNOWN_INTERVAL = Interval(None, None)
 _ANY_FACT = Interval(None, None)   # a distinct object: "every fact holds here" (an empty array's elements)
 EMPTY_INTERVAL = Interval(1, 0)
-State = dict[int, Interval]
+# Terms retain the unbounded signed binding/length encoding. Relations have
+# distinct structural keys: packing ids into fixed-width fields can silently
+# turn a large binding into a length, another relation, or a different binding.
+@dataclass(frozen=True, slots=True)
+class IndexFact:
+    index: int
+    array: int
 
-# Runtime-length arrays contribute two kinds of synthetic state entries, keyed
-# by negative ids so they never collide with bindings: the array's *length
-# interval* (refined by `xs.length >? k` and stepped by growth methods) and
-# *index facts* recording that an index binding is proven below an array's
-# length (from `i <? xs.length`). Joins and widening only keep keys common to
-# both sides, which is exactly the sound treatment for facts.
-_FACT_BASE = 1 << 40
-_FACT_SHIFT = 20
+
+@dataclass(frozen=True, slots=True)
+class NonzeroFact:
+    binding: int
+
+
+@dataclass(frozen=True, slots=True)
+class OrderFact:
+    smaller: int
+    larger: int
+
+
+@dataclass(frozen=True, slots=True)
+class RemainderFact:
+    subject: int
+    upper: int
+    offset: int
+
+
+FactKey = int | IndexFact | NonzeroFact | OrderFact | RemainderFact
+State = dict[FactKey, Interval]
 
 # A runtime-length array's length is a nonnegative int64, which keeps
 # `i <? xs.length` bounded above so `i + 1` cannot roll over.
@@ -309,11 +328,11 @@ def _exclude_value(interval: Interval, value: int) -> Interval | None:
     return Interval(lower, upper, capped=interval.capped)
 
 
-def _is_length_key(key: int) -> bool:
-    return key < 0 and key > -_FACT_BASE
+def _is_length_key(key: FactKey) -> bool:
+    return isinstance(key, int) and key < 0
 
 
-def _known_interval(state: State, key: int, cap: int = _MAX_LENGTH) -> Interval:
+def _known_interval(state: State, key: FactKey, cap: int = _MAX_LENGTH) -> Interval:
     """The interval a key currently has; lengths default to `[0, cap]` (a capped interval)."""
     default = _length_range(cap) if _is_length_key(key) else UNKNOWN_INTERVAL
     return state.get(key, default)
@@ -326,53 +345,40 @@ def _conjuncts(condition: hir.AST) -> list[hir.AST]:
     return [condition]
 
 
-def _index_fact_key(index_id: int, array_id: int) -> int:
-    return -(_FACT_BASE + (index_id << _FACT_SHIFT) + array_id)
+# The decoder shares invalidation/transfer logic for index and nonzero facts.
+# Its sentinel is outside the nonnegative binding-id domain; the stored keys
+# themselves have distinct types, rather than reserving a real array id.
+_NONZERO_MARK = -1
 
 
-# `x not=? 0` facts are index facts against this pseudo-array: they join,
-# widen, and drop on assignment exactly like `i <? xs.length` facts.
-_NONZERO_MARK = (1 << _FACT_SHIFT) - 1
+def _index_fact_key(index_id: int, array_id: int) -> IndexFact | NonzeroFact:
+    return NonzeroFact(index_id) if array_id == _NONZERO_MARK else IndexFact(index_id, array_id)
 
 
-def _nonzero_key(binding_id: int) -> int:
-    return _index_fact_key(binding_id, _NONZERO_MARK)
+def _nonzero_key(binding_id: int) -> NonzeroFact:
+    return NonzeroFact(binding_id)
 
 
-def _decode_index_fact(key: int) -> tuple[int, int] | None:
-    if key > -_FACT_BASE or key <= -_ORDER_BASE:
-        return None
-    raw = -key - _FACT_BASE
-    return raw >> _FACT_SHIFT, raw & ((1 << _FACT_SHIFT) - 1)
+def _decode_index_fact(key: FactKey) -> tuple[int, int] | None:
+    if isinstance(key, IndexFact):
+        return key.index, key.array
+    if isinstance(key, NonzeroFact):
+        return key.binding, _NONZERO_MARK
+    return None
 
 
 # *Order facts* keep a comparison between two terms — bindings, member routes,
 # or lengths, whatever `_binding_id` names — as `larger - smaller >= gap`
 # (`i <? xs.length` is gap 1, `start <=? end` gap 0), stored as `[gap, ∞]`.
-# They are the one relational fact the analysis holds: `xs.length - i` and
-# `end - start` read them. Like index facts they join to the weaker gap, drop
+# Difference expressions such as `xs.length - i` and `end - start` read them. Like index facts they join to the weaker gap, drop
 # when either term is assigned, and drop with a sequence's index facts.
-_ORDER_BASE = 1 << 42
-_ORDER_SHIFT = 21
-_LENGTH_TERM = 1 << 20
+def _order_key(smaller: int, larger: int) -> OrderFact:
+    return OrderFact(smaller, larger)
 
 
-def _order_term(term: int) -> int:
-    """A nonnegative encoding of a `_binding_id` result (length keys are negative)."""
-    return term if term >= 0 else _LENGTH_TERM - term
-
-
-def _order_key(smaller: int, larger: int) -> int:
-    return -(_ORDER_BASE + (_order_term(smaller) << _ORDER_SHIFT) + _order_term(larger))
-
-
-def _decode_order_fact(key: int) -> tuple[int, int] | None:
-    """The `(smaller, larger)` terms of an order-fact key, as `_binding_id` names them."""
-    if key > -_ORDER_BASE or key <= -_REMAINDER_BASE:
-        return None
-    raw = -key - _ORDER_BASE
-    encoded = raw >> _ORDER_SHIFT, raw & ((1 << _ORDER_SHIFT) - 1)
-    return tuple(term if term < _LENGTH_TERM else _LENGTH_TERM - term for term in encoded)  # type: ignore[return-value]
+def _decode_order_fact(key: FactKey) -> tuple[int, int] | None:
+    """The `(smaller, larger)` terms, with lengths encoded as negative ids."""
+    return (key.smaller, key.larger) if isinstance(key, OrderFact) else None
 
 
 # *Remainder facts* bound a value by what is left of a sequence past an
@@ -383,24 +389,13 @@ def _decode_order_fact(key: int) -> tuple[int, int] | None:
 # they join to the weaker gap and drop when any of the three terms is
 # assigned. The subject may be a binding, a member route, or an element
 # route (`matches.*.length`: every element's field).
-_REMAINDER_BASE = 1 << 44
-_REMAINDER_SHIFT = 21
+def _remainder_key(subject: int, upper: int, offset_id: int) -> RemainderFact:
+    """`upper - offset - subject >= gap`, using binding/length terms."""
+    return RemainderFact(subject, upper, offset_id)
 
 
-def _remainder_key(subject: int, upper: int, offset_id: int) -> int:
-    """`upper - offset - subject >= gap`: `upper` is a length key (`src.length`, a
-    tail `src[i..]`) or a binding (`j`, a window `src[i..j)`), encoded like order terms."""
-    return -(_REMAINDER_BASE + (_order_term(subject) << (2 * _REMAINDER_SHIFT)) + (_order_term(upper) << _REMAINDER_SHIFT) + offset_id)
-
-
-def _decode_remainder_fact(key: int) -> tuple[int, int, int] | None:
-    """The `(subject, upper, offset)` of a remainder-fact key (`_binding_id` terms: lengths negative)."""
-    if key > -_REMAINDER_BASE:
-        return None
-    raw = -key - _REMAINDER_BASE
-    mask = (1 << _REMAINDER_SHIFT) - 1
-    decode = lambda term: term if term < _LENGTH_TERM else _LENGTH_TERM - term
-    return decode(raw >> (2 * _REMAINDER_SHIFT)), decode((raw >> _REMAINDER_SHIFT) & mask), raw & mask
+def _decode_remainder_fact(key: FactKey) -> tuple[int, int, int] | None:
+    return (key.subject, key.upper, key.offset) if isinstance(key, RemainderFact) else None
 
 
 def _is_runtime_string(type_: ty.Type) -> bool:
@@ -597,7 +592,7 @@ def _drop_index_facts(
     index_id: int | None = None,
     array_id: int | None = None,
 ) -> None:
-    for key in [key for key in state if key <= -_FACT_BASE]:
+    for key in [key for key in state if not isinstance(key, int)]:
         remainder = _decode_remainder_fact(key)
         if remainder is not None:
             subject, upper, offset = remainder
@@ -669,7 +664,7 @@ def _seed_loop_relations(state: State, assigned: set[int], registry: sb.BindingR
     result = dict(state)
     exact = []
     for term, interval in state.items():
-        if not (term >= 0 or _is_length_key(term)):
+        if not isinstance(term, int):
             continue
         binding_id = term if term >= 0 else -term - 1
         binding = registry.by_id.get(binding_id)
@@ -1568,7 +1563,7 @@ class _BoundsValidator:
                 return True   # `result:addr<…> | none | TokenError`, narrowed to the integer
             # a term the facts keep at or below some length (`i <=? src.length` after a guarded loop, an index fact)
             for key in list(state):
-                if -_FACT_BASE < key < 0 and self._ordered(subject, key, 0, state):
+                if _is_length_key(key) and self._ordered(subject, key, 0, state):
                     return True
             for key in list(state):
                 decoded = _decode_index_fact(key)
@@ -4048,14 +4043,14 @@ class _BoundsValidator:
             types.append(_strip_casts(node.value).type)
         return all(self._fit_type(mathematical, ty.strip_refinement(type_)) is not None for type_ in types)
 
-    def _shifted_facts(self, state: State, term: int, shift: int) -> dict[int, Interval]:
+    def _shifted_facts(self, state: State, term: int, shift: int) -> State:
         """Substitute a constant shift into both sides of an order relation.
 
         Negative gaps are useful evidence too: increasing the other term
         later can restore equality. Remainders retain their existing bounded
         offset rule, separate from this two-term affine transfer.
         """
-        shifted: dict[int, Interval] = {}
+        shifted: State = {}
         for key, interval in state.items():
             if interval.lower is None:
                 continue
@@ -4187,9 +4182,9 @@ class _BoundsValidator:
                 sources.append((self.registry.route_paths[route], route))
         return sources
 
-    def _facts_of(self, state: State, subject: int) -> dict[int, Interval]:
+    def _facts_of(self, state: State, subject: int) -> State:
         """The relational facts whose subject is `subject`, keyed as they would be for subject 0."""
-        facts: dict[int, Interval] = {}
+        facts: State = {}
         for key, interval in state.items():
             remainder = _decode_remainder_fact(key)
             if remainder is not None:
@@ -4207,7 +4202,7 @@ class _BoundsValidator:
         return facts
 
     @staticmethod
-    def _rekey(key: int, subject: int) -> int:
+    def _rekey(key: FactKey, subject: int) -> FactKey:
         remainder = _decode_remainder_fact(key)
         if remainder is not None:
             return _remainder_key(subject, remainder[1], remainder[2])
@@ -4237,7 +4232,7 @@ class _BoundsValidator:
                 state.pop(_length_key(route))
             else:
                 state[_length_key(route)] = state[_length_key(route)].union(Interval.exact(known))
-        stored: dict[int, dict[int, Interval]] = {}
+        stored: dict[int, State] = {}
         for path, source in self._value_fact_sources(value):
             stored[self._element_route(array_id, path, loc)] = self._facts_of(state, source)
         for route in self._element_routes(array_id):
@@ -4278,7 +4273,7 @@ class _BoundsValidator:
             for key, interval in self._facts_of(state, route).items():
                 state[self._rekey(key, mirrored)] = interval
 
-    def _implied(self, state: State, key: int) -> Interval | None:
+    def _implied(self, state: State, key: FactKey) -> Interval | None:
         """The interval a state implies for a relational fact it does not hold:
         `_ANY_FACT` for an element fact of an empty array (every fact holds of
         no elements), or the gap the intervals give an order fact — `i ∈ [0, 0]`
@@ -4297,7 +4292,7 @@ class _BoundsValidator:
         gap = larger_interval.lower - smaller_interval.upper
         return Interval(gap, None) if gap >= 0 else None
 
-    def _vacuous(self, state: State, key: int) -> bool:
+    def _vacuous(self, state: State, key: FactKey) -> bool:
         """Whether an element fact holds of `state` because the array is empty there."""
         remainder = _decode_remainder_fact(key)
         subject = remainder[0] if remainder is not None else None

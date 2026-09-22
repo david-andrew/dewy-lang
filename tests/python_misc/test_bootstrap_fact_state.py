@@ -22,7 +22,7 @@ def fact(key):
     def name(key):
         return f'length:{-key - 1}' if key < 0 else f'value:{key}'
 
-    if key >= 0 or bounds._is_length_key(key):
+    if isinstance(key, int):
         return f'facts.value({term(key)})', f'v:{name(key)}'
     remainder = bounds._decode_remainder_fact(key)
     if remainder is not None:
@@ -67,6 +67,15 @@ def test_native_fact_state_matches_hosted(tmp_path):
          order(length(2), length(2)): interval.exact(0),
          bounds._index_fact_key(1, 2): interval(None, None), bounds._nonzero_key(3): interval.exact(1)},
     ]
+    # Exercise joins, narrowing, widening and invalidation with ids that used
+    # to collide in the hosted 20/21-bit encoding (native keys are structural).
+    for large in [2**20 - 1, 2**21, 2**42]:
+        states.append({large: interval(0, 4), length(large): interval(4, 9),
+                       order(1, large): interval(1, None),
+                       order(1, length(large)): interval(2, None),
+                       remainder(1, length(large), large): interval(0, None),
+                       bounds._index_fact_key(1, large): interval(None, None),
+                       bounds._nonzero_key(1): interval(None, None)})
     changes = [interval.exact(1), interval.exact(-1), interval(0, 2), interval(None, 0), interval(-7, 0), interval(None, None)]
     lines = []
     for i, state in enumerate(states):
