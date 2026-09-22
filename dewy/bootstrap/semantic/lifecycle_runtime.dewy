@@ -28,7 +28,7 @@ Frame:type = const [
 ]
 Plan:type = [
     flags:dict<addr Captured>=[]
-    extractions:dict<addr Extraction>=[]
+    extractions:dict<addr array<Extraction>>=[]
     hooks:dict<addr Hook>=[]
     composed_moves:dict<addr addr>=[]
     owners:dict<string Hook>=[]
@@ -97,16 +97,19 @@ move_remainder=(shape:types.ObjectType plan:Plan session:contexts.Session):>arra
     }
     return current.fields
 }
-drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none extraction:Extraction?=none inline_array:bool=false):>void => {
+drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none extraction:Extraction?=none additional:array<Extraction>=[] inline_array:bool=false):>void => {
     if extraction isnt? none and extraction.path.length=?0 {
         if not extraction.moved return
         run_hook=false
         extraction=none
+        additional=[]
     }
+    let routes=additional
+    if extraction isnt? none {routes.push(extraction)}
     if plan.problem isnt? none or resource(type_id session.types) is? none return
     let owner=views.structural_base(type_id session.types)
     let type=types.node_at(session.types owner)
-    if owner in? ancestors {
+    if owner in? ancestors and routes.length=?0 {
         # Close recursive structural expansion with a checked borrowed helper.
         # Publish the callable before its body so recursive calls reuse it.
         let key="{owner}:{run_hook}"
@@ -313,7 +316,7 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
             narrowed.value_type=member
             let selected=put(narrowed @session)
             let body:array<addr>=[]
-            drop_value(selected member loc nested @body @plan @session run_hook=run_hook)
+            drop_value(selected member loc nested @body @plan @session run_hook=run_hook extraction=extraction additional=additional)
             let condition=put(hir.TypeTest[loc boolean value member false] @session)
             let block=put(hir.Block[loc empty body true] @session)
             arms.push(put(hir.IfArm[loc empty condition block] @session))
@@ -344,14 +347,18 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         let field=fields[index]
         if resource(field.value_type session.types) is? none continue
         let member=put(hir.MemberAccess[loc field.value_type value field.name] @session)
-        let remaining:Extraction?=none
-        if extraction isnt? none and extraction.path.length>?0 and extraction.path[0] is? string and extraction.path[0]=?field.name {
-            let path:array<string|addr>=[]
-            let i:addr=1
-            loop i<?extraction.path.length {path.push(extraction.path[i]) i+=1}
-            remaining=Extraction[extraction.binding path extraction.moved]
+        let remaining:array<Extraction>=[]
+        loop route in routes {
+            if route.path.length>?0 and route.path[0] is? string and route.path[0]=?field.name {
+                let path:array<string|addr>=[]
+                let i:addr=1
+                loop i<?route.path.length {path.push(route.path[i]) i+=1}
+                remaining.push(Extraction[route.binding path route.moved])
+            }
         }
-        drop_value(member field.value_type loc nested @calls @plan @session extraction=remaining)
+        let first:Extraction?=none
+        if remaining.length>?0 {first=remaining.pop}
+        drop_value(member field.value_type loc nested @calls @plan @session extraction=first additional=remaining)
     }
 }
 cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fields_only:addr?=none extracted:Extraction?=none):>array<addr> => {
@@ -367,7 +374,11 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
         let value=put(hir.ExpressedIdentifier[loc owner declared.name declared.binding_id] @session)
         let calls:array<addr>=[]
         $runtime_assert declared.binding_id isnt? none
-        drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only extraction=if extracted isnt? none and extracted.binding=?declared.binding_id extracted else plan.extractions.get(declared.binding_id))
+        let routes=plan.extractions.get(declared.binding_id [])
+        if extracted isnt? none and extracted.binding=?declared.binding_id {routes.push(extracted)}
+        let first:Extraction?=none
+        if routes.length>?0 {first=routes.pop}
+        drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only extraction=first additional=routes)
         let flag=plan.flags.get(declared.binding_id)
         if flag isnt? none and owners[index] not=? fields_only {
             let empty=types.primitive('void' @session.types)
@@ -593,7 +604,9 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
             $runtime_assert frozen isnt? none
             let result=transfer(selected candidate.value_type @plan @session)
             let saved=capture_result(result candidate.loc @session)
-            plan.extractions[frozen.binding]=Extraction[frozen.binding frozen.path result not=?selected]
+            let routes=plan.extractions.get(frozen.binding [])
+            routes.push(Extraction[frozen.binding frozen.path result not=?selected])
+            plan.extractions[frozen.binding]=routes
             # Preserve the wrapper's lexical lifetime. Its cleanup skips this
             # transferred component but still visits the other fields/elements.
             prefix.push(saved.declaration) prefix.push(saved.value)
@@ -1587,6 +1600,56 @@ alias_alive=(binding:addr read:addr dependent:dict<addr set<addr>> born:dict<add
 # Before cleanup adds artificial reads, identify last uses transferring
 # between declarations in one lexical block. Outer-owner conditional moves
 # need lifetime joins and are deliberately excluded by the same-block rule.
+# A maximal member route observes only that part of its owner. Indexing
+# observes the entire selected array; calls/whole values observe their root.
+ReadRoute:type=const [id:addr path:array<string>]
+ReadRoutes:type=[paths:dict<addr array<string>>=[] by_binding:dict<addr array<addr>>=[]]
+route_overlaps=(left:array<string> right:array<string>):>bool=>{
+    let i:addr=0
+    loop i<?left.length and i<?right.length {
+        if left[i] not=?right[i] return false
+        i+=1
+    }
+    return true
+}
+read_routes=(body:addr nodes:array<hir.AST>):>ReadRoutes=>{
+    let result=ReadRoutes[]
+    let pending:array<ReadRoute>=[ReadRoute[body []]]
+    loop pending.length>?0 {
+        let selected=pending.pop
+        let node=hir.node_at(nodes selected.id)
+        if node is? hir.FunctionLiteral continue
+        if node is? hir.MemberAccess {
+            let path:array<string>=[node.name]
+            loop name in selected.path {path.push(name)}
+            pending.push(ReadRoute[node.value path])
+        } else {
+            if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+                let previous=result.paths.get(selected.id)
+                if previous is? none {
+                    let reads=result.by_binding.get(node.binding_id [])
+                    reads.push(selected.id) result.by_binding[node.binding_id]=reads
+                    result.paths[selected.id]=selected.path
+                } else if previous.length not=?selected.path.length or not route_overlaps(previous selected.path) {result.paths[selected.id]=[]}
+            }
+            loop child in hir.children(node) {pending.push(ReadRoute[child []])}
+        }
+    }
+    return result
+}
+last_component=(value:addr root:addr last:dict<addr addr> positions:dict<addr addr> routes:ReadRoutes nodes:array<hir.AST>):>bool=>{
+    let owner=hir.node_at(nodes root)
+    $runtime_assert owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none
+    let part=hir.node_at(nodes value)
+    if part is? hir.ExpressedIdentifier return last.get(owner.binding_id)=?root
+    loop part is? hir.MemberAccess {part=hir.node_at(nodes part.value)}
+    if part isnt? hir.ExpressedIdentifier return last.get(owner.binding_id)=?root
+    let path=routes.paths.get(root [])
+    loop read in routes.by_binding.get(owner.binding_id []) {
+        if positions.get(read 0)>?positions.get(root 0) and route_overlaps(path routes.paths.get(read [])) return false
+    }
+    return true
+}
 local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Plan session:contexts.Session):>void => {
     let last:dict<addr addr>=[]
     let occurrences:dict<addr int>=[]
@@ -1631,6 +1694,7 @@ local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Pla
         # Stack order must preserve the order of statements in each block.
         loop children.length >? 0 {pending.push(children.pop)}
     }
+    let routes=read_routes(body session.hir)
     let dependent:dict<addr set<addr>>=[]
     let born:dict<addr addr>=[]
     loop id in blocks {
@@ -1697,7 +1761,7 @@ local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Pla
                         root=if owner is? hir.MemberAccess owner.value else owner.array
                         owner=hir.node_at(session.hir root)
                     }
-                    if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none and resource(value.value_type session.types) isnt? none and owner.binding_id in? locals and owner.binding_id not in? captured and last.get(owner.binding_id) =? root and occurrences.get(root 0) =? 1 and references.get(owner.binding_id 0) =? 1 and not alias_alive(owner.binding_id root dependent born last positions) {plan.consume_sites.add(selected)}
+                    if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none and resource(value.value_type session.types) isnt? none and owner.binding_id in? locals and owner.binding_id not in? captured and last_component(selected root last positions routes session.hir) and occurrences.get(root 0) =? 1 and references.get(owner.binding_id 0) =? 1 and not alias_alive(owner.binding_id root dependent born last positions) {plan.consume_sites.add(selected)}
                 }
                 hir.push_children(part @candidates)
             }

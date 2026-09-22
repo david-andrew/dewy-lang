@@ -139,16 +139,18 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
 
     def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None, extracted=None):
         result = []
-        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None, inline_array=False):
+        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None, additional=(), inline_array=False):
+            routes = (() if extraction is None else (extraction,)) + tuple(additional)
             if extraction is not None and not extraction[0]:
                 if not extraction[1]:
                     return  # This component now belongs to the returned value.
                 run_hook = False  # A custom move leaves only component cleanup.
                 extraction = None
+                routes = ()
             if resource(type_) is None:
                 return
             shape = ty.structural_base(type_)
-            if id(shape) in ancestors:
+            if id(shape) in ancestors and not routes:
                 # A recursive value has finite runtime storage but an infinite
                 # structural expansion. Close that expansion with a borrowed
                 # helper call, publishing its identity before checking its body.
@@ -301,7 +303,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         # resources now belong to the destination too.
                         continue
                     calls = []
-                    drop(replace(value, type=member), member, ancestors | {id(shape)}, run_hook, into=calls)
+                    drop(replace(value, type=member), member, ancestors | {id(shape)}, run_hook, into=calls, extraction=extraction, additional=additional)
                     condition = hir.TypeTest(loc, 'bool', value, member, False)
                     arms.append(hir.IfArm(loc, ty.VOID_TYPE, condition, hir.Block(loc, ty.VOID_TYPE, calls, True)))
                 if arms:
@@ -326,14 +328,18 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             fields = shape.fields if run_hook else move_remainder(shape)
             for field in reversed(fields):
                 if resource(field.type) is not None:
+                    selected_routes = [(path[1:], moved) for path, moved in routes if path and path[0] == field.name]
                     drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)}, into=into,
-                         extraction=(extraction[0][1:], extraction[1]) if extraction is not None and extraction[0][0] == field.name else None)
+                         extraction=selected_routes[0] if selected_routes else None, additional=selected_routes[1:])
         for owner in reversed(owners):
             owner_type = owner.annotation or owner.expr.type
             value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
             calls = []
+            routes = list(extractions.get(owner.binding_id, ()))
+            if extracted is not None and extracted[0] == owner.binding_id:
+                routes.append(extracted[1:])
             drop(value, owner_type, set(), owner.binding_id not in fields_only, into=calls,
-                 extraction=extracted[1:] if extracted is not None and extracted[0] == owner.binding_id else extractions.get(owner.binding_id))
+                 extraction=routes[0] if routes else None, additional=routes[1:])
             flag = ownership_flags.get(owner.binding_id)
             if flag is not None and owner.binding_id not in fields_only:
                 body = hir.Block(loc, ty.VOID_TYPE, calls, True)
@@ -970,6 +976,19 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if isinstance(node, hir.Declare):
                 lexical.add(node.binding_id)
             pending.extend(reversed(tuple(hir.children(node))))
+        read_routes, reads_by_binding = {}, {}
+        pending = [(body, ())]
+        while pending:
+            node, route = pending.pop()
+            if isinstance(node, hir.FunctionLiteral):
+                continue
+            if isinstance(node, hir.MemberAccess):
+                pending.append((node.value, (node.name, *route)))
+            else:
+                if isinstance(node, hir.ExpressedIdentifier):
+                    reads_by_binding.setdefault(node.binding_id, []).append(node)
+                    read_routes[id(node)] = route if id(node) not in read_routes or read_routes[id(node)] == route else ()
+                pending.extend((child, ()) for child in hir.children(node))
         result, views, consumes = set(), set(), set()
         # A lexical position is enough for this same-block proof. Dependent
         # read-only aliases keep their original owner live as well.
@@ -994,6 +1013,26 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     return True
                 pending.extend(dependent.get(alias, ()))
             return False
+        def last_component(value, owner):
+            if isinstance(value, hir.ExpressedIdentifier):
+                return last.get(owner.binding_id) == id(owner)
+            # Distinct record fields have disjoint ownership. Indexed routes
+            # retain the whole-root last-use proof until index disjointness is
+            # carried by this analysis as well.
+            part = value
+            while isinstance(part, hir.MemberAccess):
+                part = part.value
+            if not isinstance(part, hir.ExpressedIdentifier):
+                return last.get(owner.binding_id) == id(owner)
+            route = read_routes[id(owner)]
+            for read in reads_by_binding.get(owner.binding_id, ()):
+                if positions[id(read)] <= positions[id(owner)]:
+                    continue
+                later = read_routes[id(read)]
+                if route[:len(later)] == later or later[:len(route)] == route:
+                    return False
+            return True
+
         def owning_inputs(node):
             if isinstance(node, hir.Declare) and not node.view:
                 return [node.expr]
@@ -1041,7 +1080,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                             owner = owner.value if isinstance(owner, hir.MemberAccess) else owner.array
                         if (isinstance(owner, hir.ExpressedIdentifier) and resource(value.type) is not None
                                 and owner.binding_id in local and owner.binding_id not in captured
-                                and last.get(owner.binding_id) == id(owner) and occurrences[id(owner)] == 1
+                                and last_component(value, owner) and occurrences[id(owner)] == 1
                                 and references.get(owner.binding_id) == 1 and not alive_after(owner.binding_id, id(owner))):
                             consumes.add(id(value))
                     pending.extend(hir.children(part))
@@ -1140,7 +1179,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         projection = returning_projection(selected, owners)
                         value, moved = transfer(selected, child.type)
                         saved, value = capture(value, child.loc)
-                        extractions[projection[0]] = (projection[1], moved)
+                        extractions.setdefault(projection[0], []).append((projection[1], moved))
                         # Keep the wrapper alive until its lexical cleanup. Only
                         # this component transfers; siblings still drop there.
                         return hir.Block(child.loc, value.type, [*prefix, saved, value], False)

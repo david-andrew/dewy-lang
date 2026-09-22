@@ -2951,3 +2951,26 @@ that rejection on both routes. Runtime cases were not rerun unnecessarily;
 rejection checks and the two final storage kernels ran separately.
 Artifacts use `phase1-renewed-owners-*`. Broader partial ownership and the
 remaining Phase 1 proof/effect work are still in progress.
+
+
+## Disjoint record component ownership (2026-09-22)
+
+Same-block component liveness now compares member paths. A move of `pair.first`
+no longer conflicts with a later read, write or transfer of `pair.second`.
+Whole-owner uses and ancestor/descendant routes overlap; captures and surviving
+whole-owner aliases still block the proof. Indexed transfers retain the earlier
+whole-root last-use rule until index disjointness joins this analysis.
+
+Cleanup retains all transferred paths, not just one. It recursively skips each
+moved component, cleans custom-move remnants, and releases untouched siblings
+in reverse order. Returned components combine with prior transfers. Union
+alternatives preserve this metadata, and recursive cleanup follows a finite
+selected path before using its ordinary per-shape helper; previously those two
+routes could forget a selection and repeat its drop.
+
+Validation: 71 hosted adjacent cases passed. Fresh hosted/native comparisons
+passed 28 runtime kernels on x86-64/C and 15 rejections, including recursive
+and optional owners, multiple transfers, sibling replacement, custom move
+remnants, and 100 array-field transfers without retained arena growth.
+Artifacts use `phase1-partial-records-*`. Field reinitialization, conditional
+partial ownership and broader indexed disjointness remain conservative.
