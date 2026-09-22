@@ -502,8 +502,9 @@ in both lowerings and the parity tool is the gate.
   owners now join branch liveness and guard cleanup on the executed path.
   Loop exits now retain their selected continuation: a last use before
   `break`, including a labeled exit, can consume an outer owner when no later
-  read or alias needs it. Returning a field from an exiting local or by-value owner now transfers it
-  through synthesized wrappers and drops the remaining fields. Custom wrapper
+  read or alias needs it. Returning a field or array element from an exiting local or by-value owner
+  now transfers it through synthesized wrappers and drops the remaining
+  components. Nested selectors evaluate once and retain checked bounds. Custom wrapper
   hooks still require a complete receiver. Repeated outer-owner consumption,
   broader partial transfers and remaining resource-container mutations still
   require further lifetime analysis. Same-block owning input

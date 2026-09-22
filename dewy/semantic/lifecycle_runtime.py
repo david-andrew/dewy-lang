@@ -102,6 +102,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 # not. Reprobe resource entries until that representation
                 # effect can invalidate only the affected cached positions.
                 node.position = node.static_position = None
+    receivers.update(bindings.access_path(node.item, unwrap=bindings._unwrap_fact_route).binding_id
+                     for node in hir.walk(root) if isinstance(node, hir.Return) and node.item is not None
+                     and resource(node.item.type) is not None)
     receivers.discard(None)
     argument_writes = effects.analyze_global_writes(effect_context or root, receivers)
     readonly_arguments = effects.read_only_places(root, effect_context) if receivers else set()
@@ -132,7 +135,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
 
     def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None, extracted=None):
         result = []
-        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None):
+        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None, inline_array=False):
             if extraction is not None and not extraction[0]:
                 if not extraction[1]:
                     return  # This component now belongs to the returned value.
@@ -168,6 +171,63 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     generated.append(declared)
                 into.append(hir.FunctionCall(loc, ty.VOID_TYPE, replace(operation, loc=loc),
                                              [hir.Place(loc, shape, value)], {}))
+                return
+            if isinstance(shape, ty.ArrayType) and extraction is not None and not inline_array and not isinstance(value, hir.ExpressedIdentifier):
+                # Give each array traversal a stable borrowed root. In a
+                # nested selection the caller's outer cursor changes; its
+                # indexed expression cannot serve as an invariant identity.
+                name = f'__dewy_drop_selected_{registry.next_id}'
+                binding = registry.allocate(object(), name, 'value', loc)
+                parameter = registry.allocate(object(), '__items', 'param', loc)
+                parameter.type = shape
+                params = [hir.Param(parameter.name, shape, binding_id=parameter.id, place=True)]
+                arguments = [hir.Place(loc, shape, value)]
+                path = []
+                for selector in extraction[0]:
+                    if isinstance(selector, str):
+                        path.append(selector)
+                        continue
+                    param = registry.allocate(object(), f'__index_{len(params)}', 'param', loc)
+                    param.type = 'int64'
+                    params.append(hir.Param(param.name, 'int64', binding_id=param.id))
+                    arguments.append(selector)
+                    path.append(hir.ExpressedIdentifier(loc, 'int64', param.name, binding_id=param.id))
+                signature = ty.FunctionType([ty.PosOrKwArg(p.name, p.type, place=p.place) for p in params], [], None, ty.VOID_TYPE)
+                binding.type = signature
+                receiver = hir.ExpressedIdentifier(loc, shape, parameter.name, binding_id=parameter.id)
+                body = []
+                drop(receiver, shape, set(), into=body, extraction=(tuple(path), extraction[1]), inline_array=True)
+                literal = hir.FunctionLiteral(loc, signature, params, [], None, ty.VOID_TYPE,
+                    hir.Block(loc, ty.VOID_TYPE, body, True), source=current_source)
+                declared = hir.Declare(loc, ty.VOID_TYPE, 'const', name, signature, literal, binding_id=binding.id)
+                binding.function = literal
+                binding.declaration = declared
+                generated.append(declared)
+                function = hir.ExpressedIdentifier(loc, signature, name, binding_id=binding.id)
+                into.append(hir.FunctionCall(loc, ty.VOID_TYPE, function, arguments, {}))
+                return
+            if isinstance(shape, ty.ArrayType) and extraction is not None:
+                # The selected element transfers; the other elements retain
+                # reverse-order cleanup. Saved selectors name the same slot
+                # for both the return value and this cleanup traversal.
+                declaration, cursor = capture(hir.ArrayLength(loc, 'int64', value), loc)
+                zero = hir.Integer(loc, 'int64', t0.base10, 0)
+                one = hir.Integer(loc, 'int64', t0.base10, 1)
+                signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, 'bool')
+                def comparison(name, right):
+                    function = hir.ExpressedIdentifier(loc, signature, name)
+                    return hir.FunctionCall(loc, 'bool', function, [cursor, right], {})
+                element = hir.Index(loc, shape.element, value, cursor, None)
+                selected_calls, other_calls = [], []
+                drop(element, shape.element, ancestors | {id(shape)}, into=selected_calls,
+                     extraction=(extraction[0][1:], extraction[1]))
+                drop(element, shape.element, ancestors | {id(shape)}, into=other_calls)
+                selected_arm = hir.IfArm(loc, ty.VOID_TYPE, comparison('__eq__', extraction[0][0]),
+                                         hir.Block(loc, ty.VOID_TYPE, selected_calls, True))
+                body = hir.Block(loc, ty.VOID_TYPE, [hir.Assign(loc, ty.VOID_TYPE, cursor, '-=', one),
+                    hir.Flow(loc, ty.VOID_TYPE, [selected_arm], hir.Block(loc, ty.VOID_TYPE, other_calls, True))], True)
+                loop = hir.LoopArm(loc, ty.VOID_TYPE, comparison('__gt__', zero), body)
+                into.extend([declaration, hir.Flow(loc, ty.VOID_TYPE, [loop])])
                 return
             if isinstance(shape, ty.ArrayType):
                 # One checked helper per array shape: its borrowed receiver
@@ -283,8 +343,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             drop(value, value.type, set(), tail=(first, before))
         return result
 
-    def returning_field(value, owners):
-        """An exiting owner may surrender a field through hook-free wrappers.
+    def returning_projection(value, owners):
+        """An exiting owner may surrender a component through hook-free wrappers.
 
         A wrapper with lifecycle hooks still needs to see its complete value;
         ordinary synthesized wrappers can clean up their remaining fields.
@@ -293,12 +353,16 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         while isinstance(value, (hir.Obligation, hir.ValueCast, hir.RepresentationCast)):
             value = value.value if isinstance(value, hir.Obligation) else value.expr
         path = []
-        while isinstance(value, hir.MemberAccess):
-            shape = ty.structural_base(value.value.type)
-            if not isinstance(shape, ty.ObjectType) or any(m.lifecycle is not None for m in shape.methods):
-                return None
-            path.append(value.name)
-            value = value.value
+        while isinstance(value, (hir.MemberAccess, hir.Index)):
+            if isinstance(value, hir.MemberAccess):
+                shape = ty.structural_base(value.value.type)
+                if not isinstance(shape, ty.ObjectType) or any(m.lifecycle is not None for m in shape.methods):
+                    return None
+                path.append(value.name)
+                value = value.value
+            else:
+                path.append(value.index)
+                value = value.array
         if (path and isinstance(value, hir.ExpressedIdentifier)
                 and any(owner.binding_id == value.binding_id for owner in owners)):
             return value.binding_id, tuple(reversed(path))
@@ -618,6 +682,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     def freeze_route(value, loc, root_id, prefix):
         # Preserve the rooted place, capturing only selectors. A raw pointer
         # could become stale when mutable-place lowering detaches COW storage.
+        if isinstance(value, hir.Obligation):
+            return replace(value, value=freeze_route(value.value, loc, root_id, prefix))
+        if isinstance(value, (hir.ValueCast, hir.RepresentationCast)):
+            return replace(value, expr=freeze_route(value.expr, loc, root_id, prefix))
         if isinstance(value, hir.MemberAccess):
             return replace(value, value=freeze_route(value.value, loc, root_id, prefix))
         if isinstance(value, hir.Index):
@@ -1149,6 +1217,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 consumed = None
                 moved = False
                 extracted = None
+                prefix = []
                 if node.item is not None and owning_result and resource(node.item.type) is not None:
                     # Returning leaves this path, so a named local owner is
                     # at its last use. Borrowed parameters are deliberately
@@ -1165,8 +1234,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     elif isinstance(node.item, hir.ExpressedIdentifier) and any(owner.binding_id == node.item.binding_id for owner in owners):
                         returned, moved = transfer(node.item, literal.rettype)
                         consumed = node.item.binding_id
-                    elif (projection := returning_field(node.item, owners)) is not None:
-                        returned, moved = transfer(node.item, literal.rettype)
+                    elif (projection := returning_projection(node.item, owners)) is not None:
+                        selected = freeze_route(node.item, node.loc, projection[0], prefix)
+                        projection = returning_projection(selected, owners)
+                        returned, moved = transfer(selected, literal.rettype)
                         extracted = (*projection, moved)
                     else:
                         returned = fresh(node.item, live, False, control=control)
@@ -1174,7 +1245,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     returned = expression(node.item, live, inherited=literal.lifecycle == 'drop', control=control) if node.item is not None else None
                 if not owners:
                     return replace(node, item=returned)
-                result = []
+                result = prefix
                 if returned is not None and not isinstance(returned, hir.NoneValue):
                     declaration, returned = capture(returned, node.loc)
                     result.append(declaration)

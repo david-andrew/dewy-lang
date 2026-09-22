@@ -2789,3 +2789,31 @@ driver agrees on eight runtime kernels and five rejections, with x86-64/C
 execution. The array-field kernel checks 100 calls with no retained arena bytes.
 Artifacts: `../dewy-build-artifacts/phase1-field-return-*`. General partial
 transfers and array-element returns remain pending; Phase 1 is not complete.
+
+
+## Returning owned array components (2026-09-22)
+
+An exiting array owner can now transfer a selected element, including mixed
+field/index paths, nested arrays, optional results and custom moves. Selectors
+are saved once before the result is evaluated; conflicting receiver writes
+remain errors. Reverse cleanup skips the transferred component and drops its
+siblings. Nested array traversal uses a checked borrowed helper so each loop
+has a stable array identity. This extends the existing exit-transfer rule;
+there is no new source syntax or partially initialized value available to user
+code. Non-exiting partial transfers still require further lifetime work.
+
+These tests also found and fixed a shared-HIR constant-index bug. Both bounds
+analyzers now retain a constant only when all checked occurrences agree;
+disagreement with another constant or a dynamic occurrence removes it. Native
+discharge clears stale annotations on revalidation. Hosted graph-level tests
+cover arrays and strings; the paired nested-record cleanup test would otherwise
+drop the wrong indexed record.
+
+Validation: 23 hosted field/element tests passed before the final reduction in
+helper generation; the final ten element tests passed afterward. There are 34
+passing adjacent bounds/index/generated-contract checks, plus the two added
+string graph checks. A fresh native driver passes 15 execution kernels and
+eight rejection cases against hosted checking on x86-64 and C. Dynamic selection
+is evaluated once; the repeated-call kernel retains no arena bytes over 100
+calls. Artifacts use `../dewy-build-artifacts/phase1-element-return-*` and
+`phase1-index-adjacent.log`. Phase 1 remains in progress.

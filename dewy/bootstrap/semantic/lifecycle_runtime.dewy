@@ -17,7 +17,7 @@ import p"analyze/predicate_effects.dewy" as predicate_effects
 # field/element storage cleanup. Branch consumption uses last-use proofs and
 # conditional cleanup. Exiting owners can transfer fields through synthesized
 # wrappers; repeated consumption and broader partial transfers remain pending.
-Extraction:type = const [binding:addr path:array<string> moved:bool=false]
+Extraction:type = const [binding:addr path:array<string|addr> moved:bool=false]
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 # An expression can contain a block, branch, or early return. Carry its
 # enclosing lexical lifetime explicitly through expression traversal.
@@ -95,7 +95,7 @@ move_remainder=(shape:types.ObjectType plan:Plan session:contexts.Session):>arra
     }
     return current.fields
 }
-drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none extraction:Extraction?=none):>void => {
+drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none extraction:Extraction?=none inline_array:bool=false):>void => {
     if extraction isnt? none and extraction.path.length=?0 {
         if not extraction.moved return
         run_hook=false
@@ -134,6 +134,86 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         $runtime_assert operation isnt? none
         let place=put(hir.Place[loc owner value] @session)
         calls.push(put(hir.FunctionCall[loc empty operation [place] []] @session))
+        return
+    }
+    if type is? types.ArrayType and extraction isnt? none and not inline_array and hir.node_at(session.hir value) isnt? hir.ExpressedIdentifier {
+        # An inner traversal needs its own borrowed identity: the caller's
+        # outer cursor changes. Saved selector values become scalar arguments.
+        let name="__dewy_drop_selected_{session.registry.next_id}"
+        let binding_id=bindings.allocate(@session.registry none name 'value' loc)
+        let parameter_id=bindings.allocate(@session.registry none '__items' 'param' loc)
+        let parameter=bindings.binding_at(session.registry parameter_id)
+        parameter.value_type=owner parameter.store_type=owner
+        bindings.store_binding(@session.registry parameter_id parameter)
+        let params:array<hir.Param>=[hir.Param['__items' owner parameter_id place=true]]
+        let signature_params:array<types.PosOrKwArg>=[types.PosOrKwArg['__items' owner place=true]]
+        let arguments:array<addr>=[put(hir.Place[loc owner value] @session)]
+        let path:array<string|addr>=[]
+        let word=types.primitive('int64' @session.types)
+        let empty=types.primitive('void' @session.types)
+        loop selector in extraction.path {
+            if selector is? string {path.push(selector) continue}
+            let param_name="__index_{params.length}"
+            let param_id=bindings.allocate(@session.registry none param_name 'param' loc)
+            let param=bindings.binding_at(session.registry param_id)
+            param.value_type=word param.store_type=word
+            bindings.store_binding(@session.registry param_id param)
+            params.push(hir.Param[param_name word param_id])
+            signature_params.push(types.PosOrKwArg[param_name word])
+            arguments.push(selector)
+            path.push(put(hir.ExpressedIdentifier[loc word param_name param_id] @session))
+        }
+        let signature=types.function_type(signature_params [] none empty [] @session.types)
+        let receiver=put(hir.ExpressedIdentifier[loc owner '__items' parameter_id] @session)
+        let body:array<addr>=[]
+        drop_value(receiver owner loc set[] @body @plan @session extraction=Extraction[extraction.binding path extraction.moved] inline_array=true)
+        let block=put(hir.Block[loc empty body true] @session)
+        let function=put(hir.FunctionLiteral[loc signature params [] none empty block source=plan.function_source] @session)
+        let declaration=put(hir.Declare[loc empty 'const' name signature function binding_id] @session)
+        let binding=bindings.binding_at(session.registry binding_id)
+        binding.value_type=signature binding.function=function binding.declaration=declaration
+        bindings.store_binding(@session.registry binding_id binding)
+        plan.generated.push(declaration)
+        let operation=put(hir.ExpressedIdentifier[loc signature name binding_id] @session)
+        calls.push(put(hir.FunctionCall[loc empty operation arguments []] @session))
+        return
+    }
+    if type is? types.ArrayType and extraction isnt? none {
+        $runtime_assert extraction.path.length>?0
+        let selected=extraction.path[0]
+        $runtime_assert selected is? addr
+        let path:array<string|addr>=[]
+        let i:addr=1
+        loop i<?extraction.path.length {path.push(extraction.path[i]) i+=1}
+        let remaining=Extraction[extraction.binding path extraction.moved]
+        let empty=types.primitive('void' @session.types)
+        let word=types.primitive('int64' @session.types)
+        let boolean=types.primitive('bool' @session.types)
+        let length=put(hir.ArrayLength[loc word value] @session)
+        let cursor=capture_result(length loc @session)
+        let zero=put(hir.Integer[loc word '0d' 0] @session)
+        let one=put(hir.Integer[loc word '0d' 1] @session)
+        let signature=types.function_type([types.PosOrKwArg[none word] types.PosOrKwArg[none word]] [] none boolean [] @session.types)
+        let greater=put(hir.ExpressedIdentifier[loc signature '__gt__' none] @session)
+        let equal=put(hir.ExpressedIdentifier[loc signature '__eq__' none] @session)
+        let condition=put(hir.FunctionCall[loc boolean greater [cursor.value zero] []] @session)
+        let selected_condition=put(hir.FunctionCall[loc boolean equal [cursor.value selected] []] @session)
+        let element=put(hir.Index[loc type.element value cursor.value none] @session)
+        let nested=ancestors
+        nested.add(owner)
+        let selected_calls:array<addr>=[]
+        let other_calls:array<addr>=[]
+        drop_value(element type.element loc nested @selected_calls @plan @session extraction=remaining)
+        drop_value(element type.element loc nested @other_calls @plan @session)
+        let selected_body=put(hir.Block[loc empty selected_calls true] @session)
+        let other_body=put(hir.Block[loc empty other_calls true] @session)
+        let selected_arm=put(hir.IfArm[loc empty selected_condition selected_body] @session)
+        let choice=put(hir.Flow[loc empty [selected_arm] other_body] @session)
+        let decrement=put(hir.Assign[loc empty cursor.value '-=' one] @session)
+        let body=put(hir.Block[loc empty [decrement choice] true] @session)
+        let arm=put(hir.LoopArm[loc empty condition body] @session)
+        calls.push(cursor.declaration)
+        calls.push(put(hir.Flow[loc empty [arm] none] @session))
         return
     }
     if type is? types.ArrayType {
@@ -263,8 +343,8 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         if resource(field.value_type session.types) is? none continue
         let member=put(hir.MemberAccess[loc field.value_type value field.name] @session)
         let remaining:Extraction?=none
-        if extraction isnt? none and extraction.path.length>?0 and extraction.path[0]=?field.name {
-            let path:array<string>=[]
+        if extraction isnt? none and extraction.path.length>?0 and extraction.path[0] is? string and extraction.path[0]=?field.name {
+            let path:array<string|addr>=[]
             let i:addr=1
             loop i<?extraction.path.length {path.push(extraction.path[i]) i+=1}
             remaining=Extraction[extraction.binding path extraction.moved]
@@ -299,25 +379,30 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
 # Only synthesized wrappers may become partially owned at an exit. A custom
 # lifecycle operation still requires its complete receiver. Borrowed bindings
 # and aliases never appear in the owning declaration list.
-returning_field=(id:addr owners:array<addr> session:contexts.Session):>Extraction?=>{
+returning_projection=(id:addr owners:array<addr> session:contexts.Session):>Extraction?=>{
     let value=hir.node_at(session.hir id)
     loop value is? hir.Obligation|hir.ValueCast|hir.RepresentationCast {
         value=hir.node_at(session.hir if value is? hir.Obligation value.value else value.expr)
     }
-    let reverse_path:array<string>=[]
-    loop value is? hir.MemberAccess {
-        let shape=types.node_at(session.types views.structural_base(hir.node_at(session.hir value.value).value_type session.types))
-        if shape isnt? types.ObjectType return none
-        loop method in shape.methods {if method.lifecycle isnt? none return none}
-        reverse_path.push(value.name)
-        value=hir.node_at(session.hir value.value)
+    let reverse_path:array<string|addr>=[]
+    loop value is? hir.MemberAccess|hir.Index {
+        if value is? hir.MemberAccess {
+            let shape=types.node_at(session.types views.structural_base(hir.node_at(session.hir value.value).value_type session.types))
+            if shape isnt? types.ObjectType return none
+            loop method in shape.methods {if method.lifecycle isnt? none return none}
+            reverse_path.push(value.name)
+            value=hir.node_at(session.hir value.value)
+        } else {
+            reverse_path.push(value.index)
+            value=hir.node_at(session.hir value.array)
+        }
     }
     if reverse_path.length=?0 or value isnt? hir.ExpressedIdentifier or value.binding_id is? none return none
     loop owner in owners {
         let declaration=hir.node_at(session.hir owner)
         $runtime_assert declaration is? hir.Declare
         if declaration.binding_id not=?value.binding_id continue
-        let path:array<string>=[]
+        let path:array<string|addr>=[]
         loop reverse_path.length>?0 {path.push(reverse_path.pop)}
         return Extraction[value.binding_id path]
     }
@@ -791,6 +876,18 @@ check_selection = (id:addr root:addr? @plan:Plan session:contexts.Session):>void
 }
 freeze_route = (id:addr loc:Span root:addr? @prefix:array<addr> @plan:Plan @session:contexts.Session):>addr => {
     let node=hir.node_at(session.hir id)
+    if node is? hir.Obligation {
+        node.value=freeze_route(node.value loc root @prefix @plan @session)
+        return put(node @session)
+    }
+    if node is? hir.ValueCast {
+        node.expr=freeze_route(node.expr loc root @prefix @plan @session)
+        return put(node @session)
+    }
+    if node is? hir.RepresentationCast {
+        node.expr=freeze_route(node.expr loc root @prefix @plan @session)
+        return put(node @session)
+    }
     if node is? hir.MemberAccess {
         let value=freeze_route(node.value loc root @prefix @plan @session)
         return put(hir.MemberAccess[node.loc node.value_type value node.name node.mutable] @session)
@@ -1273,6 +1370,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         let current:hir.Return=node
         let consumed:addr?=none
         let extracted:Extraction?=none
+        let prefix:array<addr>=[]
         let moved=false
         if current.item isnt? none {
             if owning_result and resource(hir.node_at(session.hir current.item).value_type session.types) isnt? none {
@@ -1306,10 +1404,13 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                     }
                 }
                 if consumed is? none {
-                    let projection=returning_field(returned_id owners session)
+                    let projection=returning_projection(returned_id owners session)
                     if projection isnt? none {
-                        let result=transfer(returned_id plan.result_type @plan @session)
-                        extracted=Extraction[projection.binding projection.path result not=?returned_id]
+                        let selected=freeze_route(returned_id current.loc projection.binding @prefix @plan @session)
+                        let frozen=returning_projection(selected owners session)
+                        $runtime_assert frozen isnt? none
+                        let result=transfer(selected plan.result_type @plan @session)
+                        extracted=Extraction[frozen.binding frozen.path result not=?selected]
                         current.item=result
                     } else {fresh(returned_id live false @plan @session frame=frame)}
                 }
@@ -1317,7 +1418,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             else {expression(current.item live inherited @plan @session frame=frame)}
         }
         if plan.problem isnt? none or owners.length =? 0 return
-        let items:array<addr>=[]
+        let items=prefix
         if current.item isnt? none and hir.node_at(session.hir current.item) isnt? hir.NoneValue {
             let returned:addr=current.item
             let value=hir.node_at(session.hir returned)
@@ -1793,6 +1894,10 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
         }
         if node is? hir.MemberAssign|hir.IndexAssign and resource(hir.node_at(session.hir node.target).value_type session.types) isnt? none {
             let root=receiver_root(node.target session.hir)
+            if root isnt? none {receivers.add(root)}
+        }
+        if node is? hir.Return and node.item isnt? none and resource(hir.node_at(session.hir node.item).value_type session.types) isnt? none {
+            let root=receiver_root(node.item session.hir)
             if root isnt? none {receivers.add(root)}
         }
         if node is? hir.DictStore|hir.DictRemove|hir.DictLookup {
