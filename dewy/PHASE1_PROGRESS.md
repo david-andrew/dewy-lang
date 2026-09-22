@@ -3286,3 +3286,21 @@ certifies the structural fact identities, disjoint binding ids and predicate
 chain search; it predates the arithmetic/provenance follow-ups. It does not
 stand for all-route pytest or CI. Artifacts use `phase1-relational-*`, with the
 native pair in `phase1-relational-099937f3`.
+
+## Shared difference search for arithmetic (2026-09-22)
+
+Arithmetic differences and slice lengths now query the same finite graph as
+ordering predicates. The graph can return the strongest established bound,
+including negative gaps, instead of looking only for a direct edge. Transfers
+retain address-cap provenance and prefer an equally strong uncapped path.
+Known predicate proofs still return directly; a term without outgoing order
+facts does not construct a graph.
+
+The final focused run passed 17 checks, including an independent simple-path
+oracle over 40 consistent graphs. Three direct native analysis comparisons
+passed across the relation, expression-interval and term-fact layers. A fresh
+native driver passed three runtime cases and three rejections against hosted
+compilation on x86-64/C, including a nonnegative difference established through
+eight terms. Earlier adjacent hosted loop/proof checks also passed. Artifacts
+use `phase1-difference-closure-*`. The general qualifier engine and exact unsafe
+assumption provenance remain larger tasks.

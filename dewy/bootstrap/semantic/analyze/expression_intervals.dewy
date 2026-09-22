@@ -1,3 +1,4 @@
+import p"relations.dewy" as relations
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
 import p"../bindings.dewy" as bindings
@@ -127,10 +128,11 @@ slice_length = (node:hir.StringSlice state:facts.State snapshot:Snapshot env:val
             if sequence isnt? none {last=terms.Offset[facts.Term[sequence 'length'] 0]}
         }
         if first isnt? none and last isnt? none {
-            let lower=facts.lookup(state facts.order(first.term last.term))
-            let upper=facts.lookup(state facts.order(last.term first.term))
+            let lower=relations.bound(first.term last.term state)
+            let upper=relations.bound(last.term first.term state)
             let delta=last.shift-first.shift
-            bound=ranges.Interval[(if lower is? none none else ranges.shift_endpoint(lower.lower delta)) (if upper is? none or upper.lower is? none none else -upper.lower+delta)]
+            let capped=(lower isnt? none and lower.capped) or (upper isnt? none and upper.capped)
+            bound=ranges.Interval[(if lower is? none none else ranges.shift_endpoint(lower.lower delta)) (if upper is? none or upper.lower is? none none else -upper.lower+delta) capped]
         }
     }
     let result=ranges.binary('__sub__' limit start ranges.Interval[(-9223372036854775808) 9223372036854775807] bound)
@@ -146,9 +148,10 @@ difference = (left:addr right:addr state:facts.State snapshot:Snapshot):>ranges.
     if a is? none or b is? none return none
     let delta=a.shift-b.shift
     if facts.same_term(a.term b.term) return ranges.exact(delta)
-    let lower=facts.lookup(state facts.order(b.term a.term))
-    let upper=facts.lookup(state facts.order(a.term b.term))
-    return ranges.Interval[(if lower is? none none else ranges.shift_endpoint(lower.lower delta)) (if upper is? none or upper.lower is? none none else -upper.lower+delta)]
+    let lower=relations.bound(b.term a.term state)
+    let upper=relations.bound(a.term b.term state)
+    let capped=(lower isnt? none and lower.capped) or (upper isnt? none and upper.capped)
+    return ranges.Interval[(if lower is? none none else ranges.shift_endpoint(lower.lower delta)) (if upper is? none or upper.lower is? none none else -upper.lower+delta) capped]
 }
 call = (id:addr node:hir.FunctionCall state:facts.State snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>ranges.Interval? => {
     let function=hir.node_at(env.nodes node.func)

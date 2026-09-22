@@ -38,7 +38,9 @@ def test_native_relations_match_hosted(tmp_path):
     ]
     chain = {order(i, i + 1): interval(1, None) for i in range(10, 22)}
     states.extend([chain, {**chain, order(10, 18): interval(-10, None), order(18, 11): interval(-7, None)}])
-    terms = [1, 3, length(2), length(4), 10, 22, 99]
+    capped = {order(10, 11): interval(2, None, capped=True), order(11, 12): interval(-1, None), order(10, 12): interval(0, None)}
+    states.extend([capped, {**capped, order(10, 13): interval(3, None), order(13, 12): interval(-2, None)}])
+    terms = [1, 3, length(2), length(4), 10, 12, 22, 99]
     gaps = [-1, 0, 1, 3, 12, 13]
     lines, expected = [], []
     for i, state in enumerate(states):
@@ -46,9 +48,11 @@ def test_native_relations_match_hosted(tmp_path):
         for key, value in state.items():
             lo = 'none' if value.lower is None else f'({value.lower})'
             hi = 'none' if value.upper is None else f'({value.upper})'
-            lines.append(f'    facts.put(@s{i} {fact(key)[0]} ranges.Interval[{lo} {hi}])')
+            lines.append(f'    facts.put(@s{i} {fact(key)[0]} ranges.Interval[{lo} {hi} {str(value.capped).lower()}])')
         for left in terms:
             for right in terms:
+                bound = validator._order_search(left, right, state)
+                expected.append(f'bound|{i}|{term(left)}|{term(right)}|{spelling(bound) if bound is not None else "unknown"}')
                 for gap in gaps:
                     expected.append(f'proof|{i}|{term(left)}|{term(right)}|{gap}|{str(validator._ordered(left, right, gap, state)).lower()}')
         for label, source, target in [('scalar', 1, 5), ('length', length(2), length(6)), ('offset', 3, 7)]:
@@ -81,9 +85,19 @@ main = ():>int64 => {{
     let gaps:array<bigint> = [(-1) 0 1 3 12 13]
     loop i in 0.. and i <? states.length {{
         let state = states[i]
-        loop left in terms {{ loop right in terms {{ loop gap in gaps {{
-            printl("proof|{{i}}|{{term_text(left)}}|{{term_text(right)}}|{{_bigint_as_string(gap)}}|{{relations.ordered(left right gap state context)}}")
-        }} }} }}
+        loop left in terms {{ loop right in terms {{
+            let bound=relations.bound(left right state)
+            let display:string='unknown'
+            if bound isnt? none {{
+                let lo=if bound.lower is? none '-' else _bigint_as_string(bound.lower)
+                let hi=if bound.upper is? none '+' else _bigint_as_string(bound.upper)
+                display="{{lo}},{{hi}},{{bound.capped}}"
+            }}
+            printl("bound|{{i}}|{{term_text(left)}}|{{term_text(right)}}|{{display}}")
+            loop gap in gaps {{
+                printl("proof|{{i}}|{{term_text(left)}}|{{term_text(right)}}|{{_bigint_as_string(gap)}}|{{relations.ordered(left right gap state context)}}")
+            }}
+        }} }}
         let scalar = state
         relations.copy_relational(@scalar facts.Term[1] facts.Term[5])
         emit("scalar{{i}}" scalar)

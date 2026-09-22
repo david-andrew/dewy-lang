@@ -3199,11 +3199,12 @@ class _BoundsValidator:
         left_id, right_id = self._binding_id(node.pos_args[0]), self._binding_id(node.pos_args[1])
         if left_id is None or right_id is None or left_id == right_id:
             return None
-        lower = state.get(_order_key(right_id, left_id))   # right <= left - gap
-        upper = state.get(_order_key(left_id, right_id))   # left <= right - gap
+        lower = self._order_search(right_id, left_id, state)
+        upper = self._order_search(left_id, right_id, state)
         bound = Interval(
             None if lower is None else lower.lower,
             None if upper is None or upper.lower is None else -upper.lower,
+            capped=(lower is not None and lower.capped) or (upper is not None and upper.capped),
         )
         return None if bound == UNKNOWN_INTERVAL else bound
 
@@ -3547,40 +3548,49 @@ class _BoundsValidator:
         return False
 
     def _ordered(self, smaller: int, larger: int, gap: int, state: State) -> bool:
-        """Prove a difference using the finite graph of established order facts.
-
-        Each edge contributes a lower bound on the difference. Revisit a term
-        only for a stronger bound, and cap relaxation by the number of edges:
-        that covers every simple path and terminates even for contradictory
-        positive cycles. Failure remains unknown; no candidate supplies proof.
-        """
         if self._ordered_direct(smaller, larger, gap, state):
             return True
-        edges: dict[int, list[tuple[int, int]]] = {}
+        return self._order_search(smaller, larger, state, required=gap) is not None
+
+    def _order_search(self, smaller: int, larger: int, state: State, *, required: int | None = None) -> Interval | None:
+        """Search established difference edges, either for a proof or a bound.
+
+        A required gap permits early success, including interval/index evidence
+        at a reached term. Without it, return the strongest established path to
+        the destination for arithmetic transfer. All simple paths fit within
+        the edge-count relaxation bound; contradictory cycles cannot diverge.
+        """
+        if smaller == larger:
+            return Interval(0, None) if required is None or required <= 0 else None
+        if not any(isinstance(key, OrderFact) and key.smaller == smaller and interval.lower is not None
+                   for key, interval in state.items()):
+            return None
+        edges: dict[int, list[tuple[int, Interval]]] = {}
         count = 0
         for key, interval in state.items():
             pair = _decode_order_fact(key)
             if pair is not None and interval.lower is not None:
-                edges.setdefault(pair[0], []).append((pair[1], interval.lower))
+                edges.setdefault(pair[0], []).append((pair[1], interval))
                 count += 1
-        best = {smaller: 0}
-        frontier = {smaller: 0}
+        best = {smaller: Interval(0, None)}
+        frontier = {smaller: best[smaller]}
         for _ in range(count):
             following = {}
             for term, distance in frontier.items():
                 for target, weight in edges.get(term, ()):
-                    candidate = distance + weight
+                    candidate = Interval(distance.lower + weight.lower, None, capped=distance.capped or weight.capped)
                     previous = best.get(target)
-                    if previous is not None and previous >= candidate:
+                    if previous is not None and (previous.lower > candidate.lower or
+                            previous.lower == candidate.lower and (not previous.capped or candidate.capped)):
                         continue
-                    if self._ordered_direct(target, larger, gap - candidate, state):
-                        return True
+                    if required is not None and self._ordered_direct(target, larger, required - candidate.lower, state):
+                        return Interval(required, None, capped=candidate.capped)
                     best[target] = candidate
                     following[target] = candidate
             if not following:
                 break
             frontier = following
-        return False
+        return best.get(larger) if required is None else None
 
     def _ordered_direct(self, smaller: int, larger: int, gap: int, state: State) -> bool:
         """Evidence that does not traverse another order edge."""

@@ -313,10 +313,11 @@ difference_bound = (left:addr right:addr state:facts.State env:values.Environmen
     let a = binding_term(left env @registry)
     let b = binding_term(right env @registry)
     if a is? none or b is? none or facts.same_term(a b) return none
-    let lower = facts.lookup(state facts.order(b a))
-    let upper = facts.lookup(state facts.order(a b))
+    let lower = relations.bound(b a state)
+    let upper = relations.bound(a b state)
     let lower_endpoint = if lower is? none none else lower.lower
     let upper_endpoint = if upper is? none or upper.lower is? none none else -upper.lower
-    let bound = ranges.Interval[lower_endpoint upper_endpoint]
+    let capped=(lower isnt? none and lower.capped) or (upper isnt? none and upper.capped)
+    let bound = ranges.Interval[lower_endpoint upper_endpoint capped]
     return if ranges.same_bounds(bound ranges.UNKNOWN) none else bound
 }

@@ -54,10 +54,24 @@ minimum_length = (sequence:addr state:facts.State context:Context):>bigint => {
     return if declared is? none 0 else declared
 }
 # Keep value and length identities separate instead of packing their ids.
-Step:type = const [term:facts.Term gap:bigint]
+Step:type = const [term:facts.Term gap:bigint capped:bool=false]
 Edges:type = dict<addr array<Step>>
 ordered = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State context:Context):>bool => {
+    # The usual direct proof needs no constructed bound result.
     if ordered_direct(smaller larger gap state context) return true
+    return search(smaller larger state context gap) isnt? none
+}
+# Arithmetic needs the strongest established difference, while a predicate
+# can stop once it has enough evidence. Both consume the same finite graph.
+bound = (smaller:facts.Term larger:facts.Term state:facts.State):>ranges.Interval? => search(smaller larger state none none)
+search = (smaller:facts.Term larger:facts.Term state:facts.State context:Context? required:bigint?):>ranges.Interval? => {
+    if facts.same_term(smaller larger) return if required is? none or required <=? 0 ranges.Interval[0 none] else none
+    let outgoing=false
+    loop entry in state.values {
+        let fact=entry.fact
+        if fact is? facts.Order and entry.interval.lower isnt? none and facts.same_term(fact.smaller smaller) {outgoing=true break}
+    }
+    if not outgoing return none
     let values:Edges=[]
     let lengths:Edges=[]
     let count:addr=0
@@ -65,7 +79,7 @@ ordered = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State con
         let fact=entry.fact
         let weight=entry.interval.lower
         if fact isnt? facts.Order or weight is? none continue
-        let step=Step[fact.larger weight]
+        let step=Step[fact.larger weight entry.interval.capped]
         let key=fact.smaller.binding_id
         if fact.smaller.projection =? 'value' {
             let edges=values.get(key [])
@@ -78,10 +92,10 @@ ordered = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State con
         }
         count+=1
     }
-    let best_values:dict<addr bigint>=[]
-    let best_lengths:dict<addr bigint>=[]
-    if smaller.projection =? 'value' {best_values[smaller.binding_id]=0}
-    else {best_lengths[smaller.binding_id]=0}
+    let best_values:dict<addr ranges.Interval>=[]
+    let best_lengths:dict<addr ranges.Interval>=[]
+    if smaller.projection =? 'value' {best_values[smaller.binding_id]=ranges.Interval[0 none]}
+    else {best_lengths[smaller.binding_id]=ranges.Interval[0 none]}
     let frontier:array<Step>=[Step[smaller 0]]
     # At most one edge per round; every simple path fits this bound. A
     # contradictory positive cycle must not make proof search diverge.
@@ -92,18 +106,21 @@ ordered = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State con
             loop edge in outgoing {
                 let target=edge.term
                 let candidate=reached.gap+edge.gap
+                let capped=reached.capped or edge.capped
                 let previous=if target.projection =? 'value' best_values.get(target.binding_id) else best_lengths.get(target.binding_id)
-                if previous isnt? none and previous >=? candidate continue
-                if ordered_direct(target larger gap-candidate state context) return true
-                if target.projection =? 'value' {best_values[target.binding_id]=candidate}
-                else {best_lengths[target.binding_id]=candidate}
-                following.push(Step[target candidate])
+                if previous isnt? none and previous.lower isnt? none and (previous.lower >? candidate or (previous.lower =? candidate and (not previous.capped or capped))) continue
+                if context isnt? none and required isnt? none and ordered_direct(target larger required-candidate state context) return ranges.Interval[required none capped]
+                let evidence=ranges.Interval[candidate none capped]
+                if target.projection =? 'value' {best_values[target.binding_id]=evidence}
+                else {best_lengths[target.binding_id]=evidence}
+                following.push(Step[target candidate capped])
             }
         }
         if following.length =? 0 break
         frontier=following
     }
-    return false
+    if required isnt? none return none
+    return if larger.projection =? 'value' best_values.get(larger.binding_id) else best_lengths.get(larger.binding_id)
 }
 ordered_direct = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State context:Context):>bool => {
     if facts.same_term(smaller larger) return gap <=? 0
