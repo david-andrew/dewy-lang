@@ -3320,3 +3320,26 @@ comparisons with capped states and length changes. A fresh native driver passed
 four runtime kernels and three rejections on x86-64/C. The added runtime kernel
 checks the returned provenance after length transfer, remainder shifting,
 widening and implied evidence. Artifacts use `phase1-address-provenance-*`.
+
+
+## Arithmetic/provenance integration checkpoint (2026-09-22)
+
+Frozen source `d4a181b5` passed the three-generation direct x86-64 bootstrap;
+Dewy and µDewy are byte-identical across the final two generations, and the
+x86-64/C pipeline checks passed. Concurrent generation times of 142/121 seconds
+are not isolated benchmarks. The fresh native copy inventory is 4,497 sites
+over 48,626 bootstrap lines (92.481/KLOC), within the unchanged 4,500/100 gates.
+The broad selection excluding `bootstrap` and `native` names passed 3,744 tests
+with 14 skips in 616.29 seconds. This is not an all-route pytest/CI certificate;
+the last full 211-case corpus comparison remains the preceding `099937f3`
+checkpoint. Artifacts use `phase1-proof-bounds-*`.
+
+A subsequent generic-specialization experiment for the search helper was
+measured and discarded. Across 100 long-chain queries, native allocation
+traffic fell from 1,167,200 to 1,138,400 bytes and hosted traffic from 1,176,032
+to 1,054,400 bytes (identical on x86-64/C). However its seeded inventory rose to
+4,504 sites, exceeding the count budget; no gate was raised. Specializing the
+loop duplicates copy sites. The underlying opportunity is borrowing an
+aggregate while temporarily boxing it for a known read-only union parameter.
+The retained implementation keeps one search body. Experiment artifacts use
+`phase1-proof-search-storage-*`.
