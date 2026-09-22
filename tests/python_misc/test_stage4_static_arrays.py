@@ -303,7 +303,17 @@ let read = ():>int64 => {
 }
 ''',
             'stack_data',
-            False,
+            True,  # a stable alias retains its known read-only target
+        ),
+        (
+            '''
+let read = (indirect:(items:array<int64 length=2>):>int64):>int64 => {
+    let values = [42 0]
+    return indirect(values)
+}
+''',
+            'stack_data',
+            False,  # an unconstrained incoming callback provides no loan proof
         ),
         (
             '''
