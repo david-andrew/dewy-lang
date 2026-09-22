@@ -3488,3 +3488,19 @@ snapshots, tombstones, nested entries, and once-only resource cleanup. Rejection
 diagnostics were checked for receiver invalidation, missing membership, view
 conflicts, const storage and effect contracts. Nineteen focused hosted tests and
 82 adjacent ownership/borrow tests pass. Broader integration follows.
+
+## Borrow-graph storage (2026-09-22)
+
+The native borrow analysis extends adjacency sets through checked entry places
+instead of copying each set out and back per edge. Candidate intersection now
+filters the existing allowed set once, avoiding a temporary difference and the
+three owning inputs to the set operators. This preserves the existing proof
+rule and candidate order. The entry-place spelling also compiles with the
+preceding native seed, without needing a language staging workaround.
+
+The preliminary inventory on this branch is 4,503 sites before incorporating
+the separately verified four-site interval simplification; the combined source
+must be checked against the unchanged 4,500-site gate. The adjacency change is
+in the fresh driver used for the nested-container tests. The final filter
+change is source-checked; its execution is covered by the next full native
+integration checkpoint. Static counts do not establish a latency improvement.

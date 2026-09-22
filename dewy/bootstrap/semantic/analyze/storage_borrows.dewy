@@ -145,7 +145,12 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                     let func=hir.node_at(nodes effects.unwrap(node.func nodes))
                     if not primitive(func registry) {blocked.add(id)}
                 } else {
-                    loop target in targets {let callers=edges.get(target set[]) callers.add(id) edges[target]=callers}
+                    loop target in targets {
+                        # Extend the live adjacency set, rather than copying
+                        # it out and replacing the dictionary entry per edge.
+                        if target in? edges {let callers=@edges[target] callers.push(id)}
+                        else {edges[target]=set[id]}
+                    }
                 }
             }
         }
@@ -254,7 +259,13 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                         if safe {current.add(pair.argument)} else {rejected.add(pair.argument)}
                     }
                 }
-                allowed=allowed & (current-rejected)
+                # Filter the candidates once. Building two intermediate set
+                # values copies three inputs before discarding those copies.
+                let retained:set<addr>=set[]
+                loop argument in allowed {
+                    if argument in? current and argument not in? rejected {retained.push(argument)}
+                }
+                allowed=retained
             }
             if allowed.length >? 0 {result[item]=allowed}
         }
