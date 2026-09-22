@@ -2356,5 +2356,9 @@ temporary string/array lifetimes, and the failing runtime guard on x86-64/C.
 Its rebuilt native CLI reports **4,987 sites over 47,324 source lines
 (105.380/KLOC)** in the isolated checkout, within the unchanged gates.
 Artifacts use the `../dewy-build-artifacts/phase1-nested-projections-` prefix.
-This later slice has bounded second-generation validation, not another full
-fixed-point/parity-corpus certification. Phase 1 remains in progress.
+Integration follow-up: the three-generation direct x86-64 bootstrap also
+completed, with byte-identical final Dewy and µDewy generations and passing
+runtime checks on x86-64/C. Generation 2/3 took 67/77 seconds during concurrent
+development; these are integration timings, not isolated latency measurements.
+The 211-case corpus certification above belongs to the preceding placement
+checkpoint. Phase 1 remains in progress.
