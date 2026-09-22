@@ -353,7 +353,7 @@ silently.
    "unexplained copies on the compiler's own sources" as a CI metric with a
    fixed budget per kernel and per thousand lines. The native command test now
    gates the bootstrap inventory at 4,500 static sites and 100 sites/KLOC;
-   the measured string-view checkpoint is 4,390 sites and 92.444/KLOC. Concise reporting
+   the measured loop-exit checkpoint is 4,411 sites and 92.764/KLOC. Concise reporting
    retains every entry while avoiding repeated source rendering. Regressions
    surface in a pull request, not at 25 GB in a self-build.
 2. **Mechanisms in order of where the bytes went.** First: read-only
@@ -498,8 +498,11 @@ in both lowerings and the parity tool is the gate.
   Inherited copies consume their intermediate parent results, including nested
   resources and multiple inheritance levels. Conditional transfers of outer
   owners now join branch liveness and guard cleanup on the executed path.
-  Repeated outer-owner consumption, field transfers and remaining resource-
-  container mutations still require further lifetime analysis. Same-block owning input
+  Loop exits now retain their selected continuation: a last use before
+  `break`, including a labeled exit, can consume an outer owner when no later
+  read or alias needs it. Repeated outer-owner consumption, field transfers
+  and remaining resource-container mutations still require further lifetime
+  analysis. Same-block owning input
   transfers now include owning parameters, custom move hooks and union owners;
   first if conditions are unconditional input sites, while loop conditions
   and later arms still need the more general lifetime join. Fresh arguments, factory results and explicit copies
@@ -593,7 +596,12 @@ lifecycle lowering; an unknown callback parameter stays unknown. Inferred wrappe
 exclusion fixed point: every body and incoming assignment must establish each
 surviving exclusion. Generic row substitutions now retain shared negative
 guarantees as well, including their cache identity and restored bindings.
-Scoped polymorphic place rows remain in progress. Bare
+Inferred call rows now retain their subject environment until the source row
+is resolved, including reordered parameters, field routes and reassigned
+callbacks. Body equations and callable boundaries share the same solver.
+Inverse mappings propagate demanded exclusions through a finite vocabulary of
+route suffixes without strengthening their scope. User-written polymorphic
+place rows remain in progress. Bare
 `allocates` / `no allocates` now classify logical copies and aggregate
 construction; fixed scalar local arrays and scalar record literals now share
 a bounded nonescaping frame-placement proof with lowering. Native record
@@ -602,8 +610,10 @@ Fixed local arrays and scalar records may lend field/element addresses through
 known nonescaping helpers, including forwarding and recursion, without losing
 frame placement. Whole-owner loans now include read-only scalar arrays and
 field-mutating scalar records when every known callee preserves their backing
-storage. Unknown callbacks, whole-owner replacement/resizing and by-value
-whole-owner uses remain conservative. Conditional choices among known
+storage. Fresh local arrays and records can also lend ordinary by-value
+arguments to proven read-only callees while retaining frame placement. Unknown
+callbacks, whole-owner replacement/resizing and unproved owning uses remain
+conservative. Conditional choices among known
 callees keep the guarantees common to every branch, with selector effects
 checked separately and shared choices visited once.
 Projected writes and mutating place calls share their allocation obligations;

@@ -2610,3 +2610,13 @@ inference and the supported conditional resource transfers. Artifacts use
 `../dewy-build-artifacts/phase1-loop-exit-` prefixes. The latest complete native
 fixed point remains `e145a7f2`; this is a bounded second-generation ownership
 checkpoint, not completion of Phase 1.
+
+
+Broader hosted validation after `21fe9314`: `pytest -q -k 'not bootstrap and
+not native'` completed with 3,400 passed, 14 skipped and one failure in 446 s.
+The failure expected a stable known read-only function alias to require an
+array copy, predating the local-value loan proof. That expectation now accepts
+the proved loan; a new incoming-unknown-callback case still requires a copy.
+All 58 static-array tests pass after this test correction. This is the broader
+hosted selection plus a focused repair, not a complete all-route pytest run.
+The log is `../dewy-build-artifacts/phase1-effects-exits-hosted-suite.log`.
