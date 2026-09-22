@@ -52,16 +52,16 @@ def test_effect_contracts_survive_native_snapshot(tmp_path):
     if recovered_open isnt? types.FunctionType or rows.implies(recovered_open.effects rows.Contract[rows.Row[]]) return 31
     if types.primitive('int64' @copy.types) not=? word return 4''')
     body = body.replace('    record.value_type=word', """    record.kind='effect'
-    record.effect_value=resources
-    session.registry.generic_instances[binding]=bindings.GenericInstance[binding [] syntax ['binder:E' -> resources]]
+    record.effect_value=contract
+    session.registry.generic_instances[binding]=bindings.GenericInstance[binding [] syntax ['binder:E' -> contract]]
     record.value_type=word""")
     body = body.replace("    if restored.prelude_bindings.get('answer') not=? binding return 6", """    let restored_binding=bindings.binding_at(copy.registry binding)
     if restored_binding.kind not=? 'effect' or restored_binding.effect_value is? none return 33
-    if rows.identity(rows.Contract[restored_binding.effect_value]) not=? rows.identity(rows.Contract[resources]) return 34
+    if rows.identity(restored_binding.effect_value) not=? rows.identity(contract) return 34
     let instance=copy.registry.generic_instances.get(binding)
     if instance is? none return 35
     let argument=instance.effect_arguments.get('binder:E')
-    if argument is? none or rows.identity(rows.Contract[argument]) not=? rows.identity(rows.Contract[resources]) return 36
+    if argument is? none or rows.identity(argument) not=? rows.identity(contract) return 36
     if restored.prelude_bindings.get('answer') not=? binding return 6""")
     source = tmp_path / 'effect-snapshot.dewy'
     source.write_text(body)
