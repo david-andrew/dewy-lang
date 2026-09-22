@@ -3185,6 +3185,13 @@ class _Lowerer(
             self._keyed_nodes_keepalive.append(transformed)
             if id(node) in self.source_intrinsic_calls:
                 self.source_intrinsic_calls.add(id(transformed))
+            borrowed = self.forwarded_values.get(id(node), ())
+            if borrowed:
+                self.forwarded_values[id(transformed)] = {
+                    id(argument) for argument, position in zip(transformed.pos_args, source_positions)
+                    if position is not None and id(node.pos_args[position] if isinstance(position, int)
+                                                  else node.kw_args[position]) in borrowed
+                }
             for index, (argument, source_position) in enumerate(zip(
                 transformed.pos_args,
                 source_positions,
@@ -5603,6 +5610,9 @@ class _Lowerer(
                         self._materialize_place_argument(arg)
                     )
                     place_postlude.extend(arg_postlude)
+                elif (id(arg) in self.forwarded_values.get(id(node), ())
+                        and (loan := storage_borrows.union_loan_source(arg, expected_type)) is not None):
+                    arg_prelude, lowered_arg = self._materialize_union_loan(loan, expected_type)
                 elif boundary is not None and boundary.safe:
                     arg_prelude, lowered_arg = self._materialize_array_call_argument(
                         arg,
@@ -5641,6 +5651,8 @@ class _Lowerer(
                 pos_args.append(lowered_arg)
             optional_kwargs = self.call_optional_kwargs.get(id(node), {})
             for name, arg in node.kw_args.items():
+                expected_type = next((param.type for param in [*function_type.pos_or_kw, *function_type.kw_only]
+                                      if param.name == name), None) if function_type is not None else None
                 payload = optional_kwargs.get(name)
                 boundary = self.array_call_boundary_analyses.get((id(node), name))
                 if isinstance(arg, hir.Place):
@@ -5648,6 +5660,9 @@ class _Lowerer(
                         self._materialize_place_argument(arg)
                     )
                     place_postlude.extend(arg_postlude)
+                elif (id(arg) in self.forwarded_values.get(id(node), ())
+                        and (loan := storage_borrows.union_loan_source(arg, expected_type)) is not None):
+                    arg_prelude, lowered_arg = self._materialize_union_loan(loan, expected_type)
                 elif boundary is not None and boundary.safe:
                     arg_prelude, lowered_arg = self._materialize_array_call_argument(
                         arg,

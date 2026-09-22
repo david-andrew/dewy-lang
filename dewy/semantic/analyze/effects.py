@@ -573,7 +573,10 @@ class _EffectAnalyzer:
             if resolved is not None:
                 binding_id, route, inner = resolved
                 params[binding_id].add_read(route)
-                params[binding_id].add_escape(route)
+                # Tagged value conversion creates an owning value at an
+                # ordinary boundary; it does not expose the source address.
+                if not ty.preserves_union_payload(node.expr.type, node.type):
+                    params[binding_id].add_escape(route)
                 for expr in inner:
                     self._visit(expr, params)
                 return

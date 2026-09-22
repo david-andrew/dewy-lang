@@ -265,7 +265,9 @@ def inventory(root, registry):
                             elif projected_storage(path) and any(item.writes for item in parameter_summaries):
                                 storage()
                     else:
-                        visit(argument)
+                        loan = (storage_borrows.union_loan_source(argument)
+                                if id(argument) in borrowed_arguments.get(id(node), ()) else None)
+                        visit(argument if loan is None else loan)
                         if (not word_value(argument) and not isinstance(argument.type, (ty.FunctionType, ty.OverloadType))
                                 and id(argument) not in borrowed_arguments.get(id(node), ())):
                             storage()  # logical aggregate transfer not proved

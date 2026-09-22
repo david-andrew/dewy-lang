@@ -218,6 +218,28 @@ runtime_union_members = (id:addr @nodes:types.Table):>array<addr> | none => {
     if optional_payload(plain @nodes) isnt? none or enum_members(plain nodes) isnt? none or string_valued(plain nodes) return none
     return canonical_members(node.items nodes)
 }
+# This representation query does not grant a borrow. Ordinary value
+# boundaries still create owners; only a separate stability proof lends one.
+union_cell_members=(type:addr @table:types.Table):>array<addr>|none=>{
+    let plain=types.unfold(types.strip_refinement(type table) table)
+    let payload=optional_payload(plain @table)
+    if payload isnt? none return [types.primitive('none' @table) payload]
+    return runtime_union_members(plain @table)
+}
+preserves_union_payload=(actual:addr expected:addr table:types.Table):>bool=>{
+    let wanted=union_cell_members(expected @table)
+    if wanted is? none return false
+    let members=union_cell_members(actual @table)
+    let supplied=if members is? none [actual] else members
+    loop member in supplied {
+        let found=false
+        loop candidate in wanted {
+            if types.same_type(types.strip_refinement(member table) types.strip_refinement(candidate table) table) {found=true break}
+        }
+        if not found return false
+    }
+    return true
+}
 fixed_integer_layout = (id:addr nodes:types.Table):>subtyping.IntegerLayout? => {
     let node = types.node_at(nodes types.strip_refinement(id nodes))
     if node isnt? types.Primitive return none

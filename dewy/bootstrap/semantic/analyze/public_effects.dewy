@@ -231,7 +231,8 @@ visit = (id:addr input:Input @scan:Scan):>void => {
                 }
             }
             else {
-                visit(arg input @scan)
+                let loan=if arg in? input.borrowed_arguments.get(id set[]) storage_borrows.union_loan_source(arg input.nodes input.types) else none
+                visit(if loan is? none arg else loan input @scan)
                 if not word_value(value input scan) and types.node_at(input.types value.value_type) isnt? types.CallableType and arg not in? input.borrowed_arguments.get(id set[]) {storage(@scan)}
             }
         }

@@ -249,6 +249,24 @@ class _OptionalLowering:
             True,
         )
 
+    def _materialize_union_loan(self, source: hir.AST, expected: ty.Type) -> tuple[list[hir.AST], hir.AST]:
+        """A checked call-only loan: borrow an existing cell or a payload handle.
+
+        The frame cell has no ownership cleanup. Its payload belongs to the
+        stable source, and the read-only callee cannot retain its address.
+        """
+        prelude, value = self._extract_expression(source)
+        if self._field_union_members(source.type) is not None:
+            return prelude, value  # Exact members retain program-wide tags.
+        members = self._field_union_members(expected)
+        assert members is not None
+        member = members[self._union_member_index(members, source.type, source)]
+        cell = hir.ExpressedIdentifier(source.loc, 'int64', self._new_optional_name('loan'))
+        return [*prelude,
+                hir.Declare(source.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(source.loc)),
+                self._tag_write(cell, member, source.loc),
+                self._optional_store_payload(value, cell, member, source.loc)], cell
+
     def _materialize_optional(
         self,
         value: hir.AST,

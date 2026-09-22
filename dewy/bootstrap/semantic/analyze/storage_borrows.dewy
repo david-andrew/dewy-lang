@@ -9,7 +9,7 @@ import p"../type_queries.dewy" as views
 # Read-only by-value parameters, stable fresh local owners and their projections
 # stay stable, including later argument evaluation. Calls on their own bindings
 # cannot change an incoming alias through nonlocal or raw storage. The shared
-# proof permits fixed-to-dynamic outer array length, but no storage conversion.
+# proof permits outer array-length widening and exact union-member boxing.
 # More precise lowerer proofs may still borrow other expressions.
 const OPERATORS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
 # Native builtins carry stable identities. A source function with the same
@@ -68,6 +68,21 @@ independent_materialization=(id:addr nodes:array<hir.AST>):>bool=>{
     }
     return true
 }
+# Classify only exact member injection/widening. The call proof below still
+# supplies stability and read-only use; this is not permission by itself.
+# Type normalization stays inside the representation query; only an input
+# HIR identity crosses this boundary.
+union_loan_source=(id:addr nodes:array<hir.AST> table:types.Table expected:addr?=none):>addr?=>{
+    let node=hir.node_at(nodes id)
+    let source=id
+    let target=expected
+    if node is? hir.ValueCast|hir.RepresentationCast {
+        if target is? none {target=node.value_type}
+        source=node.expr
+    }
+    if target is? none return none
+    return if views.preserves_union_payload(hir.node_at(nodes source).value_type target table) source else none
+}
 Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr>]
 forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>prove(analysis summaries nodes table registry).arguments
 prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>Proofs=>{
@@ -121,7 +136,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         writes[id]=written
         loop item in body {
             let node=hir.node_at(nodes item)
-            if node is? hir.RepresentationCast and not independent_materialization(node.expr nodes) {blocked.add(id)}
+            if node is? hir.RepresentationCast and not independent_materialization(node.expr nodes) and union_loan_source(item nodes table) is? none {blocked.add(id)}
             else if node is? hir.ExpressedIdentifier {
                 let local=node.binding_id isnt? none and node.binding_id in? locals
                 if not local and node.binding_id isnt? none {captured.add(node.binding_id)}
@@ -214,12 +229,13 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                 if pairs isnt? none {
                     loop pair in pairs {
                         let arg=hir.node_at(nodes pair.argument)
-                        let path=bindings.access_path(pair.argument nodes)
+                        let expected=if pair.parameter is? none none else wanted.get(pair.parameter)
+                        let loan=union_loan_source(pair.argument nodes table expected=expected)
+                        let path=bindings.access_path(if loan is? none pair.argument else loan nodes)
                         let source=hir.node_at(nodes path.root)
                         let safe=false
                         if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and pair.parameter isnt? none {
                             let own=parameters.get(source.binding_id)
-                            let expected=wanted.get(pair.parameter)
                             let local=local_owners.get(source.binding_id)
                             let stable=local isnt? none and ordinary(local table @eligible)
                             if not stable and own isnt? none and ordinary(own table @eligible) and source.binding_id in? summaries.by_param_binding {
@@ -228,7 +244,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                             }
                             let same=false
                             if expected isnt? none {
-                                same=arg.value_type =? expected
+                                same=arg.value_type =? expected or loan isnt? none
                                 let actual_type=types.node_at(table arg.value_type)
                                 let expected_type=types.node_at(table expected)
                                 if actual_type is? types.ArrayType and expected_type is? types.ArrayType and actual_type.element =? expected_type.element and expected_type.length is? none {same=true}

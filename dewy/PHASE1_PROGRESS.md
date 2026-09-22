@@ -3343,3 +3343,31 @@ loop duplicates copy sites. The underlying opportunity is borrowing an
 aggregate while temporarily boxing it for a known read-only union parameter.
 The retained implementation keeps one search body. Experiment artifacts use
 `phase1-proof-search-storage-*`.
+
+
+## Borrowed union call conversions (2026-09-22)
+
+Both compilers can lend a stable ordinary aggregate to a known read-only
+union parameter. Exact-member widening reuses the existing tagged cell;
+injection puts the existing payload handle into a 16-byte caller frame cell.
+The slot is reused across loop iterations and owns no payload. This uses the
+same storage proof for `no_effects`/`no allocates` checking and lowering.
+Family conversions, lifecycle-bearing storage, later argument writes, raw
+exposure and unresolved callbacks retain their existing obligations. Owning
+results still copy; a returned value does not retain the temporary cell.
+
+A shared representation query now distinguishes exact tagged value casts
+from casts that may expose an address. Native contextual typing explicitly
+inserts the former; hosted calls may instead carry the target only in their
+formal signature. Hosted lowering now carries proof identities through call
+normalization and handles union wrapping before array argument adapters.
+Program-wide tags permit widening without renumbering alternatives.
+
+Validation: 12 runtime cases and five rejection cases agree on fresh native
+and hosted compilers with x86-64/C execution. The rejection tests require an
+effect-contract diagnostic, including the corrected named callback signature.
+A repeated call kernel performs 100 injections without arena allocation.
+Ninety-seven focused/adjacent hosted tests passed before the final diagnostic
+strengthening; the final five contract-rejection checks pass on both routes.
+A full bootstrap and inventory checkpoint follows; this is not a claim that
+Phase 1 or the full test matrix is complete.

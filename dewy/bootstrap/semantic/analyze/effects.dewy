@@ -391,7 +391,7 @@ visit = (id:addr @params:dict<addr ParameterEffects> @analysis:Analysis nodes:ar
             # Storage lowering can instead use its independent value-boundary
             # ownership rules; wrapping an optional does not expose a pointer.
             changed = record(resolved.binding_id 'read' resolved.route @params)
-            if analysis.value_casts_escape and record(resolved.binding_id 'escape' resolved.route @params) { changed = true }
+            if analysis.value_casts_escape and not views.preserves_union_payload(hir.node_at(nodes node.expr).value_type node.value_type type_nodes) and record(resolved.binding_id 'escape' resolved.route @params) { changed = true }
         }
         if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }
         return changed

@@ -56,6 +56,23 @@ def independent_materialization(node):
         hir.RepresentationCast, hir.Obligation)) for item in hir.walk(node))
 
 
+def union_loan_source(node, expected_type=None):
+    """A pure member injection/widening whose existing payload layout is kept.
+
+    This only classifies the conversion. A call's storage proof must still
+    establish stability and the callee's read-only use before lending it.
+    Program-wide member tags permit exact-member widening of existing cells;
+    family conversions and enum/string representation changes stay excluded.
+    """
+    source = node
+    if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
+        expected_type = node.type if expected_type is None else expected_type
+        source = node.expr
+    elif expected_type is None:
+        return None
+    return source if ty.preserves_union_payload(source.type, expected_type) else None
+
+
 @dataclass(frozen=True)
 class Proofs:
     arguments: dict[int, set[int]]
@@ -112,7 +129,8 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                              and node.binding_id not in written
                              and isinstance(node.expr, (hir.ObjectLiteral, hir.ArrayLiteral))}
         for node in body:
-            if isinstance(node, hir.RepresentationCast) and not independent_materialization(node.expr):
+            if (isinstance(node, hir.RepresentationCast) and not independent_materialization(node.expr)
+                    and union_loan_source(node) is None):
                 blocked.add(key)
             elif isinstance(node, hir.ExpressedIdentifier):
                 if (node.binding_id not in local
@@ -178,21 +196,23 @@ def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
                 pairs = analysis._pair_arguments(node, target)
                 current, rejected = set(), set()
                 for argument, parameter in pairs or ():
-                    path = bindings.access_path(argument, unwrap=_unwrap)
+                    expected = parameter.type if parameter is not None else None
+                    loan = union_loan_source(argument, expected) if expected is not None else None
+                    path = bindings.access_path(argument if loan is None else loan, unwrap=_unwrap)
                     source = path.root
                     own = parameters.get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
                     incoming = summaries.for_param_binding(own.binding_id) if own else None
                     local = stable_locals[id(literal)].get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
                     outgoing = summaries.for_param_binding(parameter.binding_id) if parameter else None
-                    # No conversion or lifecycle operation at this boundary.
+                    # An exact union wrapper may lend the same stable payload.
                     stable = (local is not None and ordinary(local)) or (
                         own is not None and ordinary(own.type) and incoming is not None
                         and (incoming.read_only or incoming.read_only_at(tuple(
                             INDEX_STEP if isinstance(step, hir.Index) else step.name for step in path.steps))))
-                    expected = parameter.type if parameter is not None else None
                     same_storage = argument.type == expected or (
                         isinstance(argument.type, ty.ArrayType) and isinstance(expected, ty.ArrayType)
                         and argument.type.element == expected.element and expected.length is None)
+                    same_storage |= loan is not None
                     if (stable and parameter is not None and ordinary(argument.type)
                             and same_storage and not parameter.place
                             and outgoing is not None and outgoing.read_only):

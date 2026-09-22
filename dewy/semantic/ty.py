@@ -1172,9 +1172,9 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
 
     Returns None for non-unions and for single-payload optionals, which keep
     their dedicated two-state cells, and for enums (unions of singletons),
-    which are plain words (see `enum_members`). ``none`` is always
-    member 0 when present, so the general tag numbering coincides with
-    optional tags.
+    which are plain words (see `enum_members`). Members have a stable order;
+    lowering assigns program-wide tags by member identity, with zero for
+    ``none``, rather than using positions in this tuple as tags.
     """
     if not isinstance(type_, TypeOr):
         return None
@@ -1188,13 +1188,31 @@ def runtime_union_members(type_: Type) -> tuple[TypeExpr, ...] | None:
     if string_valued(type_):
         return None   # a union of string literals: one string handle, no tags
     # Canonical order: `none` first, then a deterministic sort, so every
-    # spelling of the same member set (declared, narrowed, joined) numbers
-    # its tags identically.
+    # spelling of the same member set (declared, narrowed, joined) visits
+    # its alternatives identically.
     members = sorted(
         type_.items,
         key=lambda member: (0 if member == 'none' else 1, _runtime_order_key(member)),
     )
     return tuple(members)
+
+
+def preserves_union_payload(actual: Type, expected: Type) -> bool:
+    """Exact tagged member injection/widening preserves its payload layout.
+
+    This is a representation query, not permission to borrow. Owning value
+    boundaries still copy; family/enum/byte conversions are not this case.
+    """
+    def members(type_):
+        type_ = unfold(strip_refinement(type_))
+        payload = optional_payload(type_)
+        return ('none', payload) if payload is not None else runtime_union_members(type_)
+    wanted = members(expected)
+    if wanted is None:
+        return False
+    supplied = members(actual)
+    return all(any(strip_refinement(value) == strip_refinement(member) for member in wanted)
+               for value in (supplied if supplied is not None else (actual,)))
 
 
 @_runtime_query

@@ -8,6 +8,7 @@ import p"captures.dewy" as captures
 import p"borrowing.dewy" as borrowing
 import p"moves.dewy" as moves
 import p"../../semantic/analyze/effects.dewy" as effects
+import p"../../semantic/analyze/storage_borrows.dewy" as storage_borrows
 import p"../../semantic/placement.dewy" as placement
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/bindings.dewy" as bindings
@@ -4224,13 +4225,21 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
     let positional:array<addr>=[]
     let views_allowed=string_free_type(signature.ret @state)
     let consumed=state.consumed_arguments.get(id set[])
+    let argument_index:addr=0
     loop argument in node.pos_args {
-        let value=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
+        $runtime_assert argument_index <? signature.pos_or_kw.length
+        let expected=signature.pos_or_kw[argument_index].value_type
+        argument_index+=1
+        let value=call_argument(argument expected borrowed disposable consumed views_allowed @temporary @prefix @state)
         positional.push(value)
     }
     let keywords:dict<string addr>=[]
     loop [name argument] in node.kw_args {
-        keywords[name]=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
+        let expected:addr?=none
+        loop parameter in signature.pos_or_kw {if parameter.name =? name {expected=parameter.value_type break}}
+        if expected is? none {loop parameter in signature.kw_only {if parameter.name =? name {expected=parameter.value_type break}}}
+        $runtime_assert expected isnt? none
+        keywords[name]=call_argument(argument expected borrowed disposable consumed views_allowed @temporary @prefix @state)
     }
     let args:array<addr>=[]
     if receiver isnt? none {args.push(receiver)}
@@ -4322,11 +4331,28 @@ string_free_type = (id:addr @state:State depth:addr=0):>bool => {
     if plain is? types.FunctionType return false
     return true
 }
-call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State):>addr => {
+call_argument = (argument:addr expected:addr borrowed:set<addr> disposable:set<addr> consumed:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State):>addr => {
     # A donated argument is an owned value the callee takes over: a fresh
     # temporary passes as is, a kept value is copied, and nothing is
     # released here.
     if argument in? consumed return snapshot(owned_value(argument @state 'donated to a call') @prefix @state)
+    if argument in? borrowed {
+        let loan=storage_borrows.union_loan_source(argument state.input.nodes state.type_nodes expected=expected)
+        if loan isnt? none {
+            let source=hir.node_at(state.input.nodes loan)
+            let value=snapshot(expression(loan @state) @prefix @state)
+            if cell_members(source.value_type @state) isnt? none return value
+            # One fixed frame slot per call site, reused on loop iterations.
+            # Its borrowed payload never enters ownership cleanup.
+            let hoisted:array<addr>=[]
+            let word_type=types.primitive('int64' @state.type_nodes)
+            let cell=snapshot(intrinsic_call('__alloca__' [word(16 source @state)] word_type source @state) @hoisted @state)
+            loop item in hoisted {state.loop_prologue.push(item)}
+            prefix.push(store_word(word(member_tag(source.value_type @state) source @state) cell 0 source @state))
+            prefix.push(store_word(value cell 8 source @state))
+            return cell
+        }
+    }
     let peeled:addr?=if argument in? borrowed peel_borrowed(argument @state) else none
     if peeled isnt? none return snapshot(expression(peeled @state) @prefix @state)
     let source=hir.node_at(state.input.nodes argument)
