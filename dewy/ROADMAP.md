@@ -353,7 +353,7 @@ silently.
    "unexplained copies on the compiler's own sources" as a CI metric with a
    fixed budget per kernel and per thousand lines. The native command test now
    gates the bootstrap inventory at 4,500 static sites and 100 sites/KLOC;
-   the measured shared-view checkpoint is 4,485 sites and 92.354/KLOC. Concise reporting
+   the measured relational-proof checkpoint is 4,492 sites and 92.418/KLOC. Concise reporting
    retains every entry while avoiding repeated source rendering. Regressions
    surface in a pull request, not at 25 GB in a self-build.
 2. **Mechanisms in order of where the bytes went.** First: read-only
@@ -590,7 +590,10 @@ establishes it: the incoming intervals and each advancing edge supply proof. Wor
 neither the arithmetic nor its destination can wrap. Stable literal/const-selected array and dictionary reads also consume
 branch type alternatives and predicate-result facts, while writes retain their
 storage contracts. Mutation prefixes invalidate possibly aliased descendants
-without discarding ancestor type facts. The general liquid qualifier/invariant
+without discarding ancestor type facts. Established ordering facts now form a finite
+worklist graph, so proof search has no fixed two-step chain cutoff. Hosted fact
+keys are structural, and both registries keep declaration/route identities
+disjoint beyond the old packing boundaries. The general liquid qualifier/invariant
 work remains broader than these completed fixtures.
 
 ### 1.3 Effects as a real vocabulary

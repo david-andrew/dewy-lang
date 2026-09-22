@@ -3268,3 +3268,21 @@ both x86-64/C routes, including array access through an eight-term ordering
 chain and rejection of a contradictory unsafe assumption. Artifacts use
 `phase1-relational-closure-*`. Arithmetic difference-bound consumers still
 read direct edges and are the next integration step.
+
+
+## Relational-proof integration checkpoint (2026-09-22)
+
+Frozen source `099937f3` passed the three-generation direct x86-64 bootstrap
+with byte-identical Dewy and µDewy executables in the last two generations.
+The x86-64/C pipeline checks passed. Generation timings of 214/197 seconds
+were collected under concurrent checks, not as isolated performance results.
+The fresh pair reports 4,492 copy sites over 48,605 bootstrap lines
+(92.418/KLOC), inside the unchanged 4,500/100 limits.
+
+The broad selection excluding `bootstrap` and `native` names passed 3,738 tests
+with 14 skips in 966.26 seconds. The full default corpus passed 211/211 native
+versus hosted comparisons on direct x86-64 with a shared prelude cache. This
+certifies the structural fact identities, disjoint binding ids and predicate
+chain search; it predates the arithmetic/provenance follow-ups. It does not
+stand for all-route pytest or CI. Artifacts use `phase1-relational-*`, with the
+native pair in `phase1-relational-099937f3`.
