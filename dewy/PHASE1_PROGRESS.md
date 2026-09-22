@@ -3032,3 +3032,14 @@ field fixtures; the final focused selection passed 15. A freshly built native
 driver and the hosted compiler agree on 20 runtime kernels and 12 rejections,
 with x86-64/C execution. Repeated array-field replacement retained no arena
 allocation across 100 calls. Artifacts use `phase1-field-renewal-*`.
+
+
+## Full corpus checkpoint (2026-09-22)
+
+All 211 default corpus cases passed acceptance/rejection and expected runtime
+comparisons using native pair `phase1-partial-records-e8d2a2da` and frozen hosted
+source `28dbe7db`, through direct x86-64 output with shared checked-prelude
+caches. The report is `phase1-partial-records-corpus.json` and its log is
+`phase1-partial-records-corpus.log`. This certifies the corpus at those inputs;
+field renewal and subsequent source changes retain their separate focused
+validation until the next integration checkpoint.
