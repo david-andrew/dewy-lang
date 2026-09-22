@@ -2885,3 +2885,20 @@ The final fresh native driver agrees with hosted checking on 17 runtime kernels
 and nine rejection cases on both x86-64 and C. This includes the added refinement
 cases, independent narrow-word/boolean copies, fresh chains and zero arena
 allocation over 100,000 iterations. Artifacts: `phase1-frame-array-copy-*`.
+
+
+## Frame-copy integration checkpoint (2026-09-22)
+
+Source `113146f1` closes the three-generation direct x86-64 bootstrap. Both
+compiler binaries in generations two and three are byte-identical, and the
+pair's x86-64/C execution checks pass. Artifacts are in
+`../dewy-build-artifacts/phase1-frame-copies-113146f1`. Generations took 163,
+191 and 131 seconds under concurrent test/build load; these are validation
+runs, not isolated performance measurements.
+
+The broad `tests/python_misc -k 'not bootstrap and not native'` selection passed
+3,554 tests with 14 skips in 771 seconds. This is not the all-route pytest suite;
+a few selected import tests also exercise native drivers. The new pair reports
+4,457 bootstrap copy sites across 48,220 source lines (92.431/KLOC), within
+unchanged 4,500-site and 100/KLOC gates. Logs and JSON use the
+`phase1-frame-copies-*` artifact prefix. Phase 1 remains in progress.
