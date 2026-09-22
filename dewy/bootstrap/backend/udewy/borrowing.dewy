@@ -355,7 +355,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
 }
 # `rejections` explains, per source binding, why its last considered use as
 # an argument was not borrowed (for `dewy analyze`).
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[] view_regions:dict<addr array<addr>>=[]]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[] view_regions:dict<addr array<addr>>=[] nonescaping_places:set<addr>=set[]]
 
 # Required views can end at the last use of all their derived aliases.
 # Statements containing control flow remain indivisible, so a read in a loop
@@ -696,13 +696,7 @@ stable_owner = (source:Route stable:set<addr> parameters:dict<addr effects.Param
     if source.binding in? stable return true
     let summary=parameters.get(source.binding)
     if summary is? none return false
-    let changes=summary.mutates
-    loop route in summary.rebinds {changes.push(route)}
-    loop route in summary.escapes {changes.push(route)}
-    loop route in changes {
-        if overlap(source Route[source.binding route.steps]) return false
-    }
-    return true
+    return effects.read_only_at(summary effects.Route[source.fields])
 }
 analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan):>dict<addr set<addr>> => details(root nodes type_nodes plan).arguments
 details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan links:subtyping.Graph=subtyping.default_links external:set<addr>=set[] owned_parameter_protocol:bool=false registry:bindings.Registry=bindings.Registry[]):>Plan => {
@@ -910,5 +904,6 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # a view's live interval are still checked, including mutable places.
     loop binding in escaping {excluded.add(binding)}
     let scoped=scoped_views(view_demands nodes type_nodes plan excluded)
-    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned scoped.bindings scoped.scopes scoped.regions]
+    loop id in unsafe_places {safe_places.pop(id default=id);}
+    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned scoped.bindings scoped.scopes scoped.regions safe_places]
 }

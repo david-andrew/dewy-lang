@@ -12,7 +12,7 @@ from . import hir, ty
 FRAME_STORAGE_BYTES = 4096
 
 
-def local_values(literal: hir.FunctionLiteral) -> dict[int, hir.Declare]:
+def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
     nodes = []
     captured = set()
     pending = [literal.body]
@@ -53,9 +53,9 @@ def local_values(literal: hir.FunctionLiteral) -> dict[int, hir.Declare]:
             allowed[id(node.array)] = allowed.get(id(node.array), 0) + 1
         if isinstance(node, hir.MemberAccess) and isinstance(node.value, hir.ExpressedIdentifier):
             allowed[id(node.value)] = allowed.get(id(node.value), 0) + 1
-        if isinstance(node, hir.Place):
-            # Until the callee's escape proof is shared with this pass, even
-            # a scalar element address conservatively excludes placement.
+        if isinstance(node, hir.Place) and id(node) not in nonescaping_places:
+            # Only a solved call boundary can lend a field/element address.
+            # Whole-value uses and all other escapes still exclude placement.
             blocked.update(read.binding_id for read in hir.walk(node.target)
                            if isinstance(read, hir.ExpressedIdentifier))
     for node in nodes:
@@ -75,6 +75,6 @@ def local_values(literal: hir.FunctionLiteral) -> dict[int, hir.Declare]:
     return result
 
 
-def local_arrays(literal: hir.FunctionLiteral) -> dict[int, hir.Declare]:
-    return {binding: declaration for binding, declaration in local_values(literal).items()
+def local_arrays(literal: hir.FunctionLiteral, nonescaping_places: set[int] | frozenset[int] = frozenset()) -> dict[int, hir.Declare]:
+    return {binding: declaration for binding, declaration in local_values(literal, nonescaping_places).items()
             if isinstance(declaration.expr, hir.ArrayLiteral)}

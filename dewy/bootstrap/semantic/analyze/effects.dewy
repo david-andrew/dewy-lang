@@ -29,6 +29,7 @@ ProgramEffects:type = [by_literal:dict<addr FunctionEffects> by_param_binding:di
 EffectTransfer:type = const [caller:addr caller_parameter:addr callee_parameter:addr prefix:Route]
 Analysis:type = [
     literals:array<addr>=[] declares:dict<addr addr>=[]
+    calls:array<addr>=[]
     reassigned:set<addr>=set[] param_ids:set<addr>=set[]
     effects:dict<addr FunctionEffects>=[]
     callback_targets:dict<addr array<addr>>=[]
@@ -156,6 +157,7 @@ collect_roots = (roots:array<addr> nodes:array<hir.AST>):>Analysis => {
             }
             analysis.effects[id] = FunctionEffects[id params]
         }
+        else if node is? hir.FunctionCall {analysis.calls.push(id)}
         else if node is? hir.Declare and node.binding_id isnt? none { analysis.declares[node.binding_id] = id }
         else if node is? hir.Assign {
             let target = hir.node_at(nodes node.target)
@@ -490,6 +492,44 @@ analyze_collected = (analysis:Analysis nodes:array<hir.AST> type_nodes:types.Tab
     return ProgramEffects[analysis.effects by_param]
 }
 
+
+# Addresses lent only until their call returns. Every target and repeated
+# argument position must have a known nonescaping parameter; writes are fine.
+# Collection already retains call sites, so this needs no extra HIR traversal.
+nonescaping_places = (analysis:Analysis summaries:ProgramEffects nodes:array<hir.AST>):>set<addr> => {
+    let safe:set<addr>=set[] let unsafe:set<addr>=set[]
+    loop id in analysis.calls {
+        let call=hir.node_at(nodes id)
+        $runtime_assert call is? hir.FunctionCall
+        let places:set<addr>=set[]
+        loop arg in call.pos_args {if hir.node_at(nodes arg) is? hir.Place {places.add(arg)}}
+        loop arg in call.kw_args.values {if hir.node_at(nodes arg) is? hir.Place {places.add(arg)}}
+        if places.length =? 0 continue
+        let targets=direct_targets(call analysis nodes)
+        if targets is? none or targets.length =? 0 {
+            loop place in places {unsafe.add(place)}
+            continue
+        }
+        loop target in targets {
+            let literal=hir.node_at(nodes target)
+            $runtime_assert literal is? hir.FunctionLiteral
+            let pairs=pair_arguments(call literal)
+            let paired:set<addr>=set[]
+            if pairs isnt? none {
+                loop pair in pairs {
+                    if pair.argument not in? places continue
+                    paired.add(pair.argument)
+                    let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
+                    if summary isnt? none and summary.escapes.length =? 0 {safe.add(pair.argument)}
+                    else {unsafe.add(pair.argument)}
+                }
+            }
+            loop place in places {if place not in? paired {unsafe.add(place)}}
+        }
+    }
+    loop place in unsafe {safe.pop(place default=place);}
+    return safe
+}
 
 # Implicit global writes have no argument route. Share callable resolution
 # with parameter effects, but solve this finite root set independently so

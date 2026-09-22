@@ -202,6 +202,7 @@ class _EffectAnalyzer:
     def __init__(self, root: hir.AST):
         self.root = root
         self.literals: list[hir.FunctionLiteral] = []
+        self.calls: list[hir.FunctionCall] = []
         self.declares: dict[int, hir.Declare] = {}
         self.reassigned: set[int] = set()
         self.param_binding_ids: set[int] = set()
@@ -241,6 +242,8 @@ class _EffectAnalyzer:
         elif isinstance(node, hir.Assign):
             if node.target.binding_id is not None:
                 self.reassigned.add(node.target.binding_id)
+        elif isinstance(node, hir.FunctionCall):
+            self.calls.append(node)
         if isinstance(node, hir.AST):
             for child in hir.children(node):
                 self._collect(child)
@@ -692,6 +695,35 @@ def analyze_effects(root: hir.AST) -> ProgramEffects:
     analysis: absence of an effect is a guarantee, presence is not.
     """
     return _EffectAnalyzer(root).solve()
+
+
+def nonescaping_places(analysis: _EffectAnalyzer, summaries: ProgramEffects) -> set[int]:
+    """Addresses borrowed only for their call, across every possible target.
+
+    A shared argument can occur at several positions or calls. Every use
+    must have a known, nonescaping parameter; writes themselves are allowed.
+    Reuse the collected call sites and solved graph, without another HIR walk.
+    """
+    safe, unsafe = set(), set()
+    for call in analysis.calls:
+        places = {id(arg) for arg in [*call.pos_args, *call.kw_args.values()] if isinstance(arg, hir.Place)}
+        if not places:
+            continue
+        targets = analysis._direct_targets(call)
+        if not targets:
+            unsafe.update(places)
+            continue
+        for target in targets:
+            paired = set()
+            for argument, parameter in analysis._pair_arguments(call, target) or ():
+                key = id(argument)
+                if key not in places:
+                    continue
+                paired.add(key)
+                summary = summaries.for_param_binding(parameter.binding_id) if parameter is not None else None
+                (safe if summary is not None and not summary.escapes else unsafe).add(key)
+            unsafe.update(places - paired)
+    return safe - unsafe
 
 
 def read_only_places(root: hir.AST, context: hir.AST | None = None) -> set[int]:

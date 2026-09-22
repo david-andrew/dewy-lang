@@ -2297,3 +2297,31 @@ rejections checked by a second-generation native driver against hosted
 checking/execution on x86-64 and C. The adjacent aggregate-borrow/access and
 public-allocation/effect checks pass (29 and 106 existing hosted cases).
 These are bounded checks, not another complete pytest or fixed-point run.
+
+## Frame storage through nonescaping place calls (2026-09-21)
+
+Fixed scalar arrays and scalar records may now lend element/field addresses
+to known nonescaping callees while remaining in reusable frame storage. The
+public allocation checker and lowering consume the solved parameter escape
+summaries. Every possible target and argument position must establish the
+lifetime; unknown callbacks, captured owners, whole-container uses, resizing
+and the existing frame-size limit retain their restrictions. Forwarding,
+recursion and keyword argument pairing need no new source annotations.
+
+The effect collector retains call sites for the new proof, avoiding another
+whole-HIR traversal. The native borrow planner also exposes its already
+validated place sites to placement. Projection stability shares the route
+overlap query instead of constructing concatenated mutation/escape arrays.
+The new native escape proof updates its sets rather than rebuilding them at
+each call; this removes accidental repeated copying of the growing result.
+
+Validation: the new hosted cases and adjacent frame/projection checks passed
+(40 in the first run, with one additional rejection case corrected to avoid
+an unrelated bounds error; the corrected six new cases and 52 adjacent
+allocation/access checks pass). A second-generation native driver agrees with
+hosted checking on five execution kernels and 14 rejections on x86-64/C.
+The new 10,000-iteration kernel observes zero arena allocation while passing
+array-element and record-field addresses through helpers. Initial compiler
+inventory was 4,995 sites over 47,295 lines (105.614/KLOC), within the unchanged
+gates. That inventory precedes the final set-update cleanup; a fresh native
+fixed point and final inventory are the next integration check.

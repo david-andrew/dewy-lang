@@ -111,6 +111,7 @@ State:type = [
     frame_arrays:dict<addr ArrayMemory>=[]
     frame_records:dict<addr addr>=[]
     frame_record_bindings:set<addr>=set[]
+    nonescaping_places:set<addr>=set[]
     addressed:set<addr>=set[]
     place_parameters:set<addr>=set[]
     union_tags:dict<string addr>=[]
@@ -4349,7 +4350,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.cleanup_enabled=enabled state.cleanup_owned=set[] state.mutated_roots=mutated
     state.frame_boxes=[]
     state.frame_arrays=[] state.frame_records=[] state.frame_record_bindings=set[]
-    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes) {
+    loop [binding declaration_id] in placement.local_values(node state.input.nodes state.type_nodes state.nonescaping_places) {
         let declaration=hir.node_at(state.input.nodes declaration_id)
         $runtime_assert declaration is? hir.Declare
         let literal=hir.node_at(state.input.nodes declaration.expr)
@@ -4554,6 +4555,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     }
     let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers registry=source_registry)
     state.borrowed_arguments=borrowed.arguments
+    state.nonescaping_places=borrowed.nonescaping_places
     state.stable_bindings=borrowed.stable_bindings
     state.scoped_views=borrowed.scoped_views
     state.view_scopes=borrowed.view_scopes

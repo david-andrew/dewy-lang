@@ -1,0 +1,27 @@
+# Known helpers may borrow an element/field address without forcing its
+# bounded local owner into the arena. Forwarding and recursion retain that
+# lifetime proof, and loop iterations reuse the same frame storage.
+Point=type of [x:int64 y:int64]
+put=(@value:int64 n:int64):>void & mutates<value>=>{value=n}
+forward=(@value:int64 n:int64):>void & mutates<value>=>put(@value n)
+recursive=(@value:int64 count:int64):>void & mutates<value>=>{
+    if count>?0 {recursive(@value count-1)} else {forward(@value 40)}
+}
+work=(seed:int64):>int64 & no_effects=>{
+    let result:int64=0
+    loop i in 0.. and i<?10000 {
+        let xs:array<int64>=[0 2]
+        recursive(@xs[0] 2)
+        let point=Point[0 2]
+        forward(n=seed value=@point.x)
+        result=xs[0]+point.y
+        if point.x not=?seed return 1
+    }
+    return result
+}
+main=():>int64=>{
+    let before:int64=_arena_allocated_bytes
+    let result=work(40)
+    if _arena_allocated_bytes not=?before return 2
+    return result
+}

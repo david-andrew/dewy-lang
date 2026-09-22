@@ -42,7 +42,7 @@ from typing import Literal, NoReturn
 from ...parser import t0
 from ...reporting import Error, Pointer, Span, SrcFile
 from ...semantic import builtins, hir, ty
-from ...semantic.analyze.effects import ProgramEffects, _EffectAnalyzer
+from ...semantic.analyze.effects import ProgramEffects, _EffectAnalyzer, nonescaping_places
 from ...semantic.analyze import storage_borrows
 from ...semantic.errors import NotImplementedYet
 from ...semantic.hir_display import type_to_dewy
@@ -492,6 +492,7 @@ class _Lowerer(
         self.entry_name = entry_name
         analysis = _EffectAnalyzer(root)
         self.program_effects: ProgramEffects = analysis.solve()
+        self.nonescaping_places = nonescaping_places(analysis, self.program_effects)
         self.forwarded_values = storage_borrows.forwarded_values(analysis, self.program_effects)
 
     def _runtime_helper(self, name: str) -> _FunctionDef | None:

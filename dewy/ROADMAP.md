@@ -597,7 +597,13 @@ Scoped polymorphic place rows remain in progress. Bare
 `allocates` / `no allocates` now classify logical copies and aggregate
 construction; fixed scalar local arrays and scalar record literals now share
 a bounded nonescaping frame-placement proof with lowering. Native record
-storage is allocated once per function frame and reused across loop iterations. Read-only aggregate forwarding now shares its storage
+storage is allocated once per function frame and reused across loop iterations.
+Fixed local arrays and scalar records may lend field/element addresses through
+known nonescaping helpers, including forwarding and recursion, without losing
+frame placement. Unknown callbacks and whole-owner uses remain conservative.
+Projected writes and mutating place calls share their allocation obligations;
+an untouched sibling projection can still borrow its own storage.
+Read-only aggregate forwarding now shares its storage
 proof with allocation contracts, including records, strings and field/element
 projections of stable by-value parameters. Lifecycle operations, unknown
 callbacks, raw exposure and conflicting argument evaluation retain their
