@@ -13,7 +13,7 @@ source_at = (id:addr input:Input):>SrcFile => {
     $runtime_assert id <? input.sources.length
     return input.sources[id].srcfile
 }
-State:type = [input:Input source:SrcFile problem:Error?=none functions:dict<addr addr>=[] edges:dict<addr set<addr>>=[]]
+State:type = [input:Input source:SrcFile type_nodes:types.Table problem:Error?=none functions:dict<addr addr>=[] edges:dict<addr set<addr>>=[]]
 fail = (node:hir.AST title:string message:string @state:State):>void => {
     let pointer=Pointer[span=node.loc message=message]
     if state.problem is? none {state.problem=Error[srcfile=state.source title=title pointers=[pointer]]}
@@ -59,10 +59,30 @@ check_call = (node:hir.FunctionCall @state:State parameters:(set<addr>)?=none):>
     }
     return target
 }
+scalar_fact_type=(id:addr nodes:types.Table):>bool=>{
+    let node=types.node_at(nodes types.unfold(types.strip_refinement(id nodes) nodes))
+    if node is? types.IntegerLiteralType return true
+    return node is? types.Primitive and node.name in? ['int' 'uint' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'bool' 'true' 'false']
+}
 body = (id:addr parameters:set<addr> @dependencies:set<addr> @state:State):>void => {
     if state.problem isnt? none return
     let node=hir.node_at(state.input.nodes id)
-    if node is? hir.Block {loop item in node.items {body(item parameters @dependencies @state)} return}
+    if node is? hir.Block {
+        # A proof local names a checked mathematical value in this lexical
+        # block. It owns no runtime storage and cannot affect the caller.
+        let available=parameters
+        loop item in node.items {
+            body(item available @dependencies @state)
+            let declaration=hir.node_at(state.input.nodes item)
+            if declaration is? hir.Declare and declaration.binding_id isnt? none {available.add(declaration.binding_id)}
+        }
+        return
+    }
+    if node is? hir.Declare and node.decltype in? ['const' 'local_const'] and not node.view {
+        let value=hir.node_at(state.input.nodes node.expr)
+        if not scalar_fact_type(value.value_type state.type_nodes) or not fact_term(node.expr state.input parameters) {fail(node 'a proof local must be a scalar pure fact term' 'bind an integer, boolean, or trusted measure of an available value' @state)}
+        return
+    }
     if node is? hir.Void return
     if node is? hir.Suppress {body(node.item parameters @dependencies @state) return}
     if node is? hir.Return {
@@ -89,7 +109,7 @@ body = (id:addr parameters:set<addr> @dependencies:set<addr> @state:State):>void
         if node.default isnt? none {body(node.default parameters @dependencies @state)}
         return
     }
-    fail(node 'unsupported operation in a checked proof' 'the initial terminating subset permits assertions, branches, and direct calls of other proofs' @state)
+    fail(node 'unsupported operation in a checked proof' 'the terminating subset permits scalar const bindings, assertions, branches, and direct calls of other proofs' @state)
 }
 visit = (id:addr statement:bool @state:State):>void => {
     if state.problem isnt? none return
@@ -157,7 +177,7 @@ acyclic = (binding:addr @active:set<addr> @checked:set<addr> @state:State):>void
 }
 validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
     if session.proof_literals.length =? 0 return none
-    let state=State[Input[session.hir session.registry session.sources] source]
+    let state=State[Input[session.hir session.registry session.sources] source session.types]
     visit(root true @state)
     let active:set<addr>=set[]
     let checked:set<addr>=set[]

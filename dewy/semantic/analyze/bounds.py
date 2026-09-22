@@ -3216,6 +3216,8 @@ class _BoundsValidator:
             return Interval.exact(node.type.value)
         if isinstance(node, hir.Integer):
             return Interval.exact(node.value)
+        if isinstance(node, hir.Bool):
+            return Interval.exact(int(node.value))
         if isinstance(node, hir.ObjectLiteral) and node.integer_value is not None:
             return Interval.exact(node.integer_value)
         if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
@@ -5162,6 +5164,7 @@ class _BoundsValidator:
         hir.Suppress: _eval_suppress,
         hir.Obligation: _eval_obligation,
         hir.Integer: _eval_integer,
+        hir.Bool: lambda self, node, state, validate: Interval.exact(int(node.value)),
         hir.ExpressedIdentifier: _eval_expressed_identifier,
         hir.MemberAccess: _eval_member_access,
         hir.FunctionCall: _eval_call,

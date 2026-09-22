@@ -189,6 +189,7 @@ transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @
     let type=types.node_at(env.types node.value_type)
     if type is? types.IntegerLiteralType return ranges.exact(type.value)
     if node is? hir.Integer return ranges.exact(node.value)
+    if node is? hir.Bool return ranges.exact(if node.value 1 else 0)
     if node is? hir.ObjectLiteral and node.integer_value isnt? none return ranges.exact(node.integer_value)
     if node is? hir.ExpressedIdentifier return identifier(node state env)
     if node is? hir.ValueCast {

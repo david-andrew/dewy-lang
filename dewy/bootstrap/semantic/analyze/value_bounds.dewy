@@ -142,6 +142,7 @@ constant_expr = (id:addr nodes:array<hir.AST> type_nodes:types.Table registry:bi
     let value_type = types.node_at(type_nodes node.value_type)
     if value_type is? types.IntegerLiteralType return ranges.exact(value_type.value)
     if node is? hir.Integer return ranges.exact(node.value)
+    if node is? hir.Bool return ranges.exact(if node.value 1 else 0)
     if node is? hir.ObjectLiteral and node.integer_value isnt? none return ranges.exact(node.integer_value)
     if node is? hir.ValueCast | hir.RepresentationCast return constant_expr(node.expr nodes type_nodes registry @seen)
     if node is? hir.ArrayLength {

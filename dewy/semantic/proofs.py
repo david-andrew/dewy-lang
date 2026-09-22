@@ -43,6 +43,14 @@ def fact_term(node: hir.AST, parameters: set[int] | None = None) -> bool:
     return False
 
 
+def scalar_fact_type(type_: ty.Type) -> bool:
+    plain = ty.unfold(ty.strip_refinement(type_))
+    return isinstance(plain, ty.IntegerLiteralType) or isinstance(plain, str) and plain in {
+        'int', 'uint', 'int8', 'int16', 'int32', 'int64',
+        'uint8', 'uint16', 'uint32', 'uint64', 'bool', 'true', 'false',
+    }
+
+
 def validate(root: hir.AST, registry: bindings.BindingRegistry, source: SrcFile) -> None:
     if not any(binding.proof for binding in registry.by_id.values()):
         return
@@ -63,8 +71,15 @@ def validate(root: hir.AST, registry: bindings.BindingRegistry, source: SrcFile)
 
     def proof_body(node: hir.AST, parameters: set[int], dependencies: set[int], src: SrcFile) -> None:
         if isinstance(node, hir.Block):
+            available = set(parameters)
             for item in node.items:
-                proof_body(item, parameters, dependencies, src)
+                proof_body(item, available, dependencies, src)
+                if isinstance(item, hir.Declare) and item.binding_id is not None:
+                    available.add(item.binding_id)
+        elif isinstance(node, hir.Declare) and node.decltype in {'const', 'local_const'} and not node.view:
+            if not scalar_fact_type(node.expr.type) or not fact_term(node.expr, parameters):
+                fail(node, 'a proof local must be a scalar pure fact term',
+                     'bind an integer, boolean, or trusted measure of an available value', src)
         elif isinstance(node, hir.Void):
             pass
         elif isinstance(node, hir.Suppress):
@@ -86,7 +101,7 @@ def validate(root: hir.AST, registry: bindings.BindingRegistry, source: SrcFile)
             if node.default is not None:
                 proof_body(node.default, parameters, dependencies, src)
         else:
-            fail(node, 'unsupported operation in a checked proof', 'the initial terminating subset permits assertions, branches, and direct calls of other proofs', src)
+            fail(node, 'unsupported operation in a checked proof', 'the terminating subset permits scalar const bindings, assertions, branches, and direct calls of other proofs', src)
 
     def visit(node: hir.AST, statement: bool, src: SrcFile) -> None:
         if isinstance(node, hir.FunctionLiteral):

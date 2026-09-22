@@ -104,8 +104,11 @@ For the first implementation, proof evaluation is finite and acyclic:
 no unproved recursive proof cycles, effectful calls, allocation, unchecked
 assumptions, or diverging paths that could make a false conclusion appear
 vacuously true. Branches and calls to other checked proof functions can
-structure a larger argument. A future richer proof language can produce the
-same checked conclusion representation.
+structure a larger argument. Scalar `const` locals may name integer or boolean
+fact terms, including trusted measures of available parameters and earlier
+locals. They do not introduce resource ownership, mutable state or arbitrary
+runtime evaluation into the erased body. A future richer proof language can
+produce the same checked conclusion representation.
 
 Ordinary functions keep `:> T` and `:> T & <P>`. In particular,
 `:> void & <P>` is a real runtime function which returns nothing and

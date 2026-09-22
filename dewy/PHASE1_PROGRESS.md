@@ -3533,3 +3533,22 @@ interval oracle for both rounding rules. Three interval-kernel comparisons
 pass, and a fresh native driver agrees with hosted on three runtime and two
 rejection cases on x86-64/C. The seeded source inventory is 4,491 sites; a
 fresh integration checkpoint remains necessary. This count is not a timing.
+
+## Scalar locals in checked proofs (2026-09-22)
+
+A checked proof can now name intermediate integer and boolean facts with
+`const`, including trusted measures of its parameters and earlier locals.
+Lexical blocks retain their own available bindings. Mutable locals, aggregate
+owners, runtime calls and mutable enclosing reads remain outside this finite,
+effect-free erased subset. Returned facts still mention only parameters, and
+every normal exit must establish the conclusion.
+
+Both interval evaluators also retain literal boolean values through bindings:
+`const answer=true; $assert answer` now proves, while a false initializer or
+subsequent false assignment does not. This is ordinary fact propagation, not
+a proof-only exception.
+
+Validation: eleven focused hosted cases pass; the existing proof-boundary
+cases also pass. A fresh native driver agrees on four runtime and seven
+rejection cases, executing accepted programs on x86-64 and C. Aggregate local
+rejection protects erasure from hiding lifecycle effects.
