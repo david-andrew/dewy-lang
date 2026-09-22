@@ -2473,3 +2473,40 @@ compiler inventory is 4,992 sites over 47,474 lines (105.152/KLOC), within the
 unchanged gates; subsequent edits only clarify comments/tests. Artifacts use
 `../dewy-build-artifacts/phase1-frame-values-`. These are bounded checks, not a
 new full-suite or fixed-point certification.
+
+## Dictionary array views and hosted parity (2026-09-22)
+
+Proven dictionary array entries now lend their stored descriptors through the
+existing local-view lifetime proof. Read-only inferred bindings use the same
+route; explicit demands reject conflicting writes and temporary fallbacks.
+Returning a view or explicitly copying it still creates an independent value.
+Hosted checking now follows dictionary storage to its named owner, matching
+native checking for both record and array entry views.
+
+The compiler's storage analysis uses checked views for retained function bodies,
+local-owner maps, reverse call edges and parameter summaries. Function body
+inventories move into their table after the final local read. The native
+inventory falls from 4,992 to 4,986 sites over 47,487 lines (104.997/KLOC), with
+unchanged budgets. Ten hosted view cases and 61 adjacent lifetime checks pass;
+six runtime kernels and five rejections agree across hosted/native checking and
+x86-64/C execution. The eager-default case explicitly checks receiver mutation.
+
+The full hosted compiler build also exposed two parity gaps. Optional numeric
+calls and conditional `none` arms now retain common payload bounds without
+proving presence or preserving facts across assignment. Four execution cases
+and three rejections agree on both compiler/backend routes; 36 adjacent bounds
+checks pass. Read-only defaulted record parameters now borrow supplied values
+in hosted lowering. Cleanup uses the existing ABI presence bit, so only omitted
+defaults are owned locally. Mutable/escaping/resource parameters retain their
+existing ownership requirements. Ten selected parameter/default tests pass,
+and two repeated lifetime kernels agree on both compilers and backends.
+
+Checkpoint `eea60209` closes another three-generation direct bootstrap: the final
+Dewy and µDewy generations are byte-identical and runtime checks pass. Generation
+2/3 took 69/82 seconds with concurrent development, not isolated latency samples.
+The subsequent hosted-only default fix emits and links the complete compiler
+(54,290,861 bytes of µDewy); its executable reports the expected version. Full
+corpus parity is running separately. Artifacts use the
+`../dewy-build-artifacts/phase1-dictionary-views-`, `phase1-dictionary-array-views-`,
+`phase1-optional-conditional-bounds-` and `phase1-readonly-defaults-` prefixes.
+These checkpoints do not complete Phase 1 or certify a new full pytest run.
