@@ -2149,6 +2149,17 @@ class _ArrayLowering(_ArraySharing):
             return self._intrinsic_call('__store_i64__', [value, address], ty.VOID_TYPE, loc)
 
         setup: list[hir.AST] = []
+        # Options are ordinary argument values, evaluated once before any key
+        # invocation, including when the array is empty. Source keyword order
+        # survives normalization for this built-in's non-call ABI.
+        for option, expression in arguments.items():
+            before, value = self._extract_expression(expression)
+            saved = name('sort_' + option, expression.type)
+            setup.extend([*before, declare(saved, value, expression.type)])
+            if option == 'key':
+                key_function = saved
+            elif option == 'reverse':
+                reverse = saved
         mask: hir.ExpressedIdentifier | None = None
         if reverse is not None:
             # descending: complement every normalized key. The mask is the same
@@ -2218,7 +2229,12 @@ class _ArrayLowering(_ArraySharing):
                 [hir.Index(loc, element_type, method.array, index, None)], {},
             )
             key_prelude, key_value = self._extract_expression(key_call)
-            key_word = normalized(key_value, key_type)
+            # Materialize the callback result before bit normalization, as the
+            # native lowerer does. An indirect call nested inside a transmute
+            # is not a µDewy expression supported by its call parser.
+            key_result = name('sort_result', key_type)
+            key_prelude.append(declare(key_result, key_value, key_type))
+            key_word = normalized(key_result, key_type)
             record = add(records, times(index, record_bytes))
             setup.extend([
                 declare(records, self._arena_allocation(times(length, record_bytes), loc)),

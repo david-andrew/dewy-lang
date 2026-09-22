@@ -3102,6 +3102,11 @@ class _Lowerer(
                 name: self._require_node(self._transform_node(arg))
                 for name, arg in node.kw_args.items()
             }
+            if isinstance(func, hir.ArrayMethod) and func.name == 'sort':
+                # The built-in sorter consumes named options itself, rather
+                # than calling the ordinary function ABI. Retain source order
+                # instead of moving reverse/key into signature-order slots.
+                return replace(node, func=func, pos_args=transformed_pos, kw_args=transformed_kw)
             if source_function_type is not None:
                 normalized, source_positions, optional_payloads = (
                     self._normalize_call_arguments(

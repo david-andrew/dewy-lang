@@ -151,6 +151,22 @@ def inventory(root, registry):
                 supplied[str(index)] = subject
             return supplied
 
+        def callback(value):
+            # Sort invokes a value parameter for each selected element. Its
+            # body participates in the same equations as an ordinary call;
+            # evaluating a function handle alone does not account for that.
+            targets = analysis._value_targets(value)
+            if targets is not None:
+                for target in targets:
+                    if any(param.place for param in _literal_params(target)):
+                        unknown()
+                    else:
+                        contribute(rows.Contract(rows.Row(variables=(body_name(id(target)),))))
+            elif isinstance(value.type, ty.FunctionType) and not any(param.place for param in [*value.type.pos_or_kw, *value.type.kw_only]):
+                contribute(value.type.effects or rows.Contract())
+            else:
+                unknown()
+
         def projected_storage(path):
             # Mutating a projection can detach its owning aggregate. The
             # obligation is the same for a store and a forwarded place.
@@ -177,16 +193,17 @@ def inventory(root, registry):
             if isinstance(node, hir.FunctionCall):
                 if node.proof:
                     return
-                if isinstance(node.func, hir.ArrayMethod) and node.func.name in {'push', 'pop', 'insert', 'truncate', 'clear', 'reserve', 'join'}:
+                if isinstance(node.func, hir.ArrayMethod) and node.func.name in {'push', 'pop', 'insert', 'truncate', 'clear', 'reserve', 'join', 'sort'}:
                     # Growth, detachment, returned storage and implicit value
                     # copies need permission. COW postponement is not proof of
                     # no allocation. Lifecycle calls added later are checked
-                    # again; a sort callback deliberately keeps its own call
-                    # boundary instead of being classified as a plain method.
+                    # again. Sort additionally invokes its key callback.
                     access(node.func.array, 'reads')
                     if node.func.name != 'join':
                         access(node.func.array, 'mutates')
                     storage()
+                    if node.func.name == 'sort' and (key := node.kw_args.get('key')) is not None:
+                        callback(key)
                     for argument in [*node.pos_args, *node.kw_args.values()]:
                         visit(argument)
                     return
@@ -300,6 +317,12 @@ def inventory(root, registry):
                     storage()
                 for child in hir.children(node):
                     visit(child)
+                return
+            if (isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and ty.string_valued(node.type)
+                    and ty.string_valued(node.expr.type)):
+                # String/character/literal widening preserves the stored text;
+                # value boundaries account for any independent ownership.
+                visit(node.expr)
                 return
             if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and not scalar(node.type):
                 unknown()

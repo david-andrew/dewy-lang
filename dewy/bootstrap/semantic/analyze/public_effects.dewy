@@ -2,6 +2,7 @@ from reporting import SrcFile, Error, Pointer
 import p"../context.dewy" as contexts
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
+import p"../type_queries.dewy" as views
 import p"../bindings.dewy" as bindings
 import p"../effect_rows.dewy" as rows
 import p"../effect_inference.dewy" as inference
@@ -119,6 +120,29 @@ call_subjects = (call:hir.FunctionCall signature:types.FunctionType input:Input 
     }
     return supplied
 }
+# A sort key is called, not just evaluated as a function handle. Known
+# bodies share ordinary call equations; an indirect key retains its written
+# or inferred row. Sort passes a value, so no place-slot rebinding is needed.
+callback=(id:addr input:Input @scan:Scan):>void=>{
+    let targets=access.value_targets(id none input.analysis input.nodes)
+    if targets isnt? none {
+        loop target in targets {
+            let literal=hir.node_at(input.nodes target)
+            $runtime_assert literal is? hir.FunctionLiteral
+            let places=false
+            loop param in access.literal_params(literal) {if param.place {places=true}}
+            if places {unknown(@scan)}
+            else {contribute(rows.Contract[rows.Row[variables=[body_name(target)]]] @scan)}
+        }
+        return
+    }
+    let signature=types.node_at(input.types hir.node_at(input.nodes id).value_type)
+    if signature is? types.FunctionType {
+        loop param in signature.pos_or_kw {if param.place {unknown(@scan) return}}
+        loop param in signature.kw_only {if param.place {unknown(@scan) return}}
+        contribute(if signature.effects is? none rows.Contract[] else signature.effects @scan)
+    } else {unknown(@scan)}
+}
 visit = (id:addr input:Input @scan:Scan):>void => {
     let node=hir.node_at(input.nodes id)
     if node is? hir.ValueCast and node.effect_target isnt? none {visit(node.expr input @scan) return}
@@ -130,12 +154,14 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     if node is? hir.FunctionCall {
         if node.proof return
         let method=hir.node_at(input.nodes node.func)
-        if method is? hir.ArrayMethod and method.name in? ['push' 'pop' 'insert' 'truncate' 'clear' 'reserve' 'join'] {
+        if method is? hir.ArrayMethod and method.name in? ['push' 'pop' 'insert' 'truncate' 'clear' 'reserve' 'join' 'sort'] {
             # Storage permission includes logical copies and COW detachments.
-            # Sort callbacks keep their distinct, currently unknown boundary.
+            # Sort callbacks contribute their distinct call boundary.
             record_access(method.array 'reads' input @scan)
             if method.name not=? 'join' {record_access(method.array 'mutates' input @scan)}
             storage(@scan)
+            let key=node.kw_args.get('key')
+            if method.name =? 'sort' and key isnt? none {callback(key input @scan)}
             loop arg in node.pos_args {visit(arg input @scan)}
             loop arg in node.kw_args.values {visit(arg input @scan)}
             return
@@ -249,6 +275,11 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         if id not in? scan.frame_literals and not scalar(node.value_type input.types) {storage(@scan)}
         loop child in hir.children(node) {visit(child input @scan)}
         return
+    }
+    if node is? hir.ValueCast|hir.RepresentationCast and views.string_valued(node.value_type input.types) and views.string_valued(hir.node_at(input.nodes node.expr).value_type input.types) {
+        # Widening a stored string/literal preserves the text. Independent
+        # value boundaries retain their ordinary storage permission.
+        visit(node.expr input @scan) return
     }
     if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {unknown(@scan) return}
     if node is? hir.IteratorExpression {

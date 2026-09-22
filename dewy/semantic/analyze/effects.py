@@ -838,7 +838,9 @@ def analyze_global_writes(root: hir.AST, globals: set[int]) -> dict[int, set[int
     targets = {
         # A checked intrinsic has no lexical binding. integer_operation is
         # numeric meaning, not a purity promise for a library implementation.
-        key: [] if isinstance(call.func, hir.ArrayMethod) or (
+        key: (analysis._value_targets(call.kw_args['key'])
+              if call.func.name == 'sort' and 'key' in call.kw_args else [])
+        if isinstance(call.func, hir.ArrayMethod) else [] if (
             isinstance(call.func, hir.ExpressedIdentifier) and call.func.binding_id is None
         ) else analysis._direct_targets(call)
         for key, call in calls.items()
