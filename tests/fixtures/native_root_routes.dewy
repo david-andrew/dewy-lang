@@ -7,17 +7,18 @@ main=():>int64=>{
     let loc=Span[0 0]
     let last:addr=0
     let expected:addr=0
+    let sibling:addr=0
     loop i in 0..511 {
         last=bindings.allocate(@registry none 'owner' 'value' loc)
         expected=bindings.route_id(@registry last ['bag' 'a'] 0 loc)
-        bindings.route_id(@registry last ['bag' 'b'] 0 loc);
+        sibling=bindings.route_id(@registry last ['bag' 'b'] 0 loc)
     }
     let before:int64=_arena_allocated_bytes
     loop i in 0..9999 {
         if bindings.route_id(@registry last ['bag' 'a'] 0 loc) not=? expected return 1
         let selected=bindings.routes_under(registry last ['bag'])
         if selected.length not=? 2 return 2
-        if selected[0] not=? expected or selected[1] not=? expected+1 return 3
+        if selected[0] not=? expected or selected[1] not=? sibling return 3
     }
     printl(_arena_allocated_bytes-before)
     return 42

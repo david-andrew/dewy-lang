@@ -45,11 +45,10 @@ Binding:type = [
 GenericInstance:type = [generic:addr type_arguments:dict<string addr> context:addr effect_arguments:dict<string effect_rows.Contract>=[]]
 Route:type = const [id:addr root:addr path:array<string>]
 Registry:type = [
+    # Odd declarations and even routes are disjoint at every program size.
+    # Lazy validation-only routes must not shift later declaration identities.
     next_id:addr=1
-    # Keep validation-only route allocation separate from declaration ids.
-    # The hosted bounds pass packs ids in 20 bits; retain its route range for
-    # now. The native fact representation must not silently truncate an id.
-    next_route_id:addr=524288
+    next_route_id:addr=2
     # Value snapshots share these small binding pages. Updating one binding
     # copies its page and the page index, rather than every binding record in
     # the compilation. Sparse validation ids use the same address space.
@@ -104,7 +103,7 @@ binding_at = (registry:Registry id:addr):>Binding => {
 
 allocate = (@registry:Registry syntax:addr? name:string kind:BindingKind loc:Span):>addr => {
     let id = registry.next_id
-    registry.next_id += 1
+    registry.next_id += 2
     store_binding(@registry id Binding[id=id name=name kind=kind loc=loc syntax=syntax])
     if syntax isnt? none { registry.by_syntax[syntax] = id }
     return id
@@ -131,7 +130,7 @@ route_id = (@registry:Registry root:addr path:array<string> value_type:addr loc:
     }
     let owner = binding_at(registry root)
     let id = registry.next_route_id
-    registry.next_route_id += 1
+    registry.next_route_id += 2
     store_binding(@registry id Binding[id=id name="{owner.name}.{path.join('.')}" kind='value' loc=loc value_type=value_type route_root=root])
     routes.push(Route[id=id root=root path=path])
     registry.routes_by_root[root]=routes

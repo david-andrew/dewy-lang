@@ -57,8 +57,10 @@ class Binding:
 class BindingRegistry:
     """Allocate identities and retain semantic metadata for checked HIR."""
 
+    # Independent odd/even spaces keep lazy analysis routes from shifting
+    # declaration identities, without an arbitrary boundary that can overlap.
     next_id: int = 1
-    next_route_id: int = 1 << 19  # member-route bindings (see `route_id`); ids stay below the bounds analysis's 20-bit fact packing
+    next_route_id: int = 2
     by_id: dict[int, Binding] = field(default_factory=dict)
     by_syntax: dict[int, Binding] = field(default_factory=dict)
     route_ids: dict[tuple[int, tuple[str, ...]], int] = field(default_factory=dict)
@@ -76,6 +78,36 @@ class BindingRegistry:
         # address and accidentally complete an unrelated binding.
         self.by_syntax = {id(binding.syntax): binding for binding in self.by_syntax.values()}
 
+    def rollback_allocations(self, next_id: int, next_route_id: int) -> None:
+        """Discard a compile's added declarations/routes from a resident prelude.
+
+        Each cursor governs only its own kind. Route ids can be numerically
+        above an earlier declaration cursor and still belong to the prelude.
+        """
+        if self.next_id != next_id:
+            for binding_id in [key for key, binding in self.by_id.items()
+                               if binding.route_root is None and key >= next_id]:
+                del self.by_id[binding_id]
+            self.by_syntax = {key: binding for key, binding in self.by_syntax.items()
+                              if binding.id < next_id}
+            self.next_id = next_id
+        if self.next_route_id != next_route_id:
+            for route_id in [key for key in self.route_paths if key >= next_route_id]:
+                binding = self.by_id.pop(route_id)
+                path = self.route_paths.pop(route_id)
+                root = binding.route_root
+                del self.route_ids[root, path]
+                routes = self.routes_by_root[root]
+                routes.remove(route_id)
+                if not routes:
+                    del self.routes_by_root[root]
+            self.next_route_id = next_route_id
+        self.index_routes = {
+            binding: kept for binding, routes in self.index_routes.items()
+            if binding in self.by_id
+            and (kept := {route for route in routes if route in self.route_paths})
+        }
+
     def route_id(self, root_id: int, path: tuple[str, ...], type_: ty.Type, loc: Span) -> int:
         """A stable id for the member route ``root.path``, allocated on first use."""
         key = (root_id, path)
@@ -83,12 +115,12 @@ class BindingRegistry:
         if existing is not None:
             return existing
         root = self.by_id[root_id]
-        # routes have their own id range: they are allocated lazily (also by
+        # routes have their own id sequence: they are allocated lazily (also by
         # the analyses after checking), so sharing `next_id` would let a
         # validation-only compile shift every later binding id
         binding = Binding(self.next_route_id, f'{root.name}.{".".join(path)}', 'value', loc, type_)
         binding.route_root = root_id
-        self.next_route_id += 1
+        self.next_route_id += 2
         self.by_id[binding.id] = binding
         self.route_ids[key] = binding.id
         self.routes_by_root.setdefault(root_id, []).append(binding.id)
@@ -114,14 +146,14 @@ class BindingRegistry:
     ) -> Binding:
         binding = Binding(self.next_id, name, kind, loc)
         binding.syntax = syntax
-        self.next_id += 1
+        self.next_id += 2
         self.by_id[binding.id] = binding
         self.by_syntax[id(syntax)] = binding
         return binding
 
     def allocate_param(self, name: str, type_: ty.Type, loc: Span) -> Binding:
         binding = Binding(self.next_id, name, 'param', loc, type_)
-        self.next_id += 1
+        self.next_id += 2
         self.by_id[binding.id] = binding
         return binding
 

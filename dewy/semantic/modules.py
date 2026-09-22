@@ -86,27 +86,7 @@ class _ResidentPrelude:
     def rollback(self) -> None:
         state = self.state
         registry = state['registry']
-        if registry.next_id != self.next_id:
-            for binding_id in [item for item in registry.by_id if item >= self.next_id]:
-                del registry.by_id[binding_id]
-            for key in [key for key, binding in registry.by_syntax.items() if binding.id >= self.next_id]:
-                del registry.by_syntax[key]
-            registry.next_id = self.next_id
-        if registry.next_route_id != self.next_route_id:
-            for route_id in [item for item in registry.route_paths if item >= self.next_route_id]:
-                path = registry.route_paths.pop(route_id)
-                for root_id, routes in registry.routes_by_root.items():
-                    if route_id in routes:
-                        routes.remove(route_id)
-                registry.route_ids = {key: value for key, value in registry.route_ids.items() if value != route_id}
-            registry.next_route_id = self.next_route_id
-        # Selector dependencies are analysis-created route identities too.
-        # Resident reuse must discard routes created by the previous program.
-        registry.index_routes = {
-            binding: kept for binding, routes in registry.index_routes.items()
-            if binding in registry.by_id
-            and (kept := {route for route in routes if route in registry.route_paths})
-        }
+        registry.rollback_allocations(self.next_id, self.next_route_id)
         state['records'].clear()
         state['records'].update(self.records)
         state['included_files'].clear()

@@ -6,13 +6,17 @@ let allocated=():>int64=>_arena_allocated_bytes
 let exercise=(count:addr & ~0):>int64=>{
     let registry=bindings.Registry[]
     let loc=Span[0 1]
+    let ids:array<addr>=[]
     loop i in 0.. and i <? count {
-        bindings.allocate(@registry none 'entry' 'value' loc);
+        ids.push(bindings.allocate(@registry none 'entry' 'value' loc))
     }
+    $runtime_assert ids.length >? 0
     let initial=registry
     let before=allocated()
     loop i in 0.. and i <? 64 {
-        let id=1+(i*31)%count
+        let index=(i*31)%ids.length
+        $runtime_assert 0 <=? index <? ids.length
+        let id=ids[index]
         let saved=registry
         let binding=bindings.binding_at(registry id)
         let previous=binding.value_type

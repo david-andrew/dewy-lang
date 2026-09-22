@@ -56,6 +56,17 @@ main = ():>int64 => {
     if bindings.routes_under(registry second []).length not=? 0 return 24
     if bindings.routes_under(saved first []).length not=? 2 return 25
 
+    # Crossing the former fixed route range must not overwrite a route.
+    registry.next_id=524287
+    let near=bindings.allocate(@registry none 'near' 'value' loc)
+    let beyond=bindings.allocate(@registry none 'beyond' 'value' loc)
+    let later=bindings.route_id(@registry first ['later'] 0 loc)
+    if bindings.binding_at(registry near).name not=? 'near' return 26
+    if bindings.binding_at(registry beyond).name not=? 'beyond' return 27
+    if bindings.route_at(registry route) is? none return 28
+    if near =? later or beyond =? later return 29
+    if bindings.allocate_param(@registry 'next' 0 loc) not=? 524291 return 30
+
     let nodes:array<hir.AST> = []
     let root = hir.append_node(@nodes hir.ExpressedIdentifier[loc=loc value_type=0 name='x' binding_id=first])
     let bag = hir.append_node(@nodes hir.MemberAccess[loc=loc value_type=0 value=root name='bag'])

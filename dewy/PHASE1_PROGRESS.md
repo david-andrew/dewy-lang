@@ -3234,3 +3234,20 @@ packing boundaries. All 56 selected proof/loop checks passed (including three
 paired native kernels), as did four direct native analysis comparisons.
 Artifacts use `phase1-structural-facts-*`. This removes an identity limit; it
 does not claim to complete the general liquid qualifier engine.
+
+## Disjoint binding and route allocation (2026-09-22)
+
+Declaration ids are odd and lazily allocated projection ids are even in both
+compilers. The independent sequences preserve declaration identities when
+validation adds routes, without the previous overlap at 524,288 declarations.
+No cache schema changed: hosted source digests and native executable identities
+already invalidate old snapshots. Resident-prelude rollback now removes each
+kind using its own cursor and removes all associated route metadata; it no
+longer discards older routes merely because their numeric ids are large.
+
+Eighteen initial checks passed, including cache reuse and native allocation;
+an allocation fixture exposed its assumption that adjacent route ids differ
+by one. Fixtures now retain allocated identities. Both repaired native binding
+checks passed, followed by twelve hosted/native x86-64/C executions covering
+small/large snapshot tables and repeated subtree queries. Existing 4 MB/25 MB
+allocation budgets passed unchanged. Artifacts use `phase1-binding-ids-*`.
