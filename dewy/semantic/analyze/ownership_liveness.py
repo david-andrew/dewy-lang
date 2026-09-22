@@ -83,7 +83,7 @@ def conditional_consumptions(body, parameter_owners, resource):
                 candidates.add(id(value))
 
     consumes = {}
-    def visit(node, after, enabled):
+    def visit(node, after, enabled, exits=()):
         live = set(after)
         if isinstance(node, hir.ExpressedIdentifier):
             if node.binding_id in enabled and id(node) in candidates and not any(node.binding_id in roots(binding) for binding in live):
@@ -92,15 +92,19 @@ def conditional_consumptions(body, parameter_owners, resource):
             return live
         if isinstance(node, hir.FunctionLiteral):
             return live | reads(node)
+        if isinstance(node, (hir.Break, hir.Continue)) and node.loop_levels < len(exits):
+            continuation = exits[-1-node.loop_levels]
+            return set(continuation[0 if isinstance(node, hir.Break) else 1])
         if isinstance(node, hir.Return):
-            return visit(node.item, set(), owners) if node.item is not None else set()
+            return visit(node.item, set(), owners, exits) if node.item is not None else set()
         if isinstance(node, hir.Flow):
-            following = visit(node.default, live, enabled) if node.default is not None else live
+            following = visit(node.default, live, enabled, exits) if node.default is not None else live
             for arm in reversed(node.arms):
                 if isinstance(arm, hir.LoopArm):
-                    # New iteration locals are born again after a backedge;
-                    # outer owners are not. Only the former can be consumed
-                    # on a repeating path. A return has no backedge at all.
+                    # Backedges keep every repeatedly read outer owner live.
+                    # A break bypasses that edge and the loop's else arms;
+                    # only uses after this flow remain live on that path.
+                    # Nested loops retain their enclosing continuation.
                     born, pending = set(), [arm.body]
                     while pending:
                         child = pending.pop()
@@ -110,16 +114,17 @@ def conditional_consumptions(body, parameter_owners, resource):
                             born.add(child.binding_id)
                         pending.extend(hir.children(child))
                     repeated = (following | live | reads(arm)) - born
-                    visit(arm.body, repeated, enabled & born)
-                    following = visit(arm.condition, repeated, set())
+                    nested = (*exits, (live, repeated))
+                    visit(arm.body, repeated, enabled, nested)
+                    following = visit(arm.condition, repeated, set(), nested)
                 else:
-                    taken = visit(arm.body, live, enabled)
-                    following = visit(arm.condition, following | taken, enabled)
+                    taken = visit(arm.body, live, enabled, exits)
+                    following = visit(arm.condition, following | taken, enabled, exits)
             return following
         if isinstance(node, hir.Declare):
             live.discard(node.binding_id)
         for child in reversed(tuple(hir.children(node))):
-            live = visit(child, live, enabled)
+            live = visit(child, live, enabled, exits)
         return live
     visit(body, set(), owners)
     return consumes, declarations

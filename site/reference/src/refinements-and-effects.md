@@ -316,6 +316,18 @@ An effect describes observable behavior relevant beyond a function's return valu
 
 Effects propagate through calls. A caller may preserve a refinement or borrow storage only when the callee's effects prove that behavior safe. Unresolved indirect calls require a conservative effect contract.
 
+Omitted function rows are inferred from bodies and checked callable assignments.
+Each call translates effects on the callee's place parameters into the caller's
+actual arguments. Reordering parameters or passing a field does not change the
+identity of the storage being described. Inferred callback rows retain this
+mapping until their behavior is known, including through reassigned handles.
+
+Negative guarantees retain their scope: `no mutates<box.field>` does not promise
+`no mutates<box>`. Unknown behavior cannot establish a missing guarantee.
+User-written generic rows with callback-relative place subjects still have
+conservative implementation limits; nominal resource rows and their negative
+guarantees can be forwarded through `<E:Effect>`.
+
 `noreturn` is a control-flow guarantee that a function cannot return to its caller. It is kept separate from the may-effect row: permitting fewer possible effects does not imply that a call never returns.
 
 Expected failures remain [error alternatives in the return type](errors-and-forwarding.md), not members of the effect set. A contract may contain both a returned error union and effects, but `|` combines the returned alternatives while the effect syntax describes evaluation behavior separately.

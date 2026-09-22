@@ -2587,3 +2587,26 @@ checks. Generation 2/3 took 66/81 seconds during concurrent work, not isolated
 latency samples. The certified pair is
 `../dewy-build-artifacts/phase1-scoped-effects-e145a7f2`; the preceding 211-case
 corpus result belongs to the dictionary-view checkpoint.
+
+
+## Ownership at loop exits (2026-09-22)
+
+Logical ownership liveness now follows the selected loop continuation for
+`break` and `continue`, including labeled exits. Repeating paths retain outer
+owners; a break path may transfer one at its last use when nothing after the
+selected loop needs it. Nested loops retain the enclosing continuation, so
+breaking only the inner loop cannot consume an owner needed on the next outer
+iteration. Existing alias/capture checks and conditional cleanup flags remain
+authoritative. Custom move hooks and owning parameters use the same path proof.
+No new move syntax or resource representation is introduced.
+
+Validation: 36 focused hosted loop/branch checks pass. A second-generation
+native driver passes 19 runtime kernels and 16 rejection cases against hosted
+checking on x86-64/C, including labeled exits, live aliases, continued paths,
+custom moves, drop counts and repeated-call retained-memory checks. The native
+inventory is **4,411 sites over 47,551 lines (92.764/KLOC)** in the isolated
+checkout, within the 4,500/100 gates. The reference now describes scoped effect
+inference and the supported conditional resource transfers. Artifacts use
+`../dewy-build-artifacts/phase1-loop-exit-` prefixes. The latest complete native
+fixed point remains `e145a7f2`; this is a bounded second-generation ownership
+checkpoint, not completion of Phase 1.

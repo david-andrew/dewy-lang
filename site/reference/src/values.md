@@ -164,9 +164,16 @@ hook invocation occurs.
 Cleanup supports nested records, arrays and optional/union owners, including
 recursive records linked through optional fields. A parent's hook runs before
 its fields are cleaned up in reverse order; arrays clean up elements in reverse
-order. Conditional consumption of outer owners, general field transfers and
-resource dictionaries still need further ownership analysis. Recursion through
-`array<Self>` is a separate unsupported type shape.
+order. Resource dictionaries clean up live values and transfer ownership on
+removal; independent snapshots invoke the component copy hooks.
+
+Conditional transfers follow the path that executes. An owner created outside
+a loop can move on a path that exits with `break`, including a labeled exit,
+when no later use or live alias needs it. A path that continues the loop still
+needs the owner for later iterations. For example, an owning `consume(owner)`
+immediately followed by `break` can move; following it with `continue` cannot.
+General field transfers and dictionary-entry place lifetimes remain
+conservative.
 
 The broader typed allocation capabilities remain provisional. Their direction
 is recorded in the compiler's [`user_managed_storage.md`](https://github.com/david-andrew/dewy-lang/blob/main/dewy/semantic/user_managed_storage.md) note.
