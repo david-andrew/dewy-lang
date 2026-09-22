@@ -2579,3 +2579,11 @@ checkout, within the tighter 4,500/100 gates. Artifacts use
 `../dewy-build-artifacts/phase1-scoped-inferred-` prefixes. The latest certified
 full fixed point remains the preceding string-view checkpoint; this slice has
 second-generation execution checks. Phase 1 remains in progress.
+
+
+Integration checkpoint: `e145a7f2` completed the three-generation direct x86-64
+bootstrap with byte-identical final Dewy and µDewy binaries and passing runtime
+checks. Generation 2/3 took 66/81 seconds during concurrent work, not isolated
+latency samples. The certified pair is
+`../dewy-build-artifacts/phase1-scoped-effects-e145a7f2`; the preceding 211-case
+corpus result belongs to the dictionary-view checkpoint.
