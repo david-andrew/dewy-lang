@@ -45,7 +45,7 @@ let main = ():>int => {
     assert declarations['both'].op == 'and'
 
 
-def test_assignment_is_void_and_retains_compound_operator() -> None:
+def test_assignment_is_void_and_retains_checked_arithmetic() -> None:
     body = _main_body("""
 let main = ():>int => {
     let x:int = 40
@@ -56,7 +56,11 @@ let main = ():>int => {
 """)
     assignments = [item for item in body.items if isinstance(item, hir.Assign)]
 
-    assert [assignment.op for assignment in assignments] == ['=', '+=']
+    assert [assignment.op for assignment in assignments] == ['=', '=']
+    for assignment in assignments:
+        assert isinstance(assignment.value, hir.FunctionCall)
+        assert isinstance(assignment.value.func, hir.ExpressedIdentifier)
+        assert assignment.value.func.name == '__add__'
     assert all(assignment.type == ty.VOID_TYPE for assignment in assignments)
     assert all(assignment.target.name == 'x' for assignment in assignments)
 

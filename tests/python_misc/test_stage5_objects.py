@@ -151,7 +151,10 @@ def test_expression_function_body_allows_grouped_compound_assignment() -> None:
     assert len(declaration.expr.body.items) == 1
     assignment = declaration.expr.body.items[0]
     assert isinstance(assignment, hir.Assign)
-    assert assignment.op == '+='
+    assert assignment.op == '='
+    assert isinstance(assignment.value, hir.FunctionCall)
+    assert isinstance(assignment.value.func, hir.ExpressedIdentifier)
+    assert assignment.value.func.name == '__add__'
 
 
 def test_ungrouped_compound_assignment_function_body_suggests_grouping() -> None:

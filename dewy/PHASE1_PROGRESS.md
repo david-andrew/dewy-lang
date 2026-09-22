@@ -3450,3 +3450,19 @@ Validation: 19 focused hosted bounds/runtime tests pass; four compound
 refinement/native interval kernel tests pass. A fresh native driver agrees
 on six runtime and five rejection cases with x86-64/C execution. The broader
 combined checkpoint, including the separate remainder relations, follows.
+
+## Remainder integration checkpoint (2026-09-22)
+
+Source `2cae5f76` completes a three-generation direct x86-64 bootstrap; both
+compilers are byte-identical between generations 2 and 3, and the pair passes
+x86-64/C pipeline execution. Generations 2/3 took 151/144 seconds during
+concurrent validation, not an isolated latency measurement. Its fresh native
+inventory is 4,500 sites and 92.298/KLOC, meeting both existing budgets.
+Artifacts use `phase1-remainder-*`.
+
+The broad Python selection excluding `bootstrap` and `native` names reports
+3,787 passes, 14 skips and two stale HIR-shape assertions. Both expected a
+retained `+=` operator; they now check the ordinary assignment and preserved
+checked `__add__` call. The two complete containing test modules pass all
+34 tests afterward. The former imported native-driver build failure is fixed.
+This does not certify all-route pytest/CI or complete Phase 1.
