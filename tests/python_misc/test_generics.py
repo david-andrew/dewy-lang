@@ -1,5 +1,6 @@
 """User generic functions: instantiation per call, hoisted instances, and the rejections."""
 import subprocess
+from dataclasses import replace
 
 import pytest
 
@@ -52,9 +53,14 @@ let main = ():>int64 => {
     assert isinstance(generic, hir.GenericFunction) and generic.type.type_params[0].name == 'T'
     assert isinstance(declared['first__int64'].expr, hir.FunctionLiteral)
     assert isinstance(declared['first__string'].expr, hir.FunctionLiteral)
-    assert declared['first__int64'].expr.type == ty.FunctionType(
+    signature = declared['first__int64'].expr.type
+    assert replace(signature, effects=None) == ty.FunctionType(
         [ty.PosOrKwArg('xs', ty.ArrayType('int64', None))], [], None, ty.optional('int64'),
     )
+    # Each instance retains its own body-inferred effects. Omitting a row
+    # on a literal no longer gives it the unknown row of a callback annotation.
+    assert signature.inferred_effect is not None
+    assert signature.inferred_effect != declared['first__string'].expr.type.inferred_effect
     instance_names = [item.name for item in _root(FIRST + "let main = ():>int64 => { let xs:array<int64> = [1] let a = first(xs) let b = first(xs) return 0 }\n").items if item.name.startswith('first__')]
     assert instance_names == ['first__int64']  # one instance per distinct binding
 
