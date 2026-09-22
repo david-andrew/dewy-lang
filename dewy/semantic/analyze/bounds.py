@@ -1751,7 +1751,13 @@ class _BoundsValidator:
         and the arms join as states — a value conditional evaluated as an
         expression would keep only the union of the arms' intervals."""
 
+        binding = node.binding_id if isinstance(node, hir.Declare) else node.target.binding_id
+        optional = isinstance(flow.type, ty.TypeOr) and 'none' in flow.type.items
+        payload_intervals: list[Interval | None] = []
+        absent = False
+
         def bind(body: hir.AST, arm_state: State) -> State:
+            nonlocal absent
             current = dict(arm_state)
             value = body
             local_ids: set[int] = set()
@@ -1765,6 +1771,12 @@ class _BoundsValidator:
             else:
                 rebound = replace(node, expr=value) if isinstance(node, hir.Declare) else replace(node, value=value)
                 current = self._analyze(rebound, current, validate=validate)
+                if optional:
+                    if value.type == 'none':
+                        absent = True
+                    else:
+                        interval = current.get(binding)
+                        payload_intervals.append(interval if interval is not None else self._declared_type_interval(value.type))
             for binding_id in local_ids:
                 current.pop(binding_id, None)
             return current
@@ -1791,7 +1803,14 @@ class _BoundsValidator:
                 exits.append(exit_state)
         elif flow.default is None and remaining is not None:
             exits.append(remaining)
-        return dict(state) if not exits else self._join_states(exits)
+        joined = dict(state) if not exits else self._join_states(exits)
+        # An absent optional arm has no numeric payload to widen. Preserve
+        # only payload bounds here, never presence or unrelated branch facts.
+        # Every value-producing arm must supply evidence; a nonnumeric or
+        # unconstrained alternative keeps the ordinary conservative join.
+        if absent and binding is not None and payload_intervals and all(part is not None for part in payload_intervals):
+            joined[binding] = _union_intervals(payload_intervals)
+        return joined
 
     def _analyze_flow(
         self,
@@ -3099,6 +3118,14 @@ class _BoundsValidator:
         refined_result = _call_result_refinement(node)
         if refined_result is not None:
             declared = self._bounds_of(refined_result.propositions)   # `:>addr`: a capped `[0, 2^bits)`
+            if declared is not None:
+                result = declared if result is None else result.intersect(declared)
+        elif called is not None and isinstance(called.ret, ty.TypeOr):
+            # Joining an optional call with another conditional arm must keep
+            # the bounds shared by every numeric payload. This says nothing
+            # about presence, and an unrefined/non-numeric alternative cannot
+            # inherit another alternative's stronger contract.
+            declared = self._declared_type_interval(called.ret)
             if declared is not None:
                 result = declared if result is None else result.intersect(declared)
         if validate and arithmetic and node.type in ('int', 'uint'):
