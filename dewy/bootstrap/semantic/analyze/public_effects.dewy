@@ -20,7 +20,7 @@ scalar = (id:addr nodes:types.Table):>bool => {
     if node is? types.IntegerLiteralType return node.value >=? -9223372036854775808 and node.value <? 18446744073709551616
     return node is? types.Primitive and node.name in? ['void' 'never' 'none' 'bool' 'true' 'false' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64']
 }
-Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[] borrowed_arguments:dict<addr set<addr>>=[]]
+Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[] borrowed_arguments:dict<addr set<addr>>=[] local_views:set<addr>=set[]]
 Call:type = const [source:rows.Contract subjects:dict<string rows.Subject?>]
 Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[] value_parameters:set<addr>=set[] frame_values:set<addr>=set[] frame_literals:set<addr>=set[]]
 Location:type = const [known:bool subject:rows.Subject?=none]
@@ -260,7 +260,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     if node is? hir.Declare {
         let value=hir.node_at(input.nodes node.expr)
         # A required view has no copy fallback: lowering proves or rejects it.
-        if not node.view and (node.binding_id is? none or node.binding_id not in? scan.frame_values) and not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral and types.node_at(input.types value.value_type) isnt? types.FunctionType|types.OverloadType {storage(@scan)}
+        if not node.view and (node.binding_id is? none or (node.binding_id not in? scan.frame_values and node.binding_id not in? input.local_views)) and not scalar(value.value_type input.types) and value isnt? hir.String|hir.FunctionLiteral and types.node_at(input.types value.value_type) isnt? types.FunctionType|types.OverloadType {storage(@scan)}
         visit(node.expr input @scan)
         return
     }
@@ -318,8 +318,9 @@ inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
     let analysis=access.collect_roots(roots session.hir)
     let access_summaries=access.analyze_collected(analysis session.hir session.types)
     let frame_places=access.place_loans(analysis access_summaries session.hir session.types)
-    let borrowed=storage_borrows.forwarded_values(analysis access_summaries session.hir session.types session.registry)
-    let input=Input[session.hir session.types session.registry analysis access_summaries word_iterators borrowed]
+    let storage_proofs=storage_borrows.prove(analysis access_summaries session.hir session.types session.registry)
+    let borrowed=storage_proofs.arguments
+    let input=Input[session.hir session.types session.registry analysis access_summaries word_iterators borrowed storage_proofs.local_views]
     let local:dict<addr rows.Contract>=[]
     let projections:dict<string inference.Projection>=[]
     loop id in analysis.literals {

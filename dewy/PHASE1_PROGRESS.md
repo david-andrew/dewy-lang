@@ -3161,3 +3161,21 @@ seconds under concurrent work, not isolated benchmark conditions.
 Artifacts: `phase1-union-views-582fbe53`, `phase1-union-views-bootstrap.log`,
 `phase1-union-views-inventory.json`, `phase1-union-views-broad.log`, and
 `phase1-indexed-facts-broad.log`.
+
+## Shared local-view allocation evidence (2026-09-22)
+
+The storage-borrow analysis now returns local-view evidence alongside its
+argument proofs. Allocation contracts and both lowerers consume that evidence.
+An unwritten, uncaptured field/element read from an ordinary read-only by-value
+parameter can therefore satisfy `no allocates` or `no_effects`. The proof
+requires identical stored/read representations and excludes lifecycle hooks,
+raw/nonlocal exposure and unresolved calls. More precise scoped lowerer views
+remain conservative in source allocation contracts.
+
+Validation: 182 adjacent hosted checks and 28 focused hosted checks passed.
+A fresh native driver passed nine runtime cases and five rejections against
+hosted compilation on x86-64/C. A caller-side allocation counter verifies a
+contracted union view creates no storage. Mutated locals, replaced sources,
+escaping results and runtime-sized explicit copies still require allocation;
+fixed scalar copies retain their existing frame-placement permission. Artifacts
+use `phase1-local-view-effects-*`.

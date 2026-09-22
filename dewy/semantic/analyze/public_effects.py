@@ -47,7 +47,8 @@ def inventory(root, registry):
     analysis = _EffectAnalyzer(root)
     storage_effects = analysis.solve()
     frame_places = place_loans(analysis, storage_effects)
-    borrowed_arguments = storage_borrows.forwarded_values(analysis, storage_effects)
+    storage_proofs = storage_borrows.prove(analysis, storage_effects)
+    borrowed_arguments = storage_proofs.arguments
     local = {}
     projections = {}
 
@@ -300,7 +301,7 @@ def inventory(root, registry):
             if isinstance(node, hir.Declare):
                 # A required view cannot silently allocate a replacement;
                 # lowering must prove the storage demand or reject it.
-                if not node.view and node.binding_id not in frame_values and not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)) and not isinstance(node.expr.type, (ty.FunctionType, ty.OverloadType)):
+                if not node.view and node.binding_id not in storage_proofs.local_views and node.binding_id not in frame_values and not scalar(node.expr.type) and not isinstance(node.expr, (hir.String, hir.FunctionLiteral)) and not isinstance(node.expr.type, (ty.FunctionType, ty.OverloadType)):
                     storage()
                 visit(node.expr)
                 return

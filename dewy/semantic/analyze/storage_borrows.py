@@ -8,6 +8,7 @@ storage, raw operations, casts of existing storage and unresolved callbacks keep
 this proof unknown; ordinary lowering may have more precise borrow proofs.
 """
 from collections import deque
+from dataclasses import dataclass
 
 from .. import hir, ty, bindings
 from .effects import INDEX_STEP, _EffectAnalyzer, _literal_params, _unwrap
@@ -55,9 +56,20 @@ def independent_materialization(node):
         hir.RepresentationCast, hir.Obligation)) for item in hir.walk(node))
 
 
+@dataclass(frozen=True)
+class Proofs:
+    arguments: dict[int, set[int]]
+    local_views: set[int]
+
+
 def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]]:
+    return prove(analysis, summaries).arguments
+
+
+def prove(analysis: _EffectAnalyzer, summaries) -> Proofs:
     bodies, edges, blocked = {}, {}, set()
     stable_locals = {}
+    writes, captured = {}, set()
     eligible = {}
 
     def ordinary(type_):
@@ -92,6 +104,9 @@ def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]
             target = node.target if isinstance(node, hir.IteratorExpression) else predicate_effects.write_target(node)
             if target is not None:
                 written.add(bindings.access_path(target, unwrap=bindings._unwrap_fact_route).binding_id)
+        writes[key] = written
+        captured.update(node.binding_id for node in body if isinstance(node, hir.ExpressedIdentifier)
+                        and node.binding_id is not None and node.binding_id not in local)
         stable_locals[key] = {node.binding_id: node.expr.type for node in body
                              if isinstance(node, hir.Declare) and node.binding_id is not None and not node.view
                              and node.binding_id not in written
@@ -120,11 +135,38 @@ def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]
             if caller not in blocked:
                 blocked.add(caller)
                 pending.append(caller)
-    result = {}
+    result, local_views = {}, set()
     for literal in analysis.literals:
         if id(literal) in blocked:
             continue
         parameters = {p.binding_id: p for p in _literal_params(literal) if not p.place}
+        # An unwritten projection can lend its parameter's existing storage.
+        # No retagging, lifecycle operation, capture, or escaping address is
+        # admitted by this shared proof. More precise scoped views remain a
+        # lowerer optimization until their evidence is shared here too.
+        for node in bodies[id(literal)]:
+            if (not isinstance(node, hir.Declare) or node.binding_id is None
+                    or node.binding_id in writes[id(literal)] or node.binding_id in captured
+                    or not isinstance(node.expr, (hir.Index, hir.MemberAccess))
+                    or not ordinary(node.expr.type)):
+                continue
+            path = bindings.access_path(node.expr, unwrap=_unwrap)
+            source = path.root
+            own = parameters.get(source.binding_id) if isinstance(source, hir.ExpressedIdentifier) else None
+            incoming = summaries.for_param_binding(own.binding_id) if own else None
+            if own is None or not ordinary(own.type) or incoming is None or not incoming.read_only:
+                continue
+            value = node.expr
+            shape = ty.structural_base(value.array.type if isinstance(value, hir.Index) else value.value.type)
+            stored = shape.element if isinstance(value, hir.Index) and isinstance(shape, ty.ArrayType) else None
+            if isinstance(value, hir.MemberAccess) and isinstance(shape, ty.ObjectType):
+                field = shape.field(value.name)
+                stored = field.type if field is not None else None
+            if stored is None or ty.structural_base(stored) != ty.structural_base(value.type):
+                continue
+            if node.annotation is not None and ty.structural_base(node.annotation) != ty.structural_base(value.type):
+                continue
+            local_views.add(node.binding_id)
         for node in bodies[id(literal)]:
             if not isinstance(node, hir.FunctionCall):
                 continue
@@ -161,4 +203,4 @@ def forwarded_values(analysis: _EffectAnalyzer, summaries) -> dict[int, set[int]
                 allowed = current if allowed is None else allowed & current
             if allowed:
                 result[id(node)] = allowed
-    return result
+    return Proofs(result, local_views)

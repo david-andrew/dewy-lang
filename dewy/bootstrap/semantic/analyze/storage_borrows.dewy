@@ -68,10 +68,14 @@ independent_materialization=(id:addr nodes:array<hir.AST>):>bool=>{
     }
     return true
 }
-forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>{
+Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr>]
+forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>prove(analysis summaries nodes table registry).arguments
+prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>Proofs=>{
     let eligible:dict<addr bool>=[]
     let bodies:dict<addr array<addr>>=[]
     let stable_locals:dict<addr dict<addr addr>>=[]
+    let writes:dict<addr set<addr>>=[]
+    let captured:set<addr>=set[]
     let edges:dict<addr set<addr>>=[]
     let blocked:set<addr>=set[]
     loop id in analysis.literals {
@@ -114,11 +118,13 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
         }
         loop binding in written {candidates.pop(binding default=0);}
         stable_locals[id]=candidates
+        writes[id]=written
         loop item in body {
             let node=hir.node_at(nodes item)
             if node is? hir.RepresentationCast and not independent_materialization(node.expr nodes) {blocked.add(id)}
             else if node is? hir.ExpressedIdentifier {
                 let local=node.binding_id isnt? none and node.binding_id in? locals
+                if not local and node.binding_id isnt? none {captured.add(node.binding_id)}
                 let operation=primitive(node registry)
                 if not local and not operation and effects.flatten_callable(item set[] analysis nodes) is? none {blocked.add(id)}
             } else if node is? hir.FunctionCall {
@@ -145,8 +151,9 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
         }
     }
     let result:dict<addr set<addr>>=[]
+    let local_views:set<addr>=set[]
     loop id in analysis.literals {
-        if id in? blocked or id not in? bodies or id not in? stable_locals continue
+        if id in? blocked or id not in? bodies or id not in? stable_locals or id not in? writes continue
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         let parameters:dict<addr addr>=[]
@@ -155,6 +162,37 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
             if not param.place and param.binding_id isnt? none {parameters[param.binding_id]=param.value_type}
         }
         const body=@bodies[id]
+        # Whole-function local views share the allocation-contract proof.
+        # Restrict this boundary to identical stored representations; scoped
+        # views and retagging keep their separate lowerer obligations.
+        const written=@writes[id]
+        loop item in body {
+            let node=hir.node_at(nodes item)
+            if node isnt? hir.Declare or node.binding_id is? none or node.binding_id in? written or node.binding_id in? captured continue
+            let value=hir.node_at(nodes node.expr)
+            if value isnt? hir.Index|hir.MemberAccess or not ordinary(value.value_type table @eligible) continue
+            let path=bindings.access_path(node.expr nodes)
+            let source=hir.node_at(nodes path.root)
+            if source isnt? hir.ExpressedIdentifier or source.binding_id is? none or source.binding_id not in? parameters or source.binding_id not in? summaries.by_param_binding continue
+            let owner=parameters[source.binding_id]
+            const incoming=@summaries.by_param_binding[source.binding_id]
+            if not ordinary(owner table @eligible) or not effects.read_only(incoming) continue
+            let stored:addr?=none
+            if value is? hir.Index {
+                let array=types.node_at(table views.structural_base(hir.node_at(nodes value.array).value_type table))
+                if array is? types.ArrayType {stored=array.element}
+            } else {
+                $runtime_assert value is? hir.MemberAccess
+                let record=types.node_at(table views.structural_base(hir.node_at(nodes value.value).value_type table))
+                if record is? types.ObjectType {
+                    let field=types.object_field(record value.name)
+                    if field isnt? none {stored=field.value_type}
+                }
+            }
+            if stored is? none or not types.same_type(views.structural_base(stored table) views.structural_base(value.value_type table) table) continue
+            if node.annotation isnt? none and not types.same_type(views.structural_base(node.annotation table) views.structural_base(value.value_type table) table) continue
+            local_views.add(node.binding_id)
+        }
         loop item in body {
             let node=hir.node_at(nodes item)
             if node isnt? hir.FunctionCall continue
@@ -208,5 +246,5 @@ forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nod
             if allowed.length >? 0 {result[item]=allowed}
         }
     }
-    return result
+    return Proofs[result local_views]
 }

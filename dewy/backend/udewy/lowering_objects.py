@@ -1313,6 +1313,8 @@ class _ObjectLowering:
             # The fallback may be a temporary released after this statement.
             # Stability of the dictionary alone cannot lend that other owner.
             return False
+        if node.binding_id in self.storage_borrow_proofs.local_views:
+            return True  # the same whole-function proof used by allocation contracts
         if node.binding_id not in self.borrow_plan.stable_bindings:
             return False
         if node.annotation is not None and ty.strip_refinement(node.annotation) != ty.strip_refinement(expr.type):

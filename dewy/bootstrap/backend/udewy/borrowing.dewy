@@ -710,7 +710,8 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # including an aggregate wrapped into an optional result.
     let analysis=effects.collect(root nodes)
     let summaries=effects.analyze_collected(analysis nodes type_nodes indirect value_casts_escape=false)
-    let forwarded=storage_borrows.forwarded_values(analysis summaries nodes type_nodes registry)
+    let storage_proofs=storage_borrows.prove(analysis summaries nodes type_nodes registry)
+    let forwarded=storage_proofs.arguments
     let ambient=ambient_graph(plan nodes type_nodes indirect)
     let initial=ambient.opaque
     loop id in ambient.globals {initial.add(id)}
@@ -912,5 +913,6 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let scoped=scoped_views(view_demands nodes type_nodes plan excluded)
     loop id in unsafe_places {safe_places.pop(id default=id); fixed_places.pop(id default=id);}
     loop id in changed_places {fixed_places.pop(id default=id);}
-    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned scoped.bindings scoped.scopes scoped.regions safe_places fixed_places]
+    loop binding in storage_proofs.local_views {stable.add(binding)}
+    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned (scoped.bindings | storage_proofs.local_views) scoped.scopes scoped.regions safe_places fixed_places]
 }

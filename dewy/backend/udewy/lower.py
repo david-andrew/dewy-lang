@@ -496,7 +496,8 @@ class _Lowerer(
         analysis = _EffectAnalyzer(root)
         self.program_effects: ProgramEffects = analysis.solve()
         self.place_loans = place_loans(analysis, self.program_effects)
-        self.forwarded_values = storage_borrows.forwarded_values(analysis, self.program_effects)
+        self.storage_borrow_proofs = storage_borrows.prove(analysis, self.program_effects)
+        self.forwarded_values = self.storage_borrow_proofs.arguments
 
     def _runtime_helper(self, name: str) -> _FunctionDef | None:
         """Find a runtime helper once in the append-only discovery list.
