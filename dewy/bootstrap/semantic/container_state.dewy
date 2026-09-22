@@ -70,6 +70,19 @@ remember = (container:addr key:addr state:addr @session:contexts.Session positio
     keys.record(@current keys.Fact[binding identity position static_position])
     set_facts(state current @session)
 }
+# A contextual storage wrapper may widen away the displayed refinement,
+# while its evaluated input still carries the named value guarantee.
+total_key = (value:addr session:contexts.Session):>addr? => {
+    let node=hir.node_at(session.hir value)
+    loop true {
+        let total=views.total_dict_key(node.value_type session.types)
+        if total isnt? none return total
+        if node isnt? hir.ValueCast|hir.RepresentationCast return none
+        let source=hir.node_at(session.hir node.expr)
+        if not types.same_type(views.structural_base(node.value_type session.types) views.structural_base(source.value_type session.types) session.types) return none
+        node=source
+    }
+}
 proven = (container:addr key:addr state:addr @session:contexts.Session):>keys.Fact? => {
     let binding = route(container @session)
     let identity = keys.identity(key session.hir @session.registry @session.types)
@@ -78,7 +91,7 @@ proven = (container:addr key:addr state:addr @session:contexts.Session):>keys.Fa
         if found isnt? none return found
     }
     let value = hir.node_at(session.hir container)
-    let total = views.total_dict_key(value.value_type session.types)
+    let total = total_key(container session)
     if binding isnt? none {
         let declared = bindings.binding_at(session.registry binding).store_type
         if total is? none and declared isnt? none { total = views.total_dict_key(declared session.types) }

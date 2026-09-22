@@ -3100,7 +3100,7 @@ class _ArrayLowering(_ArraySharing):
         element_type: ty.Type,
         node: hir.AST,
     ) -> tuple[int, bool]:
-        element_type = ty.unfold(element_type)   # `array<Node>` inside `Node`: object handles
+        element_type = ty.structural_base(element_type)   # Refinements and aliases do not change an element's storage.
         if ty.enum_members(element_type) is not None:
             return 8, True
         if element_type == 'bool':

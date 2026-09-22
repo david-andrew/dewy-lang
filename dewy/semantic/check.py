@@ -2044,16 +2044,19 @@ _TOTAL_KEYS = ('total', None)   # the key-fact identity of "every key of the key
 
 def _proven_key(dictionary: hir.AST, key: hir.AST, *, ctx: Context) -> tuple[str | None, int | None] | None:
     dictionary_id = _dictionary_fact_id(dictionary, ctx=ctx)
-    if dictionary_id is None:
-        return None
     identity = _key_identity(key, ctx=ctx)
-    if identity is not None:
+    if dictionary_id is not None and identity is not None:
         fact = ctx.key_facts.get((dictionary_id, identity))
         if fact is not None:
             return fact
     # a total dictionary (every key of `K` present): any key of a type within `K`
     total_key = _total_key_of(dictionary, ctx=ctx)
-    if total_key is not None and ctx.type_system.is_subtype(ty.strip_refinement(key.type), total_key):
+    # Argument conversion may widen a literal to the dictionary's storage
+    # key type. Its captured constant still proves finite-key membership.
+    key_type = ty.strip_refinement(key.type)
+    if identity is not None and identity[0] == 'c':
+        key_type = ty.StringLiteralType(identity[1]) if isinstance(identity[1], str) else ty.IntegerLiteralType(identity[1])
+    if total_key is not None and ctx.type_system.is_subtype(key_type, total_key):
         return (None, None)
     return None
 
@@ -9319,7 +9322,10 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             Pointer(span=binop.right.loc, message='this field is not present'),
             hint=f'available fields: {", ".join(item.name for item in object_type.fields) or "(none)"}',
         )
-    access = hir.MemberAccess(binop.loc, field.type, value, name, field.mutable)
+    # Named value guarantees (including totaldict) survive a field read.
+    # Parameter/sibling relations remain in the separate fact environment.
+    read_type = ty.strip_result_refinement(_field_expectation(field))
+    access = hir.MemberAccess(binop.loc, read_type, value, name, field.mutable)
     if isinstance(field.type, (ty.ObjectType, ty.TypeOr)):
         # Membership tests refine a record family just as they refine a
         # union. Consume its existing route fact without allocating a new
@@ -13709,7 +13715,7 @@ def _object_type_member(item: p0.AST, *, ctx: Context) -> ty.ObjectField:
         if isinstance(declared_type, ty.RefinedType):
             # an invariant of the field: kept beside the base type (value
             # comparisons, or a length bound of an array or string field)
-            if any(p.subject not in ('self', 'length') and p.field is None for p in declared_type.propositions):
+            if any(p.subject not in ('self', 'length') and p.field is None and p not in ty.named_refinement(declared_type) for p in declared_type.propositions):
                 not_implemented(ctx.srcfile, item.right.loc, 'field invariants other than value and length comparisons')
             return ty.ObjectField(item.left.item.name, declared_type.base, mutable, refinement=declared_type.propositions)
         return ty.ObjectField(
@@ -17024,7 +17030,7 @@ def check_against(node: hir.AST, expected: ty.Type, *, ctx: Context) -> hir.AST:
         # `totaldict<K V>`: the shape is the dictionary's; totality is proven here (a literal with every key, or a dictionary known total)
         checked = _check_against_shape(node, ty.strip_refinement(expected), ctx=ctx)
         _prove_total_dictionary(checked, expected, ctx=ctx)
-        return checked
+        return hir.ValueCast(checked.loc, expected, checked)
     checked = _check_against_shape(node, expected, ctx=ctx)
     target = ty.unfold(ty.strip_refinement(expected))
     if isinstance(target, ty.ObjectType):
@@ -17558,7 +17564,7 @@ def tcr_identifier(
         source_type = ctx.refinements.get(binding.id, declared_type) if refined and binding is not None else declared_type
         resolved_type = ty.unfold(ty.strip_refinement(source_type))
         named = ty.named_refinement(source_type) if isinstance(source_type, ty.RefinedType) else ()
-        if named and isinstance(resolved_type, str):
+        if named:
             resolved_type = ty.RefinedType(resolved_type, named)   # a binding's facts are facts; its *name* (`addr`, `nat64`) it keeps
         return hir.ExpressedIdentifier(
             id.loc,

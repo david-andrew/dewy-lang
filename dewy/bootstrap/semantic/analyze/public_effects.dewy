@@ -54,6 +54,7 @@ location = (id:addr input:Input scan:Scan):>Location => {
         }
     }
     let root=hir.node_at(input.nodes path.root)
+    if root is? hir.FunctionCall|hir.ObjectLiteral|hir.ArrayLiteral|hir.CopyValue|hir.Block|hir.Flow return Location[true]
     if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return Location[false]
     if root.binding_id in? scan.places {
         let fields:array<string>=[]
@@ -279,6 +280,11 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     if node is? hir.ValueCast|hir.RepresentationCast and views.string_valued(node.value_type input.types) and views.string_valued(hir.node_at(input.nodes node.expr).value_type input.types) {
         # Widening a stored string/literal preserves the text. Independent
         # value boundaries retain their ordinary storage permission.
+        visit(node.expr input @scan) return
+    }
+    if node is? hir.ValueCast and types.same_type(views.structural_base(node.value_type input.types) views.structural_base(hir.node_at(input.nodes node.expr).value_type input.types) input.types) {
+        # A proved refinement changes facts, not storage. Owning boundaries
+        # still account for their copy/allocation demands.
         visit(node.expr input @scan) return
     }
     if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {unknown(@scan) return}

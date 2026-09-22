@@ -126,6 +126,12 @@ named_refinement = (id:addr nodes:types.Table):>array<facts.Proposition> => {
             loop name in nat_bases.keys { if name in? nat_bases and nat_bases[name] =? base.name return [NAT] }
         }
     }
+    if total_dict_key(id nodes) isnt? none and node is? types.RefinedType {
+        # This names a total dictionary value, independent of call scope.
+        let named:array<facts.Proposition>=[]
+        loop p in node.propositions {if p.subject =? 'keys' and p.tested_type isnt? none {named.push(p)}}
+        return named
+    }
     return []
 }
 # Results shed call-specific evidence but keep the facts that spell their

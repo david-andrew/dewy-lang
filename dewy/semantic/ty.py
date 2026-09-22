@@ -1273,6 +1273,10 @@ def named_refinement(type_: TypeExpr) -> tuple[Proposition, ...]:
         return (NAT_PROPOSITION, ADDR_PROPOSITION)
     if nat_name(type_) is not None:
         return (NAT_PROPOSITION,)
+    if total_dict_key(type_) is not None:
+        # Totality is part of the value's named type, not a relation to the
+        # callee's parameter scope. Factory results keep this guarantee.
+        return tuple(p for p in type_.propositions if p.subject == 'keys' and p.type_ is not None)
     return ()
 
 

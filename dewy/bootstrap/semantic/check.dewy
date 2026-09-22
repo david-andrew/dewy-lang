@@ -289,7 +289,11 @@ against_shape = (value:addr expected:addr id:addr env:Environment @session:conte
         if total isnt? none {
             let error = prove_total(value total id env @session)
             if error isnt? none return error
-            return against(value target.base id env @session)
+            let checked=against(value target.base id env @session)
+            if checked is? Error return checked
+            # Rechecking an argument/element must not lose a guarantee this
+            # boundary just established. The wrapper retains its value type.
+            return put(hir.ValueCast[node.loc expected checked] @session)
         }
         let checked = against(value target.base id env @session)
         if checked is? Error return checked
@@ -3314,7 +3318,12 @@ member_named = (receiver:addr name:string id:addr env:Environment @session:conte
     }
     if type is? types.ObjectType {
         let field = types.object_field(type name)
-        if field isnt? none return match_read(put(hir.MemberAccess[loc field.value_type receiver name field.mutable and not type.immutable] @session) env @session)
+        if field isnt? none {
+            # Keep a named guarantee such as totaldict on the selected value;
+            # call/sibling-specific relations stay in the fact environment.
+            let read=if field.refinement.length =? 0 field.value_type else views.strip_result_refinement(types.refined_type(field.value_type field.refinement @session.types) @session.types)
+            return match_read(put(hir.MemberAccess[loc read receiver name field.mutable and not type.immutable] @session) env @session)
+        }
         if name =? 'copy' and builtin_copy_available(value.value_type session.types) return copy_method(receiver loc @session)
         let selected=method_member(views.structural_base(value.value_type session.types) receiver name id env @session)
         if selected is? Error return selected
@@ -4886,7 +4895,7 @@ prove_total = (value:addr key_type:addr id:addr env:Environment @session:context
     if complete return none
     let binding = container_state.route(value @session)
     let node = node_at(value session)
-    let known = views.total_dict_key(node.value_type session.types)
+    let known = container_state.total_key(value session)
     if binding isnt? none {
         let declared = bindings.binding_at(session.registry binding).store_type
         if known is? none and declared isnt? none { known = views.total_dict_key(declared session.types) }

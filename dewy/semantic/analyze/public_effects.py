@@ -118,6 +118,10 @@ def inventory(root, registry):
                 return rows.Subject('parameter', places[path.binding_id], fields)
             if path.binding_id in private:
                 return None
+            if isinstance(path.root, (hir.FunctionCall, hir.ObjectLiteral, hir.ArrayLiteral, hir.CopyValue, hir.Block, hir.Flow)):
+                # A computed value owns its result. Evaluating that result
+                # still contributes effects through access's root visit.
+                return None
             return False  # unresolved external storage; distinct from private
 
         def access(node, family):
@@ -322,6 +326,11 @@ def inventory(root, registry):
                     and ty.string_valued(node.expr.type)):
                 # String/character/literal widening preserves the stored text;
                 # value boundaries account for any independent ownership.
+                visit(node.expr)
+                return
+            if isinstance(node, hir.ValueCast) and ty.structural_base(node.type) == ty.structural_base(node.expr.type):
+                # A proved refinement retains the same storage. Its value
+                # boundary, if any, already owns the copy/allocation demand.
                 visit(node.expr)
                 return
             if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and not scalar(node.type):
