@@ -4225,21 +4225,13 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
     let positional:array<addr>=[]
     let views_allowed=string_free_type(signature.ret @state)
     let consumed=state.consumed_arguments.get(id set[])
-    let argument_index:addr=0
     loop argument in node.pos_args {
-        $runtime_assert argument_index <? signature.pos_or_kw.length
-        let expected=signature.pos_or_kw[argument_index].value_type
-        argument_index+=1
-        let value=call_argument(argument expected borrowed disposable consumed views_allowed @temporary @prefix @state)
+        let value=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
         positional.push(value)
     }
     let keywords:dict<string addr>=[]
     loop [name argument] in node.kw_args {
-        let expected:addr?=none
-        loop parameter in signature.pos_or_kw {if parameter.name =? name {expected=parameter.value_type break}}
-        if expected is? none {loop parameter in signature.kw_only {if parameter.name =? name {expected=parameter.value_type break}}}
-        $runtime_assert expected isnt? none
-        keywords[name]=call_argument(argument expected borrowed disposable consumed views_allowed @temporary @prefix @state)
+        keywords[name]=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
     }
     let args:array<addr>=[]
     if receiver isnt? none {args.push(receiver)}
@@ -4331,13 +4323,13 @@ string_free_type = (id:addr @state:State depth:addr=0):>bool => {
     if plain is? types.FunctionType return false
     return true
 }
-call_argument = (argument:addr expected:addr borrowed:set<addr> disposable:set<addr> consumed:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State):>addr => {
+call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State):>addr => {
     # A donated argument is an owned value the callee takes over: a fresh
     # temporary passes as is, a kept value is copied, and nothing is
     # released here.
     if argument in? consumed return snapshot(owned_value(argument @state 'donated to a call') @prefix @state)
     if argument in? borrowed {
-        let loan=storage_borrows.union_loan_source(argument state.input.nodes state.type_nodes expected=expected)
+        let loan=storage_borrows.union_loan_source(argument state.input.nodes state.type_nodes)
         if loan isnt? none {
             let source=hir.node_at(state.input.nodes loan)
             let value=snapshot(expression(loan @state) @prefix @state)

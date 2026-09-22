@@ -64,6 +64,14 @@ def test_native_type_queries_match_hosted(tmp_path):
         expression = f'views.container_type({build(key)} {"none" if value is None else build(value)} @type_nodes)'
         checks.append(f'    printl("{label}|{{types.same_type({expression} {target} type_nodes)}}")')
         expected.append(f'{label}|true')
+    # Every source/target pair exercises cell versus word/string layouts,
+    # refined alternatives, exact injection and widening. In particular the
+    # grouped optional-string fallback must agree with the normalized query.
+    members = ' '.join(build(value) for value in cases)
+    checks.append(f"    let loan_types:array<addr>=[{members}]")
+    checks.append('    loop actual in loan_types {loop wanted in loan_types {printl(views.preserves_union_payload(actual wanted type_nodes))}}')
+    expected.extend(str(ty.preserves_union_payload(actual, wanted)).lower()
+                    for actual in cases for wanted in cases)
     source = tmp_path / 'type_views.dewy'
     source.write_text(f'''
 import p"{ROOT / 'dewy/bootstrap/semantic/type_queries.dewy'}" as views

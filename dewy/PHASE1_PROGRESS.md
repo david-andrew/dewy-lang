@@ -3390,3 +3390,27 @@ hosted compiler, with x86-64/C execution. The native interval kernel matches
 hosted transfers including negative and unbounded divisors; its three tests
 and 29 focused/adjacent hosted proof checks pass. This fixes sign soundness;
 symbolic remainder-versus-divisor relations remain the next proof step.
+
+## Union query storage and checkpoint follow-up (2026-09-22)
+
+The `05222239` union-loan implementation completed a three-generation direct
+x86-64 bootstrap with byte-identical generations 2 and 3 and x86-64/C pipeline
+execution. Generations 2/3 took 154/111 seconds while other checks ran; these
+are not isolated performance measurements. Its broad Python selection
+reported 3,760 passes, 14 skips and one failure building a hosted-generated
+native driver. An explicit common array annotation repairs that failure;
+the same imported-resource-truncate test then passes through that driver.
+
+Its fresh inventory was 4,506 copies (92.543/KLOC), above the 4,500-site gate.
+The common union representation query now compares existing members without
+normalizing or privately copying the type table. Grouped optional-string
+payloads retain the normalization path. Native lowering also consumes the
+explicit checked cast destination rather than reconstructing keyword/positional
+signatures; unlike hosted HIR, native contextual union conversion is explicit.
+
+The follow-up passes the cross-product of the type-query fixture's source
+and destination types against hosted results, including grouped strings and
+refinements. A fresh driver passes all 12 runtime and five contract-rejection
+cases on both compilers and x86-64/C. The preliminary source inventory is
+4,499 sites (92.376/KLOC); the merged checkpoint still needs a fresh full
+compiler inventory, especially after the separate remainder-bound fix.

@@ -72,16 +72,13 @@ independent_materialization=(id:addr nodes:array<hir.AST>):>bool=>{
 # supplies stability and read-only use; this is not permission by itself.
 # Type normalization stays inside the representation query; only an input
 # HIR identity crosses this boundary.
-union_loan_source=(id:addr nodes:array<hir.AST> table:types.Table expected:addr?=none):>addr?=>{
+# Native `against` makes every union conversion explicit in checked HIR.
+# Its cast already names the destination, including normalized keyword calls;
+# reconstructing the formal signature here would repeat that work.
+union_loan_source=(id:addr nodes:array<hir.AST> table:types.Table):>addr?=>{
     let node=hir.node_at(nodes id)
-    let source=id
-    let target=expected
-    if node is? hir.ValueCast|hir.RepresentationCast {
-        if target is? none {target=node.value_type}
-        source=node.expr
-    }
-    if target is? none return none
-    return if views.preserves_union_payload(hir.node_at(nodes source).value_type target table) source else none
+    if node isnt? hir.ValueCast|hir.RepresentationCast return none
+    return if views.preserves_union_payload(hir.node_at(nodes node.expr).value_type node.value_type table) node.expr else none
 }
 Proofs:type = const [arguments:dict<addr set<addr>> local_views:set<addr>]
 forwarded_values=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hir.AST> table:types.Table registry:bindings.Registry):>dict<addr set<addr>>=>prove(analysis summaries nodes table registry).arguments
@@ -230,7 +227,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                     loop pair in pairs {
                         let arg=hir.node_at(nodes pair.argument)
                         let expected=if pair.parameter is? none none else wanted.get(pair.parameter)
-                        let loan=union_loan_source(pair.argument nodes table expected=expected)
+                        let loan=union_loan_source(pair.argument nodes table)
                         let path=bindings.access_path(if loan is? none pair.argument else loan nodes)
                         let source=hir.node_at(nodes path.root)
                         let safe=false

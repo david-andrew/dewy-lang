@@ -226,7 +226,43 @@ union_cell_members=(type:addr @table:types.Table):>array<addr>|none=>{
     if payload isnt? none return [types.primitive('none' @table) payload]
     return runtime_union_members(plain @table)
 }
+# Optional unions of several string literals have one grouped payload. They
+# need normalization; ordinary tagged members can be compared without
+# writing (and therefore privately copying) the entire type table.
+grouped_string_payload=(id:addr table:types.Table):>bool=>{
+    let node=types.node_at(table types.unfold(types.strip_refinement(id table) table))
+    if node isnt? types.TypeOr return false
+    let absent=false let count:addr=0
+    loop member in node.items {
+        let plain=types.strip_refinement(member table)
+        if types.is_primitive(types.node_at(table plain) 'none') {absent=true}
+        else {
+            if not string_valued(plain table) return false
+            count+=1
+        }
+    }
+    return absent and count >? 1
+}
+union_has_member=(member:addr expected:types.TypeOr table:types.Table):>bool=>{
+    loop candidate in expected.items {
+        if types.same_type(types.strip_refinement(member table) types.strip_refinement(candidate table) table) return true
+    }
+    return false
+}
 preserves_union_payload=(actual:addr expected:addr table:types.Table):>bool=>{
+    let wanted=types.unfold(types.strip_refinement(expected table) table)
+    let target=types.node_at(table wanted)
+    if target isnt? types.TypeOr or string_valued(wanted table) or enum_members(wanted table) isnt? none return false
+    if grouped_string_payload(actual table) or grouped_string_payload(expected table) return normalized_union_payload(actual expected table)
+    let plain=types.unfold(types.strip_refinement(actual table) table)
+    let source=types.node_at(table plain)
+    if source is? types.TypeOr and not string_valued(plain table) and enum_members(plain table) is? none {
+        loop member in source.items {if not union_has_member(member target table) return false}
+        return true
+    }
+    return union_has_member(actual target table)
+}
+normalized_union_payload=(actual:addr expected:addr table:types.Table):>bool=>{
     let wanted=union_cell_members(expected @table)
     if wanted is? none return false
     let members=union_cell_members(actual @table)
