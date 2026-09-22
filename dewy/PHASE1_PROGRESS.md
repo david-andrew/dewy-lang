@@ -2435,3 +2435,13 @@ stale sidecar after removal. Repeated native invocations also retain an unused
 imported default with its original source path. The native command regression
 now covers these cases alongside its existing invocation checks. Artifacts use
 the `../dewy-build-artifacts/phase1-default-audit-` prefix.
+
+
+Integration checkpoint: `3e30f72a` completed the three-generation direct x86-64
+bootstrap with byte-identical final Dewy and µDewy binaries and passing runtime
+checks. Generation 2/3 took 66/76 seconds during concurrent development; these
+are integration timings, not isolated latency measurements. The certified pair
+reports 4,991 copy sites over 47,440 lines (105.207/KLOC). Artifacts:
+`../dewy-build-artifacts/phase1-loans-audit-3e30f72a` and
+`phase1-loans-audit-copies.json`. Native cache invalidation after removing the
+imported default also replaces its audit with an empty report.
