@@ -2989,11 +2989,14 @@ class _Lowerer(
                 range=transformed_range,
             )
         if isinstance(node, hir.StringEqual):
-            return replace(
+            transformed = replace(
                 node,
                 left=self._require_node(self._transform_node(node.left)),
                 right=self._require_node(self._transform_node(node.right)),
             )
+            if id(node) in self.borrow_plan.comparison_snapshots:
+                self.borrow_plan.comparison_snapshots.add(id(transformed))
+            return transformed
         if isinstance(node, hir.StringConcat):
             # Concatenation has exactly the materialization and grapheme
             # re-segmentation semantics of two adjacent interpolation fields.
@@ -4231,9 +4234,9 @@ class _Lowerer(
         if isinstance(node, (hir.FunctionCall, hir.CopyValue)):
             self.consumed_string_values.add(id(node))
 
-    def _string_result_temporary(self, node: hir.AST, value: hir.AST, prelude: list[hir.AST]) -> tuple[list[hir.AST], hir.AST]:
+    def _string_result_temporary(self, node: hir.AST, value: hir.AST, prelude: list[hir.AST], *, force: bool = False) -> tuple[list[hir.AST], hir.AST]:
         """Keep an owned string result alive through its consuming statement."""
-        if id(node) in self.consumed_string_values or self.lowering_module_startup:
+        if not force and (id(node) in self.consumed_string_values or self.lowering_module_startup):
             return prelude, value
         temp = self._new_string_temp(node.loc, 'int64', 'temp')
         self.statement_temporaries.append(('string', temp))
@@ -5340,6 +5343,7 @@ class _Lowerer(
                 target.name,
                 'int64'
                 if isinstance(node.type, (ty.ArrayType, ty.ObjectType))
+                or self._is_string_valued(node.type)
                 or ty.enum_members(node.type) is not None
                 or isinstance(node.type, ty.TypeOr) and (ty.string_valued(node.type) or self._is_optional_element(node.type))
                 else target.type,

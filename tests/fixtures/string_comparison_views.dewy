@@ -1,0 +1,23 @@
+$explicit_copies
+
+# Whole strings, fields, elements and nested slices share one read-only root.
+# Strict-copy mode also catches retain/release work that COW hides from the
+# allocation counter. Grapheme indices still use the ordinary checked bounds.
+Box:type=[text:string]
+check=(box:Box words:array<string> text:string):>int64=>{
+    if text.length not=?4 or words.length not=?1 return 1
+    let before:int64=_arena_allocated_bytes
+    loop i in 0.. and i<?1000 {
+        if box.text not=?text or words[0] not=?text return 2
+        if text[1..3) not=?'é🇺🇸' return 3
+        if (text[1..])[..2) not=?'é🇺🇸' return 4
+        if text[0] not=?'A' or text[3] not=?'z' return 5
+    }
+    if _arena_allocated_bytes not=?before return 6
+    return 42
+}
+main=():>int64=>{
+    let box=Box['Aé🇺🇸z']
+    let words:array<string>=['Aé🇺🇸z']
+    return check(box words 'Aé🇺🇸z')
+}

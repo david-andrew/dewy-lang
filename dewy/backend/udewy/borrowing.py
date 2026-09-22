@@ -61,6 +61,7 @@ class Plan:
     stable_bindings: set[int] = field(default_factory=set)
     stable_parameters: dict[int, ParameterEffects] = field(default_factory=dict)
     array_snapshots: set[int] = field(default_factory=set)             # id(Index) whose index may write the array
+    comparison_snapshots: set[int] = field(default_factory=set)        # id(StringEqual) whose right operand may write the left
     ambient_writes: dict[int, set[int]] = field(default_factory=dict)  # call identity -> nonlocal owners written
     scoped_views: set[int] = field(default_factory=set)                # view binding -> interval/lexical proof
     view_scopes: dict[int, hir.Block] = field(default_factory=dict)
@@ -384,6 +385,7 @@ def view_region(scope: ViewScope, declaration: hir.Declare, excluded: set[int]) 
 def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source_bindings: set[int]) -> Plan:
     """Compute the borrow plan for a module (borrowing.dewy `details`, the scope-borrow part)."""
     plan = Plan()
+    comparisons: dict[int, hir.StringEqual] = {}
     # globals: top-level declarations, through unscoped blocks
     pending: list[hir.AST] = list(root.items)
     while pending:
@@ -401,6 +403,8 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
             if id(current) in seen or not isinstance(current, hir.AST):
                 continue
             seen.add(id(current))
+            if isinstance(current, hir.StringEqual):
+                comparisons[id(current)] = current
             if isinstance(current, hir.Declare) and isinstance(unwrap(current.expr), hir.FunctionLiteral) and current.binding_id is not None:
                 plan.named[current.binding_id] = unwrap(current.expr)
             if isinstance(current, hir.FunctionLiteral):
@@ -412,6 +416,8 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
                         if param.place:
                             function.places.add(param.binding_id)
                 for inner in _walk_function(current):
+                    if isinstance(inner, hir.StringEqual):
+                        comparisons[id(inner)] = inner
                     if isinstance(inner, hir.Declare) and inner.binding_id is not None:
                         function.locals.add(inner.binding_id)
                     if isinstance(inner, hir.IteratorExpression) and inner.target.binding_id is not None:
@@ -446,6 +452,16 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
             if summary is not None:
                 plan.stable_parameters[binding] = summary
     plan.ambient_writes = ambient
+    # The existing discovery inventories cover module initializers as well as
+    # function bodies/defaults. Preserve evidence before callable rewriting
+    # replaces the call nodes keyed by the ambient-write analysis.
+    for node in comparisons.values():
+        source = route(node.left)
+        if source is not None and stable_owner(source, plan):
+            continue
+        if (not isinstance(unwrap(node.left), hir.String)
+                and expression_conflicts(node.right, source, plan, source_bindings)):
+            plan.comparison_snapshots.add(id(node))
     # A nonescaping place call only lends its owner for that call. It must
     # conflict while a view is live, but need not lengthen the view past its
     # last use. Unknown or retaining calls keep the whole-scope exclusion.

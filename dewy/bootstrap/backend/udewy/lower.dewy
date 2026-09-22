@@ -2499,11 +2499,11 @@ string_slice = (node:hir.StringSlice @state:State):>addr => {
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 
-# An immediately consumed view needs byte boundaries and an owning root,
-# not a separately allocated string descriptor. Keeping that root until the
-# whole comparison finishes preserves the left value across right-hand calls
-# that replace its source. Bounds still execute once, in source order.
-StringSpan:type = const [root:addr data:addr boundaries:addr start:addr byte_length:addr length:addr]
+# An immediately consumed view needs byte boundaries and a live root, not
+# a separately allocated string descriptor. Stable roots borrow; the fallback
+# owns a snapshot until the comparison finishes, preserving the left value
+# across right-hand calls that replace it. Bounds execute once, in source order.
+StringSpan:type = const [root:addr data:addr boundaries:addr start:addr byte_length:addr length:addr owned:bool=true]
 string_span = (id:addr @prefix:array<addr> @state:State offsets:bool=false):>StringSpan => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.ValueCast|hir.RepresentationCast and owned_string(node.value_type state) and owned_string(hir.node_at(state.input.nodes node.expr).value_type state) {
@@ -2530,11 +2530,12 @@ string_span = (id:addr @prefix:array<addr> @state:State offsets:bool=false):>Str
         let stop_pointer=word_op('__add__' boundaries word_op('__mul__' count word(4 node @state) node @state) node @state)
         let stop=snapshot(intrinsic_call('__load_u32__' [stop_pointer] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
         let length=snapshot(word_op('__sub__' stop start node @state) @prefix @state)
-        return StringSpan[source.root source.data boundaries start length count]
+        return StringSpan[source.root source.data boundaries start length count source.owned]
     }
-    let root=snapshot(owned_value(id @state) @prefix @state)
+    let borrowed=string_frame_view(id @prefix @state)
+    let root=if borrowed is? none snapshot(owned_value(id @state) @prefix @state) else borrowed
     if offsets {prefix.push(ensure_segmented(root node @state))}
-    return StringSpan[root read_word(root layouts.string_descriptor.data node @state) read_word(root layouts.string_descriptor.boundaries node @state) read_word(root layouts.string_descriptor.start node @state) read_word(root layouts.string_descriptor.byte_length node @state) read_word(root layouts.string_descriptor.grapheme_length node @state)]
+    return StringSpan[root read_word(root layouts.string_descriptor.data node @state) read_word(root layouts.string_descriptor.boundaries node @state) read_word(root layouts.string_descriptor.start node @state) read_word(root layouts.string_descriptor.byte_length node @state) read_word(root layouts.string_descriptor.grapheme_length node @state) borrowed is? none]
 }
 string_equal = (node:hir.StringEqual @state:State):>addr => {
     let prefix:array<addr>=[]
@@ -2543,8 +2544,8 @@ string_equal = (node:hir.StringEqual @state:State):>addr => {
     let a=word_op('__add__' left.data left.start node @state)
     let b=word_op('__add__' right.data right.start node @state)
     let result=snapshot(string_equal_bytes(a left.byte_length b right.byte_length node node.negated @state) @prefix @state)
-    prefix.push(string_runtime('_native_string_release' [left.root] node @state result_void=true))
-    prefix.push(string_runtime('_native_string_release' [right.root] node @state result_void=true))
+    if left.owned {prefix.push(string_runtime('_native_string_release' [left.root] node @state result_void=true))}
+    if right.owned {prefix.push(string_runtime('_native_string_release' [right.root] node @state result_void=true))}
     prefix.push(result)
     return put(hir.Block[node.loc types.primitive('bool' @state.type_nodes) prefix false] @state)
 }

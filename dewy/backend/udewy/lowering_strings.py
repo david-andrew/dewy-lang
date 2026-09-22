@@ -4606,6 +4606,11 @@ class _StringLowering:
         node: hir.StringEqual,
     ) -> tuple[list[hir.AST], hir.AST]:
         left_prelude, left = self._extract_expression(node.left)
+        if id(node) in self.borrow_plan.comparison_snapshots and not self._is_owned_string_result(node.left):
+            self._note_copy('string', node.left.type, 'snapshotted before comparison',
+                            'the right operand may replace the string being read', node.left.loc)
+            left_prelude, left = self._string_result_temporary(
+                node.left, self._string_clone_call(left, node.left.loc), left_prelude, force=True)
         right_prelude, right = self._extract_expression(node.right)
         left_length = self._load_i64_field(
             left,
