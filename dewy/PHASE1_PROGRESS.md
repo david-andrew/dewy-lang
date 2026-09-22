@@ -2848,3 +2848,20 @@ field mutation, defaults and read-only/by-place calls. Copies that need an
 independent value, escapes, dynamic fields and oversized shapes remain
 conservative. Artifacts: `../dewy-build-artifacts/phase1-nested-frame-*`.
 Phase 1 continues.
+
+## Explicit fixed-record copies in frame storage (2026-09-22)
+
+The same placement proof now supplies independent frame storage for explicit
+copies of scalar records, including nested records and copies into inline
+fields. Fresh literal/copy chains can initialize that destination directly;
+a copy of an existing value writes its scalar fields into independent storage.
+Source evaluation and nested field defaults keep their original order. The
+source owner may itself remain in frame storage because `.copy()` does not
+expose its address. Escaping results and dynamic/resource storage retain their
+allocation obligations; COW is not used to justify the exclusion.
+
+Validation: seven focused hosted tests pass. A fresh native driver agrees on
+11 runtime kernels and five rejections (including nested-record placement),
+with x86-64/C execution. Kernels check value independence, by-value parameters,
+fresh-copy chains, inline-field copies and zero arena allocation over 100,000
+iterations. Artifacts use `../dewy-build-artifacts/phase1-frame-copy-*`.

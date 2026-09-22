@@ -357,6 +357,18 @@ expression = (id:addr @state:State):>addr => {
     let node=hir.node_at(state.input.nodes id)
     if state.problem isnt? none return put(hir.Void[node.loc types.primitive('void' @state.type_nodes)] @state)
     if node is? hir.CopyValue {
+        let frame=state.frame_records.get(id)
+        if frame isnt? none {
+            let source=hir.node_at(state.input.nodes node.value)
+            if source is? hir.ObjectLiteral|hir.CopyValue and types.same_type(views.structural_base(source.value_type state.type_nodes) views.structural_base(node.value_type state.type_nodes) state.type_nodes) {
+                return initialize_frame(node.value frame @state)
+            }
+            note_copy('record' node.value_type 'explicit copy' 'requested with `.copy()`' node @state explicit=true)
+            let prefix:array<addr>=[]
+            let receiver=read_operand(node.value @prefix @state)
+            prefix.push(field_write(frame receiver.value node.value_type node @state))
+            return finish_read(frame receiver node @prefix @state)
+        }
         # A dying fresh result already is independent. Otherwise retain the
         # receiver before any surrounding operation can mutate its source.
         if expression_owns(node.value @state) return owned_value(node.value @state 'explicit copy')
@@ -3948,6 +3960,16 @@ peel_statement = (id:addr @state:State):>addr => {
         return current
     }
 }
+# A proven destination can be shared by construction and explicit copying.
+# Restore the mapping after lowering in case HIR reuses this expression.
+initialize_frame=(id:addr destination:addr @state:State):>addr=>{
+    let previous=state.frame_records.get(id)
+    state.frame_records[id]=destination
+    let value=expression(id @state)
+    if previous is? none {state.frame_records.pop(id default=0);}
+    else {state.frame_records[id]=previous}
+    return value
+}
 object_literal = (id:addr node:hir.ObjectLiteral @state:State):>addr => {
     let layout=object_layout(node.value_type node @state)
     let record=object_type(node.value_type state)
@@ -3966,15 +3988,11 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State):>addr => {
         # a local) is read at the write; only a source that owns fresh
         # storage needs the owned value, which is released after the write.
         let source=peel_statement(item.value @state)
-        if frame isnt? none and hir.node_at(state.input.nodes source) is? hir.ObjectLiteral and types.same_type(views.structural_base(hir.node_at(state.input.nodes source).value_type state.type_nodes) views.structural_base(field.value_type state.type_nodes) state.type_nodes) {
+        if frame isnt? none and hir.node_at(state.input.nodes source) is? hir.ObjectLiteral|hir.CopyValue and types.same_type(views.structural_base(hir.node_at(state.input.nodes source).value_type state.type_nodes) views.structural_base(field.value_type state.type_nodes) state.type_nodes) {
             # The placement proof gives the entire scalar record tree one
             # frame slot. Initialize nested literals directly in their inline
             # field, without an arena temporary or a second component copy.
-            let previous=state.frame_records.get(source)
-            state.frame_records[source]=address(destination offset node @state)
-            let value=expression(item.value @state)
-            if previous is? none {state.frame_records.pop(source default=0);}
-            else {state.frame_records[source]=previous}
+            let value=initialize_frame(source address(destination offset node @state) @state)
             let type=runtime_type(field.value_type node @state)
             if item.binding_id isnt? none {
                 let name=symbol(item.name item.binding_id @state)
@@ -4411,7 +4429,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         let declaration=hir.node_at(state.input.nodes declaration_id)
         $runtime_assert declaration is? hir.Declare
         let literal=hir.node_at(state.input.nodes declaration.expr)
-        if literal is? hir.ObjectLiteral {
+        if literal is? hir.ObjectLiteral|hir.CopyValue {
             # No whole-value copy, capture or call can outlive this record.
             # It owns only inline scalar storage, so no release/header is required.
             let layout=object_layout(literal.value_type literal @state)

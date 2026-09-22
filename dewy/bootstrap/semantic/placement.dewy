@@ -37,13 +37,17 @@ literal_storage=(value:addr nodes:array<hir.AST> table:types.Table):>set<addr>=>
         if id in? result continue
         result.add(id)
         let node=hir.node_at(nodes id)
+        if node is? hir.CopyValue {
+            let value=hir.node_at(nodes node.value)
+            if value is? hir.ObjectLiteral|hir.CopyValue and types.same_type(views.structural_base(value.value_type table) views.structural_base(node.value_type table) table) {pending.push(node.value)}
+        }
         if node is? hir.ObjectLiteral {
             let shape=types.node_at(table views.structural_base(node.value_type table))
             $runtime_assert shape is? types.ObjectType
             loop field in node.fields {
                 let expected=types.object_field(shape field.name)
                 let value=hir.node_at(nodes field.value)
-                if value is? hir.ObjectLiteral and expected isnt? none and types.same_type(views.structural_base(value.value_type table) views.structural_base(expected.value_type table) table) {pending.push(field.value)}
+                if value is? hir.ObjectLiteral|hir.CopyValue and expected isnt? none and types.same_type(views.structural_base(value.value_type table) views.structural_base(expected.value_type table) table) {pending.push(field.value)}
             }
         }
     }
@@ -88,7 +92,7 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
                     loop item in value.items {if hir.node_at(nodes item) is? hir.Spread {spread=true}}
                     if scalar and not spread {candidates[node.binding_id]=Candidate[id 48+8*value.items.length]}
                 }
-            } else if value is? hir.ObjectLiteral {
+            } else if value is? hir.ObjectLiteral|hir.CopyValue {
                 let size=scalar_record_size(value.value_type table)
                 if size isnt? none and size<=?FRAME_STORAGE_BYTES {candidates[node.binding_id]=Candidate[id size]}
             }
@@ -102,6 +106,7 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
                 if arg in? borrowed and hir.node_at(nodes arg) is? hir.ExpressedIdentifier {allowed[arg]=allowed.get(arg 0)+1}
             }
         }
+        if node is? hir.CopyValue and hir.node_at(nodes node.value) is? hir.ExpressedIdentifier {allowed[node.value]=allowed.get(node.value 0)+1}
         if node is? hir.Index|hir.ArrayLength and hir.node_at(nodes node.array) is? hir.ExpressedIdentifier {allowed[node.array]=allowed.get(node.array 0)+1}
         if node is? hir.MemberAccess and hir.node_at(nodes node.value) is? hir.ExpressedIdentifier {allowed[node.value]=allowed.get(node.value 0)+1}
         if node is? hir.Place and id in? fixed_places {

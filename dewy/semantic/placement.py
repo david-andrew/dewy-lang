@@ -43,11 +43,14 @@ def literal_storage(value):
     while pending:
         node = pending.pop()
         result.add(id(node))
+        if isinstance(node, hir.CopyValue) and isinstance(node.value, (hir.ObjectLiteral, hir.CopyValue)):
+            if ty.structural_base(node.value.type) == ty.structural_base(node.type):
+                pending.append(node.value)
         if isinstance(node, hir.ObjectLiteral):
             shape = ty.structural_base(node.type)
             for field in node.fields:
                 expected = shape.field(field.name)
-                if (isinstance(field.value, hir.ObjectLiteral) and expected is not None
+                if (isinstance(field.value, (hir.ObjectLiteral, hir.CopyValue)) and expected is not None
                         and ty.structural_base(field.value.type) == ty.structural_base(expected.type)):
                     pending.append(field.value)
     return result
@@ -76,7 +79,7 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
             scalar = element == 'bool' or ty.fixed_integer_layout(element) is not None
             if scalar and value.type.length == len(value.items) and not any(isinstance(item, hir.Spread) for item in value.items):
                 size = 48 + 8 * len(value.items)
-        elif isinstance(value, hir.ObjectLiteral):
+        elif isinstance(value, (hir.ObjectLiteral, hir.CopyValue)):
             size = scalar_record_size(value.type)
         if size is not None and size <= FRAME_STORAGE_BYTES:
             candidates[node.binding_id] = (node, size)
@@ -89,6 +92,8 @@ def local_values(literal: hir.FunctionLiteral, nonescaping_places: set[int] | fr
             for arg in [*node.pos_args, *node.kw_args.values()]:
                 if id(arg) in borrowed and isinstance(arg, hir.ExpressedIdentifier):
                     allowed[id(arg)] = allowed.get(id(arg), 0) + 1
+        if isinstance(node, hir.CopyValue) and isinstance(node.value, hir.ExpressedIdentifier):
+            allowed[id(node.value)] = allowed.get(id(node.value), 0) + 1
         if isinstance(node, (hir.Index, hir.ArrayLength)) and isinstance(node.array, hir.ExpressedIdentifier):
             allowed[id(node.array)] = allowed.get(id(node.array), 0) + 1
         if isinstance(node, hir.MemberAccess) and isinstance(node.value, hir.ExpressedIdentifier):
