@@ -2540,3 +2540,42 @@ Generation 2/3 took 64/82 seconds during concurrent work, not isolated latency
 measurements. Artifacts use `../dewy-build-artifacts/phase1-string-comparison-views-`
 and `phase1-string-views-` prefixes. These are focused checks and a fixed point,
 not a new complete pytest or corpus certification of this checkpoint.
+
+
+## Scoped inferred call rows (2026-09-22)
+
+Public effect analysis now retains a call's subject mapping as a solver
+projection. It resolves the callee row before translating parameter slots and
+field routes, including reassigned callbacks, keyword calls and nested wrappers.
+Private arguments erase only their own storage effects; unknown behavior stays
+unknown. Body equations and selected callable-boundary constraints use one
+solver rather than a separate body-call fixed point followed by row inference.
+These equations are transient analysis data, not new type syntax or cache data.
+
+Negative guarantees translate without broadening their routes. Written
+exclusions nominate candidates; inverse call mappings propagate those demands
+to source scopes by removing prefixes and renaming slots. The finite vocabulary
+therefore remains route suffixes even with recursion. Every candidate still
+needs evidence from all defining rules. Deep positive paths retain the existing
+widening, while deep exclusions drop. General user-written polymorphic `E` rows
+with callback-relative place subjects remain conservative: this checkpoint
+retains environments for inferred call equations, not those generic binders.
+Function-handle assignment also no longer implies allocation by itself;
+projected storage writes still retain their separate storage obligation.
+
+The solver kernel exposed a hosted iterator bug: optional record elements in a
+composite iterator were wrapped as present records instead of preserving their
+stored tags. Optional scalar/string and general union cells now use the same
+borrowed tag/payload transfer. Dictionary entries, nested record storage and
+padded array iteration preserve absence and execute correctly.
+
+Validation: 125 hosted effect checks passed before the negative-demand
+extension; 95 adjacent proof/allocation/cache/iterator checks pass after the
+final correction. The solver kernel, six scoped-call programs and three
+optional-iterator programs pass hosted/native checking and x86-64/C execution;
+five wrong-scope/forbidden-effect cases are rejected by both compilers. The
+native inventory is **4,408 sites over 47,545 lines (92.712/KLOC)** in the isolated
+checkout, within the tighter 4,500/100 gates. Artifacts use
+`../dewy-build-artifacts/phase1-scoped-inferred-` prefixes. The latest certified
+full fixed point remains the preceding string-view checkpoint; this slice has
+second-generation execution checks. Phase 1 remains in progress.
