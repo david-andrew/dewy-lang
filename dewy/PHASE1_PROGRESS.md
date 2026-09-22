@@ -3371,3 +3371,22 @@ Ninety-seven focused/adjacent hosted tests passed before the final diagnostic
 strengthening; the final five contract-rejection checks pass on both routes.
 A full bootstrap and inventory checkpoint follows; this is not a claim that
 Phase 1 or the full test matrix is complete.
+
+## Signed remainder bounds (2026-09-22)
+
+Fixed a proof-engine correctness bug in both compilers: fixed-width signed
+remainder had been given a nonnegative interval whenever its divisor was
+positive. That could accept `$assert x % 3 >=? 0` for an arbitrary signed
+`x`, or use the invented sign to justify an array index. Runtime arithmetic
+was already correct and is unchanged. Truncating remainder now follows the
+dividend's sign and is bounded by both the dividend and divisor magnitude;
+mathematical floor modulo keeps the divisor's sign. Unknown endpoints stay
+unknown, and an exactly zero divisor supplies no result bound.
+
+Validation: an exhaustive small-integer oracle checks every nonzero divisor
+in all intervals with endpoints from -5 through 5, for both conventions.
+Three runtime and three rejection cases agree on a fresh native driver and
+hosted compiler, with x86-64/C execution. The native interval kernel matches
+hosted transfers including negative and unbounded divisors; its three tests
+and 29 focused/adjacent hosted proof checks pass. This fixes sign soundness;
+symbolic remainder-versus-divisor relations remain the next proof step.

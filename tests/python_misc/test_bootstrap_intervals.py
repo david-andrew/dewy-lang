@@ -46,6 +46,12 @@ def test_native_interval_operations_match_hosted(tmp_path):
         ('__sub__', Interval(0, 1000), Interval(0, 1000), 'int8', Interval(0, 100)),
     ])
 
+    arithmetic = [(*case, False) for case in arithmetic]
+    for floor in (False, True):
+        for left in (Interval(-8, -1), Interval(-8, 8), Interval(1, 8), Interval(None, None)):
+            for right in (Interval(-5, -2), Interval(2, 5), Interval(-5, 5), Interval(1, None), Interval(None, -1)):
+                arithmetic.append(('__mod__', left, right, 'int', None, floor))
+
     def interval_literal(value):
         if value is None:
             return 'none'
@@ -54,9 +60,9 @@ def test_native_interval_operations_match_hosted(tmp_path):
         return f'intervals.Interval[{lo} {hi} {str(value.capped).lower()}]'
 
     arithmetic_lines = []
-    for operation, left, right, word, bound in arithmetic:
+    for operation, left, right, word, bound, floor in arithmetic:
         width = Interval(-128, 127) if word == 'int8' else None
-        arithmetic_lines.append(f"printl(spell(intervals.binary('{operation}' {interval_literal(left)} {interval_literal(right)} {interval_literal(width)} {interval_literal(bound)})))")
+        arithmetic_lines.append(f"printl(spell(intervals.binary('{operation}' {interval_literal(left)} {interval_literal(right)} {interval_literal(width)} {interval_literal(bound)} floor={str(floor).lower()})))")
     source = tmp_path / 'intervals.dewy'
     source.write_text(f'''
 import p"{ROOT / 'dewy/bootstrap/semantic/analyze/intervals.dewy'}" as intervals
@@ -100,8 +106,8 @@ main = ():>int64 => {{
         for op in OPS.values():
             expected.extend(spelling(_BoundsValidator._comparison_constraint(op, left, truth)) for truth in (True, False))
         expected.append(spelling(_exclude_value(left, 0)))
-    expected.extend(spelling(validator._binary_interval(operation, left, right, word, bound=bound))
-                    for operation, left, right, word, bound in arithmetic)
+    expected.extend(spelling(validator._binary_interval(operation, left, right, word, bound=bound, floor=floor))
+                    for operation, left, right, word, bound, floor in arithmetic)
     output = source.with_suffix('.udewy')
     output.write_text(codegen(SrcFile.from_path(source)))
     assert entry_point(output, [], EntryPointOptions(compile_only=True)) == 0

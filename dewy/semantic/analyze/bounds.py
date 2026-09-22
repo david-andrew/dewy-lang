@@ -788,6 +788,28 @@ def _multiply(interval: Interval, other: Interval) -> Interval:
     return Interval(min(products), max(products))
 
 
+def _remainder_interval(left: Interval, right: Interval, *, floor: bool) -> Interval | None:
+    """Modulo follows the divisor for floor division, the dividend for truncation.
+
+    A divisor may be known nonzero separately from its interval. The interval
+    may therefore span zero; only an exactly zero divisor has no result.
+    """
+    if right.lower == right.upper == 0:
+        return None
+    if floor:
+        if right.lower is not None and right.lower > 0:
+            return Interval(0, None if right.upper is None else right.upper - 1)
+        if right.upper is not None and right.upper < 0:
+            return Interval(None if right.lower is None else right.lower + 1, 0)
+        return None
+    magnitude = (max(abs(right.lower), abs(right.upper)) - 1
+                 if right.lower is not None and right.upper is not None else None)
+    lower = 0 if left.lower is not None and left.lower >= 0 else _maximum_lower(
+        left.lower, None if magnitude is None else -magnitude)
+    upper = 0 if left.upper is not None and left.upper <= 0 else _minimum_upper(left.upper, magnitude)
+    return Interval(lower, upper)
+
+
 class _BoundsValidator:
     def __init__(
         self,
@@ -3288,15 +3310,10 @@ class _BoundsValidator:
         ):
             candidates = [a // b for a in (left.lower, left.upper) for b in (right.lower, right.upper)]
             result = Interval(min(candidates), max(candidates))
-        elif (
-            name == '__mod__'
-            and right.lower is not None
-            and right.lower > 0
-            and right.upper is not None
-        ):
-            result = Interval(0, right.upper - 1)
-        elif floor and name == '__mod__' and right.lower is not None and right.upper is not None and right.upper < 0:
-            result = Interval(right.lower + 1, 0)
+        elif name == '__mod__':
+            result = _remainder_interval(left, right, floor=floor)
+            if result is None:
+                return None
         else:
             return None
         if bound is not None:
