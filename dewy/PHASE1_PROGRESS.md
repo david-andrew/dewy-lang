@@ -2817,3 +2817,14 @@ eight rejection cases against hosted checking on x86-64 and C. Dynamic selection
 is evaluated once; the repeated-call kernel retains no arena bytes over 100
 calls. Artifacts use `../dewy-build-artifacts/phase1-element-return-*` and
 `phase1-index-adjacent.log`. Phase 1 remains in progress.
+
+
+Integration checkpoint: `7f040b71` completed the three-generation direct x86-64
+bootstrap with byte-identical final Dewy and µDewy binaries and passing native
+runtime checks, including x86-64/C execution. Generation 1/2/3 took 154/141/104
+seconds under concurrent test load; these are not isolated latency results.
+The pair is `../dewy-build-artifacts/phase1-component-returns-7f040b71`.
+Copy inventory is **4,452 sites over 48,103 lines (92.551/KLOC)**, within the
+4,500/100 gates. The broad hosted selection (`-k 'not bootstrap and not native'`)
+passed **3,527 tests with 14 skipped** in 590.13 seconds. This is not a complete
+all-route pytest run; fresh paired checks for this batch are recorded above.
