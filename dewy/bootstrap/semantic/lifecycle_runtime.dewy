@@ -15,8 +15,9 @@ import p"analyze/predicate_effects.dewy" as predicate_effects
 # transfer fresh owners; checked @ parameters borrow. Same-scope bindings move
 # at last use. Custom copy/move hooks remain checked calls, and drop precedes
 # field/element storage cleanup. Branch consumption uses last-use proofs and
-# conditional cleanup. Repeated outer-owner consumption, field transfers and
-# remaining resource-container mutations still need further lifetime analysis.
+# conditional cleanup. Exiting owners can transfer fields through synthesized
+# wrappers; repeated consumption and broader partial transfers remain pending.
+Extraction:type = const [binding:addr path:array<string> moved:bool=false]
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 # An expression can contain a block, branch, or early return. Carry its
 # enclosing lexical lifetime explicitly through expression traversal.
@@ -94,7 +95,12 @@ move_remainder=(shape:types.ObjectType plan:Plan session:contexts.Session):>arra
     }
     return current.fields
 }
-drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none):>void => {
+drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none extraction:Extraction?=none):>void => {
+    if extraction isnt? none and extraction.path.length=?0 {
+        if not extraction.moved return
+        run_hook=false
+        extraction=none
+    }
     if plan.problem isnt? none or resource(type_id session.types) is? none return
     let owner=views.structural_base(type_id session.types)
     let type=types.node_at(session.types owner)
@@ -256,10 +262,17 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         let field=fields[index]
         if resource(field.value_type session.types) is? none continue
         let member=put(hir.MemberAccess[loc field.value_type value field.name] @session)
-        drop_value(member field.value_type loc nested @calls @plan @session)
+        let remaining:Extraction?=none
+        if extraction isnt? none and extraction.path.length>?0 and extraction.path[0]=?field.name {
+            let path:array<string>=[]
+            let i:addr=1
+            loop i<?extraction.path.length {path.push(extraction.path[i]) i+=1}
+            remaining=Extraction[extraction.binding path extraction.moved]
+        }
+        drop_value(member field.value_type loc nested @calls @plan @session extraction=remaining)
     }
 }
-cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fields_only:addr?=none):>array<addr> => {
+cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fields_only:addr?=none extracted:Extraction?=none):>array<addr> => {
     let result:array<addr>=[]
     let index=owners.length
     loop index >? 0 {
@@ -271,7 +284,7 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
         let owner=if declared.annotation isnt? none declared.annotation else hir.node_at(session.hir declared.expr).value_type
         let value=put(hir.ExpressedIdentifier[loc owner declared.name declared.binding_id] @session)
         let calls:array<addr>=[]
-        drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only)
+        drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only extraction=if extracted isnt? none and extracted.binding=?declared.binding_id extracted else none)
         $runtime_assert declared.binding_id isnt? none
         let flag=plan.flags.get(declared.binding_id)
         if flag isnt? none and owners[index] not=? fields_only {
@@ -282,6 +295,33 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
         } else {loop call in calls {result.push(call)}}
     }
     return result
+}
+# Only synthesized wrappers may become partially owned at an exit. A custom
+# lifecycle operation still requires its complete receiver. Borrowed bindings
+# and aliases never appear in the owning declaration list.
+returning_field=(id:addr owners:array<addr> session:contexts.Session):>Extraction?=>{
+    let value=hir.node_at(session.hir id)
+    loop value is? hir.Obligation|hir.ValueCast|hir.RepresentationCast {
+        value=hir.node_at(session.hir if value is? hir.Obligation value.value else value.expr)
+    }
+    let reverse_path:array<string>=[]
+    loop value is? hir.MemberAccess {
+        let shape=types.node_at(session.types views.structural_base(hir.node_at(session.hir value.value).value_type session.types))
+        if shape isnt? types.ObjectType return none
+        loop method in shape.methods {if method.lifecycle isnt? none return none}
+        reverse_path.push(value.name)
+        value=hir.node_at(session.hir value.value)
+    }
+    if reverse_path.length=?0 or value isnt? hir.ExpressedIdentifier or value.binding_id is? none return none
+    loop owner in owners {
+        let declaration=hir.node_at(session.hir owner)
+        $runtime_assert declaration is? hir.Declare
+        if declaration.binding_id not=?value.binding_id continue
+        let path:array<string>=[]
+        loop reverse_path.length>?0 {path.push(reverse_path.pop)}
+        return Extraction[value.binding_id path]
+    }
+    return none
 }
 transfer = (id:addr expected:addr? @plan:Plan @session:contexts.Session):>addr => {
     let value=hir.node_at(session.hir id)
@@ -1168,7 +1208,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             }
         }
         if declared.binding_id is? none or (declared.annotation isnt? none and not types.same_type(declared.annotation value.value_type session.types) and not same_array and not same_union) {reject(declared 'a non-fresh local owner' @plan) return}
-        if id in? plan.transfer_sites and value is? hir.ExpressedIdentifier {
+        if id in? plan.transfer_sites and not declared.view and value is? hir.ExpressedIdentifier {
             let retained:array<addr>=[]
             let source:addr?=none
             loop owner in owners {
@@ -1232,6 +1272,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
     if node is? hir.Return {
         let current:hir.Return=node
         let consumed:addr?=none
+        let extracted:Extraction?=none
         let moved=false
         if current.item isnt? none {
             if owning_result and resource(hir.node_at(session.hir current.item).value_type session.types) isnt? none {
@@ -1264,7 +1305,14 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                         }
                     }
                 }
-                if consumed is? none {fresh(returned_id live false @plan @session frame=frame)}
+                if consumed is? none {
+                    let projection=returning_field(returned_id owners session)
+                    if projection isnt? none {
+                        let result=transfer(returned_id plan.result_type @plan @session)
+                        extracted=Extraction[projection.binding projection.path result not=?returned_id]
+                        current.item=result
+                    } else {fresh(returned_id live false @plan @session frame=frame)}
+                }
             }
             else {expression(current.item live inherited @plan @session frame=frame)}
         }
@@ -1279,7 +1327,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         }
         let released:array<addr>=[]
         loop owner in owners {if moved or consumed is? none or owner not=? consumed {released.push(owner)}}
-        loop call in cleanup(released current.loc @plan @session fields_only=if moved consumed else none) {items.push(call)}
+        loop call in cleanup(released current.loc @plan @session fields_only=if moved consumed else none extracted=extracted) {items.push(call)}
         items.push(put(current @session))
         store(id hir.Block[current.loc current.value_type items false] @session)
         return

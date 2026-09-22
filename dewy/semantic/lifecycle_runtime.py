@@ -6,8 +6,8 @@ borrow. Same-scope bindings can move at last use, and custom copy/move hooks
 remain checked calls. Drop precedes field/element storage cleanup.
 
 Branch consumption uses last-use proofs and conditional cleanup. Repeated
-outer-owner consumption, field transfers and remaining resource-container
-mutations still need further lifetime analysis.
+outer-owner consumption and partial transfers still need further lifetime
+analysis; exiting owners can transfer fields through synthesized wrappers.
 """
 from dataclasses import replace
 
@@ -130,9 +130,14 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             assert parent is not None
             current = ty.USER_BRAND_TYPES[parent]
 
-    def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None):
+    def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None, extracted=None):
         result = []
-        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None):
+        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None):
+            if extraction is not None and not extraction[0]:
+                if not extraction[1]:
+                    return  # This component now belongs to the returned value.
+                run_hook = False  # A custom move leaves only component cleanup.
+                extraction = None
             if resource(type_) is None:
                 return
             shape = ty.structural_base(type_)
@@ -257,12 +262,14 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             fields = shape.fields if run_hook else move_remainder(shape)
             for field in reversed(fields):
                 if resource(field.type) is not None:
-                    drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)}, into=into)
+                    drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)}, into=into,
+                         extraction=(extraction[0][1:], extraction[1]) if extraction is not None and extraction[0][0] == field.name else None)
         for owner in reversed(owners):
             owner_type = owner.annotation or owner.expr.type
             value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
             calls = []
-            drop(value, owner_type, set(), owner.binding_id not in fields_only, into=calls)
+            drop(value, owner_type, set(), owner.binding_id not in fields_only, into=calls,
+                 extraction=extracted[1:] if extracted is not None and extracted[0] == owner.binding_id else None)
             flag = ownership_flags.get(owner.binding_id)
             if flag is not None and owner.binding_id not in fields_only:
                 body = hir.Block(loc, ty.VOID_TYPE, calls, True)
@@ -275,6 +282,27 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             value, first, before = suffix
             drop(value, value.type, set(), tail=(first, before))
         return result
+
+    def returning_field(value, owners):
+        """An exiting owner may surrender a field through hook-free wrappers.
+
+        A wrapper with lifecycle hooks still needs to see its complete value;
+        ordinary synthesized wrappers can clean up their remaining fields.
+        Borrowed parameters and aliases are not in the owning declaration set.
+        """
+        while isinstance(value, (hir.Obligation, hir.ValueCast, hir.RepresentationCast)):
+            value = value.value if isinstance(value, hir.Obligation) else value.expr
+        path = []
+        while isinstance(value, hir.MemberAccess):
+            shape = ty.structural_base(value.value.type)
+            if not isinstance(shape, ty.ObjectType) or any(m.lifecycle is not None for m in shape.methods):
+                return None
+            path.append(value.name)
+            value = value.value
+        if (path and isinstance(value, hir.ExpressedIdentifier)
+                and any(owner.binding_id == value.binding_id for owner in owners)):
+            return value.binding_id, tuple(reversed(path))
+        return None
 
     def transfer(value, expected):
         shape = ty.structural_base(value.type)
@@ -1084,7 +1112,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 if (node.binding_id is None
                         or node.annotation is not None and node.annotation != node.expr.type and not same_array and not same_union):
                     reject(node, 'a non-fresh local owner')
-                if id(node) in transfers:
+                if id(node) in transfers and not node.view:
                     source = next((owner for owner in owners if owner.binding_id == node.expr.binding_id), None)
                     if source is not None:
                         value, moved = transfer(node.expr, node.annotation or node.expr.type)
@@ -1120,6 +1148,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if isinstance(node, hir.Return):
                 consumed = None
                 moved = False
+                extracted = None
                 if node.item is not None and owning_result and resource(node.item.type) is not None:
                     # Returning leaves this path, so a named local owner is
                     # at its last use. Borrowed parameters are deliberately
@@ -1136,6 +1165,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     elif isinstance(node.item, hir.ExpressedIdentifier) and any(owner.binding_id == node.item.binding_id for owner in owners):
                         returned, moved = transfer(node.item, literal.rettype)
                         consumed = node.item.binding_id
+                    elif (projection := returning_field(node.item, owners)) is not None:
+                        returned, moved = transfer(node.item, literal.rettype)
+                        extracted = (*projection, moved)
                     else:
                         returned = fresh(node.item, live, False, control=control)
                 else:
@@ -1147,7 +1179,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     declaration, returned = capture(returned, node.loc)
                     result.append(declaration)
                 result.extend(cleanup([owner for owner in owners if moved or owner.binding_id != consumed], node.loc,
-                                      {consumed} if moved else frozenset()))
+                                      {consumed} if moved else frozenset(), extracted=extracted))
                 result.append(replace(node, item=returned))
                 return hir.Block(node.loc, node.type, result, False)
             if isinstance(node, (hir.Break, hir.Continue)):

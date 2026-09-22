@@ -2769,3 +2769,23 @@ over 47,770 lines (92.485/KLOC)**, within the 4,500/100 gates. The broad hosted
 selection (`-k 'not bootstrap and not native'`) passed **3,488 tests with 14
 skipped** in 569.44 seconds. These integration results precede the sort storage
 lifetime change; its fresh paired checks are recorded separately above.
+
+
+## Owning field returns (2026-09-22)
+
+Returning a resource field from a local owning record or by-value parameter now
+transfers that field and drops the remaining fields in reverse order. Nested
+synthesized wrappers, optional fields, arrays of resources, conditional exits
+and custom moves on the selected field share the rule. A custom move still
+cleans up the consumed component's remaining fields and must establish the
+return facts. Wrappers with their own lifecycle hooks conservatively retain
+the complete-receiver requirement; borrowed parameters/views cannot donate
+ownership. Native last-use rewriting no longer promotes an explicit resource
+view to an owning transfer, fixing a paired acceptance mismatch.
+
+Validation: 278 adjacent hosted lifecycle tests passed before the final explicit
+view guard; the final focused hosted selection passed 13 tests. A fresh native
+driver agrees on eight runtime kernels and five rejections, with x86-64/C
+execution. The array-field kernel checks 100 calls with no retained arena bytes.
+Artifacts: `../dewy-build-artifacts/phase1-field-return-*`. General partial
+transfers and array-element returns remain pending; Phase 1 is not complete.
