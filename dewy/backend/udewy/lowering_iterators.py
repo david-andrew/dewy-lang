@@ -368,9 +368,11 @@ class _IteratorLowering:
             else:
                 value = self._iterator_value(iterator, offset_value)
                 value_updates = []
-            if payload is not None and self._is_optional_element(element_type if array_value is not None else None):
-                # the element word is a cell pointer: copy its tag and payload
-                # into the target cell directly (the value is not re-wrapped)
+            if payload is not None and array_value is not None and (
+                    self._is_optional_element(element_type) or self._is_union_element(element_type)):
+                # Optional aggregates use the general union-cell layout. Both
+                # representations already carry presence: borrow their tag and
+                # payload, rather than wrapping the cell as a present record.
                 loc = iterator.loc
                 pointer = hir.ExpressedIdentifier(loc, 'int64', self._new_iterator_name('cell'))
                 defined_body = [
