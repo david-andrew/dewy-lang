@@ -94,3 +94,45 @@ unknown=(f:():>int64):>int64=>f()
     assert rows.implies(summaries[id(functions['answer'])], PURE)
     assert rows.implies(summaries[id(functions['forward'])], PURE)
     assert not rows.implies(summaries[id(functions['unknown'])], PURE)
+
+
+def test_scoped_call_equations_translate_after_callback_inference():
+    read = rows.Atom('reads', rows.Subject('parameter', '0'))
+    projections = {
+        'call:first': infer.Projection(variable(A), {'0': rows.Subject('parameter', '1', ('left',))}),
+        'call:second': infer.Projection(variable(A), {'0': rows.Subject('parameter', '2', ('right',))}),
+        'call:private': infer.Projection(variable(A), {'0': None}),
+    }
+    result = infer.solve_contracts({A: PURE, B: rows.Contract(rows.Row((read,)))},
+                                  (infer.Constraint(variable(B), variable(A)),), projections)
+    for name, slot, field in [('first', '1', 'left'), ('second', '2', 'right')]:
+        expected = rows.Contract(rows.Row((rows.Atom('reads', rows.Subject('parameter', slot, (field,))),)))
+        assert result['call:'+name] == expected
+    assert result['call:private'] == PURE
+    assert result[A].allowed.atoms == (read,)
+
+
+def test_scoped_call_equations_preserve_unknown_and_do_not_strengthen_exclusions():
+    source = rows.Atom('mutates', rows.Subject('parameter', '0', ('inner',)))
+    target = rows.Atom('mutates', rows.Subject('parameter', '1', ('outer', 'inner')))
+    no_target = rows.Contract(excluded=(target,))
+    projection = {'call': infer.Projection(variable(A), {'0': rows.Subject('parameter', '1', ('outer',))})}
+    constraints = (infer.Constraint(variable('call'), no_target),)
+    result = infer.solve_contracts({A: rows.Contract(excluded=(source,))}, constraints, projection)
+    assert infer.satisfied_contracts(constraints[0], result)
+    assert not rows.implies(result['call'], PURE)
+    result = infer.solve_contracts({A: rows.Contract()}, constraints, projection)
+    assert not infer.satisfied_contracts(constraints[0], result)
+    deep = {'call': infer.Projection(variable(A), {'0': rows.Subject('parameter', '1', ('nested',)*9)})}
+    result = infer.solve_contracts({A: rows.Contract(excluded=(source,))}, constraints, deep)
+    assert not result['call'].excluded  # truncating an exclusion would strengthen it
+
+
+def test_recursive_scoped_call_equations_have_a_bounded_route_vocabulary():
+    read = rows.Atom('reads', rows.Subject('parameter', '0', ('value',)))
+    source = rows.Contract(rows.Row((read,), ('call',)))
+    projections = {'call': infer.Projection(variable(A), {'0': rows.Subject('parameter', '0', ('child',))})}
+    result = infer.solve_contracts({A: source}, projections=projections)
+    assert result[A].allowed.atoms
+    assert all(len(atom.subject.route) <= 8 for atom in result[A].allowed.atoms)
+    assert any(atom.subject.route == ('child',)*8 for atom in result[A].allowed.atoms)

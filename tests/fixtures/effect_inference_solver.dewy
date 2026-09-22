@@ -59,5 +59,31 @@ main=():>int64=>{
         infer.Constraint[variable(a) no_fs]
     ])
     if not infer.satisfied_contracts(infer.Constraint[variable(a) no_fs] solved) return 13
+    # A call resolves its source before moving parameter-relative subjects.
+    # The same callback can be applied to two different routes and to private
+    # storage without widening or renaming its own signature.
+    let read=rows.Atom['reads' rows.Subject['parameter' '0']]
+    let caller="{infer.PREFIX}call"
+    let private_call="{infer.PREFIX}private"
+    let projections:dict<string infer.Projection>=[
+        caller->infer.Projection[variable(a) ['0'->rows.Subject['parameter' '1' ['field']]]]
+        private_call->infer.Projection[variable(a) ['0'->none]]
+    ]
+    definitions=[a->pure b->rows.Contract[rows.Row[[read]]]]
+    solved=infer.solve_contracts(definitions [infer.Constraint[variable(b) variable(a)]] projections)
+    let translated=rows.Contract[rows.Row[[rows.Atom['reads' rows.Subject['parameter' '1' ['field']]]]]]
+    if not infer.satisfied_contracts(infer.Constraint[variable(caller) translated] solved) return 14
+    if not infer.satisfied_contracts(infer.Constraint[variable(private_call) pure] solved) return 15
+    if infer.satisfied_contracts(infer.Constraint[variable(caller) pure] solved) return 16
+    let excluded=rows.Atom['mutates' rows.Subject['parameter' '0']]
+    let destination=rows.Contract[excluded=[rows.Atom['mutates' rows.Subject['parameter' '1' ['field']]]]]
+    definitions=[a->rows.Contract[excluded=[excluded]]]
+    constraints=[infer.Constraint[variable(caller) destination]]
+    solved=infer.solve_contracts(definitions constraints projections)
+    $runtime_assert constraints.length =? 1
+    if not infer.satisfied_contracts(constraints[0] solved) return 17
+    definitions[a]=rows.Contract[]
+    solved=infer.solve_contracts(definitions constraints projections)
+    if infer.satisfied_contracts(constraints[0] solved) return 18
     return 42
 }

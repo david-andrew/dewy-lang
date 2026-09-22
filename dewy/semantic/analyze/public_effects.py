@@ -5,7 +5,6 @@ read/write is private, whereas a place or captured mutable value belongs to
 someone else. Unsupported storage operations remain unknown until their
 allocation/escape behavior has a checked model; unknown never means pure.
 """
-from collections import deque
 
 from .. import bindings, effect_rows as rows, effect_inference as inference, hir, ty, placement
 from ..errors import user_error
@@ -43,15 +42,23 @@ def word_iterator(node):
         for value in (node.first, node.step, node.last, node.count))
 
 
-def summarize(root, registry):
-    """Infer behavior for every checked function, even without written rows."""
+def inventory(root, registry):
+    """Collect finite body/call equations; keep call environments until solving."""
     analysis = _EffectAnalyzer(root)
     storage_effects = analysis.solve()
     frame_places = place_loans(analysis, storage_effects)
     borrowed_arguments = storage_borrows.forwarded_values(analysis, storage_effects)
     local = {}
-    calls = {}
-    dependents = {}
+    projections = {}
+
+    def instantiate(contract, supplied):
+        if not supplied:
+            return contract
+        # A call owns one equation. Recursive calls reference body variables,
+        # never an ever-growing string of composed substitution environments.
+        name = inference.PREFIX + f'call:{len(projections)}'
+        projections[name] = inference.Projection(contract, supplied)
+        return rows.Contract(rows.Row(variables=(name,)))
     for literal in analysis.literals:
         key = id(literal)
         params = _literal_params(literal)
@@ -79,7 +86,6 @@ def summarize(root, registry):
                     word_bindings.add(node.target.binding_id)
             pending.extend(hir.children(node))
         summary = rows.Contract(rows.Row())
-        dependencies = []
 
         def contribute(contract):
             nonlocal summary
@@ -170,7 +176,7 @@ def summarize(root, registry):
                         if supplied is None:
                             unknown()
                         else:
-                            dependencies.append((id(target), supplied))
+                            contribute(instantiate(rows.Contract(rows.Row(variables=(body_name(id(target)),))), supplied))
                 elif (isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None
                       and node.func.name in SCALAR_OPERATIONS and scalar(node.type)
                       and all(word_value(arg) for arg in node.pos_args)):
@@ -180,7 +186,7 @@ def summarize(root, registry):
                     if supplied is None:
                         unknown()
                     else:
-                        contribute(rows.instantiate(node.func.type.effects or rows.Contract(), supplied))
+                        contribute(instantiate(node.func.type.effects or rows.Contract(), supplied))
                     visit(node.func)
                 else:
                     unknown()
@@ -227,7 +233,7 @@ def summarize(root, registry):
                 # Projected writes may detach a shared array or require an
                 # independent by-value parameter. Do not infer no allocation
                 # merely because the final stored element is a scalar.
-                if not scalar(node.target.type) or projected_storage(path):
+                if (not scalar(node.target.type) and not isinstance(node.target.type, (ty.FunctionType, ty.OverloadType))) or projected_storage(path):
                     storage()
                 access(node.target, 'mutates')
                 if isinstance(node, hir.Assign) and node.op != '=':
@@ -265,28 +271,19 @@ def summarize(root, registry):
             if isinstance(param, hir.BoundParam):
                 visit(param.value)
         local[key] = summary
-        calls[key] = dependencies
-        for target, _ in dependencies:
-            dependents.setdefault(target, set()).add(key)
+    return local, projections
 
-    # Least fixed point of possible behaviors, independent of termination.
-    # Calls translate parameter slots into the caller's storage routes. Deep
-    # recursive routes widen positively; negative guarantees never widen.
-    summaries = dict(local)
-    pending = deque(local)
-    queued = set(local)
-    while pending:
-        key = pending.popleft()
-        queued.remove(key)
-        updated = rows.join(local[key], *(rows.instantiate(summaries[target], supplied) for target, supplied in calls[key]))
-        if rows.identity(updated) == rows.identity(summaries[key]):
-            continue
-        summaries[key] = updated
-        for caller in dependents.get(key, ()):
-            if caller not in queued:
-                pending.append(caller)
-                queued.add(caller)
-    return summaries
+
+def body_name(key):
+    return inference.PREFIX + f'body:{key}'
+
+
+def summarize(root, registry):
+    """Infer bodies without value-boundary constraints, for analysis clients."""
+    local, projections = inventory(root, registry)
+    solutions = inference.solve_contracts({body_name(key): body for key, body in local.items()},
+                                          projections=projections)
+    return {key: solutions[body_name(key)] for key in local}
 
 
 def validate(root, registry, srcfile):
@@ -314,17 +311,22 @@ def validate(root, registry, srcfile):
                    for _, edge in boundaries)
     if not written and not required:
         return
-    summaries = summarize(root, registry)
+    summaries, projections = inventory(root, registry)
+    definitions.update((body_name(key), body) for key, body in summaries.items())
     for name, node in bodies:
-        body = summaries[id(node)]
+        body = rows.Contract(rows.Row(variables=(body_name(id(node)),)))
         definitions[name] = rows.join(definitions[name], body) if name in definitions else body
-    solutions = inference.solve_contracts(definitions, tuple(edge for _, edge in boundaries))
+    # Written exclusions seed the finite qualifier vocabulary. They are
+    # obligations, never positive lower bounds on an unrelated row variable.
+    requirements = tuple(inference.Constraint(None, rows.Contract(excluded=node.type.effects.excluded))
+                         for node in constrained if node.type.effects.excluded)
+    solutions = inference.solve_contracts(definitions, tuple(edge for _, edge in boundaries) + requirements, projections)
     for node, edge in boundaries:
         if not inference.satisfied_contracts(edge, solutions):
             user_error(srcfile, 'callable does not satisfy its effect contract',
                        Pointer(span=node.loc, message='the inferred callable behavior exceeds its destination contract'))
     for literal in constrained:
-        if not rows.implies(inference.resolve_contracts(summaries[id(literal)], solutions), inference.resolve_contracts(literal.type.effects, solutions)):
+        if not rows.implies(solutions[body_name(id(literal))], inference.resolve_contracts(literal.type.effects, solutions)):
             user_error(literal.source or srcfile, 'function does not satisfy its effect contract',
                        Pointer(span=literal.loc, message='an operation or callee may exceed the permitted effects or violate an exclusion'),
                        hint='omit the row to infer conservatively, or remove the operation requiring effects')

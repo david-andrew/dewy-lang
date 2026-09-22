@@ -20,7 +20,7 @@ scalar = (id:addr nodes:types.Table):>bool => {
     return node is? types.Primitive and node.name in? ['void' 'never' 'none' 'bool' 'true' 'false' 'int8' 'int16' 'int32' 'int64' 'uint8' 'uint16' 'uint32' 'uint64' 'float32' 'float64']
 }
 Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[] borrowed_arguments:dict<addr set<addr>>=[]]
-Call:type = const [target:addr subjects:dict<string rows.Subject?>]
+Call:type = const [source:rows.Contract subjects:dict<string rows.Subject?>]
 Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[] value_parameters:set<addr>=set[] frame_values:set<addr>=set[] frame_literals:set<addr>=set[]]
 Location:type = const [known:bool subject:rows.Subject?=none]
 word_iterator = (id:addr node:hir.IteratorExpression input:Input):>bool => {
@@ -136,14 +136,14 @@ visit = (id:addr input:Input @scan:Scan):>void => {
                 if shape isnt? types.FunctionType {unknown(@scan) continue}
                 let supplied=call_subjects(node shape input scan)
                 if supplied is? none {unknown(@scan)}
-                else {scan.calls.push(Call[target supplied])}
+                else {scan.calls.push(Call[rows.Contract[rows.Row[variables=[body_name(target)]]] supplied])}
             }
         }
         else if scalar_operation {}
         else if signature is? types.FunctionType {
             let supplied=call_subjects(node signature input scan)
             if supplied is? none {unknown(@scan)}
-            else {contribute(rows.instantiate(if signature.effects is? none rows.Contract[] else signature.effects supplied) @scan)}
+            else {scan.calls.push(Call[if signature.effects is? none rows.Contract[] else signature.effects supplied])}
             visit(node.func input @scan)
         }
         else {unknown(@scan)}
@@ -193,7 +193,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     }
     if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign {
         let target=hir.node_at(input.nodes node.target)
-        if not scalar(target.value_type input.types) or projected_storage(node.target input scan) {storage(@scan)}
+        if (not scalar(target.value_type input.types) and types.node_at(input.types target.value_type) isnt? types.FunctionType|types.OverloadType) or projected_storage(node.target input scan) {storage(@scan)}
         record_access(node.target 'mutates' input @scan)
         if node is? hir.Assign and node.op not=? '=' {record_access(node.target 'reads' input @scan)}
         visit(node.value input @scan)
@@ -218,15 +218,16 @@ visit = (id:addr input:Input @scan:Scan):>void => {
 }
 # The behavior inventory is independent of whether a source contract exists.
 # Validation and omitted-row inference share this same checked call graph.
-summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[]):>dict<addr rows.Contract> => {
+Inventory:type = const [bodies:dict<addr rows.Contract> projections:dict<string inference.Projection>]
+body_name=(id:addr):>string=>"{inference.PREFIX}body:{id}"
+inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[]):>Inventory => {
     let analysis=access.collect_roots(roots session.hir)
     let access_summaries=access.analyze_collected(analysis session.hir session.types)
     let frame_places=access.place_loans(analysis access_summaries session.hir session.types)
     let borrowed=storage_borrows.forwarded_values(analysis access_summaries session.hir session.types session.registry)
     let input=Input[session.hir session.types session.registry analysis access_summaries word_iterators borrowed]
     let local:dict<addr rows.Contract>=[]
-    let calls:dict<addr array<Call>>=[]
-    let edges:dict<addr set<addr>>=[]
+    let projections:dict<string inference.Projection>=[]
     loop id in analysis.literals {
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
@@ -265,37 +266,32 @@ summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
         }
         visit(node.body input @scan)
         loop param in params {if param is? hir.BoundParam {visit(param.value input @scan)}}
-        local[id]=scan.summary
-        calls[id]=scan.calls
         loop call in scan.calls {
-            let callers=edges.get(call.target set[])
-            callers.add(id)
-            edges[call.target]=callers
+            if call.subjects.length =? 0 {contribute(call.source @scan)}
+            else {
+                let name="{inference.PREFIX}call:{projections.length}"
+                projections[name]=inference.Projection[call.source call.subjects]
+                contribute(rows.Contract[rows.Row[variables=[name]]] @scan)
+            }
         }
+        local[id]=scan.summary
     }
-    # Possible behaviors grow to a fixed point. This does not imply that a
-    # recursive pure function terminates ($proof has a separate boundary).
-    let summaries=local
-    let pending=analysis.literals
-    let queued:set<addr>=set[]
-    loop id in pending {queued.add(id)}
-    loop pending.length >? 0 {
-        let id=pending.pop
-        queued.pop(id default=id);
-        $runtime_assert id in? local and id in? calls and id in? summaries
-        let updated=local[id]
-        loop call in calls[id] {
-            $runtime_assert call.target in? summaries
-            updated=rows.join(updated rows.instantiate(summaries[call.target] call.subjects))
-        }
-        if rows.identity(updated) =? rows.identity(summaries[id]) continue
-        summaries[id]=updated
-        loop caller in edges.get(id set[]) {
-            if caller not in? queued {pending.push(caller) queued.add(caller)}
-        }
+    return Inventory[local projections]
+}
+summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[]):>dict<addr rows.Contract> => {
+    let graph=inventory(roots session word_iterators)
+    let definitions:dict<string rows.Contract>=[]
+    loop [id body] in graph.bodies {definitions[body_name(id)]=body}
+    let solutions=inference.solve_contracts(definitions projections=graph.projections)
+    let summaries:dict<addr rows.Contract>=[]
+    loop [id body] in graph.bodies {
+        let name=body_name(id)
+        $runtime_assert name in? solutions
+        summaries[id]=solutions[name]
     }
     return summaries
 }
+
 validate = (roots:array<addr> source:SrcFile session:contexts.Session word_iterators:set<addr>=set[]):>Error? => {
     if not session.types.effect_contracts return none
     let constrained:array<addr>=[]
@@ -347,15 +343,25 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
         if edge.required isnt? none and not rows.implies(none edge.required) and (not inference.pending(edge.required) or edge.required.excluded.length >? 0) {required=true}
     }
     if not written and not required return none
-    let summaries=summarize(roots session word_iterators)
+    let graph=inventory(roots session word_iterators)
+    let summaries=graph.bodies
+    loop [id body] in summaries {definitions[body_name(id)]=body}
     loop id in bodies {
         let signature=types.node_at(session.types hir.node_at(session.hir id).value_type)
         $runtime_assert signature is? types.FunctionType and signature.inferred_effect isnt? none and id in? summaries
         let name=signature.inferred_effect
-        let body=summaries[id]
+        let body=rows.Contract[rows.Row[variables=[body_name(id)]]]
         definitions[name]=if name in? definitions rows.join(definitions[name] body) else body
     }
-    let solutions=inference.solve_contracts(definitions constraints)
+    # Written exclusions select candidates; they never become assignments to
+    # a source callable's row. Their actual obligations are checked below.
+    loop id in constrained {
+        let signature=types.node_at(session.types hir.node_at(session.hir id).value_type)
+        if signature is? types.FunctionType and signature.effects isnt? none and signature.effects.excluded.length >? 0 {
+            constraints.push(inference.Constraint[none rows.Contract[excluded=signature.effects.excluded]])
+        }
+    }
+    let solutions=inference.solve_contracts(definitions constraints graph.projections)
     loop i in 0.. and i <? constraints.length and i <? sites.length {
         if not inference.satisfied_contracts(constraints[i] solutions) {
             let node=hir.node_at(session.hir sites[i])
@@ -368,7 +374,9 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
         let signature=types.node_at(session.types node.value_type)
         $runtime_assert signature is? types.FunctionType and signature.effects isnt? none
         $runtime_assert id in? summaries
-        if not rows.implies(inference.resolve_contracts(summaries[id] solutions) inference.resolve_contracts(signature.effects solutions)) {
+        let name=body_name(id)
+        $runtime_assert name in? solutions
+        if not rows.implies(solutions[name] inference.resolve_contracts(signature.effects solutions)) {
             let src=source
             if node.source isnt? none {
                 $runtime_assert node.source <? session.sources.length

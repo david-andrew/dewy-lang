@@ -6,7 +6,10 @@ import p"effect_rows.dewy" as rows
 const PREFIX='inferred-effect:'
 const BINDING_PREFIX='inferred-effect:binding:'
 Constraint:type = const [actual:rows.Contract? required:rows.Contract?]
-Rule:type = const [targets:array<string> source:rows.Row covered:rows.Row=rows.Row[]]
+# Transient equations retain the callee's subject scope until its row has
+# been solved. They are not source types or serialized generic binders.
+Projection:type = const [source:rows.Contract subjects:dict<string rows.Subject?>]
+Rule:type = const [targets:array<string> source:rows.Row covered:rows.Row=rows.Row[] subjects:(dict<string rows.Subject?>)?=none]
 pending=(contract:rows.Contract?):>bool=>{
     if contract is? none or contract.allowed is? none return false
     loop name in contract.allowed.variables {if name.startswith(PREFIX) return true}
@@ -19,11 +22,15 @@ admitted=(contract:rows.Contract?):>rows.Row=>{
     if contract is? none or contract.allowed is? none return rows.Row[unknown=true]
     return contract.allowed
 }
-solve=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[]):>dict<string rows.Row>=>{
+solve=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[] projections:dict<string Projection>=[]):>dict<string rows.Row>=>{
     let rules:array<Rule>=[]
     let solutions:dict<string rows.Row>=[]
     loop [name body] in definitions {
         rules.push(Rule[[name] admitted(body)])
+        solutions[name]=rows.Row[]
+    }
+    loop [name edge] in projections {
+        rules.push(Rule[[name] admitted(edge.source) subjects=edge.subjects])
         solutions[name]=rows.Row[]
     }
     loop constraint in constraints {
@@ -41,7 +48,7 @@ solve=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[]):
     let queued:set<addr>=set[]
     loop index in 0.. and index <? rules.length {
         loop name in rules[index].source.variables {
-            if name in? definitions {
+            if name in? solutions {
                 let dependents=users.get(name set[])
                 dependents.add(index) users[name]=dependents
             }
@@ -54,6 +61,7 @@ solve=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[]):
         $runtime_assert index <? rules.length
         let rule=rules[index]
         let source=rows.substitute(rule.source solutions)
+        if rule.subjects isnt? none {source=admitted(rows.instantiate(rows.Contract[source] rule.subjects))}
         let atoms:array<rows.Atom>=[]
         loop atom in source.atoms {
             let covered=false
@@ -98,7 +106,44 @@ compatible=(actual:rows.Contract? required:rows.Contract?):>bool=>{
 
 # A row's open negative guarantees travel through inference independently of
 # its possible effects. A requirement selects a candidate, never proves it.
-GuaranteeRule:type=const [name:string source:rows.Contract covered:rows.Row=rows.Row[]]
+GuaranteeRule:type=const [name:string source:rows.Contract covered:rows.Row=rows.Row[] subjects:(dict<string rows.Subject?>)?=none]
+# Inverting a call environment only removes a route prefix or renames its
+# parameter slot. Even recursive calls therefore select a finite vocabulary
+# of route suffixes; every candidate still owes proof from all defining rules.
+Inverse:type=const [slot:string prefix:array<string>]
+projection_candidates=(projections:dict<string Projection> @vocabulary:array<rows.Atom> @known:set<string>):>void=>{
+    let inverse:dict<string array<Inverse>>=[]
+    loop [name edge] in projections {
+        loop [slot subject] in edge.subjects {
+            if subject is? none or subject.kind not=? 'parameter' continue
+            let entries=inverse.get(subject.key [])
+            entries.push(Inverse[slot subject.route])
+            inverse[subject.key]=entries
+        }
+    }
+    let cursor:addr=0
+    loop cursor <? vocabulary.length {
+        let atom=vocabulary[cursor]
+        cursor+=1
+        if atom.subject is? none or atom.subject.kind not=? 'parameter' continue
+        let subject=atom.subject
+        loop mapping in inverse.get(subject.key []) {
+            if mapping.prefix.length >? subject.route.length continue
+            let matches=true
+            loop i in 0.. and i <? mapping.prefix.length {
+                $runtime_assert i <? subject.route.length
+                if mapping.prefix[i] not=? subject.route[i] {matches=false break}
+            }
+            if not matches continue
+            let suffix:array<string>=[]
+            let i:addr=mapping.prefix.length
+            loop i <? subject.route.length {suffix.push(subject.route[i]) i+=1}
+            let candidate=rows.Atom[atom.family rows.Subject['parameter' mapping.slot suffix]]
+            let key=rows.atom_key(candidate)
+            if key not in? known {known.add(key) vocabulary.push(candidate)}
+        }
+    }
+}
 resolve_contracts=(contract:rows.Contract? solutions:dict<string rows.Contract>):>rows.Contract?=>{
     return rows.replace_contracts(contract solutions)
 }
@@ -110,20 +155,23 @@ add_candidates=(contract:rows.Contract? @vocabulary:array<rows.Atom> @known:set<
         if key not in? known {known.add(key) vocabulary.push(atom)}
     }
 }
-solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[]):>dict<string rows.Contract>=>{
-    let positive=solve(definitions constraints)
+solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[] projections:dict<string Projection>=[]):>dict<string rows.Contract>=>{
+    let positive=solve(definitions constraints projections)
     let vocabulary:array<rows.Atom>=[]
     let known:set<string>=set[]
     loop [name body] in definitions {add_candidates(body @vocabulary @known)}
+    loop [name edge] in projections {add_candidates(edge.source @vocabulary @known)}
     loop edge in constraints {
         add_candidates(edge.actual @vocabulary @known)
         add_candidates(edge.required @vocabulary @known)
     }
+    if vocabulary.length >? 0 {projection_candidates(projections @vocabulary @known)}
     let solutions:dict<string rows.Contract>=[]
     loop [name row] in positive {solutions[name]=rows.Contract[row vocabulary]}
     if vocabulary.length =? 0 return solutions
     let rules:array<GuaranteeRule>=[]
     loop [name body] in definitions {rules.push(GuaranteeRule[name body])}
+    loop [name edge] in projections {rules.push(GuaranteeRule[name edge.source subjects=edge.subjects])}
     loop edge in constraints {
         let permitted=admitted(edge.required)
         let targets:array<string>=[]
@@ -142,7 +190,7 @@ solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constr
     loop i in 0.. and i <? rules.length {
         work.push(i) queued.add(i)
         loop name in admitted(rules[i].source).variables {
-            if name in? definitions {
+            if name in? solutions {
                 let list=users.get(name set[])
                 list.add(i) users[name]=list
             }
@@ -158,6 +206,7 @@ solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constr
         let rule=rules[index]
         let actual=resolve_contracts(rule.source solutions)
         $runtime_assert actual isnt? none
+        if rule.subjects isnt? none {actual=rows.instantiate(actual rule.subjects)}
         let behavior=admitted(actual)
         let atoms:array<rows.Atom>=[]
         loop atom in behavior.atoms {
