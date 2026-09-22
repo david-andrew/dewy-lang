@@ -328,6 +328,25 @@ User-written generic rows with callback-relative place subjects still have
 conservative implementation limits; nominal resource rows and their negative
 guarantees can be forwarded through `<E:Effect>`.
 
+Type aliases can also take row parameters. Each argument is checked against
+its parameter's kind; a row cannot become a value type or runtime value.
+Aliases preserve nominal resource identities, negative guarantees and nested
+binder scope, including through imports.
+
+<!-- dewy-example: compiler -->
+
+```dewy
+Action:type = <E:Effect>(():>int64 & E)
+let invoke = <E:Effect>(f:Action<E>):>int64 & E => f()
+quiet = ():>int64 & no_effects => 42
+main = ():>int64 & no_effects => invoke(@quiet)
+```
+
+`Action<no_effects>` supplies a concrete empty row; `Action<E>` forwards an
+existing row parameter. Type and row parameters can occur in the same alias.
+A negative-only argument such as `no mutates<Filesystem>` keeps an open row
+with that exclusion; it does not promise that every other effect is absent.
+
 `noreturn` is a control-flow guarantee that a function cannot return to its caller. It is kept separate from the may-effect row: permitting fewer possible effects does not imply that a call never returns.
 
 Expected failures remain [error alternatives in the return type](errors-and-forwarding.md), not members of the effect set. A contract may contain both a returned error union and effects, but `|` combines the returned alternatives while the effect syntax describes evaluation behavior separately.

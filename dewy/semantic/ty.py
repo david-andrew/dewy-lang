@@ -184,7 +184,7 @@ class KwOnlyArg:
 
 @dataclass(slots=True, weakref_slot=True)
 class GenericParam:
-    """A type or effect-row binder in a function's generic signature.
+    """A type or effect-row binder in a generic signature or type alias.
 
     The bound applies only to type parameters. Effect parameters have a stable
     lexical identity and bind into TypeArguments.effects, never a TypeExpr.

@@ -826,6 +826,44 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
     let parameters = contexts.node_at(node.right context session)
     if parameters isnt? parser.Block or parameters.delims not=? '<>' return contexts.unsupported(id 'this type application' context session)
     let name = source_views.identifier(node.left context session)
+    # Resolve an alias's parameter kinds before its arguments. Rows stay out
+    # of the type table, including through imported namespace applications.
+    let generic:types.GenericTypeAlias?=none
+    let exported=namespaces.source_field(node.left context session)
+    if exported isnt? none and exported.type_value is? types.GenericTypeAlias {generic=exported.type_value}
+    if name isnt? none {
+        let binding_id=lookup(name context session)
+        if binding_id isnt? none {
+            let binding=bindings.binding_at(session.registry binding_id)
+            if binding.type_value isnt? none or binding_id in? session.pending_aliases {
+                let value=resolve_alias(binding_id @session)
+                if value is? Error return value
+                if value is? types.GenericTypeAlias {generic=value}
+            }
+        }
+    }
+    if generic isnt? none {
+        if parameters.inner.length not=?generic.params.length return contexts.problem(id 'wrong number of generic type arguments' "expected {generic.params.length}, got {parameters.inner.length}" context session)
+        let supplied:array<aliases.Argument>=[]
+        loop index in 0.. and index<?parameters.inner.length {
+            $runtime_assert index<?generic.params.length
+            let parameter=generic.params[index]
+            let item=parameters.inner[index]
+            if parameter.kind=?'effect' {
+                let split=effect_syntax.split(item context @session)
+                if split.value isnt? none or split.terms.length=?0 return contexts.problem(item 'generic argument needs an effect row' "`{parameter.name}` has kind Effect" context session)
+                let row=effect_contract(item [] [] context @session)
+                if row is? Error return row
+                $runtime_assert row isnt? none
+                supplied.push(row)
+            } else {
+                let argument=resolve(item context @session)
+                if argument is? Error return argument
+                supplied.push(argument)
+            }
+        }
+        return aliases.instantiate(generic supplied session.links @session.types source_views.srcfile(context session) node.loc)
+    }
     let arguments:array<addr> = []
     let promises:array<facts.Proposition> = []
     let length:addr? = none
@@ -894,7 +932,7 @@ parameterize = (node:parser.BinOp id:addr context:contexts.Context @session:cont
             if binding.type_value is? none and binding_id not in? session.pending_aliases return contexts.problem(id "`{name}` does not name a type" 'this binding has a runtime value' context session)
             let value = resolve_alias(binding_id @session)
             if value is? Error return value
-            if value is? types.GenericTypeAlias return aliases.instantiate(value arguments session.links @session.types source_views.srcfile(context session) node.loc)
+            $runtime_assert value isnt? types.GenericTypeAlias
             # `NonEmptyArray<int>` where `NonEmptyArray = array<length >? 0>`:
             # a refined bare `array` takes its element here and keeps its
             # propositions. `Positive<i => i <? 10>`: conditions refine the
@@ -1040,9 +1078,6 @@ generic_alias = (parameters:parser.Block body:addr context:contexts.Context @ses
     if parameters.inner.length =? 0 return contexts.problem(body 'generic type alias requires at least one parameter' 'this parameter list is empty' context session)
     let declared = generic_parameters(parameters context @session)
     if declared is? Error return declared
-    loop parameter in declared.params {
-        if parameter.kind =? 'effect' return contexts.problem(body 'effect parameters currently belong to functions' 'effect-polymorphic type aliases are not implemented yet' context session)
-    }
     let resolved = resolve(body declared.context @session)
     if resolved is? Error return resolved
     return types.GenericTypeAlias[declared.params resolved]

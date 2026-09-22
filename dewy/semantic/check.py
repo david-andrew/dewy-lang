@@ -7278,8 +7278,6 @@ def _generic_type_alias(
             'generic type alias requires at least one parameter',
             Pointer(span=parameters.loc, message='this parameter list is empty'),
         )
-    if any(param.kind == 'effect' for param in params):
-        user_error(ctx.srcfile, 'effect parameters currently belong to functions', Pointer(span=parameters.loc, message='effect-polymorphic type aliases are not implemented yet'))
     return ty.GenericTypeAlias(params, ast_to_type(body, ctx=alias_ctx))
 
 
@@ -13782,7 +13780,7 @@ def _named_type_alias_value(
 
 def _instantiate_type_alias(
     alias: ty.GenericTypeAlias,
-    arguments: list[ty.TypeExpr],
+    arguments: list[ty.TypeExpr | effect_rows.Contract],
     *,
     loc: Span,
     ctx: Context,
@@ -13798,8 +13796,17 @@ def _instantiate_type_alias(
                 ),
             ),
         )
-    bindings: dict[str, ty.TypeExpr] = {}
+    bindings = ty.TypeArguments()
     for param, argument in zip(alias.params, arguments):
+        if param.kind == 'effect':
+            if not isinstance(argument, effect_rows.Contract):
+                user_error(ctx.srcfile, 'generic argument needs an effect row',
+                           Pointer(span=loc, message=f'`{param.name}` has kind Effect'))
+            bindings.effects[param.identity] = argument
+            continue
+        if isinstance(argument, effect_rows.Contract):
+            user_error(ctx.srcfile, 'an effect row is not a value type',
+                       Pointer(span=loc, message=f'`{param.name}` needs a type argument'))
         bound = ty.substitute_type(param.bound, bindings)
         if not ctx.type_system.is_subtype(argument, bound):
             type_error(
@@ -14665,7 +14672,19 @@ def ast_to_type(ast: p0.AST, *, ctx: Context) -> ty.Type:
                 'type alias is not generic',
                 Pointer(span=ast.left.loc, message='this alias takes no arguments'),
             )
-        arguments = [ast_to_type(item, ctx=ctx) for item in ast.right.inner]
+        if len(ast.right.inner) != len(alias_value.params):
+            user_error(ctx.srcfile, 'wrong number of generic type arguments',
+                       Pointer(span=ast.loc, message=f'expected {len(alias_value.params)}, got {len(ast.right.inner)}'))
+        arguments = []
+        for param, item in zip(alias_value.params, ast.right.inner):
+            if param.kind == 'effect':
+                value, terms = effect_syntax.split(item, ctx)
+                if value is not None or not terms:
+                    user_error(ctx.srcfile, 'generic argument needs an effect row',
+                               Pointer(span=item.loc, message=f'`{param.name}` has kind Effect'))
+                arguments.append(effect_syntax.contract(item, [], ctx))
+            else:
+                arguments.append(ast_to_type(item, ctx=ctx))
         return _instantiate_type_alias(
             alias_value,
             arguments,

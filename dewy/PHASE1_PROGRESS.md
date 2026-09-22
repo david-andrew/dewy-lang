@@ -2990,3 +2990,24 @@ The fresh native copy inventory contains 4,479 sites over 48,324 source lines
 are `phase1-partial-records-e8d2a2da/`, `phase1-partial-records-bootstrap.log`,
 `phase1-partial-records-broad.log`, and `phase1-partial-records-inventory.json`.
 Full corpus certification remains a separate gate.
+
+
+## Effect-parameterized type aliases (2026-09-22)
+
+Generic type aliases now accept the existing separately kind-checked `E:Effect`
+parameters in both compilers. Applications resolve argument kinds before
+substitution: `Action<no_effects>` supplies a row and `Action<E>` forwards one.
+The row table is keyed by lexical binder identity, separate from value-type
+arguments. Positive bounds, open negative guarantees and nested callable
+binders retain ordinary substitution behavior. Mixed type/row aliases,
+composition and imports use the same mechanism. Native checking now resolves
+applied generic aliases through module namespaces as well.
+
+Validation: 18 final focused hosted checks pass; 41 adjacent generic/row checks
+passed before correcting one fixture that exercised unsupported non-literal
+callable field storage. The final fixture uses an ordinary function literal.
+A fresh native driver agrees on eight runtime kernels and ten rejections,
+with x86-64/C execution. Cold/restored prelude snapshots retain alias row kinds,
+emit byte-identical output, execute correctly and reject a value type supplied
+as a row. Artifacts use `phase1-effect-aliases-*`. Callback-relative place rows
+and other remaining Phase 1 work are still in progress.
