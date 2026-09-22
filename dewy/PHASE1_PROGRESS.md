@@ -2658,3 +2658,12 @@ membership is forgotten at loop entry; unnamed `totaldict` receivers need
 better totality propagation; hosted array layout does not yet erase a nested
 `totaldict` refinement. These probes are not counted as passing coverage.
 Phase 1 remains in progress.
+
+
+Integration checkpoint: `a240f952` completed the three-generation direct x86-64
+bootstrap with byte-identical final Dewy and µDewy binaries and passing native
+runtime checks. Generation 2/3 took 66/74 seconds during concurrent work;
+these are not isolated latency measurements. The pair is
+`../dewy-build-artifacts/phase1-entry-places-a240f952`. Its inventory is
+**4,414 sites over 47,648 lines (92.638/KLOC)**, within the 4,500/100 gates.
+The full corpus checkpoint remains the earlier 211-case dictionary-view run.
