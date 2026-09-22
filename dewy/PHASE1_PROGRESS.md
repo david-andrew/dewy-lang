@@ -2974,3 +2974,19 @@ and optional owners, multiple transfers, sibling replacement, custom move
 remnants, and 100 array-field transfers without retained arena growth.
 Artifacts use `phase1-partial-records-*`. Field reinitialization, conditional
 partial ownership and broader indexed disjointness remain conservative.
+
+
+## Partial-record integration checkpoint (2026-09-22)
+
+At `e8d2a2da`, the direct x86-64 three-generation bootstrap completed with
+byte-identical second/third generations of both compilers and passing x86-64/C
+execution checks. Generation times were 165/152/130 seconds under concurrent
+load, not isolated performance measurements. The broad
+`tests/python_misc -k "not bootstrap and not native"` selection passed 3,603
+tests with 14 skips; this selection is not the complete all-route suite.
+
+The fresh native copy inventory contains 4,479 sites over 48,324 source lines
+(92.687/KLOC), within the unchanged 4,500-site and 100/KLOC gates. Artifacts
+are `phase1-partial-records-e8d2a2da/`, `phase1-partial-records-bootstrap.log`,
+`phase1-partial-records-broad.log`, and `phase1-partial-records-inventory.json`.
+Full corpus certification remains a separate gate.
