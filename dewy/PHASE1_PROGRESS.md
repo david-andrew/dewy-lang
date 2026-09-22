@@ -2695,3 +2695,26 @@ the added dictionary-address read exclusion regression. Artifacts use
 `../dewy-build-artifacts/phase1-container-effects-` prefixes. The preceding
 dictionary-place commit is the latest complete native fixed point; Phase 1
 remains in progress.
+
+## Sort callback effects and option evaluation (2026-09-22)
+
+Sort keys now contribute their invoked bodies or callback contracts to the
+public effect equations. Function-handle selection contributes its own effects;
+known conditional/reassigned targets join, unconstrained callbacks stay unknown,
+and generic row arguments retain their guarantees. Sort still needs storage
+permission. Global-write summaries also follow the implicit key call through
+wrappers, preserving snapshots across callback writes. String-to-string
+widening retains the operand's effects without inventing unknown behavior.
+
+Hosted lowering now evaluates sort options once in source order, including on
+empty arrays, and saves indirect key-call results before numeric normalization.
+The native lowerer already used these evaluation rules. No µDewy evaluation
+semantics changed.
+
+Validation: 32 focused hosted tests passed. A fresh native driver passed 26
+runtime kernels and 22 rejection cases against hosted checking, with x86-64/C
+execution, including the adjacent container/scoped-effect groups. Artifacts:
+`../dewy-build-artifacts/phase1-sort-effects-*`. The preceding broad hosted run
+at `82d73625` passed 3,456 tests with 14 skipped in 522.18 seconds using
+`-k 'not bootstrap and not native'`; that is not a complete all-route pytest run.
+The latest complete native fixed point remains `a240f952`. Phase 1 continues.

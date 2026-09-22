@@ -461,3 +461,10 @@ Arguments must be pure fact terms such as names, literals, trusted lengths,
 and supported arithmetic over those terms. Definitions and calls erase
 only after validation. Returned facts refer to current argument values;
 subsequent mutation invalidates them normally.
+
+Sort invokes its `key` callback, so the callback's effects contribute to the
+sort's contract in addition to reading, mutating and allocating storage for
+the receiver. Selecting a callback can have separate effects. The `key` and
+`reverse` options evaluate once, in source order, even when the array is empty;
+the key itself is then called for each element. Unknown callback effects remain
+unknown.
