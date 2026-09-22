@@ -1,4 +1,5 @@
 from reporting import SrcFile, Error, Pointer, Warning
+import p"analyze/storage_lifetimes.dewy" as storage_lifetimes
 import p"analyze/public_effects.dewy" as public_effects
 import p"analyze/effects.dewy" as effects
 import p"analyze/place_contracts.dewy" as place_contracts
@@ -70,6 +71,8 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
     loop module in loaded {roots.push(place_contracts.Root[module.root module.context.source])}
     let place_error=place_contracts.validate(roots source_files session)
     if place_error isnt? none return place_error
+    let lifetime_error=storage_lifetimes.validate(roots source_files session)
+    if lifetime_error isnt? none return lifetime_error
     let env=values.Environment[session.hir session.types session.registry targets.max_length(session.target)]
     let prepared=bounds.prepare(env)
     let ids:array<addr>=[]

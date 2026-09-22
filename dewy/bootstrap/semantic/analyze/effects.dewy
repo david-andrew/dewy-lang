@@ -603,11 +603,14 @@ place_loans = (analysis:Analysis summaries:ProgramEffects nodes:array<hir.AST> t
 # with parameter effects, but solve this finite root set independently so
 # bounds validation need not compute aggregate read/escape summaries.
 analyze_global_writes = (root:addr nodes:array<hir.AST> globals:set<addr> registry:bindings.Registry=bindings.Registry[]):>dict<addr set<addr>> => {
+    return analyze_global_writes_in([root] nodes globals registry=registry)
+}
+analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<addr> registry:bindings.Registry=bindings.Registry[]):>dict<addr set<addr>> => {
     let result:dict<addr set<addr>>=[]
     if globals.length =? 0 return result
-    let analysis=collect(root nodes)
+    let analysis=collect_roots(roots nodes)
     let targets:dict<addr array<addr>>=[]
-    let pending:array<addr>=[root]
+    let pending=roots
     let seen:set<addr>=set[]
     loop pending.length >? 0 {
         let id=pending.pop

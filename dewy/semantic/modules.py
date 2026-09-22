@@ -751,7 +751,7 @@ class ModuleCompiler:
 
     def finish(self, entry: ModuleRecord) -> hir.Block:
         from . import check, unsafe_audit
-        from .analyze import place_contracts, public_effects
+        from .analyze import place_contracts, public_effects, storage_lifetimes
         # Parent-place safety needs imported helper bodies and must also
         # check unused source functions before runtime reachability pruning.
         source_items = [record.root for record in self.order]
@@ -764,6 +764,7 @@ class ModuleCompiler:
             tuple(record.srcfile for record in self.order), (),
         )
         place_contracts.validate(source_graph, self.registry, entry.srcfile)
+        storage_lifetimes.validate(source_graph, self.registry, entry.srcfile)
         # Imported direct callees participate in the same inference as local
         # helpers. Every module's bounds pass has certified iterator storage
         # by now; a syntactic `guarded` hint alone is never allocation proof.

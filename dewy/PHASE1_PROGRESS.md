@@ -2740,3 +2740,21 @@ rejections against hosted checking on x86-64/C. A repeated temporary lookup
 calls its factory once per iteration and retains no arena bytes over 100 calls.
 Artifacts use `../dewy-build-artifacts/phase1-totaldict-` prefixes. Full integration
 checks are running separately; these focused checks do not complete Phase 1.
+
+## Sort storage lifetimes (2026-09-22)
+
+Both checkers now reject sort keys and option expressions that can invalidate
+selected receiver storage. The shared call graph follows wrappers and known
+callback targets. Private owning values remain independent of unrelated
+callbacks; captured/exposed owners and borrowed receivers require a stable
+call graph or a contract proving no mutation. Borrowed receivers conservatively
+include externally reachable owners because their caller may supply an alias.
+This does not add closure mutation support: writes to enclosing function locals
+remain a separate unsupported case.
+
+Validation: the fresh native driver agrees with hosted checking on 15 runtime
+kernels and 13 rejections (including the preceding sort effect group), executing
+on both x86-64 and C. Cases include by-value snapshots, mutable record key
+arguments, captured receivers, transitive writes, effect-qualified keys and
+option evaluation. Artifacts use `phase1-sort-lifetimes-*` under
+`../dewy-build-artifacts`. Phase 1 remains in progress.

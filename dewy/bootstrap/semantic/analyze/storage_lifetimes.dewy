@@ -1,0 +1,161 @@
+from reporting import SrcFile, Error, Pointer
+import p"../context.dewy" as contexts
+import p"../bindings.dewy" as bindings
+import p"../hir.dewy" as hir
+import p"../ty.dewy" as types
+import p"../effect_rows.dewy" as rows
+import p"effects.dewy" as effects
+import p"predicate_effects.dewy" as predicates
+import p"place_contracts.dewy" as places
+
+# Sort retains selected element addresses while invoking its key. Private
+# owning values cannot be reached by an unrelated callback; borrowed,
+# captured and exposed storage needs a call-graph or effect-row proof.
+Visit:type=const [id:addr source:addr function:addr?=none]
+Candidate:type=const [id:addr source:addr function:addr? binding:addr?]
+owner=(binding:addr? session:contexts.Session):>addr?=>{
+    let seen:set<addr>=set[]
+    loop binding isnt? none and binding not in? seen {
+        seen.add(binding)
+        let entry=bindings.find_binding(session.registry binding)
+        if entry is? none or entry.declaration is? none break
+        let declaration=hir.node_at(session.hir entry.declaration)
+        if declaration isnt? hir.Declare or not declaration.view break
+        let path=bindings.access_path(declaration.expr session.hir facts=true dictionaries=true)
+        let root=hir.node_at(session.hir path.root)
+        binding=if root is? hir.ExpressedIdentifier root.binding_id else none
+    }
+    return binding
+}
+root_of=(id:addr session:contexts.Session):>addr?=>{
+    let path=bindings.access_path(id session.hir facts=true dictionaries=true)
+    let root=hir.node_at(session.hir path.root)
+    return if root is? hir.ExpressedIdentifier owner(root.binding_id session) else none
+}
+nonmutating=(id:addr session:contexts.Session):>bool=>{
+    let signature=types.node_at(session.types types.unfold(types.strip_refinement(hir.node_at(session.hir id).value_type session.types) session.types))
+    return signature is? types.FunctionType and rows.implies(signature.effects rows.Contract[excluded=[rows.Atom['mutates']]])
+}
+validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.Session):>Error?=>{
+    let candidates:array<Candidate>=[]
+    let private:dict<addr set<addr>>=[]
+    let borrowed_parameters:set<addr>=set[]
+    let captured:set<addr>=set[]
+    let exposed:set<addr>=set[]
+    let written:set<addr>=set[]
+    let aliases:dict<addr addr>=[]
+    let seen:set<addr>=set[]
+    let pending:array<Visit>=[]
+    let ids:array<addr>=[]
+    loop root in roots {pending.push(Visit[root.id root.source]) ids.push(root.id)}
+    loop pending.length>?0 {
+        let item=pending.pop
+        if item.id in? seen continue
+        seen.add(item.id)
+        let node=hir.node_at(session.hir item.id)
+        let source=item.source
+        let function=item.function
+        if node is? hir.FunctionLiteral {
+            function=item.id
+            if node.source isnt? none {source=node.source}
+            let owned:set<addr>=set[]
+            let local:set<addr>=set[]
+            let reads:set<addr>=set[]
+            loop param in effects.literal_params(node) {
+                if param.binding_id isnt? none {
+                    local.add(param.binding_id)
+                    if param.place {borrowed_parameters.add(param.binding_id)} else {owned.add(param.binding_id)}
+                }
+            }
+            let body=hir.children(node)
+            let visited:set<addr>=set[]
+            loop body.length>?0 {
+                let id=body.pop
+                if id in? visited continue
+                visited.add(id)
+                let part=hir.node_at(session.hir id)
+                if part is? hir.FunctionLiteral continue
+                if part is? hir.Declare and part.binding_id isnt? none {
+                    local.add(part.binding_id)
+                    if not part.view {owned.add(part.binding_id)}
+                }
+                if part is? hir.IteratorExpression {
+                    let target=hir.node_at(session.hir part.target)
+                    if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {local.add(target.binding_id)}
+                }
+                if part is? hir.ExpressedIdentifier and part.binding_id isnt? none {reads.add(part.binding_id)}
+                hir.push_children(part @body)
+            }
+            private[item.id]=owned
+            loop binding in reads {
+                if binding in? local continue
+                let selected=owner(binding session)
+                if selected isnt? none {captured.add(selected)}
+            }
+        }
+        let target=predicates.write_target(node session.hir)
+        if target isnt? none {
+            let selected=root_of(target session)
+            if selected isnt? none {written.add(selected)}
+        }
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
+            let selected=owner(node.binding_id session)
+            if selected isnt? none {aliases[node.binding_id]=selected}
+        }
+        if node is? hir.Place|hir.Transmute {
+            let selected=root_of(if node is? hir.Place node.target else node.expr session)
+            if selected isnt? none {exposed.add(selected)}
+        }
+        if node is? hir.FunctionCall {
+            let method=hir.node_at(session.hir node.func)
+            if method is? hir.ArrayMethod and method.name=?'sort' {candidates.push(Candidate[item.id source function root_of(method.array session)])}
+        }
+        loop child in hir.children(node) {pending.push(Visit[child source function])}
+    }
+    if candidates.length=?0 return none
+    let tracked:set<addr>=set[]
+    loop binding in captured {if binding in? written {tracked.add(binding)}}
+    loop candidate in candidates {if candidate.binding isnt? none {tracked.add(candidate.binding)}}
+    loop [alias target] in aliases {if target in? tracked {tracked.add(alias)}}
+    let writes=effects.analyze_global_writes_in(ids session.hir tracked registry=session.registry)
+    let readonly=effects.read_only_places_in(ids session.hir session.types)
+    loop candidate in candidates {
+        let call=hir.node_at(session.hir candidate.id)
+        $runtime_assert call is? hir.FunctionCall
+        let owned:set<addr>=if candidate.function is? none set[] else private.get(candidate.function set[])
+        let binding=candidate.binding
+        let isolated=binding isnt? none and binding in? owned and binding not in? captured and binding not in? exposed
+        let borrowed=binding isnt? none and binding in? borrowed_parameters
+        let relevant:set<addr>=if borrowed tracked else if binding is? none set[] else set[binding]
+        let key=call.kw_args.get('key')
+        $runtime_assert candidate.source <? source_files.length
+        if key isnt? none and not isolated and not nonmutating(key session) {
+            loop changed in writes.get(candidate.id tracked) {
+                let selected=owner(changed session)
+                if selected isnt? none and selected in? relevant {
+                    return Error[srcfile=source_files[candidate.source] title='sort key may change its receiver' pointers=[Pointer[hir.node_at(session.hir key).loc 'the array storage must stay stable throughout key evaluation']] hint='keep receiver mutations outside the sort, or provide a callback contract proving no mutation']
+                }
+            }
+        }
+        let arguments=call.pos_args
+        loop arg in call.kw_args.values {arguments.push(arg)}
+        loop argument in arguments {
+            let argument_writes=writes
+            let nodes:array<addr>=[argument]
+            loop nodes.length>?0 {
+                let id=nodes.pop
+                let node=hir.node_at(session.hir id)
+                if node is? hir.FunctionLiteral continue
+                if node is? hir.FunctionCall and nonmutating(node.func session) {argument_writes[id]=set[]}
+                hir.push_children(node @nodes)
+            }
+            loop changed in predicates.mutated_bindings(argument session.hir argument_writes readonly) {
+                let selected=owner(changed session)
+                if selected isnt? none and selected in? relevant {
+                    return Error[srcfile=source_files[candidate.source] title='sort option may change its receiver' pointers=[Pointer[hir.node_at(session.hir argument).loc 'this option changes the array while the sort is being prepared']] hint='evaluate the option before selecting the array to sort']
+                }
+            }
+        }
+    }
+    return none
+}
