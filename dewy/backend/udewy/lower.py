@@ -461,6 +461,8 @@ class _Lowerer(
         self.owned_array_elements: dict[str, ty.TypeExpr] = {}   # one element contract drives recursive cleanup
         self.rebound_array_owners: dict[int, hir.ExpressedIdentifier] = {}
         self.owned_objects: dict[LocalBindingKey, ty.ObjectType] = {}   # object locals (dictionaries and sets included) whose members are released at scope exit
+        self.borrowed_default_inputs: set[str] = set()
+        self.default_owner_conditions: dict[LocalBindingKey, hir.AST] = {}
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
         self.move_notes: list[MoveNote] = []
         self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
@@ -773,6 +775,8 @@ class _Lowerer(
         default_prologue: list[hir.AST] = []
         parameter_prologue: list[hir.AST] = []
         parameter_objects: dict[LocalBindingKey, ty.ObjectType] = {}
+        borrowed_default_inputs: set[str] = set()
+        default_owner_conditions: dict[LocalBindingKey, hir.AST] = {}
         parameter_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] = {}
         parameter_arrays: dict[str, ty.TypeExpr] = {}
         rebound_array_owners: dict[int, hir.ExpressedIdentifier] = {}
@@ -1081,10 +1085,19 @@ class _Lowerer(
             )
             default = self._require_node(self._transform_node(param.value))
             if isinstance(param.type, (ty.ArrayType, ty.ObjectType)) or ty.runtime_union_members(param.type) is not None:
+                summary = self.program_effects.for_param_binding(param.binding_id) if param.binding_id is not None else None
+                if (isinstance(param.type, ty.ObjectType) and summary is not None and summary.read_only
+                        and storage_borrows.borrowable(param.type)):
+                    # Like an ordinary read-only parameter, an explicitly
+                    # supplied record borrows the caller's storage. Only the
+                    # omitted default belongs to this function's cleanup.
+                    borrowed_default_inputs.add(incoming_name)
+                    default_owner_conditions[local_binding_key(target)] = self._bool_not(
+                        hir.ExpressedIdentifier(literal.loc, 'bool', present_name))
                 # Select before dereferencing: an omitted aggregate argument
                 # is an ignored zero pointer. The ordinary value-flow path
-                # copies a supplied value and constructs a default lazily,
-                # retaining the same ownership rules as a local declaration.
+                # constructs a default lazily and otherwise borrows a proven
+                # read-only record or supplies an independent local value.
                 selected = hir.Flow(
                     literal.loc,
                     param.type,
@@ -1253,6 +1266,8 @@ class _Lowerer(
             transformed_body, literal.rettype, parameter_prologue,
             parameter_objects=parameter_objects, parameter_cells=parameter_cells,
             parameter_arrays=parameter_arrays,
+            borrowed_default_inputs=borrowed_default_inputs,
+            default_owner_conditions=default_owner_conditions,
         )
         self.rebound_array_owners = previous_array_owners
         self.current_optional_result = previous_result
@@ -3313,11 +3328,15 @@ class _Lowerer(
         *, parameter_objects: dict[LocalBindingKey, ty.ObjectType] | None = None,
         parameter_cells: dict[str, tuple[tuple[ty.TypeExpr, ...], bool]] | None = None,
         parameter_arrays: dict[str, ty.TypeExpr] | None = None,
+        borrowed_default_inputs: set[str] | None = None,
+        default_owner_conditions: dict[LocalBindingKey, hir.AST] | None = None,
     ) -> hir.AST:
         """Lower a function body and install labeled-exit signal state when needed."""
         self.owned_array_names = set(parameter_arrays or {})
         self.owned_array_elements = dict(parameter_arrays or {})
         self.owned_objects = dict(parameter_objects or {})
+        self.borrowed_default_inputs = borrowed_default_inputs or set()
+        self.default_owner_conditions = default_owner_conditions or {}
         self.moved_record_bindings = set()
         # Already-lowered parameter copies belong to this scope just like
         # body declarations. Register them before lowering writes/returns so
@@ -3857,6 +3876,10 @@ class _Lowerer(
                             # A branch may have transferred this frame record's
                             # handle. Only the path retaining it owns its fields.
                             condition = self._intrinsic_call('__ne__', [local, self._int64_literal(local.loc, 0)], 'bool', local.loc)
+                            cleanup = [hir.Flow(local.loc, ty.VOID_TYPE, [hir.IfArm(local.loc, ty.VOID_TYPE, condition,
+                                       hir.Block(local.loc, ty.VOID_TYPE, cleanup, True))], None)]
+                        condition = self.default_owner_conditions.get(local_binding_key(local))
+                        if condition is not None:
                             cleanup = [hir.Flow(local.loc, ty.VOID_TYPE, [hir.IfArm(local.loc, ty.VOID_TYPE, condition,
                                        hir.Block(local.loc, ty.VOID_TYPE, cleanup, True))], None)]
                         released.extend(cleanup)

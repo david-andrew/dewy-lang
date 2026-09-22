@@ -1,0 +1,35 @@
+$explicit_copies
+
+let defaults:int64=0
+Box:type=[items:array<int64> label:string]
+make=():>Box=>{defaults+=1 return Box[[42] 'default']}
+read=(box:Box=make() early:bool=false):>int64=>{
+    if early return 42
+    if box.label.length<?1 return 1
+    if box.items.length>?0 return box.items[0]
+    return 2
+}
+contains=(... values:set<int64>=set[42]):>int64=>if 42 in? values 42 else 1
+work=():>int64=>{
+    let box=Box[[42] 'caller']
+    let values:set<int64>=set[42]
+    if contains(values=values) not=?42 return 3
+    let before:int64=_arena_allocated_bytes
+    if read(box) not=?42 or read(box early=true) not=?42 return 4
+    if contains(values=values) not=?42 return 5
+    if _arena_allocated_bytes not=?before or defaults not=?0 return 6
+    # Omitted defaults are fresh and owned here, even on early exits.
+    if read() not=?42 or read(early=true) not=?42 return 7
+    if defaults not=?2 or contains() not=?42 return 8
+    return 42
+}
+main=():>int64=>{
+    if work() not=?42 return 9
+    let before:int64=_arena_live_bytes
+    loop i in 0.. and i<?100 {
+        defaults=0
+        if work() not=?42 return 10
+    }
+    if _arena_live_bytes not=?before return 11
+    return 42
+}

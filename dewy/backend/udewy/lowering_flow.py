@@ -949,6 +949,11 @@ class _FlowLowering:
             # lives on (a binding, a field), as `let t = x` copies
             if isinstance(item_type, ty.ObjectType) and isinstance(item, (hir.ObjectLiteral, hir.FunctionCall)):
                 return self._extract_object_pointer(item)
+            if isinstance(item, hir.ExpressedIdentifier) and item.name in self.borrowed_default_inputs:
+                # This is the generated supplied-argument arm of a read-only
+                # defaulted parameter. Its cleanup is guarded by the ABI's
+                # presence bit; no independent record is needed on this path.
+                return self._extract_object_pointer(item)
             # An inferred join can widen a child union into its parent record.
             # Extract its payload and copy into the joined layout; the cell's
             # address is not itself a record pointer.
