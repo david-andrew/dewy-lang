@@ -2718,3 +2718,25 @@ execution, including the adjacent container/scoped-effect groups. Artifacts:
 at `82d73625` passed 3,456 tests with 14 skipped in 522.18 seconds using
 `-k 'not bootstrap and not native'`; that is not a complete all-route pytest run.
 The latest complete native fixed point remains `a240f952`. Phase 1 continues.
+
+## Total dictionaries as value guarantees (2026-09-22)
+
+`totaldict` now retains its named guarantee through factory results, optional
+narrowing, record-field reads and array storage. Unnamed receivers can use the
+same totality proof as bindings. Contextual storage wrappers retain already
+proved totality rather than losing it at a second argument/element check.
+Literal key evidence survives conversion to the storage key type. Hosted array
+layout now erases element refinements through the shared representation query.
+
+The same bounds remain enforced at construction, replacement and removal:
+a partial result cannot stand in for a total dictionary, and clear/pop cannot
+remove a required key. Proved value refinements preserve their operand effects;
+accessing a computed owned container still accounts for producing that value.
+
+Validation: 76 hosted object/entry-place checks passed before the final effect
+classification; 107 hosted total-dictionary/public/container-effect checks
+passed afterward. A fresh native driver passes seven runtime kernels and nine
+rejections against hosted checking on x86-64/C. A repeated temporary lookup
+calls its factory once per iteration and retains no arena bytes over 100 calls.
+Artifacts use `../dewy-build-artifacts/phase1-totaldict-` prefixes. Full integration
+checks are running separately; these focused checks do not complete Phase 1.
