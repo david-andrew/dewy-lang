@@ -50,9 +50,12 @@ discharge = (root:addr constants:dict<addr bigint> word_iterators:set<addr> @ses
             if constant isnt? none and constant >=? 0 and constant <=? targets.max_length(session.target) {
                 if node is? hir.Index {node.constant_index=constant as addr}
                 else {node.constant_index=constant as addr}
-                $runtime_assert id <? session.hir.length
-                session.hir[id]=node
+            } else {
+                if node is? hir.Index {node.constant_index=none}
+                else {node.constant_index=none}
             }
+            $runtime_assert id <? session.hir.length
+            session.hir[id]=node
         }
     }
 }

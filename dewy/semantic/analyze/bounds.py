@@ -820,6 +820,7 @@ class _BoundsValidator:
         # budget falls back to widening, never to an assumed proof.
         self.finite_loop_budget = 64
         self.loop_qualifier_pairs = {}
+        self.constant_indices: dict[int, int | None] = {}
         self.call_writes: dict[int, set[int]] = {}
         self.predicate_bindings = predicate_effects.BindingQueries()
         self.declared_intervals: dict[int, tuple[ty.Type, Interval | None]] = {}
@@ -4395,6 +4396,13 @@ class _BoundsValidator:
         *,
         length_interval: Interval | None,
     ) -> None:
+        # HIR is a graph: generated cleanup/proof routes can share an index
+        # across branches with different facts. An emission decision must
+        # agree at every checked occurrence, not merely the last visited one.
+        candidate = interval.lower if interval is not None and interval.lower == interval.upper else None
+        previous = self.constant_indices.setdefault(id(node), candidate)
+        self.constant_indices[id(node)] = candidate if previous == candidate else None
+        node.constant_index = self.constant_indices[id(node)]
         if isinstance(node, hir.Index):
             length = (
                 node.array.type.length
@@ -4415,8 +4423,6 @@ class _BoundsValidator:
             and 0 <= interval.lower
             and interval.upper < length
         ):
-            if interval.lower == interval.upper:
-                node.constant_index = interval.lower
             return
         sequence = node.array if isinstance(node, hir.Index) else node.string
         symbolic = not (self.predicate_bindings.read_bindings(sequence)
@@ -4434,8 +4440,6 @@ class _BoundsValidator:
                 # route relationships only when its root survived.
                 minimum_length = (length_interval or self._length_default()).lower or 0
                 if interval.upper is not None and interval.upper < minimum_length:
-                    if interval.lower == interval.upper:
-                        node.constant_index = interval.lower
                     return
                 index_id = self._binding_id(index)
                 if symbolic and index_id is not None and _index_fact_key(index_id, array_id) in state:

@@ -46,7 +46,7 @@ Checker:type = [
     root_items:set<addr>=set[] deferred:array<addr>=[]
     read_only_places:set<addr>=set[]
     element_intervals:values.ElementIntervals=[]
-    unfit:dict<addr Unfit>=[] constant_indices:dict<addr bigint>=[] problem:Error?=none
+    unfit:dict<addr Unfit>=[] constant_indices:dict<addr bigint>=[] checked_indices:set<addr>=set[] problem:Error?=none
     warnings:array<Warning>=[] word_iterators:set<addr>=set[]
     # `$prototype`: unproven sites become runtime checks instead of errors.
     prototype:bool=false deferred_sites:dict<addr prototype.Deferred>=[]
@@ -813,7 +813,17 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
             if checker.prototype {checker.deferred_sites[id]=prototype.Deferred['index' checked]}
             else {checker.problem=checked}
         }
-        else if checked.constant_index isnt? none {checker.constant_indices[id]=checked.constant_index}
+        else {
+            # Shared HIR routes need the same constant at every occurrence.
+            # A disagreement (including a dynamic occurrence) is permanent.
+            if id in? checker.checked_indices {
+                let previous=checker.constant_indices.get(id)
+                if checked.constant_index is? none or previous is? none or previous not=?checked.constant_index {checker.constant_indices.pop(id default=0);}
+            } else {
+                checker.checked_indices.add(id)
+                if checked.constant_index isnt? none {checker.constant_indices[id]=checked.constant_index}
+            }
+        }
     }
     if node is? hir.StringSlice {
         let error=slices.check(node state checker.srcfile @checker.data)
