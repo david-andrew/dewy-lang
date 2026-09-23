@@ -294,6 +294,10 @@ visit = (id:addr input:Input @scan:Scan):>void => {
         visit(node.expr input @scan) return
     }
     if node is? hir.ValueCast|hir.RepresentationCast and not scalar(node.value_type input.types) {unknown(@scan) return}
+    if node is? hir.Transmute and scalar(node.value_type input.types) and scalar(hir.node_at(input.nodes node.expr).value_type input.types) {
+        # Reinterpreting a scalar preserves its operand's evaluation effects.
+        visit(node.expr input @scan) return
+    }
     if node is? hir.IteratorExpression {
         if word_iterator(id node input) {
             loop child in hir.children(hir.node_at(input.nodes node.iterable)) {visit(child input @scan)}

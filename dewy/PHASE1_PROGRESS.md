@@ -3590,3 +3590,19 @@ native scalar-transmute case: lowering treated a scalar element's bit cast as
 a mutation and copied its containing array. The fix and a rerun of the full
 scalar-lowering case group are tracked separately below. This run is broader
 than the prior selections, but is not a clean full-suite/CI certificate.
+
+## Scalar bit reinterpretation storage (2026-09-23)
+
+Transmuting a scalar to another scalar exposes no storage. Native lowering no
+longer marks the operand's root binding mutated for it, so a read-only array
+parameter whose element bits are reinterpreted stays borrowed instead of
+being copied. This repairs the full-suite scalar-lowering failure above.
+Both effect inventories now visit a scalar-to-scalar transmute's operand
+rather than treating it as an unknown operation: operand effects still count,
+while aggregate transmutes keep their raw-exposure boundary.
+
+Validation: five hosted cases (two `no allocates` readers, three effect-
+contract rejections) and 369 hosted effect tests pass. A fresh native driver
+agrees on the same cases, and the complete native scalar-lowering group,
+which failed on `4a3ce3cb` locally and in CI, passes. Fresh bootstrap
+integration follows at the next checkpoint.

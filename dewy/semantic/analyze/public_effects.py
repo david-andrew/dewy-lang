@@ -343,6 +343,11 @@ def inventory(root, registry):
             if isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and not scalar(node.type):
                 unknown()
                 return
+            if isinstance(node, hir.Transmute) and scalar(node.type) and scalar(node.expr.type):
+                # Scalar bits do not expose or allocate their containing
+                # storage. The operand's own evaluation still has effects.
+                visit(node.expr)
+                return
             if isinstance(node, hir.IteratorExpression):
                 if word_iterator(node):
                     for child in hir.children(node.iterable):

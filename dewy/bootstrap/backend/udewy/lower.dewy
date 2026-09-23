@@ -4469,7 +4469,10 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         # binding slot; dict_parts deliberately uses detach=false for reads.
         if current is? hir.DictMethod {mark_mutated(current.dictionary @mutated state)}
         if current is? hir.Place {mark_mutated(current.target @mutated state)}
-        if current is? hir.Transmute {mark_mutated(current.expr @mutated state)}
+        # Reading a scalar's bits cannot mutate its containing array/record.
+        # Match the borrow/effect proof: only exposing non-word storage needs
+        # a private owning root at this boundary.
+        if current is? hir.Transmute and (not borrowing.word_value(current.value_type state.type_nodes) or not borrowing.word_value(hir.node_at(state.input.nodes current.expr).value_type state.type_nodes)) {mark_mutated(current.expr @mutated state)}
         # Installed failure reporting uses raw I/O internally. It does not
         # expose the successful path's locals; only source message effects
         # participate in this lifetime decision, as in borrow analysis.
