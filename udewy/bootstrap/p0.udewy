@@ -1273,6 +1273,16 @@ let parse_static_alloca_size = (state:int idx:int size_out:int):>int => {
     return idx + 1
 }
 
+# A declaration initializer is stable only when the stable atom is the
+# whole expression: `42 >? 43` or `size * 2` is an ordinary expression.
+let try_parse_stable_initializer = (state:int idx:int sv_out:int):>int => {
+    let new_idx:int = try_parse_stable_expr(state idx false sv_out)
+    if (new_idx =? -1) or (new_idx >=? tok_count(state)) { return new_idx }
+    let k:int = tok_kind(state new_idx)
+    if (get_precedence(k) not=? 0) or (k =? TK_EXPR_CALL) or (k =? TK_TRANSMUTE) { return -1 }
+    return new_idx
+}
+
 let parse_static_intrinsic_int_arg = (state:int name:int idx:int arg_index:int call_loc:int size_out:int):>int => {
     let sv_out:int = __static_alloca__(8)
     let new_idx:int = try_parse_stable_expr(state idx false sv_out)
@@ -1722,10 +1732,11 @@ let parse_var_decl = (state:int idx:int):>int => {
     let const_value:int = 0
     if is_const {
         let sv_out:int = __static_alloca__(8)
-        let new_idx:int = try_parse_stable_expr(state idx true sv_out)
+        let new_idx:int = try_parse_stable_initializer(state idx sv_out)
         if new_idx not=? -1 {
             idx = new_idx
             const_value = __load__(sv_out)
+            push_stable_value(const_value)
         } else {
             idx = parse_expr(state idx 0)
         }
@@ -2087,7 +2098,7 @@ let parse_program = (state:int):>void => {
                 continue
             }
             let sv_out:int = __static_alloca__(8)
-            let new_idx:int = try_parse_stable_expr(state idx false sv_out)
+            let new_idx:int = try_parse_stable_initializer(state idx sv_out)
             if new_idx not=? -1 {
                 idx = new_idx
                 let sv:int = __load__(sv_out)

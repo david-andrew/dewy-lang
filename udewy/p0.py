@@ -453,6 +453,24 @@ def parse_static_words(
     return idx, StableValue("static", label_id)
 
 
+def try_parse_stable_initializer(
+    toks: list[t1.Token],
+    idx: int,
+    state: ParseState,
+) -> tuple[int, StableValue] | None:
+    # A declaration initializer is stable only when the stable atom is the
+    # whole expression: `42 >? 43` or `size * 2` is an ordinary expression.
+    parsed = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
+    if parsed is None:
+        return None
+    new_idx, _ = parsed
+    if new_idx < len(toks):
+        kind = toks[new_idx].kind
+        if get_precedence(kind) != 0 or kind in (t1.Kind.TK_EXPR_CALL, t1.Kind.TK_TRANSMUTE):
+            return None
+    return parsed
+
+
 def try_parse_stable_expr(
     toks: list[t1.Token],
     idx: int,
@@ -1333,9 +1351,10 @@ def parse_var_decl(toks: list[t1.Token], idx: int, state: ParseState) -> int:
 
     const_value: StableValue | None = None
     if is_const:
-        stable_result = try_parse_stable_expr(toks, idx, state)
+        stable_result = try_parse_stable_initializer(toks, idx, state)
         if stable_result is not None:
             idx, const_value = stable_result
+            push_stable_value(backend, const_value)
         else:
             idx = parse_expr(toks, idx, state, 0)
     else:
@@ -1682,7 +1701,7 @@ def parse_program(toks: list[t1.Token], state: ParseState) -> None:
                 idx = idx + 1
                 continue
 
-            stable_result = try_parse_stable_expr(toks, idx, state, emit_runtime=False)
+            stable_result = try_parse_stable_initializer(toks, idx, state)
             if stable_result is not None:
                 idx, stable_value = stable_result
                 directive = stable_value_to_directive(backend, stable_value)

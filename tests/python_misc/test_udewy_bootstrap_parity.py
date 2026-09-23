@@ -522,3 +522,32 @@ def test_native_target_assembly_matches_between_compilers(bootstrap_binary, tmp_
         text = assembly.read_text().replace(str(work), '<work>')
         texts.append([line for line in text.splitlines() if line.strip()])
     assert texts[0] == texts[1]
+
+
+def test_stable_initializer_prefixes_parse_as_expressions(bootstrap_binary, tmp_path):
+    """A stable atom followed by an operator is an ordinary initializer.
+
+    Declarations fold a lone literal, const or function reference into a
+    stable value; `42 >? 43` or `40 + 2` must not stop after the first atom.
+    """
+    program = '''
+const G:int = 40 + 2
+let H:int = 2 * 21
+const K:int = 42
+let main = ():>int => {
+    const b:bool = 42 >? 43
+    const s:int = 40 + 2
+    const k:int = K
+    if b { return 1 }
+    if s not=? G { return 2 }
+    if H not=? k { return 3 }
+    return s
+}
+'''
+    for name, command in [('hosted', ['python', '-m', 'udewy']),
+                          ('native', [str(bootstrap_binary)])]:
+        work = tmp_path / name
+        work.mkdir()
+        for target in ('x86_64', 'c'):
+            binary = _compile_with(command, program, target, work)
+            assert subprocess.run([binary], timeout=10).returncode == 42, (name, target)
