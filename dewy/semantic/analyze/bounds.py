@@ -3155,6 +3155,26 @@ class _BoundsValidator:
                 bound=self._difference_bound(node, state) if name == '__sub__' else None,
                 floor=node.integer_operation is not None,
             )
+        # Comparisons produce ordinary boolean values as well as branch
+        # predicates. Use the operands observed above, without evaluating
+        # them again. A later argument can invalidate the left term's live
+        # identity even though its saved interval remains usable.
+        primitive = isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None
+        if primitive and node.type == 'bool':
+            decided = None
+            if len(arguments) == 2 and name in {'__lt__', '__le__', '__gt__', '__ge__', '__eq__', '__ne__'}:
+                decided = self._decide_comparison(name, *arguments)
+                left, right = node.pos_args
+                invalidated = (self.predicate_bindings.read_bindings(left)
+                               & self.predicate_bindings.mutated_bindings(right))
+                if decided is None and not invalidated:
+                    decided = self._decide_ordered_comparison(name, left, right, state)
+            elif name == '__not__' and len(arguments) == 1:
+                value = arguments[0]
+                if value is not None and value.lower == value.upper and value.lower in (0, 1):
+                    decided = not value.lower
+            if decided is not None:
+                result = Interval.exact(int(decided))
         # A user call's fixed-width result has the whole representation
         # range even when its contract specifies only one endpoint. A
         # partial promise must refine that range, not replace its other

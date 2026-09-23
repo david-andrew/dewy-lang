@@ -3606,3 +3606,25 @@ contract rejections) and 369 hosted effect tests pass. A fresh native driver
 agrees on the same cases, and the complete native scalar-lowering group,
 which failed on `4a3ce3cb` locally and in CI, passes. Fresh bootstrap
 integration follows at the next checkpoint.
+
+## Named comparison results (2026-09-23)
+
+A primitive comparison or `not` whose operand intervals decide it now has an
+exact boolean value in both interval evaluators, so `const r=a<=?c` followed
+by `$assert r` (or `$assert not (not r)`) proves from the same evidence as the
+direct assertion, including inside `$proof` bodies. Operands are not
+re-evaluated for this: the observed intervals are reused, and an ordered
+relation is consulted only while the left operand's identity is still live
+(`n<?change(@n)` stays unproven). User functions named like the primitive
+operators receive no such value.
+
+Native lowering folds a decided operand into the initializer, which exposed a
+µDewy parser defect in both implementations: a declaration initializer that
+started with a stable atom stopped after it, so `const b:bool = 42 >? 43` (or
+a top-level `const G:int = 40 + 2`) was a syntax error. A stable value is now
+accepted only when no operator, call or transmute follows.
+
+Validation: four runtime and four rejection cases pass on hosted; the native
+driver agrees on all eight with x86-64/C execution. A new µDewy parity case
+runs local and top-level stable-prefix initializers through both µDewy
+compilers on x86-64/C; all 87 µDewy parity tests pass.

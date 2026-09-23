@@ -8,6 +8,7 @@ import p"hir_facts.dewy" as expressions
 import p"value_bounds.dewy" as values
 import p"expression_intervals.dewy" as intervals
 import p"predicate_facts.dewy" as predicates
+import p"comparison_facts.dewy" as comparisons
 import p"predicate_paths.dewy" as paths
 import p"predicate_effects.dewy" as predicate_effects
 import p"refinement_facts.dewy" as refinements
@@ -103,6 +104,28 @@ record = (id:addr @state:facts.State @checker:Checker):>void => {
         if sequence isnt? none {facts.set_value(@state facts.Term[sequence 'length'] ranges.exact(exact))}
     }
     intervals.record(@checker.data.snapshot id state checker.data.env @checker.data.registry)
+    let node=node_at(id checker)
+    if node isnt? hir.FunctionCall or not types.is_primitive(types.node_at(checker.data.env.types node.value_type) 'bool') return
+    let function=node_at(node.func checker)
+    if function isnt? hir.ExpressedIdentifier return
+    if function.binding_id isnt? none {
+        let binding=bindings.find_binding(checker.data.registry function.binding_id)
+        if binding is? none or not binding.builtin return
+    }
+    # The snapshot keeps observed values and only still-live term identities.
+    # Do not replay argument evaluation merely to decide the result value.
+    let decided:bool?=none
+    let op=predicates.operators.get(function.name)
+    if op isnt? none and node.pos_args.length=?2 {
+        let left=predicates.operand(node.pos_args[0] state checker.data)
+        let right=predicates.operand(node.pos_args[1] state checker.data)
+        decided=ranges.decide(op left.interval right.interval)
+        if decided is? none {decided=comparisons.decide_order(op left right state checker.data.relations)}
+    } else if function.name=?'__not__' and node.pos_args.length=?1 {
+        let value=checker.data.snapshot.numbers.get(node.pos_args[0])
+        if value isnt? none and value.lower isnt? none and ranges.same_endpoint(value.lower value.upper) and (value.lower=?0 or value.lower=?1) {decided=value.lower=?0}
+    }
+    if decided isnt? none {checker.data.snapshot.numbers[id]=ranges.exact(if decided 1 else 0)}
 }
 refine = (state:facts.State id:addr truth:bool @checker:Checker):>facts.State? => predicates.refine_with_context(state id truth checker.path_context @checker.data)
 joined = (states:array<facts.State> checker:Checker):>facts.State? => {
