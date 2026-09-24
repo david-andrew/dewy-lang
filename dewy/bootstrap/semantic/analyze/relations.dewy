@@ -81,14 +81,16 @@ search = (smaller:facts.Term larger:facts.Term state:facts.State context:Context
         if fact isnt? facts.Order or weight is? none continue
         let step=Step[fact.larger weight entry.interval.capped]
         let key=fact.smaller.binding_id
+        # Extend each adjacency list in place; a copy per edge made graph
+        # construction quadratic in the facts leaving one term.
         if fact.smaller.projection =? 'value' {
-            let edges=values.get(key [])
+            if key not in? values {values[key]=[]}
+            let edges=@values[key]
             edges.push(step)
-            values[key]=edges
         } else {
-            let edges=lengths.get(key [])
+            if key not in? lengths {lengths[key]=[]}
+            let edges=@lengths[key]
             edges.push(step)
-            lengths[key]=edges
         }
         count+=1
     }
