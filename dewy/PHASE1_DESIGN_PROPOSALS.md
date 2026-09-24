@@ -479,3 +479,60 @@ Composition currently covers nominal children. Structurally extending the
 same nominal identity (`Parent & [extra:...]`, without `type of`) still needs
 a separate composition path; requesting its inherited hook is diagnosed
 explicitly rather than inventing a nominal parent or failing internally.
+
+## Context allocators — approved initial design (2026-09-24)
+
+David approved this design on 2026-09-24 (ROADMAP throughput lever 3,
+ownership tier 3 in `status.md`).
+
+**Allocators are library values.** The prelude defines an abstract
+`Allocator` family and concrete kinds written in Dewy over the existing
+memory intrinsics: `Arena` (bump chunks; `release` does nothing; `reset`
+frees everything at once) and the process default `Heap` (today's size-class
+allocator). `Heap` stays internal in the first slice. The compiler knows only
+that the *current* allocator is implicit context: every allocating operation
+uses it and every callee inherits it, so libraries need no changes.
+
+**A block pushes one:** `$allocator(@a) { ... }`. The directive has call form,
+like `$include_bytes(...)` and `$test(...)`, and applies to the block that
+immediately follows it. The allocator is passed as a place because allocation
+mutates it. The whole form is an expression: its value is the block's result,
+copied out to the enclosing allocator.
+
+```dewy
+let scratch = Arena[]
+let summary = $allocator(@scratch) {
+    let facts = analyze(body)       # temporaries come from scratch
+    facts.conclusion()              # the result is copied out of scratch
+}
+scratch.reset()
+```
+
+**Storage belongs to its owner.** A value stored into storage owned by
+allocator A becomes owned by A: pushing into an outer array, assigning an
+outer field or binding, a dictionary store, a block or function result. A
+value from another allocator is copied into A at the store. Stores the
+analysis proves same-owner need no copy; the rest compare owners at runtime.
+Results are built in the caller's allocator. Nothing allocated from an arena
+can therefore outlive it, and `reset()` (a mutation of the arena place)
+invalidates views derived from it like any other container mutation.
+
+**Escapes follow the approved copy policy.** By default an escape copies out
+and `dewy analyze` reports it ("copied out of `scratch` when stored into
+`summary`"). Under `$explicit_copies` an escape the analysis cannot eliminate
+is an error naming the escape, suggesting building the value outside the
+block or `.copy()`.
+
+**The compiler is the first customer.** No compiler-only never-free mode:
+checking and lowering push per-function arenas where their temporaries die
+(bounds checking first), with results copied out under the rule above.
+
+Deferred: `allocates<A>` effect rows naming the allocator; the allocation
+failure policy (`$fallible_allocation`, still tentative); `Pool`, tracking
+and user-defined allocator kinds; making `Heap` user-visible.
+
+Implementation order: (1) runtime foundation: arena chunks in
+`library/linux/system.dewy`, owner lookup by chunk, arena-aware release;
+(2) `Arena` in the prelude and the store-owner rule; (3) the directive in
+both compilers with copy notes and the `$explicit_copies` policy; (4) the
+bounds checker as first customer, measured with `--timings`.
