@@ -3921,3 +3921,20 @@ cost is the number of allocations, not their size. Bounds checking remains
 about 20 s; the relational search (`decide_order` → `ordered` → `search`)
 scans every fact twice per comparison. The waiting time for the backend
 process is 5%.
+
+Checkpoint: `be0749ff` completed a three-generation direct x86-64 bootstrap
+from the `c498be68` pair (75/69/74 seconds, byte-identical generations two
+and three) and passed 201/201 focused and 211/211 corpus parity cases and
+the native command test. Quiet, cold, each bootstrapped pair on its own
+source: `c498be68` 84.9/84.5 s, `be0749ff` 73.8/73.8 s (prelude analysis
+10.1 → 2.4 s, frontend 30.7 → 21.9 s, validation 20.8 → 19.9 s, lowering
+18.0 → 17.1 s). An experiment sharing one relation graph among a
+comparison's order queries produced identical output and no measurable
+change, so it was not kept: the relational search was hot only inside
+`Report.layout`.
+
+Remaining cost ranking: frontend imports/checking ~19 s, bounds on the
+program ~13 s, per-function lowering ~9.5 s, backend 7 s, allocator entry
+points ~20% of samples overall. The allocation count is the remaining
+general lever; ROADMAP ties it to the context allocator, whose surface is
+still undecided.
