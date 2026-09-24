@@ -31,3 +31,27 @@ finish = (stage:string started:Stamp?):>void => {
     let line="dewy timing {stage} {ended-started.clock} ns\ndewy storage {stage} allocated={allocated} copied={copied} live={live} peak={peak}\n"
     _write_stderr(line as array<uint8>);
 }
+# Repeated intervals (for example one per function) summed into one report
+# line per stage, printed once by `report`.
+Total:type = [ns:int64=0 allocated:int64=0 copied:int64=0 count:int64=0]
+accumulate = (@total:Total started:Stamp?):>void => {
+    if started is? none return
+    let ended=read_clock()
+    if ended <? started.clock return
+    total.ns+=ended-started.clock
+    total.allocated+=_arena_allocated_bytes-started.allocated
+    total.copied+=_arena_copied_bytes-started.copied
+    total.count+=1
+}
+report = (stage:string total:Total enabled:bool):>void => {
+    if not enabled return
+    let line="dewy timing {stage} {total.ns} ns\ndewy storage {stage} allocated={total.allocated} copied={total.copied} count={total.count}\n"
+    _write_stderr(line as array<uint8>);
+}
+# Report an interval only when it took at least `minimum` nanoseconds.
+finish_slow = (stage:string started:Stamp? minimum:int64):>void => {
+    if started is? none return
+    let ended=read_clock()
+    if ended-started.clock <? minimum return
+    finish(stage started)
+}

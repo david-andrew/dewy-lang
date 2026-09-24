@@ -3859,3 +3859,35 @@ about 2.8x; the entry of 2026-09-20 recorded 44.6 s under the same cold
 protocol. Throughput is about 580 lines/s against the 1.6k lines/s (30 s)
 target, and the growth sits in the Phase 1 analyses that ROADMAP's lever 6
 says must stay linear. `--timings` has no breakdown inside validation yet.
+
+## Validation and lowering breakdown (2026-09-24)
+
+`--timings` now reports sub-phases: `validation.local_places`,
+`validation.lifecycle`, `validation.place_contracts`,
+`validation.storage_lifetimes`, `validation.prepare`, per-module
+`validation.proofs` and `validation.bounds:<path>`,
+`validation.public_effects` and `validation.representation_and_reports`
+(the prelude analysis reports the same stages), and `lowering.captures`,
+`lowering.borrowing`, `lowering.normalize` and an accumulated
+`lowering.moves`. Bounds checking also reports each function that takes 20 ms
+or more as `bounds.function:<path>@<offset>#<node>`.
+
+First measurement of the `c498be68` source (85 s cold direct build):
+bounds checking is the largest single cost, 10.3 s inside prelude analysis
+and 15.1 s on the program. Two causes account for most of it:
+
+1. `library/reporting.dewy` takes 9.6 s. `Report` is a structural type
+   with ~500 lines of methods, and each of `Error`, `Warning`, `Info` and
+   `Hint` (`type of Report & [severity=...]`) receives its own copy of every
+   method body, so `layout` alone is checked five times (distinct HIR nodes,
+   1.65 s each). Methods inherited from a non-minted parent take the child's
+   name as their owner, which defeats the reuse minted families already get.
+2. A loop's fixed point re-analyzes its body on every widening/narrowing
+   pass (up to 11), including each nested loop's own fixed point, so cost
+   grows as passes^depth. `layout` nests loops three and four deep; the
+   slowest program functions (`borrowing.details` 1.9 s, a `p0.dewy`
+   function 1.3 s) have the same shape. This is the superlinear analysis
+   ROADMAP lever 6 rules out.
+
+Lowering: captures 1.3 s, borrowing 4.1 s, normalization 3.7 s, moves
+0.2 s; the remaining ~9.5 s is per-function lowering itself.

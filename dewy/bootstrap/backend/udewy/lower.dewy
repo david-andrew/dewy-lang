@@ -18,6 +18,7 @@ import p"../../semantic/builtins.dewy" as builtins
 import p"../../semantic/brands.dewy" as brands
 import p"../../semantic/subtyping.dewy" as subtyping
 import p"../../semantic/type_tests.dewy" as type_tests
+import p"../../timing.dewy" as timing
 
 doc"""
 Legalize validated semantic HIR into concrete µDewy function units.
@@ -97,6 +98,8 @@ State:type = [
     scoped_views:set<addr>=set[]
     # The default a viewing `get` kept alive; its caller releases it later.
     kept_fallback:addr?=none
+    timings:bool=false
+    move_time:timing.Total=timing.Total[]
     # The body of the loop arm whose iterators are being lowered.
     iterated_body:addr?=none
     view_scopes:dict<addr addr>=[]
@@ -4674,7 +4677,9 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             }
         }
     }
+    let moves_started=timing.start(state.timings)
     state.moved_uses=if enabled moves.compute(id state.input.nodes borrow_dependents) else set[]
+    timing.accumulate(@state.move_time moves_started)
     state.moved_bindings=set[]
     loop use in state.moved_uses {
         let moved=hir.node_at(state.input.nodes use)
@@ -4775,7 +4780,8 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     return put(hir.FunctionLiteral[node.loc code_type(id node @state result=if projection is? none none else projection.result) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[]):>Result|Error => {
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false):>Result|Error => {
+    let captures_started=timing.start(timings)
     let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links debug_names=debug_names explicit_copy_sources=explicit_copy_sources]
     # Older seeds and prelude-free kernels retain the six-word allocation
     # ABI. Install retain/drop together with prefix allocation, once per
@@ -4804,7 +4810,11 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
         let id=state.capture_plan.named.get(binding)
         if id isnt? none {external.add(id)}
     }
+    timing.finish('lowering.captures' captures_started)
+    let borrowing_started=timing.start(timings)
     let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers registry=source_registry)
+    timing.finish('lowering.borrowing' borrowing_started)
+    state.timings=timings
     state.borrowed_arguments=borrowed.arguments
     state.nonescaping_places=borrowed.nonescaping_places
     state.fixed_places=borrowed.fixed_places
@@ -4930,7 +4940,9 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     }
     if state.problem isnt? none return state.problem
     loop function in state.generated {functions.push(function)}
+    let normalize_started=timing.start(timings)
     let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value] emit.Input[state.nodes state.type_nodes input.source_files])
+    timing.finish('lowering.normalize' normalize_started)
     loop note in state.copy_notes {
         if note.explicit or not note.runtime_sized or note.source is? none or note.source not in? state.explicit_copy_sources {continue}
         $runtime_assert note.source <? state.input.source_files.length
@@ -4939,6 +4951,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
             hint='use `.copy()` for an independent value, or a required read-only view when the source can stay stable'
             notes=['This module enables `$explicit_copies`; COW sharing does not prove that a logical copy is free.']]
     }
+    timing.report('lowering.moves' state.move_time timings)
     return Result[normalized.program normalized.input state.copy_notes]
 }
 

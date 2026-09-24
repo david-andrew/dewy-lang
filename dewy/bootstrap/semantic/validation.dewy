@@ -15,6 +15,7 @@ import p"local_places.dewy" as local_places
 import p"validation_state.dewy" as proofs
 import p"validation_analysis.dewy" as analysis
 import p"analyze/prototype_checks.dewy" as prototype
+import p"../timing.dewy" as timing
 
 # Bounds validation precedes representation selection. Library foundations
 # cannot fall back to the BigInt helpers they are themselves defining.
@@ -69,7 +70,7 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
 # proof discharge happen after this scope returns, so no analysis can observe
 # a partly rewritten graph and no old snapshot survives the first write.
 analyze_modules = (word:addr engine:modules.Engine):>array<Decision>|Error => {
-    return analysis.analyze(word engine.modules engine.prelude_bindings engine.session saved=engine.prelude_validation)
+    return analysis.analyze(word engine.modules engine.prelude_bindings engine.session saved=engine.prelude_validation timings=engine.timings)
 }
 validate = (@engine:modules.Engine):>Result|Error => {
     let word=types.primitive('int64' @engine.session.types)
@@ -80,17 +81,22 @@ validate = (@engine:modules.Engine):>Result|Error => {
         let roots:array<addr>=[]
         loop module in engine.modules {roots.push(module.root)}
         let source=sources.srcfile(engine.modules[0].context engine.session)
+        let places_started=timing.start(engine.timings)
         if engine.session.local_place_roots.length >? 0 {
             let place_error=local_places.rewrite(roots source @engine.session)
             if place_error isnt? none return place_error
         }
+        timing.finish('validation.local_places' places_started)
+        let lifecycle_started=timing.start(engine.timings)
         ownership_error=lifecycle_runtime.prepare(roots source @engine.session)
+        timing.finish('validation.lifecycle' lifecycle_started)
     }
     let decisions=analyze_modules(word engine)
     if decisions is? Error return decisions
     # Unsupported ownership still receives source fact/effect diagnostics.
     # No rejected, partially prepared graph can reach runtime lowering.
     if ownership_error isnt? none return ownership_error
+    let finishing_started=timing.start(engine.timings)
     let result=Result[]
     let loaded=engine.modules
     $runtime_assert decisions.length =? loaded.length
@@ -129,5 +135,6 @@ validate = (@engine:modules.Engine):>Result|Error => {
         let error=runtime_reports.lower(module.root engine.prelude_bindings @engine.session)
         if error isnt? none return error
     }
+    timing.finish('validation.representation_and_reports' finishing_started)
     return result
 }

@@ -25,6 +25,7 @@ import p"index_checks.dewy" as indices
 import p"slice_checks.dewy" as slices
 import p"effects.dewy" as effects
 import p"prototype_checks.dewy" as prototype
+import p"../../timing.dewy" as timing
 
 # The visitor owns evaluation order; the smaller modules own individual
 # transfer and proof rules. Loop iterations compute evidence without issuing
@@ -35,6 +36,8 @@ Exit:type = const [levels:addr state:facts.State]
 Transfer:type = [normal:facts.State? breaks:array<Exit>=[] continues:array<Exit>=[]]
 Checker:type = [
     data:predicates.Data srcfile:SrcFile word_type:addr
+    # `--timings`: report functions whose checking takes 20 ms or more.
+    timings:bool=false
     source_files:array<SrcFile>=[]
     # The HIR/type environment and default word do not change during this
     # module's validation. Build their refinement view once, not per binding
@@ -1262,7 +1265,9 @@ validate = (root:addr @checker:Checker read_only:set<addr> | none=none):>void =>
     loop id in deferred {
         let function=node_at(id checker)
         $runtime_assert function is? hir.FunctionLiteral
+        let started=timing.start(checker.timings)
         function_body(id function state @checker true)
+        timing.finish_slow("bounds.function:{checker.srcfile.path}@{function.loc.start}#{id}" started 20000000)
         if checker.problem isnt? none return
     }
 }

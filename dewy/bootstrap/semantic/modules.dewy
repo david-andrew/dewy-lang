@@ -273,7 +273,7 @@ ensure_prelude = (@engine:Engine):>Error? => {
     if cached isnt? none {
         let word=types.primitive('int64' @engine.session.types)
         let analysis_started=timing.start(engine.timings)
-        let decisions=analysis.analyze(word engine.modules engine.prelude_bindings engine.session)
+        let decisions=analysis.analyze(word engine.modules engine.prelude_bindings engine.session timings=engine.timings)
         timing.finish('prelude_analysis' analysis_started)
         if decisions is? Error return decisions
         let roots:array<addr>=[]

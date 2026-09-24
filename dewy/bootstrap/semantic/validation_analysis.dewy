@@ -17,20 +17,26 @@ import p"analyze/relations.dewy" as relations
 import p"analyze/fact_state.dewy" as facts
 import p"analyze/expression_intervals.dewy" as intervals
 import p"analyze/representation.dewy" as representation
+import p"../timing.dewy" as timing
 
 # This boundary reads a frozen graph and returns decisions. It neither loads
 # modules nor discharges witnesses, so the prelude loader can use it before
 # entry checking without creating a loader/validation import cycle.
-validate_module = (module:modules.Module source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr prelude:dict<string addr> session:contexts.Session read_only:set<addr> | none=none):>proofs.Decision|Error => {
+validate_module = (module:modules.Module source_files:array<SrcFile> env:values.Environment prepared:facts.Context word:addr prelude:dict<string addr> session:contexts.Session read_only:set<addr> | none=none timings:bool=false):>proofs.Decision|Error => {
     let source=sources.srcfile(module.context session)
+    let proofs_started=timing.start(timings)
     let proof_error=checked_proofs.validate(module.root source session)
+    timing.finish('validation.proofs' proofs_started)
     if proof_error isnt? none return proof_error
+    let bounds_started=timing.start(timings)
     let data=predicates.Data[env relations.Context[prepared] intervals.Snapshot[] env.registry]
     let checker=bounds.Checker[data source word source_files=source_files]
     bounds.configure(@checker prepared)
     checker.data.links=session.links
     checker.prototype=module.options.prototype and not module.prelude
+    checker.timings=timings
     bounds.validate(module.root @checker read_only=read_only)
+    timing.finish(if timings "validation.bounds:{source.path}" else 'validation.bounds' bounds_started)
     if checker.problem isnt? none return checker.problem
     let strict=module.prelude or module.no_prelude or 'BigInt' not in? prelude
     let unfit:dict<addr proofs.Unfit>=[]
@@ -63,28 +69,34 @@ reusable = (saved:proofs.Prelude loaded:array<modules.Module> session:contexts.S
     return true
 }
 
-analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> session:contexts.Session saved:proofs.Prelude?=none):>array<proofs.Decision>|Error => {
+analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> session:contexts.Session saved:proofs.Prelude?=none timings:bool=false):>array<proofs.Decision>|Error => {
     let cached=saved
     if cached isnt? none and not reusable(cached loaded session) {cached=none}
     let source_files=sources.files(session)
     let roots:array<place_contracts.Root>=[]
     loop module in loaded {roots.push(place_contracts.Root[module.root module.context.source])}
+    let places_started=timing.start(timings)
     let place_error=place_contracts.validate(roots source_files session)
+    timing.finish('validation.place_contracts' places_started)
     if place_error isnt? none return place_error
+    let lifetimes_started=timing.start(timings)
     let lifetime_error=storage_lifetimes.validate(roots source_files session)
+    timing.finish('validation.storage_lifetimes' lifetimes_started)
     if lifetime_error isnt? none return lifetime_error
+    let prepare_started=timing.start(timings)
     let env=values.Environment[session.hir session.types session.registry targets.max_length(session.target)]
     let prepared=bounds.prepare(env)
     let ids:array<addr>=[]
     loop module in loaded {ids.push(module.root)}
     let read_only=effects.read_only_places_in(ids session.hir session.types)
+    timing.finish('validation.prepare' prepare_started)
     let decisions:array<proofs.Decision>=[]
     loop index in 0.. and index <? loaded.length {
         if cached isnt? none and index <? cached.decisions.length {
             decisions.push(cached.decisions[index])
             continue
         }
-        let checked=validate_module(loaded[index] source_files env prepared word prelude session read_only=read_only)
+        let checked=validate_module(loaded[index] source_files env prepared word prelude session read_only=read_only timings=timings)
         if checked is? Error return checked
         decisions.push(checked)
     }
@@ -94,7 +106,9 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
     if loaded.length >? 0 {
         let word_iterators:set<addr>=set[]
         loop decision in decisions {loop id in decision.word_iterators {word_iterators.add(id)}}
+        let effects_started=timing.start(timings)
         let effect_error=public_effects.validate(ids sources.srcfile(loaded[0].context session) session word_iterators)
+        timing.finish('validation.public_effects' effects_started)
         if effect_error isnt? none return effect_error
     }
     return decisions
