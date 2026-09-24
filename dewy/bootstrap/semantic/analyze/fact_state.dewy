@@ -243,20 +243,40 @@ join = (states:array<State> context:Context):>State => {
     # Returning its value preserves snapshot independence on later mutation.
     if states.length =? 0 return State[]
     if states.length =? 1 return states[0]
-    let candidates=State[]
-    loop state in states { loop entry in state.values { put(@candidates entry.fact entry.interval) } }
+    # Every fact of any state is a candidate, first occurrence first. A fact
+    # an earlier state holds was already considered: a lookup, where
+    # collecting candidates into a state of their own allocated per fact.
     let result=State[]
-    loop candidate in candidates.values {
-        let combined:ranges.Interval? = none
-        let present:bool = true
-        loop state in states {
-            let part = evidence(state candidate.fact context)
-            if part is? none { present = false break }
-            if part is? Vacuous continue
-            if combined is? none { combined = part }
-            else { combined = ranges.union(combined part) }
+    loop index in 0.. and index <? states.length {
+        loop candidate in states[index].values {
+            let earlier=false
+            loop previous in 0.. and previous <? index {
+                if contains(states[previous] candidate.fact) { earlier=true break }
+            }
+            if earlier continue
+            let combined:ranges.Interval? = none
+            let present:bool = true
+            loop state in states {
+                let part = evidence(state candidate.fact context)
+                if part is? none { present = false break }
+                if part is? Vacuous continue
+                if combined is? none { combined = part }
+                else { combined = ranges.union(combined part) }
+            }
+            if not present continue
+            let joined:ranges.Interval=candidate.interval
+            if combined isnt? none { joined=combined }
+            else {
+                # Vacuous everywhere: the last state holding the fact supplies it.
+                let later=index+1
+                loop later <? states.length {
+                    let held=lookup(states[later] candidate.fact)
+                    if held isnt? none { joined=held }
+                    later+=1
+                }
+            }
+            put(@result candidate.fact joined)
         }
-        if present { put(@result candidate.fact if combined is? none candidate.interval else combined) }
     }
     return result
 }
