@@ -4008,8 +4008,61 @@ nodes only). Hosted compiles of a small program cost about 0.1 s more.
 David decided to keep the hook (an arena that goes out of scope releases
 its region) and revisit if the cost becomes a problem.
 
-Next: the bounds checker as the first customer, measured with
-`--timings`. It needs a seed that knows the directive, so it lands after
-this commit's release. Later placement work: copying owned values into
-outer storage at the store (with runtime owner checks), so blocks that
-store results outside can use their arena too.
+## The bounds checker as first customer: no gain at module granularity (2026-09-24)
+
+`validate_module` ran inside `$allocator(@scratch)`, with the arena reset
+after each module. It qualified for its arena, and its output was
+byte-identical. Timings are quiet, cold self-builds of the same source,
+both compilers built by the `a49d6a58` pair.
+
+1. **First runtime.** The whole build took 82.0 s → 92.7 s, and validation
+   24.9 s → 30.5 s. The profile shows region allocation (a call into
+   `_region_alloc` plus clearing each block) costing more than the heap
+   allocation it replaced. Every release inside a region also looked up
+   the region's owner.
+2. **After the runtime fixes below.** Validation takes the same time as
+   on the heap (25.2 s against 25.1 s), and the build is still about 3 s
+   slower.
+
+The reason is structural. The checker allocates and frees temporaries
+constantly. The heap reuses a freed block at once, so the working set
+stays small and warm. In an arena a release frees nothing: the largest
+module's arena grew to about 1.5 GB (24,013 chunk mappings) and needed a
+second address range. The number of allocations, the actual cost, is
+unchanged. The change was not committed. Arenas pay where values live
+until the reset (per function or per iteration). For churny phases the
+lever is fewer allocations.
+
+Runtime fixes kept from this (`library/linux/system.dewy`):
+
+- **Allocation.** Context allocation bumps inline and does not clear
+  each block. A chunk is cleared once, when a context allocation opens
+  it. Clearing at reset instead broke `native_string_lifetimes` in the
+  hosted backend: hosted code reads a frame region's storage after the
+  region is reset (it worked because the chunk was not yet reused). That
+  is a latent hosted bug to fix; for now resets leave chunks untouched.
+- **Large blocks.** A block larger than a chunk comes from the heap, and
+  a release frees it there. Oversized region runs were reused only at an
+  exact size, so growing arrays left runs of every size and exhausted
+  the address range.
+- **Address range.** The first range is 8 GB, halving when the
+  address-space limit refuses. With one range everything between
+  `_region_low` and `_region_high` is region memory. A release, a share
+  test and growth then need two comparisons, not an owner lookup.
+
+Later placement work: copying owned values into outer storage at the
+store (with runtime owner checks), so blocks that store results outside
+can use their arena too.
+
+## Fewer allocations: fact-state joins (2026-09-24)
+
+About 72% of self-build samples are in runtime helpers (allocation,
+copies, shares, releases, dictionary probes). They are spread thinly over
+the callers. The largest concentrated group was the bounds checker's
+`fact_state.join` and the `put` calls it makes (about 5%). The join
+collected every input state's facts into a hashed candidate state, which
+it then discarded. It now walks each state's entries and skips a fact an
+earlier state holds (a hash lookup). The result is the same, including
+the interval of a fact that is vacuous everywhere. Validation: 25.1 s →
+23.9 s; self-build: 82.6 s → 81.2 s; 3.1 GB less allocated;
+byte-identical output.
