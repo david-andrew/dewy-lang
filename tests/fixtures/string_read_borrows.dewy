@@ -1,0 +1,34 @@
+# Field and element strings are borrowed up to an immediate consumer, not
+# copied. A later operand that runs code keeps the earlier operand's snapshot.
+Field:type = [name:string width:int64]
+Holder:type = [name:string]
+find = (fields:array<Field> name:string):>int64 => {
+    loop f in fields {if f.name =? name return f.width}
+    return 0
+}
+first_is = (fields:array<Field> name:string):>bool => fields.length >? 0 and fields[0].name =? name
+# Interpolation builds an owned string; a literal is static and has no owner.
+owned = (text:string):>string => "{text}"
+rename = (@holder:Holder):>string => {
+    let old=holder.name
+    holder.name=owned('beta')
+    return old
+}
+main = ():>int64 => {
+    let fields=[Field[name=owned('alpha') width=20] Field[name=owned('beta') width=22]]
+    if find(fields 'beta') not=? 22 or not first_is(fields 'alpha') return 1
+    let before:int64=_arena_allocated_bytes
+    let found=find(fields 'beta') + find(fields 'alpha')
+    let first=first_is(fields 'alpha')
+    if _arena_allocated_bytes not=? before return 2
+    if found not=? 42 or not first return 3
+    # The left operand is read before `rename` replaces it.
+    let holder=Holder[owned('alpha')]
+    if not (holder.name =? rename(@holder)) or holder.name not=? 'beta' return 4
+    holder.name=owned('alpha')
+    let text="{holder.name}-{rename(@holder)}-{holder.name}"
+    if text not=? 'alpha-alpha-beta' return 5
+    let label="<{fields[1].name}:{fields[0].name}>"
+    if label not=? '<beta:alpha>' return 6
+    return 42
+}

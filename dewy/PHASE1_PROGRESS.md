@@ -3628,3 +3628,32 @@ Validation: four runtime and four rejection cases pass on hosted; the native
 driver agrees on all eight with x86-64/C execution. A new µDewy parity case
 runs local and top-level stable-prefix initializers through both µDewy
 compilers on x86-64/C; all 87 µDewy parity tests pass.
+
+## Immediate string reads through fields and elements (2026-09-23)
+
+Checkpoint first: source `d6130c73` completed a three-generation direct
+x86-64 bootstrap (81/71/85 seconds, byte-identical generations two and
+three, pair execution checks passed; artifacts `phase1-d6130c73`). Its fresh
+inventory was 4,501 sites, one over the 4,500-site gate: the new boolean-value
+rule read a binding record and an operator through optional lookups. It now
+uses a copy-free builtin query (`bindings.builtin_binding`) and a `const`
+operator view.
+
+Native lowering previously borrowed a string handle for an immediate builtin
+consumer only when the operand was a bare identifier; a field or element read
+(`f.name =? name` in a loop, `"<{p.name}>"`) retained and released a shared
+descriptor around every use. A route of fields and elements down to a binding
+now qualifies too, unless an index on it was snapshotted. Consumers opt in
+only when nothing runs between the read and the use: a type test; string
+equality for its right operand, and for its left when the right operand is
+quiet (literals, identifiers, field reads and proven element reads); an
+interpolation part when every later part is quiet. `holder.name =?
+rename(@holder)` and `"{h.name}-{rename(@h)}"` keep the earlier snapshot.
+Hosted lowering never copied these reads, so this changes no hosted output.
+
+Validation: the new `string_read_borrows` fixture passes both compilers on
+x86-64/C and is in the focused parity manifest; the native command test now
+checks its copy rows. 427 native/hosted string, lowering, view and borrow
+tests pass. The compiler inventory falls from 4,501 to 4,141 sites (strings
+2,038 → 1,673), measured with a compiler built from this source by the
+`d6130c73` pair. Second-generation integration follows.

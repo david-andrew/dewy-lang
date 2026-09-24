@@ -84,6 +84,15 @@ has_binding = (registry:Registry id:addr):>bool => {
     let page=registry.binding_pages.get(page_id)
     return page isnt? none and id in? page
 }
+# Whether a binding is a registered builtin, without copying the binding.
+builtin_binding = (registry:Registry id:addr):>bool => {
+    let page_id=id // BINDING_PAGE_SIZE
+    let current=registry.current_page
+    if current isnt? none and current =? page_id return id in? registry.current_bindings and registry.current_bindings[id].builtin
+    if page_id not in? registry.binding_pages return false
+    const page=registry.binding_pages[page_id]
+    return id in? page and page[id].builtin
+}
 store_binding = (@registry:Registry id:addr binding:Binding):>void => {
     let page_id=id // BINDING_PAGE_SIZE
     let current=registry.current_page

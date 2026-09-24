@@ -108,15 +108,12 @@ record = (id:addr @state:facts.State @checker:Checker):>void => {
     if node isnt? hir.FunctionCall or not types.is_primitive(types.node_at(checker.data.env.types node.value_type) 'bool') return
     let function=node_at(node.func checker)
     if function isnt? hir.ExpressedIdentifier return
-    if function.binding_id isnt? none {
-        let binding=bindings.find_binding(checker.data.registry function.binding_id)
-        if binding is? none or not binding.builtin return
-    }
+    if function.binding_id isnt? none and not bindings.builtin_binding(checker.data.registry function.binding_id) return
     # The snapshot keeps observed values and only still-live term identities.
     # Do not replay argument evaluation merely to decide the result value.
     let decided:bool?=none
-    let op=predicates.operators.get(function.name)
-    if op isnt? none and node.pos_args.length=?2 {
+    if function.name in? predicates.operators and node.pos_args.length=?2 {
+        const op=predicates.operators[function.name]
         let left=predicates.operand(node.pos_args[0] state checker.data)
         let right=predicates.operand(node.pos_args[1] state checker.data)
         decided=ranges.decide(op left.interval right.interval)

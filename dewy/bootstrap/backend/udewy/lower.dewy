@@ -2169,7 +2169,7 @@ brand_predicate = (tag:addr tested:addr node:hir.AST @state:State):>addr => {
 }
 runtime_test = (node:hir.TypeTest @state:State):>addr => {
     let prefix:array<addr>=[]
-    let view=string_frame_view(node.value @prefix @state)
+    let view=string_frame_view(node.value @prefix @state immediate=true)
     if view isnt? none {
         prefix.push(runtime_test_value(view node @state))
         return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
@@ -2429,6 +2429,31 @@ string_view = (value:addr first:addr count:addr node:hir.AST @state:State):>addr
     prefix.push(string_memory(read_word(value layouts.string_descriptor.data node @state) word_op('__sub__' stop start node @state) boundaries count start node @state owner=string_runtime('_native_string_view_owner' [value] node @state)))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
+# A string handle read through a binding's own fields and elements stays in
+# place while no code runs. A snapshotted index reads a temporary owner that
+# its read releases, so it never qualifies.
+immediate_route = (id:addr state:State):>bool => {
+    let current=id
+    loop true {
+        let node=hir.node_at(state.input.nodes current)
+        if node is? hir.ExpressedIdentifier return node.binding_id isnt? none
+        if node is? hir.MemberAccess {current=node.value continue}
+        if node isnt? hir.Index or current in? state.array_snapshots return false
+        current=node.array
+    }
+    return false
+}
+# Evaluating this runs no user code and writes or releases nothing, so a
+# string handle read just before it is still in place for the consumer.
+quiet = (id:addr state:State):>bool => {
+    let node=hir.node_at(state.input.nodes id)
+    if node is? hir.Integer|hir.Bool|hir.String|hir.ExpressedIdentifier return true
+    if node is? hir.Suppress return quiet(node.item state)
+    if node is? hir.MemberAccess return quiet(node.value state)
+    # A proven element read only loads; a snapshotted one copies first.
+    if node is? hir.Index return id not in? state.array_snapshots and quiet(node.array state) and quiet(node.index state)
+    return false
+}
 # A string index or slice whose base stays alive for the enclosing statement
 # can be read through a frame-resident descriptor: no arena allocation and
 # no owner reference. The slot is reserved once per function (hoisted with
@@ -2461,7 +2486,7 @@ string_frame_view = (id:addr @prefix:array<addr> @state:State immediate:bool=fal
         # A local/parameter string handle survives that interval even when
         # a later statement replaces it. Longer intervals still require the
         # whole-function stability proof (notably lookup defaults).
-        if not (immediate and node is? hir.ExpressedIdentifier) and not borrowing.stable_owner(source state.stable_bindings state.stable_parameters) return none
+        if not (immediate and immediate_route(id state)) and not borrowing.stable_owner(source state.stable_bindings state.stable_parameters) return none
         return snapshot(expression(id @state) @prefix @state)
     }
     if node isnt? hir.StringIndex|hir.StringSlice return none
@@ -2550,10 +2575,10 @@ string_slice = (node:hir.StringSlice @state:State):>addr => {
 # owns a snapshot until the comparison finishes, preserving the left value
 # across right-hand calls that replace it. Bounds execute once, in source order.
 StringSpan:type = const [root:addr data:addr boundaries:addr start:addr byte_length:addr length:addr owned:bool=true]
-string_span = (id:addr @prefix:array<addr> @state:State offsets:bool=false):>StringSpan => {
+string_span = (id:addr @prefix:array<addr> @state:State offsets:bool=false immediate:bool=false):>StringSpan => {
     let node=hir.node_at(state.input.nodes id)
     if node is? hir.ValueCast|hir.RepresentationCast and owned_string(node.value_type state) and owned_string(hir.node_at(state.input.nodes node.expr).value_type state) {
-        return string_span(node.expr @prefix @state offsets=offsets)
+        return string_span(node.expr @prefix @state offsets=offsets immediate=immediate)
     }
     if node is? hir.StringSlice|hir.StringIndex {
         let source=string_span(node.string @prefix @state offsets=true)
@@ -2578,15 +2603,17 @@ string_span = (id:addr @prefix:array<addr> @state:State offsets:bool=false):>Str
         let length=snapshot(word_op('__sub__' stop start node @state) @prefix @state)
         return StringSpan[source.root source.data boundaries start length count source.owned]
     }
-    let borrowed=string_frame_view(id @prefix @state)
+    let borrowed=string_frame_view(id @prefix @state immediate=immediate)
     let root=if borrowed is? none snapshot(owned_value(id @state) @prefix @state) else borrowed
     if offsets {prefix.push(ensure_segmented(root node @state))}
     return StringSpan[root read_word(root layouts.string_descriptor.data node @state) read_word(root layouts.string_descriptor.boundaries node @state) read_word(root layouts.string_descriptor.start node @state) read_word(root layouts.string_descriptor.byte_length node @state) read_word(root layouts.string_descriptor.grapheme_length node @state) borrowed is? none]
 }
 string_equal = (node:hir.StringEqual @state:State):>addr => {
     let prefix:array<addr>=[]
-    let left=string_span(node.left @prefix @state)
-    let right=string_span(node.right @prefix @state)
+    # The comparison itself runs no user code: the right operand is borrowed
+    # up to it, and the left one too when evaluating the right is quiet.
+    let left=string_span(node.left @prefix @state immediate=quiet(node.right state))
+    let right=string_span(node.right @prefix @state immediate=true)
     let a=word_op('__add__' left.data left.start node @state)
     let b=word_op('__add__' right.data right.start node @state)
     let result=snapshot(string_equal_bytes(a left.byte_length b right.byte_length node node.negated @state) @prefix @state)
@@ -3058,11 +3085,17 @@ interpolated_string = (node:hir.InterpolatedString @state:State):>addr => {
     let pieces:array<TextBytes>=[]
     let owners:array<addr>=[]
     let total=word(0 node @state)
-    loop id in node.parts {
+    # Parts are copied into the result after all are evaluated. A string
+    # part is borrowed when every later part is quiet.
+    let last_loud:int64=-1
+    loop i in 0.. and i <? node.parts.length {if not quiet(node.parts[i] state) {last_loud=i}}
+    loop i in 0.. and i <? node.parts.length {
+        let id=node.parts[i]
         let original=hir.node_at(state.input.nodes id)
         let plain=types.node_at(state.type_nodes types.unfold(types.strip_refinement(original.value_type state.type_nodes) state.type_nodes))
-        let value=snapshot(owned_value(id @state) @prefix @state)
-        if owned_string(original.value_type state) {owners.push(value)}
+        let borrowed=if last_loud <=? i and enum_members(original.value_type state) is? none string_frame_view(id @prefix @state immediate=true) else none
+        let value=if borrowed isnt? none borrowed else snapshot(owned_value(id @state) @prefix @state)
+        if borrowed is? none and owned_string(original.value_type state) {owners.push(value)}
         let part:TextBytes=[word(0 node @state) word(0 node @state)]
         if string_type(original.value_type state) {
             if enum_members(original.value_type state) isnt? none {value=enum_read(value original.value_type types.primitive('string' @state.type_nodes) original @state)}
