@@ -3660,7 +3660,13 @@ class _ArrayLowering(_ArraySharing):
             assert members is not None
             self.union_cells[iterator.target.binding_id] = members   # the target holds the cell pointer
         raw_representation = self._array_use_representation(iterator.iterable)
-        prelude, array = self._extract_expression(iterator.iterable)
+        if self._iteration_snapshot_needed(iterator.iterable, arm.body):
+            # The value the source had on entry, as in multi-iterator loops.
+            prelude, array = self._clone_dynamic_array_value(iterator.iterable, array_type, arena=True)
+            prelude, array = self._array_result_temporary(iterator.iterable, array, prelude)
+            raw_representation = None
+        else:
+            prelude, array = self._extract_expression(iterator.iterable)
         offset = self._new_iterator_temp(iterator)
         offset_value = replace(offset, loc=iterator.loc)
         runtime_target_type = self._lower_runtime_value_type(array_type.element)

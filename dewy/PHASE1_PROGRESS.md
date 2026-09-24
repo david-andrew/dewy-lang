@@ -3776,3 +3776,36 @@ compilers pass it on x86-64/C, and 526 dictionary, iterator, loop and view
 tests pass. The one failure in that run, an explicit `@values.get(1 [42])`
 that native briefly accepted, is fixed by the inference-only rule above. The
 compiler inventory falls from 3,637 to 3,621 sites.
+
+## Loop sources keep their entry value (2026-09-23)
+
+Checkpoint first: `bde5e33e` passed all 200 focused parity cases and the
+full 211-case corpus against its bootstrapped pair.
+
+Both compilers mishandled a loop whose body replaces its own source. Hosted
+re-read the source route at every step (`loop x in xs {xs=[1000]}` summed
+20 instead of 42) and read freed storage when the replaced source was a
+dictionary entry. Native read the storage the replacement had just released:
+with allocations in the body reusing that block, an array loop summed 27
+instead of 42, and a string loop crashed. A loop now iterates the value its
+source had on entry. When the source is a route whose root binding the loop
+body writes, lends as a place or mutates, or whose root other code can reach
+(a global, a capture or a place parameter), both lowerings iterate a shared
+copy-on-write snapshot held for the loop and released when it ends. Sources
+nothing in the body can change are still read in place, as are temporaries,
+which the loop already owns.
+
+The first native version tested whole-function stability instead of the
+loop body. The compiler's own `$explicit_copies` modules rejected the
+resulting snapshot of a list pushed before (not during) its loop, which is
+why the rule is scoped to the body. Remaining snapshots add 43 inventory
+sites (3,621 → 3,664); each is a loop that does write its source.
+
+Validation: the `iteration_snapshots` fixture covers a reassigned local,
+a replaced dictionary entry, a written `get` source, and array and string
+sources whose freed storage the body reuses. Both compilers return 42 on
+x86-64/C. A compiler built from this source analyzes its own sources under
+`$explicit_copies`. The everyday gate (`-m "not slow"`, run from a copy of the
+tree without `.git`) passed 4,505 tests; its three failures were the
+measurement-cache tests, which need `git rev-parse` and fail for that reason
+alone.

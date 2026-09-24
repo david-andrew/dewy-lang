@@ -97,6 +97,8 @@ State:type = [
     scoped_views:set<addr>=set[]
     # The default a viewing `get` kept alive; its caller releases it later.
     kept_fallback:addr?=none
+    # The body of the loop arm whose iterators are being lowered.
+    iterated_body:addr?=none
     view_scopes:dict<addr addr>=[]
     view_regions:dict<addr array<addr>>=[]
     stable_parameters:dict<addr effects.ParameterEffects>=[]
@@ -5043,6 +5045,36 @@ scalar_string = (ordinal:addr node:hir.AST @prefix:array<addr> @state:State):>ad
     steps.push(descriptor)
     return put(hir.Block[node.loc word_type steps false] @state)
 }
+# An array or string loop source read through a route whose owner some write
+# in the function may replace (a temporary source is owned by the arm already).
+iteration_snapshot = (id:addr @state:State):>bool => {
+    if state.allocator is? none or not state.cleanup_enabled return false
+    let node=hir.node_at(state.input.nodes id)
+    if array_type(node.value_type state) is? none and not owned_string(node.value_type state) return false
+    if temporary_owner(id @state) or iterated_view(id @state) return false
+    let route=borrowing.route(id state.input.nodes)
+    if route is? none or borrowing.stable_owner(route state.stable_bindings state.stable_parameters) return false
+    let body=state.iterated_body
+    if body is? none return true
+    # An owner other code can reach may change through any call in the body.
+    if route.binding in? state.boxed or route.binding in? state.place_parameters or route.binding in? state.capture_plan.globals return true
+    return writes_binding(body route.binding state)
+}
+# Whether a subtree writes, lends or mutates storage rooted at a binding.
+writes_binding = (root:addr binding:addr state:State):>bool => {
+    let pending:array<addr>=[root]
+    loop pending.length >? 0 {
+        let current=pending.pop
+        let node=hir.node_at(state.input.nodes current)
+        if node is? hir.FunctionLiteral continue
+        loop target in captures.write_targets(node state.input.nodes) {
+            if captures.root_binding(target state.input.nodes) =? binding return true
+        }
+        if node is? hir.DictMethod and captures.root_binding(node.dictionary state.input.nodes) =? binding return true
+        hir.push_children(node @pending)
+    }
+    return false
+}
 # A loop over `d.get(k default)` whose dictionary no write in the function
 # reaches iterates the stored element instead of a copy of it.
 iterated_view = (id:addr @state:State):>bool => {
@@ -5124,6 +5156,15 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
                 }
             }
             sequence=dict_field(parts source.name node @state)
+        } else if iteration_snapshot(node.iterable @state) {
+            # The loop iterates the value its source had on entry. A write
+            # to the source's owner can replace or free it: hold a shared
+            # snapshot for the arm and release it when the arm ends.
+            sequence=snapshot(owned_value(node.iterable @state 'iterated') @prefix @state)
+            $runtime_assert state.cleanup_frames.length >? 0
+            let frame=state.cleanup_frames.pop
+            frame.push(OwnedLocal[sequence source.value_type])
+            state.cleanup_frames.push(frame)
         } else if iterated_view(node.iterable @state) {
             # The stored element is iterated in place; only a kept default is
             # released when the arm ends.
@@ -5132,7 +5173,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
             $runtime_assert source.default isnt? none
             keep_fallback(hir.node_at(state.input.nodes source.default).value_type @state)
         } else {sequence=snapshot(expression(node.iterable @state) @prefix @state)}
-        if source isnt? hir.DictEntries and temporary_owner(node.iterable @state) and not iterated_view(node.iterable @state) {
+        if source isnt? hir.DictEntries and temporary_owner(node.iterable @state) and not iterated_view(node.iterable @state) and not iteration_snapshot(node.iterable @state) {
             # lower_flow gives iterator setup its own cleanup frame. Body
             # continues keep this owner; leaving the arm or returning from
             # the function releases it after the last borrowed element use.
@@ -5299,7 +5340,10 @@ lower_flow = (node:hir.Flow position:addr @state:State):>addr => {
     let condition:addr=0
     let entry:array<addr>=[]
     if iterator {
+        let outer_body=state.iterated_body
+        state.iterated_body=arm.body
         let step=iterator_condition(test @state)
+        state.iterated_body=outer_body
         prefix=step.prefix condition=step.condition entry=step.entry
     } else {condition=expression(arm.condition @state)}
     let previous_depth=state.loop_depth

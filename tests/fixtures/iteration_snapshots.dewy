@@ -1,0 +1,52 @@
+# A loop iterates the value its source had when the loop began, even when the
+# body replaces the variable, the dictionary entry or the looked-up element.
+rewritten = (@d:dict<string array<int64>> k:string):>int64 => {
+    let total:int64=0
+    loop x in d.get(k []) {
+        total+=x
+        d[k]=[1000]
+    }
+    return total
+}
+make = (a:int64 b:int64):>array<int64> => [a b]
+grow = (text:string):>string => "{text}!"
+# Replacing the source frees its old storage; allocations in the body reuse
+# it. The loop still reads the original elements and graphemes.
+reused = ():>int64 => {
+    let xs=make(20 22)
+    let total:int64=0
+    let junk:array<array<int64>>=[]
+    loop x in xs {
+        total+=x
+        xs=make(1000 1000)
+        junk.push(make(7 7))
+        junk.push(make(7 7))
+    }
+    let s=grow('abcd')
+    let count:int64=0
+    loop c in s {
+        count+=1
+        s=grow('x')
+    }
+    return if count =? 5 total else 0
+}
+main = ():>int64 => {
+    let xs:array<int64>=[20 22]
+    let total:int64=0
+    loop x in xs {
+        total+=x
+        xs=[1000]
+    }
+    if total not=? 42 return 1
+    let d:dict<string array<int64>>=['a'->[20 22]]
+    total=0
+    loop y in d['a'] {
+        total+=y
+        d['a']=[1000]
+    }
+    if total not=? 42 return 2
+    let lists:dict<string array<int64>>=['a'->[20 20]]
+    if rewritten(@lists 'a') not=? 40 or rewritten(@lists 'z') not=? 0 return 3
+    if reused() not=? 42 return 4
+    return 42
+}

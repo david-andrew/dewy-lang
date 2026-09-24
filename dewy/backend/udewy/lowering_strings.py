@@ -4751,6 +4751,11 @@ class _StringLowering:
         iterator: hir.IteratorExpression,
     ) -> list[hir.AST]:
         prelude, string = self._extract_expression(iterator.iterable)
+        if self._iteration_snapshot_needed(iterator.iterable, arm.body):
+            # The loop iterates the value its source had on entry (see the
+            # array iterators): hold a shared clone through the loop.
+            prelude, string = self._string_result_temporary(
+                iterator.iterable, self._string_clone_call(string, iterator.loc), prelude, force=True)
         offset = self._new_iterator_temp(iterator)
         target = replace(iterator.target, loc=iterator.loc, type='int64')
         offset_value = replace(offset, loc=iterator.loc)

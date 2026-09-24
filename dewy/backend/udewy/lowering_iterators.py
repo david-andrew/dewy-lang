@@ -9,6 +9,7 @@ from ...utils import dataclass_replace as replace
 
 from ...reporting import Error, Pointer
 from ...semantic import hir, ty
+from . import borrowing
 from ...semantic.errors import NotImplementedYet
 from .lowering_shared import (
     ARRAY_LENGTH_OFFSET,
@@ -29,6 +30,43 @@ class _IteratorLowering:
             if name not in self.source_names:
                 self.source_names.add(name)
                 return hir.ExpressedIdentifier(node.loc, 'int64', name)
+
+    def _iteration_snapshot_needed(self, iterable: hir.AST, body: hir.AST | None = None) -> bool:
+        """Whether a loop over this array or string route must iterate a snapshot.
+
+        A route whose owner nothing in the function writes stays in place for
+        the whole loop; calls and other computed sources are statement
+        temporaries already. Otherwise a write can replace or free the source.
+        """
+        if not self._has_arena() or self.lowering_module_startup or not hasattr(self, 'borrow_plan'):
+            return False
+        if not isinstance(ty.unfold(ty.strip_refinement(iterable.type)), ty.ArrayType) and not self._is_string_valued(iterable.type):
+            return False
+        source = borrowing.route(iterable)
+        if source is None or borrowing.stable_owner(source, self.borrow_plan):
+            return False
+        if body is None or source.binding in self.borrow_plan.globals:
+            return True
+        # Only a write during the loop can change what it iterates. An owner
+        # other code can reach (a capture or a place) may change through a call.
+        if any(isinstance(param, hir.Param) and param.place and param.binding_id == source.binding
+               for param in (self.current_literal.pos_or_kw_args + self.current_literal.kw_only_args if self.current_literal is not None else [])):
+            return True
+        pending = [body]
+        while pending:
+            node = pending.pop()
+            if isinstance(node, hir.FunctionLiteral):
+                continue   # runs only when called; calls are checked below
+            if isinstance(node, hir.FunctionCall):
+                ambient = self.borrow_plan.ambient_writes.get(id(node), set())
+                if source.binding in ambient or -1 in ambient:
+                    return True
+            if any(borrowing.root_binding(target) == source.binding for target in borrowing.write_targets(node)):
+                return True
+            if isinstance(node, hir.DictMethod) and borrowing.root_binding(node.dictionary) == source.binding:
+                return True
+            pending.extend(child for child in borrowing.children(node) if isinstance(child, hir.AST))
+        return False
 
     def _new_iterator_name(self, role: str) -> str:
         while True:
@@ -167,6 +205,16 @@ class _IteratorLowering:
                 )
                 if isinstance(iterator.iterable, hir.DictEntries):
                     array_prelude, array_value = self._extract_dict_entries(iterator.iterable, dictionary_sources)
+                elif self._iteration_snapshot_needed(iterator.iterable, arm.body):
+                    # The loop iterates the value its source had on entry. A
+                    # write to the source's owner (in the body or through a
+                    # call) must not change or free it: iterate a shared
+                    # copy-on-write snapshot (an arena descriptor, also for a
+                    # raw fixed source), released after the loop.
+                    array_type = ty.unfold(ty.strip_refinement(iterator.iterable.type))
+                    array_prelude, array_value = self._clone_dynamic_array_value(iterator.iterable, array_type, arena=True)
+                    array_prelude, array_value = self._array_result_temporary(replace(iterator.iterable, type=array_type), array_value, array_prelude)
+                    array_representation = None
                 else:
                     array_prelude, array_value = self._extract_expression(iterator.iterable)
                 declarations.extend(array_prelude)
@@ -585,3 +633,4 @@ class _IteratorLowering:
             scaled_offset,
             iterator.loc,
         )
+
