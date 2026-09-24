@@ -3657,3 +3657,29 @@ checks its copy rows. 427 native/hosted string, lowering, view and borrow
 tests pass. The compiler inventory falls from 4,501 to 4,141 sites (strings
 2,038 → 1,673), measured with a compiler built from this source by the
 `d6130c73` pair. Second-generation integration follows.
+
+## Borrowed string operands for slicing, concatenation and narrowed reads (2026-09-23)
+
+Checkpoint first: source `add81b06` completed a three-generation direct
+x86-64 bootstrap from the `d6130c73` pair (82/74/86 seconds, byte-identical
+generations two and three, pair execution checks passed; artifacts
+`phase1-add81b06`).
+
+The immediate-consumer rule above now covers more native string operations.
+A string index or slice borrows its base when the index or range endpoints
+are quiet: the resulting view retains the base's owner itself, so the
+retain/release pair around it was redundant. A frame-resident descriptor has
+no owner word and is never used as such a base. Concatenation copies both
+operands' bytes before anything else runs, so it borrows the right operand
+and, when the right operand is quiet, the left. Reads narrowed from a
+`string?` or string-union cell (`t.label isnt? none and t.label =? text`)
+load the cell's payload word in place and now qualify like plain string
+routes, through an identifier, field or element or through an explicit cast.
+
+Validation: the `string_read_borrows` fixture gained narrowed-optional,
+index/slice and concatenation cases, including `h.name + rename(@h)` (left
+snapshot kept) and `rename(@h) + h.name` (right read after the call); it
+passes both compilers on x86-64/C. The command test now derives the expected
+copy rows from the fixture text: exactly the owned binding and the three
+operands read before a mutating call remain. The compiler inventory falls
+from 4,141 to 3,827 sites (strings 1,673 → 1,359).

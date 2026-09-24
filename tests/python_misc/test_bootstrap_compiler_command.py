@@ -150,18 +150,20 @@ def test_native_compiler_command(tmp_path):
     assert not any('`probe`' in line for line in key_notes), key_notes
     assert any('`key`' in line for line in key_notes), key_notes
 
-    # Field and element strings compared or interpolated with nothing
-    # running in between are borrowed; a binding still owns its value.
-    string_inventory = subprocess.run([
-        compiler, 'analyze', '--brief', ROOT / 'tests/fixtures/string_read_borrows.dewy',
-    ], cwd=tmp_path, env=real_env, capture_output=True, text=True, timeout=120, check=False)
+    # Field, element and narrowed optional strings read with nothing running
+    # before their builtin consumer are borrowed; a binding owns its value,
+    # and an operand read before a call that may replace it is a snapshot.
+    string_fixture = ROOT / 'tests/fixtures/string_read_borrows.dewy'
+    string_inventory = subprocess.run([compiler, 'analyze', '--brief', string_fixture],
+                                      cwd=tmp_path, env=real_env, capture_output=True, text=True, timeout=120, check=False)
     assert string_inventory.returncode == 0, string_inventory.stdout + string_inventory.stderr
     string_rows = {int(line.split('string_read_borrows.dewy:')[1].split(':')[0])
                    for line in string_inventory.stdout.splitlines()
                    if line.startswith('copy: ') and 'string_read_borrows.dewy:' in line}
-    assert not string_rows & {6, 9, 31}, string_rows
-    # Operands read before a call that may replace them keep their snapshots.
-    assert {13, 27, 29} <= string_rows, string_rows
+    lines = string_fixture.read_text().splitlines()
+    def rows(*fragments):
+        return {index + 1 for index, line in enumerate(lines) if any(fragment in line for fragment in fragments)}
+    assert string_rows == rows('let old=', '(holder.name =? rename', '"{holder.name}-{rename', '=holder.name + rename'), string_rows
 
     # The compiler's own copies are a bounded CI inventory, not an informal
     # count. The tool verifies every summary entry before applying the scope.

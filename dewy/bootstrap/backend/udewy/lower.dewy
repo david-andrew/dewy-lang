@@ -2454,13 +2454,14 @@ quiet = (id:addr state:State):>bool => {
     if node is? hir.Index return id not in? state.array_snapshots and quiet(node.array state) and quiet(node.index state)
     return false
 }
+quiet_range = (range:hir.Range state:State):>bool => (range.left is? none or quiet(range.left state)) and (range.right is? none or quiet(range.right state))
 # A string index or slice whose base stays alive for the enclosing statement
 # can be read through a frame-resident descriptor: no arena allocation and
 # no owner reference. The slot is reserved once per function (hoisted with
 # the loop prologue), so loops reuse it. Only consumers that neither retain
 # nor release the value (comparisons, tests, hashing) may request one; the
 # control word stays zero and the descriptor must never escape the statement.
-string_frame_view = (id:addr @prefix:array<addr> @state:State immediate:bool=false):>addr? => {
+string_frame_view = (id:addr @prefix:array<addr> @state:State immediate:bool=false routes_only:bool=false):>addr? => {
     if state.allocator is? none or not state.cleanup_enabled return none
     let node=hir.node_at(state.input.nodes id)
     # Contextual typing wraps an index in representation-preserving casts
@@ -2478,7 +2479,10 @@ string_frame_view = (id:addr @prefix:array<addr> @state:State immediate:bool=fal
     # Consumers read the operand several times, so bind it once.
     if node is? hir.String return snapshot(expression(id @state) @prefix @state)
     if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index {
-        if not owned_string(node.value_type state) or stored_type(id state) not=? node.value_type return none
+        # A read narrowed from a `string?` or string union cell loads the
+        # cell's payload word in place; other conversions build a value.
+        let stored=stored_type(id state)
+        if not owned_string(node.value_type state) or (stored not=? node.value_type and cell_members(stored @state) is? none) return none
         if id in? state.array_snapshots return none
         let source=borrowing.route(id state.input.nodes)
         if source is? none or source.binding in? state.boxed return none
@@ -2489,7 +2493,19 @@ string_frame_view = (id:addr @prefix:array<addr> @state:State immediate:bool=fal
         if not (immediate and immediate_route(id state)) and not borrowing.stable_owner(source state.stable_bindings state.stable_parameters) return none
         return snapshot(expression(id @state) @prefix @state)
     }
-    if node isnt? hir.StringIndex|hir.StringSlice return none
+    # A narrowed `string?` (or string union) read loads its cell's payload
+    # word, which stays in place under the same conditions as the cell.
+    if node is? hir.ValueCast and owned_string(node.value_type state) {
+        let cell=hir.node_at(state.input.nodes node.expr)
+        if cell_members(cell.value_type @state) is? none or cell isnt? hir.ExpressedIdentifier|hir.MemberAccess|hir.Index return none
+        if stored_type(node.expr state) not=? cell.value_type or node.expr in? state.array_snapshots return none
+        let source=borrowing.route(node.expr state.input.nodes)
+        if source is? none or source.binding in? state.boxed return none
+        if not (immediate and immediate_route(node.expr state)) and not borrowing.stable_owner(source state.stable_bindings state.stable_parameters) return none
+        return snapshot(expression(id @state) @prefix @state)
+    }
+    # A frame descriptor has no owner word: never a base that is retained.
+    if routes_only or node isnt? hir.StringIndex|hir.StringSlice return none
     let base=hir.node_at(state.input.nodes node.string)
     if not owned_string(base.value_type state) return none
     if base isnt? hir.String {
@@ -2536,10 +2552,13 @@ string_frame_view = (id:addr @prefix:array<addr> @state:State immediate:bool=fal
 }
 string_index = (node:hir.StringIndex @state:State):>addr => {
     let prefix:array<addr>=[]
-    let value=snapshot(owned_value(node.string @state) @prefix @state)
+    # The view retains the base's owner itself; a quiet index lets the base
+    # be borrowed up to that point.
+    let borrowed=string_frame_view(node.string @prefix @state immediate=quiet(node.index state) routes_only=true)
+    let value=if borrowed isnt? none borrowed else snapshot(owned_value(node.string @state) @prefix @state)
     let index=snapshot(expression(node.index @state) @prefix @state)
     let result=snapshot(string_view(value index word(1 node @state) node @state) @prefix @state)
-    prefix.push(string_runtime('_native_string_release' [value] node @state result_void=true))
+    if borrowed is? none {prefix.push(string_runtime('_native_string_release' [value] node @state result_void=true))}
     prefix.push(result)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
@@ -2562,10 +2581,11 @@ string_slice = (node:hir.StringSlice @state:State):>addr => {
     let range=hir.node_at(state.input.nodes node.range)
     if range isnt? hir.Range or range.step_pair isnt? none return reject(node 'stepped string slicing' @state)
     let prefix:array<addr>=[]
-    let value=snapshot(owned_value(node.string @state) @prefix @state)
+    let borrowed=string_frame_view(node.string @prefix @state immediate=quiet_range(range state) routes_only=true)
+    let value=if borrowed isnt? none borrowed else snapshot(owned_value(node.string @state) @prefix @state)
     let bounds=string_bounds(range read_word(value layouts.string_descriptor.grapheme_length node @state) node @prefix @state)
     let result=snapshot(string_view(value bounds.first bounds.count node @state) @prefix @state)
-    prefix.push(string_runtime('_native_string_release' [value] node @state result_void=true))
+    if borrowed is? none {prefix.push(string_runtime('_native_string_release' [value] node @state result_void=true))}
     prefix.push(result)
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
@@ -2581,7 +2601,9 @@ string_span = (id:addr @prefix:array<addr> @state:State offsets:bool=false immed
         return string_span(node.expr @prefix @state offsets=offsets immediate=immediate)
     }
     if node is? hir.StringSlice|hir.StringIndex {
-        let source=string_span(node.string @prefix @state offsets=true)
+        let range_node=if node is? hir.StringSlice hir.node_at(state.input.nodes node.range) else none
+        let settled=if node is? hir.StringIndex quiet(node.index state) else range_node is? hir.Range and quiet_range(range_node state)
+        let source=string_span(node.string @prefix @state offsets=true immediate=immediate and settled)
         let first:addr=0
         let count:addr=0
         if node is? hir.StringSlice {
@@ -3029,16 +3051,20 @@ segmented_string = (data:addr length:addr node:hir.AST optional:bool @state:Stat
 }
 string_concat = (node:hir.StringConcat @state:State):>addr => {
     let prefix:array<addr>=[]
-    let left=snapshot(owned_value(node.left @state) @prefix @state)
-    let right=snapshot(owned_value(node.right @state) @prefix @state)
+    # Bytes are copied out before anything else runs: the right operand is
+    # borrowed, and the left one too when evaluating the right is quiet.
+    let left_view=string_frame_view(node.left @prefix @state immediate=quiet(node.right state))
+    let left=if left_view isnt? none left_view else snapshot(owned_value(node.left @state) @prefix @state)
+    let right_view=string_frame_view(node.right @prefix @state immediate=true)
+    let right=if right_view isnt? none right_view else snapshot(owned_value(node.right @state) @prefix @state)
     let first=snapshot(read_word(left layouts.string_descriptor.byte_length node @state) @prefix @state)
     let second=snapshot(read_word(right layouts.string_descriptor.byte_length node @state) @prefix @state)
     let length=snapshot(word_op('__add__' first second node @state) @prefix @state)
     let data=snapshot(allocation(length node @state) @prefix @state)
     prefix.push(counted_bytes(string_data(left node @state) data word(0 node @state) first node @state))
     prefix.push(counted_bytes(string_data(right node @state) word_op('__add__' data first node @state) word(0 node @state) second node @state))
-    prefix.push(string_runtime('_native_string_release' [left] node @state result_void=true))
-    prefix.push(string_runtime('_native_string_release' [right] node @state result_void=true))
+    if left_view is? none {prefix.push(string_runtime('_native_string_release' [left] node @state result_void=true))}
+    if right_view is? none {prefix.push(string_runtime('_native_string_release' [right] node @state result_void=true))}
     prefix.push(segmented_string(data length node false @state))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
