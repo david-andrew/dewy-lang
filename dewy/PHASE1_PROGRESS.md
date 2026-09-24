@@ -3713,3 +3713,34 @@ arms, a return inside a loop, and a place-lent local; a later use,
 move notes and both compilers' x86-64/C execution agree, and native analysis
 reports exactly the three negative sites. The compiler inventory falls from
 3,827 to 3,692 sites (arrays 733 → 602).
+
+## Read-only `get` views (2026-09-23)
+
+A dictionary `get` without a default produced an owned optional in both
+lowerings: the stored record was shared or copied into a new cell, and the
+binding released both at scope exit. This is the arena-lookup shape the 1.1
+strategy names first. A `let`/`const` bound to such a `get` now views the
+stored element when the existing local-view proof holds (the binding is never
+written, lent as a place, captured or exposed, and the dictionary's values
+route is stable for its lifetime): elements that are already that optional
+are referred to directly; otherwise a frame cell holds the tag and the stored
+handle, and a miss uses the `none` cell. The view owns nothing, so there is
+no copy and no release; escaping uses (returns, owning arguments, stores)
+still copy from it. Lookups with a default, union-valued elements beyond
+`T | none`, and rebound or mutated-around bindings keep their owned results.
+
+Both compilers implement the rule (`get_view_lookup` / `view_cell` in
+`lower.dewy`; `_get_view_lookup` and `_extract_dict_lookup(view=True)` hosted).
+
+Validation: the new `get_views` fixture covers record, optional-record and
+string elements, misses, a loop-local view, a dictionary written while its
+binding lives and a rebound binding. Both compilers execute it on x86-64/C,
+and the hosted copy notes and native command test pin exactly the three
+owned lookups. The compiler inventory falls from 3,692 to 3,637 sites.
+
+The complete pytest run at `520e3445` (in a detached snapshot, concurrent
+with other validation) reported 4,523 passes, 27 skips and one failure:
+`test_native_global_call_facts_from_source` exceeded its 60-second
+subprocess limit. Run alone, the call takes 31.5 seconds at `520e3445` and
+30.7 seconds at this session's starting commit `4a3ce3cb`, so the timeout
+came from machine load, not a slowdown; the margin is noted for CI.

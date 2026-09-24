@@ -4413,7 +4413,11 @@ class _Lowerer(
                 # A stable tagged projection lends its cell (and payload)
                 # under the same lifetime proof as an explicit const view.
                 # Escaping value boundaries still acquire their own owner.
-                prelude, value = self._extract_expression(node.expr)
+                lookup = borrowing.unwrap(node.expr)
+                if self._get_view_lookup(lookup):
+                    prelude, value = self._extract_dict_lookup(lookup, view=True)
+                else:
+                    prelude, value = self._extract_expression(node.expr)
                 return [*prelude, replace(node, decltype='let', annotation=self._lower_runtime_value_type(declared_type), expr=value)]
             if isinstance(declared_type, ty.TypeOr) and ty.string_valued(declared_type):
                 node = replace(node, annotation='int64')   # one string handle

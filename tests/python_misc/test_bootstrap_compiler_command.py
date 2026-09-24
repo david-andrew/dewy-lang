@@ -165,6 +165,19 @@ def test_native_compiler_command(tmp_path):
         return {index + 1 for index, line in enumerate(lines) if any(fragment in line for fragment in fragments)}
     assert string_rows == rows('let old=', '(holder.name =? rename', '"{holder.name}-{rename', '=holder.name + rename'), string_rows
 
+    # A read-only `get` binding views the stored element; a dictionary write
+    # while it lives, or rebinding it, keeps an owned copy.
+    get_fixture = ROOT / 'tests/fixtures/get_views.dewy'
+    get_inventory = subprocess.run([compiler, 'analyze', '--brief', get_fixture],
+                                   cwd=tmp_path, env=real_env, capture_output=True, text=True, timeout=120, check=False)
+    assert get_inventory.returncode == 0, get_inventory.stdout + get_inventory.stderr
+    get_rows = {int(line.split('get_views.dewy:')[1].split(':')[0])
+                for line in get_inventory.stdout.splitlines()
+                if line.startswith('copy: ') and 'get_views.dewy:' in line and ': record ' in line}
+    lines = get_fixture.read_text().splitlines()
+    assert get_rows == rows('let before=d.get', "found=d.get('beta')") | {index + 1 for index, line in enumerate(lines)
+                                                                        if 'let found=d.get(k)' in line and 'first' in lines[index + 1]}, get_rows
+
     # The compiler's own copies are a bounded CI inventory, not an informal
     # count. The tool verifies every summary entry before applying the scope.
     budget = subprocess.run([

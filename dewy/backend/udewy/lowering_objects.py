@@ -1295,6 +1295,25 @@ class _ObjectLowering:
         )
         return prelude, result
 
+    def _get_view_lookup(self, expr: hir.AST) -> bool:
+        """A `get` without a default whose optional result can refer to the stored element.
+
+        The native rule (`get_view_lookup` in lower.dewy): the stored cell
+        itself when elements are that optional, otherwise a frame cell holding
+        the element's handle (see `_extract_dict_lookup(view=True)`).
+        """
+        if not isinstance(expr, hir.DictLookup) or expr.proven or expr.default is not None:
+            return False
+        if ty.runtime_union_members(expr.type) is not None:
+            return False
+        payload = ty.optional_payload(expr.type)
+        element = getattr(expr.values.type, 'element', None) if expr.values is not None else None
+        if payload is None or element is None:
+            return False
+        if ty.optional_payload(element) is not None:
+            return ty.strip_refinement(element) == ty.strip_refinement(expr.type)
+        return ty.unfold(ty.strip_refinement(element)) == ty.unfold(ty.strip_refinement(payload))
+
     def _borrowed_route_local(self, node: hir.Declare, value_type: ty.Type) -> bool:
         """`let x = a[i]` / `a.f` / `d[k]` binds the storage it reads when both stay stable.
 
@@ -1313,9 +1332,10 @@ class _ObjectLowering:
             node.view and isinstance(expr, hir.ExpressedIdentifier)
         ):
             return False
+        get_view = self._get_view_lookup(expr)
         if (isinstance(expr, hir.DictLookup) and not expr.proven
-                and not isinstance(value_type, ty.ObjectType)):
-            return False  # optional/fallback lookups may construct result storage
+                and not isinstance(value_type, ty.ObjectType) and not get_view):
+            return False  # other optional/fallback lookups construct result storage
         if isinstance(expr, hir.DictLookup) and expr.default is not None and not expr.proven:
             # The fallback may be a temporary released after this statement.
             # Stability of the dictionary alone cannot lend that other owner.

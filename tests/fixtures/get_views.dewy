@@ -1,0 +1,55 @@
+# A `get` bound to a read-only local reads the stored element through a view;
+# writes to the dictionary or the binding keep an independent copy.
+Rec:type = [name:string width:int64]
+width = (d:dict<string Rec> k:string):>int64 => {
+    let found=d.get(k)
+    if found is? none return 0
+    return found.width
+}
+maybe = (d:dict<string Rec?> k:string):>int64 => {
+    let found=d.get(k)
+    if found is? none return 0
+    return found.width
+}
+label = (d:dict<string string> k:string):>string => {
+    let found=d.get(k)
+    if found is? none return '-'
+    return "<{found}>"
+}
+summed = (d:dict<string Rec> keys:array<string>):>int64 => {
+    let total:int64=0
+    loop k in keys {
+        let r=d.get(k)
+        if r isnt? none {total+=r.width}
+    }
+    return total
+}
+# The dictionary changes while the binding lives: the binding keeps its value.
+replaced = (@d:dict<string Rec> k:string):>int64 => {
+    let before=d.get(k)
+    d[k]=Rec['new' 1]
+    if before is? none return 0
+    return before.width
+}
+# A rebound local owns each value it holds.
+rebound = (d:dict<string Rec> k:string):>int64 => {
+    let found=d.get(k)
+    let first=if found is? none 0 else found.width
+    found=d.get('beta')
+    return first + if found is? none 0 else found.width
+}
+main = ():>int64 => {
+    let d:dict<string Rec>=['alpha'->Rec['a' 20] 'beta'->Rec['b' 2]]
+    let o:dict<string Rec?>=['alpha'->Rec['a' 3] 'gamma'->none]
+    let s:dict<string string>=['alpha'->"{'x'}y"]
+    if width(d 'alpha') not=? 20 or width(d 'zeta') not=? 0 return 1
+    if maybe(o 'alpha') not=? 3 or maybe(o 'gamma') not=? 0 or maybe(o 'zeta') not=? 0 return 2
+    if label(s 'alpha') not=? '<xy>' or label(s 'zeta') not=? '-' return 3
+    if summed(d ['alpha' 'zeta' 'beta' 'alpha']) not=? 42 return 4
+    let e:dict<string Rec>=['alpha'->Rec['a' 7]]
+    if replaced(@e 'alpha') not=? 7 return 5
+    let after=e.get('alpha')
+    if after is? none or after.width not=? 1 return 7
+    if rebound(d 'alpha') not=? 22 return 6
+    return 42
+}

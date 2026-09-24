@@ -468,7 +468,7 @@ class _DictLowering:
         return statements, found, position, slot
 
     # ------------------------------------------------------------------ nodes
-    def _extract_dict_lookup(self, node: hir.DictLookup) -> tuple[list[hir.AST], hir.AST]:
+    def _extract_dict_lookup(self, node: hir.DictLookup, view: bool = False) -> tuple[list[hir.AST], hir.AST]:
         loc = node.loc
         prelude, parts = self._dict_parts(node.keys)
         key_prelude, key = self._extract_expression(node.key)
@@ -538,6 +538,23 @@ class _DictLowering:
             raise TypeError('INTERNAL ERROR: dictionary lookup is not optional')
         cell = hir.ExpressedIdentifier(loc, node.type, self._new_optional_name('dict_value'))
         cell_word = replace(cell, type='int64')
+        if view:
+            # A read-only binding refers to the stored element: the stored
+            # cell itself, or a frame cell holding the element's handle. It
+            # owns nothing, so no copy is made and nothing is released.
+            if not isinstance(parts.value_type, str) and ty.optional_payload(ty.strip_refinement(parts.value_type)) is not None:
+                found_body = [self._assign(cell_word, replace(value_at(position), type='int64'), loc)]
+            else:
+                found_body = [
+                    self._tag_write(cell_word, payload, loc),
+                    self._optional_store_payload(replace(value_at(position), type='int64'), cell_word, payload, loc),
+                ]
+            return [
+                *prelude, *key_prelude, *search,
+                hir.Declare(loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._optional_allocation(loc)),
+                self._tag_write(cell_word, 'none', loc),
+                self._if(found, found_body, loc),
+            ], cell
         if not self.lowering_module_startup:
             # Lookup makes an independent payload, subsequently copied by
             # its consumer. Its temporary owns that first copy until exit.

@@ -588,7 +588,11 @@ expression = (id:addr @state:State):>addr => {
             let call=hir.node_at(state.input.nodes node.expr)
             $runtime_assert call is? hir.FunctionCall
             value=ordinary_call(node.expr call runtime_type(call.value_type call @state) @state projection=projection)
-        } else if borrowed_route_local(node @state) {value=expression(node.expr @state) borrowed=true}
+        } else if borrowed_route_local(node @state) {
+            let lookup=hir.node_at(state.input.nodes node.expr)
+            value=if lookup is? hir.DictLookup and get_view_lookup(lookup @state) dict_lookup(lookup @state view=true) else expression(node.expr @state)
+            borrowed=true
+        }
         else {
             if node.view return required_view_error(node @state)
             value=owned_value(node.expr @state "bound to `{node.name}`")
@@ -3825,13 +3829,28 @@ borrow_projection_matches = (stored:addr read:addr nodes:types.Table):>bool => {
     }
     return true
 }
+# An unproven `get` without a default whose optional result can refer to the
+# stored element: the stored cell itself when elements are cells, otherwise a
+# frame cell holding the element's handle; the static `none` cell when absent.
+get_view_lookup = (expr:hir.AST @state:State):>bool => {
+    if expr isnt? hir.DictLookup or expr.proven or expr.default isnt? none or state.none_cell is? none return false
+    let members=cell_members(expr.value_type @state)
+    if members is? none return false
+    let values=array_type(hir.node_at(state.input.nodes expr.values).value_type state)
+    if values is? none return false
+    if cell_members(values.element @state) isnt? none return values.element =? expr.value_type
+    return values.element in? members
+}
 borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     if state.allocator is? none and not node.view return false
     let expr=hir.node_at(state.input.nodes node.expr)
     if expr isnt? hir.Index|hir.MemberAccess|hir.DictLookup and not (node.view and expr is? hir.ExpressedIdentifier) return false
     # Proven array entries hand out the stored descriptor, just as records
-    # expose their stored block. Optional/fallback lookups may rebuild storage.
-    if expr is? hir.DictLookup and not expr.proven and not object_valued(expr.value_type state) return false
+    # expose their stored block. A `get` without a default can hand out a
+    # view cell (see `get_view`); other fallback lookups may rebuild storage.
+    let get_view=get_view_lookup(expr @state)
+    if get_view and (node.binding_id is? none or node.binding_id in? state.addressed) return false
+    if expr is? hir.DictLookup and not expr.proven and not object_valued(expr.value_type state) and not get_view return false
     # An unproven lookup may select a temporary fallback. Its lifetime is
     # independent of the dictionary's, so a stable dictionary is insufficient.
     if expr is? hir.DictLookup and expr.default isnt? none and not expr.proven return false
@@ -3846,7 +3865,7 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     # Do not confuse a refined word/aggregate with a representation conversion.
     let read_type=types.unfold(types.strip_refinement(expr.value_type state.type_nodes) state.type_nodes)
     if node.annotation isnt? none and not borrow_storage_matches(node.annotation read_type state.type_nodes) return false
-    if not borrow_projection_matches(stored_type(node.expr state) read_type state.type_nodes) return false
+    if not get_view and not borrow_projection_matches(stored_type(node.expr state) read_type state.type_nodes) return false
     if node.expr in? state.array_snapshots return false
     let route=borrowing.route(node.expr state.input.nodes)
     if route is? none return false
@@ -5566,6 +5585,23 @@ dict_entry_slot=(node:hir.DictLookup @prefix:array<addr> @state:State):>addr=>{
 
 # Container operations retain a temporary receiver until their result has
 # been materialized. Iteration instead keeps this owner for the whole arm.
+# A frame cell for a view of `value`: its tag and the element's handle, with
+# no ownership. One slot per site, hoisted with the loop prologue; a view
+# binding lives no longer than one execution of its declaration.
+view_cell = (value:addr actual:addr expected:addr node:hir.AST @state:State):>addr => {
+    let members=cell_members(expected @state)
+    $runtime_assert members isnt? none
+    let prefix:array<addr>=[]
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let hoisted:array<addr>=[]
+    let slot=snapshot(intrinsic_call('__alloca__' [word(16 node @state)] word_type node @state) @hoisted @state)
+    loop item in hoisted {state.loop_prologue.push(item)}
+    let payload=put(hir.Transmute[node.loc word_type value] @state)
+    prefix.push(store_word(word(member_tag(actual @state) node @state) slot 0 node @state))
+    prefix.push(store_word(payload slot 8 node @state))
+    prefix.push(slot)
+    return put(hir.Block[node.loc word_type prefix false] @state)
+}
 finish_dictionary = (value:addr parts:DictParts node:hir.AST @prefix:array<addr> @state:State copy_result:bool=false):>addr => {
     if parts.owner_type isnt? none {
         if copy_result {value=copy_value(value node.value_type node @state)}
@@ -5827,7 +5863,7 @@ dict_contains = (node:hir.DictContains @state:State):>addr => {
     if node.position isnt? none {prefix.push(put(hir.Declare[node.loc types.primitive('void' @state.type_nodes) 'let' node.position types.primitive('int64' @state.type_nodes) probe.position] @state))}
     return finish_dictionary(probe.found parts node @prefix @state)
 }
-dict_lookup = (node:hir.DictLookup @state:State):>addr => {
+dict_lookup = (node:hir.DictLookup @state:State view:bool=false):>addr => {
     let prefix:array<addr>=[]
     let parts=dict_from_keys(node.keys @prefix @state)
     $runtime_assert parts.value isnt? none
@@ -5850,7 +5886,11 @@ dict_lookup = (node:hir.DictLookup @state:State):>addr => {
     if node.proven {value=read_value(value parts.value node.value_type node @state)}
     else {
         $runtime_assert found isnt? none
-        if fallback is? none {
+        if fallback is? none and view {
+            let absent=types.primitive('none' @state.type_nodes)
+            fallback=cell_pack(word(0 node @state) absent node.value_type node @state)
+            if cell_members(parts.value @state) is? none {value=view_cell(value parts.value node.value_type node @state)}
+        } else if fallback is? none {
             let absent=types.primitive('none' @state.type_nodes)
             fallback=cell_pack(word(0 node @state) absent node.value_type node @state)
             let kind=copy_kind(parts.value @state)
