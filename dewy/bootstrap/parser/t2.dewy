@@ -31,7 +31,7 @@ const prefix_symbols = set['@' '~' 'not' 'no' '`' '+' '-' 'type of']
 const postfix_symbols = set['`' '?' 'or_throw']
 const comparisons = set['=?' '>?' '<?' '>=?' '<=?' 'in?' 'is?' 'isnt?']
 const partial_symbols = comparisons | set['.' 'as' 'transmute' '*' '/' '//' '^' '%' '\\']
-const directives = set['assert' 'unsafe_assume' 'runtime_assert' 'expect' 'fail' 'abstract' 'breakpoint']
+const directives = set['assert' 'unsafe_assume' 'runtime_assert' 'expect' 'fail' 'abstract' 'breakpoint' 'allocator']
 const flows = set['if' 'loop' 'match']
 const no_stops:set<string> = set[]
 
@@ -399,6 +399,7 @@ collect_directive = (items:array<addr> start:addr stop:set<string> srcfile:SrcFi
     if tag isnt? compound.Metatag return compound.lexical_error(srcfile tag.loc 'Expected directive')
     let i:addr = start+1
     if tag.name =? 'breakpoint' return Collected[compound.append_node(@nodes Directive[loc=tag.loc name=tag.name]) i]
+    if tag.name =? 'allocator' return collect_allocator(items start srcfile @nodes)
     let ends_here:bool = i >=? items.length
     if i <? items.length {
         let next = compound.node_at(nodes items[i])
@@ -438,6 +439,29 @@ collect_directive = (items:array<addr> start:addr stop:set<string> srcfile:SrcFi
     let condition = chain(condition_items @nodes)
     let message = chain(message_items @nodes)
     return Collected[compound.append_node(@nodes Directive[loc=loc name=tag.name condition=condition message=message]) argument.next]
+}
+
+# `$allocator(@arena) { ... }` owns its argument group (as the condition)
+# and the block after it (as the message): whitespace would otherwise make
+# the block a separate expression.
+collect_allocator = (items:array<addr> start:addr srcfile:SrcFile @nodes:array<compound.Token>):>Collected | compound.TokenError => {
+    $runtime_assert start <? items.length
+    let tag = compound.node_at(nodes items[start])
+    if tag isnt? compound.Metatag return compound.lexical_error(srcfile tag.loc 'Expected directive')
+    let i:addr = start+1
+    if i <? items.length and compound.node_at(nodes items[i]) is? Juxtapose { i += 1 }
+    if i >=? items.length return compound.lexical_error(srcfile tag.loc '`$allocator` takes its allocator in parentheses')
+    let group = compound.node_at(nodes items[i])
+    if group isnt? compound.Block or group.delims not=? '()' return compound.lexical_error(srcfile tag.loc '`$allocator` takes its allocator in parentheses')
+    let group_id = items[i]
+    i += 1
+    if i <? items.length and compound.node_at(nodes items[i]) is? Juxtapose { i += 1 }
+    if i >=? items.length return compound.lexical_error(srcfile group.loc '`$allocator(...)` applies to the block after it')
+    let body = compound.node_at(nodes items[i])
+    if body isnt? compound.Block or body.delims not=? '\{}' return compound.lexical_error(srcfile group.loc '`$allocator(...)` applies to the block after it')
+    let condition = chain([group_id] @nodes)
+    let message = chain([items[i]] @nodes)
+    return Collected[compound.append_node(@nodes Directive[loc=Span[tag.loc.start body.loc.stop] name=tag.name condition=condition message=message]) i+1]
 }
 
 postok = (srcfile:SrcFile):>compound.TokenStream | compound.TokenError => {

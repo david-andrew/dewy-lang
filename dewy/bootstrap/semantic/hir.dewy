@@ -657,6 +657,12 @@ Block = type of AST & [
     items:array<addr>
     scoped:bool
 ]
+# `$allocator(@arena) { ... }`: a scoped block whose allocations use the
+# arena place `arena`. Placement is not observable; values that leave the
+# block are copied out (see PHASE1_DESIGN_PROPOSALS, "Context allocators").
+AllocatorBlock = type of Block & [
+    arena:addr
+]
 
 TypeBlock = type of AST & [
     items:array<addr>

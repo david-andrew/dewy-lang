@@ -853,6 +853,18 @@ class Block(AST):
 
 
 @dataclass(slots=True)
+class AllocatorBlock(Block):
+    """`$allocator(@arena) { ... }`: a scoped block whose allocations use `arena`.
+
+    `arena` is the checked place of the arena. Placement is not observable:
+    an implementation may allocate on the process heap instead, but values
+    that leave the block are copied out either way (see PHASE1_DESIGN_PROPOSALS,
+    "Context allocators").
+    """
+    arena: AST = None
+
+
+@dataclass(slots=True)
 class Program(Block):
     """Assembled module items and their defining files, in matching order.
 

@@ -1,0 +1,126 @@
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+
+doc"""
+Values that leave an `$allocator(@arena)` block.
+
+Such a value is copied out to the enclosing allocator (see
+PHASE1_DESIGN_PROPOSALS, "Context allocators"). This first rule is lexical
+and shared by both lowerings, so reports and `$explicit_copies` acceptance
+agree whatever each implementation does with the allocation itself: the
+block's result value; an assignment to a binding declared outside the block;
+a store into storage rooted at such a binding (a field, an element, a
+dictionary entry, `push`/`insert`); a `return` from inside the block. A
+nested function literal's body runs only when called and is not part of the
+block's lexical extent. Mirrors `dewy/semantic/allocator_escapes.py`.
+"""
+
+# `value` is the escaping expression; `explicit` when it is written `.copy()`.
+Escape:type = const [value:addr site:string arena:string explicit:bool]
+
+unwrap = (id:addr nodes:array<hir.AST>):>addr => {
+    let current=id
+    loop true {
+        let node=hir.node_at(nodes current)
+        if node is? hir.Block and not node.scoped and node.items.length =? 1 {current=node.items[0] continue}
+        if node is? hir.ValueCast|hir.RepresentationCast|hir.Transmute {current=node.expr continue}
+        if node is? hir.Suppress {current=node.item continue}
+        return current
+    }
+    return current
+}
+root = (id:addr nodes:array<hir.AST>):>addr? => {
+    let current=unwrap(id nodes)
+    loop true {
+        let node=hir.node_at(nodes current)
+        if node is? hir.MemberAccess {current=unwrap(node.value nodes) continue}
+        if node is? hir.Index {current=unwrap(node.array nodes) continue}
+        if node is? hir.DictLookup {current=unwrap(node.values nodes) continue}
+        if node is? hir.ExpressedIdentifier return node.binding_id
+        return none
+    }
+    return none
+}
+name = (id:addr nodes:array<hir.AST>):>string => {
+    let current=id
+    loop true {
+        let node=hir.node_at(nodes current)
+        if node is? hir.ExpressedIdentifier return "`{node.name}`"
+        if node is? hir.MemberAccess {current=node.value continue}
+        if node is? hir.Index {current=node.array continue}
+        if node is? hir.DictLookup {current=node.values continue}
+        if node is? hir.ValueCast|hir.RepresentationCast|hir.Transmute {current=node.expr continue}
+        return 'outer storage'
+    }
+    return 'outer storage'
+}
+escape = (value:addr site:string arena:string nodes:array<hir.AST>):>Escape => Escape[value site arena hir.node_at(nodes unwrap(value nodes)) is? hir.CopyValue]
+
+# Every lexical escape of every allocator block under `start`.
+escapes = (start:addr nodes:array<hir.AST> type_nodes:types.Table):>array<Escape> => {
+    let found:array<Escape>=[]
+    let pending:array<addr>=[start]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let node=hir.node_at(nodes id)
+        if node is? hir.AllocatorBlock {loop item in block_escapes(node nodes type_nodes) {found.push(item)}}
+        hir.push_children(node @pending)
+    }
+    return found
+}
+
+block_escapes = (block:hir.AllocatorBlock nodes:array<hir.AST> type_nodes:types.Table):>array<Escape> => {
+    let arena_node=hir.node_at(nodes block.arena)
+    let arena=(if arena_node is? hir.Place name(arena_node.target nodes) else name(block.arena nodes)).replace('`' '')
+    let declared:set<addr>=set[]
+    let inside:array<addr>=[]
+    let pending:array<addr>=[]
+    loop item in block.items {pending.push(item)}
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let node=hir.node_at(nodes id)
+        if node is? hir.FunctionLiteral continue
+        inside.push(id)
+        if node is? hir.Declare and node.binding_id isnt? none {declared.add(node.binding_id)}
+        if node is? hir.IteratorExpression {
+            let target=hir.node_at(nodes node.target)
+            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {declared.add(target.binding_id)}
+        }
+        hir.push_children(node @pending)
+    }
+    let found:array<Escape>=[]
+    if block.items.length >? 0 and not types.is_primitive(types.node_at(type_nodes block.value_type) 'void') {
+        found.push(escape(block.items[block.items.length-1] 'produced as the block result' arena nodes))
+    }
+    loop id in inside {
+        let node=hir.node_at(nodes id)
+        if node is? hir.Assign {
+            let target=hir.node_at(nodes node.target)
+            if target is? hir.ExpressedIdentifier and (target.binding_id is? none or target.binding_id not in? declared) {
+                found.push(escape(node.value "stored into `{target.name}`" arena nodes))
+            }
+        } else if node is? hir.MemberAssign|hir.IndexAssign {
+            if outer(node.target declared nodes) {found.push(escape(node.value "stored into {name(node.target nodes)}" arena nodes))}
+        } else if node is? hir.DictStore {
+            let value=node.value
+            if value isnt? none and outer(node.keys declared nodes) {found.push(escape(value "stored into {name(node.keys nodes)}" arena nodes))}
+        } else if node is? hir.FunctionCall {
+            let callee=hir.node_at(nodes node.func)
+            if callee is? hir.ArrayMethod and (callee.name =? 'push' or callee.name =? 'insert') and outer(callee.array declared nodes) {
+                let value:addr?=none
+                if callee.name =? 'push' and node.pos_args.length >? 0 {value=node.pos_args[0]}
+                else if node.pos_args.length >? 1 {value=node.pos_args[1]}
+                else {value=node.kw_args.get('value')}
+                if value isnt? none {found.push(escape(value "stored into {name(callee.array nodes)}" arena nodes))}
+            }
+        } else if node is? hir.Return {
+            let item=node.item
+            if item isnt? none {found.push(escape(item 'returned' arena nodes))}
+        }
+    }
+    return found
+}
+outer = (target:addr declared:set<addr> nodes:array<hir.AST>):>bool => {
+    let binding=root(target nodes)
+    return binding is? none or binding not in? declared
+}

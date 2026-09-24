@@ -19,6 +19,7 @@ import p"../../semantic/brands.dewy" as brands
 import p"../../semantic/subtyping.dewy" as subtyping
 import p"../../semantic/type_tests.dewy" as type_tests
 import p"../../timing.dewy" as timing
+import p"../../semantic/allocator_escapes.dewy" as allocator_escapes
 
 doc"""
 Legalize validated semantic HIR into concrete µDewy function units.
@@ -40,7 +41,9 @@ pass read-only captures as hidden arguments, as in the hosted backend.
 Escaping closures remain a subsequent step. An unsupported representation reports a
 pending-implementation diagnostic before program emission.
 """
-OwnedLocal:type = const [value:addr value_type:addr box:addr?=none condition:addr?=none]
+# `restore`: not a release but leaving an `$allocator` block: `value` holds
+# the allocation context to restore.
+OwnedLocal:type = const [value:addr value_type:addr box:addr?=none condition:addr?=none restore:bool=false]
 ProjectionField:type = const [name:string owner:addr result:addr]
 ScalarProjection:type = const [function:addr read:addr fields:array<ProjectionField> result:addr symbol:string borrowed:bool=false]
 # One dynamic aggregate copy the lowering decided, for `dewy analyze`: what
@@ -98,6 +101,12 @@ State:type = [
     scoped_views:set<addr>=set[]
     # The default a viewing `get` kept alive; its caller releases it later.
     kept_fallback:addr?=none
+    # Functions that may keep a value beyond an `$allocator` block that
+    # calls them (computed once, when a block needs it).
+    allocator_hazards:set<addr>=set[]
+    # Each callback call's possible targets (from the borrowing analysis).
+    indirect_calls:dict<addr array<addr>>=[]
+    allocator_hazards_ready:bool=false
     timings:bool=false
     move_time:timing.Total=timing.Total[]
     # The body of the loop arm whose iterators are being lowered.
@@ -171,6 +180,15 @@ note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state
     let name=copy_name(type @state)
     let dynamic=copy_policy.runtime_sized(type state.type_nodes state.layout_context.brands @state.copy_bound_memo)
     state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index explicit dynamic])
+}
+# Values leaving `$allocator` blocks are copies (see allocator_escapes).
+note_allocator_escapes = (body:addr @state:State):>void => {
+    loop escape in allocator_escapes.escapes(body state.input.nodes state.type_nodes) {
+        let value=hir.node_at(state.input.nodes escape.value)
+        let kind=copy_kind(value.value_type @state)
+        if kind is? none continue
+        note_copy(kind value.value_type escape.site (if escape.explicit 'requested with `.copy()`' else "values leave the `$allocator(@{escape.arena})` block by copy") value @state explicit=escape.explicit)
+    }
 }
 copy_kind = (type:addr @state:State):>string? => {
     if owned_string(type state) return 'string'
@@ -775,6 +793,21 @@ allocation = (size:addr node:hir.AST @state:State):>addr => {
     }
     return intrinsic_call(name [size] types.primitive('int64' @state.type_nodes) node @state)
 }
+# Whether a handle to `block` may be shared in the current `$allocator`
+# context (see `_shareable`). Without the prelude there are no regions.
+shareable = (block:addr node:hir.AST @state:State):>addr => {
+    if state.allocator is? none or state.runtime_helpers.get('_shareable') is? none return put(hir.Bool[node.loc types.primitive('bool' @state.type_nodes) true] @state)
+    let binding=state.runtime_helpers.get('_shareable')
+    $runtime_assert binding isnt? none
+    let name=state.symbols.get(binding)
+    if name is? none return reject(node 'the `_shareable` helper is absent from the lowered graph' @state)
+    return intrinsic_call(name [block] types.primitive('bool' @state.type_nodes) node @state)
+}
+# Storage for a structure that already exists, from its own allocator.
+owner_allocation = (anchor:addr size:addr node:hir.AST @state:State):>addr => {
+    if state.runtime_helpers.get('_arena_alloc_for') is? none return allocation(size node @state)
+    return string_runtime('_arena_alloc_for' [anchor size] node @state)
+}
 # Records and tagged cells occupy inline storage in fields. Their existing
 # storage is itself the place; scalar values and array handles need a slot.
 inline_place = (type:addr @state:State):>bool => object_valued(type state) or cell_members(type @state) isnt? none
@@ -1191,21 +1224,23 @@ construction_helper = (key:string arity:addr node:hir.AST @state:State):>string?
     state.generated.push(program.Function[generated literal])
     return generated
 }
-array_memory = (length:addr stride:addr node:hir.AST @state:State):>ArrayMemory => {
+# With `anchor`, the storage comes from the allocator owning `anchor`.
+array_memory = (length:addr stride:addr node:hir.AST @state:State anchor:addr?=none):>ArrayMemory => {
     let prefix:array<addr>=[]
     let size=word_op('__mul__' length word(stride node @state) node @state)
     # An empty array owns no data block: growth allocates from a zero
     # capacity and release ignores a null pointer, so `[]` costs only its
     # descriptor instead of a second allocation for zero bytes.
     let count=hir.node_at(state.nodes length)
-    let data=if count is? hir.Integer and count.value =? 0 snapshot(word(0 node @state) @prefix @state) else snapshot(allocation(size node @state) @prefix @state)
+    let data=if count is? hir.Integer and count.value =? 0 snapshot(word(0 node @state) @prefix @state) else snapshot(if anchor isnt? none owner_allocation(anchor size node @state) else allocation(size node @state) @prefix @state)
     let fields:array<addr>=[data length length word(stride node @state) word(layouts.array_flags.mutable + (if state.allocator is? none 0 else layouts.array_flags.arena_descriptor) node @state) word(if state.allocator is? none 0 else 1 node @state)]
-    let helper=construction_helper('new_array' 6 node @state)
+    let helper=if anchor is? none construction_helper('new_array' 6 node @state) else none
     if helper isnt? none {
         let descriptor=snapshot(intrinsic_call(helper fields types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
         return ArrayMemory[descriptor data prefix]
     }
-    let descriptor=snapshot(allocation(word(layouts.array_descriptor.size node @state) node @state) @prefix @state)
+    let descriptor_size=word(layouts.array_descriptor.size node @state)
+    let descriptor=snapshot(if anchor isnt? none owner_allocation(anchor descriptor_size node @state) else allocation(descriptor_size node @state) @prefix @state)
     let offset:addr=0
     loop value in fields {
         prefix.push(intrinsic_call('__store_i64__' [value address(descriptor offset node @state)] types.primitive('void' @state.type_nodes) node @state))
@@ -1417,6 +1452,8 @@ record_share_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     let counted=compare('__ge__' record_count(current node @state) word(1 node @state) node @state)
     let sized=compare('__eq__' record_size(current node @state) word(layout.size node @state) node @state)
     let condition=intrinsic_call('__and__' [counted sized] types.primitive('bool' @state.type_nodes) node @state)
+    # A block from another `$allocator` region is copied, never shared.
+    condition=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'and' condition shareable(header node @state)] @state)
     let arm=put(hir.IfArm[node.loc word_type condition sequence(shared node @state)] @state)
     prefix.push(put(hir.Flow[node.loc word_type [arm] object_copy(source type node @state)] @state))
     return put(hir.Block[node.loc word_type prefix false] @state)
@@ -1432,7 +1469,8 @@ record_unique_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
     let current=snapshot(read_word(header 0 node @state) @prefix @state)
     let detached:array<addr>=[store_word(word_op('__sub__' current word(1 node @state) node @state) header 0 node @state)]
     let size=snapshot(record_size(current node @state) @detached @state)
-    let fresh_header=snapshot(allocation(word_op('__add__' size word(8 node @state) node @state) node @state) @detached @state)
+    # The replacement lives where the shared block does (see `_arena_alloc_for`).
+    let fresh_header=snapshot(owner_allocation(header word_op('__add__' size word(8 node @state) node @state) node @state) @detached @state)
     detached.push(store_word(word_op('__add__' word_op('__lshift__' size word(32 node @state) node @state) word(1 node @state) node @state) fresh_header 0 node @state))
     let destination=snapshot(address(fresh_header 8 node @state) @detached @state)
     detached.push(object_write(destination source type node @state))
@@ -1532,7 +1570,9 @@ array_copy_body = (value:addr type:types.ArrayType node:hir.AST @state:State):>a
     let source=snapshot(value @prefix @state)
     let owner=snapshot(read_word(source layouts.array_descriptor.owner node @state) @prefix @state)
     let shared:array<addr>=[store_word(word_op('__add__' owner word(1 node @state) node @state) source layouts.array_descriptor.owner node @state) source]
-    let arm=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) compare('__ge__' owner word(1 node @state) node @state) sequence(shared node @state)] @state)
+    # A descriptor from another `$allocator` region is copied, never shared.
+    let condition=put(hir.ShortCircuit[node.loc types.primitive('bool' @state.type_nodes) 'and' compare('__ge__' owner word(1 node @state) node @state) shareable(source node @state)] @state)
+    let arm=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) condition sequence(shared node @state)] @state)
     prefix.push(put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [arm] array_copy_storage(source type node @state)] @state))
     return sequence(prefix node @state)
 }
@@ -1559,7 +1599,7 @@ array_unique_body = (source:addr element:addr node:hir.AST @state:State):>addr =
     let storage_type=array_type(types.array_type(element none @state.type_nodes) state)
     $runtime_assert storage_type isnt? none
     let detached:array<addr>=[store_word(word_op('__sub__' owner word(1 node @state) node @state) source layouts.array_descriptor.owner node @state)]
-    detached.push(array_copy_storage(source storage_type node @state))
+    detached.push(array_copy_storage(source storage_type node @state detach=true))
     let arm=put(hir.IfArm[node.loc types.primitive('int64' @state.type_nodes) compare('__gt__' owner word(1 node @state) node @state) sequence(detached node @state)] @state)
     prefix.push(put(hir.Flow[node.loc types.primitive('int64' @state.type_nodes) [arm] source] @state))
     return sequence(prefix node @state)
@@ -1785,14 +1825,16 @@ write_route = (id:addr @state:State detach:bool=true):>addr => {
     return expression(id @state)
 }
 
-array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State):>addr => {
+# `detach`: the copy replaces the source in its own place, so it lives
+# where the source does rather than in the current `$allocator` context.
+array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State detach:bool=false):>addr => {
     let prefix:array<addr>=[]
     let descriptor=snapshot(value @prefix @state)
     let source=snapshot(intrinsic_call('__load_i64__' [descriptor] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let length=snapshot(intrinsic_call('__load_i64__' [address(descriptor layouts.array_descriptor.length node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(node layout.detail @state)
-    let memory=array_memory(length layout.size node @state)
+    let memory=array_memory(length layout.size node @state anchor=if detach and state.allocator isnt? none descriptor else none)
     loop item in memory.prefix {prefix.push(item)}
     let counter=state.runtime_helpers.get('_arena_note_copy')
     if counter isnt? none {
@@ -3324,7 +3366,9 @@ array_reserve_body = (descriptor:addr required:addr stride:addr node:hir.AST @st
     let insufficient=intrinsic_call('__lt__' [next required] types.primitive('bool' @state.type_nodes) node @state)
     let choose=put(hir.Assign[node.loc types.primitive('void' @state.type_nodes) next '=' required] @state)
     body.push(conditional(insufficient choose node @state))
-    let data=snapshot(allocation(word_op('__mul__' next word(stride node @state) node @state) node @state) @body @state)
+    # Grown storage belongs where the descriptor lives, not to the current
+    # `$allocator` context.
+    let data=snapshot(owner_allocation(descriptor word_op('__mul__' next word(stride node @state) node @state) node @state) @body @state)
     let source=snapshot(read_word(descriptor layouts.array_descriptor.data node @state) @body @state)
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length node @state) @body @state)
     # New storage is disjoint. Move one stored element's bits at a time;
@@ -4680,6 +4724,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     let moves_started=timing.start(state.timings)
     state.moved_uses=if enabled moves.compute(id state.input.nodes borrow_dependents) else set[]
     timing.accumulate(@state.move_time moves_started)
+    note_allocator_escapes(node.body @state)
     state.moved_bindings=set[]
     loop use in state.moved_uses {
         let moved=hir.node_at(state.input.nodes use)
@@ -4818,6 +4863,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.borrowed_arguments=borrowed.arguments
     state.nonescaping_places=borrowed.nonescaping_places
     state.fixed_places=borrowed.fixed_places
+    state.indirect_calls=borrowed.indirect
     state.stable_bindings=borrowed.stable_bindings
     state.scoped_views=borrowed.scoped_views
     state.view_scopes=borrowed.view_scopes
@@ -6398,6 +6444,10 @@ cleanup_since = (first:addr node:hir.AST @state:State transferred:addr?=none):>a
             index-=1
             $runtime_assert index <? frame.length
             let owned=frame[index]
+            if owned.restore {
+                prefix.push(string_runtime('_allocator_exit' [owned.value] node @state result_void=true))
+                continue
+            }
             if transferred isnt? none and owned.value =? transferred continue
             let release=release_value(owned.value owned.value_type node @state)
             if owned.condition isnt? none {release=conditional(owned.condition release node @state)}
@@ -6426,8 +6476,15 @@ cleanup_block = (node:hir.Block @state:State):>addr => {
         return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
     }
     let start=state.cleanup_frames.length
-    state.cleanup_frames.push([])
     let prefix:array<addr>=[]
+    let arena=node is? hir.AllocatorBlock and arena_eligible(node @state)
+    if arena and node is? hir.AllocatorBlock {
+        # Allocations inside come from the arena; every exit restores the
+        # previous context before the block's value leaves it by copy.
+        let word_type=types.primitive('int64' @state.type_nodes)
+        let previous=snapshot(string_runtime('_allocator_enter' [expression(node.arena @state)] node @state) @prefix @state)
+        state.cleanup_frames.push([OwnedLocal[previous word_type restore=true]])
+    } else {state.cleanup_frames.push([])}
     let result:addr?=none
     loop index in 0.. and index <? node.items.length {
         let item=node.items[index]
@@ -6446,8 +6503,149 @@ cleanup_block = (node:hir.Block @state:State):>addr => {
     loop released in cleanup_since(start node @state) {prefix.push(released)}
     $runtime_assert state.cleanup_frames.length >? 0
     state.cleanup_frames.pop;
+    if result isnt? none and arena {result=copied_out(result node.value_type node @prefix @state)}
     if result isnt? none {prefix.push(result)}
     return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix node.scoped] @state)
+}
+# A value computed inside an `$allocator` block, after its context was
+# restored: an independent copy (sharing refuses the arena's storage), and
+# the arena original released (a no-op for its own blocks; shared heap parts
+# drop the reference it held).
+copied_out = (value:addr type:addr node:hir.AST @prefix:array<addr> @state:State):>addr => {
+    if not releasable(type @state) return value
+    let copied=snapshot(copy_value(value type node @state) @prefix @state)
+    prefix.push(release_value(value type node @state))
+    return copied
+}
+# Functions that may keep a value where it outlives an `$allocator` block
+# calling them: a store into a global holding owned storage, or a call of
+# unknown code (a function value, a `sort` key). Raw memory and system
+# calls are the runtime's own, which knows region owners; a raw address
+# is a word, and the program keeps it at its own risk.
+allocator_hazards = (@state:State):>set<addr> => {
+    let plan=state.capture_plan
+    let nodes=state.input.nodes
+    let initial:set<addr>=set[]
+    let callers:dict<addr array<addr>>=[]
+    loop id in plan.functions.keys {
+        let literal=hir.node_at(nodes id)
+        $runtime_assert literal is? hir.FunctionLiteral
+        let pending:array<addr>=[literal.body]
+        loop parameter in parameters(literal) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
+        loop pending.length >? 0 {
+            let child=pending.pop
+            let node=hir.node_at(nodes child)
+            if node is? hir.FunctionLiteral|hir.GenericFunction continue
+            loop target in captures.write_targets(node nodes) {
+                let root=captures.root_binding(target nodes)
+                if (root is? none or root in? plan.globals) and stores_owned(node @state) {initial.add(id)}
+            }
+            if node is? hir.FunctionCall {
+                let direct=captures.resolve(node.func node.selected_method_index plan nodes)
+                let target=if direct isnt? none direct else if hir.node_at(nodes node.func) is? hir.FunctionLiteral node.func else sort_key_literal(node @state)
+                let targets:array<addr> | none = if target isnt? none [target] else state.indirect_calls.get(node.func)
+                if targets isnt? none {
+                    loop callee in targets {
+                        let users=callers.get(callee [])
+                        users.push(id)
+                        callers[callee]=users
+                    }
+                } else if unknown_call(node @state) {initial.add(id)}
+            }
+            hir.push_children(node @pending)
+        }
+    }
+    return borrowing.propagate_ambient(initial callers)
+}
+# Whether a write may keep owned storage (a string, array, record or cell)
+# in the storage it writes. Scalar writes are safe beyond an `$allocator`
+# block: growth and copy-on-write detach allocate where the written
+# structure lives. Dictionary updates and place arguments are assumed to.
+stores_owned = (node:hir.AST @state:State):>bool => {
+    let nodes=state.input.nodes
+    if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign return releasable(hir.node_at(nodes node.value).value_type @state)
+    if node is? hir.FunctionCall {
+        let callee=hir.node_at(nodes node.func)
+        if callee is? hir.ArrayMethod {
+            loop argument in node.pos_args {if releasable(hir.node_at(nodes argument).value_type @state) return true}
+            loop argument in node.kw_args.values {if releasable(hir.node_at(nodes argument).value_type @state) return true}
+            return false
+        }
+    }
+    return true
+}
+# A call the capture plan does not resolve that may run unknown code.
+unknown_call = (node:hir.FunctionCall @state:State):>bool => {
+    let callee=hir.node_at(state.input.nodes node.func)
+    if callee is? hir.ExpressedIdentifier {
+        if callee.binding_id isnt? none and callee.binding_id in? state.capture_plan.source_bindings return true
+        return callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix
+    }
+    if callee is? hir.ArrayMethod return callee.name =? 'sort' and 'key' in? node.kw_args and sort_key_literal(node @state) is? none
+    return callee isnt? hir.DictMethod|hir.FunctionLiteral
+}
+# The function literal a `sort` call orders by, which runs inside the call.
+sort_key_literal = (node:hir.FunctionCall @state:State):>addr? => {
+    let callee=hir.node_at(state.input.nodes node.func)
+    if callee isnt? hir.ArrayMethod or callee.name not=? 'sort' return none
+    let key=node.kw_args.get('key')
+    if key is? none or hir.node_at(state.input.nodes key) isnt? hir.FunctionLiteral return none
+    return key
+}
+# Whether an `$allocator` block uses its arena. The first rule is that
+# nothing inside writes storage rooted outside the block, directly or
+# through calls (place arguments, globals, captures, unknown callees): only
+# its value and returns leave it, and those are copied out. Other blocks
+# allocate from the enclosing context, which is always correct.
+arena_eligible = (node:hir.AllocatorBlock @state:State):>bool => {
+    if state.allocator is? none or not state.cleanup_enabled return false
+    loop helper in ['_allocator_enter' '_allocator_exit' '_shareable' '_arena_alloc_for'] {if state.runtime_helpers.get(helper) is? none return false}
+    if not state.allocator_hazards_ready {
+        state.allocator_hazards=allocator_hazards(@state)
+        state.allocator_hazards_ready=true
+    }
+    let hazards=state.allocator_hazards
+    let declared:set<addr>=set[]
+    let inside:array<addr>=[]
+    let pending:array<addr>=[]
+    # Entering a nested block's arena sets only its handle; nothing is
+    # placed in outer storage.
+    let arenas:set<addr>=set[]
+    loop item in node.items {pending.push(item)}
+    loop pending.length >? 0 {
+        let id=pending.pop
+        let item=hir.node_at(state.input.nodes id)
+        if item is? hir.FunctionLiteral return false
+        if item is? hir.AllocatorBlock {arenas.add(item.arena)}
+        if id not in? arenas {inside.push(id)}
+        if item is? hir.Declare and item.binding_id isnt? none {declared.add(item.binding_id)}
+        if item is? hir.IteratorExpression {
+            let target=hir.node_at(state.input.nodes item.target)
+            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {declared.add(target.binding_id)}
+        }
+        hir.push_children(item @pending)
+    }
+    loop id in inside {
+        let item=hir.node_at(state.input.nodes id)
+        if item is? hir.IteratorExpression continue
+        loop target in captures.write_targets(item state.input.nodes) {
+            let root=captures.root_binding(target state.input.nodes)
+            if (root is? none or root not in? declared) and stores_owned(item @state) return false
+        }
+        if item is? hir.DictMethod {
+            let root=captures.root_binding(item.dictionary state.input.nodes)
+            if root is? none or root not in? declared return false
+        }
+        if item is? hir.FunctionCall {
+            let direct=captures.resolve(item.func item.selected_method_index state.capture_plan state.input.nodes)
+            if direct isnt? none {
+                if direct in? hazards return false
+                let function=state.capture_plan.functions.get(direct)
+                if function isnt? none and function.captures.length >? 0 return false
+            } else if unknown_call(item @state) return false
+        }
+    }
+    return true
 }
 # A return ends every local lifetime on this path. An unboxed, unconditionally
 # owned local can transfer its allocation to the caller instead of copying it
@@ -6510,7 +6708,15 @@ cleanup_return = (node:hir.Return @state:State):>addr => {
         if types.is_primitive(type 'void') or types.is_primitive(type 'never') {prefix.push(value)}
         else {result=snapshot(value @prefix @state)}
     }
+    let crossing=false
+    loop cursor in 0.. and cursor <? state.cleanup_frames.length {
+        let frame=state.cleanup_frames[cursor]
+        if frame.length >? 0 and frame[0].restore {crossing=true}
+    }
     loop released in cleanup_since(0 node @state transferred=transferred) {prefix.push(released)}
+    # A return from inside an `$allocator` block copies its value out after
+    # the context is restored (the transferred local included).
+    if crossing and result isnt? none and node.item isnt? none {result=copied_out(result hir.node_at(state.input.nodes node.item).value_type node @prefix @state)}
     prefix.push(put(hir.Return[node.loc runtime_type(node.value_type node @state) result] @state))
     return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
 }

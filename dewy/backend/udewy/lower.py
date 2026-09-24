@@ -1284,6 +1284,7 @@ class _Lowerer(
         self.array_element_targets = self._array_element_string_targets(analysis_literal)
         self.owning_string_bindings = self._owning_string_locals(analysis_literal, self.local_initializers)
         self.moved_uses = self._compute_moves(analysis_literal)
+        self._note_allocator_escapes(analysis_literal.body)
         self.owned_strings = set()
         self.owned_raw_arrays = {}
         self.owned_cells = {}
@@ -3737,6 +3738,17 @@ class _Lowerer(
             notes=['A required view needs stable storage through its last use, including derived aliases; captured or exposed owners need additional lifetime evidence.'],
         )
 
+    def _note_allocator_escapes(self, body: hir.AST) -> None:
+        """Report values leaving `$allocator` blocks as copies (see allocator_escapes)."""
+        from ...semantic import allocator_escapes
+        for escape in allocator_escapes.escapes(body):
+            kind = _allocator_copy_kind(escape.value_type)
+            if kind is not None:
+                self._note_copy(kind, escape.value_type, escape.site,
+                                'requested with `.copy()`' if escape.explicit else
+                                f'values leave the `$allocator(@{escape.arena})` block by copy', escape.loc,
+                                explicit=escape.explicit)
+
     def _compute_moves(self, literal: hir.FunctionLiteral) -> set[int]:
         """Find transfer sites that can consume an owned local.
 
@@ -4335,7 +4347,7 @@ class _Lowerer(
 
     def _consume_array_value(self, node: hir.AST) -> None:
         """A binding, a return, or a store takes this array call's result over: not a temporary."""
-        node = self._copy_source_expression(node)
+        node = self._scoped_block_result(node)
         if isinstance(node, (hir.FunctionCall, hir.DictView, hir.CopyValue)):
             self.consumed_string_values.add(id(node))
 
@@ -5940,8 +5952,20 @@ class _Lowerer(
                 continue
             return node
 
-    def _array_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
+    def _scoped_block_result(self, node: hir.AST) -> hir.AST:
+        """A scoped block's value expression (the block when it has none).
+
+        A fresh value there (a call, a literal, `.copy()`) is owned by no
+        local of the block, so whoever takes the block's value may take its
+        storage, as native lowering does.
+        """
         node = self._copy_source_expression(node)
+        while isinstance(node, hir.Block) and node.scoped and node.items and node.type not in ('void', None):
+            node = self._copy_source_expression(node.items[-1])
+        return node
+
+    def _array_expression_owns_fresh_storage(self, node: hir.AST) -> bool:
+        node = self._scoped_block_result(node)
         # A call returning several array-length alternatives owns a union
         # cell, not a directly transferable array descriptor. Its active
         # payload must be extracted and kept independently before releasing
@@ -6319,3 +6343,17 @@ def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main'
     from .copy_policy import validate
     validate(lowerer.copy_notes, root.explicit_copy_sources if isinstance(root, hir.Program) else ())
     return program
+
+
+def _allocator_copy_kind(type_: ty.Type) -> str | None:
+    """The copy-report kind of a value copied out of an allocator block, if it has storage."""
+    plain = ty.unfold(ty.strip_refinement(type_))
+    if ty.string_valued(plain):
+        return 'string'
+    if isinstance(plain, ty.ArrayType):
+        return 'array'
+    if isinstance(plain, ty.ObjectType):
+        return 'record'
+    if ty.runtime_union_members(plain) is not None or ty.optional_payload(plain) is not None:
+        return 'cell'
+    return None

@@ -1,0 +1,31 @@
+# `$allocator(@arena) { ... }` blocks: a statement or an expression whose
+# value leaves the block by copy, like stores into outer storage.
+Box:type = [items:array<int64>]
+build = (n:int64):>array<int64> => {
+    let xs:array<int64> = []
+    loop i in 0.. and i <? n {xs.push(i)}
+    return xs
+}
+main = ():>int64 => {
+    let scratch = Arena[]
+    let kept:array<int64> = []
+    let box = Box[[]]
+    let summary = $allocator(@scratch) {
+        let xs = build(3)
+        xs.push(10)
+        kept = xs
+        box.items.push(xs.length)
+        xs
+    }
+    let total:int64 = $allocator(@scratch) {
+        let ys = build(5)
+        ys.length
+    }
+    $allocator(@scratch) {
+        let zs = [1 2]
+        total += zs[1]
+    }
+    scratch.reset()
+    if summary.length <? 4 or box.items.length <? 1 return 1
+    return summary.length + kept.length + box.items[0] + total + summary[3] + 13
+}

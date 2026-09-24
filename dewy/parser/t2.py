@@ -193,11 +193,15 @@ class Chain(t1.InedibleToken):
 # condition from the message — so the comma's operator precedence (tighter
 # than the comparisons) never applies to it. `$assert pair =? 1, 2` therefore
 # needs `$assert pair =? (1, 2)`, exactly as a form's argument would elsewhere.
-assertion_directives: set[str] = {'assert', 'unsafe_assume', 'runtime_assert', 'expect', 'fail', 'abstract', 'breakpoint'}   # `$fail [message]` takes no condition; `$abstract type of …` marks a mint; `$breakpoint` stands alone
+assertion_directives: set[str] = {'assert', 'unsafe_assume', 'runtime_assert', 'expect', 'fail', 'abstract', 'breakpoint', 'allocator'}   # `$fail [message]` takes no condition; `$abstract type of …` marks a mint; `$breakpoint` stands alone
 
 @dataclass
 class Directive(t1.InedibleToken):
-    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`, `$fail [message]`, `$breakpoint`."""
+    """`$assert cond`, `$runtime_assert cond, message`, `$expect cond, message`, `$fail [message]`, `$breakpoint`.
+
+    `$allocator(@arena) { ... }` owns its argument group (as the condition)
+    and the block after it (as the message): whitespace would otherwise
+    make the block a separate expression."""
     metatag: t1.Metatag
     condition: Chain | None      # `None` for `$fail` and `$breakpoint`
     message: Chain | None = None
@@ -901,6 +905,8 @@ def collect_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[
     if metatag.name == "breakpoint":
         # `$breakpoint` takes nothing: whatever follows is the next statement
         return Directive(metatag.loc, metatag, None), i
+    if metatag.name == "allocator":
+        return _collect_allocator_directive(tokens, start, ctx=ctx)
     ends_here = (
         i >= len(tokens)
         or is_stop_keyword(tokens[i], stop_keywords)
@@ -958,6 +964,36 @@ def collect_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[
     condition = Chain(Span(condition_items[0].loc.start, condition_items[-1].loc.stop), condition_items)
     message = Chain(Span(message_items[0].loc.start, message_items[-1].loc.stop), message_items)
     return Directive(Span(metatag.loc.start, message.loc.stop), metatag, condition, message), i
+
+
+def _collect_allocator_directive(tokens: list[t1.Token], start: int, *, ctx: Context) -> tuple[Directive, int]:
+    """`$allocator(@arena) { ... }`: the argument group, then the block it applies to."""
+    metatag = tokens[start]
+    i = start + 1
+    if i < len(tokens) and isinstance(tokens[i], (Juxtapose, QJuxtapose)):
+        i += 1
+    group = tokens[i] if i < len(tokens) else None
+    if not isinstance(group, t1.Block) or group.kind != '()':
+        Error(
+            srcfile=ctx.srcfile,
+            title="`$allocator` takes its allocator in parentheses",
+            message="",
+            pointer_messages=[Pointer(span=metatag.loc, message="expected `(@arena)` after the metatag")],
+            hint="`$allocator(@scratch) { ... }`",
+        ).throw()
+    i += 1
+    if i < len(tokens) and isinstance(tokens[i], (Juxtapose, QJuxtapose)):
+        i += 1
+    body = tokens[i] if i < len(tokens) else None
+    if not isinstance(body, t1.Block) or body.kind != '{}':
+        Error(
+            srcfile=ctx.srcfile,
+            title="`$allocator(...)` applies to the block after it",
+            message="",
+            pointer_messages=[Pointer(span=Span(metatag.loc.start, group.loc.stop), message="expected `{ ... }` after this")],
+            hint="`$allocator(@scratch) { ... }`",
+        ).throw()
+    return Directive(Span(metatag.loc.start, body.loc.stop), metatag, Chain(group.loc, [group]), Chain(body.loc, [body])), i + 1
 
 
 def _is_comma_void(token: t1.Token) -> bool:

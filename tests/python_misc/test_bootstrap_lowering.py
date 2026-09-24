@@ -67,7 +67,8 @@ CASES = [
 # checking/lowering as well. Selecting its binding is this kernel driver's
 # explicit stand-in for the full module driver's runtime identity lookup.
 SYSTEM = (ROOT / 'library/linux/system.dewy').read_text()
-ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('# Regions —')]
+# The heap allocator and the regions its entry points route to.
+ARENA = SYSTEM[SYSTEM.index('let _arena_cursor:'):SYSTEM.index('let _allocator_enter')]
 STRINGS = (ROOT / 'library/strings.dewy').read_text()
 SET_OF_ARRAY = STRINGS[STRINGS.index('let _set_of_array ='):STRINGS.index('# ---- loop capture:')]
 # UTF-8 decoding produces Unicode scalars, independently of grapheme boundaries.

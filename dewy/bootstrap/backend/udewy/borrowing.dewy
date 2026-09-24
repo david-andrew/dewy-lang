@@ -355,7 +355,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
 }
 # `rejections` explains, per source binding, why its last considered use as
 # an argument was not borrowed (for `dewy analyze`).
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[] view_regions:dict<addr array<addr>>=[] nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[]]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[] view_regions:dict<addr array<addr>>=[] nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[] indirect:dict<addr array<addr>>=[]]
 
 # Required views can end at the last use of all their derived aliases.
 # Statements containing control flow remain indivisible, so a read in a loop
@@ -914,5 +914,5 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     loop id in unsafe_places {safe_places.pop(id default=id); fixed_places.pop(id default=id);}
     loop id in changed_places {fixed_places.pop(id default=id);}
     loop binding in storage_proofs.local_views {stable.add(binding)}
-    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned (scoped.bindings | storage_proofs.local_views) scoped.scopes scoped.regions safe_places fixed_places]
+    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned (scoped.bindings | storage_proofs.local_views) scoped.scopes scoped.regions safe_places fixed_places indirect]
 }

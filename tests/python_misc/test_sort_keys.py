@@ -19,7 +19,8 @@ def _function_literals(node: object) -> list[hir.FunctionLiteral]:
     def walk(value: object) -> None:
         if isinstance(value, hir.FunctionLiteral):
             found.append(value)
-        if hasattr(value, '__dataclass_fields__'):
+        # HIR nodes only: a program's binding registry holds parser syntax.
+        if isinstance(value, hir.AST):
             for name in value.__dataclass_fields__:
                 walk(getattr(value, name))
         elif isinstance(value, (list, tuple)):

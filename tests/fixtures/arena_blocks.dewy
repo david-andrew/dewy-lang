@@ -1,0 +1,68 @@
+# Values computed in `$allocator` blocks that use their arena: results,
+# returns and nested blocks are copied out, so they outlive the arena's
+# reset and the reuse of its memory. Scalar stores into outer storage grow
+# or detach it where it lives.
+Pair:type = [name:string values:array<int64>]
+build = (n:int64):>array<int64> => {
+    let xs:array<int64> = []
+    loop i in 0.. and i <? n and i <? 1000000 {xs.push(i + i)}
+    return xs
+}
+label = (n:int64):>string => "item {n}"
+pair = (n:int64):>Pair => Pair[label(n) build(n)]
+first_long = (limit:int64 @scratch:Arena):>array<int64> => {
+    $allocator(@scratch) {
+        loop i in 0.. and i <? limit {
+            let xs = build(i)
+            if xs.length >? 3 return xs
+        }
+    }
+    return []
+}
+nested = (@a:Arena @b:Arena):>Pair => $allocator(@a) {
+    let inner = $allocator(@b) {pair(5)}
+    let counts:dict<string int64> = []
+    counts[inner.name] = inner.values.length
+    Pair["{inner.name}/{counts.length}" inner.values]
+}
+main = ():>int64 => {
+    let a = Arena[]
+    let b = Arena[]
+    let xs = $allocator(@a) {
+        let ys = build(6)
+        ys.push(100)
+        ys
+    }
+    let name = $allocator(@a) {label(7)}
+    let long = first_long(10 @a)
+    let n:int64 = 0
+    loop round in 0.. and round <? 1000 {n += $allocator(@a) {build(50).length}}
+    let kept:array<Pair> = []
+    loop round in 0.. and round <? 20 {
+        kept.push(nested(@a @b))
+        kept.push($allocator(@a) {pair(round)})
+        a.reset()
+        b.reset()
+        if $allocator(@a) {build(300).length} not=? 300 return 1
+    }
+    let counts:array<int64> = [1 2]
+    let alias = counts
+    let box = Pair["box" [5]]
+    let shared_box = box
+    $allocator(@a) {
+        let zs = build(10)
+        counts.push(zs.length)
+        if zs.length >? 9 and counts.length >? 0 {counts[0] = zs[9]}
+        box.values.push(zs.length + 1)
+    }
+    a.reset()
+    if $allocator(@a) {build(500).length} not=? 500 return 4
+    let total:int64 = 0
+    loop p in kept {total += p.values.length}
+    if xs.length <? 7 or long.length <? 4 or kept.length <? 40 return 2
+    if counts.length <? 3 or alias.length <? 2 or box.values.length <? 2 or shared_box.values.length <? 1 return 5
+    let last = kept[39]
+    if last.values.length <? 19 return 3
+    printl"{xs[6]} {name} {long[3]} {n} {kept[0].name} {kept[1].name} {last.name} {last.values[18]} {total} {counts[0]},{counts[1]},{counts[2]} {alias[0]},{alias[1]} {box.values[1]} {shared_box.values.length}"
+    return 42
+}

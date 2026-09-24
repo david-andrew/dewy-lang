@@ -5266,9 +5266,42 @@ assertion_failure = (id:addr node:parser.Directive condition:addr? text:string e
     let mode:'assert'|'expect'|'fail' = if node.name =? 'expect' 'expect' else if node.name =? 'fail' 'fail' else 'assert'
     return put(hir.RuntimeFailure[node.loc types.primitive('never' @session.types) env.lexical.source text mode condition message dimmed] @session)
 }
+# `$allocator(@arena) { ... }`: the block's allocations come from `arena`, a
+# place of the prelude's `Arena` (checked against the runtime entry's
+# `@arena:Arena` parameter). The arena is lent to the block for its whole
+# extent, so the block may not use it otherwise.
+allocator_block = (id:addr node:parser.Directive env:Environment @session:contexts.Session):>addr|Error => {
+    $runtime_assert node.condition isnt? none and node.message isnt? none
+    let items=source_arguments(node.condition env session)
+    if items.length not=? 1 return problem(node.condition '`$allocator` takes one arena place' 'write `$allocator(@scratch) \{ ... \}`' env session)
+    let arena=expression(items[0] env @session allow_place=true)
+    if arena is? Error return arena
+    let lent=node_at(arena session)
+    if lent isnt? hir.Place return problem(items[0] '`$allocator` takes its arena as a place' 'allocating mutates the arena: write `@scratch`' env session)
+    let entry=library_call('_allocator_enter' [arena] items[0] env @session)
+    if entry is? Error return entry
+    let body=expression(node.message env @session)
+    if body is? Error return body
+    let path=bindings.access_path(lent.target session.hir)
+    let root=node_at(path.root session)
+    if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {
+        let pending:array<addr>=[body]
+        loop pending.length >? 0 {
+            let current=pending.pop
+            let item=node_at(current session)
+            if item is? hir.ExpressedIdentifier and item.binding_id =? root.binding_id return problem(node.message 'an arena cannot be used inside its own `$allocator` block' 'this arena is lent to the block around it; use it after the block' env session)
+            hir.push_children(item @pending)
+        }
+    }
+    let block=node_at(body session)
+    let loc=contexts.node_at(id env.lexical session).loc
+    let contents:array<addr>=if block is? hir.Block block.items else [body]
+    return put(hir.AllocatorBlock[loc block.value_type contents true arena] @session)
+}
 directive = (id:addr node:parser.Directive env:Environment @session:contexts.Session):>addr|Error => {
     if node.name =? 'abstract' return problem(id '`$abstract` marks a `type of` mint' 'it belongs on the value of a type alias' env session)
     if node.name =? 'breakpoint' return pending(id 'debugger binding snapshots and breakpoint reporting' env session)
+    if node.name =? 'allocator' return allocator_block(id node env @session)
     if node.name =? 'expect' or node.name =? 'fail' {
         if env.return_collector is? none return problem(id "`${node.name}` outside a function" 'a failed expectation returns from the enclosing void function' env session)
         if env.return_type isnt? none and not types.is_primitive(types.node_at(session.types env.return_type) 'void') return problem(id "`${node.name}` in a function that returns a value" 'expectations belong in void functions' env session)

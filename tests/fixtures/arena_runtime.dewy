@@ -1,0 +1,34 @@
+# The region runtime behind `$allocator` blocks: region memory is recognized
+# by address, block releases inside it are ignored, and a released region's
+# chunks are reused.
+main = ():>int64 => {
+    let heap_block=_arena_alloc(24)
+    if _allocator_of(heap_block) not=? 0 return 1
+    let region=_region_new()
+    let first=_region_alloc(region 40)
+    let second=_region_alloc(region 100000)
+    if _allocator_of(first) not=? region or _allocator_of(second) not=? region return 2
+    if _allocator_of(second + 99999) not=? region return 3
+    _arena_release(first 40)
+    _arena_release_64(second)
+    let scratch=Arena[]
+    let previous=_allocator_enter(@scratch)
+    let routed=_arena_alloc(32)
+    let sized=_arena_alloc_64()
+    _allocator_exit(previous)
+    if previous not=? 0 or _allocator_of(routed) not=? scratch.handle or _allocator_of(sized) not=? scratch.handle return 4
+    if __load_i64__(routed) not=? 0 or __load_i64__(sized+56) not=? 0 return 5
+    let after=_arena_alloc(24)
+    if _allocator_of(after) not=? 0 return 6
+    _region_release(region)
+    if _allocator_of(first) not=? (-1) or _allocator_of(second) not=? (-1) return 7
+    let reused=_region_new()
+    let again=_region_alloc(reused 40)
+    if _allocator_of(again) not=? reused return 8
+    let run=_region_alloc(reused 100000)
+    if run not=? second or _allocator_of(run) not=? reused return 9
+    _region_release(reused)
+    scratch.reset()
+    if scratch.handle not=? 0 or _allocator_of(routed) not=? (-1) return 10
+    return 42
+}

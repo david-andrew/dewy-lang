@@ -5422,6 +5422,8 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
         return _tcr_fail(ast, ctx=ctx)
     if ast.name == 'breakpoint':
         return _tcr_breakpoint(ast, ctx=ctx)
+    if ast.name == 'allocator':
+        return _tcr_allocator(ast, ctx=ctx)
     if ast.name == 'abstract':
         user_error(
             ctx.srcfile,
@@ -5547,6 +5549,40 @@ def _relocated(node: object, loc: Span) -> object:
         if field_.init and field_.name not in ('type', 'annotation')
     }
     return replace(node, **changes)
+
+
+def _tcr_allocator(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
+    """`$allocator(@arena) { ... }`: the block's allocations come from `arena`.
+
+    The argument is a place of the prelude's `Arena` (checked against the
+    runtime entry's `@arena:Arena` parameter). The arena is lent to the
+    block for its whole extent, so the block may not use it otherwise.
+    """
+    assert isinstance(ast.condition, p0.Block) and isinstance(ast.message, p0.Block)
+    pos_args, kw_args, _ = parse_call_arguments(ast.condition, ctx=ctx)
+    if kw_args or len(pos_args) != 1:
+        user_error(ctx.srcfile, '`$allocator` takes one arena place',
+                   Pointer(span=ast.condition.loc, message='write `$allocator(@scratch) { ... }`'))
+    arena = pos_args[0]
+    if not isinstance(arena, hir.Place):
+        user_error(ctx.srcfile, '`$allocator` takes its arena as a place',
+                   Pointer(span=arena.loc, message='allocating mutates the arena: write `@scratch`'),
+                   hint='`$allocator(@scratch) { ... }`')
+    entry = _compiler_helper('_allocator_enter', loc=arena.loc, ctx=ctx)
+    assert isinstance(entry.type, ty.FunctionType)
+    arena = check_against(arena, entry.type.pos_or_kw[0].type, ctx=ctx)
+    body = tcr_block(ast.message, ctx=ctx)
+    owner = _member_root_binding(arena.target, ctx=ctx) if isinstance(arena, hir.Place) else None
+    root = owner.id if owner is not None else None
+    if root is not None:
+        for node in hir.walk(body):
+            if isinstance(node, hir.ExpressedIdentifier) and node.binding_id == root:
+                user_error(ctx.srcfile, 'an arena cannot be used inside its own `$allocator` block',
+                           Pointer(span=node.loc, message='this arena is lent to the block around it'),
+                           Pointer(span=arena.loc, message='lent here', color='blue'),
+                           hint='use the arena after the block, or allocate from a different arena inside it')
+    items = body.items if isinstance(body, hir.Block) else [body]
+    return hir.AllocatorBlock(ast.loc, body.type, items, True, arena)
 
 
 def _tcr_breakpoint(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
@@ -15436,6 +15472,9 @@ def _contains_place(value: object) -> bool:
         # The nested call has already validated and consumed its place
         # arguments. Its result is an ordinary value of the return type.
         return False
+    if isinstance(value, hir.AllocatorBlock):
+        # Its arena was validated like a call argument; only the body counts.
+        return _contains_place(value.items)
     if isinstance(value, (list, tuple)):
         return any(_contains_place(item) for item in value)
     if isinstance(value, dict):

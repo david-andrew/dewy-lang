@@ -3938,3 +3938,78 @@ program ~13 s, per-function lowering ~9.5 s, backend 7 s, allocator entry
 points ~20% of samples overall. The allocation count is the remaining
 general lever; ROADMAP ties it to the context allocator, whose surface is
 still undecided.
+
+## Context allocators: first slices (2026-09-24)
+
+Implementation of the approved design, steps (1)–(3):
+
+1. **Runtime.** Region memory in `library/linux/system.dewy` comes from
+   reserved address ranges (1 GB, halving on failure, up to 32 ranges) with
+   an owner table per 64 KB chunk, so `_allocator_of(address)` answers
+   "which region owns this block" by address alone (0 for the heap, -1 for
+   a released region's chunk). Every `_arena_alloc*` entry point allocates
+   from the current context when one is set, and every `_arena_release*`
+   ignores region blocks. `Arena` (`reset`, `release`, dropped with its
+   owner) is a prelude type; `_allocator_enter(@arena)`/`_allocator_exit`
+   switch the context and create the region lazily.
+2. **Owner-aware sharing.** A record, array or string is shared (reference
+   counted) only if it belongs to the heap or to the current context;
+   otherwise copying it makes an independent copy in the current context.
+   Growth allocates from the owner of the array descriptor. This is the
+   store-owner rule at runtime: a value that leaves a region is copied.
+3. **The directive.** `$allocator(@a) { ... }` parses and checks in both
+   compilers (`hir.AllocatorBlock`), as a statement or as an expression.
+   The arena is lent to its block (using it inside is an error). The
+   lexical escapes (the block's value, stores into outer bindings, fields,
+   elements, dictionaries, `push`/`insert`, returns) are copy notes, and
+   under `$explicit_copies` errors unless written `.copy()`, identically
+   in both compilers (`allocator_escapes.py`/`.dewy`).
+4. **Native placement, first rule.** The native lowering gives a block
+   its arena unless something inside could keep a value beyond it:
+   - a store of owned storage (a string, array, record or cell) into
+     storage rooted outside the block;
+   - a dictionary update or place argument rooted outside the block;
+   - a nested function literal;
+   - a call of a function with captures;
+   - a callee that may itself do such a store to a global, or call
+     unknown code.
+   Callback targets come from the borrowing analysis's callback
+   resolution, and `sort` key literals are ordinary callees. Raw memory
+   and system calls are the arena-aware runtime's, so they do not count.
+   Scalar stores into outer storage are safe because growth and
+   copy-on-write detach allocate where the written structure lives
+   (`_arena_alloc_for`). Every exit (end, `break`/`continue`, `return`)
+   restores the previous context, then copies the value out and releases
+   the arena original. A nested block's arena place does not disqualify
+   the outer block. Other blocks allocate from the enclosing context,
+   which is always correct. Placement is not observable through values,
+   so the hosted compiler lowers every allocator block as an ordinary
+   block and the two agree on behavior. Only `Arena.handle` shows the
+   difference (`test_native_arena_placement`).
+
+Found on the way, both hosted:
+
+- A flow arm's result read from an owned array local after the arm
+  released it (`let s = {let xs = f() kept = xs xs}` gave an empty `s`);
+  the result now takes its own reference.
+- A loop condition that needs statements (a brand range test for a type
+  with descendants: `value is? Block and value.items.length =? 1`) was
+  hoisted into `let test:bool = condition`. µDewy `and`/`or` are bitwise
+  outside `if`/`loop` conditions, so the right operand ran for every
+  node. Adding the first descendant of `hir.Block` crashed the
+  hosted-built native driver this way. The test is now an `if` that sets
+  the flag.
+
+Found by the gate: the prelude now has a lifecycle hook (`Arena`'s
+`$__drop__`), so hosted module loading takes the lifecycle path for every
+module. That path attaches the binding registry to the program, and
+`test_sort_keys` walked into its parser syntax (the walk now visits HIR
+nodes only). Hosted compiles of a small program cost about 0.1 s more.
+David decided to keep the hook (an arena that goes out of scope releases
+its region) and revisit if the cost becomes a problem.
+
+Next: the bounds checker as the first customer, measured with
+`--timings`. It needs a seed that knows the directive, so it lands after
+this commit's release. Later placement work: copying owned values into
+outer storage at the store (with runtime owner checks), so blocks that
+store results outside can use their arena too.

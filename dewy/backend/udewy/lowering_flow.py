@@ -265,11 +265,19 @@ class _FlowLowering:
                     [hir.IfArm(loc, ty.VOID_TYPE, negated, hir.Block(loc, ty.VOID_TYPE, [hir.Break(loc, ty.BOTTOM_TYPE)], True))],
                     None,
                 )
+                # The test stays an `if` condition: µDewy `and`/`or` short-circuit
+                # only there (`p is? Block and p.items.length =? 1` must not read
+                # `items` of another node).
+                evaluate_test = hir.Flow(
+                    loc, ty.VOID_TYPE,
+                    [hir.IfArm(loc, ty.VOID_TYPE, condition, hir.Block(loc, ty.VOID_TYPE, [hir.Assign(loc, ty.VOID_TYPE, tested, '=', hir.Bool(loc, 'bool', True))], True))],
+                    None,
+                )
                 body_items = body.items if isinstance(body, hir.Block) else [body]
                 arms.append(replace(
                     arm,
                     condition=hir.Bool(loc, 'bool', True),
-                    body=hir.Block(arm.body.loc, ty.VOID_TYPE, [*declarations, *condition_prelude, hir.Declare(loc, ty.VOID_TYPE, 'let', tested.name, 'bool', condition), *releases, exit_test, *body_items], True),
+                    body=hir.Block(arm.body.loc, ty.VOID_TYPE, [*declarations, *condition_prelude, hir.Declare(loc, ty.VOID_TYPE, 'let', tested.name, 'bool', hir.Bool(loc, 'bool', False)), evaluate_test, *releases, exit_test, *body_items], True),
                 ))
                 continue
             if condition_prelude or condition_temporaries:
@@ -941,6 +949,12 @@ class _FlowLowering:
             return self._enum_word_of(item, members)
         target_type = ty.strip_refinement(target.type)
         if isinstance(target_type, ty.ArrayType):
+            source = self._copy_source_expression(item)
+            if isinstance(source, hir.ExpressedIdentifier) and source.name in self.owned_array_names:
+                # The arm's cleanup releases an owned local after this
+                # assignment: the result needs its own reference to the
+                # storage (a copy-on-write share), not the local's.
+                return self._clone_dynamic_array_value(item, target_type, arena=True)
             return self._extract_array_operand(item, target_type)
         item_type = ty.strip_refinement(item.type)
         if isinstance(target_type, ty.ObjectType) and local_binding_key(target) in self.object_flow_targets:

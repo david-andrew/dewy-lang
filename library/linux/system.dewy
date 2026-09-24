@@ -79,6 +79,7 @@ let _arena_bump = (size:int64):>int64 => {
 # Size class and width are computed inline: on backends without an
 # optimizer, three helper calls per allocation cost more than the bookkeeping.
 let _arena_alloc = (size:int64):>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(size) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let class:int64 = 0
     if size >? 8 {
@@ -120,6 +121,7 @@ let _arena_alloc = (size:int64):>int64 => {
 # code selects one by constant size; other sizes use the general entries.
 
 let _arena_alloc_8 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(8) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 0
     let block:int64 = __load_i64__(head_address)
@@ -133,6 +135,7 @@ let _arena_alloc_8 = ():>int64 => {
 }
 let _arena_release_8 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 8
     let head_address:int64 = _arena_free_lists + 0
@@ -142,6 +145,7 @@ let _arena_release_8 = (block:int64):>void => {
 }
 
 let _arena_alloc_16 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(16) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 8
     let block:int64 = __load_i64__(head_address)
@@ -156,6 +160,7 @@ let _arena_alloc_16 = ():>int64 => {
 }
 let _arena_release_16 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 16
     let head_address:int64 = _arena_free_lists + 8
@@ -165,6 +170,7 @@ let _arena_release_16 = (block:int64):>void => {
 }
 
 let _arena_alloc_32 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(32) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 16
     let block:int64 = __load_i64__(head_address)
@@ -181,6 +187,7 @@ let _arena_alloc_32 = ():>int64 => {
 }
 let _arena_release_32 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 32
     let head_address:int64 = _arena_free_lists + 16
@@ -190,6 +197,7 @@ let _arena_release_32 = (block:int64):>void => {
 }
 
 let _arena_alloc_64 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(64) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 24
     let block:int64 = __load_i64__(head_address)
@@ -210,6 +218,7 @@ let _arena_alloc_64 = ():>int64 => {
 }
 let _arena_release_64 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 64
     let head_address:int64 = _arena_free_lists + 24
@@ -218,6 +227,7 @@ let _arena_release_64 = (block:int64):>void => {
     return void
 }
 let _arena_alloc_128 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(128) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 32
     let block:int64 = __load_i64__(head_address)
@@ -246,6 +256,7 @@ let _arena_alloc_128 = ():>int64 => {
 }
 let _arena_release_128 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 128
     let head_address:int64 = _arena_free_lists + 32
@@ -255,6 +266,7 @@ let _arena_release_128 = (block:int64):>void => {
 }
 
 let _arena_alloc_256 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(256) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 40
     let block:int64 = __load_i64__(head_address)
@@ -299,6 +311,7 @@ let _arena_alloc_256 = ():>int64 => {
 }
 let _arena_release_256 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 256
     let head_address:int64 = _arena_free_lists + 40
@@ -311,6 +324,7 @@ let _arena_release_256 = (block:int64):>void => {
 # allocated: constant sizes select these entries in generated code, computed
 # sizes take the general entries, and the two never meet for one block.
 let _arena_alloc_24 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(24) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 384
     let block:int64 = __load_i64__(head_address)
@@ -326,6 +340,7 @@ let _arena_alloc_24 = ():>int64 => {
 }
 let _arena_release_24 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 24
     let head_address:int64 = _arena_free_lists + 384
@@ -334,6 +349,7 @@ let _arena_release_24 = (block:int64):>void => {
     return void
 }
 let _arena_alloc_40 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(40) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 392
     let block:int64 = __load_i64__(head_address)
@@ -351,6 +367,7 @@ let _arena_alloc_40 = ():>int64 => {
 }
 let _arena_release_40 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 40
     let head_address:int64 = _arena_free_lists + 392
@@ -359,6 +376,7 @@ let _arena_release_40 = (block:int64):>void => {
     return void
 }
 let _arena_alloc_72 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(72) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 400
     let block:int64 = __load_i64__(head_address)
@@ -380,6 +398,7 @@ let _arena_alloc_72 = ():>int64 => {
 }
 let _arena_release_72 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 72
     let head_address:int64 = _arena_free_lists + 400
@@ -388,6 +407,7 @@ let _arena_release_72 = (block:int64):>void => {
     return void
 }
 let _arena_alloc_136 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(136) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 408
     let block:int64 = __load_i64__(head_address)
@@ -417,6 +437,7 @@ let _arena_alloc_136 = ():>int64 => {
 }
 let _arena_release_136 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 136
     let head_address:int64 = _arena_free_lists + 408
@@ -425,6 +446,7 @@ let _arena_release_136 = (block:int64):>void => {
     return void
 }
 let _arena_alloc_264 = ():>int64 => {
+    if _allocator_context not=? 0 { return _context_alloc(264) }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let head_address:int64 = _arena_free_lists + 416
     let block:int64 = __load_i64__(head_address)
@@ -470,6 +492,7 @@ let _arena_alloc_264 = ():>int64 => {
 }
 let _arena_release_264 = (block:int64):>void => {
     if block =? 0 { return void }
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     _arena_live_bytes -= 264
     let head_address:int64 = _arena_free_lists + 416
@@ -479,6 +502,8 @@ let _arena_release_264 = (block:int64):>void => {
 }
 let _arena_release = (block:int64 size:int64):>void => {
     if block =? 0 { return void }
+    # Region memory is released with its region, never block by block.
+    if block >=? _region_low and block <? _region_high and _allocator_of(block) not=? 0 { return void }
     if _arena_free_lists =? 0 { _arena_free_lists = _arena_bump(512) }
     let class:int64 = 0
     if size >? 8 {
@@ -575,8 +600,38 @@ let _native_string_retain = (value:int64):>int64 => {
     let owner=__load_i64__(value+40)
     if owner =? 0 return value
     if __load_i64__(owner) <? 0 return value
+    if not _shareable(owner) return _native_string_clone(value)
     __store_i64__(__load_i64__(value-8)+1 value-8)
     return value
+}
+# A private copy of a string in the current context: its backing bytes and
+# grapheme boundaries, and a descriptor with the same offsets into them.
+let _native_string_clone = (value:int64):>int64 => {
+    let owner=__load_i64__(value+40)
+    let data=__load_i64__(owner+8)
+    let size=__load_i64__(owner+16)
+    let boundaries=__load_i64__(owner+24)
+    let boundary_size=__load_i64__(owner+32)
+    let copy_data=if size >? 0 _arena_alloc(size) else 0
+    let index:int64=0
+    loop index <? size { __store_u8__(__load_u8__(data+index) copy_data+index)  index+=1 }
+    let copy_boundaries:int64=0
+    if boundaries not=? 0 and boundary_size >? 0 {
+        copy_boundaries=_arena_alloc(boundary_size)
+        index=0
+        loop index <? boundary_size { __store_u8__(__load_u8__(boundaries+index) copy_boundaries+index)  index+=1 }
+    }
+    let copy_owner=_native_string_owner(copy_data size copy_boundaries boundary_size)
+    __store_i64__(__load_i64__(owner+40) copy_owner+40)
+    let descriptor=_native_string_descriptor()
+    __store_i64__(copy_data + (__load_i64__(value) - data) descriptor)
+    __store_i64__(__load_i64__(value+8) descriptor+8)
+    let view_boundaries=__load_i64__(value+16)
+    __store_i64__(if view_boundaries =? 0 or boundaries =? 0 view_boundaries else copy_boundaries + (view_boundaries - boundaries) descriptor+16)
+    __store_i64__(__load_i64__(value+24) descriptor+24)
+    __store_i64__(__load_i64__(value+32) descriptor+32)
+    __store_i64__(copy_owner descriptor+40)
+    return descriptor
 }
 let _native_string_drop = (value:int64):>void => {
     if value =? 0 return void
@@ -600,18 +655,153 @@ let _native_string_drop = (value:int64):>void => {
 }
 
 # Regions — the scoped-arena tier. A region is a bump allocator over 64 KB
-# chunks (an oversized allocation gets a chunk of its own) that is released
-# as a whole: its chunks go back to a free list for the next region. The
-# compiler gives a function a *frame region* for the string storage that
-# provably never leaves the frame — slices, decoded bytes, joins — and
-# releases it at every exit. A header is three words: cursor, end, first
-# chunk; a chunk starts with two words: next chunk, size.
+# chunks (an oversized allocation gets a run of chunks of its own) that is
+# released as a whole: its chunks go back to a free list for the next region.
+# `$allocator(@arena) { ... }` makes an arena's region the allocation context
+# of a block; hosted lowering also gives a function a *frame region* for the
+# string storage that provably never leaves the frame. A header is three
+# words: cursor, end, first chunk; a chunk starts with two words: next chunk,
+# size.
+#
+# Every region chunk lies in one reserved address range, so whether an
+# address belongs to a region, and to which, is a range check and one load
+# from the owner table: nothing is read near an arbitrary (static or stack)
+# address. The owner of a chunk in use is its region header; a free chunk's
+# owner is -1, still region memory, so a stray release of it is ignored.
 let _region_headers:int64 = 0     # free list of headers
-let _region_chunks:int64 = 0      # free list of 65536-byte chunks
+let _region_chunks:int64 = 0      # free list of standard chunks
+let _region_runs:int64 = 0        # free list of oversized runs: next, size
+# Reserved ranges (PROT_NONE until used): up to 32 entries of four words,
+# base, end, cursor and owner table (one word per chunk). A range is 1 GB,
+# or smaller when the address-space limit refuses that; another is reserved
+# when one fills. `_region_low`/`_region_high` bound all of them.
+let _region_ranges:int64 = 0
+let _region_range_count:int64 = 0
+let _region_low:int64 = 0
+let _region_high:int64 = 0
+# The region of the innermost `$allocator` block; 0 is the process heap.
+let _allocator_context:int64 = 0
+
+# Chunks are 65536 bytes (shift 16).
+
+# The range entry holding an address, or 0.
+let _region_range_of = (address:int64):>int64 => {
+    if address <? _region_low or address >=? _region_high return 0
+    let index:int64 = 0
+    loop index <? _region_range_count {
+        let entry:int64 = _region_ranges + index * 32
+        if address >=? __load_i64__(entry) and address <? __load_i64__(entry + 16) return entry
+        index += 1
+    }
+    return 0
+}
+# The region that owns an address: its header, -1 for a free region chunk,
+# 0 for anything else (heap, frame, static data).
+let _allocator_of = (address:int64):>int64 => {
+    let entry:int64 = _region_range_of(address)
+    if entry =? 0 return 0
+    return __load_i64__(__load_i64__(entry + 24) + ((address - __load_i64__(entry)) >> 16) * 8)
+}
+let _region_set_owner = (chunk:int64 size:int64 owner:int64):>void => {
+    let entry:int64 = _region_range_of(chunk)
+    if entry =? 0 return void
+    let owners:int64 = __load_i64__(entry + 24)
+    let unit:int64 = (chunk - __load_i64__(entry)) >> 16
+    let stop:int64 = unit + (size >> 16)
+    loop unit <? stop {
+        __store_i64__(owner owners + unit * 8)
+        unit += 1
+    }
+    return void
+}
+# Reserve a range of at least `size` bytes; 0 when the address space is full.
+let _region_reserve = (size:int64):>int64 => {
+    if _region_ranges =? 0 { _region_ranges = __syscall6__(9 0 4096 3 34 (-1) 0) }
+    if _region_range_count >=? 32 return 0
+    let reserved:int64 = 1073741824
+    if reserved <? size { reserved = size }
+    let base:int64 = -1
+    loop base <? 0 and reserved >=? size {
+        # mmap(NULL reserved+64 KB PROT_NONE MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE -1 0)
+        base = __syscall6__(9 0 reserved + 65536 0 16418 (-1) 0)
+        if base <? 0 {
+            if reserved >? size and reserved >? 1048576 { reserved = reserved >> 1 } else { return 0 }
+            if reserved <? size { reserved = size }
+        }
+    }
+    let owners:int64 = __syscall6__(9 0 (((reserved >> 16) * 8 + 4095) >> 12) << 12 3 34 (-1) 0)
+    if owners <? 0 return 0
+    let aligned:int64 = ((base + 65536 - 1) >> 16) << 16
+    let entry:int64 = _region_ranges + _region_range_count * 32
+    __store_i64__(aligned entry)
+    __store_i64__(aligned + reserved entry + 8)
+    __store_i64__(aligned entry + 16)
+    __store_i64__(owners entry + 24)
+    _region_range_count += 1
+    if _region_low =? 0 or aligned <? _region_low { _region_low = aligned }
+    if aligned + reserved >? _region_high { _region_high = aligned + reserved }
+    return entry
+}
+# A run of `size` bytes (a multiple of the chunk size) from a reserved
+# range, readable and writable, zero, owned by `owner`.
+let _region_map = (size:int64 owner:int64):>int64 => {
+    let entry:int64 = 0
+    if _region_range_count >? 0 { entry = _region_ranges + (_region_range_count - 1) * 32 }
+    if entry =? 0 or __load_i64__(entry + 16) + size >? __load_i64__(entry + 8) { entry = _region_reserve(size) }
+    if entry =? 0 return 0
+    let chunk:int64 = __load_i64__(entry + 16)
+    __store_i64__(chunk + size entry + 16)
+    # mprotect(chunk size PROT_READ|PROT_WRITE)
+    let status:int64 = __syscall3__(10 chunk size 3)
+    _region_set_owner(chunk size owner)
+    return chunk
+}
+# Whether a handle to `block` may be shared in the current context: heap
+# storage outlives every block, and a region shares within its own block.
+# Anything else is copied, so nothing escapes the region it lives in.
+let _shareable = (block:int64):>bool => {
+    if _region_high =? 0 return true
+    let owner:int64 = _allocator_of(block)
+    return owner =? 0 or owner =? _allocator_context
+}
+# Growth and rebuilding allocate where the structure being grown lives, not
+# in the current context: a heap array pushed inside an `$allocator` block
+# stays heap storage.
+let _arena_alloc_for = (anchor:int64 size:int64):>int64 => {
+    if _allocator_context =? 0 and _region_high =? 0 return _arena_alloc(size)
+    let owner:int64 = _allocator_of(anchor)
+    if owner <? 0 { owner = 0 }
+    if owner =? _allocator_context return _arena_alloc(size)
+    let context:int64 = _allocator_context
+    _allocator_context = owner
+    let block:int64 = _arena_alloc(size)
+    _allocator_context = context
+    return block
+}
+# Allocation in the current `$allocator` block's region: cleared like a
+# recycled heap block, since region chunks are reused without clearing.
+let _context_alloc = (size:int64):>int64 => {
+    let aligned:int64 = ((size + 7) // 8) * 8
+    let block:int64 = _region_alloc(_allocator_context aligned)
+    let cursor:int64 = block
+    let stop:int64 = block + aligned
+    loop cursor + 32 <=? stop {
+        __store_i64__(0 cursor) __store_i64__(0 cursor+8) __store_i64__(0 cursor+16) __store_i64__(0 cursor+24)
+        cursor = cursor + 32
+    }
+    loop cursor <? stop { __store_i64__(0 cursor)  cursor = cursor + 8 }
+    return block
+}
 
 let _region_new = ():>int64 => {
     let header:int64 = _region_headers
-    if header =? 0 { header = _arena_alloc(24) } else { _region_headers = __load_i64__(header) }
+    if header =? 0 {
+        # A header is heap storage even inside another region's block.
+        let context:int64 = _allocator_context
+        _allocator_context = 0
+        header = _arena_alloc(24)
+        _allocator_context = context
+    } else { _region_headers = __load_i64__(header) }
     __store_i64__(0 header)
     let end_address:int64 = header + 8
     __store_i64__(0 end_address)
@@ -627,13 +817,28 @@ let _region_alloc = (region:int64 size:int64):>int64 => {
     let limit:int64 = __load_i64__(end_address)
     if cursor + aligned >? limit {
         let chunk_size:int64 = 65536
-        if aligned + 16 >? chunk_size { chunk_size = aligned + 16 }
+        if aligned + 16 >? chunk_size { chunk_size = ((aligned + 16 + 65536 - 1) >> 16) << 16 }
         let chunk:int64 = 0
         if chunk_size =? 65536 and _region_chunks not=? 0 {
             chunk = _region_chunks
             _region_chunks = __load_i64__(chunk)
+            _region_set_owner(chunk chunk_size region)
+        } else if chunk_size >? 65536 {
+            # Reuse a released run of exactly this size, else map a new one.
+            let previous:int64 = 0
+            let run:int64 = _region_runs
+            loop run not=? 0 and chunk =? 0 {
+                if __load_i64__(run + 8) =? chunk_size {
+                    chunk = run
+                    if previous =? 0 { _region_runs = __load_i64__(run) } else { __store_i64__(__load_i64__(run) previous) }
+                } else {
+                    previous = run
+                    run = __load_i64__(run)
+                }
+            }
+            if chunk =? 0 { chunk = _region_map(chunk_size region) } else { _region_set_owner(chunk chunk_size region) }
         } else {
-            chunk = _arena_alloc(chunk_size)
+            chunk = _region_map(chunk_size region)
         }
         let first_address:int64 = region + 16
         __store_i64__(__load_i64__(first_address) chunk)
@@ -657,11 +862,13 @@ let _region_reset = (region:int64):>void => {
         let next:int64 = __load_i64__(chunk)
         let size_address:int64 = chunk + 8
         let size:int64 = __load_i64__(size_address)
+        _region_set_owner(chunk size (-1))
         if size =? 65536 {
             __store_i64__(_region_chunks chunk)
             _region_chunks = chunk
         } else {
-            _arena_release(chunk size)
+            __store_i64__(_region_runs chunk)
+            _region_runs = chunk
         }
         chunk = next
     }
@@ -678,6 +885,36 @@ let _region_release = (region:int64):>void => {
     _region_headers = region
     return void
 }
+
+# Entering an `$allocator(@arena)` block makes the arena's region (created on
+# first use) the context and returns the previous context; every exit of the
+# block restores that.
+let _allocator_enter = (@arena:Arena):>int64 => {
+    if arena.handle =? 0 {arena.handle=_region_new()}
+    let previous:int64=_allocator_context
+    _allocator_context=arena.handle
+    return previous
+}
+let _allocator_exit = (previous:int64):>void => {
+    _allocator_context=previous
+    return void
+}
+
+# A scratch allocator for `$allocator(@arena) { ... }` blocks: allocations
+# bump through its chunks, releases are free, and `reset` (or dropping the
+# arena) returns every chunk at once. Nothing allocated in it can outlive it:
+# a value stored anywhere another allocator owns is copied there.
+Arena = type of [
+    handle:int64 = 0
+    reset = ():>void => {
+        if handle not=? 0 {_region_release(handle)}
+        handle = 0
+    }
+    $__drop__
+    release = ():>void => {
+        if handle not=? 0 {_region_release(handle)}
+    }
+]
 
 # Process exit: exit_group(2) is syscall 231. The checker has no
 # never-returning functions yet, so the signature says `void`; callers that

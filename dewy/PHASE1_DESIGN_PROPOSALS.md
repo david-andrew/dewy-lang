@@ -531,6 +531,20 @@ Deferred: `allocates<A>` effect rows naming the allocator; the allocation
 failure policy (`$fallible_allocation`, still tentative); `Pool`, tracking
 and user-defined allocator kinds; making `Heap` user-visible.
 
+Agreed for later, low priority (2026-09-24). The full language should
+behave this way:
+
+- **Any expression.** `$allocator(@a) expr` applies to the entire next
+  expression, like `$assert cond`: `$allocator(@a) f(x) + g(y)` covers
+  `f(x) + g(y)`. It means `$allocator(@a) {expr}`.
+- **Report a fallback.** A block that allocates from the enclosing
+  allocator instead of its arena gets a `dewy analyze` note saying why
+  ("stores a string into `kept`, which outlives the block", "calls `f`,
+  which may store into a global").
+- **Warn about nothing to allocate.** A block or expression that provably
+  allocates nothing gets a warning. Exact detection needs the
+  `allocates<A>` effect rows; before them, only the provable cases.
+
 Implementation order: (1) runtime foundation: arena chunks in
 `library/linux/system.dewy`, owner lookup by chunk, arena-aware release;
 (2) `Arena` in the prelude and the store-owner rule; (3) the directive in
