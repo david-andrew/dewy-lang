@@ -1,0 +1,33 @@
+name: Tests
+
+# The README badge. GitHub's workflow badge shows the latest run, including
+# runs cancelled because a newer push superseded them. This workflow mirrors
+# the most recent *finished, non-cancelled* test-suite run on master instead.
+"on":
+  workflow_run:
+    workflows: [Run test suite]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+
+concurrency:
+  group: tests-status
+  cancel-in-progress: true
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror the latest non-cancelled test-suite result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          conclusion=$(gh run list --repo "$REPO" --workflow tests.yml --branch master \
+            --status completed --limit 50 --json conclusion,headSha,url \
+            --jq '[.[] | select(.conclusion != "cancelled" and .conclusion != "skipped")][0] | "\(.conclusion) \(.headSha) \(.url)"')
+          echo "Latest finished test-suite run: $conclusion"
+          [[ ${conclusion%% *} == success ]]
