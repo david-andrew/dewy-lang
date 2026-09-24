@@ -1332,7 +1332,9 @@ class _ObjectLowering:
             node.view and isinstance(expr, hir.ExpressedIdentifier)
         ):
             return False
-        get_view = self._get_view_lookup(expr)
+        # Only an inferred view: an explicit `@` demand names the
+        # dictionary's storage, which a lookup result is not.
+        get_view = self._get_view_lookup(expr) and not node.view
         if (isinstance(expr, hir.DictLookup) and not expr.proven
                 and not isinstance(value_type, ty.ObjectType) and not get_view):
             return False  # other optional/fallback lookups construct result storage

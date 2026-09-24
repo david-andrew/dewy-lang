@@ -3744,3 +3744,35 @@ with other validation) reported 4,523 passes, 27 skips and one failure:
 subprocess limit. Run alone, the call takes 31.5 seconds at `520e3445` and
 30.7 seconds at this session's starting commit `4a3ce3cb`, so the timeout
 came from machine load, not a slowdown; the margin is noted for CI.
+
+## Viewed `get` defaults and loop sources (2026-09-23)
+
+Checkpoint first: source `bde5e33e` completed a three-generation direct
+x86-64 bootstrap from the `520e3445` pair (88/78/89 seconds, byte-identical
+generations two and three, pair execution checks passed; artifacts
+`phase1-bde5e33e`).
+
+Native lowering copied the stored element of `d.get(k default)`, often an
+array iterated once (`loop route in routes.get(root [])`), which the relation
+and effect analyses do on hot paths. Such a lookup now reads the stored
+element in place when its storage type is the result's and either a
+read-only binding's local-view proof holds or, for a loop source, no write in
+the function reaches the dictionary. The default is still evaluated eagerly;
+the lowering keeps it alive until the view's scope or loop arm ends and
+releases it there (`state.kept_fallback`, `keep_fallback`). Hosted lowering
+already read these elements in place. Explicit `@` view demands still reject
+`get` results in both compilers, since a lookup result or its fallback is not
+the dictionary's storage; views of `get` remain inferred only.
+
+Hosted review found a pre-existing iteration bug that native does not have:
+hosted re-reads a loop's source route on every step, so replacing the
+variable, the dictionary entry or the looked-up element inside the body
+changes or frees what the loop iterates. The new `iteration_snapshots`
+fixture records the intended value semantics (native passes it); the hosted
+fix follows separately.
+
+Validation: `get_views` gained a defaulted loop source and binding; both
+compilers pass it on x86-64/C, and 526 dictionary, iterator, loop and view
+tests pass. The one failure in that run, an explicit `@values.get(1 [42])`
+that native briefly accepted, is fixed by the inference-only rule above. The
+compiler inventory falls from 3,637 to 3,621 sites.

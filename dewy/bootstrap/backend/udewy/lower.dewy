@@ -95,6 +95,8 @@ State:type = [
     owned_parameters:set<addr>=set[]
     stable_bindings:set<addr>=set[]
     scoped_views:set<addr>=set[]
+    # The default a viewing `get` kept alive; its caller releases it later.
+    kept_fallback:addr?=none
     view_scopes:dict<addr addr>=[]
     view_regions:dict<addr array<addr>>=[]
     stable_parameters:dict<addr effects.ParameterEffects>=[]
@@ -590,7 +592,9 @@ expression = (id:addr @state:State):>addr => {
             value=ordinary_call(node.expr call runtime_type(call.value_type call @state) @state projection=projection)
         } else if borrowed_route_local(node @state) {
             let lookup=hir.node_at(state.input.nodes node.expr)
-            value=if lookup is? hir.DictLookup and get_view_lookup(lookup @state) dict_lookup(lookup @state view=true) else expression(node.expr @state)
+            let viewed=lookup is? hir.DictLookup and (get_view_lookup(lookup @state) or default_view_lookup(lookup @state))
+            value=if viewed and lookup is? hir.DictLookup dict_lookup(lookup @state view=true) else expression(node.expr @state)
+            if viewed and lookup is? hir.DictLookup and lookup.default isnt? none {keep_fallback(hir.node_at(state.input.nodes lookup.default).value_type @state)}
             borrowed=true
         }
         else {
@@ -3841,6 +3845,18 @@ get_view_lookup = (expr:hir.AST @state:State):>bool => {
     if cell_members(values.element @state) isnt? none return values.element =? expr.value_type
     return values.element in? members
 }
+# A `get` with a default whose result is the stored element itself (no
+# conversion): viewed in place, while the eagerly evaluated default is kept
+# alive by the caller until the view ends.
+default_view_lookup = (expr:hir.AST @state:State):>bool => {
+    if expr isnt? hir.DictLookup or expr.proven or expr.default is? none or state.allocator is? none return false
+    let values=array_type(hir.node_at(state.input.nodes expr.values).value_type state)
+    if values is? none or cell_members(expr.value_type @state) isnt? none or not releasable(expr.value_type @state) return false
+    let stored=types.unfold(types.strip_refinement(values.element state.type_nodes) state.type_nodes)
+    let read=types.unfold(types.strip_refinement(expr.value_type state.type_nodes) state.type_nodes)
+    let fallback=types.unfold(types.strip_refinement(hir.node_at(state.input.nodes expr.default).value_type state.type_nodes) state.type_nodes)
+    return stored =? read and (fallback =? read or (array_type(fallback state) isnt? none and array_type(read state) isnt? none))
+}
 borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     if state.allocator is? none and not node.view return false
     let expr=hir.node_at(state.input.nodes node.expr)
@@ -3848,12 +3864,14 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
     # Proven array entries hand out the stored descriptor, just as records
     # expose their stored block. A `get` without a default can hand out a
     # view cell (see `get_view`); other fallback lookups may rebuild storage.
-    let get_view=get_view_lookup(expr @state)
-    if get_view and (node.binding_id is? none or node.binding_id in? state.addressed) return false
+    let get_view=get_view_lookup(expr @state) or default_view_lookup(expr @state)
+    # Only an inferred view: an explicit `@` demand names the dictionary's
+    # storage, which a lookup result (or its fallback) is not.
+    if get_view and (node.view or node.binding_id is? none or node.binding_id in? state.addressed) return false
     if expr is? hir.DictLookup and not expr.proven and not object_valued(expr.value_type state) and not get_view return false
     # An unproven lookup may select a temporary fallback. Its lifetime is
     # independent of the dictionary's, so a stable dictionary is insufficient.
-    if expr is? hir.DictLookup and expr.default isnt? none and not expr.proven return false
+    if expr is? hir.DictLookup and expr.default isnt? none and not expr.proven and not get_view return false
     # An explicit string/union view may use an immediate enum word. A
     # stable read then needs no owning storage or release in either form.
     if not node.view and not releasable(expr.value_type @state) return false
@@ -5025,6 +5043,14 @@ scalar_string = (ordinal:addr node:hir.AST @prefix:array<addr> @state:State):>ad
     steps.push(descriptor)
     return put(hir.Block[node.loc word_type steps false] @state)
 }
+# A loop over `d.get(k default)` whose dictionary no write in the function
+# reaches iterates the stored element instead of a copy of it.
+iterated_view = (id:addr @state:State):>bool => {
+    let node=hir.node_at(state.input.nodes id)
+    if not default_view_lookup(node @state) or id in? state.array_snapshots return false
+    let route=borrowing.route(id state.input.nodes)
+    return route isnt? none and route.binding not in? state.boxed and borrowing.stable_owner(route state.stable_bindings state.stable_parameters)
+}
 iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @state:State plain:bool=false):>IteratorStep => {
     let prefix:array<addr>=[]
     let bool_type=types.primitive('bool' @state.type_nodes)
@@ -5098,8 +5124,15 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
                 }
             }
             sequence=dict_field(parts source.name node @state)
+        } else if iterated_view(node.iterable @state) {
+            # The stored element is iterated in place; only a kept default is
+            # released when the arm ends.
+            $runtime_assert source is? hir.DictLookup
+            sequence=snapshot(dict_lookup(source @state view=true) @prefix @state)
+            $runtime_assert source.default isnt? none
+            keep_fallback(hir.node_at(state.input.nodes source.default).value_type @state)
         } else {sequence=snapshot(expression(node.iterable @state) @prefix @state)}
-        if source isnt? hir.DictEntries and temporary_owner(node.iterable @state) {
+        if source isnt? hir.DictEntries and temporary_owner(node.iterable @state) and not iterated_view(node.iterable @state) {
             # lower_flow gives iterator setup its own cleanup frame. Body
             # continues keep this owner; leaving the arm or returning from
             # the function releases it after the last borrowed element use.
@@ -5585,6 +5618,15 @@ dict_entry_slot=(node:hir.DictLookup @prefix:array<addr> @state:State):>addr=>{
 
 # Container operations retain a temporary receiver until their result has
 # been materialized. Iteration instead keeps this owner for the whole arm.
+# Release a viewing `get`'s kept default when the current cleanup frame ends.
+keep_fallback = (type:addr @state:State):>void => {
+    let kept=state.kept_fallback
+    state.kept_fallback=none
+    if kept is? none or state.cleanup_frames.length =? 0 return
+    let frame=state.cleanup_frames.pop
+    frame.push(OwnedLocal[kept type])
+    state.cleanup_frames.push(frame)
+}
 # A frame cell for a view of `value`: its tag and the element's handle, with
 # no ownership. One slot per site, hoisted with the loop prologue; a view
 # binding lives no longer than one execution of its declaration.
@@ -5899,6 +5941,10 @@ dict_lookup = (node:hir.DictLookup @state:State view:bool=false):>addr => {
             # An already-optional stored element uses its existing cell;
             # a lookup result must independently own that payload too.
             if cell_members(parts.value @state) isnt? none {value=copy_value(value node.value_type node @state)}
+        } else if view {
+            # The stored element is read in place; the default stays alive
+            # until the caller's view ends (see `keep_fallback`).
+            state.kept_fallback=fallback
         } else {
             let selected:array<addr>=[]
             let kind=copy_kind(parts.value @state)
