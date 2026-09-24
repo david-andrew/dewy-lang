@@ -102,6 +102,16 @@ let _arena_alloc = (size:int64):>int64 => {
     __store_i64__(__load_i64__(block) head_address)     # pop: the block's first word is the next free block
     let cursor:int64 = block
     let stop:int64 = block + width
+    # Widths are powers of two: from 64 bytes on, clear eight words per step.
+    # Without an optimizing backend the loop overhead otherwise dominates.
+    if width >=? 64 {
+        loop cursor <? stop {
+            __store_i64__(0 cursor) __store_i64__(0 cursor+8) __store_i64__(0 cursor+16) __store_i64__(0 cursor+24)
+            __store_i64__(0 cursor+32) __store_i64__(0 cursor+40) __store_i64__(0 cursor+48) __store_i64__(0 cursor+56)
+            cursor = cursor + 64
+        }
+        return block
+    }
     loop cursor <? stop { __store_i64__(0 cursor)  cursor = cursor + 8 }
     return block
 }

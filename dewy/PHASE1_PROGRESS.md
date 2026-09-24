@@ -3891,3 +3891,33 @@ and 15.1 s on the program. Two causes account for most of it:
 
 Lowering: captures 1.3 s, borrowing 4.1 s, normalization 3.7 s, moves
 0.2 s; the remaining ~9.5 s is per-function lowering itself.
+
+## First throughput fixes from the breakdown (2026-09-24)
+
+Three changes, each measured with compilers built by the `c498be68` pair
+and compiling the same source (cold, direct x86-64):
+
+1. `Report` in `library/reporting.dewy` is now a minted family root
+   (`let Report = type of [...]`). Minted families already compile an
+   inherited method once for its declaring owner; the structural `Report`
+   gave each of `Error`, `Warning`, `Info` and `Hint` its own copy of every
+   method body, which prelude analysis then checked five times. Prelude
+   analysis falls from 9.5 s to 2.4 s and the self-build from about 82 s to
+   74 s. Direct `Report[...]` construction and `Report` parameters work as
+   before (a family root is constructible; children are its subtypes), on
+   both compilers.
+2. The relational proof search built its adjacency lists with
+   `get`/push/store-back, copying a list for every edge; it now extends
+   them in place (about 0.5 s).
+3. The generic arena allocator clears recycled blocks eight words per step
+   from 64 bytes up (about 3 s on the direct route). A throwaway build that
+   skipped clearing entirely produced identical µDewy output only ~3.7 s
+   faster, so clearing is not the remaining allocator cost.
+
+A 20 ms sample of the full self-build with source-named symbols (`dewy
+debug --build`) now attributes 13.4% of samples to `_arena_alloc` and 7.0%
+to `_arena_release` themselves, plus array/cell construction helpers: the
+cost is the number of allocations, not their size. Bounds checking remains
+about 20 s; the relational search (`decide_order` → `ordered` → `search`)
+scans every fact twice per comparison. The waiting time for the backend
+process is 5%.
