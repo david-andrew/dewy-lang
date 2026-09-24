@@ -3840,3 +3840,22 @@ volume by site at runtime, which the current counters do not attribute.
 The next measurement step is per-site allocation attribution (counting
 allocations by the lowering site that requested them) before choosing more
 ownership mechanisms by where the bytes go.
+
+## Seed release and direct-route throughput (2026-09-24)
+
+The published native seed (`native-5638d42371b5`) predated syntax the
+compiler now uses (dictionary entry places), so every `Release native Dewy`
+push failed. A `workflow_dispatch` run with `hosted_seed=true` rebuilt stage
+zero with the hosted compiler, verified three native generations and
+published `native-948ee309a58f`. A following ordinary run seeded from that
+release, verified again and produced a byte-identical package.
+
+Throughput, cold direct-built self-builds on a quiet machine, each pair on
+its own source: the fully direct pair of 2026-09-18 (`a09a4b4a`, 39.3k
+lines) took 61.9/61.8 seconds with validation at 7.6 s and lowering at 12.6
+s; the `c498be68` pair (49.2k lines) takes 85.0/85.6 seconds with validation
+at 21.0 s and lowering at 18.1 s. The source grew 25% while validation grew
+about 2.8x; the entry of 2026-09-20 recorded 44.6 s under the same cold
+protocol. Throughput is about 580 lines/s against the 1.6k lines/s (30 s)
+target, and the growth sits in the Phase 1 analyses that ROADMAP's lever 6
+says must stay linear. `--timings` has no breakdown inside validation yet.
