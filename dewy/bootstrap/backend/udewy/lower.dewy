@@ -1068,7 +1068,11 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
             else if cell_members(stored @state) isnt? none cell_read_keeps_handle(stored node.value_type @state)
             else if object_valued(stored state) and object_valued(node.value_type state) object_layout(stored node @state).size =? object_layout(node.value_type node @state).size
             else true
-        if movable and binding isnt? none and binding in? state.cleanup_owned and binding not in? state.boxed and binding not in? state.addressed and releasable(node.value_type @state) {
+        # An array or string local lent as a place lives in a box, which no
+        # place argument outlives: its handle moves and the box is emptied.
+        # (A closure capture also boxes, but its nested uses never move.)
+        let boxed_place=binding isnt? none and binding in? state.boxed and binding in? state.addressed and not narrowed and not inline_place(stored @state)
+        if movable and binding isnt? none and binding in? state.cleanup_owned and ((binding not in? state.boxed and binding not in? state.addressed) or boxed_place) and releasable(node.value_type @state) {
             let prefix:array<addr>=[]
             let taken=snapshot(value @prefix @state)
             let word_type=types.primitive('int64' @state.type_nodes)
@@ -1084,6 +1088,8 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
                     empty_cell=conditional(intrinsic_call('__ne__' [cell shared] types.primitive('bool' @state.type_nodes) node @state) empty_cell node @state)
                 }
                 prefix.push(empty_cell)
+            } else if boxed_place {
+                prefix.push(array_store(word(0 node @state) binding_storage(node stored @state) stored node @state))
             } else {
                 prefix.push(assign_value(put(hir.ExpressedIdentifier[node.loc word_type symbol(node.name binding @state) binding] @state) word(0 node @state) node @state))
             }

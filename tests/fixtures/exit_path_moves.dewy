@@ -1,0 +1,92 @@
+# A transfer that falls through to a `return` is the last use on its path,
+# even when later text (another path) uses the local again.
+Block:type = [items:array<int64> tag:int64]
+Store:type = [blocks:array<Block>]
+keep = (block:Block @into:Store):>void => {into.blocks.push(block)}
+branch = (n:int64 @into:Store):>int64 => {
+    let early:array<int64>=[n]
+    if n >? 1 {
+        keep(Block[early 1] @into)
+        return 1
+    }
+    early.push(n)
+    keep(Block[early 2] @into)
+    return 2
+}
+# A nested arm falls through to the enclosing block's return.
+nested = (n:int64 @into:Store):>int64 => {
+    let inner:array<int64>=[n n]
+    if n >? 0 {
+        if n >? 1 {keep(Block[inner 3] @into)} else {keep(Block[[n] 4] @into)}
+        return 3
+    }
+    return inner.length
+}
+# A return inside the loop leaves it: no next iteration reads the local.
+looped_return = (n:int64 @into:Store):>int64 => {
+    let found:array<int64>=[n]
+    let i:int64=0
+    loop i <? n {
+        i+=1
+        if i =? 2 {
+            keep(Block[found 5] @into)
+            return i
+        }
+        found.push(i)
+    }
+    return found.length
+}
+# A later use on the same path keeps the copy.
+used = (n:int64 @into:Store):>int64 => {
+    let kept:array<int64>=[n]
+    if n >? 0 {
+        keep(Block[kept 6] @into)
+        let size=kept.length
+        return size
+    }
+    return 0
+}
+# `continue` skips the return, and the next iteration reads the local.
+skipped = (n:int64 @into:Store):>int64 => {
+    let looped:array<int64>=[n]
+    let i:int64=0
+    loop i <? 3 {
+        i+=1
+        keep(Block[looped 7] @into)
+        if i <? 3 continue
+        return i
+    }
+    return looped.length
+}
+# `break` skips the return, and the code after the loop reads the local.
+broken = (n:int64 @into:Store):>int64 => {
+    let stays:array<int64>=[n]
+    loop true {
+        keep(Block[stays 8] @into)
+        if n >? 0 break
+        return 0
+    }
+    return stays.length
+}
+# Lending a local as a place does not outlive the call: it still moves.
+fill = (n:int64 @items:array<int64>):>void => {items.push(n)}
+lent = (n:int64 @into:Store):>int64 => {
+    let lent_items:array<int64>=[]
+    fill(n @lent_items)
+    fill(n+1 @lent_items)
+    keep(Block[lent_items 9] @into)
+    return 9
+}
+main = ():>int64 => {
+    let into=Store[[]]
+    if branch(2 @into) not=? 1 or branch(1 @into) not=? 2 return 1
+    if nested(2 @into) not=? 3 or nested(1 @into) not=? 3 return 2
+    if looped_return(3 @into) not=? 2 return 3
+    if used(4 @into) not=? 1 or skipped(5 @into) not=? 3 or broken(6 @into) not=? 1 return 4
+    if lent(7 @into) not=? 9 return 6
+    let lengths:array<int64>=[]
+    let total:int64=0
+    loop block in into.blocks {lengths.push(block.items.length) total+=block.tag}
+    if "{lengths}" not=? '[1 2 2 1 2 1 1 1 1 1 2]' or total not=? 59 return 5
+    return 42
+}

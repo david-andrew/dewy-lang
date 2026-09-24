@@ -12,12 +12,23 @@ order (a later sibling arm counts as after, conservatively), it is not
 inside a loop the declaration is outside of (the next iteration would read
 the emptied local), and no nested function literal captures the binding.
 A `return` leaves every path, so a local returned there always moves,
-whatever the text after the return does with it. Parameters are not declarations
-here and never move. Mirrors `_compute_moves` in the hosted lowering.
+whatever the text after the return does with it. Likewise a transfer that a
+later `return` statement of an enclosing block follows unconditionally, at
+the same loop depth, with no use, `break` or `continue` in between, is the
+last use on its path: later text belongs to other paths. Parameters are not
+declarations here and never move. Mirrors `_compute_moves` in the hosted
+lowering.
 """
 
 Use:type = const [id:addr sequence:addr depth:addr nested:bool transfer:bool returned:bool]
-Analysis:type = [uses:dict<addr array<Use>>=[] declared:dict<addr addr>=[] counter:addr=0]
+# A transfer use in statement order, and one followed by a `return` of an
+# enclosing block: it moves if nothing in `(sequence, until]` intervenes.
+Transfer:type = const [binding:addr id:addr sequence:addr depth:addr]
+Candidate:type = const [id:addr sequence:addr until:addr]
+Analysis:type = [
+    uses:dict<addr array<Use>>=[] declared:dict<addr addr>=[] counter:addr=0
+    transfers:array<Transfer>=[] exits:array<addr>=[] candidates:dict<addr array<Candidate>>=[]
+]
 
 # The expression a transfer site hands over, through the wrappers that keep its storage.
 peel = (id:addr nodes:array<hir.AST>):>addr => {
@@ -34,9 +45,43 @@ peel = (id:addr nodes:array<hir.AST>):>addr => {
 
 note_use = (id:addr binding:addr depth:addr nested:bool transfer:bool returned:bool @analysis:Analysis):>void => {
     analysis.counter+=1
-    let uses=analysis.uses.get(binding default=[])
+    if binding not in? analysis.uses {analysis.uses[binding]=[]}
+    let uses=@analysis.uses[binding]
     uses.push(Use[id analysis.counter depth nested transfer returned])
-    analysis.uses[binding]=uses
+    if transfer and not nested and not returned {analysis.transfers.push(Transfer[binding id analysis.counter depth])}
+}
+# Statement `i` of a block falls through to the next `return` statement of
+# that block. Transfers directly in statement `i` (not in a nested loop) are
+# candidates up to the end of that return.
+Span:type = const [first:addr finish:addr returns:bool]
+walk_block = (items:array<addr> depth:addr nested:bool nodes:array<hir.AST> @analysis:Analysis):>void => {
+    let spans:array<Span>=[]
+    loop item in items {
+        let first=analysis.transfers.length
+        walk(item depth nested nodes @analysis)
+        spans.push(Span[first analysis.counter hir.node_at(nodes item) is? hir.Return])
+    }
+    if nested return
+    let until:addr?=none
+    let last=analysis.transfers.length
+    let i=spans.length
+    loop i >? 0 {
+        i-=1
+        let span=spans[i]
+        let stop=last
+        last=span.first
+        if span.returns {until=span.finish continue}
+        if until is? none continue
+        let k=span.first
+        loop k <? stop and k <? analysis.transfers.length {
+            let transfer=analysis.transfers[k]
+            k+=1
+            if transfer.depth not=? depth continue
+            if transfer.binding not in? analysis.candidates {analysis.candidates[transfer.binding]=[]}
+            let pending=@analysis.candidates[transfer.binding]
+            pending.push(Candidate[transfer.id transfer.sequence until])
+        }
+    }
 }
 
 walk_transfer = (id:addr depth:addr nested:bool returned:bool nodes:array<hir.AST> @analysis:Analysis):>void => {
@@ -65,6 +110,15 @@ walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> @analysis:Analysis):
     }
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none {note_use(id node.binding_id depth nested false false @analysis)}
+        return
+    }
+    if node is? hir.Break|hir.Continue {
+        analysis.counter+=1
+        if not nested {analysis.exits.push(analysis.counter)}
+        return
+    }
+    if node is? hir.Block {
+        walk_block(node.items depth nested nodes @analysis)
         return
     }
     if node is? hir.Return {
@@ -170,10 +224,41 @@ compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[]):>s
         # A `return` leaves every path: a returned local is always at its
         # last use there, whatever follows the return in the text.
         loop use in uses {if use.returned {moves.add(use.id)}}
+        loop candidate in analysis.candidates.get(binding []) {
+            if candidate.id in? moves or not quiet_until(binding candidate analysis) continue
+            if borrow_live_between(binding candidate.sequence candidate.until borrows analysis) continue
+            moves.add(candidate.id)
+        }
         if not last.transfer or last.returned continue
         if last.depth >? declared continue
         if borrow_live_after(binding last.sequence borrows analysis) continue
         moves.add(last.id)
     }
     return moves
+}
+# No use of the binding and no loop exit between a candidate and its return.
+quiet_until = (binding:addr candidate:Candidate analysis:Analysis):>bool => {
+    loop use in analysis.uses.get(binding []) {
+        if use.sequence >? candidate.sequence and use.sequence <=? candidate.until return false
+    }
+    loop exit in analysis.exits {
+        if exit >? candidate.sequence and exit <=? candidate.until return false
+    }
+    return true
+}
+borrow_live_between = (binding:addr sequence:addr until:addr borrows:dict<addr set<addr>> analysis:Analysis):>bool => {
+    let pending:array<addr>=[binding]
+    let visited:set<addr>=set[]
+    loop pending.length >? 0 {
+        let owner=pending.pop
+        if owner in? visited continue
+        visited.add(owner)
+        loop borrower in borrows.get(owner set[]) {
+            loop use in analysis.uses.get(borrower []) {
+                if use.nested or (use.sequence >? sequence and use.sequence <=? until) return true
+            }
+            pending.push(borrower)
+        }
+    }
+    return false
 }

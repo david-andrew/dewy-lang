@@ -3747,13 +3747,19 @@ class _Lowerer(
         sibling branch's use is "after"), it is not inside a loop the
         declaration is outside of (the next iteration would use it again —
         a `return` is exempt, it leaves the loop), and no nested function
-        literal captures the binding. The lowering then adopts the arena
+        literal captures the binding. A transfer that a later `return`
+        statement of an enclosing block follows unconditionally, at the same
+        loop depth, with no use, `break` or `continue` in between, is also a
+        last use: later text belongs to other paths. The lowering then adopts the arena
         storage instead of cloning it (`_adopt_or_clone`). Record returns
         adopt their owned fields. Single-use string locals with independent
         descriptors also transfer into bindings, records and array storage.
         """
         owned: dict[int, tuple[int, int]] = {}   # binding id -> (sequence, loop depth) of its declaration
         uses: dict[int, list[tuple[int, int, bool, int | None]]] = {}   # binding id -> (sequence, loop depth, in nested literal, transfer node id)
+        transfers: list[tuple[int, int, int, int]] = []   # (binding id, transfer node id, sequence, loop depth) in order
+        exits: list[int] = []   # sequences of break/continue
+        candidates: dict[int, list[tuple[int, int, int]]] = {}   # binding id -> (transfer node id, sequence, end of the following return)
         counter = 0
         returned: set[int] = set()
         borrow_dependents: dict[int, set[int]] = {}
@@ -3778,6 +3784,32 @@ class _Lowerer(
             nonlocal counter
             counter += 1
             uses.setdefault(binding_id, []).append((counter, depth, nested, transfer))
+            if transfer is not None and not nested:
+                transfers.append((binding_id, transfer, counter, depth))
+
+        def walk_block(items: list[hir.AST], depth: int, nested: bool, transfer_of: dict[int, int]) -> None:
+            # Statement i falls through to the block's next `return`
+            # statement; its transfers at this loop depth are candidates up
+            # to the end of that return.
+            spans = []
+            for item in items:
+                first = len(transfers)
+                walk(item, depth, nested, transfer_of)
+                spans.append((first, counter, isinstance(item, hir.Return)))
+            if nested:
+                return
+            until = None
+            last = len(transfers)
+            for first, end, returns in reversed(spans):
+                stop, last = last, first
+                if returns:
+                    until = end
+                    continue
+                if until is None:
+                    continue
+                for binding_id, transfer, sequence, use_depth in transfers[first:stop]:
+                    if use_depth == depth:
+                        candidates.setdefault(binding_id, []).append((transfer, sequence, until))
 
         def walk(node: object, depth: int, nested: bool, transfer_of: dict[int, int]) -> None:
             nonlocal counter
@@ -3803,6 +3835,14 @@ class _Lowerer(
             if isinstance(node, hir.ExpressedIdentifier):
                 if node.binding_id is not None:
                     note_use(node.binding_id, depth, nested, transfer_of.get(id(node)))
+                return
+            if isinstance(node, (hir.Break, hir.Continue)):
+                counter += 1
+                if not nested:
+                    exits.append(counter)
+                return
+            if isinstance(node, hir.Block):
+                walk_block(node.items, depth, nested, transfer_of)
                 return
             if isinstance(node, hir.Return) and node.item is not None:
                 source = self._copy_source_expression(node.item)
@@ -3857,6 +3897,24 @@ class _Lowerer(
 
         walk(literal.body, 0, False, {})
 
+        def borrow_live_between(binding: int, sequence: int, until: int) -> bool:
+            pending = [binding]
+            visited: set[int] = set()
+            while pending:
+                owner = pending.pop()
+                if owner in visited:
+                    continue
+                visited.add(owner)
+                for borrower in borrow_dependents.get(owner, ()):
+                    if any(nested or sequence < seq <= until for seq, _depth, nested, _transfer in uses.get(borrower, ())):
+                        return True
+                    pending.append(borrower)
+            return False
+
+        def quiet_until(references: list[tuple[int, int, bool, int | None]], sequence: int, until: int) -> bool:
+            return (not any(sequence < seq <= until for seq, _depth, _nested, _transfer in references)
+                    and not any(sequence < exit_ <= until for exit_ in exits))
+
         def borrow_live_after(binding: int, sequence: int) -> bool:
             pending = [binding]
             visited: set[int] = set()
@@ -3884,6 +3942,9 @@ class _Lowerer(
             # use there whatever the text after the return does with it.
             for _sequence, _depth, _nested, transfer in references:
                 if transfer in returned:
+                    moves.add(transfer)
+            for transfer, sequence, until in candidates.get(binding_id, ()):
+                if transfer not in moves and quiet_until(references, sequence, until) and not borrow_live_between(binding_id, sequence, until):
                     moves.add(transfer)
             last = max(references, key=lambda use: use[0])
             _sequence, depth, _nested, transfer = last

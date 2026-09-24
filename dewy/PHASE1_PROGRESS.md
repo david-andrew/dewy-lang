@@ -3683,3 +3683,33 @@ passes both compilers on x86-64/C. The command test now derives the expected
 copy rows from the fixture text: exactly the owned binding and the three
 operands read before a mutating call remain. The compiler inventory falls
 from 4,141 to 3,827 sites (strings 1,673 → 1,359).
+
+## Moves on paths that end in a return; place-lent array moves (2026-09-23)
+
+Checkpoint first: source `520e3445` completed a three-generation direct
+x86-64 bootstrap from the `add81b06` pair (82/71/84 seconds, byte-identical
+generations two and three, pair execution checks passed; artifacts
+`phase1-520e3445`).
+
+Both move analyses took a use's textual position as its path position: a
+transfer was a last use only if no reference to the local followed it
+anywhere in the function (or it was itself returned). A transfer that falls
+through to a later `return` statement of an enclosing block is now also a
+last use when nothing in between uses the local or its borrowers, no `break`
+or `continue` intervenes, and no loop boundary separates the two: the text
+after that return belongs to other paths. Both compilers implement the same
+rule, with statement spans per block and sequence intervals checked at the end
+(`moves.dewy`, `_compute_moves`).
+
+Native lowering also refused every move of a local it had lent as a place
+(`fill(@prefix)`), because such arrays and strings live in a box. A place
+argument cannot outlive its call, so the handle now moves out and the box is
+emptied; closure captures, which also box, never reach the move set because
+their uses are nested. Hosted lowering already moved these locals.
+
+Validation: the new `exit_path_moves` fixture covers moves through nested
+arms, a return inside a loop, and a place-lent local; a later use,
+`continue` and `break` between transfer and return keep their copies. Hosted
+move notes and both compilers' x86-64/C execution agree, and native analysis
+reports exactly the three negative sites. The compiler inventory falls from
+3,827 to 3,692 sites (arrays 733 → 602).
