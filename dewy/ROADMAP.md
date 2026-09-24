@@ -765,9 +765,11 @@ Decisions were made by David on 2026-09-13.
    2x            # multiply
    2 x           # two expressions
    (x+1)5        # multiply (a number on the left)
-   (y)3.14159    # multiply
+   (y)3.14159    # call if `y` is callable, multiply if `y` is a number
    (f)2          # call if `f` is callable, multiply if `f` is a number
-   g(1)2         # the call result decides: multiply for a numeric result
+   g(1)2         # by the type of `g`: a number makes both multiplications;
+                 # a callable makes `g(1)` a call, and then its result's
+                 # type decides whether `2` is called with or multiplied
    printl"hi"    # call
    ```
 
