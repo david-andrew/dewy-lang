@@ -242,6 +242,78 @@ integration checkpoints, rather than after every small edit. Reaching the
 target is likely to require eliminating whole categories of repeated work;
 small local speedups alone are unlikely to be sufficient.
 
+### Compile-time throughput as a design constraint (2026-09-23)
+
+David's position: Dewy should recompile large programs, the compiler
+included, at scripting-language speed **without incremental builds or
+caches**. The model is Jai, whose custom backend builds about 100k lines in
+roughly a second. Whole-program batch compilation every time is a feature:
+deterministic builds, no invalidation bugs, no daemon state, every compile
+re-runs every proof. The one cache the position tolerates is the checked
+prelude, treated as fixed input; the user's program always rebuilds from
+scratch. Jai holds the same line.
+
+Where that puts the targets: the compiler's ~49k lines build in about 20 s
+on the C route and 45 s direct (2.5k and 1.1k lines/s); the 30 s and 10 s
+targets above are 1.6k and 5k lines/s; the Jai class is ~100k lines/s. The
+stretch goal is therefore a waypoint, not the destination, and tuning the
+current pipeline cannot reach the destination. The design has to.
+
+What Jai does that Dewy does not, and the lever each implies:
+
+1. **No textual intermediate stages.** Jai goes AST → bytecode → machine
+   code in memory, then writes an object and links. Dewy serializes 17 MB
+   of µDewy text, reparses it in a separate tool, emits assembly text, and
+   the system assembler parses that again: three serialize-and-reparse
+   cycles. Lever: hand µDewy statements to the backend in process (already
+   a candidate below) and emit object bytes instead of assembly text.
+2. **The unoptimized backend is the fast one.** Jai uses LLVM only for
+   release builds and its own backend for development, where compile speed
+   is everything and output speed is nothing. Dewy's direct route is
+   currently the *slow* route. Lever: make the direct backend the
+   development path, measured on compile time alone, with C (or a later
+   optimizing path) for release builds.
+3. **Never freeing.** Jai's compiler allocates from arenas and lets the
+   process exit reclaim everything: no reference counts, no releases. Lever:
+   the context allocator (ownership tier 3, `status.md`) pushed at the top
+   of the compiler makes every release a no-op and most copy proofs moot
+   for this one program. The compiler is that mechanism's first customer.
+4. **A worklist, not passes.** Declarations typecheck out of order from a
+   queue; a job that meets an unresolved dependency requeues; compile-time
+   execution runs in the same loop. Nothing walks the whole program eight
+   times. Lever: queue-driven checking, which is also the natural home for
+   Phase 2 compile-time execution.
+5. **Parallel per-procedure work.** Eight cores are idle during a Dewy
+   build; only the assembler runs in parallel. Value semantics makes
+   per-function checking, lowering and emission safer to parallelize than
+   it was for Jai.
+6. **A cheap semantic layer.** Jai has no proofs, no effects, no ownership
+   analysis and no operator ambiguity; typechecking is near-linear and
+   local. Dewy cannot copy this: proofs are its reason to exist. The
+   constraint instead is that **no analysis may do superlinear work in
+   program size**, budgeted and measured like any phase (bounds, effects,
+   borrowing, moves). Retrofitting linearity into a proof engine later is
+   the expensive path, so Phase 1.2 designs against it now.
+
+Other measured costs with the same flavor: the multi-stage parser resolves
+juxtaposition ambiguity at ~18k lines/s against Jai's millions, and the
+compiler as a Dewy program pays copies, retain/release pairs and string
+work that Jai's compiler never performs (Phase 1.1 removes these as a side
+effect; the copy budget is the metric).
+
+**Open design question for David:** which language constraints to relax
+for throughput. His own candidate is narrowing the allowed juxtaposition
+cases while keeping every form people actually write (`2x`, `f(x)`,
+`printl"hi"`, `sin(x)^2`), so the parser stops carrying undecided
+call-or-multiply alternatives through to the checker. Any such narrowing is
+a surface change and needs his decision first; record it in 1.4 when made.
+
+Sequencing: levers 1, 2 and 5 need no language change and belong to the
+next performance batch after Phase 1.1's current slices; lever 3 lands
+with the context allocator; lever 4 with Phase 2; lever 6 is a standing
+rule from now on. Measure every batch as lines per second on the
+compiler's own sources, C route and direct route separately.
+
 ### Performance measurements and candidates
 
 The measurements below describe the hosted Python route. They identify
