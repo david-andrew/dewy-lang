@@ -3809,3 +3809,34 @@ x86-64/C. A compiler built from this source analyzes its own sources under
 tree without `.git`) passed 4,505 tests; its three failures were the
 measurement-cache tests, which need `git rev-parse` and fail for that reason
 alone.
+
+## Runtime effect of this session's copy reductions (2026-09-24)
+
+Checkpoint first: `c498be68` completed a three-generation direct x86-64
+bootstrap from the `bde5e33e` pair (85/74/86 seconds, byte-identical
+generations two and three) and passed all 201 focused parity cases, the full
+211-case corpus and the native command test (inventory and copy-row gates).
+
+On a quiet machine, the bootstrapped compilers from `3139fe4a` (before this
+session's ownership work) and `c498be68` compiled the same source
+(`c498be68`'s `dewy/bootstrap/main.dewy`, cold, direct x86-64) in 84.1/83.7
+and 85.0/85.6 seconds. Top-level `--timings` storage, old → new:
+
+| Phase | Allocated | Copied |
+| --- | --- | --- |
+| frontend (incl. prelude analysis 6.42 → 7.26 GB) | 21.19 → 22.00 GB | 0.602 → 0.623 GB |
+| validation | 14.80 → 14.98 GB | 0.341 → 0.353 GB |
+| initialization and reachability | 1.09 → 1.09 GB | 0.353 → 0.353 GB |
+| lowering | 15.36 → 15.29 GB | 0.210 → 0.202 GB |
+| emission | 3.33 → 3.33 GB | 0.081 → 0.081 GB |
+
+The static inventory fell from 4,501 to 3,664 sites over the same interval,
+yet runtime bytes and time did not move: logical copies are about 3% of the
+~56 GB allocated, and the removed sites were not hot. (The small frontend
+increase comes from the source itself growing, e.g. the boolean-value rule,
+not from the lowering changes.) Static copy sites remain the regression gate
+the roadmap asks for, but further compile-time progress needs allocation
+volume by site at runtime, which the current counters do not attribute.
+The next measurement step is per-site allocation attribution (counting
+allocations by the lowering site that requested them) before choosing more
+ownership mechanisms by where the bytes go.
