@@ -4160,3 +4160,36 @@ backend step, split into 8 chunks: direct 10.4–11.5 s wall and 9.5 s CPU,
 against 12.3–13.1 s wall and 13.4 s CPU through `as`. The encoder still
 re-parses the backend's text. Emitting instructions without text is the
 larger remaining cut.
+
+## µDewy bytecode: recorder and player (2026-09-24)
+
+Step 2 of the direct binary fast path. `udewy/BYTECODE.md` specifies the
+format. It is a recording of the 53 backend calls the µDewy parser makes
+(six pure queries are left out), with LEB128 operands. Ids are renumbered
+densely per id space (functions, globals, strings, statics, slots, split
+labels), so a stream does not depend on the backend that recorded it.
+Stable values keep their kind, and a player turns them back into its own
+backend's references.
+
+- The native recorder and player are in `udewy/bootstrap/stream.udewy`,
+  generated from one operation table. The recorder swaps the backend's
+  function pointers and records only the parser's own calls: the default
+  `binary_immediate` calls `save_value`, `push_const_i64` and `binary_op`
+  itself, and recording those too made replay emit them twice. The Python
+  recorder and player are in `udewy/stream.py`. The recorder wraps the
+  backend and carries each reference's kind and label on the reference
+  value itself (a `str` or `int` subclass).
+- `UDEWY_RECORD=path` records a compile, and an input ending in `.ubc` is
+  played instead of tokenized and parsed. Both compilers support both.
+
+**Checks.** The compiler's own µDewy (23 MB) records to a 16.5 MB stream
+whose replay produces byte-identical assembly, with and without debug
+information. On `udewy/tests` programs and a globals fixture, the Python
+and native recorders write byte-identical streams, and replay reaches the
+parsed assembly in both implementations (`tests/python_misc/test_udewy_stream.py`).
+
+**Cost.** Under load, with direct objects for both runs: compiling the
+compiler's µDewy source took 8.4 s wall and 9.5 s CPU; replaying its
+stream took 5.2 s wall and 6.4 s CPU. That difference is what step 4
+(Dewy writing the stream instead of µDewy text) removes from a cold
+compile, along with part of Dewy's 3.5 s text emission.

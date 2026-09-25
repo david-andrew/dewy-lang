@@ -224,12 +224,8 @@ never_called:
 
 @pytest.fixture(scope='module')
 def native_udewy(tmp_path_factory) -> Path:
-    """The native µDewy compiler built by the Python one."""
-    work = tmp_path_factory.mktemp('native-udewy')
-    main = REPO_ROOT / 'udewy/bootstrap/main.udewy'
-    subprocess.run([sys.executable, '-m', 'udewy', '--no-debug-info', '-c', str(main)], cwd=work, check=True,
-                   env={**os.environ, 'PYTHONPATH': str(REPO_ROOT)})
-    return work / cache_artifact(main, cwd=work)
+    from native_udewy import native_udewy as build
+    return build(tmp_path_factory.mktemp('native-udewy'))
 
 
 def test_native_and_python_write_identical_objects(tmp_path, native_udewy):

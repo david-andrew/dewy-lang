@@ -12,6 +12,7 @@ import p"./backend/riscv.udewy"
 import p"./backend/arm.udewy"
 import p"./backend/c.udewy"
 import p"./backend/wasm.udewy"
+import p"./stream.udewy"
 
 let g_compile_only:int = false
 let g_target:int = 0
@@ -165,19 +166,33 @@ let main = (argc:int argv:int):>int => {
 
     select_backend(g_target)
 
-    let loaded:int = t0_load_program(g_input_path g_target)
-    if loaded =? 0 {
-        return 1
+    let asm:int = 0
+    let artifacts:int = 0
+    if str_eq(path_suffix(g_input_path) ".ubc") {
+        # µDewy bytecode (udewy/BYTECODE.md): replay the recorded backend
+        # calls; no tokenizing or parsing.
+        artifacts = st_open(src str_len(src))
+        asm = st_play()
+    } else {
+        let loaded:int = t0_load_program(g_input_path g_target)
+        if loaded =? 0 {
+            return 1
+        }
+        let combined:int = loaded_source(loaded)
+        diag_set_source(input_cstr combined str_len(combined))
+        artifacts = loaded_artifacts(loaded)
+        # UDEWY_RECORD=path also writes the module's bytecode to `path`.
+        let record_path:int = proc_getenv("UDEWY_RECORD")
+        if record_path not=? 0 { st_install_recorder(artifacts) }
+        (@be_set_imported_sources)(loaded_sources(loaded))
+        let toks:int = t1_tokenize(combined)
+        asm = parse_run(toks combined path_absolute(g_input_path))
+        if record_path not=? 0 { st_write(record_path) }
     }
-    let combined:int = loaded_source(loaded)
-    diag_set_source(input_cstr combined str_len(combined))
-    (@be_set_imported_sources)(loaded_sources(loaded))
-    let toks:int = t1_tokenize(combined)
-    let asm:int = parse_run(toks combined path_absolute(g_input_path))
 
     # Build CompileOptions threaded through compile_and_link and run.
     let opts:int = be_options_new()
-    be_opt_set_link_artifacts(opts loaded_artifacts(loaded))
+    be_opt_set_link_artifacts(opts artifacts)
     be_opt_set_split_wasm(opts g_split_wasm)
     be_opt_set_serve_wasm(opts g_serve_wasm)
     be_opt_set_input_file(opts g_input_path)

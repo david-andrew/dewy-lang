@@ -1,0 +1,1359 @@
+# µDewy bytecode: a recorder and a player for the parser's backend calls.
+# Generated from one operation table (udewy/BYTECODE.md); mirrors
+# udewy/stream.py. The recorder wraps the backend's function pointers,
+# writing each call before forwarding it. The player decodes a stream and
+# makes the same calls on the live backend, mapping each recorded id to the
+# one the backend returns, one table per id space.
+
+import p"./runtime/runtime.udewy"
+import p"./backend/common.udewy"
+
+const ST_SV_INT:int = 1
+
+let st_out:int = 0
+let st_depth:int = 0          # backend calls in progress (nested ones are not recorded)
+let st_refs:int = 0           # backend reference value -> label id (recording)
+let st_rec_fn:int = 0
+let st_rec_global:int = 0
+let st_rec_string:int = 0
+let st_rec_static:int = 0
+let st_rec_slot:int = 0
+let st_rec_cond:int = 0
+let st_data:int = 0
+let st_len:int = 0
+let st_pos:int = 0
+let st_fn_map:int = 0
+let st_global_map:int = 0
+let st_string_map:int = 0
+let st_static_map:int = 0
+let st_slot_map:int = 0
+let st_cond_map:int = 0
+
+# ----------------------------------------------------------------------------
+# Encoding
+# ----------------------------------------------------------------------------
+
+let st_op = (op:int):>void => {
+    bb_push_byte(st_out op)
+    return void
+}
+let st_u = (v:int):>void => {
+    let x:int = v
+    loop true {
+        let low:int = x and 127
+        x = x >> 7
+        if x =? 0 {
+            bb_push_byte(st_out low)
+            return void
+        }
+        bb_push_byte(st_out low or 128)
+    }
+    return void
+}
+let st_s = (v:int):>void => {
+    st_u((v << 1) xor __signed_shr__(v 63))
+    return void
+}
+let st_bytes = (data:int len:int):>void => {
+    bb_push_bytes(st_out data len)
+    return void
+}
+let st_str = (s:int):>void => {
+    st_u(str_len(s))
+    st_bytes(s str_len(s))
+    return void
+}
+let st_ostr = (s:int):>void => {
+    if s =? 0 {
+        st_u(0)
+        return void
+    }
+    st_u(str_len(s) + 1)
+    st_bytes(s str_len(s))
+    return void
+}
+# Stream ids are dense per id space, in creation order, whatever the
+# backend returned: both recorders write the same stream for one program.
+# Each space maps a live id to its stream id (a map and its next id).
+let st_space_new = ():>int => {
+    let space:int = arena_alloc(16)
+    __store__(intmap_new() space)
+    __store__(0 space + 8)
+    return space
+}
+let st_new_dense = (space:int live:int):>int => {
+    let dense:int = __load__(space + 8)
+    __store__(dense + 1 space + 8)
+    intmap_put(__load__(space) live dense)
+    return dense
+}
+let st_dense = (space:int live:int):>int => {
+    let dense:int = intmap_get(__load__(space) live)
+    if dense =? IM_MISSING {
+        eprintl("error: µDewy bytecode: a backend id recorded before it was created")
+        host_exit(1)
+    }
+    return dense
+}
+# A stable value: an integer, or the stream id of the label behind a
+# backend reference.
+let st_value = (kind:int value:int):>void => {
+    st_u(kind)
+    if kind =? ST_SV_INT {
+        st_s(value)
+        return void
+    }
+    let label:int = intmap_get(st_refs value)
+    if label =? IM_MISSING {
+        eprintl("error: µDewy bytecode: a reference value without a recorded label")
+        host_exit(1)
+    }
+    if kind =? 2 { st_u(st_dense(st_rec_fn label)) }
+    else if kind =? 3 { st_u(st_dense(st_rec_string label)) }
+    else { st_u(st_dense(st_rec_static label)) }
+    return void
+}
+# A set of function labels, as ascending stream ids.
+let st_function_set = (m:int):>void => {
+    let ids:int = vec_new(intmap_size(m) + 1)
+    let slots:int = intmap_slots(m)
+    let i:int = 0
+    loop i <? intmap_cap(m) {
+        let slot:int = slots + i * IM_SLOT_SIZE
+        if __load__(slot + IM_SLOT_STATE) =? IM_OCCUPIED { vec_push(ids st_dense(st_rec_fn __load__(slot + IM_SLOT_KEY))) }
+        i = i + 1
+    }
+    # Insertion sort: the stream spells a set in one order.
+    let a:int = 1
+    loop a <? vec_len(ids) {
+        let value:int = vec_get(ids a)
+        let b:int = a - 1
+        loop b >=? 0 and vec_get(ids b) >? value {
+            vec_set(ids b + 1 vec_get(ids b))
+            b = b - 1
+        }
+        vec_set(ids b + 1 value)
+        a = a + 1
+    }
+    st_u(vec_len(ids))
+    let k:int = 0
+    loop k <? vec_len(ids) { st_u(vec_get(ids k))  k = k + 1 }
+    return void
+}
+# Static intrinsic arguments, as (index, value) pairs by ascending index.
+let st_int_pairs = (m:int):>void => {
+    st_u(intmap_size(m))
+    let written:int = 0
+    let index:int = 0
+    loop written <? intmap_size(m) {
+        let value:int = intmap_get(m index)
+        if value not=? IM_MISSING or intmap_has(m index) {
+            st_u(index)
+            st_s(value)
+            written = written + 1
+        }
+        index = index + 1
+    }
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Recorder
+# ----------------------------------------------------------------------------
+
+let st_orig_begin_module:int = 0
+let st_orig_finish_module:int = 0
+let st_orig_set_module_init:int = 0
+let st_orig_set_imported_sources:int = 0
+let st_orig_mark_location:int = 0
+let st_orig_note_local:int = 0
+let st_orig_begin_scope:int = 0
+let st_orig_end_scope:int = 0
+let st_orig_intern_string:int = 0
+let st_orig_define_global:int = 0
+let st_orig_declare_extern_global:int = 0
+let st_orig_intern_static:int = 0
+let st_orig_intern_words:int = 0
+let st_orig_push_string_ref:int = 0
+let st_orig_push_global_ref:int = 0
+let st_orig_push_static_ref:int = 0
+let st_orig_load_global:int = 0
+let st_orig_store_global:int = 0
+let st_orig_declare_function:int = 0
+let st_orig_bind_extern_function:int = 0
+let st_orig_declare_extern_function:int = 0
+let st_orig_begin_function:int = 0
+let st_orig_end_function:int = 0
+let st_orig_set_reachable_functions:int = 0
+let st_orig_load_param:int = 0
+let st_orig_alloc_local:int = 0
+let st_orig_load_local:int = 0
+let st_orig_store_local:int = 0
+let st_orig_push_const_i64:int = 0
+let st_orig_push_void:int = 0
+let st_orig_push_fn_ref:int = 0
+let st_orig_pop_value:int = 0
+let st_orig_save_value:int = 0
+let st_orig_restore_value:int = 0
+let st_orig_unary_op:int = 0
+let st_orig_binary_op:int = 0
+let st_orig_binary_immediate:int = 0
+let st_orig_begin_if:int = 0
+let st_orig_begin_else:int = 0
+let st_orig_end_if:int = 0
+let st_orig_begin_loop:int = 0
+let st_orig_begin_loop_body:int = 0
+let st_orig_end_loop:int = 0
+let st_orig_emit_break:int = 0
+let st_orig_emit_continue:int = 0
+let st_orig_cond_and_split:int = 0
+let st_orig_cond_and_join:int = 0
+let st_orig_cond_or_split:int = 0
+let st_orig_cond_or_join:int = 0
+let st_orig_emit_return:int = 0
+let st_orig_call_direct:int = 0
+let st_orig_call_indirect:int = 0
+let st_orig_emit_intrinsic:int = 0
+let st_orig_function_ref:int = 0
+let st_orig_string_ref:int = 0
+let st_orig_static_ref:int = 0
+
+let st_rec_function_ref = (label_id:int):>int => {
+    let value:int = (@st_orig_function_ref)(label_id)
+    intmap_put(st_refs value label_id)
+    return value
+}
+let st_rec_string_ref = (label_id:int):>int => {
+    let value:int = (@st_orig_string_ref)(label_id)
+    intmap_put(st_refs value label_id)
+    return value
+}
+let st_rec_static_ref = (label_id:int):>int => {
+    let value:int = (@st_orig_static_ref)(label_id)
+    intmap_put(st_refs value label_id)
+    return value
+}
+let st_rec_begin_module = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(1)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_begin_module)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_finish_module = ():>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(2)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_finish_module)()
+    st_depth = st_depth - 1
+    return result
+}
+let st_rec_set_module_init = (name:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(3)
+        st_ostr(name)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_set_module_init)(name)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_set_imported_sources = (paths:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(4)
+        st_u(vec_len(paths))
+        let pi:int = 0
+        loop pi <? vec_len(paths) { st_str(vec_get(paths pi))  pi = pi + 1 }
+    }
+    st_depth = st_depth + 1
+    (@st_orig_set_imported_sources)(paths)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_mark_location = (path:int line:int column:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(5)
+        st_str(path)
+        st_u(line)
+        st_u(column)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_mark_location)(path line column)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_note_local = (slot:int name:int type_name:int formatter:int parameter:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(6)
+        st_u(st_dense(st_rec_slot slot))
+        st_str(name)
+        st_str(type_name)
+        st_ostr(formatter)
+        if parameter { st_u(1) } else { st_u(0) }
+    }
+    st_depth = st_depth + 1
+    (@st_orig_note_local)(slot name type_name formatter parameter)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_begin_scope = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(7)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_begin_scope)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_end_scope = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(8)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_end_scope)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_intern_string = (data:int len:int):>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(9)
+        st_u(len)
+        st_bytes(data len)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_intern_string)(data len)
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_string result)) }
+    return result
+}
+let st_rec_define_global = (name:int kind:int value:int):>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(10)
+        st_ostr(name)
+        st_value(kind value)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_define_global)(name kind value)
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_global result)) }
+    return result
+}
+let st_rec_declare_extern_global = (name:int):>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(11)
+        st_str(name)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_declare_extern_global)(name)
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_global result)) }
+    return result
+}
+let st_rec_intern_static = (size:int):>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(12)
+        st_u(size)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_intern_static)(size)
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_static result)) }
+    return result
+}
+let st_rec_intern_words = (elements:int kinds:int):>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(13)
+        st_u(vec_len(elements))
+        let wi:int = 0
+        loop wi <? vec_len(elements) { st_value(vec_get(kinds wi) vec_get(elements wi))  wi = wi + 1 }
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_intern_words)(elements kinds)
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_static result)) }
+    return result
+}
+let st_rec_push_string_ref = (label:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(14)
+        st_u(st_dense(st_rec_string label))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_push_string_ref)(label)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_push_global_ref = (label:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(15)
+        st_u(st_dense(st_rec_global label))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_push_global_ref)(label)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_push_static_ref = (label:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(16)
+        st_u(st_dense(st_rec_static label))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_push_static_ref)(label)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_load_global = (label:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(17)
+        st_u(st_dense(st_rec_global label))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_load_global)(label)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_store_global = (label:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(18)
+        st_u(st_dense(st_rec_global label))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_store_global)(label)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_declare_function = (name:int num_params:int):>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(19)
+        st_ostr(name)
+        st_u(num_params)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_declare_function)(name num_params)
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_fn result)) }
+    return result
+}
+let st_rec_bind_extern_function = (label:int name:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(20)
+        st_u(st_dense(st_rec_fn label))
+        st_str(name)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_bind_extern_function)(label name)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_declare_extern_function = (name:int num_params:int):>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(21)
+        st_str(name)
+        st_u(num_params)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_declare_extern_function)(name num_params)
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_fn result)) }
+    return result
+}
+let st_rec_begin_function = (label:int name:int param_count:int is_main:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(22)
+        st_u(st_dense(st_rec_fn label))
+        st_ostr(name)
+        st_u(param_count)
+        if is_main { st_u(1) } else { st_u(0) }
+    }
+    st_depth = st_depth + 1
+    (@st_orig_begin_function)(label name param_count is_main)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_end_function = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(23)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_end_function)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_set_reachable_functions = (labels:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(24)
+        st_function_set(labels)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_set_reachable_functions)(labels)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_load_param = (index:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(25)
+        st_u(index)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_load_param)(index)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_alloc_local = ():>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(26)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_alloc_local)()
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_slot result)) }
+    return result
+}
+let st_rec_load_local = (slot:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(27)
+        st_u(st_dense(st_rec_slot slot))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_load_local)(slot)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_store_local = (slot:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(28)
+        st_u(st_dense(st_rec_slot slot))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_store_local)(slot)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_push_const_i64 = (value:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(29)
+        st_s(value)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_push_const_i64)(value)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_push_void = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(30)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_push_void)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_push_fn_ref = (label:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(31)
+        st_u(st_dense(st_rec_fn label))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_push_fn_ref)(label)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_pop_value = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(32)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_pop_value)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_save_value = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(33)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_save_value)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_restore_value = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(34)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_restore_value)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_unary_op = (op_kind:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(35)
+        st_u(op_kind)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_unary_op)(op_kind)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_binary_op = (op_kind:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(36)
+        st_u(op_kind)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_binary_op)(op_kind)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_binary_immediate = (op_kind:int value:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(37)
+        st_u(op_kind)
+        st_s(value)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_binary_immediate)(op_kind value)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_begin_if = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(38)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_begin_if)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_begin_else = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(39)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_begin_else)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_end_if = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(40)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_end_if)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_begin_loop = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(41)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_begin_loop)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_begin_loop_body = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(42)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_begin_loop_body)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_end_loop = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(43)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_end_loop)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_emit_break = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(44)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_emit_break)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_emit_continue = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(45)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_emit_continue)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_cond_and_split = ():>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(46)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_cond_and_split)()
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_cond result)) }
+    return result
+}
+let st_rec_cond_and_join = (label:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(47)
+        st_u(st_dense(st_rec_cond label))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_cond_and_join)(label)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_cond_or_split = ():>int => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(48)
+    }
+    st_depth = st_depth + 1
+    let result:int = (@st_orig_cond_or_split)()
+    st_depth = st_depth - 1
+    if outer { st_u(st_new_dense(st_rec_cond result)) }
+    return result
+}
+let st_rec_cond_or_join = (label:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(49)
+        st_u(st_dense(st_rec_cond label))
+    }
+    st_depth = st_depth + 1
+    (@st_orig_cond_or_join)(label)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_emit_return = ():>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(50)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_emit_return)()
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_call_direct = (label:int num_args:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(51)
+        st_u(st_dense(st_rec_fn label))
+        st_u(num_args)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_call_direct)(label num_args)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_call_indirect = (num_args:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(52)
+        st_u(num_args)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_call_indirect)(num_args)
+    st_depth = st_depth - 1
+    return void
+}
+let st_rec_emit_intrinsic = (name:int num_args:int static_args:int):>void => {
+    let outer:int = st_depth =? 0
+    if outer {
+        st_op(53)
+        st_str(name)
+        st_u(num_args)
+        st_int_pairs(static_args)
+    }
+    st_depth = st_depth + 1
+    (@st_orig_emit_intrinsic)(name num_args static_args)
+    st_depth = st_depth - 1
+    return void
+}
+
+# Start recording: every recorded backend call is written to the stream,
+# which begins with the module's link artifacts.
+let st_install_recorder = (artifacts:int):>void => {
+    st_out = bb_new(1 << 20)
+    st_refs = intmap_new()
+    st_rec_fn = st_space_new()
+    st_rec_global = st_space_new()
+    st_rec_string = st_space_new()
+    st_rec_static = st_space_new()
+    st_rec_slot = st_space_new()
+    st_rec_cond = st_space_new()
+    bb_push_str(st_out "UBC1")
+    let n:int = 0
+    if artifacts not=? 0 { n = vec_len(artifacts) }
+    st_u(n)
+    let ai:int = 0
+    loop ai <? n { st_str(vec_get(artifacts ai))  ai = ai + 1 }
+    st_orig_function_ref = be_function_ref
+    be_function_ref = @st_rec_function_ref
+    st_orig_string_ref = be_string_ref
+    be_string_ref = @st_rec_string_ref
+    st_orig_static_ref = be_static_ref
+    be_static_ref = @st_rec_static_ref
+    st_orig_begin_module = be_begin_module
+    be_begin_module = @st_rec_begin_module
+    st_orig_finish_module = be_finish_module
+    be_finish_module = @st_rec_finish_module
+    st_orig_set_module_init = be_set_module_init
+    be_set_module_init = @st_rec_set_module_init
+    st_orig_set_imported_sources = be_set_imported_sources
+    be_set_imported_sources = @st_rec_set_imported_sources
+    st_orig_mark_location = be_mark_location
+    be_mark_location = @st_rec_mark_location
+    st_orig_note_local = be_note_local
+    be_note_local = @st_rec_note_local
+    st_orig_begin_scope = be_begin_scope
+    be_begin_scope = @st_rec_begin_scope
+    st_orig_end_scope = be_end_scope
+    be_end_scope = @st_rec_end_scope
+    st_orig_intern_string = be_intern_string
+    be_intern_string = @st_rec_intern_string
+    st_orig_define_global = be_define_global
+    be_define_global = @st_rec_define_global
+    st_orig_declare_extern_global = be_declare_extern_global
+    be_declare_extern_global = @st_rec_declare_extern_global
+    st_orig_intern_static = be_intern_static
+    be_intern_static = @st_rec_intern_static
+    st_orig_intern_words = be_intern_words
+    be_intern_words = @st_rec_intern_words
+    st_orig_push_string_ref = be_push_string_ref
+    be_push_string_ref = @st_rec_push_string_ref
+    st_orig_push_global_ref = be_push_global_ref
+    be_push_global_ref = @st_rec_push_global_ref
+    st_orig_push_static_ref = be_push_static_ref
+    be_push_static_ref = @st_rec_push_static_ref
+    st_orig_load_global = be_load_global
+    be_load_global = @st_rec_load_global
+    st_orig_store_global = be_store_global
+    be_store_global = @st_rec_store_global
+    st_orig_declare_function = be_declare_function
+    be_declare_function = @st_rec_declare_function
+    st_orig_bind_extern_function = be_bind_extern_function
+    be_bind_extern_function = @st_rec_bind_extern_function
+    st_orig_declare_extern_function = be_declare_extern_function
+    be_declare_extern_function = @st_rec_declare_extern_function
+    st_orig_begin_function = be_begin_function
+    be_begin_function = @st_rec_begin_function
+    st_orig_end_function = be_end_function
+    be_end_function = @st_rec_end_function
+    st_orig_set_reachable_functions = be_set_reachable_functions
+    be_set_reachable_functions = @st_rec_set_reachable_functions
+    st_orig_load_param = be_load_param
+    be_load_param = @st_rec_load_param
+    st_orig_alloc_local = be_alloc_local
+    be_alloc_local = @st_rec_alloc_local
+    st_orig_load_local = be_load_local
+    be_load_local = @st_rec_load_local
+    st_orig_store_local = be_store_local
+    be_store_local = @st_rec_store_local
+    st_orig_push_const_i64 = be_push_const_i64
+    be_push_const_i64 = @st_rec_push_const_i64
+    st_orig_push_void = be_push_void
+    be_push_void = @st_rec_push_void
+    st_orig_push_fn_ref = be_push_fn_ref
+    be_push_fn_ref = @st_rec_push_fn_ref
+    st_orig_pop_value = be_pop_value
+    be_pop_value = @st_rec_pop_value
+    st_orig_save_value = be_save_value
+    be_save_value = @st_rec_save_value
+    st_orig_restore_value = be_restore_value
+    be_restore_value = @st_rec_restore_value
+    st_orig_unary_op = be_unary_op
+    be_unary_op = @st_rec_unary_op
+    st_orig_binary_op = be_binary_op
+    be_binary_op = @st_rec_binary_op
+    st_orig_binary_immediate = be_binary_immediate
+    be_binary_immediate = @st_rec_binary_immediate
+    st_orig_begin_if = be_begin_if
+    be_begin_if = @st_rec_begin_if
+    st_orig_begin_else = be_begin_else
+    be_begin_else = @st_rec_begin_else
+    st_orig_end_if = be_end_if
+    be_end_if = @st_rec_end_if
+    st_orig_begin_loop = be_begin_loop
+    be_begin_loop = @st_rec_begin_loop
+    st_orig_begin_loop_body = be_begin_loop_body
+    be_begin_loop_body = @st_rec_begin_loop_body
+    st_orig_end_loop = be_end_loop
+    be_end_loop = @st_rec_end_loop
+    st_orig_emit_break = be_emit_break
+    be_emit_break = @st_rec_emit_break
+    st_orig_emit_continue = be_emit_continue
+    be_emit_continue = @st_rec_emit_continue
+    st_orig_cond_and_split = be_cond_and_split
+    be_cond_and_split = @st_rec_cond_and_split
+    st_orig_cond_and_join = be_cond_and_join
+    be_cond_and_join = @st_rec_cond_and_join
+    st_orig_cond_or_split = be_cond_or_split
+    be_cond_or_split = @st_rec_cond_or_split
+    st_orig_cond_or_join = be_cond_or_join
+    be_cond_or_join = @st_rec_cond_or_join
+    st_orig_emit_return = be_emit_return
+    be_emit_return = @st_rec_emit_return
+    st_orig_call_direct = be_call_direct
+    be_call_direct = @st_rec_call_direct
+    st_orig_call_indirect = be_call_indirect
+    be_call_indirect = @st_rec_call_indirect
+    st_orig_emit_intrinsic = be_emit_intrinsic
+    be_emit_intrinsic = @st_rec_emit_intrinsic
+    return void
+}
+
+let st_write = (path:int):>void => {
+    fs_write_file(path_to_cstr(path) bb_data(st_out) bb_len(st_out))
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Player
+# ----------------------------------------------------------------------------
+
+let st_fail = (message:int):>void => {
+    eprint("error: µDewy bytecode: ")
+    eprintl(message)
+    host_exit(1)
+    return void
+}
+let st_read_byte = ():>int => {
+    if st_pos >=? st_len { st_fail("truncated stream") }
+    let b:int = __load_u8__(st_data + st_pos)
+    st_pos = st_pos + 1
+    return b
+}
+let st_read_u = ():>int => {
+    let value:int = 0
+    let shift:int = 0
+    loop true {
+        let b:int = st_read_byte()
+        value = value or ((b and 127) << shift)
+        if (b and 128) =? 0 { return value }
+        shift = shift + 7
+    }
+    return value
+}
+let st_read_s = ():>int => {
+    let z:int = st_read_u()
+    return (z >> 1) xor (0 - (z and 1))
+}
+let st_read_str = ():>int => {
+    let n:int = st_read_u()
+    if st_pos + n >? st_len { st_fail("truncated stream") }
+    let bb:int = bb_new(n + 1)
+    bb_push_bytes(bb st_data + st_pos n)
+    st_pos = st_pos + n
+    return bb_finalize_as_string(bb)
+}
+let st_read_ostr = ():>int => {
+    let n:int = st_read_u()
+    if n =? 0 { return 0 }
+    if st_pos + n - 1 >? st_len { st_fail("truncated stream") }
+    let bb:int = bb_new(n)
+    bb_push_bytes(bb st_data + st_pos n - 1)
+    st_pos = st_pos + n - 1
+    return bb_finalize_as_string(bb)
+}
+let st_lookup = (map:int recorded:int):>int => {
+    let live:int = intmap_get(map recorded)
+    if live =? IM_MISSING { st_fail("an id used before it was created") }
+    return live
+}
+# A stable value's payload: an integer, or the live backend reference for
+# the recorded function, string or static id.
+let st_read_value = (kind:int):>int => {
+    if kind =? ST_SV_INT { return st_read_s() }
+    let recorded:int = st_read_u()
+    if kind =? 2 { return (@be_function_ref)(st_lookup(st_fn_map recorded)) }
+    if kind =? 3 { return (@be_string_ref)(st_lookup(st_string_map recorded)) }
+    if kind =? 4 { return (@be_static_ref)(st_lookup(st_static_map recorded)) }
+    st_fail("unknown stable value kind")
+    return 0
+}
+
+# The link artifacts at the head of a stream (a vec of paths).
+let st_open = (data:int len:int):>int => {
+    st_data = data
+    st_len = len
+    st_pos = 0
+    if len <? 4 or __load_u8__(data) not=? 85 or __load_u8__(data + 1) not=? 66 or __load_u8__(data + 2) not=? 67 or __load_u8__(data + 3) not=? 49 {
+        st_fail("not a UBC1 stream")
+    }
+    st_pos = 4
+    let count:int = st_read_u()
+    let artifacts:int = vec_new(count + 1)
+    let ai:int = 0
+    loop ai <? count { vec_push(artifacts st_read_str())  ai = ai + 1 }
+    st_fn_map = intmap_new()
+    st_global_map = intmap_new()
+    st_string_map = intmap_new()
+    st_static_map = intmap_new()
+    st_slot_map = intmap_new()
+    st_cond_map = intmap_new()
+    return artifacts
+}
+
+# Replay the operations after `st_open`; returns finish_module's result.
+let st_play = ():>int => {
+    loop true {
+        let op:int = st_read_byte()
+        if op =? 1 {
+            (@be_begin_module)()
+            continue
+        }
+        if op =? 2 {
+            return (@be_finish_module)()
+        }
+        if op =? 3 {
+            let name:int = st_read_ostr()
+            (@be_set_module_init)(name)
+            continue
+        }
+        if op =? 4 {
+            let count:int = st_read_u()
+            let paths:int = vec_new(count + 1)
+            let pi:int = 0
+            loop pi <? count { vec_push(paths st_read_str())  pi = pi + 1 }
+            (@be_set_imported_sources)(paths)
+            continue
+        }
+        if op =? 5 {
+            let path:int = st_read_str()
+            let line:int = st_read_u()
+            let column:int = st_read_u()
+            (@be_mark_location)(path line column)
+            continue
+        }
+        if op =? 6 {
+            let slot:int = st_lookup(st_slot_map st_read_u())
+            let name:int = st_read_str()
+            let type_name:int = st_read_str()
+            let formatter:int = st_read_ostr()
+            let parameter:int = 0
+            if st_read_u() not=? 0 { parameter = true }
+            (@be_note_local)(slot name type_name formatter parameter)
+            continue
+        }
+        if op =? 7 {
+            (@be_begin_scope)()
+            continue
+        }
+        if op =? 8 {
+            (@be_end_scope)()
+            continue
+        }
+        if op =? 9 {
+            let len:int = st_read_u()
+            let data:int = st_data + st_pos
+            st_pos = st_pos + len
+            let live:int = (@be_intern_string)(data len)
+            intmap_put(st_string_map st_read_u() live)
+            continue
+        }
+        if op =? 10 {
+            let name:int = st_read_ostr()
+            let kind:int = st_read_u()
+            let value:int = st_read_value(kind)
+            let live:int = (@be_define_global)(name kind value)
+            intmap_put(st_global_map st_read_u() live)
+            continue
+        }
+        if op =? 11 {
+            let name:int = st_read_str()
+            let live:int = (@be_declare_extern_global)(name)
+            intmap_put(st_global_map st_read_u() live)
+            continue
+        }
+        if op =? 12 {
+            let size:int = st_read_u()
+            let live:int = (@be_intern_static)(size)
+            intmap_put(st_static_map st_read_u() live)
+            continue
+        }
+        if op =? 13 {
+            let count:int = st_read_u()
+            let elements:int = vec_new(count + 1)
+            let kinds:int = vec_new(count + 1)
+            let wi:int = 0
+            loop wi <? count {
+                let word_kind:int = st_read_u()
+                vec_push(kinds word_kind)
+                vec_push(elements st_read_value(word_kind))
+                wi = wi + 1
+            }
+            let live:int = (@be_intern_words)(elements kinds)
+            intmap_put(st_static_map st_read_u() live)
+            continue
+        }
+        if op =? 14 {
+            let label:int = st_lookup(st_string_map st_read_u())
+            (@be_push_string_ref)(label)
+            continue
+        }
+        if op =? 15 {
+            let label:int = st_lookup(st_global_map st_read_u())
+            (@be_push_global_ref)(label)
+            continue
+        }
+        if op =? 16 {
+            let label:int = st_lookup(st_static_map st_read_u())
+            (@be_push_static_ref)(label)
+            continue
+        }
+        if op =? 17 {
+            let label:int = st_lookup(st_global_map st_read_u())
+            (@be_load_global)(label)
+            continue
+        }
+        if op =? 18 {
+            let label:int = st_lookup(st_global_map st_read_u())
+            (@be_store_global)(label)
+            continue
+        }
+        if op =? 19 {
+            let name:int = st_read_ostr()
+            let num_params:int = st_read_u()
+            let live:int = (@be_declare_function)(name num_params)
+            intmap_put(st_fn_map st_read_u() live)
+            continue
+        }
+        if op =? 20 {
+            let label:int = st_lookup(st_fn_map st_read_u())
+            let name:int = st_read_str()
+            (@be_bind_extern_function)(label name)
+            continue
+        }
+        if op =? 21 {
+            let name:int = st_read_str()
+            let num_params:int = st_read_u()
+            let live:int = (@be_declare_extern_function)(name num_params)
+            intmap_put(st_fn_map st_read_u() live)
+            continue
+        }
+        if op =? 22 {
+            let label:int = st_lookup(st_fn_map st_read_u())
+            let name:int = st_read_ostr()
+            let param_count:int = st_read_u()
+            let is_main:int = 0
+            if st_read_u() not=? 0 { is_main = true }
+            (@be_begin_function)(label name param_count is_main)
+            continue
+        }
+        if op =? 23 {
+            (@be_end_function)()
+            continue
+        }
+        if op =? 24 {
+            let count:int = st_read_u()
+            let labels:int = intset_new()
+            let pi:int = 0
+            loop pi <? count { intset_add(labels st_lookup(st_fn_map st_read_u()))  pi = pi + 1 }
+            (@be_set_reachable_functions)(labels)
+            continue
+        }
+        if op =? 25 {
+            let index:int = st_read_u()
+            (@be_load_param)(index)
+            continue
+        }
+        if op =? 26 {
+            let live:int = (@be_alloc_local)()
+            intmap_put(st_slot_map st_read_u() live)
+            continue
+        }
+        if op =? 27 {
+            let slot:int = st_lookup(st_slot_map st_read_u())
+            (@be_load_local)(slot)
+            continue
+        }
+        if op =? 28 {
+            let slot:int = st_lookup(st_slot_map st_read_u())
+            (@be_store_local)(slot)
+            continue
+        }
+        if op =? 29 {
+            let value:int = st_read_s()
+            (@be_push_const_i64)(value)
+            continue
+        }
+        if op =? 30 {
+            (@be_push_void)()
+            continue
+        }
+        if op =? 31 {
+            let label:int = st_lookup(st_fn_map st_read_u())
+            (@be_push_fn_ref)(label)
+            continue
+        }
+        if op =? 32 {
+            (@be_pop_value)()
+            continue
+        }
+        if op =? 33 {
+            (@be_save_value)()
+            continue
+        }
+        if op =? 34 {
+            (@be_restore_value)()
+            continue
+        }
+        if op =? 35 {
+            let op_kind:int = st_read_u()
+            (@be_unary_op)(op_kind)
+            continue
+        }
+        if op =? 36 {
+            let op_kind:int = st_read_u()
+            (@be_binary_op)(op_kind)
+            continue
+        }
+        if op =? 37 {
+            let op_kind:int = st_read_u()
+            let value:int = st_read_s()
+            (@be_binary_immediate)(op_kind value)
+            continue
+        }
+        if op =? 38 {
+            (@be_begin_if)()
+            continue
+        }
+        if op =? 39 {
+            (@be_begin_else)()
+            continue
+        }
+        if op =? 40 {
+            (@be_end_if)()
+            continue
+        }
+        if op =? 41 {
+            (@be_begin_loop)()
+            continue
+        }
+        if op =? 42 {
+            (@be_begin_loop_body)()
+            continue
+        }
+        if op =? 43 {
+            (@be_end_loop)()
+            continue
+        }
+        if op =? 44 {
+            (@be_emit_break)()
+            continue
+        }
+        if op =? 45 {
+            (@be_emit_continue)()
+            continue
+        }
+        if op =? 46 {
+            let live:int = (@be_cond_and_split)()
+            intmap_put(st_cond_map st_read_u() live)
+            continue
+        }
+        if op =? 47 {
+            let label:int = st_lookup(st_cond_map st_read_u())
+            (@be_cond_and_join)(label)
+            continue
+        }
+        if op =? 48 {
+            let live:int = (@be_cond_or_split)()
+            intmap_put(st_cond_map st_read_u() live)
+            continue
+        }
+        if op =? 49 {
+            let label:int = st_lookup(st_cond_map st_read_u())
+            (@be_cond_or_join)(label)
+            continue
+        }
+        if op =? 50 {
+            (@be_emit_return)()
+            continue
+        }
+        if op =? 51 {
+            let label:int = st_lookup(st_fn_map st_read_u())
+            let num_args:int = st_read_u()
+            (@be_call_direct)(label num_args)
+            continue
+        }
+        if op =? 52 {
+            let num_args:int = st_read_u()
+            (@be_call_indirect)(num_args)
+            continue
+        }
+        if op =? 53 {
+            let name:int = st_read_str()
+            let num_args:int = st_read_u()
+            let count:int = st_read_u()
+            let static_args:int = intmap_new()
+            let pi:int = 0
+            loop pi <? count {
+                let index:int = st_read_u()
+                intmap_put(static_args index st_read_s())
+                pi = pi + 1
+            }
+            (@be_emit_intrinsic)(name num_args static_args)
+            continue
+        }
+        st_fail("unknown operation")
+    }
+    return 0
+}

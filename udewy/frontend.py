@@ -3,6 +3,7 @@ from .backend import Backend, BackendName, get_backend
 from .backend.common import RunOptions
 from .cache import cache_layout
 from .compilation import compiler_allocation_scope
+from .stream import Recorder, Stream
 import os
 from pathlib import Path
 from dataclasses import dataclass
@@ -44,13 +45,28 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
     # build; the direct path does not write debug metadata yet.
     backend.debug_info = options.debug_info and not (
         options.target == 'x86_64' and os.environ.get('UDEWY_OBJECT') == 'direct')
-    loaded = t0.load_program(input_file, target_backend=options.target)
-    backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
-    if generate is None:
-        toks = t1.tokenize(loaded.source)
-        asm = p0.parse(toks, loaded.source, backend, source_path=str(Path(input_file).resolve()))
+    if Path(input_file).suffix == '.ubc':
+        # µDewy bytecode (udewy/BYTECODE.md): replay the recorded backend
+        # calls; no tokenizing or parsing.
+        stream = Stream(Path(input_file).read_bytes())
+        asm = stream.play(backend)
+        link_artifacts = stream.link_artifacts
+        imported_sources = [str(path) for path in stream.imported_sources]
     else:
-        asm = generate(backend)
+        loaded = t0.load_program(input_file, target_backend=options.target)
+        link_artifacts = loaded.link_artifacts
+        imported_sources = loaded.imported_sources
+        # UDEWY_RECORD=path also writes the module's bytecode to `path`.
+        record_path = os.environ.get('UDEWY_RECORD')
+        target = Recorder(backend, link_artifacts) if record_path else backend
+        target.set_imported_sources([Path(path) for path in loaded.imported_sources])
+        if generate is None:
+            toks = t1.tokenize(loaded.source)
+            asm = p0.parse(toks, loaded.source, target, source_path=str(Path(input_file).resolve()))
+        else:
+            asm = generate(target)
+        if record_path:
+            Path(record_path).write_bytes(target.stream())
 
     
     cache_dir, input_name = cache_layout(input_file)
@@ -62,8 +78,8 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
         input_name,
         cache_dir,
         split_wasm=options.split_wasm,
-        link_artifacts=loaded.link_artifacts,
-        imported_sources=loaded.imported_sources,
+        link_artifacts=link_artifacts,
+        imported_sources=imported_sources,
     )
 
     
@@ -75,7 +91,7 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
         split_wasm=options.split_wasm,
         serve_wasm=options.serve_wasm,
         input_file=input_file,
-        link_artifacts=[Path(path) for path in loaded.link_artifacts],
+        link_artifacts=[Path(path) for path in link_artifacts],
     )
     exit_code = backend.run(output_path, script_args, run_options)
     if exit_code is not None:
