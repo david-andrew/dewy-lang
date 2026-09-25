@@ -1,0 +1,378 @@
+# ELF64 relocatable object files, written without an assembler.
+#
+# The direct-object backends encode their instructions themselves and hand
+# the bytes to this writer: named sections with flags and alignment, a
+# symbol table, and RELA relocations. `ld` still links the result.
+# Mirrors udewy/backend/elf.py (see ROADMAP "Direct binary fast path").
+
+import p"../runtime/runtime.udewy"
+
+const ELF_SHT_PROGBITS:int = 1
+const ELF_SHT_SYMTAB:int = 2
+const ELF_SHT_STRTAB:int = 3
+const ELF_SHT_RELA:int = 4
+const ELF_SHT_NOBITS:int = 8
+
+const ELF_SHF_WRITE:int = 1
+const ELF_SHF_ALLOC:int = 2
+const ELF_SHF_EXECINSTR:int = 4
+const ELF_SHF_INFO_LINK:int = 64
+const ELF_SHF_GNU_RETAIN:int = 2097152
+
+const ELF_STB_LOCAL:int = 0
+const ELF_STB_GLOBAL:int = 1
+const ELF_STB_WEAK:int = 2
+const ELF_STT_SECTION:int = 3
+const ELF_STV_HIDDEN:int = 2
+const ELF_OSABI_GNU:int = 3
+
+const ELF_EM_X86_64:int = 62
+
+# ----------------------------------------------------------------------------
+# One object at a time: sections, symbols and relocations in flat vectors.
+# ----------------------------------------------------------------------------
+#
+# Section i: name (string), kind, flags, data (byte buffer; 0 for NOBITS),
+# NOBITS size, alignment, relocations (vec of 4 words per entry: offset,
+# kind, symbol index, addend).
+let elf_machine:int = 0
+let elf_section_names:int = 0
+let elf_section_kinds:int = 0
+let elf_section_flags:int = 0
+let elf_section_data:int = 0
+let elf_section_sizes:int = 0
+let elf_section_aligns:int = 0
+let elf_section_relocs:int = 0
+let elf_section_map:int = 0
+# Symbol i: name pointer and length (a slice of the assembly text or any
+# other stable string), section index (-1 when undefined), value, binding,
+# visibility.
+let elf_symbol_ptrs:int = 0
+let elf_symbol_lens:int = 0
+let elf_symbol_sections:int = 0
+let elf_symbol_values:int = 0
+let elf_symbol_bindings:int = 0
+let elf_symbol_visibility:int = 0
+let elf_symbol_map:int = 0
+
+let elf_begin = (machine:int):>void => {
+    elf_machine = machine
+    elf_section_names = vec_new(64)
+    elf_section_kinds = vec_new(64)
+    elf_section_flags = vec_new(64)
+    elf_section_data = vec_new(64)
+    elf_section_sizes = vec_new(64)
+    elf_section_aligns = vec_new(64)
+    elf_section_relocs = vec_new(64)
+    elf_section_map = map_new()
+    elf_symbol_ptrs = vec_new(1024)
+    elf_symbol_lens = vec_new(1024)
+    elf_symbol_sections = vec_new(1024)
+    elf_symbol_values = vec_new(1024)
+    elf_symbol_bindings = vec_new(1024)
+    elf_symbol_visibility = vec_new(1024)
+    elf_symbol_map = map_new()
+    return void
+}
+
+# The index of section `name` (ptr/len), created with `kind` and `flags`
+# the first time it is named.
+let elf_section = (name:int name_len:int kind:int flags:int):>int => {
+    let found:int = map_get(elf_section_map name name_len)
+    if found not=? MAP_MISSING { return found }
+    let index:int = vec_len(elf_section_names)
+    let copy:int = bb_new(name_len + 1)
+    bb_push_bytes(copy name name_len)
+    let stored:int = bb_finalize_as_string(copy)
+    vec_push(elf_section_names stored)
+    vec_push(elf_section_kinds kind)
+    vec_push(elf_section_flags flags)
+    if kind =? ELF_SHT_NOBITS { vec_push(elf_section_data 0) } else { vec_push(elf_section_data bb_new(256)) }
+    vec_push(elf_section_sizes 0)
+    vec_push(elf_section_aligns 1)
+    vec_push(elf_section_relocs 0)
+    map_put(elf_section_map stored name_len index)
+    return index
+}
+
+let elf_section_length = (index:int):>int => {
+    let data:int = vec_get(elf_section_data index)
+    if data =? 0 { return vec_get(elf_section_sizes index) }
+    return bb_len(data)
+}
+
+# The index of symbol `name` (ptr/len); a new symbol is local and undefined.
+let elf_symbol = (name:int name_len:int):>int => {
+    let found:int = map_get(elf_symbol_map name name_len)
+    if found not=? MAP_MISSING { return found }
+    let index:int = vec_len(elf_symbol_ptrs)
+    vec_push(elf_symbol_ptrs name)
+    vec_push(elf_symbol_lens name_len)
+    vec_push(elf_symbol_sections (0 - 1))
+    vec_push(elf_symbol_values 0)
+    vec_push(elf_symbol_bindings ELF_STB_LOCAL)
+    vec_push(elf_symbol_visibility 0)
+    map_put(elf_symbol_map name name_len index)
+    return index
+}
+
+let elf_add_relocation = (section:int offset:int kind:int symbol:int addend:int):>void => {
+    let relocs:int = vec_get(elf_section_relocs section)
+    if relocs =? 0 {
+        relocs = vec_new(16)
+        vec_set(elf_section_relocs section relocs)
+    }
+    vec_push(relocs offset)
+    vec_push(relocs kind)
+    vec_push(relocs symbol)
+    vec_push(relocs addend)
+    return void
+}
+
+# `.L` labels are assembler temporaries: never in the symbol table.
+let elf_is_temporary = (symbol:int):>int => {
+    if vec_get(elf_symbol_lens symbol) <? 2 { return false }
+    let name:int = vec_get(elf_symbol_ptrs symbol)
+    return __load_u8__(name) =? 46 and __load_u8__(name + 1) =? 76
+}
+
+let elf_push_u16 = (bb:int v:int):>void => {
+    bb_push_byte(bb v and 255)
+    bb_push_byte(bb (v >> 8) and 255)
+    return void
+}
+let elf_push_u32 = (bb:int v:int):>void => {
+    bb_push_byte(bb v and 255)
+    bb_push_byte(bb (v >> 8) and 255)
+    bb_push_byte(bb (v >> 16) and 255)
+    bb_push_byte(bb (v >> 24) and 255)
+    return void
+}
+let elf_push_u64 = (bb:int v:int):>void => {
+    elf_push_u32(bb v and 4294967295)
+    elf_push_u32(bb v >> 32)
+    return void
+}
+let elf_pad = (bb:int align:int):>void => {
+    if align <=? 1 { return void }
+    loop bb_len(bb) % align not=? 0 { bb_push_byte(bb 0) }
+    return void
+}
+let elf_section_header = (headers:int name:int kind:int flags:int offset:int size:int link:int info:int align:int entsize:int):>void => {
+    elf_push_u32(headers name)
+    elf_push_u32(headers kind)
+    elf_push_u64(headers flags)
+    elf_push_u64(headers 0)
+    elf_push_u64(headers offset)
+    elf_push_u64(headers size)
+    elf_push_u32(headers link)
+    elf_push_u32(headers info)
+    elf_push_u64(headers align)
+    elf_push_u64(headers entsize)
+    return void
+}
+let elf_symbol_entry = (symtab:int name:int info:int other:int shndx:int value:int):>void => {
+    elf_push_u32(symtab name)
+    bb_push_byte(symtab info)
+    bb_push_byte(symtab other)
+    elf_push_u16(symtab shndx)
+    elf_push_u64(symtab value)
+    elf_push_u64(symtab 0)
+    return void
+}
+# Append `name` (ptr/len) and a NUL to a string table; its offset.
+let elf_string = (table:int name:int name_len:int):>int => {
+    let offset:int = bb_len(table)
+    bb_push_bytes(table name name_len)
+    bb_push_byte(table 0)
+    return offset
+}
+
+# The object file: ELF header, section contents, relocation tables, symbol
+# and string tables, then the section headers. Returns a byte buffer.
+let elf_write = ():>int => {
+    let section_count:int = vec_len(elf_section_names)
+    let symbol_count:int = vec_len(elf_symbol_ptrs)
+    # A relocation target defined nowhere here is an undefined global.
+    let si:int = 0
+    loop si <? section_count {
+        let relocs:int = vec_get(elf_section_relocs si)
+        if relocs not=? 0 {
+            let ri:int = 0
+            loop ri <? vec_len(relocs) {
+                let target:int = vec_get(relocs ri + 2)
+                if vec_get(elf_symbol_sections target) <? 0 and vec_get(elf_symbol_bindings target) =? ELF_STB_LOCAL {
+                    vec_set(elf_symbol_bindings target ELF_STB_GLOBAL)
+                }
+                ri = ri + 4
+            }
+        }
+        si = si + 1
+    }
+    # Symbol table order: null, one section symbol per section, defined
+    # locals, then globals, weak and undefined symbols.
+    # Presize every buffer: a 20 MB object must not grow by doubling.
+    let names_size:int = 16
+    let relocation_count:int = 0
+    let contents_size:int = 0
+    si = 0
+    loop si <? symbol_count {
+        names_size = names_size + vec_get(elf_symbol_lens si) + 1
+        si = si + 1
+    }
+    si = 0
+    loop si <? section_count {
+        let relocs:int = vec_get(elf_section_relocs si)
+        if relocs not=? 0 { relocation_count = relocation_count + vec_len(relocs) // 4 }
+        let data:int = vec_get(elf_section_data si)
+        if data not=? 0 { contents_size = contents_size + bb_len(data) + vec_get(elf_section_aligns si) }
+        si = si + 1
+    }
+    let strtab:int = bb_new(names_size)
+    bb_push_byte(strtab 0)
+    let symtab:int = bb_new((symbol_count + section_count + 1) * 24)
+    elf_symbol_entry(symtab 0 0 0 0 0)
+    si = 0
+    loop si <? section_count {
+        elf_symbol_entry(symtab 0 ELF_STT_SECTION 0 si + 1 0)
+        si = si + 1
+    }
+    let table_index:int = vec_new(symbol_count + 1)
+    vec_set_len(table_index symbol_count)
+    let pass:int = 0
+    let first_global:int = 0
+    loop pass <? 2 {
+        if pass =? 1 { first_global = bb_len(symtab) // 24 }
+        let yi:int = 0
+        loop yi <? symbol_count {
+            let section:int = vec_get(elf_symbol_sections yi)
+            let binding:int = vec_get(elf_symbol_bindings yi)
+            let local:int = binding =? ELF_STB_LOCAL and section >=? 0
+            let wanted:int = false
+            if pass =? 0 { wanted = local } else { wanted = not local }
+            if wanted and not elf_is_temporary(yi) {
+                vec_set(table_index yi bb_len(symtab) // 24)
+                let name:int = elf_string(strtab vec_get(elf_symbol_ptrs yi) vec_get(elf_symbol_lens yi))
+                let shndx:int = 0
+                if section >=? 0 { shndx = section + 1 }
+                elf_symbol_entry(symtab name binding << 4 vec_get(elf_symbol_visibility yi) shndx vec_get(elf_symbol_values yi))
+            }
+            yi = yi + 1
+        }
+        pass = pass + 1
+    }
+
+    let shstrtab_size:int = 64
+    si = 0
+    loop si <? section_count {
+        shstrtab_size = shstrtab_size + 2 * str_len(vec_get(elf_section_names si)) + 8
+        si = si + 1
+    }
+    let out:int = bb_new(64 + contents_size + relocation_count * 24 + bb_len(symtab) + bb_len(strtab) + shstrtab_size + (section_count * 2 + 8) * 64 + 64)
+    zero_bytes(bb_data(out) 64)
+    __store__(64 out + BB_OFF_LEN)
+    let shstrtab:int = bb_new(shstrtab_size)
+    bb_push_byte(shstrtab 0)
+    let headers:int = bb_new((section_count * 2 + 8) * 64)
+    elf_section_header(headers 0 0 0 0 0 0 0 0 0)
+    let gnu:int = false
+    si = 0
+    loop si <? section_count {
+        let name_str:int = vec_get(elf_section_names si)
+        let name:int = elf_string(shstrtab name_str str_len(name_str))
+        let kind:int = vec_get(elf_section_kinds si)
+        let flags:int = vec_get(elf_section_flags si)
+        if (flags and ELF_SHF_GNU_RETAIN) not=? 0 { gnu = true }
+        let align:int = vec_get(elf_section_aligns si)
+        let offset:int = bb_len(out)
+        let size:int = 0
+        if kind =? ELF_SHT_NOBITS {
+            size = vec_get(elf_section_sizes si)
+        } else {
+            elf_pad(out align)
+            offset = bb_len(out)
+            let data:int = vec_get(elf_section_data si)
+            size = bb_len(data)
+            bb_push_bytes(out bb_data(data) size)
+        }
+        elf_section_header(headers name kind flags offset size 0 0 align 0)
+        si = si + 1
+    }
+    # Relocation tables. A reference to a local label goes through its
+    # section symbol, with the label's offset folded into the addend.
+    let relocation_tables:int = 0
+    si = 0
+    loop si <? section_count {
+        if vec_get(elf_section_relocs si) not=? 0 { relocation_tables = relocation_tables + 1 }
+        si = si + 1
+    }
+    let symtab_header:int = 1 + section_count + relocation_tables
+    si = 0
+    loop si <? section_count {
+        let relocs:int = vec_get(elf_section_relocs si)
+        if relocs not=? 0 {
+            elf_pad(out 8)
+            let offset:int = bb_len(out)
+            let ri:int = 0
+            loop ri <? vec_len(relocs) {
+                let target:int = vec_get(relocs ri + 2)
+                let addend:int = vec_get(relocs ri + 3)
+                let entry:int = 0
+                let target_section:int = vec_get(elf_symbol_sections target)
+                if target_section >=? 0 and vec_get(elf_symbol_bindings target) =? ELF_STB_LOCAL {
+                    entry = target_section + 1
+                    addend = addend + vec_get(elf_symbol_values target)
+                } else {
+                    entry = vec_get(table_index target)
+                }
+                elf_push_u64(out vec_get(relocs ri))
+                elf_push_u64(out (entry << 32) or vec_get(relocs ri + 1))
+                elf_push_u64(out addend)
+                ri = ri + 4
+            }
+            let section_name:int = vec_get(elf_section_names si)
+            let rela_name:int = bb_len(shstrtab)
+            bb_push_str(shstrtab ".rela")
+            bb_push_bytes(shstrtab section_name str_len(section_name))
+            bb_push_byte(shstrtab 0)
+            elf_section_header(headers rela_name ELF_SHT_RELA ELF_SHF_INFO_LINK offset bb_len(out) - offset symtab_header si + 1 8 24)
+        }
+        si = si + 1
+    }
+    elf_pad(out 8)
+    let symtab_offset:int = bb_len(out)
+    bb_push_bytes(out bb_data(symtab) bb_len(symtab))
+    elf_section_header(headers elf_string(shstrtab ".symtab" 7) ELF_SHT_SYMTAB 0 symtab_offset bb_len(symtab) symtab_header + 1 first_global 8 24)
+    let strtab_offset:int = bb_len(out)
+    bb_push_bytes(out bb_data(strtab) bb_len(strtab))
+    elf_section_header(headers elf_string(shstrtab ".strtab" 7) ELF_SHT_STRTAB 0 strtab_offset bb_len(strtab) 0 0 1 0)
+    let shstrtab_name:int = elf_string(shstrtab ".shstrtab" 9)
+    let shstrtab_offset:int = bb_len(out)
+    bb_push_bytes(out bb_data(shstrtab) bb_len(shstrtab))
+    elf_section_header(headers shstrtab_name ELF_SHT_STRTAB 0 shstrtab_offset bb_len(shstrtab) 0 0 1 0)
+    let header_count:int = symtab_header + 3
+    elf_pad(out 8)
+    let header_offset:int = bb_len(out)
+    bb_push_bytes(out bb_data(headers) bb_len(headers))
+
+    # The ELF header. SHF_GNU_RETAIN is a GNU extension: an object using it
+    # declares the GNU OS/ABI, as gas does, or `ld --gc-sections` ignores it.
+    let h:int = bb_data(out)
+    __store_u8__(127 h)
+    __store_u8__(69 h + 1)
+    __store_u8__(76 h + 2)
+    __store_u8__(70 h + 3)
+    __store_u8__(2 h + 4)
+    __store_u8__(1 h + 5)
+    __store_u8__(1 h + 6)
+    if gnu { __store_u8__(ELF_OSABI_GNU h + 7) }
+    __store_u16__(1 h + 16)
+    __store_u16__(elf_machine h + 18)
+    __store_u32__(1 h + 20)
+    __store_u64__(header_offset h + 40)
+    __store_u16__(64 h + 52)
+    __store_u16__(64 h + 58)
+    __store_u16__(header_count h + 60)
+    __store_u16__(header_count - 1 h + 62)
+    return out
+}

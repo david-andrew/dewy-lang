@@ -3,6 +3,7 @@ from .backend import Backend, BackendName, get_backend
 from .backend.common import RunOptions
 from .cache import cache_layout
 from .compilation import compiler_allocation_scope
+import os
 from pathlib import Path
 from dataclasses import dataclass
 from collections.abc import Callable
@@ -39,7 +40,10 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
 
     # possible raise SyntaxError
     backend = get_backend(options.target)
-    backend.debug_info = options.debug_info
+    # UDEWY_OBJECT=direct writes x86-64 objects without `as` for every
+    # build; the direct path does not write debug metadata yet.
+    backend.debug_info = options.debug_info and not (
+        options.target == 'x86_64' and os.environ.get('UDEWY_OBJECT') == 'direct')
     loaded = t0.load_program(input_file, target_backend=options.target)
     backend.set_imported_sources([Path(path) for path in loaded.imported_sources])
     if generate is None:

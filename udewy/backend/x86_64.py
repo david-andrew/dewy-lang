@@ -5,6 +5,7 @@ Generates GNU assembler syntax targeting Linux x86_64 with System V ABI.
 """
 
 from dataclasses import dataclass, field
+import os
 from os import PathLike
 from pathlib import Path
 
@@ -1661,9 +1662,14 @@ class X86_64Backend(Backend):
         static_artifacts = [str(path) for path in link_artifacts if ".so" not in path.name]
         shared_artifacts = [str(path) for path in link_artifacts if ".so" in path.name]
         
-        asm_path.write_text(code)
-        
-        subprocess.run(["as", str(asm_path), "-o", str(obj_path)], check=True)
+        # The direct path encodes the module in process (UDEWY_OBJECT=direct);
+        # builds with debug information keep `as`, which builds .debug_line.
+        if not self.debug_info and os.environ.get("UDEWY_OBJECT") == "direct":
+            from .x86_64_object import assemble
+            obj_path.write_bytes(assemble(code))
+        else:
+            asm_path.write_text(code)
+            subprocess.run(["as", str(asm_path), "-o", str(obj_path)], check=True)
         if shared_artifacts:
             dynamic_linker = None
             for candidate in (

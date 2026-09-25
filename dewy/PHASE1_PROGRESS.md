@@ -4098,3 +4098,65 @@ with a subscript string). That copied the string's storage at every
 allocation and release site and added 160 MB of copies to lowering. The
 names are now literals.
 
+## Direct x86-64 objects (2026-09-24)
+
+First object writer of the "Direct binary fast path" (ROADMAP), step 3 of
+the agreed order.
+
+**Measurement (step 1).** Under load, the self-build's µDewy backend used
+12.7 s of CPU. µDewy itself (tokenizing, parsing and code generation,
+which are interleaved because the parser drives the backend) was about
+6.4 s; tokenizing was about a quarter of that. `as` over the eight chunks
+was 5.8 s, and `ld` 0.4 s.
+
+**What landed.**
+
+- `udewy/backend/elf.py` and `udewy/bootstrap/backend/elf.udewy`: an ELF64
+  relocatable writer. It writes sections with flags and alignment, a
+  section symbol per section, local then global symbols, and RELA tables.
+  `.L` labels stay out of the symbol table. It declares the GNU OS/ABI when
+  a section uses `SHF_GNU_RETAIN`, as gas does; otherwise
+  `ld --gc-sections` ignores the flag.
+- `udewy/backend/x86_64_object.py` and
+  `udewy/bootstrap/backend/x86_64_object.udewy`: an assembler for exactly
+  the x86-64 backend's closed set. That is about 45 mnemonics and the
+  directives `.text`, `.data`, `.bss`, `.section`, `.globl`, `.weak`,
+  `.hidden`, `.extern`, `.quad`, `.byte`, `.balign` and `.zero`. Branches
+  are always near and local labels resolve at the end. `call`/`jmp` to a
+  symbol use `R_X86_64_PLT32`, RIP-relative operands `R_X86_64_PC32`, and
+  `.quad sym` `R_X86_64_64`. Anything else is an error, never a guess.
+- The native module is still split into chunks. Each chunk is assembled
+  by a forked child from memory, so no assembly text is written or read
+  back. Both compilers take the path with `UDEWY_OBJECT=direct`. It omits
+  debug metadata for now: `debug` builds need the assembler until the
+  direct path writes `.debug_line`.
+- `tools/compare_objects.py`: the per-symbol comparator from the
+  acceptance checks. It compares instruction sequences with branch targets
+  as instruction indices, collapses NOP padding, and compares relocations,
+  data bytes and relocations, section types, flags and alignment, and
+  symbols. It ignores gas's `.note.gnu.property`.
+- `udewy --assemble in.s out.o` and
+  `python -m udewy.backend.x86_64_object in.s out.o` run the direct path
+  on its own.
+
+**Checks.** Every section of the compiler's own assembly (61,183 sections)
+agrees with gas, and so does the encoder edge-case fixture
+`tests/fixtures/x86_64_encoding_edges.s`. The Python and native
+assemblers write byte-identical objects. A compiler built from direct
+objects rebuilds itself to byte-identical µDewy.
+`tests/python_misc/test_direct_objects.py` covers:
+- comparator self-test and determinism;
+- programs with the same exit codes, stdout and stderr on both paths,
+  in both µDewy implementations;
+- an extern `.o` and a shared library through the PLT;
+- the same `ld` error for an undefined symbol;
+- `--gc-sections` removing an unreferenced function while keeping a
+  retained section;
+- a non-executable stack.
+
+**Cost.** Under load, on the compiler's 55 MB assembly: native
+`--assemble` uses about 2.1 s of CPU against 5.9 s for `as`. The whole
+backend step, split into 8 chunks: direct 10.4–11.5 s wall and 9.5 s CPU,
+against 12.3–13.1 s wall and 13.4 s CPU through `as`. The encoder still
+re-parses the backend's text. Emitting instructions without text is the
+larger remaining cut.

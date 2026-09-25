@@ -104,6 +104,12 @@ let parse_args = (argc:int argv:int):>void => {
         bb_push_str(bb "x86_64")
         g_target = bb_finalize_as_string(bb)
     }
+    # UDEWY_OBJECT=direct writes x86-64 objects without `as` for every
+    # build; the direct path does not write debug metadata yet.
+    if str_eq(g_target "x86_64") {
+        let object_mode:int = proc_getenv("UDEWY_OBJECT")
+        if object_mode not=? 0 and str_eq(object_mode "direct") { be_debug_info = false }
+    }
     return void
 }
 
@@ -126,9 +132,26 @@ let select_backend = (target:int):>void => {
     return void
 }
 
+# `udewy --assemble in.s out.o`: the direct x86-64 object path on its own,
+# for comparing it with `as` (tools/compare_objects.py).
+let assemble_file = (argc:int argv:int):>int => {
+    if argc not=? 4 { usage_exit() }
+    let input:int = path_from_cstr(argv_load(argv 2))
+    let text:int = fs_read_file(path_to_cstr(input))
+    if text =? 0 {
+        eprint("error: cannot read ")
+        eprintl(input)
+        return 1
+    }
+    let object:int = xo_assemble(text str_len(text))
+    fs_write_file(argv_load(argv 3) bb_data(object) bb_len(object))
+    return 0
+}
+
 let main = (argc:int argv:int):>int => {
     arena_init()
     proc_init_environ(argc argv)
+    if argc >? 1 and str_eq_cstr_lit(argv_load(argv 1) "--assemble") { return assemble_file(argc argv) }
     parse_args(argc argv)
 
     let input_cstr:int = path_to_cstr(g_input_path)

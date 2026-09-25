@@ -1,0 +1,935 @@
+# x86-64 assembly text to an ELF relocatable object, without `as`.
+#
+# The x86-64 backend emits a closed set of AT&T instructions and directives
+# (see ROADMAP "Direct binary fast path"). This encodes exactly that set: one
+# pass writes every instruction, local branches are always near (rel32) and
+# are patched once their labels are known, and every reference that leaves
+# its section becomes a relocation for `ld`. Anything outside the set is an
+# error, never a guess. Mirrors udewy/backend/x86_64_object.py.
+
+import p"../runtime/runtime.udewy"
+import p"./elf.udewy"
+
+const XO_R_X86_64_64:int = 1
+const XO_R_X86_64_PC32:int = 2
+const XO_R_X86_64_PLT32:int = 4
+
+const XO_REG:int = 1
+const XO_MEM:int = 2
+const XO_IMM:int = 3
+const XO_SYM:int = 4
+
+# Operand records (two per instruction), 8 words each: kind, register index,
+# register width, base register (-1 for RIP-relative), displacement,
+# symbol pointer, symbol length, immediate.
+const XO_KIND:int = 0
+const XO_INDEX:int = 8
+const XO_WIDTH:int = 16
+const XO_BASE:int = 24
+const XO_DISP:int = 32
+const XO_SYM_PTR:int = 40
+const XO_SYM_LEN:int = 48
+const XO_VALUE:int = 56
+
+# Mnemonic groups.
+const XO_M_RET:int = 1
+const XO_M_SYSCALL:int = 2
+const XO_M_CQTO:int = 3
+const XO_M_INT3:int = 4
+const XO_M_PUSH:int = 5
+const XO_M_POP:int = 6
+const XO_M_CALL:int = 7
+const XO_M_JMP:int = 8
+const XO_M_MOVABS:int = 9
+const XO_M_MOVQ:int = 10
+const XO_M_MOVL:int = 11
+const XO_M_MOVW:int = 12
+const XO_M_MOVB:int = 13
+const XO_M_LEA:int = 14
+const XO_M_TEST:int = 15
+const XO_M_IMUL:int = 16
+const XO_M_EXTEND:int = 17       # value: 256 * group + second opcode byte
+const XO_M_MOVSLQ:int = 18
+const XO_M_ALU:int = 19          # value: 256 * group + digit
+const XO_M_UNARY:int = 20        # value: 256 * group + digit
+const XO_M_SHIFT:int = 21        # value: 256 * group + digit
+const XO_M_JCC:int = 22          # value: 256 * group + condition
+const XO_M_SETCC:int = 23        # value: 256 * group + condition
+
+let xo_registers:int = 0          # name -> index + 256 * width
+let xo_mnemonics:int = 0          # name -> group + 256 * detail
+let xo_ops:int = 0                # two operand records
+let xo_current:int = 0            # current section index
+let xo_pending:int = 0            # rel32 fields: section, offset, symbol, addend, kind
+let xo_line_start:int = 0
+let xo_line_len:int = 0
+
+let xo_fail = (message:int):>void => {
+    eprint("error: direct x86-64 object: ")
+    eprint(message)
+    eprint(": ")
+    let line:int = bb_new(xo_line_len + 1)
+    bb_push_bytes(line xo_line_start xo_line_len)
+    eprintl(bb_finalize_as_string(line))
+    host_exit(1)
+    return void
+}
+
+# Mnemonics and register names are at most 8 bytes: packed little-endian
+# into one integer they key a small open-addressing table (1024 slots of a
+# key and a value), cheaper than hashing strings for every line.
+const XO_TABLE_SLOTS:int = 1024
+let xo_pack = (p:int n:int):>int => {
+    if n >? 8 or n <=? 0 { return 0 }
+    let key:int = 0
+    let i:int = n - 1
+    loop i >=? 0 {
+        key = (key << 8) or __load_u8__(p + i)
+        i = i - 1
+    }
+    return key
+}
+let xo_table_new = ():>int => {
+    let table:int = arena_alloc(XO_TABLE_SLOTS * 16)
+    zero_bytes(table XO_TABLE_SLOTS * 16)
+    return table
+}
+let xo_table_put = (table:int key:int value:int):>void => {
+    let slot:int = ((key * 0x9E3779B97F4A7C15) >> 54) and (XO_TABLE_SLOTS - 1)
+    loop __load__(table + slot * 16) not=? 0 and __load__(table + slot * 16) not=? key {
+        slot = (slot + 1) and (XO_TABLE_SLOTS - 1)
+    }
+    __store__(key table + slot * 16)
+    __store__(value table + slot * 16 + 8)
+    return void
+}
+# The value for `p[0..n)`, or -1.
+let xo_table_get = (table:int p:int n:int):>int => {
+    let key:int = xo_pack(p n)
+    if key =? 0 { return 0 - 1 }
+    let slot:int = ((key * 0x9E3779B97F4A7C15) >> 54) and (XO_TABLE_SLOTS - 1)
+    loop true {
+        let stored:int = __load__(table + slot * 16)
+        if stored =? key { return __load__(table + slot * 16 + 8) }
+        if stored =? 0 { return 0 - 1 }
+        slot = (slot + 1) and (XO_TABLE_SLOTS - 1)
+    }
+    return 0 - 1
+}
+
+let xo_register_names = (table:int names:int width:int):>void => {
+    # `names` is a space-separated list in register index order.
+    let n:int = str_len(names)
+    let start:int = 0
+    let index:int = 0
+    let i:int = 0
+    loop i <=? n {
+        if i =? n or __load_u8__(names + i) =? 32 {
+            xo_table_put(table xo_pack(names + start i - start) index + width * 256)
+            index = index + 1
+            start = i + 1
+        }
+        i = i + 1
+    }
+    return void
+}
+
+let xo_put = (name:int group:int detail:int):>void => {
+    xo_table_put(xo_mnemonics xo_pack(name str_len(name)) group + detail * 256)
+    return void
+}
+
+let xo_conditions = (prefix:int group:int):>void => {
+    let names:int = vec_new(32)
+    let codes:int = vec_new(32)
+    vec_push(names "o") vec_push(codes 0)
+    vec_push(names "no") vec_push(codes 1)
+    vec_push(names "b") vec_push(codes 2)
+    vec_push(names "c") vec_push(codes 2)
+    vec_push(names "nae") vec_push(codes 2)
+    vec_push(names "ae") vec_push(codes 3)
+    vec_push(names "nb") vec_push(codes 3)
+    vec_push(names "nc") vec_push(codes 3)
+    vec_push(names "e") vec_push(codes 4)
+    vec_push(names "z") vec_push(codes 4)
+    vec_push(names "ne") vec_push(codes 5)
+    vec_push(names "nz") vec_push(codes 5)
+    vec_push(names "be") vec_push(codes 6)
+    vec_push(names "na") vec_push(codes 6)
+    vec_push(names "a") vec_push(codes 7)
+    vec_push(names "nbe") vec_push(codes 7)
+    vec_push(names "s") vec_push(codes 8)
+    vec_push(names "ns") vec_push(codes 9)
+    vec_push(names "p") vec_push(codes 10)
+    vec_push(names "pe") vec_push(codes 10)
+    vec_push(names "np") vec_push(codes 11)
+    vec_push(names "po") vec_push(codes 11)
+    vec_push(names "l") vec_push(codes 12)
+    vec_push(names "nge") vec_push(codes 12)
+    vec_push(names "ge") vec_push(codes 13)
+    vec_push(names "nl") vec_push(codes 13)
+    vec_push(names "le") vec_push(codes 14)
+    vec_push(names "ng") vec_push(codes 14)
+    vec_push(names "g") vec_push(codes 15)
+    vec_push(names "nle") vec_push(codes 15)
+    let i:int = 0
+    loop i <? vec_len(names) {
+        let name:int = vec_get(names i)
+        let bb:int = bb_new(8)
+        bb_push_str(bb prefix)
+        bb_push_str(bb name)
+        xo_put(bb_finalize_as_string(bb) group vec_get(codes i))
+        i = i + 1
+    }
+    return void
+}
+
+let xo_init = ():>void => {
+    if xo_registers not=? 0 { return void }
+    xo_registers = xo_table_new()
+    xo_register_names(xo_registers "rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r10 r11 r12 r13 r14 r15" 64)
+    xo_register_names(xo_registers "eax ecx edx ebx esp ebp esi edi r8d r9d r10d r11d r12d r13d r14d r15d" 32)
+    xo_register_names(xo_registers "ax cx dx bx sp bp si di r8w r9w r10w r11w r12w r13w r14w r15w" 16)
+    xo_register_names(xo_registers "al cl dl bl spl bpl sil dil r8b r9b r10b r11b r12b r13b r14b r15b" 8)
+    xo_mnemonics = xo_table_new()
+    xo_put("ret" XO_M_RET 0)
+    xo_put("syscall" XO_M_SYSCALL 0)
+    xo_put("cqto" XO_M_CQTO 0)
+    xo_put("int3" XO_M_INT3 0)
+    xo_put("pushq" XO_M_PUSH 0)
+    xo_put("popq" XO_M_POP 0)
+    xo_put("call" XO_M_CALL 0)
+    xo_put("jmp" XO_M_JMP 0)
+    xo_put("movabsq" XO_M_MOVABS 0)
+    xo_put("movq" XO_M_MOVQ 0)
+    xo_put("movl" XO_M_MOVL 0)
+    xo_put("movw" XO_M_MOVW 0)
+    xo_put("movb" XO_M_MOVB 0)
+    xo_put("leaq" XO_M_LEA 0)
+    xo_put("testq" XO_M_TEST 0)
+    xo_put("imulq" XO_M_IMUL 0)
+    xo_put("movzbq" XO_M_EXTEND 182)
+    xo_put("movzwq" XO_M_EXTEND 183)
+    xo_put("movsbq" XO_M_EXTEND 190)
+    xo_put("movswq" XO_M_EXTEND 191)
+    xo_put("movslq" XO_M_MOVSLQ 0)
+    xo_put("addq" XO_M_ALU 0)
+    xo_put("orq" XO_M_ALU 1)
+    xo_put("andq" XO_M_ALU 4)
+    xo_put("subq" XO_M_ALU 5)
+    xo_put("xorq" XO_M_ALU 6)
+    xo_put("cmpq" XO_M_ALU 7)
+    xo_put("notq" XO_M_UNARY 2)
+    xo_put("negq" XO_M_UNARY 3)
+    xo_put("divq" XO_M_UNARY 6)
+    xo_put("idivq" XO_M_UNARY 7)
+    xo_put("shlq" XO_M_SHIFT 4)
+    xo_put("salq" XO_M_SHIFT 4)
+    xo_put("shrq" XO_M_SHIFT 5)
+    xo_put("sarq" XO_M_SHIFT 7)
+    xo_conditions("j" XO_M_JCC)
+    xo_conditions("set" XO_M_SETCC)
+    xo_ops = arena_alloc(128)
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Output
+# ----------------------------------------------------------------------------
+
+# The current section's byte buffer is written through a cursor (its data
+# pointer, length and capacity), stored back to the buffer when the section
+# changes and before relocations resolve: one store per byte instead of a
+# buffer call chain.
+let xo_buf:int = 0
+let xo_ptr:int = 0
+let xo_len:int = 0
+let xo_cap:int = 0
+
+let xo_flush = ():>void => {
+    if xo_buf not=? 0 { __store__(xo_len xo_buf + BB_OFF_LEN) }
+    return void
+}
+let xo_select = (section:int):>void => {
+    xo_flush()
+    xo_current = section
+    xo_buf = vec_get(elf_section_data section)
+    if xo_buf not=? 0 {
+        xo_ptr = bb_data(xo_buf)
+        xo_len = bb_len(xo_buf)
+        xo_cap = bb_cap(xo_buf)
+    } else {
+        xo_len = 0
+        xo_cap = 0
+    }
+    return void
+}
+# The current length of the current section, NOBITS included.
+let xo_length = ():>int => {
+    if xo_buf =? 0 { return vec_get(elf_section_sizes xo_current) }
+    return xo_len
+}
+let xo_reserve = (n:int):>void => {
+    if xo_len + n <=? xo_cap { return void }
+    if xo_buf =? 0 { xo_fail("data in a NOBITS section") }
+    __store__(xo_len xo_buf + BB_OFF_LEN)
+    bb_grow(xo_buf xo_len + n)
+    xo_ptr = bb_data(xo_buf)
+    xo_cap = bb_cap(xo_buf)
+    return void
+}
+let xo_byte = (b:int):>void => {
+    if xo_len >=? xo_cap { xo_reserve(1) }
+    __store_u8__(b xo_ptr + xo_len)
+    xo_len = xo_len + 1
+    return void
+}
+let xo_u32 = (v:int):>void => {
+    xo_reserve(4)
+    __store_u32__(v xo_ptr + xo_len)
+    xo_len = xo_len + 4
+    return void
+}
+let xo_u64 = (v:int):>void => {
+    xo_reserve(8)
+    __store_u64__(v xo_ptr + xo_len)
+    xo_len = xo_len + 8
+    return void
+}
+
+let xo_op = (i:int):>int => { return xo_ops + i * 64 }
+let xo_kind = (i:int):>int => { return __load__(xo_ops + i * 64 + XO_KIND) }
+let xo_index = (i:int):>int => { return __load__(xo_ops + i * 64 + XO_INDEX) }
+let xo_width = (i:int):>int => { return __load__(xo_ops + i * 64 + XO_WIDTH) }
+let xo_value = (i:int):>int => { return __load__(xo_ops + i * 64 + XO_VALUE) }
+
+# The ModRM `rm` register of an operand: the register itself or the base.
+let xo_rm = (i:int):>int => {
+    if xo_kind(i) =? XO_REG { return xo_index(i) }
+    let base:int = __load__(xo_op(i) + XO_BASE)
+    if base <? 0 { return 0 }
+    return base
+}
+
+# A REX prefix when needed. spl, bpl, sil and dil exist only with REX, so
+# a byte register among `byte_ops` (a bit per operand) forces it.
+let xo_rex = (w:int reg:int rm:int byte_ops:int):>void => {
+    let value:int = 64
+    if w { value = value or 8 }
+    if (reg and 8) not=? 0 { value = value or 4 }
+    if (rm and 8) not=? 0 { value = value or 1 }
+    let forced:int = false
+    let i:int = 0
+    loop i <? 2 {
+        if ((byte_ops >> i) and 1) not=? 0 {
+            if xo_kind(i) =? XO_REG and xo_width(i) =? 8 and xo_index(i) >=? 4 and xo_index(i) <=? 7 { forced = true }
+        }
+        i = i + 1
+    }
+    if value not=? 64 or forced { xo_byte(value) }
+    return void
+}
+
+# A rel32 field holding `symbol + addend - (address of the field)`.
+let xo_reference = (name:int name_len:int addend:int kind:int):>void => {
+    let offset:int = xo_len
+    xo_u32(0)
+    vec_push(xo_pending xo_current)
+    vec_push(xo_pending offset)
+    vec_push(xo_pending elf_symbol(name name_len))
+    vec_push(xo_pending addend)
+    vec_push(xo_pending kind)
+    return void
+}
+
+# ModRM (plus SIB and displacement) for `reg` and operand `i`. `trailing`
+# is the number of immediate bytes after the displacement, which a
+# RIP-relative displacement must account for.
+let xo_modrm = (reg:int i:int trailing:int):>void => {
+    let op:int = xo_op(i)
+    if xo_kind(i) =? XO_REG {
+        xo_byte(192 or ((reg and 7) << 3) or (xo_index(i) and 7))
+        return void
+    }
+    let base_reg:int = __load__(op + XO_BASE)
+    if base_reg <? 0 {
+        xo_byte(5 or ((reg and 7) << 3))
+        # The CPU adds the displacement to the end of the instruction: the
+        # field itself (4 bytes) and any immediate after it.
+        xo_reference(__load__(op + XO_SYM_PTR) __load__(op + XO_SYM_LEN) __load__(op + XO_DISP) - 4 - trailing XO_R_X86_64_PC32)
+        return void
+    }
+    let base:int = base_reg and 7
+    let disp:int = __load__(op + XO_DISP)
+    let mode:int = 128
+    if disp =? 0 and base not=? 5 { mode = 0 }
+    else if disp >=? -128 and disp <=? 127 { mode = 64 }
+    xo_byte(mode or ((reg and 7) << 3) or base)
+    if base =? 4 { xo_byte(36) }
+    if mode =? 64 { xo_byte(disp) }
+    else if mode =? 128 { xo_u32(disp) }
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Parsing
+# ----------------------------------------------------------------------------
+
+let xo_is_space = (c:int):>int => { return c =? 32 or c =? 9 or c =? 13 }
+
+# The integer in `p[0..n)`: decimal or 0x hex, optionally negative.
+let xo_int = (p:int n:int):>int => {
+    let i:int = 0
+    let negative:int = false
+    if n >? 0 and __load_u8__(p) =? 45 { negative = true  i = 1 }
+    else if n >? 0 and __load_u8__(p) =? 43 { i = 1 }
+    let value:int = 0
+    if i + 1 <? n and __load_u8__(p + i) =? 48 and (__load_u8__(p + i + 1) =? 120 or __load_u8__(p + i + 1) =? 88) {
+        i = i + 2
+        if i >=? n { xo_fail("malformed number") }
+        loop i <? n {
+            let c:int = __load_u8__(p + i)
+            let d:int = 0
+            if c >=? 48 and c <=? 57 { d = c - 48 }
+            else if c >=? 97 and c <=? 102 { d = c - 87 }
+            else if c >=? 65 and c <=? 70 { d = c - 55 }
+            else { xo_fail("malformed number") }
+            value = (value << 4) or d
+            i = i + 1
+        }
+    } else {
+        if i >=? n { xo_fail("malformed number") }
+        loop i <? n {
+            let c:int = __load_u8__(p + i)
+            if c <? 48 or c >? 57 { xo_fail("malformed number") }
+            value = value * 10 + (c - 48)
+            i = i + 1
+        }
+    }
+    if negative { return 0 - value }
+    return value
+}
+
+let xo_is_digit = (c:int):>int => { return c >=? 48 and c <=? 57 }
+
+# Split `name+8` / `name-8` / `name`: stores the name length and offset
+# into operand `i`.
+let xo_symbol_offset = (i:int p:int n:int):>void => {
+    let op:int = xo_op(i)
+    __store__(p op + XO_SYM_PTR)
+    __store__(n op + XO_SYM_LEN)
+    __store__(0 op + XO_DISP)
+    let at:int = n - 1
+    loop at >? 0 {
+        let c:int = __load_u8__(p + at)
+        if (c =? 43 or c =? 45) and at + 1 <? n and xo_is_digit(__load_u8__(p + at + 1)) {
+            __store__(at op + XO_SYM_LEN)
+            __store__(xo_int(p + at n - at) op + XO_DISP)
+            return void
+        }
+        at = at - 1
+    }
+    return void
+}
+
+let xo_register = (i:int p:int n:int):>void => {
+    let found:int = xo_table_get(xo_registers p n)
+    if found <? 0 { xo_fail("unknown register") }
+    let op:int = xo_op(i)
+    __store__(XO_REG op + XO_KIND)
+    __store__(found and 255 op + XO_INDEX)
+    __store__(found >> 8 op + XO_WIDTH)
+    return void
+}
+
+# Parse operand text `p[0..n)` (already trimmed) into record `i`.
+let xo_operand = (i:int p:int n:int):>void => {
+    let op:int = xo_op(i)
+    if n =? 0 { xo_fail("missing operand") }
+    let c:int = __load_u8__(p)
+    if c =? 37 {
+        xo_register(i p + 1 n - 1)
+        return void
+    }
+    if c =? 42 and n >? 1 and __load_u8__(p + 1) =? 37 {
+        xo_register(i p + 2 n - 2)
+        return void
+    }
+    if c =? 36 {
+        __store__(XO_IMM op + XO_KIND)
+        __store__(xo_int(p + 1 n - 1) op + XO_VALUE)
+        return void
+    }
+    if __load_u8__(p + n - 1) =? 41 {
+        let open:int = 0
+        loop open <? n and __load_u8__(p + open) not=? 40 { open = open + 1 }
+        if open >=? n { xo_fail("unsupported memory operand") }
+        __store__(XO_MEM op + XO_KIND)
+        let base:int = p + open + 1
+        let base_len:int = n - open - 2
+        if base_len =? 4 and __load_u8__(base) =? 37 and __load_u8__(base + 1) =? 114 and __load_u8__(base + 2) =? 105 and __load_u8__(base + 3) =? 112 {
+            __store__(0 - 1 op + XO_BASE)
+            xo_symbol_offset(i p open)
+            return void
+        }
+        if base_len <? 2 or __load_u8__(base) not=? 37 { xo_fail("unsupported memory operand") }
+        let found:int = xo_table_get(xo_registers base + 1 base_len - 1)
+        if found <? 0 or (found >> 8) not=? 64 { xo_fail("unsupported memory base") }
+        __store__(found and 255 op + XO_BASE)
+        if open =? 0 { __store__(0 op + XO_DISP) } else { __store__(xo_int(p open) op + XO_DISP) }
+        return void
+    }
+    __store__(XO_SYM op + XO_KIND)
+    __store__(p op + XO_SYM_PTR)
+    __store__(n op + XO_SYM_LEN)
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Instructions
+# ----------------------------------------------------------------------------
+
+let xo_fits8 = (v:int):>int => { return v >=? -128 and v <=? 127 }
+let xo_fits32 = (v:int):>int => { return v >=? -2147483648 and v <=? 2147483647 }
+
+let xo_move = (width:int):>void => {
+    let wide:int = width =? 64
+    if width =? 16 { xo_byte(102) }
+    if xo_kind(0) =? XO_IMM {
+        let value:int = xo_value(0)
+        if xo_kind(1) =? XO_REG and wide and not xo_fits32(value) {
+            xo_rex(true 0 xo_index(1) 0)
+            xo_byte(184 + (xo_index(1) and 7))
+            xo_u64(value)
+            return void
+        }
+        if not wide { xo_fail("unsupported immediate move") }
+        xo_rex(true 0 xo_rm(1) 0)
+        xo_byte(199)
+        xo_modrm(0 1 4)
+        xo_u32(value)
+        return void
+    }
+    if xo_kind(0) =? XO_REG {
+        let byte_ops:int = 0
+        if width =? 8 { byte_ops = 3 }
+        xo_rex(wide xo_index(0) xo_rm(1) byte_ops)
+        if width =? 8 { xo_byte(136) } else { xo_byte(137) }
+        xo_modrm(xo_index(0) 1 0)
+        return void
+    }
+    let byte_ops:int = 0
+    if width =? 8 { byte_ops = 2 }
+    xo_rex(wide xo_index(1) xo_rm(0) byte_ops)
+    if width =? 8 { xo_byte(138) } else { xo_byte(139) }
+    xo_modrm(xo_index(1) 0 0)
+    return void
+}
+
+let xo_alu = (digit:int):>void => {
+    if xo_kind(0) =? XO_IMM {
+        let value:int = xo_value(0)
+        xo_rex(true 0 xo_rm(1) 0)
+        if xo_fits8(value) {
+            xo_byte(131)
+            xo_modrm(digit 1 1)
+            xo_byte(value)
+        } else if xo_kind(1) =? XO_REG and xo_index(1) =? 0 {
+            xo_byte(5 or (digit << 3))
+            xo_u32(value)
+        } else {
+            xo_byte(129)
+            xo_modrm(digit 1 4)
+            xo_u32(value)
+        }
+        return void
+    }
+    if xo_kind(0) =? XO_REG {
+        xo_rex(true xo_index(0) xo_rm(1) 0)
+        xo_byte((digit << 3) or 1)
+        xo_modrm(xo_index(0) 1 0)
+        return void
+    }
+    xo_rex(true xo_index(1) xo_rm(0) 0)
+    xo_byte((digit << 3) or 3)
+    xo_modrm(xo_index(1) 0 0)
+    return void
+}
+
+let xo_instruction = (name:int name_len:int count:int):>void => {
+    let entry:int = xo_table_get(xo_mnemonics name name_len)
+    if entry <? 0 { xo_fail("unsupported instruction") }
+    let group:int = entry and 255
+    let detail:int = entry >> 8
+    if group =? XO_M_RET { xo_byte(195) return void }
+    if group =? XO_M_SYSCALL { xo_byte(15) xo_byte(5) return void }
+    if group =? XO_M_CQTO { xo_byte(72) xo_byte(153) return void }
+    if group =? XO_M_INT3 { xo_byte(204) return void }
+    if group =? XO_M_PUSH or group =? XO_M_POP {
+        if count not=? 1 or xo_kind(0) not=? XO_REG { xo_fail("unsupported operands") }
+        if (xo_index(0) and 8) not=? 0 { xo_byte(65) }
+        if group =? XO_M_PUSH { xo_byte(80 + (xo_index(0) and 7)) } else { xo_byte(88 + (xo_index(0) and 7)) }
+        return void
+    }
+    if group =? XO_M_CALL or group =? XO_M_JMP {
+        if xo_kind(0) =? XO_REG {
+            if (xo_index(0) and 8) not=? 0 { xo_byte(65) }
+            if group =? XO_M_CALL { xo_byte(255) xo_byte(208 or (xo_index(0) and 7)) }
+            else { xo_byte(255) xo_byte(224 or (xo_index(0) and 7)) }
+            return void
+        }
+        if group =? XO_M_CALL { xo_byte(232) } else { xo_byte(233) }
+        let op:int = xo_op(0)
+        xo_reference(__load__(op + XO_SYM_PTR) __load__(op + XO_SYM_LEN) (0 - 4) XO_R_X86_64_PLT32)
+        return void
+    }
+    if group =? XO_M_JCC {
+        xo_byte(15)
+        xo_byte(128 or detail)
+        let op:int = xo_op(0)
+        xo_reference(__load__(op + XO_SYM_PTR) __load__(op + XO_SYM_LEN) (0 - 4) XO_R_X86_64_PC32)
+        return void
+    }
+    if group =? XO_M_SETCC {
+        xo_rex(false 0 xo_index(0) 1)
+        xo_byte(15)
+        xo_byte(144 or detail)
+        xo_modrm(0 0 0)
+        return void
+    }
+    if count not=? 2 and group not=? XO_M_UNARY { xo_fail("unsupported operands") }
+    if group =? XO_M_MOVABS {
+        xo_rex(true 0 xo_index(1) 0)
+        xo_byte(184 + (xo_index(1) and 7))
+        xo_u64(xo_value(0))
+        return void
+    }
+    if group =? XO_M_MOVQ { xo_move(64) return void }
+    if group =? XO_M_MOVL { xo_move(32) return void }
+    if group =? XO_M_MOVW { xo_move(16) return void }
+    if group =? XO_M_MOVB { xo_move(8) return void }
+    if group =? XO_M_EXTEND or group =? XO_M_MOVSLQ {
+        let byte_ops:int = 0
+        if xo_kind(0) =? XO_REG and xo_width(0) =? 8 { byte_ops = 1 }
+        xo_rex(true xo_index(1) xo_rm(0) byte_ops)
+        if group =? XO_M_MOVSLQ { xo_byte(99) } else { xo_byte(15) xo_byte(detail) }
+        xo_modrm(xo_index(1) 0 0)
+        return void
+    }
+    if group =? XO_M_LEA {
+        xo_rex(true xo_index(1) xo_rm(0) 0)
+        xo_byte(141)
+        xo_modrm(xo_index(1) 0 0)
+        return void
+    }
+    if group =? XO_M_ALU { xo_alu(detail) return void }
+    if group =? XO_M_TEST {
+        xo_rex(true xo_index(0) xo_rm(1) 0)
+        xo_byte(133)
+        xo_modrm(xo_index(0) 1 0)
+        return void
+    }
+    if group =? XO_M_IMUL {
+        if xo_kind(0) =? XO_IMM {
+            let value:int = xo_value(0)
+            xo_rex(true xo_index(1) xo_index(1) 0)
+            if xo_fits8(value) {
+                xo_byte(107)
+                xo_modrm(xo_index(1) 1 0)
+                xo_byte(value)
+            } else {
+                xo_byte(105)
+                xo_modrm(xo_index(1) 1 0)
+                xo_u32(value)
+            }
+            return void
+        }
+        xo_rex(true xo_index(1) xo_rm(0) 0)
+        xo_byte(15)
+        xo_byte(175)
+        xo_modrm(xo_index(1) 0 0)
+        return void
+    }
+    if group =? XO_M_UNARY {
+        if count not=? 1 { xo_fail("unsupported operands") }
+        xo_rex(true 0 xo_rm(0) 0)
+        xo_byte(247)
+        xo_modrm(detail 0 0)
+        return void
+    }
+    if group =? XO_M_SHIFT {
+        xo_rex(true 0 xo_rm(1) 0)
+        if xo_kind(0) =? XO_REG {
+            if xo_width(0) not=? 8 or xo_index(0) not=? 1 { xo_fail("a variable shift count must be %cl") }
+            xo_byte(211)
+            xo_modrm(detail 1 0)
+        } else if xo_value(0) =? 1 {
+            xo_byte(209)
+            xo_modrm(detail 1 0)
+        } else {
+            xo_byte(193)
+            xo_modrm(detail 1 1)
+            xo_byte(xo_value(0))
+        }
+        return void
+    }
+    xo_fail("unsupported instruction")
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Directives
+# ----------------------------------------------------------------------------
+
+let xo_word_is = (p:int n:int word:int):>int => { return str_eq_len(p n word str_len(word)) }
+
+# Advance past one comma-separated item of `p[at..n)`; returns its end.
+let xo_item_end = (p:int at:int n:int):>int => {
+    let i:int = at
+    loop i <? n and __load_u8__(p + i) not=? 44 { i = i + 1 }
+    return i
+}
+
+let xo_trim_start = (p:int at:int n:int):>int => {
+    let i:int = at
+    loop i <? n {
+        let c:int = __load_u8__(p + i)
+        if c not=? 32 and c not=? 9 and c not=? 13 { return i }
+        i = i + 1
+    }
+    return i
+}
+let xo_trim_end = (p:int at:int stop:int):>int => {
+    let i:int = stop
+    loop i >? at {
+        let c:int = __load_u8__(p + i - 1)
+        if c not=? 32 and c not=? 9 and c not=? 13 { return i }
+        i = i - 1
+    }
+    return i
+}
+
+let xo_switch_section = (p:int n:int):>void => {
+    # `.section name,"flags",@type`
+    let name_end:int = xo_item_end(p 0 n)
+    let name_stop:int = xo_trim_end(p 0 name_end)
+    let flags:int = 0
+    let kind:int = ELF_SHT_PROGBITS
+    if name_end <? n {
+        let i:int = name_end + 1
+        loop i <? n and __load_u8__(p + i) not=? 44 {
+            let c:int = __load_u8__(p + i)
+            if c =? 97 { flags = flags or ELF_SHF_ALLOC }
+            else if c =? 119 { flags = flags or ELF_SHF_WRITE }
+            else if c =? 120 { flags = flags or ELF_SHF_EXECINSTR }
+            else if c =? 82 { flags = flags or ELF_SHF_GNU_RETAIN }
+            else if c not=? 34 and not xo_is_space(c) { xo_fail("unsupported section flag") }
+            i = i + 1
+        }
+        if i <? n {
+            let type_at:int = xo_trim_start(p i + 1 n)
+            if xo_word_is(p + type_at xo_trim_end(p type_at n) - type_at "@nobits") { kind = ELF_SHT_NOBITS }
+        }
+    }
+    xo_select(elf_section(p name_stop kind flags))
+    return void
+}
+
+let xo_directive = (name:int name_len:int p:int n:int):>void => {
+    let section:int = xo_current
+    if xo_word_is(name name_len ".quad") {
+        let at:int = 0
+        loop at <? n {
+            let stop:int = xo_item_end(p at n)
+            let start:int = xo_trim_start(p at stop)
+            let end:int = xo_trim_end(p start stop)
+            let c:int = __load_u8__(p + start)
+            if xo_is_digit(c) or c =? 45 {
+                xo_u64(xo_int(p + start end - start))
+            } else {
+                xo_symbol_offset(0 p + start end - start)
+                let op:int = xo_op(0)
+                elf_add_relocation(section xo_len XO_R_X86_64_64 elf_symbol(__load__(op + XO_SYM_PTR) __load__(op + XO_SYM_LEN)) __load__(op + XO_DISP))
+                xo_u64(0)
+            }
+            at = stop + 1
+        }
+        return void
+    }
+    if xo_word_is(name name_len ".byte") {
+        let at:int = 0
+        loop at <? n {
+            let stop:int = xo_item_end(p at n)
+            let start:int = xo_trim_start(p at stop)
+            xo_byte(xo_int(p + start xo_trim_end(p start stop) - start))
+            at = stop + 1
+        }
+        return void
+    }
+    if xo_word_is(name name_len ".section") { xo_switch_section(p n) return void }
+    if xo_word_is(name name_len ".globl") or xo_word_is(name name_len ".global") {
+        let symbol:int = elf_symbol(p n)
+        if vec_get(elf_symbol_bindings symbol) not=? ELF_STB_WEAK { vec_set(elf_symbol_bindings symbol ELF_STB_GLOBAL) }
+        return void
+    }
+    if xo_word_is(name name_len ".balign") {
+        let alignment:int = xo_int(p xo_item_end(p 0 n))
+        if alignment >? vec_get(elf_section_aligns section) { vec_set(elf_section_aligns section alignment) }
+        let padding:int = (alignment - xo_length() % alignment) % alignment
+        if xo_buf =? 0 {
+            vec_set(elf_section_sizes section vec_get(elf_section_sizes section) + padding)
+        } else {
+            let fill:int = 0
+            if (vec_get(elf_section_flags section) and ELF_SHF_EXECINSTR) not=? 0 { fill = 144 }
+            let k:int = 0
+            loop k <? padding { xo_byte(fill) k = k + 1 }
+        }
+        return void
+    }
+    if xo_word_is(name name_len ".zero") {
+        let count:int = xo_int(p n)
+        if xo_buf =? 0 {
+            vec_set(elf_section_sizes section vec_get(elf_section_sizes section) + count)
+        } else {
+            let k:int = 0
+            loop k <? count { xo_byte(0) k = k + 1 }
+        }
+        return void
+    }
+    if xo_word_is(name name_len ".text") { xo_select(elf_section(".text" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_EXECINSTR)) return void }
+    if xo_word_is(name name_len ".data") { xo_select(elf_section(".data" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_WRITE)) return void }
+    if xo_word_is(name name_len ".bss") { xo_select(elf_section(".bss" 4 ELF_SHT_NOBITS ELF_SHF_ALLOC or ELF_SHF_WRITE)) return void }
+    if xo_word_is(name name_len ".weak") { vec_set(elf_symbol_bindings elf_symbol(p n) ELF_STB_WEAK) return void }
+    # gas ignores `.extern`: an undefined symbol is external already, and
+    # one never referenced stays out of the symbol table.
+    if xo_word_is(name name_len ".extern") { return void }
+    if xo_word_is(name name_len ".hidden") { vec_set(elf_symbol_visibility elf_symbol(p n) ELF_STV_HIDDEN) return void }
+    xo_fail("unsupported directive")
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Driver
+# ----------------------------------------------------------------------------
+
+let xo_label = (p:int n:int):>void => {
+    let symbol:int = elf_symbol(p n)
+    if vec_get(elf_symbol_sections symbol) >=? 0 { xo_fail("label defined twice") }
+    vec_set(elf_symbol_sections symbol xo_current)
+    vec_set(elf_symbol_values symbol xo_length())
+    return void
+}
+
+let xo_line = (p:int n:int):>void => {
+    let start:int = xo_trim_start(p 0 n)
+    let stop:int = n
+    let hash:int = start
+    loop hash <? stop and __load_u8__(p + hash) not=? 35 { hash = hash + 1 }
+    stop = xo_trim_end(p start hash)
+    if start >=? stop { return void }
+    let line:int = p + start
+    let len:int = stop - start
+    xo_line_start = line
+    xo_line_len = len
+    let head_end:int = 0
+    loop head_end <? len {
+        let c:int = __load_u8__(line + head_end)
+        if c =? 32 or c =? 9 { break }
+        head_end = head_end + 1
+    }
+    if head_end =? len and __load_u8__(line + len - 1) =? 58 {
+        xo_label(line len - 1)
+        return void
+    }
+    let rest:int = xo_trim_start(line head_end len)
+    if __load_u8__(line) =? 46 {
+        xo_directive(line head_end line + rest len - rest)
+        return void
+    }
+    # Up to two operands, split at the comma outside parentheses.
+    let count:int = 0
+    let at:int = rest
+    let depth:int = 0
+    let item:int = rest
+    loop at <=? len {
+        let c:int = 0
+        if at <? len { c = __load_u8__(line + at) }
+        if c =? 40 { depth = depth + 1 }
+        else if c =? 41 { depth = depth - 1 }
+        if at =? len or (c =? 44 and depth =? 0) {
+            let a:int = xo_trim_start(line item at)
+            let b:int = xo_trim_end(line a at)
+            if b >? a {
+                if count >=? 2 { xo_fail("too many operands") }
+                xo_operand(count line + a b - a)
+                count = count + 1
+            }
+            item = at + 1
+        }
+        at = at + 1
+    }
+    xo_instruction(line head_end count)
+    return void
+}
+
+# Patch rel32 fields whose label lies in the same section; the rest become
+# relocations. A global symbol may be interposed, so, as gas does, a
+# reference to one keeps its relocation even within its own section.
+let xo_resolve = ():>void => {
+    let i:int = 0
+    loop i <? vec_len(xo_pending) {
+        let section:int = vec_get(xo_pending i)
+        let offset:int = vec_get(xo_pending i + 1)
+        let symbol:int = vec_get(xo_pending i + 2)
+        let addend:int = vec_get(xo_pending i + 3)
+        let kind:int = vec_get(xo_pending i + 4)
+        if vec_get(elf_symbol_sections symbol) =? section and vec_get(elf_symbol_bindings symbol) =? ELF_STB_LOCAL {
+            let value:int = vec_get(elf_symbol_values symbol) + addend - offset
+            let at:int = bb_data(vec_get(elf_section_data section)) + offset
+            __store_u32__(value and 4294967295 at)
+        } else {
+            elf_add_relocation(section offset kind symbol addend)
+        }
+        i = i + 5
+    }
+    return void
+}
+
+# Assembling is begin, any number of feeds, and finish; a chunk of a large
+# module feeds the module header, its slice, and the GNU-stack note.
+let xo_begin = ():>void => {
+    xo_init()
+    elf_begin(ELF_EM_X86_64)
+    xo_buf = 0
+    let text_section:int = elf_section(".text" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_EXECINSTR)
+    elf_section(".data" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_WRITE)
+    elf_section(".bss" 4 ELF_SHT_NOBITS ELF_SHF_ALLOC or ELF_SHF_WRITE)
+    xo_select(text_section)
+    xo_pending = vec_new(4096)
+    return void
+}
+
+let xo_feed = (text:int n:int):>void => {
+    let at:int = 0
+    loop at <? n {
+        let end:int = at
+        loop end <? n and __load_u8__(text + end) not=? 10 { end = end + 1 }
+        xo_line(text + at end - at)
+        at = end + 1
+    }
+    return void
+}
+
+# The ELF object (a byte buffer) for everything fed since `xo_begin`.
+let xo_finish = ():>int => {
+    xo_flush()
+    xo_resolve()
+    return elf_write()
+}
+
+# The ELF object (a byte buffer) for x86-64 assembly `text[0..n)`.
+let xo_assemble = (text:int n:int):>int => {
+    xo_begin()
+    xo_feed(text n)
+    return xo_finish()
+}

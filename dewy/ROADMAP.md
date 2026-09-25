@@ -389,10 +389,75 @@ relocations. `ld` still links.
 The two paths compose. A bytecode blob replayed into an object-emitting
 backend never produces µDewy text or assembly text. Either path is useful
 alone: bytecode into today's assemblers, or assembly text into a direct
-object writer. Land the µDewy recorder and player first, then the shared ELF
-writer with wasm32 and AArch64, then x86-64, then RISC-V in the long form.
-Dewy emitting bytecode is the step that removes the text round trip from a
-cold compile.
+object writer. Dewy emitting bytecode is the step that removes the text
+round trip from a cold compile.
+
+**Order and parity (agreed 2026-09-24).** Build each step in the native
+µDewy (`udewy/bootstrap`) first, where the self-build spends its time, then
+mirror it in the Python µDewy. Hosted/native parity holds as elsewhere: the
+Python side lands before a step counts as done. x86-64 comes first among
+object writers because it is the host target: ordinary builds already pass
+`--no-debug-info`, so an x86-64 writer without DWARF covers them, and
+`debug` builds keep the assembler until `.debug_line` exists.
+
+1. Measure how the backend's time splits between µDewy parsing, code
+   generation, `as`, and `ld`.
+2. The native recorder and player, checked by byte-identical assembly
+   against the parse path on every fixture and on the compiler itself.
+3. The shared ELF writer with x86-64, without DWARF.
+4. Dewy emitting the stream directly.
+5. wasm32 and AArch64 on the shared writer.
+6. x86-64 `.debug_line`.
+7. RISC-V in the long form.
+
+**Acceptance checks for direct objects.** Byte identity with `as` output
+is not a goal. Semantic equality per symbol is.
+
+- Run the existing native suites on the assembler path and the
+  direct-object path. Require the same exit codes and the same stdout and
+  stderr.
+- Link one fixture against an extern `.o` and one against a shared library,
+  and run both. This proves `R_X86_64_PLT32` and the other extern
+  relocations are real. A plain `call sym` must use `R_X86_64_PLT32`, as
+  gas does, even though the backend never writes `@PLT`.
+- An undefined external symbol produces the same `ld` error on both paths,
+  so the writer never drops or silently resolves a relocation.
+- Link with `--gc-sections` and confirm an unreferenced per-symbol section is
+  absent from the executable.
+- Keep the bootstrap fixed point: generations 2 and 3 byte-identical, both
+  built through the direct path. This checks stability only.
+- The same input yields byte-identical objects across two runs.
+- Compare each object against `as` per symbol, by instruction sequence,
+  not by address. For every function, match mnemonic, operands, the branch
+  target as the index of the instruction it lands on, and relocation type,
+  symbol, and addend. `objdump -dr --no-show-raw-insn` hides encoding
+  choices such as `imm8` versus `imm32`.
+- Treat these as the same instruction: an x86 rel8 branch and a rel32
+  branch to the same label; an AArch64 `ldr =imm` and the `movz`/`movk`
+  sequence for that immediate.
+- Compare RISC-V after `ld`, or against the long `auipc` form with no
+  `R_RISCV_RELAX`. Do not compare to gas's pre-link relaxed dump.
+- Compare initialized data bytes, and compare data relocations with symbol
+  and addend. Compare BSS by section size and type `NOBITS`, not by bytes.
+- Check section flags and alignment with `readelf -S`: text executable,
+  data writable, BSS `NOBITS`, and `sh_addralign` matching the assembler's.
+- Check the symbol table: `.globl` symbols are global, local labels are
+  not, `.L` labels are absent, `__dso_handle` is weak and hidden, `_start`
+  is the entry symbol, and symbol types (`STT_FUNC`/`STT_OBJECT`) and sizes
+  match.
+- Require a `.note.GNU-stack` note, and require that the stack is not
+  marked executable.
+- One encoder edge-case fixture, compared per symbol against gas: x86
+  displacements 0 and ±128, an `rbp`/`r13` base (explicit displacement), an
+  `rsp`/`r12` base (SIB byte), immediates at the `imm8` and `imm32` edges,
+  `movabs` constants, and REX with the high registers.
+- The comparator itself is tested: flipping one byte in a known-good
+  object must make the per-symbol check fail.
+- For wasm32, compare `wasm-objdump` against `wat2wasm` on types, imports,
+  functions, table, elements, data, and exports, and run `wasm-validate`.
+- If line numbers stay, compare `.debug_line` as decoded rows
+  (`readelf --debug-dump=decodedline`), not bytes, and stop once in a
+  debugger on a source line. Behavior tests will not notice its absence.
 
 ### Performance measurements and candidates
 

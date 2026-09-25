@@ -4,6 +4,7 @@
 import p"./common.udewy"
 import p"./linux.udewy"
 import p"../t1.udewy"
+import p"./x86_64_object.udewy"
 
 # ----------------------------------------------------------------------------
 # Backend state (globals -- only one backend is active at a time)
@@ -2534,11 +2535,15 @@ let x86_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
     let exe_path:int = bb_finalize_as_string(exe_bb)
 
     # Assemble the chunks recorded by x86_finish_module concurrently; each
-    # chunk repeats the module header and the GNU-stack note.
+    # chunk repeats the module header and the GNU-stack note. The direct
+    # path encodes the whole module in process instead (no debug info: the
+    # assembler builds .debug_line from .loc).
     let objects:int = vec_new(8)
     let splits:int = 0
     if x86_chunk_offsets not=? 0 { splits = vec_len(x86_chunk_offsets) }
-    if splits =? 0 {
+    if x86_direct_objects() {
+        x86_direct_assemble(code cache_dir input_name obj_path splits objects)
+    } else if splits =? 0 {
         fs_write_file(path_to_cstr(asm_path) code str_len(code))
         let argv1:int = vec_new(8)
         vec_push(argv1 x86_str("as"))
@@ -2657,6 +2662,66 @@ let x86_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
     vec_push(argv2 exe_path)
     proc_run_or_die(argv2 "linker failed")
     return exe_path
+}
+
+# Write the module's objects without `as`. A module split into chunks for
+# parallel assembly keeps the split: a forked child per chunk encodes it in
+# process from memory (no assembly text is written or read back).
+let x86_direct_assemble = (code:int cache_dir:int input_name:int obj_path:int splits:int objects:int):>void => {
+    if splits =? 0 {
+        let object:int = xo_assemble(code str_len(code))
+        fs_write_file(path_to_cstr(obj_path) bb_data(object) bb_len(object))
+        vec_push(objects obj_path)
+        return void
+    }
+    let note:int = "\n.section .note.GNU-stack,\"\",@progbits\n"
+    let pids:int = vec_new(splits + 1)
+    let ci:int = 0
+    loop ci <=? splits {
+        let start:int = 0
+        if ci >? 0 { start = vec_get(x86_chunk_offsets ci - 1) }
+        let stop:int = str_len(code)
+        if ci <? splits { stop = vec_get(x86_chunk_offsets ci) }
+        let chunk_obj:int = bb_new(str_len(cache_dir) + str_len(input_name) + 16)
+        bb_push_str(chunk_obj cache_dir)
+        bb_push_byte(chunk_obj 47)
+        bb_push_str(chunk_obj input_name)
+        bb_push_byte(chunk_obj 46)
+        bb_push_int(chunk_obj ci)
+        bb_push_str(chunk_obj ".o")
+        let chunk_obj_path:int = bb_finalize_as_string(chunk_obj)
+        let pid:int = host_fork()
+        if pid =? 0 {
+            xo_begin()
+            if ci >? 0 { xo_feed(x86_chunk_header str_len(x86_chunk_header)) }
+            xo_feed(code + start stop - start)
+            if ci <? splits { xo_feed(note str_len(note)) }
+            let object:int = xo_finish()
+            fs_write_file(path_to_cstr(chunk_obj_path) bb_data(object) bb_len(object))
+            host_exit(0)
+        }
+        if pid <? 0 { eprintl("error: could not start a chunk assembler") host_exit(1) }
+        vec_push(pids pid)
+        vec_push(objects chunk_obj_path)
+        ci = ci + 1
+    }
+    let failed:int = 0
+    let wi:int = 0
+    loop wi <? vec_len(pids) {
+        if proc_wait(vec_get(pids wi)) not=? 0 { failed = 1 }
+        wi = wi + 1
+    }
+    if failed { eprintl("error: direct object assembly failed") host_exit(1) }
+    return void
+}
+
+# Whether this build writes its object directly (UDEWY_OBJECT=direct)
+# rather than through `as`. Builds with debug information keep `as`.
+let x86_direct_objects = ():>int => {
+    if be_debug_info { return false }
+    let mode:int = proc_getenv("UDEWY_OBJECT")
+    if mode =? 0 { return false }
+    return str_eq(mode "direct")
 }
 
 # Locate the x86_64 Linux dynamic linker. Matches udewy/backend/x86_64.py.
