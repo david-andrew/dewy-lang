@@ -10,6 +10,7 @@
 
 import p"./common.udewy"
 import p"../t1.udewy"
+import p"./wasm_binary.udewy"
 
 let w_imports:int = 0          # vec of strings (full import lines, sorted-by-insertion)
 let w_function_ids:int = 0     # vec of label_ids (table order)
@@ -3086,14 +3087,21 @@ let w_compile_and_link = (code:int input_name:int cache_dir:int options:int):>in
     let wasm_path:int = w_path_with(cache_dir input_name ".wasm")
     let html_path:int = w_path_with(cache_dir input_name ".html")
 
-    fs_write_file(path_to_cstr(wat_path) code str_len(code))
-
-    let conv:int = vec_new(4)
-    vec_push(conv w_str("wat2wasm"))
-    vec_push(conv wat_path)
-    vec_push(conv w_str("-o"))
-    vec_push(conv wasm_path)
-    proc_run_or_die(conv "wat2wasm failed (install wabt: https://github.com/WebAssembly/wabt)")
+    # The direct path encodes the binary module in process
+    # (UDEWY_OBJECT=direct) instead of running wat2wasm.
+    let object_mode:int = proc_getenv("UDEWY_OBJECT")
+    if object_mode not=? 0 and str_eq(object_mode "direct") {
+        let module:int = wb_assemble(code str_len(code))
+        fs_write_file(path_to_cstr(wasm_path) bb_data(module) bb_len(module))
+    } else {
+        fs_write_file(path_to_cstr(wat_path) code str_len(code))
+        let conv:int = vec_new(4)
+        vec_push(conv w_str("wat2wasm"))
+        vec_push(conv wat_path)
+        vec_push(conv w_str("-o"))
+        vec_push(conv wasm_path)
+        proc_run_or_die(conv "wat2wasm failed (install wabt: https://github.com/WebAssembly/wabt)")
+    }
 
     let split_wasm:int = be_opt_split_wasm(options)
     let artifacts:int = be_opt_link_artifacts(options)

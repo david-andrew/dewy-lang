@@ -4,7 +4,10 @@ The direct path encodes the x86-64 backend's assembly in process and writes
 the ELF object itself; `ld` still links. It must agree with `as` per symbol
 (tools/compare_objects.py), link against extern objects and shared
 libraries, keep `--gc-sections` and the non-executable stack working, and
-produce byte-identical objects in the Python and native µDewy.
+produce byte-identical objects in the Python and native µDewy. Debug builds
+compare with gas byte for byte once gas's jumps are forced near (`{disp32}`,
+the direct path's layout): every section but `.debug_line`, whose decoded
+rows must match instead, and a debugger must stop on a source line.
 """
 from __future__ import annotations
 
@@ -17,7 +20,7 @@ from shutil import which
 
 import pytest
 
-from udewy import p0, t1
+from udewy import p0, t0, t1
 from udewy.backend import get_backend
 from udewy.backend.x86_64_object import assemble
 from udewy.frontend import EntryPointOptions, entry_point
@@ -26,7 +29,7 @@ from udewy.cache import cache_artifact
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EDGES = REPO_ROOT / 'tests/fixtures/x86_64_encoding_edges.s'
 sys.path.insert(0, str(REPO_ROOT / 'tools'))
-from compare_objects import compare  # noqa: E402
+from compare_objects import _section_bytes, compare, sections  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     any(which(tool) is None for tool in ('as', 'ld', 'objdump', 'readelf', 'cc')),
@@ -253,3 +256,116 @@ def test_native_direct_path_matches_the_assembler_path(tmp_path, native_udewy, n
             assert not (work / '__dewycache__' / f'{name}.s').exists()
     assert results[0] == results[1]
     assert results[0][0] == 42
+
+
+DEBUG_PROGRAMS = ['test_fib', 'test_comprehensive', 'test_loop', 'test_short_circuit_cond', 'test_stdlib', 'test_mu_string',
+                  'test_int_calculator', 'test_static_alloca']
+
+
+def _debug_asm(name: str) -> str:
+    path = REPO_ROOT / 'udewy/tests' / f'{name}.udewy'
+    backend = get_backend('x86_64')
+    backend.debug_info = True
+    loaded = t0.load_program(path, target_backend='x86_64')
+    return p0.parse(t1.tokenize(loaded.source), loaded.source, backend, source_path=str(path))
+
+
+def _near_reference(tmp_path: Path, text: str) -> Path:
+    """gas's object with every jump forced near: the direct path's layout."""
+    source = tmp_path / 'near.s'
+    source.write_text(re.sub(r'^(\s+)(j[a-z]+ )', r'\1{disp32} \2', text, flags=re.M))
+    reference = tmp_path / 'gas.o'
+    subprocess.run(['as', str(source), '-o', str(reference)], check=True)
+    return reference
+
+
+def _relocations(path: Path) -> dict[str, list]:
+    """Relocations per section; `.debug_line`'s without offsets (the two
+    encode the same rows with different opcodes)."""
+    output = subprocess.run(['readelf', '-rW', str(path)], capture_output=True, text=True, check=True).stdout
+    result: dict[str, list] = {}
+    current = None
+    for line in output.splitlines():
+        header = re.match(r"^Relocation section '\.rela(.+)' at", line)
+        if header:
+            current = header.group(1)
+            result[current] = []
+            continue
+        entry = re.match(r'^([0-9a-f]+)\s+[0-9a-f]+\s+(R_\w+)\s+[0-9a-f]+\s+(\S+)\s*([+-])\s*([0-9a-f]+)$', line.strip())
+        if entry and current:
+            offset = None if current == '.debug_line' else int(entry.group(1), 16)
+            addend = int(entry.group(5), 16) * (1 if entry.group(4) == '+' else -1)
+            result[current].append((offset or 0, entry.group(2), entry.group(3), addend))
+    return {name: sorted(entries) for name, entries in result.items()}
+
+
+def _line_rows(path: Path) -> list[list[str]]:
+    output = subprocess.run(['readelf', '--debug-dump=decodedline', str(path)], capture_output=True, text=True,
+                            check=True).stdout
+    return [line.split() for line in output.splitlines() if re.match(r'^\S+\s+\d+\s+0x[0-9a-f]+', line)]
+
+
+def _check_debug_object(tmp_path: Path, text: str, candidate: bytes) -> None:
+    reference = _near_reference(tmp_path, text)
+    direct = tmp_path / 'direct.o'
+    direct.write_bytes(candidate)
+    skipped = {'.debug_line', '.note.gnu.property'}
+    assert ({name: data for name, data in _section_bytes(str(direct)).items() if name not in skipped} ==
+            {name: data for name, data in _section_bytes(str(reference)).items() if name not in skipped})
+    assert _relocations(direct) == _relocations(reference)
+    assert sections(str(direct)) == sections(str(reference))
+    rows = _line_rows(direct)
+    assert rows and rows == _line_rows(reference)
+
+
+@pytest.mark.parametrize('name', DEBUG_PROGRAMS)
+def test_debug_objects_match_gas_with_near_jumps(tmp_path, name):
+    text = _debug_asm(name)
+    assert '.loc ' in text and '.debug_info' in text
+    _check_debug_object(tmp_path, text, assemble(text))
+
+
+@pytest.mark.parametrize('name', DEBUG_PROGRAMS)
+def test_native_and_python_write_identical_debug_objects(tmp_path, native_udewy, name):
+    source = tmp_path / f'{name}.s'
+    source.write_text(_debug_asm(name))
+    native = tmp_path / 'native.o'
+    subprocess.run([native_udewy, '--assemble', str(source), str(native)], check=True)
+    assert native.read_bytes() == assemble(source.read_text())
+
+
+def test_the_native_backends_debug_output_matches_gas(tmp_path, native_udewy):
+    # The native x86-64 backend spells its DWARF itself; the `as` path leaves
+    # that assembly in the cache.
+    work = tmp_path / 'work'
+    work.mkdir()
+    source = work / 'program.udewy'
+    source.write_text(PROGRAMS['arithmetic'])
+    env = {key: value for key, value in os.environ.items() if key != 'UDEWY_OBJECT'}
+    subprocess.run([native_udewy, '-c', str(source)], cwd=work, check=True, env=env)
+    text = (work / '__dewycache__' / 'program.s').read_text()
+    assert '.loc ' in text
+    native = tmp_path / 'native.o'
+    subprocess.run([native_udewy, '--assemble', str(work / '__dewycache__' / 'program.s'), str(native)], check=True)
+    _check_debug_object(tmp_path, text, native.read_bytes())
+
+
+@pytest.mark.skipif(which('gdb') is None, reason='gdb checks that the line table works')
+@pytest.mark.parametrize('native', [False, True], ids=['python', 'native'])
+def test_a_debugger_stops_on_a_source_line(tmp_path, monkeypatch, native_udewy, native):
+    source = tmp_path / 'lines.udewy'
+    source.write_text(PROGRAMS['arithmetic'])
+    monkeypatch.chdir(tmp_path)
+    if native:
+        env = {**os.environ, 'UDEWY_OBJECT': 'direct'}
+        subprocess.run([native_udewy, '-c', str(source)], cwd=tmp_path, check=True, env=env)
+    else:
+        _direct(monkeypatch, True)
+        assert entry_point(source, [], EntryPointOptions(compile_only=True)) == 0
+    assert not (tmp_path / '__dewycache__' / 'lines.s').exists()
+    binary = tmp_path / '__dewycache__' / 'lines'
+    # Line 6 is `if x % 2 =? 0 ...` inside collatz's loop.
+    result = subprocess.run(['gdb', '-q', '-batch', '-ex', 'break lines.udewy:6', '-ex', 'run', '-ex', 'info line',
+                             str(binary)], capture_output=True, text=True, timeout=120)
+    text = result.stdout + result.stderr
+    assert 'Breakpoint 1, collatz' in text and 'lines.udewy:6' in text

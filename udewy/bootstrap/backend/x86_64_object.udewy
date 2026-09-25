@@ -4,8 +4,11 @@
 # (see ROADMAP "Direct binary fast path"). This encodes exactly that set: one
 # pass writes every instruction, local branches are always near (rel32) and
 # are patched once their labels are known, and every reference that leaves
-# its section becomes a relocation for `ld`. Anything outside the set is an
-# error, never a guess. Mirrors udewy/backend/x86_64_object.py.
+# its section becomes a relocation for `ld`. Debug builds add the DWARF the
+# backend spells as data (`.uleb128`, `.value`, `.string`, label differences
+# resolved once every label is placed) and `.file`/`.loc` rows, from which
+# this writes the `.debug_line` program an assembler would. Anything outside
+# the set is an error, never a guess. Mirrors udewy/backend/x86_64_object.py.
 
 import p"../runtime/runtime.udewy"
 import p"./elf.udewy"
@@ -13,6 +16,7 @@ import p"./elf.udewy"
 const XO_R_X86_64_64:int = 1
 const XO_R_X86_64_PC32:int = 2
 const XO_R_X86_64_PLT32:int = 4
+const XO_R_X86_64_32:int = 10
 
 const XO_REG:int = 1
 const XO_MEM:int = 2
@@ -55,6 +59,7 @@ const XO_M_UNARY:int = 20        # value: 256 * group + digit
 const XO_M_SHIFT:int = 21        # value: 256 * group + digit
 const XO_M_JCC:int = 22          # value: 256 * group + condition
 const XO_M_SETCC:int = 23        # value: 256 * group + condition
+const XO_M_SSE:int = 24          # value: 256 * group + prefix + 256 * opcode + 65536 * (xmm is the reg field)
 
 let xo_registers:int = 0          # name -> index + 256 * width
 let xo_mnemonics:int = 0          # name -> group + 256 * detail
@@ -63,6 +68,20 @@ let xo_current:int = 0            # current section index
 let xo_pending:int = 0            # rel32 fields: section, offset, symbol, addend, kind
 let xo_line_start:int = 0
 let xo_line_len:int = 0
+# Label differences in data, resolved at the end: section, offset, size,
+# label, label subtracted.
+let xo_differences:int = 0
+# `.file` names by number (byte buffers), and `.loc` rows per section: a vec
+# of offset, file, line, column per section index, and the sections in the
+# order they first got a row. A `.loc` waits for the instruction it
+# describes.
+let xo_files:int = 0
+let xo_rows:int = 0
+let xo_row_sections:int = 0
+let xo_loc_waiting:int = false
+let xo_loc_file:int = 0
+let xo_loc_line:int = 0
+let xo_loc_column:int = 0
 
 let xo_fail = (message:int):>void => {
     eprint("error: direct x86-64 object: ")
@@ -191,6 +210,7 @@ let xo_init = ():>void => {
     xo_register_names(xo_registers "eax ecx edx ebx esp ebp esi edi r8d r9d r10d r11d r12d r13d r14d r15d" 32)
     xo_register_names(xo_registers "ax cx dx bx sp bp si di r8w r9w r10w r11w r12w r13w r14w r15w" 16)
     xo_register_names(xo_registers "al cl dl bl spl bpl sil dil r8b r9b r10b r11b r12b r13b r14b r15b" 8)
+    xo_register_names(xo_registers "xmm0 xmm1 xmm2 xmm3 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15" 128)
     xo_mnemonics = xo_table_new()
     xo_put("ret" XO_M_RET 0)
     xo_put("syscall" XO_M_SYSCALL 0)
@@ -227,6 +247,12 @@ let xo_init = ():>void => {
     xo_put("salq" XO_M_SHIFT 4)
     xo_put("shrq" XO_M_SHIFT 5)
     xo_put("sarq" XO_M_SHIFT 7)
+    # SSE moves and conversions between a general and an xmm register
+    # (`cvttss2si`/`cvttsd2si` are longer than a table key: xo_instruction
+    # names them).
+    xo_put("movd" XO_M_SSE 0x66 + 256 * 0x6E + 65536)
+    xo_put("cvtsi2ss" XO_M_SSE 0xF3 + 256 * 0x2A + 65536)
+    xo_put("cvtsi2sd" XO_M_SSE 0xF2 + 256 * 0x2A + 65536)
     xo_conditions("j" XO_M_JCC)
     xo_conditions("set" XO_M_SETCC)
     xo_ops = arena_alloc(128)
@@ -556,11 +582,44 @@ let xo_alu = (digit:int):>void => {
     return void
 }
 
+# An SSE move or conversion between operand 0 (source) and operand 1.
+let xo_sse = (prefix:int opcode:int xmm_is_reg:int):>void => {
+    if xo_kind(0) not=? XO_REG or xo_kind(1) not=? XO_REG { xo_fail("unsupported operands") }
+    let code:int = opcode
+    let reg:int = 1
+    let rm:int = 0
+    let general:int = 1
+    if xmm_is_reg { general = 0 }
+    if opcode =? 0x6E and xo_width(0) =? 128 {
+        # xmm to a general register: the store form.
+        code = 0x7E
+        reg = 0
+        rm = 1
+        general = 1
+    }
+    if (xo_width(reg) =? 128) =? (xo_width(rm) =? 128) { xo_fail("wants one xmm and one general register") }
+    xo_byte(prefix)
+    xo_rex(xo_width(general) =? 64 xo_index(reg) xo_index(rm) 0)
+    xo_byte(15)
+    xo_byte(code)
+    xo_modrm(xo_index(reg) rm 0)
+    return void
+}
+
 let xo_instruction = (name:int name_len:int count:int):>void => {
     let entry:int = xo_table_get(xo_mnemonics name name_len)
-    if entry <? 0 { xo_fail("unsupported instruction") }
+    if entry <? 0 {
+        if count =? 2 and xo_word_is(name name_len "cvttss2si") { xo_sse(0xF3 0x2C false) return void }
+        if count =? 2 and xo_word_is(name name_len "cvttsd2si") { xo_sse(0xF2 0x2C false) return void }
+        xo_fail("unsupported instruction")
+    }
     let group:int = entry and 255
     let detail:int = entry >> 8
+    if group =? XO_M_SSE {
+        if count not=? 2 { xo_fail("unsupported operands") }
+        xo_sse(detail and 255 (detail >> 8) and 255 (detail >> 16) not=? 0)
+        return void
+    }
     if group =? XO_M_RET { xo_byte(195) return void }
     if group =? XO_M_SYSCALL { xo_byte(15) xo_byte(5) return void }
     if group =? XO_M_CQTO { xo_byte(72) xo_byte(153) return void }
@@ -604,7 +663,14 @@ let xo_instruction = (name:int name_len:int count:int):>void => {
         xo_u64(xo_value(0))
         return void
     }
-    if group =? XO_M_MOVQ { xo_move(64) return void }
+    if group =? XO_M_MOVQ {
+        if (xo_kind(0) =? XO_REG and xo_width(0) =? 128) or (xo_kind(1) =? XO_REG and xo_width(1) =? 128) {
+            xo_sse(0x66 0x6E true)
+            return void
+        }
+        xo_move(64)
+        return void
+    }
     if group =? XO_M_MOVL { xo_move(32) return void }
     if group =? XO_M_MOVW { xo_move(16) return void }
     if group =? XO_M_MOVB { xo_move(8) return void }
@@ -735,25 +801,169 @@ let xo_switch_section = (p:int n:int):>void => {
     return void
 }
 
+# `size` little-endian bytes of `value`.
+let xo_sized = (value:int size:int):>void => {
+    let k:int = 0
+    loop k <? size {
+        xo_byte((value >> (8 * k)) and 255)
+        k = k + 1
+    }
+    return void
+}
+
+# A `.quad`/`.long`/`.value` item: a number, `label`, `label+n`, or `label -
+# label` (resolved once both are placed).
+let xo_value_item = (p:int n:int size:int):>void => {
+    let c:int = __load_u8__(p)
+    if xo_is_digit(c) or c =? 45 {
+        xo_sized(xo_int(p n) size)
+        return void
+    }
+    let minus:int = 0
+    loop minus + 2 <? n and not (__load_u8__(p + minus) =? 32 and __load_u8__(p + minus + 1) =? 45 and __load_u8__(p + minus + 2) =? 32) { minus = minus + 1 }
+    if minus + 2 <? n {
+        let left_end:int = xo_trim_end(p 0 minus)
+        let right:int = xo_trim_start(p minus + 3 n)
+        let left_symbol:int = elf_symbol(p left_end)
+        let right_symbol:int = elf_symbol(p + right xo_trim_end(p right n) - right)
+        vec_push(xo_differences xo_current)
+        vec_push(xo_differences xo_len)
+        vec_push(xo_differences size)
+        vec_push(xo_differences left_symbol)
+        vec_push(xo_differences right_symbol)
+        xo_sized(0 size)
+        return void
+    }
+    if size =? 2 { xo_fail("a 16-bit relocation") }
+    xo_symbol_offset(0 p n)
+    let op:int = xo_op(0)
+    let kind:int = XO_R_X86_64_32
+    if size =? 8 { kind = XO_R_X86_64_64 }
+    elf_add_relocation(xo_current xo_len kind elf_symbol(__load__(op + XO_SYM_PTR) __load__(op + XO_SYM_LEN)) __load__(op + XO_DISP))
+    xo_sized(0 size)
+    return void
+}
+
+# The bytes of a `"..."` literal (backslash escapes as gas reads them).
+let xo_string = (p:int n:int):>int => {
+    let end:int = xo_trim_end(p 0 n)
+    if end <? 2 or __load_u8__(p) not=? 34 or __load_u8__(p + end - 1) not=? 34 { xo_fail("expected a string literal") }
+    let out:int = bb_new(end)
+    let at:int = 1
+    loop at <? end - 1 {
+        let c:int = __load_u8__(p + at)
+        at = at + 1
+        if c not=? 92 {
+            bb_push_byte(out c)
+            continue
+        }
+        let escape:int = __load_u8__(p + at)
+        at = at + 1
+        if escape >=? 48 and escape <=? 55 {
+            let value:int = escape - 48
+            let digits:int = 1
+            loop digits <? 3 and at <? end - 1 and __load_u8__(p + at) >=? 48 and __load_u8__(p + at) <=? 55 {
+                value = value * 8 + (__load_u8__(p + at) - 48)
+                at = at + 1
+                digits = digits + 1
+            }
+            bb_push_byte(out value and 255)
+        }
+        else if escape =? 110 { bb_push_byte(out 10) }
+        else if escape =? 116 { bb_push_byte(out 9) }
+        else if escape =? 114 { bb_push_byte(out 13) }
+        else if escape =? 92 or escape =? 34 { bb_push_byte(out escape) }
+        else { xo_fail("unsupported string escape") }
+    }
+    return out
+}
+
+# The waiting `.loc` row, at the current offset.
+let xo_row = ():>void => {
+    xo_loc_waiting = false
+    loop vec_len(xo_rows) <=? xo_current { vec_push(xo_rows 0) }
+    let rows:int = vec_get(xo_rows xo_current)
+    if rows =? 0 {
+        rows = vec_new(64)
+        vec_set(xo_rows xo_current rows)
+        vec_push(xo_row_sections xo_current)
+    }
+    vec_push(rows xo_length())
+    vec_push(rows xo_loc_file)
+    vec_push(rows xo_loc_line)
+    vec_push(rows xo_loc_column)
+    return void
+}
+
 let xo_directive = (name:int name_len:int p:int n:int):>void => {
     let section:int = xo_current
-    if xo_word_is(name name_len ".quad") {
+    let size:int = 0
+    if xo_word_is(name name_len ".quad") { size = 8 }
+    else if xo_word_is(name name_len ".long") { size = 4 }
+    else if xo_word_is(name name_len ".value") { size = 2 }
+    if size not=? 0 {
         let at:int = 0
         loop at <? n {
             let stop:int = xo_item_end(p at n)
             let start:int = xo_trim_start(p at stop)
-            let end:int = xo_trim_end(p start stop)
-            let c:int = __load_u8__(p + start)
-            if xo_is_digit(c) or c =? 45 {
-                xo_u64(xo_int(p + start end - start))
-            } else {
-                xo_symbol_offset(0 p + start end - start)
-                let op:int = xo_op(0)
-                elf_add_relocation(section xo_len XO_R_X86_64_64 elf_symbol(__load__(op + XO_SYM_PTR) __load__(op + XO_SYM_LEN)) __load__(op + XO_DISP))
-                xo_u64(0)
+            xo_value_item(p + start xo_trim_end(p start stop) - start size)
+            at = stop + 1
+        }
+        return void
+    }
+    if xo_word_is(name name_len ".uleb128") {
+        let at:int = 0
+        loop at <? n {
+            let stop:int = xo_item_end(p at n)
+            let start:int = xo_trim_start(p at stop)
+            let value:int = xo_int(p + start xo_trim_end(p start stop) - start)
+            loop true {
+                let byte:int = value and 127
+                value = value >> 7
+                if value =? 0 { xo_byte(byte) break }
+                xo_byte(byte or 128)
             }
             at = stop + 1
         }
+        return void
+    }
+    if xo_word_is(name name_len ".string") {
+        let bytes:int = xo_string(p n)
+        let k:int = 0
+        loop k <? bb_len(bytes) { xo_byte(__load_u8__(bb_data(bytes) + k)) k = k + 1 }
+        xo_byte(0)
+        return void
+    }
+    if xo_word_is(name name_len ".file") {
+        let space:int = 0
+        loop space <? n and not xo_is_space(__load_u8__(p + space)) { space = space + 1 }
+        let number:int = xo_int(p space)
+        loop vec_len(xo_files) <=? number { vec_push(xo_files 0) }
+        let quote:int = xo_trim_start(p space n)
+        vec_set(xo_files number xo_string(p + quote n - quote))
+        return void
+    }
+    if xo_word_is(name name_len ".loc") {
+        # Two `.loc`s in a row: the first describes an empty range.
+        if xo_loc_waiting { xo_row() }
+        let fields:int = 0
+        let at:int = 0
+        xo_loc_column = 0
+        loop at <? n and fields <? 3 {
+            let start:int = xo_trim_start(p at n)
+            let end:int = start
+            loop end <? n and not xo_is_space(__load_u8__(p + end)) { end = end + 1 }
+            if end >? start {
+                let value:int = xo_int(p + start end - start)
+                if fields =? 0 { xo_loc_file = value }
+                else if fields =? 1 { xo_loc_line = value }
+                else { xo_loc_column = value }
+                fields = fields + 1
+            }
+            at = end
+        }
+        if fields <? 2 { xo_fail("malformed .loc") }
+        xo_loc_waiting = true
         return void
     }
     if xo_word_is(name name_len ".byte") {
@@ -820,12 +1030,33 @@ let xo_label = (p:int n:int):>void => {
     return void
 }
 
+# One line: `#` starts a comment and `;` separates statements, outside
+# string literals.
 let xo_line = (p:int n:int):>void => {
+    let start:int = 0
+    let i:int = 0
+    let quoted:int = false
+    loop i <? n {
+        let c:int = __load_u8__(p + i)
+        if quoted {
+            if c =? 92 { i = i + 1 }
+            else if c =? 34 { quoted = false }
+        } else if c =? 34 { quoted = true }
+        else if c =? 35 { break }
+        else if c =? 59 {
+            xo_statement(p + start i - start)
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if i >? n { i = n }
+    xo_statement(p + start i - start)
+    return void
+}
+
+let xo_statement = (p:int n:int):>void => {
     let start:int = xo_trim_start(p 0 n)
-    let stop:int = n
-    let hash:int = start
-    loop hash <? stop and __load_u8__(p + hash) not=? 35 { hash = hash + 1 }
-    stop = xo_trim_end(p start hash)
+    let stop:int = xo_trim_end(p start n)
     if start >=? stop { return void }
     let line:int = p + start
     let len:int = stop - start
@@ -846,6 +1077,7 @@ let xo_line = (p:int n:int):>void => {
         xo_directive(line head_end line + rest len - rest)
         return void
     }
+    if xo_loc_waiting { xo_row() }
     # Up to two operands, split at the comma outside parentheses.
     let count:int = 0
     let at:int = rest
@@ -906,6 +1138,11 @@ let xo_begin = ():>void => {
     elf_section(".bss" 4 ELF_SHT_NOBITS ELF_SHF_ALLOC or ELF_SHF_WRITE)
     xo_select(text_section)
     xo_pending = vec_new(4096)
+    xo_differences = vec_new(64)
+    xo_files = vec_new(8)
+    xo_rows = vec_new(64)
+    xo_row_sections = vec_new(64)
+    xo_loc_waiting = false
     return void
 }
 
@@ -924,7 +1161,203 @@ let xo_feed = (text:int n:int):>void => {
 let xo_finish = ():>int => {
     xo_flush()
     xo_resolve()
+    xo_resolve_differences()
+    xo_line_program()
     return elf_write()
+}
+
+let xo_resolve_differences = ():>void => {
+    let i:int = 0
+    loop i <? vec_len(xo_differences) {
+        let left:int = vec_get(xo_differences i + 3)
+        let right:int = vec_get(xo_differences i + 4)
+        let section:int = vec_get(elf_symbol_sections left)
+        if section <? 0 or section not=? vec_get(elf_symbol_sections right) { xo_fail("a difference of labels from two sections") }
+        let value:int = vec_get(elf_symbol_values left) - vec_get(elf_symbol_values right)
+        let at:int = bb_data(vec_get(elf_section_data vec_get(xo_differences i))) + vec_get(xo_differences i + 1)
+        let k:int = 0
+        loop k <? vec_get(xo_differences i + 2) {
+            __store_u8__((value >> (8 * k)) and 255 at + k)
+            k = k + 1
+        }
+        i = i + 5
+    }
+    return void
+}
+
+let xo_uleb = (bb:int v:int):>void => {
+    let value:int = v
+    loop true {
+        let byte:int = value and 127
+        value = value >> 7
+        if value =? 0 { bb_push_byte(bb byte) return void }
+        bb_push_byte(bb byte or 128)
+    }
+    return void
+}
+let xo_sleb = (bb:int v:int):>void => {
+    let value:int = v
+    loop true {
+        let byte:int = value and 127
+        value = __signed_shr__(value 7)
+        if (value =? 0 and (byte and 64) =? 0) or (value =? (0 - 1) and (byte and 64) not=? 0) {
+            bb_push_byte(bb byte)
+            return void
+        }
+        bb_push_byte(bb byte or 128)
+    }
+    return void
+}
+
+# `.debug_line` from the `.loc` rows, as gas writes it: a DWARF 3 header
+# naming the `.file`s (directory and base name apart), then one sequence per
+# section with rows. Special opcodes: line base -5, line range 14, opcode
+# base 13.
+let xo_line_program = ():>void => {
+    if vec_len(xo_row_sections) =? 0 { return void }
+    let directories:int = vec_new(8)
+    let files:int = bb_new(256)
+    let number:int = 1
+    loop number <? vec_len(xo_files) {
+        let path:int = vec_get(xo_files number)
+        let path_data:int = 0
+        let path_len:int = 0
+        if path not=? 0 {
+            path_data = bb_data(path)
+            path_len = bb_len(path)
+        }
+        let slash:int = path_len - 1
+        loop slash >=? 0 and __load_u8__(path_data + slash) not=? 47 { slash = slash - 1 }
+        let index:int = 0
+        if slash >=? 0 {
+            let directory:int = path_data
+            let directory_len:int = slash
+            if directory_len =? 0 {
+                directory = "/"
+                directory_len = 1
+            }
+            let d:int = 0
+            loop d <? vec_len(directories) and not str_eq_len(vec_get(directories d) vec_get(directories d + 1) directory directory_len) { d = d + 2 }
+            if d >=? vec_len(directories) {
+                vec_push(directories directory)
+                vec_push(directories directory_len)
+            }
+            index = d // 2 + 1
+        }
+        bb_push_bytes(files path_data + slash + 1 path_len - slash - 1)
+        bb_push_byte(files 0)
+        xo_uleb(files index)
+        bb_push_byte(files 0)
+        bb_push_byte(files 0)
+        number = number + 1
+    }
+    let header:int = bb_new(bb_len(files) + 256)
+    bb_push_byte(header 1)          # minimum instruction length
+    bb_push_byte(header 1)          # default is_stmt
+    bb_push_byte(header 251)        # line base -5
+    bb_push_byte(header 14)         # line range
+    bb_push_byte(header 13)         # opcode base
+    bb_push_byte(header 0) bb_push_byte(header 1) bb_push_byte(header 1) bb_push_byte(header 1)
+    bb_push_byte(header 1) bb_push_byte(header 0) bb_push_byte(header 0) bb_push_byte(header 0)
+    bb_push_byte(header 1) bb_push_byte(header 0) bb_push_byte(header 0) bb_push_byte(header 1)
+    let d:int = 0
+    loop d <? vec_len(directories) {
+        bb_push_bytes(header vec_get(directories d) vec_get(directories d + 1))
+        bb_push_byte(header 0)
+        d = d + 2
+    }
+    bb_push_byte(header 0)
+    bb_push_bytes(header bb_data(files) bb_len(files))
+    bb_push_byte(header 0)
+
+    let line_section:int = elf_section(".debug_line" 11 ELF_SHT_PROGBITS 0)
+    let data:int = vec_get(elf_section_data line_section)
+    let start:int = bb_len(data)
+    # The program's offset in the section, for its address relocations.
+    let base:int = start + 4 + 2 + 4 + bb_len(header)
+    let program:int = bb_new(4096)
+    let si:int = 0
+    loop si <? vec_len(xo_row_sections) {
+        let section:int = vec_get(xo_row_sections si)
+        let rows:int = vec_get(xo_rows section)
+        let address:int = 0
+        let file:int = 1
+        let line:int = 1
+        let column:int = 0
+        let ri:int = 0
+        loop ri <? vec_len(rows) {
+            let offset:int = vec_get(rows ri)
+            let row_file:int = vec_get(rows ri + 1)
+            let row_line:int = vec_get(rows ri + 2)
+            let row_column:int = vec_get(rows ri + 3)
+            if row_file not=? file {
+                bb_push_byte(program 4)
+                xo_uleb(program row_file)
+                file = row_file
+            }
+            if row_column not=? column {
+                bb_push_byte(program 5)
+                xo_uleb(program row_column)
+                column = row_column
+            }
+            if ri =? 0 {
+                # DW_LNE_set_address to the row, through a temporary label (a
+                # reference through the section symbol).
+                let name:int = bb_new(24)
+                bb_push_str(name ".Lline")
+                bb_push_int(name section)
+                let label_name:int = bb_finalize_as_string(name)
+                let label:int = elf_symbol(label_name str_len(label_name))
+                vec_set(elf_symbol_sections label section)
+                vec_set(elf_symbol_values label offset)
+                bb_push_byte(program 0)
+                bb_push_byte(program 9)
+                bb_push_byte(program 2)
+                elf_add_relocation(line_section base + bb_len(program) XO_R_X86_64_64 label 0)
+                elf_push_u64(program 0)
+                address = offset
+            }
+            let line_delta:int = row_line - line
+            let address_delta:int = offset - address
+            let special:int = false
+            if line_delta >=? (0 - 5) and line_delta <? 9 {
+                let opcode:int = (line_delta + 5) + 14 * address_delta + 13
+                if opcode <=? 255 {
+                    bb_push_byte(program opcode)
+                    special = true
+                }
+            }
+            if not special {
+                if line_delta not=? 0 {
+                    bb_push_byte(program 3)
+                    xo_sleb(program line_delta)
+                }
+                if address_delta not=? 0 {
+                    bb_push_byte(program 2)
+                    xo_uleb(program address_delta)
+                }
+                bb_push_byte(program 1)
+            }
+            line = row_line
+            address = offset
+            ri = ri + 4
+        }
+        let end:int = elf_section_length(section)
+        if end >? address {
+            bb_push_byte(program 2)
+            xo_uleb(program end - address)
+        }
+        bb_push_byte(program 0)
+        bb_push_byte(program 1)
+        bb_push_byte(program 1)
+        si = si + 1
+    }
+    elf_push_u32(data 2 + 4 + bb_len(header) + bb_len(program))
+    elf_push_u16(data 3)
+    elf_push_u32(data bb_len(header))
+    bb_push_bytes(data bb_data(header) bb_len(header))
+    bb_push_bytes(data bb_data(program) bb_len(program))
+    return void
 }
 
 # The ELF object (a byte buffer) for x86-64 assembly `text[0..n)`.

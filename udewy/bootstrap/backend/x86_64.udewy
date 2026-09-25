@@ -2536,8 +2536,7 @@ let x86_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
 
     # Assemble the chunks recorded by x86_finish_module concurrently; each
     # chunk repeats the module header and the GNU-stack note. The direct
-    # path encodes the whole module in process instead (no debug info: the
-    # assembler builds .debug_line from .loc).
+    # path encodes the module in process instead (a forked child per chunk).
     let objects:int = vec_new(8)
     let splits:int = 0
     if x86_chunk_offsets not=? 0 { splits = vec_len(x86_chunk_offsets) }
@@ -2716,9 +2715,8 @@ let x86_direct_assemble = (code:int cache_dir:int input_name:int obj_path:int sp
 }
 
 # Whether this build writes its object directly (UDEWY_OBJECT=direct)
-# rather than through `as`. Builds with debug information keep `as`.
+# rather than through `as`, debug information and line table included.
 let x86_direct_objects = ():>int => {
-    if be_debug_info { return false }
     let mode:int = proc_getenv("UDEWY_OBJECT")
     if mode =? 0 { return false }
     return str_eq(mode "direct")

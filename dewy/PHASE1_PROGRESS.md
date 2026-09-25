@@ -4193,3 +4193,128 @@ compiler's µDewy source took 8.4 s wall and 9.5 s CPU; replaying its
 stream took 5.2 s wall and 6.4 s CPU. That difference is what step 4
 (Dewy writing the stream instead of µDewy text) removes from a cold
 compile, along with part of Dewy's 3.5 s text emission.
+
+## Direct wasm32 modules (2026-09-25)
+
+Part of step 5. The wasm32 backend's WAT is a closed dialect: module-level
+`type`, `import`, `global`, `table`, `func`, `elem`, `data` and `export`
+forms, and flat function bodies with labeled `block`/`loop`/`if` and about
+60 instructions. `udewy/backend/wasm_binary.py` and
+`udewy/bootstrap/backend/wasm_binary.udewy` encode it in `wat2wasm`'s
+section order with minimal LEB128 sizes. `UDEWY_OBJECT=direct` uses them
+instead of running `wat2wasm`, and `udewy --assemble in.wat out.wasm` runs
+the native one on its own.
+
+Every `udewy/tests` program that builds for wasm32 (40 of them) encodes
+byte-identically to `wat2wasm`, in both implementations. The modules pass
+`wasm-validate`, and the compile path writes the same module either way
+(`tests/python_misc/test_direct_wasm.py`). Two bugs came up while matching
+`wat2wasm`: a function's signature must end at its first instruction (an
+`if (result i64)` is a block type), and a `(type ...)` after the header
+belongs to a `call_indirect`.
+
+## Direct AArch64 objects (2026-09-25)
+
+The rest of step 5. `udewy/backend/aarch64_object.py` and
+`udewy/bootstrap/backend/aarch64_object.udewy` assemble the arm backend's
+closed set into ELF objects (`EM_AARCH64`) on the shared writer. The set is
+about 55 mnemonics with pre- and post-index, unscaled and scaled
+addressing. The encoders resolve the aliases an assembler does: `mov` as
+`orr`, `add #0`, `movz`, `movn` or a bitmask `orr`; `csetm`/`cset` as
+`csinv`/`csinc`; `cmp` as `subs`; immediate shifts as `ubfm`/`sbfm`.
+`ldr xN, =imm` becomes one `movz` when that builds the constant, and
+otherwise a load from a literal pool at the end of the section, which is
+what `llvm-mc` does. Relocations are `ADR_PREL_PG_HI21`, `ADD_ABS_LO12_NC`,
+`CALL26`, `JUMP26` and `ABS64`. `UDEWY_OBJECT=direct` uses them (only `ld`
+is still needed), and `udewy --assemble in.s out.o --target arm` runs the
+native one.
+
+No AArch64 binutils or emulator is available here, so `llvm-mc` is the
+reference, and the checks cover encoding, not execution. Every
+`udewy/tests` program the Python arm backend builds (54) matches `llvm-mc`
+section for section, with the same relocations. So do the 37 the native
+arm backend builds, through the native encoder. The Python and native
+encoders write byte-identical objects, and a logical-immediate fixture
+matches too (`tests/python_misc/test_direct_aarch64.py`). The acceptance
+list still wants linking and running once a toolchain or emulator is
+available.
+
+Found later with RISC-V: neither encoder word-aligned the code sections it
+filled (alignment 1), so `ld` could have placed code off a 4-byte boundary.
+Both now word-align any section that holds an instruction. The tests
+compare section headers too (type, flags, alignment, NOBITS size).
+
+## Direct RISC-V objects (2026-09-25)
+
+Step 7. `udewy/backend/riscv_object.py` and
+`udewy/bootstrap/backend/riscv_object.udewy` assemble the riscv backend's
+closed set (RV64IMFD plus the pseudo-instructions it uses) into ELF objects
+(`EM_RISCV`, double-float ABI) on the shared writer. They use the long form
+the roadmap chose, with nothing compressed and no `R_RISCV_RELAX`:
+- `la` is `auipc` + `addi`. The high part carries `PCREL_HI20` against the
+  target. The low part carries `PCREL_LO12_I` against the `auipc`'s own kept
+  `.Lpcrel_hiN` label.
+- `call` is `auipc` + `jalr` with `CALL_PLT`. A local function in the same
+  section is reached without a relocation, as `llvm-mc` does for recursion.
+- `li` expands to LLVM's RISCVMatInt sequence
+  (`udewy/backend/riscv_materialize.py`). On 17,189 fuzzed constants it
+  matches `llvm-mc` instruction for instruction.
+- A conditional branch whose label is out of ±4 KiB becomes the inverted
+  branch over a `jal`. The Python encoder lays out items until nothing
+  changes. The native one emits in place and inserts the `jal` words in
+  batches, shifting labels, pending items and relocations. Neither re-pads
+  alignment inside code, which the backend never emits; both refuse that
+  case.
+
+RISC-V relocations name local symbols themselves rather than section
+symbol plus offset, so the ELF writers gained kept symbols and `e_flags`.
+
+The checks use `llvm-mc -mattr=+m,+f,+d,-relax,-c` as the reference, since
+no RISC-V binutils or qemu is available here. All 54 `udewy/tests` programs
+the riscv backend builds match it, along with an edge fixture (relaxed
+branches, `li` shapes, swapped pseudo-branches, data relocations with
+addends). The comparison covers section contents, relocations, and
+headers. The one header difference: `llvm-mc` leaves `.section`-made code
+sections byte-aligned, where the direct path word-aligns them. The Python
+and native encoders write byte-identical objects
+(`tests/python_misc/test_direct_riscv.py`). `UDEWY_OBJECT=direct` uses the
+encoders in both backends, and `udewy --assemble in.s out.o --target riscv`
+runs the native one. Linking and running still wait for a toolchain.
+
+## Direct x86-64 objects with debug information (2026-09-25)
+
+Step 6. Debug builds no longer fall back to `as` under
+`UDEWY_OBJECT=direct`, in either µDewy. Both x86-64 writers now also
+accept:
+- `;`-separated statements, with `#` and `;` ignored inside string
+  literals;
+- `.uleb128`, `.value`, `.long` and `.string`;
+- label differences in `.quad`/`.long`, resolved once every label is
+  placed;
+- `.long label` as `R_X86_64_32`.
+
+From the `.file`/`.loc` rows they write the `.debug_line` program the
+backend used to leave to gas. It has a DWARF 3 header like gas's (line base
+-5, range 14, directories split from base names) and one sequence per
+section, which starts with `DW_LNE_set_address` through the section symbol.
+The closed set also gained the SSE moves and conversions used by float
+extern calls (`movd`/`movq` between general and xmm registers,
+`cvtsi2ss/sd`, `cvttss2si/sd2si`). Before this, three SDL/GL demos could
+not take the direct path at all.
+
+The check goes further than per-symbol equivalence. gas's `{disp32}`
+prefix forces its jumps near, giving the direct path's layout, and against
+that reference every section matches byte for byte except `.debug_line`.
+That includes `.debug_info`, where function lengths and label differences
+live. `.debug_line` matches in decoded rows
+(`readelf --debug-dump=decodedline`) and in its relocations' targets. All
+57 `udewy/tests` programs pass, and the native writer produces identical
+bytes. The native backend's own DWARF spelling matches too. gdb stops on a
+µDewy source line in binaries built on the direct path by either compiler,
+and the gdb/lldb/editor debugging suites pass on direct objects
+(`tests/python_misc/test_direct_objects.py`).
+
+Unrelated fix on the way: two slow-marked tests in `test_breakpoint.py`
+failed on HEAD because their HIR walkers descended into node *classes*
+(which also have `__dataclass_fields__`). Skipping those made the walkers
+revisit shared nodes endlessly, so they now keep a visited set.

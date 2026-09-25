@@ -1,0 +1,988 @@
+# RISC-V (RV64IMFD) assembly text to an ELF relocatable object, without an
+# assembler.
+#
+# The riscv backend emits a closed set of instructions, pseudo-instructions
+# and directives (see ROADMAP "Direct binary fast path"). This writes the
+# long form the roadmap chose: `li` expands as LLVM's RISCVMatInt does, `la`
+# is `auipc` + `addi` with R_RISCV_PCREL_HI20 and R_RISCV_PCREL_LO12_I (the
+# low part naming the `auipc`'s `.Lpcrel_hiN` label), and `call` is `auipc` +
+# `jalr` with R_RISCV_CALL_PLT; nothing is compressed and nothing carries
+# R_RISCV_RELAX, so the linker never rewrites code. A conditional branch
+# whose label is out of range becomes the inverted branch over a `jal`, as
+# `llvm-mc` relaxes it. Anything else is an error, never a guess. Mirrors
+# udewy/backend/riscv_object.py and udewy/backend/riscv_materialize.py.
+
+import p"./elf.udewy"
+
+const RO_R_64:int = 2
+const RO_R_BRANCH:int = 16
+const RO_R_JAL:int = 17
+const RO_R_CALL_PLT:int = 19
+const RO_R_PCREL_HI20:int = 23
+const RO_R_PCREL_LO12_I:int = 24
+const ELF_EM_RISCV:int = 243
+const RO_EF_FLOAT_ABI_DOUBLE:int = 4
+
+# Mnemonic classes. A mnemonic maps to (base word << 16) | (flag << 8) | class.
+const RO_C_R:int = 1            # rd, rs1, rs2
+const RO_C_I:int = 2            # rd, rs1, imm
+const RO_C_SHIFT:int = 3        # rd, rs1, shamt
+const RO_C_LOAD:int = 4         # rd, offset(base)
+const RO_C_STORE:int = 5        # rs2, offset(base)
+const RO_C_BRANCH:int = 6       # rs1, rs2, label; flag: operands swapped (bgt, ble, ...)
+const RO_C_ZERO_BRANCH:int = 7  # rs, label; flag: zero is the first operand (blez, bgtz)
+const RO_C_FLOAT:int = 8        # float moves and conversions; flag: the destination is a float register
+const RO_C_SPECIAL:int = 9      # flag: one of RO_S_*
+
+const RO_S_J:int = 1
+const RO_S_JAL:int = 2
+const RO_S_JALR:int = 3
+const RO_S_JR:int = 4
+const RO_S_RET:int = 5
+const RO_S_ECALL:int = 6
+const RO_S_EBREAK:int = 7
+const RO_S_NOP:int = 8
+const RO_S_MV:int = 9
+const RO_S_NOT:int = 10
+const RO_S_NEG:int = 11
+const RO_S_NEGW:int = 12
+const RO_S_SEQZ:int = 13
+const RO_S_SNEZ:int = 14
+const RO_S_SLTZ:int = 15
+const RO_S_SGTZ:int = 16
+const RO_S_SGT:int = 17
+const RO_S_SGTU:int = 18
+const RO_S_SEXT_W:int = 19
+const RO_S_LI:int = 20
+const RO_S_LUI:int = 21
+const RO_S_LA:int = 22
+const RO_S_CALL:int = 23
+const RO_S_TAIL:int = 24
+
+# Pending PC-relative items, resolved once branch layout is final (8 words
+# each): section, offset, symbol, kind, word, addend, long (a relaxed
+# conditional branch; 2 while newly marked), label (`la`'s `.Lpcrel_hiN`).
+const RO_P_BRANCH:int = 1
+const RO_P_JAL:int = 2
+const RO_P_CALL:int = 3
+const RO_P_ADDRESS:int = 4
+const RO_P_WORDS:int = 8
+
+# `li` sequences: word 0 is the count, then (op, imm) pairs.
+const RO_LUI:int = 1
+const RO_ADDI:int = 2
+const RO_ADDIW:int = 3
+const RO_SLLI:int = 4
+const RO_SRLI:int = 5
+const RO_XORI:int = 6
+
+let ro_mnemonics:int = 0
+let ro_registers:int = 0
+let ro_floats:int = 0
+let ro_current:int = 0
+let ro_pending:int = 0
+let ro_pcrel:int = 0
+let ro_code_aligned:int = 0     # sections with alignment padding among their code
+let ro_ops:int = 0              # operand pointer, length pairs
+let ro_count:int = 0
+let ro_memory_offset:int = 0
+let ro_symbol_len:int = 0
+let ro_symbol_addend:int = 0
+let ro_sequence:int = 0
+let ro_trial:int = 0
+let ro_form_trial:int = 0
+let ro_inverse:int = 0
+let ro_line_start:int = 0
+let ro_line_len:int = 0
+
+let ro_fail = (message:int):>void => {
+    eprint("error: direct RISC-V object: ")
+    eprint(message)
+    eprint(": ")
+    let line:int = bb_new(ro_line_len + 1)
+    bb_push_bytes(line ro_line_start ro_line_len)
+    eprintl(bb_finalize_as_string(line))
+    host_exit(1)
+    return void
+}
+
+let ro_put = (name:int class:int base:int flag:int):>void => {
+    map_put_str(ro_mnemonics name (base << 16) or (flag << 8) or class)
+    return void
+}
+let ro_put_r = (name:int funct7:int funct3:int opcode:int):>void => {
+    ro_put(name RO_C_R (funct7 << 25) or (funct3 << 12) or opcode 0)
+    return void
+}
+let ro_put_i = (name:int funct3:int opcode:int):>void => {
+    ro_put(name RO_C_I (funct3 << 12) or opcode 0)
+    return void
+}
+let ro_put_float = (name:int funct7:int rs2:int funct3:int to_float:int):>void => {
+    ro_put(name RO_C_FLOAT (funct7 << 25) or (rs2 << 20) or (funct3 << 12) or 0x53 to_float)
+    return void
+}
+# The 32 registers named in `names` (each followed by a space), and also
+# as `prefix` + number (x0, f0, ...).
+let ro_put_names = (map:int names:int prefix:int):>void => {
+    let number:int = 0
+    let start:int = 0
+    let at:int = 0
+    loop number <? 32 {
+        if __load_u8__(names + at) =? 32 {
+            map_put(map names + start at - start number)
+            let numbered:int = bb_new(4)
+            bb_push_byte(numbered prefix)
+            bb_push_int(numbered number)
+            let name:int = bb_finalize_as_string(numbered)
+            map_put(map name str_len(name) number)
+            number = number + 1
+            start = at + 1
+        }
+        at = at + 1
+    }
+    return void
+}
+
+let ro_init = ():>void => {
+    if ro_mnemonics not=? 0 { return void }
+    ro_ops = arena_alloc(16 * 4)
+    ro_sequence = arena_alloc(8 + 16 * 24)
+    ro_trial = arena_alloc(8 + 16 * 24)
+    ro_form_trial = arena_alloc(8 + 16 * 24)
+    ro_inverse = arena_alloc(8 + 16 * 24)
+    ro_mnemonics = map_new()
+    ro_put_r("add" 0 0 0x33) ro_put_r("sub" 0x20 0 0x33) ro_put_r("sll" 0 1 0x33) ro_put_r("slt" 0 2 0x33)
+    ro_put_r("sltu" 0 3 0x33) ro_put_r("xor" 0 4 0x33) ro_put_r("srl" 0 5 0x33) ro_put_r("sra" 0x20 5 0x33)
+    ro_put_r("or" 0 6 0x33) ro_put_r("and" 0 7 0x33) ro_put_r("mul" 1 0 0x33) ro_put_r("mulh" 1 1 0x33)
+    ro_put_r("div" 1 4 0x33) ro_put_r("divu" 1 5 0x33) ro_put_r("rem" 1 6 0x33) ro_put_r("remu" 1 7 0x33)
+    ro_put_r("addw" 0 0 0x3B) ro_put_r("subw" 0x20 0 0x3B) ro_put_r("mulw" 1 0 0x3B) ro_put_r("divw" 1 4 0x3B)
+    ro_put_r("remw" 1 6 0x3B) ro_put_r("sllw" 0 1 0x3B) ro_put_r("srlw" 0 5 0x3B) ro_put_r("sraw" 0x20 5 0x3B)
+    ro_put_i("addi" 0 0x13) ro_put_i("slti" 2 0x13) ro_put_i("sltiu" 3 0x13) ro_put_i("xori" 4 0x13)
+    ro_put_i("ori" 6 0x13) ro_put_i("andi" 7 0x13) ro_put_i("addiw" 0 0x1B)
+    ro_put("slli" RO_C_SHIFT (1 << 12) or 0x13 0)
+    ro_put("srli" RO_C_SHIFT (5 << 12) or 0x13 0)
+    ro_put("srai" RO_C_SHIFT (0x10 << 26) or (5 << 12) or 0x13 0)
+    ro_put("lb" RO_C_LOAD (0 << 12) or 3 0) ro_put("lh" RO_C_LOAD (1 << 12) or 3 0)
+    ro_put("lw" RO_C_LOAD (2 << 12) or 3 0) ro_put("ld" RO_C_LOAD (3 << 12) or 3 0)
+    ro_put("lbu" RO_C_LOAD (4 << 12) or 3 0) ro_put("lhu" RO_C_LOAD (5 << 12) or 3 0)
+    ro_put("lwu" RO_C_LOAD (6 << 12) or 3 0)
+    ro_put("sb" RO_C_STORE (0 << 12) or 0x23 0) ro_put("sh" RO_C_STORE (1 << 12) or 0x23 0)
+    ro_put("sw" RO_C_STORE (2 << 12) or 0x23 0) ro_put("sd" RO_C_STORE (3 << 12) or 0x23 0)
+    ro_put("beq" RO_C_BRANCH (0 << 12) or 0x63 false) ro_put("bne" RO_C_BRANCH (1 << 12) or 0x63 false)
+    ro_put("blt" RO_C_BRANCH (4 << 12) or 0x63 false) ro_put("bge" RO_C_BRANCH (5 << 12) or 0x63 false)
+    ro_put("bltu" RO_C_BRANCH (6 << 12) or 0x63 false) ro_put("bgeu" RO_C_BRANCH (7 << 12) or 0x63 false)
+    ro_put("bgt" RO_C_BRANCH (4 << 12) or 0x63 1) ro_put("ble" RO_C_BRANCH (5 << 12) or 0x63 1)
+    ro_put("bgtu" RO_C_BRANCH (6 << 12) or 0x63 1) ro_put("bleu" RO_C_BRANCH (7 << 12) or 0x63 1)
+    ro_put("beqz" RO_C_ZERO_BRANCH (0 << 12) or 0x63 0) ro_put("bnez" RO_C_ZERO_BRANCH (1 << 12) or 0x63 0)
+    ro_put("bltz" RO_C_ZERO_BRANCH (4 << 12) or 0x63 0) ro_put("bgez" RO_C_ZERO_BRANCH (5 << 12) or 0x63 0)
+    ro_put("blez" RO_C_ZERO_BRANCH (5 << 12) or 0x63 1) ro_put("bgtz" RO_C_ZERO_BRANCH (4 << 12) or 0x63 1)
+    ro_put_float("fmv.x.w" 0x70 0 0 0) ro_put_float("fmv.w.x" 0x78 0 0 1)
+    ro_put_float("fmv.x.d" 0x71 0 0 0) ro_put_float("fmv.d.x" 0x79 0 0 1)
+    ro_put_float("fcvt.s.l" 0x68 2 7 1) ro_put_float("fcvt.d.l" 0x69 2 7 1)
+    ro_put_float("fcvt.l.s" 0x60 2 7 0) ro_put_float("fcvt.l.d" 0x61 2 7 0)
+    ro_put("j" RO_C_SPECIAL 0 RO_S_J) ro_put("jal" RO_C_SPECIAL 0 RO_S_JAL) ro_put("jalr" RO_C_SPECIAL 0 RO_S_JALR)
+    ro_put("jr" RO_C_SPECIAL 0 RO_S_JR) ro_put("ret" RO_C_SPECIAL 0 RO_S_RET) ro_put("ecall" RO_C_SPECIAL 0 RO_S_ECALL)
+    ro_put("ebreak" RO_C_SPECIAL 0 RO_S_EBREAK) ro_put("nop" RO_C_SPECIAL 0 RO_S_NOP) ro_put("mv" RO_C_SPECIAL 0 RO_S_MV)
+    ro_put("not" RO_C_SPECIAL 0 RO_S_NOT) ro_put("neg" RO_C_SPECIAL 0 RO_S_NEG) ro_put("negw" RO_C_SPECIAL 0 RO_S_NEGW)
+    ro_put("seqz" RO_C_SPECIAL 0 RO_S_SEQZ) ro_put("snez" RO_C_SPECIAL 0 RO_S_SNEZ) ro_put("sltz" RO_C_SPECIAL 0 RO_S_SLTZ)
+    ro_put("sgtz" RO_C_SPECIAL 0 RO_S_SGTZ) ro_put("sgt" RO_C_SPECIAL 0 RO_S_SGT) ro_put("sgtu" RO_C_SPECIAL 0 RO_S_SGTU)
+    ro_put("sext.w" RO_C_SPECIAL 0 RO_S_SEXT_W) ro_put("li" RO_C_SPECIAL 0 RO_S_LI) ro_put("lui" RO_C_SPECIAL 0 RO_S_LUI)
+    ro_put("la" RO_C_SPECIAL 0 RO_S_LA) ro_put("call" RO_C_SPECIAL 0 RO_S_CALL) ro_put("tail" RO_C_SPECIAL 0 RO_S_TAIL)
+
+    ro_registers = map_new()
+    ro_floats = map_new()
+    ro_put_names(ro_registers "zero ra sp gp tp t0 t1 t2 s0 s1 a0 a1 a2 a3 a4 a5 a6 a7 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 t3 t4 t5 t6 " 120)
+    ro_put_names(ro_floats "ft0 ft1 ft2 ft3 ft4 ft5 ft6 ft7 fs0 fs1 fa0 fa1 fa2 fa3 fa4 fa5 fa6 fa7 fs2 fs3 fs4 fs5 fs6 fs7 fs8 fs9 fs10 fs11 ft8 ft9 ft10 ft11 " 102)
+    map_put_str(ro_registers "fp" 8)
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Output
+# ----------------------------------------------------------------------------
+
+let ro_data = ():>int => { return vec_get(elf_section_data ro_current) }
+let ro_length = ():>int => { return elf_section_length(ro_current) }
+let ro_word = (v:int):>void => {
+    let data:int = ro_data()
+    if data =? 0 { ro_fail("code in a NOBITS section") }
+    let len:int = bb_len(data)
+    bb_grow(data len + 4)
+    __store_u32__(v and 0xFFFFFFFF bb_data(data) + len)
+    __store__(len + 4 data + BB_OFF_LEN)
+    return void
+}
+let ro_pend = (kind:int symbol:int word:int addend:int label:int):>void => {
+    vec_push(ro_pending ro_current)
+    vec_push(ro_pending ro_length())
+    vec_push(ro_pending symbol)
+    vec_push(ro_pending kind)
+    vec_push(ro_pending word)
+    vec_push(ro_pending addend)
+    vec_push(ro_pending 0)
+    vec_push(ro_pending label)
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Encoding
+# ----------------------------------------------------------------------------
+
+let ro_i = (opcode:int funct3:int rd:int rs1:int imm:int):>int => {
+    return ((imm and 0xFFF) << 20) or (rs1 << 15) or (funct3 << 12) or (rd << 7) or opcode
+}
+let ro_r = (funct7:int rs2:int rs1:int funct3:int rd:int opcode:int):>int => {
+    return (funct7 << 25) or (rs2 << 20) or (rs1 << 15) or (funct3 << 12) or (rd << 7) or opcode
+}
+let ro_b_offset = (offset:int):>int => {
+    return (((offset >> 12) and 1) << 31) or (((offset >> 5) and 0x3F) << 25) or (((offset >> 1) and 0xF) << 8) or (((offset >> 11) and 1) << 7)
+}
+let ro_j = (rd:int offset:int):>int => {
+    return (((offset >> 20) and 1) << 31) or (((offset >> 1) and 0x3FF) << 21) or (((offset >> 11) and 1) << 20) or (((offset >> 12) and 0xFF) << 12) or (rd << 7) or 0x6F
+}
+
+# ----------------------------------------------------------------------------
+# `li`: LLVM's RISCVMatInt for the base ISA (riscv_materialize.py)
+# ----------------------------------------------------------------------------
+
+let ro_signed12 = (v:int):>int => { return ((v and 0xFFF) xor 0x800) - 0x800 }
+let ro_signed32 = (v:int):>int => { return ((v and 0xFFFFFFFF) xor 0x80000000) - 0x80000000 }
+let ro_fits = (v:int bits:int):>int => {
+    let high:int = __signed_shr__(v bits - 1)
+    return high =? 0 or high =? (0 - 1)
+}
+let ro_trailing_zeros = (v:int):>int => {
+    if v =? 0 { return 64 }
+    let n:int = 0
+    loop ((v >> n) and 1) =? 0 { n = n + 1 }
+    return n
+}
+let ro_leading_zeros = (v:int):>int => {
+    let n:int = 0
+    loop n <? 64 and ((v >> (63 - n)) and 1) =? 0 { n = n + 1 }
+    return n
+}
+let ro_seq_len = (seq:int):>int => { return __load__(seq) }
+let ro_seq_clear = (seq:int):>void => { __store__(0 seq) return void }
+let ro_seq_push = (seq:int op:int imm:int):>void => {
+    let n:int = __load__(seq)
+    __store__(op seq + 8 + n * 16)
+    __store__(imm seq + 16 + n * 16)
+    __store__(n + 1 seq)
+    return void
+}
+let ro_seq_copy = (to:int from:int):>void => {
+    copy_bytes(to from 8 + 16 * __load__(from))
+    return void
+}
+
+let ro_impl = (value:int out:int):>void => {
+    if ro_fits(value 32) {
+        let hi20:int = __signed_shr__(value + 0x800 12) and 0xFFFFF
+        let lo12:int = ro_signed12(value)
+        if hi20 not=? 0 { ro_seq_push(out RO_LUI hi20) }
+        if lo12 not=? 0 or hi20 =? 0 {
+            # ADDIW only where ADDI would differ: when the sign-extended LUI
+            # value plus the low bits leaves 32 bits.
+            if hi20 not=? 0 and not ro_fits(ro_signed32(hi20 << 12) + lo12 32) { ro_seq_push(out RO_ADDIW lo12) }
+            else { ro_seq_push(out RO_ADDI lo12) }
+        }
+        return void
+    }
+    let lo12:int = ro_signed12(value)
+    let rest:int = value - lo12
+    let shift:int = 0
+    if not ro_fits(rest 32) {
+        shift = ro_trailing_zeros(rest)
+        rest = __signed_shr__(rest shift)
+        if shift >? 12 and not ro_fits(rest 12) and ro_fits(rest << 12 32) {
+            shift = shift - 12
+            rest = rest << 12
+        }
+    }
+    ro_impl(rest out)
+    if shift not=? 0 { ro_seq_push(out RO_SLLI shift) }
+    if lo12 not=? 0 { ro_seq_push(out RO_ADDI lo12) }
+    return void
+}
+
+# The shorter of `sequence` and building `value` shifted up then back down.
+let ro_leading_zero_form = (value:int sequence:int):>void => {
+    let zeros:int = ro_leading_zeros(value)
+    let low:int = (1 << zeros) - 1
+    let shifted:int = (value << zeros) or low
+    let pass:int = 0
+    loop pass <? 2 {
+        if pass =? 1 { shifted = shifted and (low xor (0 - 1)) }
+        ro_seq_clear(ro_form_trial)
+        ro_impl(shifted ro_form_trial)
+        let trial:int = ro_seq_len(ro_form_trial)
+        if trial + 1 <? ro_seq_len(sequence) or (ro_seq_len(sequence) =? 0 and trial <? 8) {
+            ro_seq_push(ro_form_trial RO_SRLI zeros)
+            ro_seq_copy(sequence ro_form_trial)
+        }
+        pass = pass + 1
+    }
+    return void
+}
+
+# The `li` sequence for `value` in `ro_sequence`.
+let ro_materialize = (value:int):>int => {
+    let sequence:int = ro_sequence
+    ro_seq_clear(sequence)
+    ro_impl(value sequence)
+    # Trailing zeros with nonzero low bits: build the shifted constant and
+    # restore the zeros with a final slli, if that is shorter.
+    if (value and 0xFFF) not=? 0 and (value and 1) =? 0 and ro_seq_len(sequence) >=? 2 {
+        let zeros:int = ro_trailing_zeros(value)
+        let shifted:int = __signed_shr__(value zeros)
+        ro_seq_clear(ro_trial)
+        ro_impl(shifted ro_trial)
+        if ro_seq_len(ro_trial) + 1 <? ro_seq_len(sequence) or ro_fits(shifted 6) {
+            ro_seq_push(ro_trial RO_SLLI zeros)
+            ro_seq_copy(sequence ro_trial)
+        }
+    }
+    if ro_seq_len(sequence) <=? 2 { return sequence }
+    # Low 13 bits like 0x17ff: build value + 1 ... and add the difference back.
+    if (value and 0xFFF) not=? 0 and (value and 0x1800) =? 0x1000 {
+        let imm12:int = 0 - (0x800 - (value and 0xFFF))
+        ro_seq_clear(ro_trial)
+        ro_impl(value - imm12 ro_trial)
+        if ro_seq_len(ro_trial) + 1 <? ro_seq_len(sequence) {
+            ro_seq_push(ro_trial RO_ADDI imm12)
+            ro_seq_copy(sequence ro_trial)
+        }
+    }
+    if value >? 0 and ro_seq_len(sequence) >? 2 { ro_leading_zero_form(value sequence) }
+    if value <? 0 and ro_seq_len(sequence) >? 3 {
+        ro_seq_clear(ro_inverse)
+        ro_leading_zero_form(value xor (0 - 1) ro_inverse)
+        if ro_seq_len(ro_inverse) >? 0 and ro_seq_len(ro_inverse) + 1 <? ro_seq_len(sequence) {
+            ro_seq_push(ro_inverse RO_XORI (0 - 1))
+            ro_seq_copy(sequence ro_inverse)
+        }
+    }
+    return sequence
+}
+
+let ro_load_immediate = (rd:int value:int):>void => {
+    let sequence:int = ro_materialize(value)
+    let i:int = 0
+    loop i <? ro_seq_len(sequence) {
+        let op:int = __load__(sequence + 8 + i * 16)
+        let imm:int = __load__(sequence + 16 + i * 16)
+        let source:int = rd
+        if i =? 0 { source = 0 }
+        if op =? RO_LUI { ro_word(((imm and 0xFFFFF) << 12) or (rd << 7) or 0x37) }
+        else if op =? RO_ADDIW { ro_word(ro_i(0x1B 0 rd source imm)) }
+        else if op =? RO_SLLI { ro_word(ro_i(0x13 1 rd source imm and 0x3F)) }
+        else if op =? RO_SRLI { ro_word(ro_i(0x13 5 rd source imm and 0x3F)) }
+        else if op =? RO_XORI { ro_word(ro_i(0x13 4 rd source imm)) }
+        else { ro_word(ro_i(0x13 0 rd source imm)) }
+        i = i + 1
+    }
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Parsing
+# ----------------------------------------------------------------------------
+
+let ro_is_digit = (c:int):>int => { return c >=? 48 and c <=? 57 }
+
+let ro_int = (p:int n:int):>int => {
+    let i:int = 0
+    let negative:int = false
+    if n >? 0 and __load_u8__(p) =? 45 { negative = true  i = 1 }
+    else if n >? 0 and __load_u8__(p) =? 43 { i = 1 }
+    let value:int = 0
+    if i + 1 <? n and __load_u8__(p + i) =? 48 and (__load_u8__(p + i + 1) =? 120 or __load_u8__(p + i + 1) =? 88) {
+        i = i + 2
+        loop i <? n {
+            let c:int = __load_u8__(p + i)
+            let d:int = 0
+            if c =? 95 { i = i + 1 continue }
+            if c >=? 48 and c <=? 57 { d = c - 48 }
+            else if c >=? 97 and c <=? 102 { d = c - 87 }
+            else if c >=? 65 and c <=? 70 { d = c - 55 }
+            else { ro_fail("malformed number") }
+            value = (value << 4) or d
+            i = i + 1
+        }
+    } else {
+        if i >=? n { ro_fail("malformed number") }
+        loop i <? n {
+            let c:int = __load_u8__(p + i)
+            if c not=? 95 {
+                if c <? 48 or c >? 57 { ro_fail("malformed number") }
+                value = value * 10 + (c - 48)
+            }
+            i = i + 1
+        }
+    }
+    if negative { return 0 - value }
+    return value
+}
+
+let ro_trim_start = (p:int at:int n:int):>int => {
+    let i:int = at
+    loop i <? n {
+        let c:int = __load_u8__(p + i)
+        if c not=? 32 and c not=? 9 and c not=? 13 { return i }
+        i = i + 1
+    }
+    return i
+}
+let ro_trim_end = (p:int at:int stop:int):>int => {
+    let i:int = stop
+    loop i >? at {
+        let c:int = __load_u8__(p + i - 1)
+        if c not=? 32 and c not=? 9 and c not=? 13 { return i }
+        i = i - 1
+    }
+    return i
+}
+
+let ro_op_ptr = (i:int):>int => { return __load__(ro_ops + i * 16) }
+let ro_op_len = (i:int):>int => { return __load__(ro_ops + i * 16 + 8) }
+let ro_operand = (i:int):>int => {
+    if i >=? ro_count { ro_fail("missing operand") }
+    return i
+}
+
+let ro_register_of = (map:int p:int n:int):>int => {
+    let found:int = map_get(map p n)
+    if found =? MAP_MISSING { ro_fail("unknown register") }
+    return found
+}
+let ro_register = (i:int):>int => { return ro_register_of(ro_registers ro_op_ptr(ro_operand(i)) ro_op_len(i)) }
+let ro_float = (i:int):>int => { return ro_register_of(ro_floats ro_op_ptr(ro_operand(i)) ro_op_len(i)) }
+let ro_immediate = (i:int):>int => { return ro_int(ro_op_ptr(ro_operand(i)) ro_op_len(i)) }
+let ro_has_paren = (i:int):>int => {
+    let p:int = ro_op_ptr(i)
+    let k:int = 0
+    loop k <? ro_op_len(i) {
+        if __load_u8__(p + k) =? 40 { return true }
+        k = k + 1
+    }
+    return false
+}
+
+# `offset(base)`: the base register; the offset in `ro_memory_offset`.
+let ro_memory = (i:int):>int => {
+    let p:int = ro_op_ptr(ro_operand(i))
+    let n:int = ro_op_len(i)
+    let open:int = 0
+    loop open <? n and __load_u8__(p + open) not=? 40 { open = open + 1 }
+    let close:int = n
+    loop close >? open and __load_u8__(p + close - 1) not=? 41 { close = close - 1 }
+    if open >=? n or close <=? open { ro_fail("malformed memory operand") }
+    let offset_end:int = ro_trim_end(p 0 open)
+    ro_memory_offset = 0
+    if offset_end >? 0 { ro_memory_offset = ro_int(p offset_end) }
+    let base_start:int = ro_trim_start(p open + 1 close - 1)
+    return ro_register_of(ro_registers p + base_start ro_trim_end(p base_start close - 1) - base_start)
+}
+
+# `name` or `name+8`: the name's length in `ro_symbol_len`, the addend in
+# `ro_symbol_addend`.
+let ro_symbol_parts = (p:int n:int):>void => {
+    ro_symbol_len = n
+    ro_symbol_addend = 0
+    let at:int = n - 1
+    loop at >? 0 {
+        let c:int = __load_u8__(p + at)
+        if (c =? 43 or c =? 45) and at + 1 <? n and ro_is_digit(__load_u8__(p + at + 1)) {
+            ro_symbol_len = at
+            ro_symbol_addend = ro_int(p + at + 1 n - at - 1)
+            if c =? 45 { ro_symbol_addend = 0 - ro_symbol_addend }
+            return void
+        }
+        at = at - 1
+    }
+    return void
+}
+# The symbol operand `i` names (without an addend; that is left in
+# `ro_symbol_addend`).
+let ro_symbol = (i:int):>int => {
+    let p:int = ro_op_ptr(ro_operand(i))
+    ro_symbol_parts(p ro_op_len(i))
+    return elf_symbol(p ro_symbol_len)
+}
+
+# ----------------------------------------------------------------------------
+# Instructions
+# ----------------------------------------------------------------------------
+
+# `la rd, sym`: auipc + addi, the low part naming the auipc's label.
+let ro_address = (rd:int):>void => {
+    let symbol:int = ro_symbol(1)
+    let addend:int = ro_symbol_addend
+    let name_bb:int = bb_new(20)
+    bb_push_str(name_bb ".Lpcrel_hi")
+    bb_push_int(name_bb ro_pcrel)
+    let name:int = bb_finalize_as_string(name_bb)
+    ro_pcrel = ro_pcrel + 1
+    let label:int = elf_symbol(name str_len(name))
+    vec_set(elf_symbol_keep label true)
+    vec_set(elf_symbol_sections label ro_current)
+    vec_set(elf_symbol_values label ro_length())
+    ro_pend(RO_P_ADDRESS symbol rd addend label)
+    ro_word(0)
+    ro_word(0)
+    return void
+}
+
+let ro_branch = (word:int target:int):>void => {
+    let p:int = ro_op_ptr(ro_operand(target))
+    ro_pend(RO_P_BRANCH elf_symbol(p ro_op_len(target)) word 0 0)
+    ro_word(0)
+    return void
+}
+
+let ro_special = (id:int):>void => {
+    if id =? RO_S_J or id =? RO_S_JAL {
+        let rd:int = 0
+        if id =? RO_S_JAL { rd = 1 }
+        let target:int = 0
+        if ro_count >? 1 {
+            rd = ro_register(0)
+            target = 1
+        }
+        let symbol:int = ro_symbol(target)
+        ro_pend(RO_P_JAL symbol (rd << 7) or 0x6F ro_symbol_addend 0)
+        ro_word(0)
+        return void
+    }
+    if id =? RO_S_JALR {
+        if ro_count =? 1 { ro_word(ro_i(0x67 0 1 ro_register(0) 0)) return void }
+        if ro_count =? 2 and ro_has_paren(1) {
+            let base:int = ro_memory(1)
+            ro_word(ro_i(0x67 0 ro_register(0) base ro_memory_offset))
+            return void
+        }
+        let imm:int = 0
+        if ro_count >? 2 { imm = ro_immediate(2) }
+        ro_word(ro_i(0x67 0 ro_register(0) ro_register(1) imm))
+        return void
+    }
+    if id =? RO_S_JR { ro_word(ro_i(0x67 0 0 ro_register(0) 0)) return void }
+    if id =? RO_S_RET { ro_word(ro_i(0x67 0 0 1 0)) return void }
+    if id =? RO_S_ECALL { ro_word(0x73) return void }
+    if id =? RO_S_EBREAK { ro_word(0x00100073) return void }
+    if id =? RO_S_NOP { ro_word(ro_i(0x13 0 0 0 0)) return void }
+    if id =? RO_S_MV { ro_word(ro_i(0x13 0 ro_register(0) ro_register(1) 0)) return void }
+    if id =? RO_S_NOT { ro_word(ro_i(0x13 4 ro_register(0) ro_register(1) (0 - 1))) return void }
+    if id =? RO_S_NEG { ro_word(ro_r(0x20 ro_register(1) 0 0 ro_register(0) 0x33)) return void }
+    if id =? RO_S_NEGW { ro_word(ro_r(0x20 ro_register(1) 0 0 ro_register(0) 0x3B)) return void }
+    if id =? RO_S_SEQZ { ro_word(ro_i(0x13 3 ro_register(0) ro_register(1) 1)) return void }
+    if id =? RO_S_SNEZ { ro_word(ro_r(0 ro_register(1) 0 3 ro_register(0) 0x33)) return void }
+    if id =? RO_S_SLTZ { ro_word(ro_r(0 0 ro_register(1) 2 ro_register(0) 0x33)) return void }
+    if id =? RO_S_SGTZ { ro_word(ro_r(0 ro_register(1) 0 2 ro_register(0) 0x33)) return void }
+    if id =? RO_S_SGT { ro_word(ro_r(0 ro_register(1) ro_register(2) 2 ro_register(0) 0x33)) return void }
+    if id =? RO_S_SGTU { ro_word(ro_r(0 ro_register(1) ro_register(2) 3 ro_register(0) 0x33)) return void }
+    if id =? RO_S_SEXT_W { ro_word(ro_i(0x1B 0 ro_register(0) ro_register(1) 0)) return void }
+    if id =? RO_S_LI { ro_load_immediate(ro_register(0) ro_immediate(1)) return void }
+    if id =? RO_S_LUI { ro_word(((ro_immediate(1) and 0xFFFFF) << 12) or (ro_register(0) << 7) or 0x37) return void }
+    if id =? RO_S_LA { ro_address(ro_register(0)) return void }
+    # call / tail: auipc + jalr through ra or t1.
+    let link:int = 1
+    let rd:int = 1
+    if id =? RO_S_TAIL { link = 6  rd = 0 }
+    ro_pend(RO_P_CALL ro_symbol(0) (rd << 8) or link 0 0)
+    ro_word(0)
+    ro_word(0)
+    return void
+}
+
+let ro_instruction = (p:int n:int):>void => {
+    let packed:int = map_get(ro_mnemonics p n)
+    if packed =? MAP_MISSING { ro_fail("unsupported instruction") }
+    let class:int = packed and 0xFF
+    let flag:int = (packed >> 8) and 0xFF
+    let base:int = packed >> 16
+    if class =? RO_C_R {
+        ro_word(base or (ro_register(2) << 20) or (ro_register(1) << 15) or (ro_register(0) << 7))
+    } else if class =? RO_C_I {
+        ro_word(base or ((ro_immediate(2) and 0xFFF) << 20) or (ro_register(1) << 15) or (ro_register(0) << 7))
+    } else if class =? RO_C_SHIFT {
+        ro_word(base or ((ro_immediate(2) and 0x3F) << 20) or (ro_register(1) << 15) or (ro_register(0) << 7))
+    } else if class =? RO_C_LOAD {
+        let memory_base:int = ro_memory(1)
+        ro_word(base or ((ro_memory_offset and 0xFFF) << 20) or (memory_base << 15) or (ro_register(0) << 7))
+    } else if class =? RO_C_STORE {
+        let memory_base:int = ro_memory(1)
+        let offset:int = ro_memory_offset
+        ro_word(base or (((offset >> 5) and 0x7F) << 25) or (ro_register(0) << 20) or (memory_base << 15) or ((offset and 0x1F) << 7))
+    } else if class =? RO_C_BRANCH {
+        let rs1:int = ro_register(0)
+        let rs2:int = ro_register(1)
+        if flag not=? 0 {
+            rs1 = ro_register(1)
+            rs2 = ro_register(0)
+        }
+        ro_branch(base or (rs2 << 20) or (rs1 << 15) 2)
+    } else if class =? RO_C_ZERO_BRANCH {
+        let register:int = ro_register(0)
+        if flag not=? 0 { ro_branch(base or (register << 20) 1) }
+        else { ro_branch(base or (register << 15) 1) }
+    } else if class =? RO_C_FLOAT {
+        if flag not=? 0 { ro_word(base or (ro_register(1) << 15) or (ro_float(0) << 7)) }
+        else { ro_word(base or (ro_float(1) << 15) or (ro_register(0) << 7)) }
+    } else {
+        ro_special(flag)
+    }
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Directives
+# ----------------------------------------------------------------------------
+
+let ro_is = (p:int n:int word:int):>int => { return str_eq_len(p n word str_len(word)) }
+
+let ro_item_end = (p:int at:int n:int):>int => {
+    let i:int = at
+    loop i <? n and __load_u8__(p + i) not=? 44 { i = i + 1 }
+    return i
+}
+
+let ro_directive = (name:int name_len:int p:int n:int):>void => {
+    let section:int = ro_current
+    if ro_is(name name_len ".dword") or ro_is(name name_len ".quad") {
+        let at:int = 0
+        loop at <? n {
+            let stop:int = ro_item_end(p at n)
+            let start:int = ro_trim_start(p at stop)
+            let end:int = ro_trim_end(p start stop)
+            let first:int = start
+            loop first <? end and __load_u8__(p + first) =? 45 { first = first + 1 }
+            let data:int = ro_data()
+            let value:int = 0
+            if first <? end and ro_is_digit(__load_u8__(p + first)) {
+                value = ro_int(p + start end - start)
+            } else {
+                ro_symbol_parts(p + start end - start)
+                elf_add_relocation(section ro_length() RO_R_64 elf_symbol(p + start ro_symbol_len) ro_symbol_addend)
+            }
+            bb_grow(data bb_len(data) + 8)
+            __store_u64__(value bb_data(data) + bb_len(data))
+            __store__(bb_len(data) + 8 data + BB_OFF_LEN)
+            at = stop + 1
+        }
+        return void
+    }
+    if ro_is(name name_len ".word") or ro_is(name name_len ".long") {
+        let at:int = 0
+        loop at <? n {
+            let stop:int = ro_item_end(p at n)
+            let start:int = ro_trim_start(p at stop)
+            ro_word(ro_int(p + start ro_trim_end(p start stop) - start))
+            at = stop + 1
+        }
+        return void
+    }
+    if ro_is(name name_len ".byte") {
+        let data:int = ro_data()
+        let at:int = 0
+        loop at <? n {
+            let stop:int = ro_item_end(p at n)
+            let start:int = ro_trim_start(p at stop)
+            bb_push_byte(data ro_int(p + start ro_trim_end(p start stop) - start) and 255)
+            at = stop + 1
+        }
+        return void
+    }
+    if ro_is(name name_len ".section") {
+        let name_end:int = ro_item_end(p 0 n)
+        let name_stop:int = ro_trim_end(p 0 name_end)
+        let flags:int = 0
+        let kind:int = ELF_SHT_PROGBITS
+        if name_end <? n {
+            let i:int = name_end + 1
+            loop i <? n and __load_u8__(p + i) not=? 44 {
+                let c:int = __load_u8__(p + i)
+                if c =? 97 { flags = flags or ELF_SHF_ALLOC }
+                else if c =? 119 { flags = flags or ELF_SHF_WRITE }
+                else if c =? 120 { flags = flags or ELF_SHF_EXECINSTR }
+                else if c =? 82 { flags = flags or ELF_SHF_GNU_RETAIN }
+                i = i + 1
+            }
+            if i <? n {
+                let type_at:int = ro_trim_start(p i + 1 n)
+                if ro_is(p + type_at ro_trim_end(p type_at n) - type_at "@nobits") { kind = ELF_SHT_NOBITS }
+            }
+        }
+        ro_current = elf_section(p name_stop kind flags)
+        return void
+    }
+    if ro_is(name name_len ".globl") or ro_is(name name_len ".global") {
+        let symbol:int = elf_symbol(p n)
+        if vec_get(elf_symbol_bindings symbol) not=? ELF_STB_WEAK { vec_set(elf_symbol_bindings symbol ELF_STB_GLOBAL) }
+        return void
+    }
+    if ro_is(name name_len ".weak") { vec_set(elf_symbol_bindings elf_symbol(p n) ELF_STB_WEAK) return void }
+    if ro_is(name name_len ".hidden") { vec_set(elf_symbol_visibility elf_symbol(p n) ELF_STV_HIDDEN) return void }
+    # `.option push/norelax/pop`: nothing here ever relaxes.
+    if ro_is(name name_len ".extern") or ro_is(name name_len ".option") { return void }
+    if ro_is(name name_len ".zero") {
+        let count:int = ro_int(p n)
+        let data:int = ro_data()
+        if data =? 0 {
+            vec_set(elf_section_sizes section vec_get(elf_section_sizes section) + count)
+        } else {
+            let k:int = 0
+            loop k <? count { bb_push_byte(data 0) k = k + 1 }
+        }
+        return void
+    }
+    if ro_is(name name_len ".balign") or ro_is(name name_len ".p2align") or ro_is(name name_len ".align") {
+        let alignment:int = ro_int(p ro_item_end(p 0 n))
+        if not ro_is(name name_len ".balign") { alignment = 1 << alignment }
+        if alignment >? vec_get(elf_section_aligns section) { vec_set(elf_section_aligns section alignment) }
+        let padding:int = (alignment - ro_length() % alignment) % alignment
+        let data:int = ro_data()
+        if data =? 0 {
+            vec_set(elf_section_sizes section vec_get(elf_section_sizes section) + padding)
+        } else if (vec_get(elf_section_flags section) and ELF_SHF_EXECINSTR) not=? 0 and (padding and 3) =? 0 {
+            intset_add(ro_code_aligned section)
+            let k:int = 0
+            loop k <? padding // 4 { ro_word(0x13) k = k + 1 }
+        } else {
+            if (vec_get(elf_section_flags section) and ELF_SHF_EXECINSTR) not=? 0 { intset_add(ro_code_aligned section) }
+            let k:int = 0
+            loop k <? padding { bb_push_byte(data 0) k = k + 1 }
+        }
+        return void
+    }
+    if ro_is(name name_len ".text") { ro_current = elf_section(".text" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_EXECINSTR) return void }
+    if ro_is(name name_len ".data") { ro_current = elf_section(".data" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_WRITE) return void }
+    if ro_is(name name_len ".bss") { ro_current = elf_section(".bss" 4 ELF_SHT_NOBITS ELF_SHF_ALLOC or ELF_SHF_WRITE) return void }
+    ro_fail("unsupported directive")
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Driver
+# ----------------------------------------------------------------------------
+
+let ro_line = (p:int n:int):>void => {
+    let stop:int = 0
+    loop stop <? n and __load_u8__(p + stop) not=? 35 { stop = stop + 1 }
+    let start:int = ro_trim_start(p 0 stop)
+    stop = ro_trim_end(p start stop)
+    if start >=? stop { return void }
+    let line:int = p + start
+    let len:int = stop - start
+    ro_line_start = line
+    ro_line_len = len
+    let head_end:int = 0
+    loop head_end <? len and __load_u8__(line + head_end) not=? 32 and __load_u8__(line + head_end) not=? 9 { head_end = head_end + 1 }
+    if head_end =? len and __load_u8__(line + len - 1) =? 58 {
+        let symbol:int = elf_symbol(line len - 1)
+        if vec_get(elf_symbol_sections symbol) >=? 0 { ro_fail("label defined twice") }
+        # RISC-V relocations name local symbols themselves, not their
+        # section symbol plus an offset (the linker may move code between).
+        vec_set(elf_symbol_keep symbol not elf_is_temporary(symbol))
+        vec_set(elf_symbol_sections symbol ro_current)
+        vec_set(elf_symbol_values symbol ro_length())
+        return void
+    }
+    let rest:int = ro_trim_start(line head_end len)
+    if __load_u8__(line) =? 46 {
+        ro_directive(line head_end line + rest len - rest)
+        return void
+    }
+    ro_count = 0
+    let item:int = rest
+    let at:int = rest
+    loop at <=? len {
+        if at =? len or __load_u8__(line + at) =? 44 {
+            let a:int = ro_trim_start(line item at)
+            let b:int = ro_trim_end(line a at)
+            if b >? a {
+                if ro_count >=? 4 { ro_fail("too many operands") }
+                __store__(line + a ro_ops + ro_count * 16)
+                __store__(b - a ro_ops + ro_count * 16 + 8)
+                ro_count = ro_count + 1
+            }
+            item = at + 1
+        }
+        at = at + 1
+    }
+    # A section holding code is word-aligned, as assemblers make it.
+    if vec_get(elf_section_aligns ro_current) <? 4 { vec_set(elf_section_aligns ro_current 4) }
+    ro_instruction(line head_end)
+    return void
+}
+
+# The offset `offset` moves to once 4 bytes are inserted at each of the
+# sorted `points` (an offset at or after a point moves past it).
+let ro_shifted = (points:int offset:int):>int => {
+    let low:int = 0
+    let high:int = vec_len(points)
+    loop low <? high {
+        let middle:int = (low + high) // 2
+        if vec_get(points middle) <=? offset { low = middle + 1 } else { high = middle }
+    }
+    return offset + 4 * low
+}
+
+# Make room for the `jal` after each conditional branch newly marked long.
+let ro_expand = ():>void => {
+    let section_count:int = vec_len(elf_section_names)
+    let section:int = 0
+    loop section <? section_count {
+        let points:int = vec_new(16)
+        let i:int = 0
+        loop i <? vec_len(ro_pending) {
+            if vec_get(ro_pending i) =? section and vec_get(ro_pending i + 6) =? 2 {
+                vec_push(points vec_get(ro_pending i + 1) + 4)
+                vec_set(ro_pending i + 6 1)
+            }
+            i = i + RO_P_WORDS
+        }
+        if vec_len(points) >? 0 {
+            if intset_has(ro_code_aligned section) { ro_fail("a relaxed branch in code with alignment padding") }
+            let data:int = vec_get(elf_section_data section)
+            let grown:int = bb_new(bb_len(data) + 4 * vec_len(points))
+            let from:int = 0
+            let k:int = 0
+            loop k <? vec_len(points) {
+                let point:int = vec_get(points k)
+                bb_push_bytes(grown bb_data(data) + from point - from)
+                elf_push_u32(grown 0)
+                from = point
+                k = k + 1
+            }
+            bb_push_bytes(grown bb_data(data) + from bb_len(data) - from)
+            vec_set(elf_section_data section grown)
+            let symbol:int = 0
+            loop symbol <? vec_len(elf_symbol_sections) {
+                if vec_get(elf_symbol_sections symbol) =? section {
+                    vec_set(elf_symbol_values symbol ro_shifted(points vec_get(elf_symbol_values symbol)))
+                }
+                symbol = symbol + 1
+            }
+            i = 0
+            loop i <? vec_len(ro_pending) {
+                if vec_get(ro_pending i) =? section { vec_set(ro_pending i + 1 ro_shifted(points vec_get(ro_pending i + 1))) }
+                i = i + RO_P_WORDS
+            }
+            let relocs:int = vec_get(elf_section_relocs section)
+            if relocs not=? 0 {
+                i = 0
+                loop i <? vec_len(relocs) {
+                    vec_set(relocs i ro_shifted(points vec_get(relocs i)))
+                    i = i + 4
+                }
+            }
+        }
+        section = section + 1
+    }
+    return void
+}
+
+# Mark each conditional branch that does not reach its label as long, until
+# nothing changes.
+let ro_relax = ():>void => {
+    loop true {
+        let marked:int = 0
+        let i:int = 0
+        loop i <? vec_len(ro_pending) {
+            let symbol:int = vec_get(ro_pending i + 2)
+            if vec_get(ro_pending i + 3) =? RO_P_BRANCH and vec_get(ro_pending i + 6) =? 0 and vec_get(elf_symbol_sections symbol) =? vec_get(ro_pending i) {
+                let distance:int = vec_get(elf_symbol_values symbol) - vec_get(ro_pending i + 1)
+                if distance <? (0 - 4096) or distance >? 4094 {
+                    vec_set(ro_pending i + 6 2)
+                    marked = marked + 1
+                }
+            }
+            i = i + RO_P_WORDS
+        }
+        if marked =? 0 { return void }
+        ro_expand()
+    }
+    return void
+}
+
+let ro_resolve = ():>void => {
+    let i:int = 0
+    loop i <? vec_len(ro_pending) {
+        let section:int = vec_get(ro_pending i)
+        let offset:int = vec_get(ro_pending i + 1)
+        let symbol:int = vec_get(ro_pending i + 2)
+        let kind:int = vec_get(ro_pending i + 3)
+        let word:int = vec_get(ro_pending i + 4)
+        let addend:int = vec_get(ro_pending i + 5)
+        let at:int = bb_data(vec_get(elf_section_data section)) + offset
+        let here:int = vec_get(elf_symbol_sections symbol) =? section
+        let distance:int = vec_get(elf_symbol_values symbol) - offset
+        if kind =? RO_P_BRANCH {
+            if not here {
+                elf_add_relocation(section offset RO_R_BRANCH symbol 0)
+                __store_u32__(word at)
+            } else if vec_get(ro_pending i + 6) not=? 0 {
+                # The inverted branch skips the jal that reaches the label.
+                __store_u32__((word xor 0x1000) or ro_b_offset(8) at)
+                __store_u32__(ro_j(0 distance - 4) at + 4)
+            } else {
+                __store_u32__(word or ro_b_offset(distance) at)
+            }
+        } else if kind =? RO_P_JAL {
+            let rd:int = (word >> 7) and 31
+            if here and addend =? 0 {
+                __store_u32__(ro_j(rd distance) at)
+            } else {
+                elf_add_relocation(section offset RO_R_JAL symbol addend)
+                __store_u32__(ro_j(rd 0) at)
+            }
+        } else if kind =? RO_P_CALL {
+            # auipc + jalr; a local function in this section is reached
+            # without a relocation.
+            let link:int = word and 31
+            let rd:int = word >> 8
+            if here and vec_get(elf_symbol_bindings symbol) =? ELF_STB_LOCAL {
+                let high:int = __signed_shr__(distance + 0x800 12) and 0xFFFFF
+                __store_u32__((high << 12) or (link << 7) or 0x17 at)
+                __store_u32__(ro_i(0x67 0 rd link distance) at + 4)
+            } else {
+                elf_add_relocation(section offset RO_R_CALL_PLT symbol 0)
+                __store_u32__((link << 7) or 0x17 at)
+                __store_u32__(ro_i(0x67 0 rd link 0) at + 4)
+            }
+        } else {
+            elf_add_relocation(section offset RO_R_PCREL_HI20 symbol addend)
+            elf_add_relocation(section offset + 4 RO_R_PCREL_LO12_I vec_get(ro_pending i + 7) 0)
+            __store_u32__((word << 7) or 0x17 at)
+            __store_u32__(ro_i(0x13 0 word word 0) at + 4)
+        }
+        i = i + RO_P_WORDS
+    }
+    return void
+}
+
+# The ELF object (a byte buffer) for RISC-V assembly `text[0..n)`.
+let ro_assemble = (text:int n:int):>int => {
+    ro_init()
+    elf_begin(ELF_EM_RISCV)
+    elf_flags = RO_EF_FLOAT_ABI_DOUBLE
+    ro_current = elf_section(".text" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_EXECINSTR)
+    elf_section(".data" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_WRITE)
+    elf_section(".bss" 4 ELF_SHT_NOBITS ELF_SHF_ALLOC or ELF_SHF_WRITE)
+    ro_pending = vec_new(1024)
+    ro_pcrel = 0
+    ro_code_aligned = intset_new()
+    let at:int = 0
+    loop at <? n {
+        let end:int = at
+        loop end <? n and __load_u8__(text + end) not=? 10 { end = end + 1 }
+        ro_line(text + at end - at)
+        at = end + 1
+    }
+    ro_relax()
+    ro_resolve()
+    return elf_write()
+}

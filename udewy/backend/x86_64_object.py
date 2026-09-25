@@ -4,8 +4,11 @@ The x86-64 backend emits a closed set of AT&T instructions and directives
 (see ROADMAP "Direct binary fast path"). This encodes exactly that set: one
 pass writes every instruction, local branches are always near (rel32) and are
 patched once their labels are known, and every reference that leaves its
-section becomes a relocation for `ld`. Anything outside the set is an error,
-never a guess. Mirrors `udewy/bootstrap/backend/x86_64_object.udewy`.
+section becomes a relocation for `ld`. Debug builds add the DWARF the backend
+spells as data (`.uleb128`, `.value`, `.string`, label differences resolved
+once every label is placed) and `.file`/`.loc` rows, from which this writes
+the `.debug_line` program an assembler would. Anything outside the set is an
+error, never a guess. Mirrors `udewy/bootstrap/backend/x86_64_object.udewy`.
 """
 from __future__ import annotations
 
@@ -16,6 +19,21 @@ from . import elf
 R_X86_64_64 = 1
 R_X86_64_PC32 = 2
 R_X86_64_PLT32 = 4
+R_X86_64_32 = 10
+
+# The `.debug_line` header gas writes: DWARF 3, and its special-opcode space.
+LINE_VERSION = 3
+LINE_BASE = -5
+LINE_RANGE = 14
+OPCODE_BASE = 13
+STANDARD_OPCODE_LENGTHS = bytes([0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1])
+DW_LNS_copy = 1
+DW_LNS_advance_pc = 2
+DW_LNS_advance_line = 3
+DW_LNS_set_file = 4
+DW_LNS_set_column = 5
+DW_LNE_end_sequence = 1
+DW_LNE_set_address = 2
 
 REGISTERS_64 = {name: index for index, name in enumerate(
     ['rax', 'rcx', 'rdx', 'rbx', 'rsp', 'rbp', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15'])}
@@ -23,6 +41,7 @@ REGISTERS_32 = {name: index for index, name in enumerate(
     ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi', 'r8d', 'r9d', 'r10d', 'r11d', 'r12d', 'r13d', 'r14d', 'r15d'])}
 REGISTERS_16 = {name: index for index, name in enumerate(
     ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di', 'r8w', 'r9w', 'r10w', 'r11w', 'r12w', 'r13w', 'r14w', 'r15w'])}
+REGISTERS_XMM = {f'xmm{index}': index for index in range(16)}
 REGISTERS_8 = {name: index for index, name in enumerate(
     ['al', 'cl', 'dl', 'bl', 'spl', 'bpl', 'sil', 'dil', 'r8b', 'r9b', 'r10b', 'r11b', 'r12b', 'r13b', 'r14b', 'r15b'])}
 
@@ -35,6 +54,10 @@ ALU = {'add': (0x01, 0x03, 0), 'or': (0x09, 0x0B, 1), 'and': (0x21, 0x23, 4), 's
        'xor': (0x31, 0x33, 6), 'cmp': (0x39, 0x3B, 7)}
 UNARY = {'not': 2, 'neg': 3, 'div': 6, 'idiv': 7}
 SHIFTS = {'shl': 4, 'sal': 4, 'shr': 5, 'sar': 7}
+# SSE moves and conversions between a general register and an xmm one:
+# (mandatory prefix, opcode, whether the xmm register is the ModRM reg field).
+SSE = {'movd': (0x66, 0x6E, True), 'movq': (0x66, 0x6E, True), 'cvtsi2ss': (0xF3, 0x2A, True),
+       'cvtsi2sd': (0xF2, 0x2A, True), 'cvttss2si': (0xF3, 0x2C, False), 'cvttsd2si': (0xF2, 0x2C, False)}
 EXTENDS = {'movzbq': (0x0F, 0xB6), 'movzwq': (0x0F, 0xB7), 'movsbq': (0x0F, 0xBE), 'movswq': (0x0F, 0xBF)}
 
 
@@ -83,11 +106,95 @@ def _symbol_offset(text: str) -> tuple[str, int]:
     return text, 0
 
 
+def _statements(raw: str) -> list[str]:
+    """The statements on one line: `;` separates them and `#` starts a
+    comment, outside string literals."""
+    if '"' not in raw:
+        if '#' in raw:
+            raw = raw.split('#', 1)[0]
+        return raw.split(';') if ';' in raw else [raw]
+    statements: list[str] = []
+    current: list[str] = []
+    quoted = escaped = False
+    for char in raw:
+        if quoted:
+            current.append(char)
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+            current.append(char)
+        elif char == '#':
+            break
+        elif char == ';':
+            statements.append(''.join(current))
+            current = []
+        else:
+            current.append(char)
+    statements.append(''.join(current))
+    return statements
+
+
+def _string(text: str) -> bytes:
+    """The bytes of a `"..."` literal (backslash escapes as gas reads them)."""
+    text = text.strip()
+    if len(text) < 2 or text[0] != '"' or text[-1] != '"':
+        raise AssemblyError(f'expected a string literal, not {text}')
+    out = bytearray()
+    body = text[1:-1]
+    at = 0
+    while at < len(body):
+        char = body[at]
+        at += 1
+        if char != '\\':
+            out.extend(char.encode())
+            continue
+        escape = body[at]
+        at += 1
+        if escape in '01234567':
+            digits = escape
+            while len(digits) < 3 and at < len(body) and body[at] in '01234567':
+                digits += body[at]
+                at += 1
+            out.append(int(digits, 8) & 0xFF)
+        else:
+            out.extend({'n': b'\n', 't': b'\t', 'r': b'\r', '\\': b'\\', '"': b'"'}[escape])
+    return bytes(out)
+
+
+def _uleb128(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def _sleb128(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if (value == 0 and not byte & 0x40) or (value == -1 and byte & 0x40):
+            out.append(byte)
+            return bytes(out)
+        out.append(byte | 0x80)
+
+
 def _operand(text: str):
     text = text.strip()
     if text.startswith('%'):
         name = text[1:]
-        for table, width in ((REGISTERS_64, 64), (REGISTERS_32, 32), (REGISTERS_16, 16), (REGISTERS_8, 8)):
+        for table, width in ((REGISTERS_64, 64), (REGISTERS_32, 32), (REGISTERS_16, 16), (REGISTERS_8, 8),
+                             (REGISTERS_XMM, 128)):
             index = table.get(name)
             if index is not None:
                 return Register(index, width)
@@ -142,6 +249,15 @@ class Assembler:
         # rel32 fields to resolve at the end: (section, offset of the field,
         # symbol, addend relative to the field, relocation kind).
         self.pending: list[tuple[int, int, str, int, int]] = []
+        # Label differences in data, resolved at the end: (section, offset,
+        # size, label, label subtracted).
+        self.differences: list[tuple[int, int, int, str, str]] = []
+        # `.file` names by number, and `.loc` rows per section (in the order
+        # sections first get one): (offset, file, line, column). A `.loc`
+        # waits for the instruction it describes.
+        self.files: dict[int, str] = {}
+        self.rows: dict[int, list[tuple[int, int, int, int]]] = {}
+        self.loc: tuple[int, int, int] | None = None
 
     # -- output --------------------------------------------------------
     @property
@@ -241,18 +357,26 @@ class Assembler:
             pass
         elif name == '.hidden':
             self.object.symbol(rest.strip()).visibility = elf.STV_HIDDEN
-        elif name == '.quad':
+        elif name in ('.quad', '.long', '.value'):
+            size = {'.quad': 8, '.long': 4, '.value': 2}[name]
             for item in _split_operands(rest):
-                item = item.strip()
-                if item.lstrip('-')[:1].isdigit():
-                    section.data.extend((_integer(item) & (2**64 - 1)).to_bytes(8, 'little'))
-                else:
-                    symbol, offset = _symbol_offset(item)
-                    self.object.symbol(symbol)
-                    section.relocations.append(elf.Relocation(len(section.data), R_X86_64_64, symbol, offset))
-                    section.data.extend(bytes(8))
+                self.value(section, item.strip(), size)
         elif name == '.byte':
             section.data.extend(_integer(item) & 0xFF for item in _split_operands(rest))
+        elif name == '.uleb128':
+            for item in _split_operands(rest):
+                section.data.extend(_uleb128(_integer(item.strip())))
+        elif name == '.string':
+            section.data.extend(_string(rest) + b'\0')
+        elif name == '.file':
+            number, _, path = rest.partition(' ')
+            self.files[_integer(number)] = _string(path).decode()
+        elif name == '.loc':
+            fields = rest.split()
+            if self.loc is not None:
+                # Two `.loc`s in a row: the first describes an empty range.
+                self.row()
+            self.loc = (_integer(fields[0]), _integer(fields[1]), _integer(fields[2]) if len(fields) > 2 else 0)
         elif name == '.zero':
             count = _integer(rest)
             if section.kind == elf.SHT_NOBITS:
@@ -271,6 +395,33 @@ class Assembler:
                 section.data.extend(bytes(padding))
         else:
             raise AssemblyError(f'unsupported directive {name}')
+
+    def value(self, section: elf.Section, item: str, size: int) -> None:
+        """A `.quad`/`.long`/`.value` item: a number, `label`, `label+n`, or
+        `label - label` (resolved once both are placed)."""
+        if item.lstrip('-')[:1].isdigit():
+            section.data.extend((_integer(item) & ((1 << (8 * size)) - 1)).to_bytes(size, 'little'))
+            return
+        if ' - ' in item:
+            left, _, right = item.partition(' - ')
+            self.object.symbol(left.strip())
+            self.object.symbol(right.strip())
+            self.differences.append((self.current, len(section.data), size, left.strip(), right.strip()))
+            section.data.extend(bytes(size))
+            return
+        if size == 2:
+            raise AssemblyError('a 16-bit relocation')
+        symbol, offset = _symbol_offset(item)
+        self.object.symbol(symbol)
+        section.relocations.append(elf.Relocation(len(section.data), R_X86_64_64 if size == 8 else R_X86_64_32,
+                                                  symbol, offset))
+        section.data.extend(bytes(size))
+
+    def row(self) -> None:
+        """The waiting `.loc` row, at the current offset."""
+        file, line, column = self.loc
+        self.loc = None
+        self.rows.setdefault(self.current, []).append((len(self.data), file, line, column))
 
     # -- instructions ---------------------------------------------------
     def instruction(self, mnemonic: str, operands: list) -> None:
@@ -303,6 +454,9 @@ class Assembler:
             self.rex(False, 0, register.index, (register,))
             self.emit(0x0F, 0x90 | CONDITIONS[mnemonic[3:]])
             self.modrm(0, register)
+            return
+        if mnemonic in SSE and count == 2 and any(isinstance(o, Register) and o.width == 128 for o in operands):
+            self.sse(mnemonic, *operands)
             return
         if mnemonic == 'movabsq':
             source, destination = operands
@@ -381,6 +535,22 @@ class Assembler:
             return
         raise AssemblyError(f'unsupported instruction {mnemonic}')
 
+    def sse(self, mnemonic: str, source: Register, destination: Register) -> None:
+        prefix, opcode, xmm_is_reg = SSE[mnemonic]
+        if mnemonic in ('movd', 'movq') and source.width == 128:
+            # xmm to a general register: the store form.
+            opcode, reg, rm, general = 0x7E, source, destination, destination
+        elif xmm_is_reg:
+            reg, rm, general = destination, source, source
+        else:
+            reg, rm, general = destination, source, destination
+        if (reg.width == 128) == (rm.width == 128):
+            raise AssemblyError(f'{mnemonic} wants one xmm and one general register')
+        self.emit(prefix)
+        self.rex(general.width == 64, reg.index, rm.index)
+        self.emit(0x0F, opcode)
+        self.modrm(reg.index, rm)
+
     def move(self, suffix: str, operands: list) -> None:
         source, destination = operands
         width = {'q': 64, 'l': 32, 'w': 16, 'b': 8}[suffix]
@@ -442,27 +612,34 @@ class Assembler:
     # -- driver ---------------------------------------------------------
     def assemble(self, text: str) -> bytes:
         for line_number, raw in enumerate(text.split('\n'), 1):
-            line = raw.split('#', 1)[0].strip() if '#' in raw else raw.strip()
-            if not line:
-                continue
-            try:
-                if line.endswith(':') and ' ' not in line:
-                    self.label(line[:-1])
+            for statement in _statements(raw) if ('#' in raw or ';' in raw or '"' in raw) else (raw,):
+                line = statement.strip()
+                if not line:
                     continue
-                head, _, rest = line.partition(' ')
-                if head.startswith('.'):
-                    self.directive(head, rest.strip())
-                    continue
-                if head in ('call', 'jmp') or (head.startswith('j') and head[1:] in CONDITIONS):
-                    # A branch names a label, or `*%reg` for an indirect call.
-                    target = rest.strip()
-                    self.instruction(head, [_operand(target[1:]) if target.startswith('*%') else target])
-                    continue
-                self.instruction(head, [_operand(part) for part in _split_operands(rest)])
-            except (AssemblyError, ValueError, KeyError, AttributeError, IndexError) as error:
-                raise AssemblyError(f'line {line_number}: {raw.strip()}: {error}') from None
+                try:
+                    self.statement(line)
+                except (AssemblyError, ValueError, KeyError, AttributeError, IndexError) as error:
+                    raise AssemblyError(f'line {line_number}: {raw.strip()}: {error}') from None
         self.resolve()
+        self.line_program()
         return self.object.write()
+
+    def statement(self, line: str) -> None:
+        if line.endswith(':') and ' ' not in line:
+            self.label(line[:-1])
+            return
+        head, _, rest = line.partition(' ')
+        if head.startswith('.'):
+            self.directive(head, rest.strip())
+            return
+        if self.loc is not None:
+            self.row()
+        if head in ('call', 'jmp') or (head.startswith('j') and head[1:] in CONDITIONS):
+            # A branch names a label, or `*%reg` for an indirect call.
+            target = rest.strip()
+            self.instruction(head, [_operand(target[1:]) if target.startswith('*%') else target])
+            return
+        self.instruction(head, [_operand(part) for part in _split_operands(rest)])
 
     def resolve(self) -> None:
         """Patch rel32 fields whose label lies in the same section; the rest become relocations."""
@@ -475,6 +652,81 @@ class Assembler:
                 section.data[offset:offset + 4] = struct.pack('<i', symbol.value + addend - offset)
                 continue
             section.relocations.append(elf.Relocation(offset, kind, symbol_name, addend))
+        for section_index, offset, size, left_name, right_name in self.differences:
+            left, right = self.object.symbols[left_name], self.object.symbols[right_name]
+            if left.section is None or left.section != right.section:
+                raise AssemblyError(f'{left_name} - {right_name}: not two labels of one section')
+            value = (left.value - right.value) & ((1 << (8 * size)) - 1)
+            self.object.sections[section_index].data[offset:offset + size] = value.to_bytes(size, 'little')
+
+    def line_program(self) -> None:
+        """`.debug_line` from the `.loc` rows, as gas writes it: a DWARF 3
+        header naming the `.file`s (directory and base name apart), then one
+        sequence per section with rows."""
+        if not self.rows:
+            return
+        directories: list[str] = []
+        files = bytearray()
+        for number in range(1, max(self.files, default=0) + 1):
+            path = self.files.get(number, '')
+            directory, slash, base = path.rpartition('/')
+            index = 0
+            if slash:
+                directory = directory or '/'
+                if directory not in directories:
+                    directories.append(directory)
+                index = directories.index(directory) + 1
+            files += base.encode() + b'\0' + _uleb128(index) + b'\0\0'
+        header = bytes([1, 1, LINE_BASE & 0xFF, LINE_RANGE, OPCODE_BASE]) + STANDARD_OPCODE_LENGTHS
+        header += b''.join(directory.encode() + b'\0' for directory in directories) + b'\0' + files + b'\0'
+        index = self.object.section('.debug_line')
+        section = self.object.sections[index]
+        start = len(section.data)
+        program = bytearray()
+        # The program's offset in the section, for its address relocations.
+        base = start + 4 + 2 + 4 + len(header)
+        for section_index, rows in self.rows.items():
+            address, file, line, column = 0, 1, 1, 0
+            for position, (offset, row_file, row_line, row_column) in enumerate(rows):
+                if row_file != file:
+                    program += bytes([DW_LNS_set_file]) + _uleb128(row_file)
+                    file = row_file
+                if row_column != column:
+                    program += bytes([DW_LNS_set_column]) + _uleb128(row_column)
+                    column = row_column
+                if position == 0:
+                    # DW_LNE_set_address to the row, through a temporary label
+                    # (a reference through the section symbol).
+                    label = self.object.symbol(f'.Lline{section_index}')
+                    label.section, label.value = section_index, offset
+                    program += bytes([0, 9, DW_LNE_set_address])
+                    section.relocations.append(elf.Relocation(base + len(program), R_X86_64_64, label.name, 0))
+                    program += bytes(8)
+                    address = offset
+                self.advance(program, row_line - line, offset - address)
+                line, address = row_line, offset
+            end = self.object.sections[section_index].length()
+            if end > address:
+                program += bytes([DW_LNS_advance_pc]) + _uleb128(end - address)
+            program += bytes([0, 1, DW_LNE_end_sequence])
+        header_length = len(header)
+        unit = struct.pack('<HI', LINE_VERSION, header_length) + header + program
+        section.data += struct.pack('<I', len(unit)) + unit
+
+    @staticmethod
+    def advance(program: bytearray, line_delta: int, address_delta: int) -> None:
+        """A row `line_delta` lines and `address_delta` bytes on: one special
+        opcode when it fits, else advance_line / advance_pc and copy."""
+        if LINE_BASE <= line_delta < LINE_BASE + LINE_RANGE:
+            opcode = (line_delta - LINE_BASE) + LINE_RANGE * address_delta + OPCODE_BASE
+            if opcode <= 255:
+                program.append(opcode)
+                return
+        if line_delta:
+            program += bytes([DW_LNS_advance_line]) + _sleb128(line_delta)
+        if address_delta:
+            program += bytes([DW_LNS_advance_pc]) + _uleb128(address_delta)
+        program.append(DW_LNS_copy)
 
 
 def _rm_index(operand) -> int:

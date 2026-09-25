@@ -69,13 +69,17 @@ class Symbol:
     value: int = 0
     binding: int = STB_LOCAL
     visibility: int = STV_DEFAULT
+    # A `.L` label kept in the symbol table and referenced by name (RISC-V
+    # %pcrel_lo relocations name their auipc's label).
+    keep: bool = False
 
 
 class ObjectFile:
     """Sections and symbols of one relocatable object, in definition order."""
 
-    def __init__(self, machine: int):
+    def __init__(self, machine: int, flags: int = 0):
         self.machine = machine
+        self.flags = flags      # e_flags: the RISC-V float ABI
         self.sections: list[Section] = []
         self.section_index: dict[str, int] = {}
         self.symbols: dict[str, Symbol] = {}
@@ -105,9 +109,10 @@ class ObjectFile:
                     target.binding = max(target.binding, STB_GLOBAL)
         # A section symbol per section, then local symbols, then global/weak
         # ones: the symbol table's `sh_info` is the index of the first
-        # non-local symbol. `.L` labels are assembler temporaries and never
-        # reach the table; references to them go through section symbols.
-        named =[symbol for symbol in self.symbols.values() if not symbol.name.startswith('.L')]
+        # non-local symbol. `.L` labels are assembler temporaries and stay
+        # out of the table (unless kept); references to other local labels go
+        # through section symbols.
+        named = [symbol for symbol in self.symbols.values() if symbol.keep or not symbol.name.startswith('.L')]
         locals_ = [symbol for symbol in named if symbol.binding == STB_LOCAL and symbol.section is not None]
         globals_ = [symbol for symbol in named if symbol.binding != STB_LOCAL or symbol.section is None]
         strtab = bytearray(b'\0')
@@ -147,7 +152,7 @@ class ObjectFile:
                 # A reference to a label with no symbol-table entry (`.L`
                 # temporaries, local labels) goes through its section symbol.
                 if target is not None and target.section is not None and (
-                        target.binding == STB_LOCAL):
+                        target.binding == STB_LOCAL) and not target.keep:
                     entry = section_symbol_index[target.section]
                     addend += target.value
                 else:
@@ -207,7 +212,7 @@ class ObjectFile:
         # GNU OS/ABI, as gas does, or `ld --gc-sections` ignores the flag.
         gnu = any(section.flags & SHF_GNU_RETAIN for section in self.sections)
         ident = b'\x7fELF' + bytes([2, 1, 1, ELFOSABI_GNU if gnu else 0]) + bytes(8)
-        body[0:64] = ident + struct.pack('<HHIQQQIHHHHHH', 1, self.machine, 1, 0, 0, header_offset, 0,
+        body[0:64] = ident + struct.pack('<HHIQQQIHHHHHH', 1, self.machine, 1, 0, 0, header_offset, self.flags,
                                          64, 0, 0, 64, len(headers), shstrtab_index)
         for header in headers:
             body.extend(header)

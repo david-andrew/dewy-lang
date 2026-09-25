@@ -43,10 +43,14 @@ def _check(source: str) -> hir.AST:
 
 def _calls(node: object) -> list[str]:
     names: list[str] = []
+    seen: set[int] = set()
 
     def walk(value: object) -> None:
         if isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier):
             names.append(value.func.name)
+        if isinstance(value, type) or id(value) in seen:   # a node class, or a node shared by several parents
+            return
+        seen.add(id(value))
         if hasattr(value, '__dataclass_fields__'):
             for name in value.__dataclass_fields__:
                 walk(getattr(value, name))
@@ -78,10 +82,14 @@ def test_the_snapshot_shows_the_current_functions_values_only() -> None:
 
 def _strings(node: object) -> list[hir.String]:
     found: list[hir.String] = []
+    seen: set[int] = set()
 
     def walk(value: object) -> None:
         if isinstance(value, hir.String):
             found.append(value)
+        if isinstance(value, type) or id(value) in seen:   # a node class, or a node shared by several parents
+            return
+        seen.add(id(value))
         if hasattr(value, '__dataclass_fields__'):
             for name in value.__dataclass_fields__:
                 walk(getattr(value, name))

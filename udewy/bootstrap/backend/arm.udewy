@@ -3,6 +3,7 @@
 import p"./common.udewy"
 import p"./linux.udewy"
 import p"../t1.udewy"
+import p"./aarch64_object.udewy"
 
 const ARM_SAVE_AREA_BYTES:int = 96
 const ARM_MAX_STACK_ADJUST_IMM:int = 4080
@@ -1697,14 +1698,21 @@ let arm_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
     bb_push_str(exe_bb input_name)
     let exe_path:int = bb_finalize_as_string(exe_bb)
 
-    fs_write_file(path_to_cstr(asm_path) code str_len(code))
-
-    let av1:int = vec_new(8)
-    vec_push(av1 arm_str("aarch64-linux-gnu-as"))
-    vec_push(av1 asm_path)
-    vec_push(av1 arm_str("-o"))
-    vec_push(av1 obj_path)
-    proc_run_or_die(av1 "aarch64 assembler failed")
+    # The direct path writes the object in process (UDEWY_OBJECT=direct);
+    # only the linker is still needed.
+    let object_mode:int = proc_getenv("UDEWY_OBJECT")
+    if object_mode not=? 0 and str_eq(object_mode "direct") {
+        let object:int = ao_assemble(code str_len(code))
+        fs_write_file(path_to_cstr(obj_path) bb_data(object) bb_len(object))
+    } else {
+        fs_write_file(path_to_cstr(asm_path) code str_len(code))
+        let av1:int = vec_new(8)
+        vec_push(av1 arm_str("aarch64-linux-gnu-as"))
+        vec_push(av1 asm_path)
+        vec_push(av1 arm_str("-o"))
+        vec_push(av1 obj_path)
+        proc_run_or_die(av1 "aarch64 assembler failed")
+    }
 
     let av2:int = vec_new(16)
     vec_push(av2 arm_str("aarch64-linux-gnu-ld"))

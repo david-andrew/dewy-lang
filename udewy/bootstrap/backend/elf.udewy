@@ -36,6 +36,7 @@ const ELF_EM_X86_64:int = 62
 # NOBITS size, alignment, relocations (vec of 4 words per entry: offset,
 # kind, symbol index, addend).
 let elf_machine:int = 0
+let elf_flags:int = 0            # e_flags: the RISC-V float ABI
 let elf_section_names:int = 0
 let elf_section_kinds:int = 0
 let elf_section_flags:int = 0
@@ -46,17 +47,21 @@ let elf_section_relocs:int = 0
 let elf_section_map:int = 0
 # Symbol i: name pointer and length (a slice of the assembly text or any
 # other stable string), section index (-1 when undefined), value, binding,
-# visibility.
+# visibility, and whether a local is kept: in the symbol table even as a
+# `.L` label, and named by relocations (RISC-V %pcrel_lo relocations name
+# their auipc's label).
 let elf_symbol_ptrs:int = 0
 let elf_symbol_lens:int = 0
 let elf_symbol_sections:int = 0
 let elf_symbol_values:int = 0
 let elf_symbol_bindings:int = 0
 let elf_symbol_visibility:int = 0
+let elf_symbol_keep:int = 0
 let elf_symbol_map:int = 0
 
 let elf_begin = (machine:int):>void => {
     elf_machine = machine
+    elf_flags = 0
     elf_section_names = vec_new(64)
     elf_section_kinds = vec_new(64)
     elf_section_flags = vec_new(64)
@@ -71,6 +76,7 @@ let elf_begin = (machine:int):>void => {
     elf_symbol_values = vec_new(1024)
     elf_symbol_bindings = vec_new(1024)
     elf_symbol_visibility = vec_new(1024)
+    elf_symbol_keep = vec_new(1024)
     elf_symbol_map = map_new()
     return void
 }
@@ -112,6 +118,7 @@ let elf_symbol = (name:int name_len:int):>int => {
     vec_push(elf_symbol_values 0)
     vec_push(elf_symbol_bindings ELF_STB_LOCAL)
     vec_push(elf_symbol_visibility 0)
+    vec_push(elf_symbol_keep false)
     map_put(elf_symbol_map name name_len index)
     return index
 }
@@ -129,9 +136,10 @@ let elf_add_relocation = (section:int offset:int kind:int symbol:int addend:int)
     return void
 }
 
-# `.L` labels are assembler temporaries: never in the symbol table.
+# `.L` labels are assembler temporaries: never in the symbol table (unless
+# kept).
 let elf_is_temporary = (symbol:int):>int => {
-    if vec_get(elf_symbol_lens symbol) <? 2 { return false }
+    if vec_get(elf_symbol_lens symbol) <? 2 or vec_get(elf_symbol_keep symbol) { return false }
     let name:int = vec_get(elf_symbol_ptrs symbol)
     return __load_u8__(name) =? 46 and __load_u8__(name + 1) =? 76
 }
@@ -319,7 +327,7 @@ let elf_write = ():>int => {
                 let addend:int = vec_get(relocs ri + 3)
                 let entry:int = 0
                 let target_section:int = vec_get(elf_symbol_sections target)
-                if target_section >=? 0 and vec_get(elf_symbol_bindings target) =? ELF_STB_LOCAL {
+                if target_section >=? 0 and vec_get(elf_symbol_bindings target) =? ELF_STB_LOCAL and not vec_get(elf_symbol_keep target) {
                     entry = target_section + 1
                     addend = addend + vec_get(elf_symbol_values target)
                 } else {
@@ -370,6 +378,7 @@ let elf_write = ():>int => {
     __store_u16__(elf_machine h + 18)
     __store_u32__(1 h + 20)
     __store_u64__(header_offset h + 40)
+    __store_u32__(elf_flags h + 48)
     __store_u16__(64 h + 52)
     __store_u16__(64 h + 58)
     __store_u16__(header_count h + 60)

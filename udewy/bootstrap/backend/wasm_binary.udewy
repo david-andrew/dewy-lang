@@ -1,0 +1,834 @@
+# WebAssembly text from the µDewy wasm32 backend to a binary module,
+# without `wat2wasm`.
+#
+# The wasm32 backend emits a closed WAT dialect (see ROADMAP "Direct binary
+# fast path"): module-level `type`, `import`, `global`, `table`, `func`,
+# `elem`, `data` and `export` forms, and function bodies as flat instruction
+# lists with labeled `block`/`loop`/`if`. This encodes exactly that dialect
+# in the order `wat2wasm` writes it, with minimal LEB128 sizes. Anything else
+# is an error, never a guess. Mirrors udewy/backend/wasm_binary.py.
+
+import p"../runtime/runtime.udewy"
+
+# ----------------------------------------------------------------------------
+# Tokens and the tree of forms
+# ----------------------------------------------------------------------------
+#
+# Tokens are slices of the text (a flat vec: pointer, length). A form is a
+# vec of items; an atom item is (token index << 1) or 1, a list item is the
+# vec itself (arena pointers are even).
+
+let wb_text:int = 0
+let wb_tokens:int = 0
+
+let wb_fail = (message:int):>void => {
+    eprint("error: direct wasm32 module: ")
+    eprintl(message)
+    host_exit(1)
+    return void
+}
+
+let wb_tokenize = (text:int n:int):>void => {
+    wb_text = text
+    wb_tokens = vec_new(4096)
+    let at:int = 0
+    loop at <? n {
+        let c:int = __load_u8__(text + at)
+        if c =? 32 or c =? 9 or c =? 10 or c =? 13 {
+            at = at + 1
+        } else if c =? 59 and at + 1 <? n and __load_u8__(text + at + 1) =? 59 {
+            loop at <? n and __load_u8__(text + at) not=? 10 { at = at + 1 }
+        } else if c =? 40 or c =? 41 {
+            vec_push(wb_tokens text + at)
+            vec_push(wb_tokens 1)
+            at = at + 1
+        } else if c =? 34 {
+            let end:int = at + 1
+            loop end <? n and __load_u8__(text + end) not=? 34 {
+                if __load_u8__(text + end) =? 92 { end = end + 2 } else { end = end + 1 }
+            }
+            vec_push(wb_tokens text + at)
+            vec_push(wb_tokens end + 1 - at)
+            at = end + 1
+        } else {
+            let end:int = at
+            loop end <? n {
+                let d:int = __load_u8__(text + end)
+                if d =? 32 or d =? 9 or d =? 10 or d =? 13 or d =? 40 or d =? 41 { break }
+                end = end + 1
+            }
+            vec_push(wb_tokens text + at)
+            vec_push(wb_tokens end - at)
+            at = end
+        }
+    }
+    return void
+}
+
+let wb_token_ptr = (index:int):>int => { return vec_get(wb_tokens index * 2) }
+let wb_token_len = (index:int):>int => { return vec_get(wb_tokens index * 2 + 1) }
+
+# The forms from the tokens: a vec of top-level items.
+let wb_tree = ():>int => {
+    let stack:int = vec_new(64)
+    vec_push(stack vec_new(4))
+    let count:int = vec_len(wb_tokens) // 2
+    let i:int = 0
+    loop i <? count {
+        let p:int = wb_token_ptr(i)
+        let c:int = __load_u8__(p)
+        if wb_token_len(i) =? 1 and c =? 40 {
+            vec_push(stack vec_new(8))
+        } else if wb_token_len(i) =? 1 and c =? 41 {
+            if vec_len(stack) <? 2 { wb_fail("unbalanced parentheses") }
+            let done:int = vec_pop(stack)
+            vec_push(vec_top(stack) done)
+        } else {
+            vec_push(vec_top(stack) (i << 1) or 1)
+        }
+        i = i + 1
+    }
+    if vec_len(stack) not=? 1 { wb_fail("unbalanced parentheses") }
+    return vec_get(stack 0)
+}
+
+let wb_is_atom = (item:int):>int => { return (item and 1) =? 1 }
+let wb_is_list = (item:int):>int => { return (item and 1) =? 0 }
+let wb_atom_ptr = (item:int):>int => { return wb_token_ptr(item >> 1) }
+let wb_atom_len = (item:int):>int => { return wb_token_len(item >> 1) }
+let wb_atom_is = (item:int word:int):>int => {
+    if not wb_is_atom(item) { return false }
+    return str_eq_len(wb_atom_ptr(item) wb_atom_len(item) word str_len(word))
+}
+# Whether an atom is a `$name`.
+let wb_is_name = (item:int):>int => {
+    if not wb_is_atom(item) { return false }
+    return __load_u8__(wb_atom_ptr(item)) =? 36
+}
+# The head word of a list form, or 0.
+let wb_head = (form:int):>int => {
+    if not wb_is_list(form) or vec_len(form) =? 0 { return 0 }
+    return vec_get(form 0)
+}
+let wb_head_is = (form:int word:int):>int => {
+    if not wb_is_list(form) or vec_len(form) =? 0 { return false }
+    return wb_atom_is(vec_get(form 0) word)
+}
+
+# The integer an atom spells: decimal or 0x hex, optional sign, `_` ignored.
+let wb_integer = (item:int):>int => {
+    let p:int = wb_atom_ptr(item)
+    let n:int = wb_atom_len(item)
+    let i:int = 0
+    let negative:int = false
+    if n >? 0 and __load_u8__(p) =? 45 { negative = true  i = 1 }
+    else if n >? 0 and __load_u8__(p) =? 43 { i = 1 }
+    let value:int = 0
+    if i + 1 <? n and __load_u8__(p + i) =? 48 and __load_u8__(p + i + 1) =? 120 {
+        i = i + 2
+        loop i <? n {
+            let c:int = __load_u8__(p + i)
+            if c not=? 95 {
+                let d:int = 0
+                if c >=? 48 and c <=? 57 { d = c - 48 }
+                else if c >=? 97 and c <=? 102 { d = c - 87 }
+                else if c >=? 65 and c <=? 70 { d = c - 55 }
+                else { wb_fail("malformed number") }
+                value = (value << 4) or d
+            }
+            i = i + 1
+        }
+    } else {
+        loop i <? n {
+            let c:int = __load_u8__(p + i)
+            if c not=? 95 {
+                if c <? 48 or c >? 57 { wb_fail("malformed number") }
+                value = value * 10 + (c - 48)
+            }
+            i = i + 1
+        }
+    }
+    if negative { return 0 - value }
+    return value
+}
+# Truncate to `bits` and sign-extend (i32 constants are written unsigned too).
+let wb_signed = (value:int bits:int):>int => {
+    if bits =? 64 { return value }
+    let v:int = value and 4294967295
+    if v >=? 2147483648 { return v - 4294967296 }
+    return v
+}
+
+let wb_hex_digit = (c:int):>int => {
+    if c >=? 48 and c <=? 57 { return c - 48 }
+    if c >=? 97 and c <=? 102 { return c - 87 }
+    if c >=? 65 and c <=? 70 { return c - 55 }
+    wb_fail("malformed string escape")
+    return 0
+}
+# Append the bytes a quoted string atom spells.
+let wb_string_bytes = (item:int out:int):>void => {
+    let p:int = wb_atom_ptr(item) + 1
+    let n:int = wb_atom_len(item) - 2
+    let i:int = 0
+    loop i <? n {
+        let c:int = __load_u8__(p + i)
+        if c not=? 92 {
+            bb_push_byte(out c)
+            i = i + 1
+        } else {
+            let d:int = __load_u8__(p + i + 1)
+            if d =? 110 { bb_push_byte(out 10) i = i + 2 }
+            else if d =? 116 { bb_push_byte(out 9) i = i + 2 }
+            else if d =? 114 { bb_push_byte(out 13) i = i + 2 }
+            else if d =? 34 or d =? 39 or d =? 92 { bb_push_byte(out d) i = i + 2 }
+            else {
+                bb_push_byte(out wb_hex_digit(d) * 16 + wb_hex_digit(__load_u8__(p + i + 2)))
+                i = i + 3
+            }
+        }
+    }
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Encoding
+# ----------------------------------------------------------------------------
+
+let wb_uleb = (out:int value:int):>void => {
+    let x:int = value
+    loop true {
+        let low:int = x and 127
+        x = x >> 7
+        if x =? 0 {
+            bb_push_byte(out low)
+            return void
+        }
+        bb_push_byte(out low or 128)
+    }
+    return void
+}
+let wb_sleb = (out:int value:int):>void => {
+    let x:int = value
+    loop true {
+        let low:int = x and 127
+        x = __signed_shr__(x 7)
+        if (x =? 0 and (low and 64) =? 0) or (x =? -1 and (low and 64) not=? 0) {
+            bb_push_byte(out low)
+            return void
+        }
+        bb_push_byte(out low or 128)
+    }
+    return void
+}
+# A vector: its count, then the concatenated item buffers.
+let wb_vector = (out:int items:int):>void => {
+    wb_uleb(out vec_len(items))
+    let i:int = 0
+    loop i <? vec_len(items) {
+        let item:int = vec_get(items i)
+        bb_push_bytes(out bb_data(item) bb_len(item))
+        i = i + 1
+    }
+    return void
+}
+let wb_section = (out:int id:int payload:int):>void => {
+    bb_push_byte(out id)
+    wb_uleb(out bb_len(payload))
+    bb_push_bytes(out bb_data(payload) bb_len(payload))
+    return void
+}
+
+let wb_value_type = (item:int):>int => {
+    if wb_atom_is(item "i32") { return 127 }
+    if wb_atom_is(item "i64") { return 126 }
+    if wb_atom_is(item "f32") { return 125 }
+    if wb_atom_is(item "f64") { return 124 }
+    wb_fail("unknown value type")
+    return 0
+}
+
+# ----------------------------------------------------------------------------
+# Module
+# ----------------------------------------------------------------------------
+
+let wb_types:int = 0            # vec of type encodings (byte buffers)
+let wb_type_map:int = 0         # encoding -> index
+let wb_type_names:int = 0       # $name -> index
+let wb_imports:int = 0
+let wb_function_names:int = 0   # $name -> function index
+let wb_imported_functions:int = 0
+let wb_functions:int = 0        # vec of func forms
+let wb_globals:int = 0
+let wb_global_names:int = 0
+let wb_tables:int = 0
+let wb_table_names:int = 0
+let wb_memories:int = 0
+let wb_exports:int = 0
+let wb_elements:int = 0
+let wb_data:int = 0
+let wb_opcodes:int = 0          # mnemonic -> opcode (simple instructions)
+let wb_memory_ops:int = 0       # mnemonic -> opcode + 256 * natural alignment
+
+let wb_name_get = (map:int item:int):>int => {
+    let found:int = map_get(map wb_atom_ptr(item) wb_atom_len(item))
+    if found =? MAP_MISSING { wb_fail("unknown name") }
+    return found
+}
+let wb_name_put = (map:int item:int value:int):>void => {
+    map_put(map wb_atom_ptr(item) wb_atom_len(item) value)
+    return void
+}
+
+let wb_intern_type = (params:int results:int):>int => {
+    let encoded:int = bb_new(16)
+    bb_push_byte(encoded 96)
+    wb_uleb(encoded bb_len(params))
+    bb_push_bytes(encoded bb_data(params) bb_len(params))
+    wb_uleb(encoded bb_len(results))
+    bb_push_bytes(encoded bb_data(results) bb_len(results))
+    let found:int = map_get(wb_type_map bb_data(encoded) bb_len(encoded))
+    if found not=? MAP_MISSING { return found }
+    let index:int = vec_len(wb_types)
+    vec_push(wb_types encoded)
+    map_put(wb_type_map bb_data(encoded) bb_len(encoded) index)
+    return index
+}
+
+# The type index of the `param`/`result`/`type` clauses of `form` from
+# item `start`; the signature ends at the first instruction.
+let wb_signature = (form:int start:int):>int => {
+    let params:int = bb_new(8)
+    let results:int = bb_new(8)
+    let i:int = start
+    loop i <? vec_len(form) {
+        let item:int = vec_get(form i)
+        if wb_is_atom(item) {
+            if not wb_is_name(item) { break }
+        } else {
+            if wb_head_is(item "param") {
+                let k:int = 1
+                loop k <? vec_len(item) {
+                    if not wb_is_name(vec_get(item k)) { bb_push_byte(params wb_value_type(vec_get(item k))) }
+                    k = k + 1
+                }
+            } else if wb_head_is(item "result") {
+                let k:int = 1
+                loop k <? vec_len(item) { bb_push_byte(results wb_value_type(vec_get(item k)))  k = k + 1 }
+            } else if wb_head_is(item "type") {
+                let target:int = vec_get(item 1)
+                if wb_is_name(target) { return wb_name_get(wb_type_names target) }
+                return wb_integer(target)
+            } else if not wb_head_is(item "local") and not wb_head_is(item "export") {
+                break
+            }
+        }
+        i = i + 1
+    }
+    return wb_intern_type(params results)
+}
+
+let wb_limits = (out:int form:int start:int):>void => {
+    let values:int = vec_new(2)
+    let i:int = start
+    loop i <? vec_len(form) {
+        let item:int = vec_get(form i)
+        if wb_is_atom(item) and not wb_is_name(item) and not wb_atom_is(item "funcref") { vec_push(values wb_integer(item)) }
+        i = i + 1
+    }
+    if vec_len(values) =? 1 {
+        bb_push_byte(out 0)
+        wb_uleb(out vec_get(values 0))
+    } else {
+        bb_push_byte(out 1)
+        wb_uleb(out vec_get(values 0))
+        wb_uleb(out vec_get(values 1))
+    }
+    return void
+}
+
+let wb_constant = (out:int expression:int):>void => {
+    if wb_atom_is(vec_get(expression 0) "i32.const") {
+        bb_push_byte(out 65)
+        wb_sleb(out wb_signed(wb_integer(vec_get(expression 1)) 32))
+    } else if wb_atom_is(vec_get(expression 0) "i64.const") {
+        bb_push_byte(out 66)
+        wb_sleb(out wb_integer(vec_get(expression 1)))
+    } else {
+        wb_fail("unsupported constant expression")
+    }
+    bb_push_byte(out 11)
+    return void
+}
+
+let wb_function_index = (item:int):>int => {
+    if wb_is_name(item) { return wb_name_get(wb_function_names item) }
+    return wb_integer(item)
+}
+
+let wb_name_bytes = (out:int item:int):>void => {
+    let content:int = bb_new(16)
+    wb_string_bytes(item content)
+    wb_uleb(out bb_len(content))
+    bb_push_bytes(out bb_data(content) bb_len(content))
+    return void
+}
+
+let wb_collect = (forms:int):>void => {
+    let i:int = 0
+    loop i <? vec_len(forms) {
+        let form:int = vec_get(forms i)
+        if wb_head_is(form "type") { wb_name_put(wb_type_names vec_get(form 1) wb_signature(vec_get(form 2) 1)) }
+        i = i + 1
+    }
+    i = 0
+    loop i <? vec_len(forms) {
+        let form:int = vec_get(forms i)
+        if wb_head_is(form "import") {
+            let entry:int = bb_new(32)
+            wb_name_bytes(entry vec_get(form 1))
+            wb_name_bytes(entry vec_get(form 2))
+            let description:int = vec_get(form 3)
+            if wb_head_is(description "func") {
+                if vec_len(description) >? 1 and wb_is_name(vec_get(description 1)) {
+                    wb_name_put(wb_function_names vec_get(description 1) wb_imported_functions)
+                }
+                wb_imported_functions = wb_imported_functions + 1
+                bb_push_byte(entry 0)
+                wb_uleb(entry wb_signature(description 1))
+            } else if wb_head_is(description "memory") {
+                bb_push_byte(entry 2)
+                wb_limits(entry description 1)
+            } else {
+                wb_fail("unsupported import")
+            }
+            vec_push(wb_imports entry)
+        }
+        i = i + 1
+    }
+    i = 0
+    loop i <? vec_len(forms) {
+        let form:int = vec_get(forms i)
+        if wb_head_is(form "func") {
+            if vec_len(form) >? 1 and wb_is_name(vec_get(form 1)) {
+                wb_name_put(wb_function_names vec_get(form 1) wb_imported_functions + vec_len(wb_functions))
+            }
+            vec_push(wb_functions form)
+        } else if wb_head_is(form "global") {
+            wb_name_put(wb_global_names vec_get(form 1) vec_len(wb_globals))
+            let encoded:int = bb_new(16)
+            let kind:int = vec_get(form 2)
+            if wb_is_list(kind) {
+                bb_push_byte(encoded wb_value_type(vec_get(kind 1)))
+                bb_push_byte(encoded 1)
+            } else {
+                bb_push_byte(encoded wb_value_type(kind))
+                bb_push_byte(encoded 0)
+            }
+            wb_constant(encoded vec_get(form 3))
+            vec_push(wb_globals encoded)
+        } else if wb_head_is(form "table") {
+            wb_name_put(wb_table_names vec_get(form 1) vec_len(wb_tables))
+            let encoded:int = bb_new(8)
+            bb_push_byte(encoded 112)
+            wb_limits(encoded form 2)
+            vec_push(wb_tables encoded)
+        } else if wb_head_is(form "memory") {
+            let encoded:int = bb_new(8)
+            wb_limits(encoded form 1)
+            vec_push(wb_memories encoded)
+        } else if wb_head_is(form "elem") {
+            vec_push(wb_elements form)
+        } else if wb_head_is(form "data") {
+            vec_push(wb_data form)
+        }
+        i = i + 1
+    }
+    i = 0
+    loop i <? vec_len(forms) {
+        let form:int = vec_get(forms i)
+        if wb_head_is(form "func") { wb_signature(form 1) }
+        i = i + 1
+    }
+    i = 0
+    loop i <? vec_len(forms) {
+        let form:int = vec_get(forms i)
+        if wb_head_is(form "export") {
+            let entry:int = bb_new(32)
+            wb_name_bytes(entry vec_get(form 1))
+            let what:int = vec_get(form 2)
+            let target:int = vec_get(what 1)
+            if wb_head_is(what "func") { bb_push_byte(entry 0) wb_uleb(entry wb_function_index(target)) }
+            else if wb_head_is(what "table") { bb_push_byte(entry 1) wb_uleb(entry wb_name_get(wb_table_names target)) }
+            else if wb_head_is(what "memory") { bb_push_byte(entry 2) wb_uleb(entry 0) }
+            else if wb_head_is(what "global") { bb_push_byte(entry 3) wb_uleb(entry wb_name_get(wb_global_names target)) }
+            else { wb_fail("unsupported export") }
+            vec_push(wb_exports entry)
+        }
+        i = i + 1
+    }
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Code
+# ----------------------------------------------------------------------------
+
+let wb_put_op = (map:int name:int value:int):>void => {
+    map_put_str(map name value)
+    return void
+}
+
+let wb_init = ():>void => {
+    if wb_opcodes not=? 0 { return void }
+    wb_opcodes = map_new()
+    let m:int = wb_opcodes
+    wb_put_op(m "unreachable" 0) wb_put_op(m "nop" 1) wb_put_op(m "return" 15) wb_put_op(m "drop" 26)
+    wb_put_op(m "select" 27)
+    wb_put_op(m "i32.eqz" 69) wb_put_op(m "i32.eq" 70) wb_put_op(m "i32.ne" 71) wb_put_op(m "i32.lt_s" 72)
+    wb_put_op(m "i32.lt_u" 73) wb_put_op(m "i32.gt_s" 74) wb_put_op(m "i32.gt_u" 75) wb_put_op(m "i32.le_s" 76)
+    wb_put_op(m "i32.le_u" 77) wb_put_op(m "i32.ge_s" 78) wb_put_op(m "i32.ge_u" 79)
+    wb_put_op(m "i64.eqz" 80) wb_put_op(m "i64.eq" 81) wb_put_op(m "i64.ne" 82) wb_put_op(m "i64.lt_s" 83)
+    wb_put_op(m "i64.lt_u" 84) wb_put_op(m "i64.gt_s" 85) wb_put_op(m "i64.gt_u" 86) wb_put_op(m "i64.le_s" 87)
+    wb_put_op(m "i64.le_u" 88) wb_put_op(m "i64.ge_s" 89) wb_put_op(m "i64.ge_u" 90)
+    wb_put_op(m "i32.add" 106) wb_put_op(m "i32.sub" 107) wb_put_op(m "i32.mul" 108) wb_put_op(m "i32.and" 113)
+    wb_put_op(m "i32.or" 114) wb_put_op(m "i32.xor" 115)
+    wb_put_op(m "i64.add" 124) wb_put_op(m "i64.sub" 125) wb_put_op(m "i64.mul" 126) wb_put_op(m "i64.div_s" 127)
+    wb_put_op(m "i64.div_u" 128) wb_put_op(m "i64.rem_s" 129) wb_put_op(m "i64.rem_u" 130) wb_put_op(m "i64.and" 131)
+    wb_put_op(m "i64.or" 132) wb_put_op(m "i64.xor" 133) wb_put_op(m "i64.shl" 134) wb_put_op(m "i64.shr_s" 135)
+    wb_put_op(m "i64.shr_u" 136)
+    wb_put_op(m "i32.wrap_i64" 167) wb_put_op(m "i64.extend_i32_s" 172) wb_put_op(m "i64.extend_i32_u" 173)
+    wb_put_op(m "i64.trunc_f32_s" 174) wb_put_op(m "i64.trunc_f64_s" 176) wb_put_op(m "f32.convert_i64_s" 180)
+    wb_put_op(m "f64.convert_i64_s" 185) wb_put_op(m "i32.reinterpret_f32" 188) wb_put_op(m "i64.reinterpret_f64" 189)
+    wb_put_op(m "f32.reinterpret_i32" 190) wb_put_op(m "f64.reinterpret_i64" 191)
+    wb_memory_ops = map_new()
+    let o:int = wb_memory_ops
+    wb_put_op(o "i32.load" 40 + 2 * 256) wb_put_op(o "i64.load" 41 + 3 * 256) wb_put_op(o "i32.load8_s" 44)
+    wb_put_op(o "i32.load8_u" 45) wb_put_op(o "i64.load8_s" 48) wb_put_op(o "i64.load8_u" 49)
+    wb_put_op(o "i64.load16_s" 50 + 256) wb_put_op(o "i64.load16_u" 51 + 256) wb_put_op(o "i64.load32_s" 52 + 2 * 256)
+    wb_put_op(o "i64.load32_u" 53 + 2 * 256) wb_put_op(o "i32.store" 54 + 2 * 256) wb_put_op(o "i64.store" 55 + 3 * 256)
+    wb_put_op(o "i32.store8" 58) wb_put_op(o "i64.store8" 60) wb_put_op(o "i64.store16" 61 + 256)
+    wb_put_op(o "i64.store32" 62 + 2 * 256)
+    return void
+}
+
+# Whether `item` is an atom starting with `prefix`.
+let wb_atom_starts = (item:int prefix:int):>int => {
+    if not wb_is_atom(item) { return false }
+    let n:int = str_len(prefix)
+    if wb_atom_len(item) <? n { return false }
+    return str_eq_len(wb_atom_ptr(item) n prefix n)
+}
+
+# The body of a function form: its instructions, encoded into `out`.
+let wb_instructions = (form:int start:int locals:int out:int):>void => {
+    let labels:int = vec_new(16)
+    let i:int = start
+    let n:int = vec_len(form)
+    loop i <? n {
+        let item:int = vec_get(form i)
+        i = i + 1
+        if wb_is_list(item) { wb_fail("folded instructions are not supported") }
+        let p:int = wb_atom_ptr(item)
+        let len:int = wb_atom_len(item)
+        let simple:int = map_get(wb_opcodes p len)
+        if simple not=? MAP_MISSING {
+            bb_push_byte(out simple)
+            continue
+        }
+        let memory:int = map_get(wb_memory_ops p len)
+        if memory not=? MAP_MISSING {
+            let align:int = memory >> 8
+            let offset:int = 0
+            loop i <? n and (wb_atom_starts(vec_get(form i) "offset=") or wb_atom_starts(vec_get(form i) "align=")) {
+                let option:int = vec_get(form i)
+                let q:int = wb_atom_ptr(option)
+                if __load_u8__(q) =? 111 {
+                    offset = wb_integer_slice(q + 7 wb_atom_len(option) - 7)
+                } else {
+                    let value:int = wb_integer_slice(q + 6 wb_atom_len(option) - 6)
+                    align = 0
+                    loop value >? 1 { value = value >> 1  align = align + 1 }
+                }
+                i = i + 1
+            }
+            bb_push_byte(out memory and 255)
+            wb_uleb(out align)
+            wb_uleb(out offset)
+            continue
+        }
+        if wb_atom_is(item "block") or wb_atom_is(item "loop") or wb_atom_is(item "if") {
+            let label:int = 0 - 1
+            if i <? n and wb_is_name(vec_get(form i)) {
+                label = vec_get(form i)
+                i = i + 1
+            }
+            let block_type:int = 64
+            if i <? n and wb_head_is(vec_get(form i) "result") {
+                block_type = wb_value_type(vec_get(vec_get(form i) 1))
+                i = i + 1
+            }
+            vec_push(labels label)
+            if wb_atom_is(item "block") { bb_push_byte(out 2) }
+            else if wb_atom_is(item "loop") { bb_push_byte(out 3) }
+            else { bb_push_byte(out 4) }
+            bb_push_byte(out block_type)
+            continue
+        }
+        if wb_atom_is(item "else") {
+            if i <? n and wb_is_name(vec_get(form i)) { i = i + 1 }
+            bb_push_byte(out 5)
+            continue
+        }
+        if wb_atom_is(item "end") {
+            if i <? n and wb_is_name(vec_get(form i)) { i = i + 1 }
+            if vec_len(labels) =? 0 { wb_fail("end without a block") }
+            vec_pop(labels)
+            bb_push_byte(out 11)
+            continue
+        }
+        if wb_atom_is(item "br") or wb_atom_is(item "br_if") {
+            let target:int = vec_get(form i)
+            i = i + 1
+            if wb_atom_is(item "br") { bb_push_byte(out 12) } else { bb_push_byte(out 13) }
+            if wb_is_name(target) {
+                let depth:int = 0
+                let found:int = false
+                let k:int = vec_len(labels) - 1
+                loop k >=? 0 and not found {
+                    let label:int = vec_get(labels k)
+                    if label >=? 0 and str_eq_len(wb_atom_ptr(label) wb_atom_len(label) wb_atom_ptr(target) wb_atom_len(target)) {
+                        found = true
+                    } else {
+                        depth = depth + 1
+                        k = k - 1
+                    }
+                }
+                if not found { wb_fail("unknown label") }
+                wb_uleb(out depth)
+            } else {
+                wb_uleb(out wb_integer(target))
+            }
+            continue
+        }
+        if wb_atom_is(item "call") {
+            bb_push_byte(out 16)
+            wb_uleb(out wb_function_index(vec_get(form i)))
+            i = i + 1
+            continue
+        }
+        if wb_atom_is(item "call_indirect") {
+            let table:int = 0
+            if i <? n and wb_is_name(vec_get(form i)) {
+                table = wb_name_get(wb_table_names vec_get(form i))
+                i = i + 1
+            }
+            let clauses:int = vec_new(4)
+            vec_push(clauses 0)
+            loop i <? n and (wb_head_is(vec_get(form i) "type") or wb_head_is(vec_get(form i) "param") or wb_head_is(vec_get(form i) "result")) {
+                vec_push(clauses vec_get(form i))
+                i = i + 1
+            }
+            if vec_len(clauses) =? 1 { wb_fail("call_indirect needs a type") }
+            bb_push_byte(out 17)
+            wb_uleb(out wb_signature(clauses 1))
+            wb_uleb(out table)
+            continue
+        }
+        if wb_atom_is(item "local.get") or wb_atom_is(item "local.set") or wb_atom_is(item "local.tee") {
+            let target:int = vec_get(form i)
+            i = i + 1
+            if wb_atom_is(item "local.get") { bb_push_byte(out 32) }
+            else if wb_atom_is(item "local.set") { bb_push_byte(out 33) }
+            else { bb_push_byte(out 34) }
+            if wb_is_name(target) { wb_uleb(out wb_name_get(locals target)) } else { wb_uleb(out wb_integer(target)) }
+            continue
+        }
+        if wb_atom_is(item "global.get") or wb_atom_is(item "global.set") {
+            let target:int = vec_get(form i)
+            i = i + 1
+            if wb_atom_is(item "global.get") { bb_push_byte(out 35) } else { bb_push_byte(out 36) }
+            if wb_is_name(target) { wb_uleb(out wb_name_get(wb_global_names target)) } else { wb_uleb(out wb_integer(target)) }
+            continue
+        }
+        if wb_atom_is(item "i32.const") {
+            bb_push_byte(out 65)
+            wb_sleb(out wb_signed(wb_integer(vec_get(form i)) 32))
+            i = i + 1
+            continue
+        }
+        if wb_atom_is(item "i64.const") {
+            bb_push_byte(out 66)
+            wb_sleb(out wb_integer(vec_get(form i)))
+            i = i + 1
+            continue
+        }
+        if wb_atom_is(item "memory.grow") { bb_push_byte(out 64) bb_push_byte(out 0) continue }
+        if wb_atom_is(item "memory.size") { bb_push_byte(out 63) bb_push_byte(out 0) continue }
+        wb_fail("unsupported instruction")
+    }
+    if vec_len(labels) not=? 0 { wb_fail("unterminated block") }
+    return void
+}
+
+# The integer in `p[0..n)` (decimal or 0x hex).
+let wb_integer_slice = (p:int n:int):>int => {
+    let value:int = 0
+    let i:int = 0
+    if n >? 2 and __load_u8__(p) =? 48 and __load_u8__(p + 1) =? 120 {
+        i = 2
+        loop i <? n { value = value * 16 + wb_hex_digit(__load_u8__(p + i))  i = i + 1 }
+        return value
+    }
+    loop i <? n { value = value * 10 + (__load_u8__(p + i) - 48)  i = i + 1 }
+    return value
+}
+
+let wb_code = (form:int):>int => {
+    let locals:int = map_new()
+    let local_types:int = bb_new(16)
+    let param_count:int = 0
+    let i:int = 1
+    if vec_len(form) >? 1 and wb_is_name(vec_get(form 1)) { i = 2 }
+    # Header clauses come before the first instruction; a later `(type ...)`
+    # belongs to a call_indirect.
+    loop i <? vec_len(form) {
+        let item:int = vec_get(form i)
+        if not wb_is_list(item) { break }
+        if wb_head_is(item "param") {
+            if vec_len(item) >? 2 and wb_is_name(vec_get(item 1)) {
+                wb_name_put(locals vec_get(item 1) param_count)
+                param_count = param_count + 1
+            } else {
+                param_count = param_count + vec_len(item) - 1
+            }
+        } else if wb_head_is(item "local") {
+            if vec_len(item) >? 2 and wb_is_name(vec_get(item 1)) {
+                wb_name_put(locals vec_get(item 1) param_count + bb_len(local_types))
+                bb_push_byte(local_types wb_value_type(vec_get(item 2)))
+            } else {
+                let k:int = 1
+                loop k <? vec_len(item) { bb_push_byte(local_types wb_value_type(vec_get(item k)))  k = k + 1 }
+            }
+        } else if not wb_head_is(item "result") and not wb_head_is(item "type") and not wb_head_is(item "export") {
+            break
+        }
+        i = i + 1
+    }
+    let body:int = bb_new(256)
+    # Locals are encoded as runs of one type.
+    let runs:int = 0
+    let counts:int = bb_new(16)
+    let t:int = 0
+    let n:int = bb_len(local_types)
+    let data:int = bb_data(local_types)
+    loop t <? n {
+        let end:int = t
+        loop end <? n and __load_u8__(data + end) =? __load_u8__(data + t) { end = end + 1 }
+        wb_uleb(counts end - t)
+        bb_push_byte(counts __load_u8__(data + t))
+        runs = runs + 1
+        t = end
+    }
+    wb_uleb(body runs)
+    bb_push_bytes(body bb_data(counts) bb_len(counts))
+    wb_instructions(form i locals body)
+    bb_push_byte(body 11)
+    let sized:int = bb_new(bb_len(body) + 8)
+    wb_uleb(sized bb_len(body))
+    bb_push_bytes(sized bb_data(body) bb_len(body))
+    return sized
+}
+
+let wb_element = (form:int):>int => {
+    let out:int = bb_new(32)
+    bb_push_byte(out 0)
+    let at:int = 1
+    if wb_is_atom(vec_get(form 1)) { at = 2 }
+    wb_constant(out vec_get(form at))
+    let names:int = vec_new(8)
+    let i:int = at + 1
+    loop i <? vec_len(form) {
+        let item:int = vec_get(form i)
+        if wb_is_atom(item) and not wb_atom_is(item "func") { vec_push(names item) }
+        i = i + 1
+    }
+    wb_uleb(out vec_len(names))
+    i = 0
+    loop i <? vec_len(names) { wb_uleb(out wb_function_index(vec_get(names i)))  i = i + 1 }
+    return out
+}
+
+let wb_data_segment = (form:int):>int => {
+    let out:int = bb_new(64)
+    bb_push_byte(out 0)
+    wb_constant(out vec_get(form 1))
+    let content:int = bb_new(64)
+    let i:int = 2
+    loop i <? vec_len(form) { wb_string_bytes(vec_get(form i) content)  i = i + 1 }
+    wb_uleb(out bb_len(content))
+    bb_push_bytes(out bb_data(content) bb_len(content))
+    return out
+}
+
+# The binary module (a byte buffer) for WAT `text[0..n)`.
+let wb_assemble = (text:int n:int):>int => {
+    wb_init()
+    wb_tokenize(text n)
+    let top:int = wb_tree()
+    if vec_len(top) not=? 1 or not wb_head_is(vec_get(top 0) "module") { wb_fail("expected one (module ...)") }
+    let module:int = vec_get(top 0)
+    let forms:int = vec_new(vec_len(module))
+    let f:int = 1
+    loop f <? vec_len(module) { vec_push(forms vec_get(module f))  f = f + 1 }
+    wb_types = vec_new(16)
+    wb_type_map = map_new()
+    wb_type_names = map_new()
+    wb_imports = vec_new(64)
+    wb_function_names = map_new()
+    wb_imported_functions = 0
+    wb_functions = vec_new(64)
+    wb_globals = vec_new(8)
+    wb_global_names = map_new()
+    wb_tables = vec_new(2)
+    wb_table_names = map_new()
+    wb_memories = vec_new(2)
+    wb_exports = vec_new(8)
+    wb_elements = vec_new(2)
+    wb_data = vec_new(64)
+    wb_collect(forms)
+    # Function signatures register their types before the type section is
+    # written, so every section is built first.
+    let function_types:int = vec_new(vec_len(wb_functions) + 1)
+    let code:int = vec_new(vec_len(wb_functions) + 1)
+    let i:int = 0
+    loop i <? vec_len(wb_functions) {
+        let entry:int = bb_new(4)
+        wb_uleb(entry wb_signature(vec_get(wb_functions i) 1))
+        vec_push(function_types entry)
+        i = i + 1
+    }
+    i = 0
+    loop i <? vec_len(wb_functions) { vec_push(code wb_code(vec_get(wb_functions i)))  i = i + 1 }
+    let elements:int = vec_new(vec_len(wb_elements) + 1)
+    i = 0
+    loop i <? vec_len(wb_elements) { vec_push(elements wb_element(vec_get(wb_elements i)))  i = i + 1 }
+    let data:int = vec_new(vec_len(wb_data) + 1)
+    i = 0
+    loop i <? vec_len(wb_data) { vec_push(data wb_data_segment(vec_get(wb_data i)))  i = i + 1 }
+    let out:int = bb_new(n // 2 + 1024)
+    bb_push_byte(out 0) bb_push_byte(out 97) bb_push_byte(out 115) bb_push_byte(out 109)
+    bb_push_byte(out 1) bb_push_byte(out 0) bb_push_byte(out 0) bb_push_byte(out 0)
+    let payload:int = 0
+    if vec_len(wb_types) >? 0 { payload = bb_new(256) wb_vector(payload wb_types) wb_section(out 1 payload) }
+    if vec_len(wb_imports) >? 0 { payload = bb_new(4096) wb_vector(payload wb_imports) wb_section(out 2 payload) }
+    if vec_len(function_types) >? 0 { payload = bb_new(256) wb_vector(payload function_types) wb_section(out 3 payload) }
+    if vec_len(wb_tables) >? 0 { payload = bb_new(16) wb_vector(payload wb_tables) wb_section(out 4 payload) }
+    if vec_len(wb_memories) >? 0 { payload = bb_new(16) wb_vector(payload wb_memories) wb_section(out 5 payload) }
+    if vec_len(wb_globals) >? 0 { payload = bb_new(64) wb_vector(payload wb_globals) wb_section(out 6 payload) }
+    if vec_len(wb_exports) >? 0 { payload = bb_new(128) wb_vector(payload wb_exports) wb_section(out 7 payload) }
+    if vec_len(elements) >? 0 { payload = bb_new(256) wb_vector(payload elements) wb_section(out 9 payload) }
+    if vec_len(code) >? 0 { payload = bb_new(n // 2 + 64) wb_vector(payload code) wb_section(out 10 payload) }
+    if vec_len(data) >? 0 { payload = bb_new(4096) wb_vector(payload data) wb_section(out 11 payload) }
+    return out
+}

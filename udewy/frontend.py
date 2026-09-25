@@ -41,10 +41,7 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
 
     # possible raise SyntaxError
     backend = get_backend(options.target)
-    # UDEWY_OBJECT=direct writes x86-64 objects without `as` for every
-    # build; the direct path does not write debug metadata yet.
-    backend.debug_info = options.debug_info and not (
-        options.target == 'x86_64' and os.environ.get('UDEWY_OBJECT') == 'direct')
+    backend.debug_info = options.debug_info
     if Path(input_file).suffix == '.ubc':
         # µDewy bytecode (udewy/BYTECODE.md): replay the recorded backend
         # calls; no tokenizing or parsing.

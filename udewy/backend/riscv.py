@@ -5,6 +5,7 @@ Generates GNU assembler syntax targeting RISC-V 64-bit Linux with LP64 ABI.
 """
 
 from os import PathLike
+import os
 from pathlib import Path
 
 from .. import t1
@@ -1149,7 +1150,14 @@ class RiscvBackend(Backend):
         exe_path = cache_dir / input_name
         link_artifacts = [str(Path(path)) for path in options.get("link_artifacts", [])]
         
-        asm_path.write_text(code)
+        # The direct path writes the object in process (UDEWY_OBJECT=direct);
+        # only the linker is still needed.
+        direct = os.environ.get("UDEWY_OBJECT") == "direct"
+        if direct:
+            from .riscv_object import assemble
+            obj_path.write_bytes(assemble(code))
+        else:
+            asm_path.write_text(code)
         as_flags = []
         if self._requires_hard_float_abi:
             as_flags = ["-march=rv64gc", "-mabi=lp64d"]
@@ -1157,7 +1165,8 @@ class RiscvBackend(Backend):
         # Try different toolchain prefixes
         for prefix in ["riscv64-linux-gnu-", "riscv64-elf-", "riscv64-unknown-elf-"]:
             try:
-                subprocess.run([f"{prefix}as", *as_flags, str(asm_path), "-o", str(obj_path)], check=True)
+                if not direct:
+                    subprocess.run([f"{prefix}as", *as_flags, str(asm_path), "-o", str(obj_path)], check=True)
                 subprocess.run([f"{prefix}ld", "--gc-sections", "-e", "_start", str(obj_path), *link_artifacts, "-o", str(exe_path)], check=True)
                 return exe_path
             except FileNotFoundError:

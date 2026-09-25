@@ -1662,9 +1662,9 @@ class X86_64Backend(Backend):
         static_artifacts = [str(path) for path in link_artifacts if ".so" not in path.name]
         shared_artifacts = [str(path) for path in link_artifacts if ".so" in path.name]
         
-        # The direct path encodes the module in process (UDEWY_OBJECT=direct);
-        # builds with debug information keep `as`, which builds .debug_line.
-        if not self.debug_info and os.environ.get("UDEWY_OBJECT") == "direct":
+        # The direct path encodes the module in process (UDEWY_OBJECT=direct),
+        # debug information and line table included.
+        if os.environ.get("UDEWY_OBJECT") == "direct":
             from .x86_64_object import assemble
             obj_path.write_bytes(assemble(code))
         else:

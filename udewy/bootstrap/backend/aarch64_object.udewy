@@ -1,0 +1,989 @@
+# AArch64 assembly text to an ELF relocatable object, without an assembler.
+#
+# The arm backend emits a closed set of AArch64 instructions and directives
+# (see ROADMAP "Direct binary fast path"). Instructions are fixed 32-bit
+# words; this encodes exactly that set, including the aliases an assembler
+# resolves (`mov` as `orr`, `add #0`, `movz`, `movn` or a bitmask `orr`;
+# `csetm` as `csinv`; `cmp` as `subs`) and `ldr xN, =imm` as a load from a
+# literal pool at the end of its section (or one `movz`, as assemblers do).
+# Local branches resolve at the end; `bl`/`b` to a symbol, `adrp` and
+# `:lo12:` operands, and `.xword sym` become relocations. Anything else is an
+# error, never a guess. Mirrors udewy/backend/aarch64_object.py.
+
+import p"../runtime/runtime.udewy"
+import p"./elf.udewy"
+
+const AO_R_ABS64:int = 257
+const AO_R_ADR_PREL_PG_HI21:int = 275
+const AO_R_ADD_ABS_LO12_NC:int = 277
+const AO_R_JUMP26:int = 282
+const AO_R_CALL26:int = 283
+const ELF_EM_AARCH64:int = 183
+
+# Operand kinds and records (four per instruction, 8 words each): kind,
+# register number, wide, is sp, fp ('d' or 's' as 100/115, else 0),
+# immediate (or memory offset / literal value / symbol addend), shift or
+# memory mode, symbol pointer, symbol length, lo12.
+const AO_REG:int = 1
+const AO_IMM:int = 2
+const AO_MEM:int = 3
+const AO_SYM:int = 4
+const AO_LIT:int = 5
+const AO_COND:int = 6
+const AO_KIND:int = 0
+const AO_NUM:int = 8
+const AO_WIDE:int = 16
+const AO_SP:int = 24
+const AO_FP:int = 32
+const AO_VALUE:int = 40
+const AO_EXTRA:int = 48       # immediate shift; memory mode (1 offset, 2 pre, 3 post); condition code
+const AO_SYM_PTR:int = 56
+const AO_SYM_LEN:int = 64
+const AO_LO12:int = 72
+const AO_RECORD:int = 80
+
+let ao_ops:int = 0
+let ao_count:int = 0
+let ao_current:int = 0
+let ao_pending:int = 0        # section, offset, symbol, kind (1 call26, 2 jump26, 3 cond19)
+let ao_literals:int = 0       # section, offset, value, wide
+let ao_line_start:int = 0
+let ao_line_len:int = 0
+let ao_conditions:int = 0     # name -> code
+
+let ao_fail = (message:int):>void => {
+    eprint("error: direct AArch64 object: ")
+    eprint(message)
+    eprint(": ")
+    let line:int = bb_new(ao_line_len + 1)
+    bb_push_bytes(line ao_line_start ao_line_len)
+    eprintl(bb_finalize_as_string(line))
+    host_exit(1)
+    return void
+}
+
+let ao_op = (i:int):>int => { return ao_ops + i * AO_RECORD }
+let ao_kind = (i:int):>int => { return __load__(ao_op(i) + AO_KIND) }
+let ao_num = (i:int):>int => { return __load__(ao_op(i) + AO_NUM) }
+let ao_wide = (i:int):>int => { return __load__(ao_op(i) + AO_WIDE) }
+let ao_is_sp = (i:int):>int => { return __load__(ao_op(i) + AO_SP) }
+let ao_fp = (i:int):>int => { return __load__(ao_op(i) + AO_FP) }
+let ao_value = (i:int):>int => { return __load__(ao_op(i) + AO_VALUE) }
+let ao_extra = (i:int):>int => { return __load__(ao_op(i) + AO_EXTRA) }
+
+let ao_init = ():>void => {
+    if ao_ops not=? 0 { return void }
+    ao_ops = arena_alloc(AO_RECORD * 4)
+    ao_conditions = map_new()
+    map_put_str(ao_conditions "eq" 0) map_put_str(ao_conditions "ne" 1) map_put_str(ao_conditions "cs" 2)
+    map_put_str(ao_conditions "hs" 2) map_put_str(ao_conditions "cc" 3) map_put_str(ao_conditions "lo" 3)
+    map_put_str(ao_conditions "mi" 4) map_put_str(ao_conditions "pl" 5) map_put_str(ao_conditions "vs" 6)
+    map_put_str(ao_conditions "vc" 7) map_put_str(ao_conditions "hi" 8) map_put_str(ao_conditions "ls" 9)
+    map_put_str(ao_conditions "ge" 10) map_put_str(ao_conditions "lt" 11) map_put_str(ao_conditions "gt" 12)
+    map_put_str(ao_conditions "le" 13) map_put_str(ao_conditions "al" 14)
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Output
+# ----------------------------------------------------------------------------
+
+let ao_data = ():>int => { return vec_get(elf_section_data ao_current) }
+let ao_length = ():>int => { return elf_section_length(ao_current) }
+let ao_word = (v:int):>void => {
+    let data:int = ao_data()
+    if data =? 0 { ao_fail("code in a NOBITS section") }
+    let len:int = bb_len(data)
+    bb_grow(data len + 4)
+    __store_u32__(v and 4294967295 bb_data(data) + len)
+    __store__(len + 4 data + BB_OFF_LEN)
+    return void
+}
+let ao_relocation = (kind:int name:int name_len:int addend:int):>void => {
+    elf_add_relocation(ao_current ao_length() kind elf_symbol(name name_len) addend)
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Parsing
+# ----------------------------------------------------------------------------
+
+let ao_is_digit = (c:int):>int => { return c >=? 48 and c <=? 57 }
+
+let ao_int = (p:int n:int):>int => {
+    let i:int = 0
+    let negative:int = false
+    if n >? 0 and __load_u8__(p) =? 45 { negative = true  i = 1 }
+    else if n >? 0 and __load_u8__(p) =? 43 { i = 1 }
+    let value:int = 0
+    if i + 1 <? n and __load_u8__(p + i) =? 48 and (__load_u8__(p + i + 1) =? 120 or __load_u8__(p + i + 1) =? 88) {
+        i = i + 2
+        loop i <? n {
+            let c:int = __load_u8__(p + i)
+            let d:int = 0
+            if c =? 95 { i = i + 1 continue }
+            if c >=? 48 and c <=? 57 { d = c - 48 }
+            else if c >=? 97 and c <=? 102 { d = c - 87 }
+            else if c >=? 65 and c <=? 70 { d = c - 55 }
+            else { ao_fail("malformed number") }
+            value = (value << 4) or d
+            i = i + 1
+        }
+    } else {
+        if i >=? n { ao_fail("malformed number") }
+        loop i <? n {
+            let c:int = __load_u8__(p + i)
+            if c not=? 95 {
+                if c <? 48 or c >? 57 { ao_fail("malformed number") }
+                value = value * 10 + (c - 48)
+            }
+            i = i + 1
+        }
+    }
+    if negative { return 0 - value }
+    return value
+}
+
+let ao_trim_start = (p:int at:int n:int):>int => {
+    let i:int = at
+    loop i <? n {
+        let c:int = __load_u8__(p + i)
+        if c not=? 32 and c not=? 9 and c not=? 13 { return i }
+        i = i + 1
+    }
+    return i
+}
+let ao_trim_end = (p:int at:int stop:int):>int => {
+    let i:int = stop
+    loop i >? at {
+        let c:int = __load_u8__(p + i - 1)
+        if c not=? 32 and c not=? 9 and c not=? 13 { return i }
+        i = i - 1
+    }
+    return i
+}
+
+let ao_lower = (c:int):>int => {
+    if c >=? 65 and c <=? 90 { return c + 32 }
+    return c
+}
+
+# Parse a register name into record `i`; false when `p[0..n)` is not one.
+let ao_register = (i:int p:int n:int):>int => {
+    let op:int = ao_op(i)
+    if n =? 2 and ao_lower(__load_u8__(p)) =? 115 and ao_lower(__load_u8__(p + 1)) =? 112 {
+        __store__(AO_REG op + AO_KIND) __store__(31 op + AO_NUM) __store__(true op + AO_WIDE) __store__(true op + AO_SP) __store__(0 op + AO_FP)
+        return true
+    }
+    if n =? 3 and ao_lower(__load_u8__(p)) =? 119 and ao_lower(__load_u8__(p + 1)) =? 115 and ao_lower(__load_u8__(p + 2)) =? 112 {
+        __store__(AO_REG op + AO_KIND) __store__(31 op + AO_NUM) __store__(false op + AO_WIDE) __store__(true op + AO_SP) __store__(0 op + AO_FP)
+        return true
+    }
+    if n =? 3 and ao_lower(__load_u8__(p + 1)) =? 122 and ao_lower(__load_u8__(p + 2)) =? 114 {
+        let first:int = ao_lower(__load_u8__(p))
+        if first =? 120 or first =? 119 {
+            __store__(AO_REG op + AO_KIND) __store__(31 op + AO_NUM) __store__(first =? 120 op + AO_WIDE) __store__(false op + AO_SP) __store__(0 op + AO_FP)
+            return true
+        }
+    }
+    if n <? 2 or n >? 3 { return false }
+    let first:int = ao_lower(__load_u8__(p))
+    if first not=? 120 and first not=? 119 and first not=? 100 and first not=? 115 { return false }
+    let number:int = 0
+    let k:int = 1
+    loop k <? n {
+        let c:int = __load_u8__(p + k)
+        if not ao_is_digit(c) { return false }
+        number = number * 10 + (c - 48)
+        k = k + 1
+    }
+    if (first =? 120 or first =? 119) and number >? 30 { return false }
+    if number >? 31 { return false }
+    __store__(AO_REG op + AO_KIND)
+    __store__(number op + AO_NUM)
+    __store__(first =? 120 or first =? 100 op + AO_WIDE)
+    __store__(false op + AO_SP)
+    if first =? 100 or first =? 115 { __store__(first op + AO_FP) } else { __store__(0 op + AO_FP) }
+    return true
+}
+
+# `name`, `name+8`, `:lo12:name+8` into record `i`.
+let ao_symbol = (i:int p:int n:int):>void => {
+    let op:int = ao_op(i)
+    let start:int = 0
+    __store__(false op + AO_LO12)
+    if n >? 6 and __load_u8__(p) =? 58 and __load_u8__(p + 1) =? 108 and __load_u8__(p + 2) =? 111 {
+        start = 6
+        __store__(true op + AO_LO12)
+    }
+    __store__(AO_SYM op + AO_KIND)
+    __store__(p + start op + AO_SYM_PTR)
+    __store__(n - start op + AO_SYM_LEN)
+    __store__(0 op + AO_VALUE)
+    let at:int = n - 1
+    loop at >? start {
+        let c:int = __load_u8__(p + at)
+        if (c =? 43 or c =? 45) and at + 1 <? n and ao_is_digit(__load_u8__(p + at + 1)) {
+            __store__(at - start op + AO_SYM_LEN)
+            __store__(ao_int(p + at n - at) op + AO_VALUE)
+            return void
+        }
+        at = at - 1
+    }
+    return void
+}
+
+# Parse operand text `p[0..n)` (trimmed) into the next record.
+let ao_operand = (p:int n:int):>void => {
+    if ao_count >=? 4 { ao_fail("too many operands") }
+    let i:int = ao_count
+    let op:int = ao_op(i)
+    ao_count = ao_count + 1
+    let c:int = __load_u8__(p)
+    if c =? 91 {
+        # [base] / [base, #imm] / [base, #imm]!
+        let pre:int = __load_u8__(p + n - 1) =? 33
+        let close:int = n - 1
+        loop close >? 0 and __load_u8__(p + close) not=? 93 { close = close - 1 }
+        let comma:int = 1
+        loop comma <? close and __load_u8__(p + comma) not=? 44 { comma = comma + 1 }
+        let base_end:int = ao_trim_end(p 1 comma)
+        let base_start:int = ao_trim_start(p 1 base_end)
+        if not ao_register(i p + base_start base_end - base_start) { ao_fail("unsupported memory base") }
+        let base_number:int = __load__(op + AO_NUM)
+        __store__(AO_MEM op + AO_KIND)
+        __store__(base_number op + AO_NUM)
+        let offset:int = 0
+        if comma <? close {
+            let at:int = ao_trim_start(p comma + 1 close)
+            if __load_u8__(p + at) =? 35 { at = at + 1 }
+            offset = ao_int(p + at ao_trim_end(p at close) - at)
+        }
+        __store__(offset op + AO_VALUE)
+        if pre { __store__(2 op + AO_EXTRA) } else { __store__(1 op + AO_EXTRA) }
+        return void
+    }
+    if c =? 35 {
+        __store__(AO_IMM op + AO_KIND)
+        __store__(ao_int(p + 1 n - 1) op + AO_VALUE)
+        __store__(0 op + AO_EXTRA)
+        return void
+    }
+    if c =? 61 {
+        __store__(AO_LIT op + AO_KIND)
+        __store__(ao_int(p + 1 n - 1) op + AO_VALUE)
+        return void
+    }
+    if n >? 3 and ao_lower(c) =? 108 and ao_lower(__load_u8__(p + 1)) =? 115 and ao_lower(__load_u8__(p + 2)) =? 108 and i >? 0 and ao_kind(i - 1) =? AO_IMM {
+        # `lsl #12` belongs to the immediate before it.
+        let at:int = 3
+        loop at <? n and __load_u8__(p + at) not=? 35 { at = at + 1 }
+        __store__(ao_int(p + at + 1 n - at - 1) ao_op(i - 1) + AO_EXTRA)
+        ao_count = ao_count - 1
+        return void
+    }
+    if ao_register(i p n) { return void }
+    if n =? 2 {
+        let code:int = map_get(ao_conditions p 2)
+        if code not=? MAP_MISSING {
+            __store__(AO_COND op + AO_KIND)
+            __store__(code op + AO_EXTRA)
+            return void
+        }
+    }
+    ao_symbol(i p n)
+    return void
+}
+
+# `[base], #imm`: a post-index memory operand takes the immediate after it.
+let ao_fold_post_index = ():>void => {
+    let i:int = 0
+    loop i + 1 <? ao_count {
+        if ao_kind(i) =? AO_MEM and ao_extra(i) =? 1 and ao_value(i) =? 0 and ao_kind(i + 1) =? AO_IMM {
+            __store__(ao_value(i + 1) ao_op(i) + AO_VALUE)
+            __store__(3 ao_op(i) + AO_EXTRA)
+            let k:int = i + 1
+            loop k + 1 <? ao_count {
+                copy_bytes(ao_op(k) ao_op(k + 1) AO_RECORD)
+                k = k + 1
+            }
+            ao_count = ao_count - 1
+        }
+        i = i + 1
+    }
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Encoding helpers
+# ----------------------------------------------------------------------------
+
+# The N:immr:imms encoding of a logical immediate, or -1.
+let ao_bitmask = (raw:int wide:int):>int => {
+    let size:int = 32
+    if wide { size = 64 }
+    let full:int = 0 - 1
+    if size =? 32 { full = 4294967295 }
+    let value:int = raw and full
+    if value =? 0 or value =? full { return 0 - 1 }
+    let element:int = size
+    loop element >? 2 {
+        let half:int = element >> 1
+        let mask:int = (1 << half) - 1
+        if (value and mask) not=? ((value >> half) and mask) { break }
+        element = half
+    }
+    let emask:int = 0 - 1
+    if element <? 64 { emask = (1 << element) - 1 }
+    let pattern:int = value and emask
+    let ones:int = 0
+    let b:int = 0
+    loop b <? element {
+        if ((pattern >> b) and 1) =? 1 { ones = ones + 1 }
+        b = b + 1
+    }
+    let target:int = (1 << ones) - 1
+    if ones =? 64 { target = 0 - 1 }
+    let rotation:int = 0
+    loop rotation <? element {
+        let rotated:int = pattern >> rotation
+        if rotation >? 0 { rotated = rotated or (pattern << (element - rotation)) }
+        rotated = rotated and emask
+        if rotated =? target {
+            let immr:int = (element - rotation) % element
+            let imms:int = ((((0 - element) << 1) and 63)) or (ones - 1)
+            let n:int = 0
+            if element =? 64 { n = 1 }
+            return (n << 12) or (immr << 6) or imms
+        }
+        rotation = rotation + 1
+    }
+    return 0 - 1
+}
+
+# A single movz (or movn) for `value` into register `rd`; false if none.
+let ao_wide_move = (rd:int wide:int raw:int allow_movn:int):>int => {
+    let size:int = 32
+    if wide { size = 64 }
+    let full:int = 0 - 1
+    if size =? 32 { full = 4294967295 }
+    let value:int = raw and full
+    let movz:int = 1384120320      # 0x52800000
+    let movn:int = 310378496       # 0x12800000
+    if wide { movz = movz or 2147483648  movn = movn or 2147483648 }
+    let chunk:int = 0
+    loop chunk <? size // 16 {
+        let others:int = value and (not (65535 << (16 * chunk))) and full
+        if others =? 0 {
+            ao_word(movz or (chunk << 21) or (((value >> (16 * chunk)) and 65535) << 5) or rd)
+            return true
+        }
+        chunk = chunk + 1
+    }
+    if not allow_movn { return false }
+    let inverted:int = (not value) and full
+    chunk = 0
+    loop chunk <? size // 16 {
+        let others:int = inverted and (not (65535 << (16 * chunk))) and full
+        if others =? 0 {
+            ao_word(movn or (chunk << 21) or (((inverted >> (16 * chunk)) and 65535) << 5) or rd)
+            return true
+        }
+        chunk = chunk + 1
+    }
+    return false
+}
+
+let ao_load_literal = (rd:int wide:int value:int):>void => {
+    if ao_wide_move(rd wide value false) { return void }
+    vec_push(ao_literals ao_current)
+    vec_push(ao_literals ao_length())
+    vec_push(ao_literals value)
+    vec_push(ao_literals wide)
+    if wide { ao_word(1476395008 or rd) } else { ao_word(402653184 or rd) }   # 0x58000000 / 0x18000000
+    return void
+}
+
+let ao_branch = (base:int i:int kind:int):>void => {
+    let op:int = ao_op(i)
+    if ao_kind(i) not=? AO_SYM { ao_fail("a branch needs a label") }
+    vec_push(ao_pending ao_current)
+    vec_push(ao_pending ao_length())
+    vec_push(ao_pending elf_symbol(__load__(op + AO_SYM_PTR) __load__(op + AO_SYM_LEN)))
+    vec_push(ao_pending kind)
+    ao_word(base)
+    return void
+}
+
+let ao_wide_bit = (i:int):>int => {
+    if ao_wide(i) { return 2147483648 }
+    return 0
+}
+
+# ----------------------------------------------------------------------------
+# Instructions
+# ----------------------------------------------------------------------------
+
+let ao_move = ():>void => {
+    let rd:int = ao_num(0)
+    if ao_kind(1) =? AO_REG {
+        if ao_is_sp(0) or ao_is_sp(1) {
+            ao_word(285212672 or ao_wide_bit(0) or (ao_num(1) << 5) or rd)          # add #0 (0x11000000)
+        } else {
+            ao_word(704644064 or ao_wide_bit(0) or (ao_num(1) << 16) or rd)         # orr xzr (0x2A0003E0)
+        }
+        return void
+    }
+    if ao_kind(1) =? AO_LIT {
+        ao_load_literal(rd ao_wide(0) ao_value(1))
+        return void
+    }
+    if ao_wide_move(rd ao_wide(0) ao_value(1) true) { return void }
+    let encoded:int = ao_bitmask(ao_value(1) ao_wide(0))
+    if encoded <? 0 { ao_fail("immediate does not fit a mov") }
+    ao_word(838860800 or ao_wide_bit(0) or (encoded << 10) or (31 << 5) or rd)   # orr (0x32000000)
+    return void
+}
+
+# add/sub (flags: 0/1) with operands at `first` (destination, left, right).
+let ao_add_sub = (subtract:int flags:int first:int):>void => {
+    let rd:int = ao_num(first)
+    let rn:int = ao_num(first + 1)
+    let right:int = first + 2
+    let wide_bit:int = ao_wide_bit(first)
+    if ao_kind(right) =? AO_SYM {
+        let op:int = ao_op(right)
+        if not __load__(op + AO_LO12) { ao_fail("an add of a symbol needs :lo12:") }
+        ao_relocation(AO_R_ADD_ABS_LO12_NC __load__(op + AO_SYM_PTR) __load__(op + AO_SYM_LEN) __load__(op + AO_VALUE))
+        ao_word(285212672 or wide_bit or (rn << 5) or rd)
+        return void
+    }
+    let s:int = subtract
+    if ao_kind(right) =? AO_IMM {
+        let value:int = ao_value(right)
+        let shift:int = 0
+        if ao_extra(right) =? 12 { shift = 1 }
+        if value <? 0 {
+            value = 0 - value
+            s = not s
+        }
+        if value >? 4095 {
+            if (value and 4095) not=? 0 or (value >> 12) >? 4095 { ao_fail("immediate does not fit add/sub") }
+            value = value >> 12
+            shift = 1
+        }
+        let base:int = 285212672 or wide_bit
+        if s { base = base or 1073741824 }
+        if flags { base = base or 536870912 }
+        ao_word(base or (shift << 22) or (value << 10) or (rn << 5) or rd)
+        return void
+    }
+    let base:int = 184549376 or wide_bit      # 0x0B000000
+    if s { base = base or 1073741824 }
+    if flags { base = base or 536870912 }
+    if ao_is_sp(first) or ao_is_sp(first + 1) {
+        let option:int = 2
+        if ao_wide(first) { option = 3 }
+        ao_word(base or 2097152 or (ao_num(right) << 16) or (option << 13) or (rn << 5) or rd)
+        return void
+    }
+    ao_word(base or (ao_num(right) << 16) or (rn << 5) or rd)
+    return void
+}
+
+# opc: and 0, orr 1, eor 2, ands 3; negate for bic/orn/eon.
+let ao_logical = (opc:int negate:int):>void => {
+    let rd:int = ao_num(0)
+    let rn:int = ao_num(1)
+    let wide_bit:int = ao_wide_bit(0)
+    if ao_kind(2) =? AO_IMM {
+        let value:int = ao_value(2)
+        if negate { value = not value }
+        let encoded:int = ao_bitmask(value ao_wide(0))
+        if encoded <? 0 { ao_fail("not a logical immediate") }
+        ao_word(301989888 or (opc << 29) or wide_bit or (encoded << 10) or (rn << 5) or rd)   # 0x12000000
+        return void
+    }
+    let base:int = 167772160 or (opc << 29) or wide_bit      # 0x0A000000
+    if negate { base = base or 2097152 }
+    ao_word(base or (ao_num(2) << 16) or (rn << 5) or rd)
+    return void
+}
+
+let ao_pair = (load:int):>void => {
+    let scale:int = 2
+    if ao_wide(0) { scale = 3 }
+    let offset:int = __signed_shr__(ao_value(2) scale)
+    if (ao_value(2) and ((1 << scale) - 1)) not=? 0 or offset <? -64 or offset >? 63 { ao_fail("pair offset out of range") }
+    let mode:int = 2
+    if ao_extra(2) =? 2 { mode = 3 }
+    if ao_extra(2) =? 3 { mode = 1 }
+    let base:int = 671088640 or (mode << 23)      # 0x28000000
+    if ao_wide(0) { base = base or 2147483648 }
+    if load { base = base or 4194304 }
+    ao_word(base or ((offset and 127) << 15) or (ao_num(1) << 10) or (ao_num(2) << 5) or ao_num(0))
+    return void
+}
+
+# size: log2 bytes; opc: 0 store, 1 load, 2/3 signed loads; unscaled: ldur/stur.
+let ao_load_store = (size:int opc:int unscaled:int):>void => {
+    let rt:int = ao_num(0)
+    if ao_kind(1) =? AO_LIT {
+        ao_load_literal(rt ao_wide(0) ao_value(1))
+        return void
+    }
+    if ao_kind(1) not=? AO_MEM { ao_fail("unsupported address") }
+    let rn:int = ao_num(1)
+    let offset:int = ao_value(1)
+    let mode:int = ao_extra(1)
+    let top:int = (size << 30) or (opc << 22)
+    if mode =? 2 or mode =? 3 {
+        if offset <? -256 or offset >? 255 { ao_fail("pre/post-index offset out of range") }
+        let bits:int = 1
+        if mode =? 2 { bits = 3 }
+        ao_word(top or 939524096 or ((offset and 511) << 12) or (bits << 10) or (rn << 5) or rt)   # 0x38000000
+        return void
+    }
+    if not unscaled and offset >=? 0 and (offset and ((1 << size) - 1)) =? 0 and (offset >> size) <=? 4095 {
+        ao_word(top or 956301312 or ((offset >> size) << 10) or (rn << 5) or rt)   # 0x39000000
+        return void
+    }
+    if offset >=? -256 and offset <=? 255 {
+        ao_word(top or 939524096 or ((offset and 511) << 12) or (rn << 5) or rt)
+        return void
+    }
+    ao_fail("load/store offset out of range")
+    return void
+}
+
+let ao_is = (p:int n:int word:int):>int => { return str_eq_len(p n word str_len(word)) }
+
+let ao_instruction = (p:int n:int):>void => {
+    let wide_bit:int = 0
+    if ao_count >? 0 and ao_kind(0) =? AO_REG and ao_wide(0) { wide_bit = 2147483648 }
+    if ao_is(p n "ret") {
+        let rn:int = 30
+        if ao_count >? 0 { rn = ao_num(0) }
+        ao_word(3596551104 or (rn << 5))      # 0xD65F03C0
+        return void
+    }
+    if ao_is(p n "nop") { ao_word(3573751839) return void }
+    if ao_is(p n "svc") { ao_word(3556769793 or ((ao_value(0) and 65535) << 5)) return void }
+    if ao_is(p n "brk") { ao_word(3558866944 or ((ao_value(0) and 65535) << 5)) return void }
+    if ao_is(p n "bl") { ao_branch(2483027968 0 1) return void }
+    if ao_is(p n "b") { ao_branch(335544320 0 2) return void }
+    if n >=? 3 and __load_u8__(p) =? 98 and (__load_u8__(p + 1) =? 46 or n =? 3) {
+        let at:int = 1
+        if __load_u8__(p + 1) =? 46 { at = 2 }
+        let code:int = map_get(ao_conditions p + at n - at)
+        if code not=? MAP_MISSING {
+            ao_branch(1409286144 or code 0 3)     # 0x54000000
+            return void
+        }
+    }
+    if ao_is(p n "cbz") or ao_is(p n "cbnz") {
+        let base:int = 872415232      # 0x34000000
+        if ao_wide(0) { base = base or 2147483648 }
+        if ao_is(p n "cbnz") { base = base or 16777216 }
+        ao_branch(base or ao_num(0) 1 3)
+        return void
+    }
+    if ao_is(p n "blr") { ao_word(3594452992 or (ao_num(0) << 5)) return void }
+    if ao_is(p n "br") { ao_word(3592355840 or (ao_num(0) << 5)) return void }
+    if ao_is(p n "adrp") {
+        let op:int = ao_op(1)
+        ao_relocation(AO_R_ADR_PREL_PG_HI21 __load__(op + AO_SYM_PTR) __load__(op + AO_SYM_LEN) __load__(op + AO_VALUE))
+        ao_word(2415919104 or ao_num(0))      # 0x90000000
+        return void
+    }
+    if ao_is(p n "mov") { ao_move() return void }
+    if ao_is(p n "add") { ao_add_sub(false false 0) return void }
+    if ao_is(p n "sub") { ao_add_sub(true false 0) return void }
+    if ao_is(p n "adds") { ao_add_sub(false true 0) return void }
+    if ao_is(p n "subs") { ao_add_sub(true true 0) return void }
+    if ao_is(p n "cmp") or ao_is(p n "cmn") {
+        # cmp x, y is subs xzr, x, y: shift the operands up one.
+        let k:int = ao_count
+        loop k >? 0 {
+            copy_bytes(ao_op(k) ao_op(k - 1) AO_RECORD)
+            k = k - 1
+        }
+        let op:int = ao_op(0)
+        __store__(AO_REG op + AO_KIND) __store__(31 op + AO_NUM) __store__(ao_wide(1) op + AO_WIDE) __store__(false op + AO_SP)
+        ao_count = ao_count + 1
+        ao_add_sub(ao_is(p n "cmp") true 0)
+        return void
+    }
+    if ao_is(p n "neg") { ao_word(1258292192 or wide_bit or (ao_num(1) << 16) or ao_num(0)) return void }   # 0x4B0003E0
+    if ao_is(p n "mvn") { ao_word(706741216 or wide_bit or (ao_num(1) << 16) or ao_num(0)) return void }    # 0x2A2003E0
+    if ao_is(p n "and") { ao_logical(0 false) return void }
+    if ao_is(p n "orr") { ao_logical(1 false) return void }
+    if ao_is(p n "eor") { ao_logical(2 false) return void }
+    if ao_is(p n "ands") { ao_logical(3 false) return void }
+    if ao_is(p n "bic") { ao_logical(0 true) return void }
+    if ao_is(p n "orn") { ao_logical(1 true) return void }
+    if ao_is(p n "eon") { ao_logical(2 true) return void }
+    if ao_is(p n "mul") or ao_is(p n "madd") or ao_is(p n "msub") {
+        let ra:int = 31
+        if ao_count >? 3 { ra = ao_num(3) }
+        let base:int = 452984832 or wide_bit      # 0x1B000000
+        if ao_is(p n "msub") { base = base or 32768 }
+        ao_word(base or (ao_num(2) << 16) or (ra << 10) or (ao_num(1) << 5) or ao_num(0))
+        return void
+    }
+    let variable:int = 0 - 1
+    if ao_is(p n "sdiv") { variable = 3072 }
+    else if ao_is(p n "udiv") { variable = 2048 }
+    else if ao_is(p n "lsl") or ao_is(p n "lslv") { variable = 8192 }
+    else if ao_is(p n "lsr") or ao_is(p n "lsrv") { variable = 9216 }
+    else if ao_is(p n "asr") or ao_is(p n "asrv") { variable = 10240 }
+    if variable >=? 0 and ao_kind(2) =? AO_REG {
+        ao_word(448790528 or wide_bit or variable or (ao_num(2) << 16) or (ao_num(1) << 5) or ao_num(0))   # 0x1AC00000
+        return void
+    }
+    if variable >=? 0 and ao_kind(2) =? AO_IMM {
+        let size:int = 32
+        if ao_wide(0) { size = 64 }
+        let shift:int = ao_value(2) % size
+        let base:int = 1392508928      # ubfm 0x53000000
+        if ao_is(p n "asr") { base = 318767104 }   # sbfm 0x13000000
+        if ao_wide(0) { base = base or 2151677952 }   # sf and N: 0x80400000
+        let immr:int = shift
+        let imms:int = size - 1
+        if ao_is(p n "lsl") {
+            immr = (size - shift) % size
+            imms = size - 1 - shift
+        }
+        ao_word(base or (immr << 16) or (imms << 10) or (ao_num(1) << 5) or ao_num(0))
+        return void
+    }
+    if ao_is(p n "csetm") or ao_is(p n "cset") {
+        let inverted:int = ao_extra(1) xor 1
+        let base:int = 1518338048 or wide_bit      # csinv 0x5A800000
+        if ao_is(p n "cset") { base = 444597248 or wide_bit }   # csinc 0x1A800400
+        ao_word(base or (31 << 16) or (inverted << 12) or (31 << 5) or ao_num(0))
+        return void
+    }
+    if ao_is(p n "ldp") { ao_pair(true) return void }
+    if ao_is(p n "stp") { ao_pair(false) return void }
+    let size:int = 2
+    if ao_count >? 0 and ao_wide(0) { size = 3 }
+    if ao_is(p n "ldr") { ao_load_store(size 1 false) return void }
+    if ao_is(p n "str") { ao_load_store(size 0 false) return void }
+    if ao_is(p n "ldur") { ao_load_store(size 1 true) return void }
+    if ao_is(p n "stur") { ao_load_store(size 0 true) return void }
+    if ao_is(p n "ldrb") { ao_load_store(0 1 false) return void }
+    if ao_is(p n "strb") { ao_load_store(0 0 false) return void }
+    if ao_is(p n "ldrh") { ao_load_store(1 1 false) return void }
+    if ao_is(p n "strh") { ao_load_store(1 0 false) return void }
+    let signed_opc:int = 3
+    if ao_count >? 0 and ao_wide(0) { signed_opc = 2 }
+    if ao_is(p n "ldrsb") { ao_load_store(0 signed_opc false) return void }
+    if ao_is(p n "ldrsh") { ao_load_store(1 signed_opc false) return void }
+    if ao_is(p n "ldrsw") { ao_load_store(2 2 false) return void }
+    if ao_is(p n "fmov") {
+        if ao_fp(0) not=? 0 and ao_fp(1) =? 0 {
+            let base:int = 505872384      # 0x1E270000 (s <- w)
+            if ao_fp(0) =? 100 { base = 2657550336 }   # 0x9E670000 (d <- x)
+            ao_word(base or (ao_num(1) << 5) or ao_num(0))
+            return void
+        }
+        if ao_fp(1) not=? 0 and ao_fp(0) =? 0 {
+            let base:int = 505806848      # 0x1E260000 (w <- s)
+            if ao_fp(1) =? 100 { base = 2657484800 }   # 0x9E660000 (x <- d)
+            ao_word(base or (ao_num(1) << 5) or ao_num(0))
+            return void
+        }
+        ao_fail("unsupported fmov")
+    }
+    if ao_is(p n "scvtf") {
+        let base:int = 2653028352      # 0x9E220000 (s <- x)
+        if ao_fp(0) =? 100 { base = 2657222656 }   # 0x9E620000 (d <- x)
+        if not ao_wide(1) { base = base and 2147483647 }
+        ao_word(base or (ao_num(1) << 5) or ao_num(0))
+        return void
+    }
+    if ao_is(p n "fcvtzs") {
+        let base:int = 2654470144      # 0x9E380000 (x <- s)
+        if ao_fp(1) =? 100 { base = 2658664448 }   # 0x9E780000 (x <- d)
+        if not ao_wide(0) { base = base and 2147483647 }
+        ao_word(base or (ao_num(1) << 5) or ao_num(0))
+        return void
+    }
+    ao_fail("unsupported instruction")
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Directives
+# ----------------------------------------------------------------------------
+
+let ao_item_end = (p:int at:int n:int):>int => {
+    let i:int = at
+    loop i <? n and __load_u8__(p + i) not=? 44 { i = i + 1 }
+    return i
+}
+
+let ao_directive = (name:int name_len:int p:int n:int):>void => {
+    let section:int = ao_current
+    if ao_is(name name_len ".xword") or ao_is(name name_len ".quad") or ao_is(name name_len ".dword") {
+        let at:int = 0
+        loop at <? n {
+            let stop:int = ao_item_end(p at n)
+            let start:int = ao_trim_start(p at stop)
+            let end:int = ao_trim_end(p start stop)
+            let c:int = __load_u8__(p + start)
+            let data:int = ao_data()
+            if ao_is_digit(c) or c =? 45 {
+                let value:int = ao_int(p + start end - start)
+                bb_grow(data bb_len(data) + 8)
+                __store_u64__(value bb_data(data) + bb_len(data))
+                __store__(bb_len(data) + 8 data + BB_OFF_LEN)
+            } else {
+                ao_symbol(0 p + start end - start)
+                let op:int = ao_op(0)
+                ao_relocation(AO_R_ABS64 __load__(op + AO_SYM_PTR) __load__(op + AO_SYM_LEN) __load__(op + AO_VALUE))
+                bb_grow(data bb_len(data) + 8)
+                __store_u64__(0 bb_data(data) + bb_len(data))
+                __store__(bb_len(data) + 8 data + BB_OFF_LEN)
+            }
+            at = stop + 1
+        }
+        return void
+    }
+    if ao_is(name name_len ".word") or ao_is(name name_len ".long") {
+        let at:int = 0
+        loop at <? n {
+            let stop:int = ao_item_end(p at n)
+            let start:int = ao_trim_start(p at stop)
+            ao_word(ao_int(p + start ao_trim_end(p start stop) - start))
+            at = stop + 1
+        }
+        return void
+    }
+    if ao_is(name name_len ".byte") {
+        let data:int = ao_data()
+        let at:int = 0
+        loop at <? n {
+            let stop:int = ao_item_end(p at n)
+            let start:int = ao_trim_start(p at stop)
+            bb_push_byte(data ao_int(p + start ao_trim_end(p start stop) - start) and 255)
+            at = stop + 1
+        }
+        return void
+    }
+    if ao_is(name name_len ".section") {
+        let name_end:int = ao_item_end(p 0 n)
+        let name_stop:int = ao_trim_end(p 0 name_end)
+        let flags:int = 0
+        let kind:int = ELF_SHT_PROGBITS
+        if name_end <? n {
+            let i:int = name_end + 1
+            loop i <? n and __load_u8__(p + i) not=? 44 {
+                let c:int = __load_u8__(p + i)
+                if c =? 97 { flags = flags or ELF_SHF_ALLOC }
+                else if c =? 119 { flags = flags or ELF_SHF_WRITE }
+                else if c =? 120 { flags = flags or ELF_SHF_EXECINSTR }
+                else if c =? 82 { flags = flags or ELF_SHF_GNU_RETAIN }
+                i = i + 1
+            }
+            if i <? n {
+                let type_at:int = ao_trim_start(p i + 1 n)
+                if ao_is(p + type_at ao_trim_end(p type_at n) - type_at "@nobits") { kind = ELF_SHT_NOBITS }
+            }
+        }
+        ao_current = elf_section(p name_stop kind flags)
+        return void
+    }
+    if ao_is(name name_len ".globl") or ao_is(name name_len ".global") {
+        let symbol:int = elf_symbol(p n)
+        if vec_get(elf_symbol_bindings symbol) not=? ELF_STB_WEAK { vec_set(elf_symbol_bindings symbol ELF_STB_GLOBAL) }
+        return void
+    }
+    if ao_is(name name_len ".weak") { vec_set(elf_symbol_bindings elf_symbol(p n) ELF_STB_WEAK) return void }
+    if ao_is(name name_len ".hidden") { vec_set(elf_symbol_visibility elf_symbol(p n) ELF_STV_HIDDEN) return void }
+    if ao_is(name name_len ".extern") { return void }
+    if ao_is(name name_len ".zero") {
+        let count:int = ao_int(p n)
+        let data:int = ao_data()
+        if data =? 0 {
+            vec_set(elf_section_sizes section vec_get(elf_section_sizes section) + count)
+        } else {
+            let k:int = 0
+            loop k <? count { bb_push_byte(data 0) k = k + 1 }
+        }
+        return void
+    }
+    if ao_is(name name_len ".balign") or ao_is(name name_len ".p2align") or ao_is(name name_len ".align") {
+        let alignment:int = ao_int(p ao_item_end(p 0 n))
+        if not ao_is(name name_len ".balign") { alignment = 1 << alignment }
+        if alignment >? vec_get(elf_section_aligns section) { vec_set(elf_section_aligns section alignment) }
+        let padding:int = (alignment - ao_length() % alignment) % alignment
+        let data:int = ao_data()
+        if data =? 0 {
+            vec_set(elf_section_sizes section vec_get(elf_section_sizes section) + padding)
+        } else if (vec_get(elf_section_flags section) and ELF_SHF_EXECINSTR) not=? 0 {
+            if (padding and 3) not=? 0 { ao_fail("unaligned code") }
+            let k:int = 0
+            loop k <? padding // 4 { ao_word(3573751839) k = k + 1 }
+        } else {
+            let k:int = 0
+            loop k <? padding { bb_push_byte(data 0) k = k + 1 }
+        }
+        return void
+    }
+    if ao_is(name name_len ".text") { ao_current = elf_section(".text" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_EXECINSTR) return void }
+    if ao_is(name name_len ".data") { ao_current = elf_section(".data" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_WRITE) return void }
+    if ao_is(name name_len ".bss") { ao_current = elf_section(".bss" 4 ELF_SHT_NOBITS ELF_SHF_ALLOC or ELF_SHF_WRITE) return void }
+    ao_fail("unsupported directive")
+    return void
+}
+
+# ----------------------------------------------------------------------------
+# Driver
+# ----------------------------------------------------------------------------
+
+let ao_line = (p:int n:int):>void => {
+    let start:int = ao_trim_start(p 0 n)
+    let stop:int = start
+    loop stop <? n {
+        if __load_u8__(p + stop) =? 47 and stop + 1 <? n and __load_u8__(p + stop + 1) =? 47 { break }
+        stop = stop + 1
+    }
+    stop = ao_trim_end(p start stop)
+    if start >=? stop { return void }
+    let line:int = p + start
+    let len:int = stop - start
+    ao_line_start = line
+    ao_line_len = len
+    let head_end:int = 0
+    loop head_end <? len {
+        let c:int = __load_u8__(line + head_end)
+        if c =? 32 or c =? 9 { break }
+        head_end = head_end + 1
+    }
+    if head_end =? len and __load_u8__(line + len - 1) =? 58 {
+        let symbol:int = elf_symbol(line len - 1)
+        if vec_get(elf_symbol_sections symbol) >=? 0 { ao_fail("label defined twice") }
+        vec_set(elf_symbol_sections symbol ao_current)
+        vec_set(elf_symbol_values symbol ao_length())
+        return void
+    }
+    let rest:int = ao_trim_start(line head_end len)
+    if __load_u8__(line) =? 46 {
+        ao_directive(line head_end line + rest len - rest)
+        return void
+    }
+    ao_count = 0
+    let at:int = rest
+    let depth:int = 0
+    let item:int = rest
+    loop at <=? len {
+        let c:int = 0
+        if at <? len { c = __load_u8__(line + at) }
+        if c =? 91 { depth = depth + 1 }
+        else if c =? 93 { depth = depth - 1 }
+        if at =? len or (c =? 44 and depth =? 0) {
+            let a:int = ao_trim_start(line item at)
+            let b:int = ao_trim_end(line a at)
+            if b >? a { ao_operand(line + a b - a) }
+            item = at + 1
+        }
+        at = at + 1
+    }
+    ao_fold_post_index()
+    # A section holding code is word-aligned, as assemblers make it.
+    if vec_get(elf_section_aligns ao_current) <? 4 { vec_set(elf_section_aligns ao_current 4) }
+    ao_instruction(line head_end)
+    return void
+}
+
+# Each section's literal pool at its end, as an assembler places it.
+let ao_place_literals = ():>void => {
+    let seen:int = intset_new()
+    let i:int = 0
+    loop i <? vec_len(ao_literals) {
+        let section:int = vec_get(ao_literals i)
+        if not intset_has(seen section) {
+            intset_add(seen section)
+            let data:int = vec_get(elf_section_data section)
+            let pool:int = map_new()
+            let k:int = i
+            loop k <? vec_len(ao_literals) {
+                if vec_get(ao_literals k) =? section {
+                    let offset:int = vec_get(ao_literals k + 1)
+                    let value:int = vec_get(ao_literals k + 2)
+                    let wide:int = vec_get(ao_literals k + 3)
+                    let size:int = 4
+                    if wide { size = 8 } else { value = value and 4294967295 }
+                    let key:int = arena_alloc(16)
+                    __store__(value key)
+                    __store__(size key + 8)
+                    let at:int = map_get(pool key 16)
+                    if at =? MAP_MISSING {
+                        loop (bb_len(data) % size) not=? 0 { bb_push_byte(data 0) }
+                        at = bb_len(data)
+                        map_put(pool key 16 at)
+                        bb_grow(data at + size)
+                        if size =? 8 { __store_u64__(value bb_data(data) + at) } else { __store_u32__(value bb_data(data) + at) }
+                        __store__(at + size data + BB_OFF_LEN)
+                        if size >? vec_get(elf_section_aligns section) { vec_set(elf_section_aligns section size) }
+                    }
+                    let delta:int = __signed_shr__(at - offset 2)
+                    let word_at:int = bb_data(data) + offset
+                    __store_u32__(__load_u32__(word_at) or ((delta and 524287) << 5) word_at)
+                }
+                k = k + 4
+            }
+        }
+        i = i + 4
+    }
+    return void
+}
+
+let ao_resolve = ():>void => {
+    let i:int = 0
+    loop i <? vec_len(ao_pending) {
+        let section:int = vec_get(ao_pending i)
+        let offset:int = vec_get(ao_pending i + 1)
+        let symbol:int = vec_get(ao_pending i + 2)
+        let kind:int = vec_get(ao_pending i + 3)
+        let word_at:int = bb_data(vec_get(elf_section_data section)) + offset
+        if vec_get(elf_symbol_sections symbol) =? section and vec_get(elf_symbol_bindings symbol) =? ELF_STB_LOCAL {
+            let delta:int = __signed_shr__(vec_get(elf_symbol_values symbol) - offset 2)
+            if kind =? 3 {
+                __store_u32__(__load_u32__(word_at) or ((delta and 524287) << 5) word_at)
+            } else {
+                __store_u32__(__load_u32__(word_at) or (delta and 67108863) word_at)
+            }
+        } else {
+            if kind =? 3 { ao_fail("conditional branch outside its section") }
+            let relocation:int = AO_R_JUMP26
+            if kind =? 1 { relocation = AO_R_CALL26 }
+            elf_add_relocation(section offset relocation symbol 0)
+        }
+        i = i + 4
+    }
+    return void
+}
+
+# The ELF object (a byte buffer) for AArch64 assembly `text[0..n)`.
+let ao_assemble = (text:int n:int):>int => {
+    ao_init()
+    elf_begin(ELF_EM_AARCH64)
+    ao_current = elf_section(".text" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_EXECINSTR)
+    elf_section(".data" 5 ELF_SHT_PROGBITS ELF_SHF_ALLOC or ELF_SHF_WRITE)
+    elf_section(".bss" 4 ELF_SHT_NOBITS ELF_SHF_ALLOC or ELF_SHF_WRITE)
+    ao_pending = vec_new(1024)
+    ao_literals = vec_new(64)
+    let at:int = 0
+    loop at <? n {
+        let end:int = at
+        loop end <? n and __load_u8__(text + end) not=? 10 { end = end + 1 }
+        ao_line(text + at end - at)
+        at = end + 1
+    }
+    ao_place_literals()
+    ao_resolve()
+    return elf_write()
+}

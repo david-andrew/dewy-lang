@@ -17,6 +17,7 @@ Host functions provided by JS:
 """
 
 from os import PathLike
+import os
 from pathlib import Path
 
 from .. import t1
@@ -1447,16 +1448,21 @@ class Wasm32Backend(Backend):
         wasm_path = cache_dir / f"{input_name}.wasm"
         html_path = cache_dir / f"{input_name}.html"
         
-        wat_path.write_text(code)
-        
-        # Convert WAT to WASM
-        try:
-            subprocess.run(["wat2wasm", str(wat_path), "-o", str(wasm_path)], check=True)
-        except FileNotFoundError:
-            raise RuntimeError(
-                "wat2wasm not found. Install wabt: https://github.com/WebAssembly/wabt\n"
-                f"WAT file generated at: {wat_path}"
-            )
+        # The direct path encodes the binary module in process
+        # (UDEWY_OBJECT=direct) instead of running wat2wasm.
+        if os.environ.get("UDEWY_OBJECT") == "direct":
+            from .wasm_binary import assemble
+            wasm_path.write_bytes(assemble(code))
+        else:
+            wat_path.write_text(code)
+            # Convert WAT to WASM
+            try:
+                subprocess.run(["wat2wasm", str(wat_path), "-o", str(wasm_path)], check=True)
+            except FileNotFoundError:
+                raise RuntimeError(
+                    "wat2wasm not found. Install wabt: https://github.com/WebAssembly/wabt\n"
+                    f"WAT file generated at: {wat_path}"
+                )
         
         browser_link_js: list[str] = []
         browser_link_wasm: dict[str, str] = {}
