@@ -265,8 +265,9 @@ What Jai does that Dewy does not, and the lever each implies:
    code in memory, then writes an object and links. Dewy serializes 17 MB
    of µDewy text, reparses it in a separate tool, emits assembly text, and
    the system assembler parses that again: three serialize-and-reparse
-   cycles. Lever: hand µDewy statements to the backend in process (already
-   a candidate below) and emit object bytes instead of assembly text.
+   cycles. Lever: a µDewy bytecode input that replays straight into the
+   backends, and object-byte output instead of assembly text. Both are
+   specified under "Direct binary fast path" below.
 2. **The unoptimized backend is the fast one.** Jai uses LLVM only for
    release builds and its own backend for development, where compile speed
    is everything and output speed is nothing. Dewy's direct route is
@@ -313,6 +314,85 @@ next performance batch after Phase 1.1's current slices; lever 3 lands
 with the context allocator; lever 4 with Phase 2; lever 6 is a standing
 rule from now on. Measure every batch as lines per second on the
 compiler's own sources, C route and direct route separately.
+
+### Direct binary fast path (2026-09-24)
+
+Accepted direction for lever 1. Two binary cuts around the µDewy backends,
+both fast paths beside the text pipeline. Source text, assembly text, and
+`cc` stay. The linker stays too: imported artifacts are already object files
+and shared libraries.
+
+**Bytecode in, straight to code generation.** µDewy has no intermediate
+representation. `p0.parse` is the parser and the code generator: every
+expression calls a method on `Backend`, and `finish_module` is what produces
+assembly or WAT. `entry_point` already accepts a `generate` callback that
+drives a backend without parsing, and nothing uses it. The binary format is
+a recording of that call stream, about forty operations, one per method the
+parser actually calls. A player decodes an opcode and calls the live
+backend. Methods that return an id (`declare_function`, `alloc_local`,
+`intern_string`, `cond_and_split`) go through a side table from the recorded
+id to whatever that backend just returned, so the backends do not change.
+Tokens are the wrong cut (the lexer is the cheap part). Dewy's
+`LoweredProgram` is also the wrong cut: it is still Dewy HIR, and µDewy has
+no walker for it.
+
+The player does not redo the parser's other work, so the producer must
+already have done name resolution, scope and forward-reference checks, const
+folding, global-initializer synthesis, and the reachability set. Builtin
+constants such as syscall numbers are folded to integers, which makes a blob
+per target; that matches `$supported_targets` and `if`-target, which already
+split the program before parsing. Link artifacts and imported paths come from
+`t0`, not from the parse, so they belong in the blob header. Debug metadata
+is more operations in the same stream. Strings and `$include_bytes` go in a
+byte pool.
+
+Inside µDewy this is a recorder backend plus a player wired through
+`generate`, tested by round-tripping to the same assembly. That only speeds
+a program that has already been compiled once. The compile-time win is Dewy
+writing the stream instead of µDewy source. That is a second emitter of about
+the size of today's text emitter, not a serialization of `LoweredProgram`.
+
+**Code generation straight to object bytes.** Skipping the assembler is
+realistic for every backend except C, and the three ELF targets share one
+object-file writer (section headers, symbol and string tables, relocations,
+weak and hidden symbols, the GNU-stack note, the per-symbol sections
+`--gc-sections` already depends on). Each backend already emits a closed
+instruction set, so the encoder covers that set only. Local branches resolve
+inside the object file. Cross-section symbols and every `extern` become
+relocations. `ld` still links.
+
+- **wasm32** is the small one. The WAT from `finish_module` is already a
+  structured module, and the binary format is that structure with LEB128
+  sizes and opcode bytes. No relocations. This removes `wat2wasm`.
+- **AArch64** is the easiest ELF target. Instructions are fixed 32-bit
+  words, and there is no DWARF to preserve. Replace the `ldr x0, =imm`
+  literal-pool pseudo with `movz`/`movk`. `adrp`, `:lo12:`, and `bl` become
+  a handful of relocation kinds.
+- **x86-64** is a step harder. Always emitting near jumps avoids the
+  short-jump relaxation the assembler does. RIP-relative `leaq` and `call`
+  are `R_X86_64_PC32` or `R_X86_64_PLT32`; the PLT form is required for the
+  existing shared-library link. `.debug_info` and `.debug_aranges` are
+  already spelled as assembler bytes plus label differences.
+  `.loc` is not: the assembler builds `.debug_line` from it. Keeping line
+  numbers means writing that state machine; codegen without them is
+  comparable to AArch64.
+- **RISC-V** is hard only because the text is not the instructions. `li`,
+  `la`, and `call` are macros, and `la`/`call` also carry linker relaxation.
+  `_start` depends on relaxation being off for `la gp, __global_pointer$`.
+  The tractable path is to expand the macros and emit the long form with
+  `R_RISCV_PCREL_*` and `R_RISCV_CALL` / `R_RISCV_CALL_PLT`, and no
+  `R_RISCV_RELAX` anywhere. Linking still works; code gets a little larger.
+  Full relaxation is an assembler project and is out of scope.
+- **C** has nothing to skip. `cc` compiles, assembles, and links in one
+  process. Emitting an object from this backend would mean abandoning C.
+
+The two paths compose. A bytecode blob replayed into an object-emitting
+backend never produces µDewy text or assembly text. Either path is useful
+alone: bytecode into today's assemblers, or assembly text into a direct
+object writer. Land the µDewy recorder and player first, then the shared ELF
+writer with wasm32 and AArch64, then x86-64, then RISC-V in the long form.
+Dewy emitting bytecode is the step that removes the text round trip from a
+cold compile.
 
 ### Performance measurements and candidates
 
@@ -382,9 +462,9 @@ changing registries or facts.
   - the µDewy stage is its own front end: of its 4.6 s, tokenizing and
     parsing the text are about nine tenths (a character loop with 4.6
     million `startswith` calls, then a recursive-descent parse); assembling
-    and linking are about a second. A regex-driven tokenizer helps; better,
-    when the hosted compiler drives the µDewy compiler in-process it can hand
-    over its statements or tokens and skip the text round trip entirely.
+    and linking are about a second. The replacement for that round trip is
+    the bytecode-in / object-out fast path recorded above, not a handoff of
+    tokens or statements.
 
 ## Phase 1: foundations to their intended designs
 
