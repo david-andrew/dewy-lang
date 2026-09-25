@@ -21,8 +21,9 @@ def test_frame_only_views_use_the_region_and_release_it_at_exit() -> None:
 def test_returned_views_stay_in_the_arena() -> None:
     body = _body('let head = (text:string):>string => { if text.length >? 0 { return text[0..0] }  return text }\nlet main = ():>int64 => head("ab").length\n', 'head')
     # The returned descriptor is arena storage; constant sizes select a
-    # size-class entry (`_arena_alloc_64`), larger ones the general entry.
-    assert re.search(r'_arena_alloc(_\d+)?\(', body) and '_region_alloc(' not in body
+    # size-class entry (`_arena_alloc₆₄`, emitted under an encoded symbol
+    # ending in its UTF-8 hex), larger ones the general entry.
+    assert ('_arena_alloc(' in body or '_arena_alloc'.encode().hex() in body) and '_region_alloc(' not in body
 
 
 def test_a_returned_local_view_keeps_its_source_out_of_the_region() -> None:

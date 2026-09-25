@@ -10,6 +10,7 @@ from ...utils import dataclass_replace as replace
 from typing import Literal
 
 from ...parser import t0
+from ...parser.t1 import normalize_identifier
 from ...reporting import Span
 from ...semantic import hir, ty, placement
 from ...semantic.hir_display import type_to_dewy
@@ -1280,7 +1281,7 @@ class _ArrayLowering(_ArraySharing):
     def _arena_release_call(self, block: hir.AST, size: hir.AST, loc) -> hir.FunctionCall:
         """Give ``size`` bytes at ``block`` back to the prelude's arena (`_arena_release`)."""
         width = self._arena_class_width(size)
-        specialized = self._runtime_helper(f'_arena_release_{width}') if width is not None else None
+        specialized = self._runtime_helper(normalize_identifier(f'_arena_release_{width}')) if width is not None else None
         if specialized is not None:
             function_type = ty.FunctionType([ty.PosOrKwArg(None, 'int64')], [], None, ty.VOID_TYPE)
             return hir.FunctionCall(loc, ty.VOID_TYPE, hir.ExpressedIdentifier(loc, function_type, specialized.symbol), [block], {})
@@ -1621,7 +1622,12 @@ class _ArrayLowering(_ArraySharing):
 
     @staticmethod
     def _arena_class_width(size: hir.AST) -> int | None:
-        """The specialized arena entry width for a constant size up to 64 bytes."""
+        """The specialized arena entry width for a constant size up to 256 bytes.
+
+        Only the power-of-two entries: they share the general entries' free
+        lists, so a block may be released either way. Their names are looked
+        up normalized (`_arena_alloc_16` is the identifier `_arena_alloc₁₆`).
+        """
         if not isinstance(size, hir.Integer) or not (0 < size.value <= 256):
             return None
         for width in (8, 16, 32, 64, 128, 256):
@@ -1632,7 +1638,7 @@ class _ArrayLowering(_ArraySharing):
     def _arena_allocation(self, size: hir.AST, loc) -> hir.FunctionCall:
         """Allocate ``size`` bytes from the prelude's process arena."""
         width = self._arena_class_width(size)
-        specialized = self._runtime_helper(f'_arena_alloc_{width}') if width is not None else None
+        specialized = self._runtime_helper(normalize_identifier(f'_arena_alloc_{width}')) if width is not None else None
         if specialized is not None:
             function_type = ty.FunctionType([], [], None, 'int64')
             return hir.FunctionCall(loc, 'int64', hir.ExpressedIdentifier(loc, function_type, specialized.symbol), [], {})

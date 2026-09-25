@@ -4066,3 +4066,35 @@ earlier state holds (a hash lookup). The result is the same, including
 the interval of a fact that is vacuous everywhere. Validation: 25.1 s →
 23.9 s; self-build: 82.6 s → 81.2 s; 3.1 GB less allocated;
 byte-identical output.
+
+## The size-class allocator entries were never used (2026-09-24)
+
+Generated code was meant to call `_arena_alloc_16`, `_arena_release_64`
+and the other constant-size entries since 0eaa88fb, but neither compiler
+ever did. Identifiers spell `_16` as the subscript `₁₆`, so the entries
+are bound as `_arena_alloc₁₆`. Both compilers looked them up by the ASCII
+spelling: the native helper lists and `arena_class_helper`, and the
+hosted `BACKEND_RUNTIME_HELPERS` and `_runtime_helper` lookups. Every
+allocation and release took the general entry, which computes a class
+from a runtime size.
+
+Both compilers now look the entries up by their bound names. They use
+only the power-of-two entries (8 to 256 bytes), mapping any constant size
+of 256 or less to its class. Those share the general entries' free lists,
+so a block may be released either way. The one-word-larger classes (24,
+40, 72, 136, 264) keep lists of their own and stay unused.
+
+The general entries also got cheaper: sizes up to 256 take a
+three-comparison class test. (Clearing only the requested size was tried
+and dropped: a reused block is zero across its class width by contract,
+`test_arena_size_classes`.)
+
+Self-build (cold, same source, against the `c3717db5` pair): 80.6 s →
+74.7 s. Validation took 23.8 s → 21.6 s, frontend 23.4 s → 21.7 s and
+lowering 18.3 s → 16.9 s. Output is byte-identical between generations.
+
+A first version built the helper name by interpolation (`"{prefix}{width}"`
+with a subscript string). That copied the string's storage at every
+allocation and release site and added 160 MB of copies to lowering. The
+names are now literals.
+

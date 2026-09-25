@@ -87,7 +87,10 @@ def test_stores_through_nested_places_release_the_old_string_and_exact_arrays_re
     assert len(re.findall(r'let __dewy_string_old_element_\d+:int64', body)) == 2    # o.tags[1], xs[0]
     # the exact-length arrays' elements are released with them: strings by owner word, the literal's element objects with their block
     assert len(re.findall(r'let __dewy_string_raw_element_\d+:int64', body)) == 3
-    assert re.search(r'_arena_release(_8\(__dewy_string_raw_element_\d+|\(__dewy_string_raw_element_\d+ 8)\)', body)
+    # The size-class entry `_arena_release_8` is bound as `_arena_release₈`
+    # and emitted under an encoded symbol ending in that name's UTF-8 hex.
+    specialized = '_arena_release₈'.encode().hex()
+    assert re.search(rf'({specialized}\(__dewy_string_raw_element_\d+|_arena_release\(__dewy_string_raw_element_\d+ 8)\)', body)
 
 
 def test_a_returned_local_object_hands_its_strings_to_the_result_and_releases_nothing_twice() -> None:

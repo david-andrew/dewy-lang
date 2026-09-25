@@ -733,9 +733,10 @@ let read = ():>int64 => {
     # The literal's temporary rows have frame descriptors. Stored rows and
     # their independent copies own arena descriptors that can escape safely.
     assert emitted.count('__alloca__(48)') == 2
-    # Stored rows use the allocator's descriptor-sized allocation interface;
-    # its internal size classes are not part of lowering's contract.
-    assert '_arena_alloc(48)' in emitted
+    # Stored rows use the allocator's descriptor-sized allocation: the
+    # general entry or the 64-byte class entry (`_arena_alloc₆₄`, emitted
+    # under an encoded symbol ending in its UTF-8 hex).
+    assert '_arena_alloc(48)' in emitted or '_arena_alloc₆₄'.encode().hex() + '()' in emitted
     assert '__store_i64__(9 __load_i64__(__load_i64__(copy)))' in emitted
 
 

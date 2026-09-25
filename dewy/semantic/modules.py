@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, is_dataclass
 from ..utils import dataclass_replace as replace
+from ..parser.t1 import normalize_identifier
 from os import PathLike
 from pathlib import Path
 from typing import Any
@@ -549,8 +550,9 @@ class ModuleCompiler:
             for name in hir.child_fields(type(value)):
                 self._collect_referenced_binding_ids(getattr(value, name), found)
 
-    # Prelude declarations the backend may call without a source reference.
-    BACKEND_RUNTIME_HELPERS = frozenset({'_arena_alloc', '_arena_release', '_arena_alloc_8', '_arena_alloc_16', '_arena_alloc_32', '_arena_alloc_64', '_arena_alloc_128', '_arena_alloc_256', '_arena_release_8', '_arena_release_16', '_arena_release_32', '_arena_release_64', '_arena_release_128', '_arena_release_256', '_arena_note_copy', '_region_new', '_region_alloc', '_region_reset', '_region_release', '_union_tree'})
+    # Prelude declarations the backend may call without a source reference,
+    # by their bound names (`_arena_alloc_16` is the identifier `_arena_alloc₁₆`).
+    BACKEND_RUNTIME_HELPERS = frozenset(normalize_identifier(name) for name in {'_arena_alloc', '_arena_release', '_arena_alloc_8', '_arena_alloc_16', '_arena_alloc_32', '_arena_alloc_64', '_arena_alloc_128', '_arena_alloc_256', '_arena_release_8', '_arena_release_16', '_arena_release_32', '_arena_release_64', '_arena_release_128', '_arena_release_256', '_arena_note_copy', '_region_new', '_region_alloc', '_region_reset', '_region_release', '_union_tree'})
 
     def _needed_runtime_binding_ids(self, entry: ModuleRecord) -> set[int]:
         """Follow runtime references before renaming and lowering imports.

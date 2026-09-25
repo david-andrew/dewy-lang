@@ -772,24 +772,30 @@ address = (base:addr offset:addr node:hir.AST @state:State):>addr => if offset =
 arena_class_helper = (size:addr prefix:string @state:State):>string? => {
     if state.allocator is? none return none
     let constant=hir.node_at(state.nodes size)
-    if constant isnt? hir.Integer or constant.value <=? 0 or constant.value >? 264 return none
-    # Power-of-two classes, plus one-word-larger classes for headed records.
-    # Constant and computed sizes must never mix for one block (see the
-    # arena in library/linux/system.dewy).
+    if constant isnt? hir.Integer or constant.value <=? 0 or constant.value >? 256 return none
+    # Only the power-of-two entries: they share the general entries' free
+    # lists, so a block may be released either way (see the arena in
+    # library/linux/system.dewy). Identifiers spell `_16` as the subscript
+    # `₁₆`, so the entries are bound as `_arena_alloc₁₆` and so on.
     let value=constant.value
-    let width=if value <=? 8 8 else if value <=? 16 16 else if value <=? 24 24 else if value <=? 32 32 else if value <=? 40 40 else if value <=? 64 64 else if value <=? 72 72 else if value <=? 128 128 else if value <=? 136 136 else if value <=? 256 256 else 264
-    let binding=state.runtime_helpers.get("{prefix}{width}")
+    let name=if prefix =? '_arena_release' {
+        if value <=? 8 '_arena_release₈' else if value <=? 16 '_arena_release₁₆' else if value <=? 32 '_arena_release₃₂' else if value <=? 64 '_arena_release₆₄' else if value <=? 128 '_arena_release₁₂₈' else '_arena_release₂₅₆'
+    } else {
+        if value <=? 8 '_arena_alloc₈' else if value <=? 16 '_arena_alloc₁₆' else if value <=? 32 '_arena_alloc₃₂' else if value <=? 64 '_arena_alloc₆₄' else if value <=? 128 '_arena_alloc₁₂₈' else '_arena_alloc₂₅₆'
+    }
+    let binding=state.runtime_helpers.get(name)
     if binding is? none return none
     return state.symbols.get(binding)
 }
 allocation = (size:addr node:hir.AST @state:State):>addr => {
     let name:string='__alloca__'
-    if state.allocator isnt? none {
-        let selected=state.symbols.get(state.allocator)
+    let allocator=state.allocator
+    if allocator isnt? none {
+        let specialized=arena_class_helper(size '_arena_alloc' @state)
+        if specialized isnt? none return intrinsic_call(specialized [] types.primitive('int64' @state.type_nodes) node @state)
+        let selected=state.symbols.get(allocator)
         if selected is? none return reject(node 'the requested arena allocator has no declaration' @state)
         name=selected
-        let specialized=arena_class_helper(size '_arena_alloc_' @state)
-        if specialized isnt? none return intrinsic_call(specialized [] types.primitive('int64' @state.type_nodes) node @state)
     }
     return intrinsic_call(name [size] types.primitive('int64' @state.type_nodes) node @state)
 }
@@ -6292,7 +6298,7 @@ releasable = (type:addr @state:State):>bool => owned_string(type state) or cell_
 release_block = (pointer:addr size:addr node:hir.AST @state:State):>addr => {
     let binding=state.runtime_helpers.get('_arena_release')
     if state.allocator is? none or binding is? none return sequence([] node @state)
-    let specialized=arena_class_helper(size '_arena_release_' @state)
+    let specialized=arena_class_helper(size '_arena_release' @state)
     if specialized isnt? none return intrinsic_call(specialized [pointer] types.primitive('void' @state.type_nodes) node @state)
     let name=state.symbols.get(binding)
     $runtime_assert name isnt? none
