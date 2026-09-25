@@ -142,3 +142,24 @@ def test_native_and_python_agree_on_edges_and_li(tmp_path, native_udewy):
     source = tmp_path / 'li.s'
     source.write_text('.text\n' + ''.join(f'    li a0, {value}\n' for value in _constants()))
     assert _native(native_udewy, tmp_path, source) == assemble(source.read_text())
+
+
+RUN_PROGRAMS = PROGRAMS + ['test_alloca_spills', 'test_fib', 'test_stack_array']
+
+
+@pytest.mark.skipif(any(which(tool) is None for tool in ('riscv64-linux-gnu-as', 'riscv64-linux-gnu-ld', 'qemu-riscv64')),
+                    reason='running the objects needs the cross binutils and qemu-riscv64')
+@pytest.mark.parametrize('name', RUN_PROGRAMS)
+def test_programs_run_the_same_on_both_paths(tmp_path, monkeypatch, name):
+    results = []
+    for mode in ('as', 'direct'):
+        monkeypatch.setenv('UDEWY_OBJECT', mode)
+        backend = get_backend('riscv')
+        backend.debug_info = False
+        loaded = t0.load_program(TESTS / f'{name}.udewy', target_backend='riscv')
+        code = p0.parse(t1.tokenize(loaded.source), loaded.source, backend)
+        binary = backend.compile_and_link(code, name, tmp_path / mode, link_artifacts=loaded.link_artifacts)
+        run = subprocess.run(['qemu-riscv64', str(binary)], capture_output=True, timeout=60)
+        results.append((run.returncode, run.stdout))
+    assert results[0] == results[1]
+    assert results[0][0] != -11 and results[0][0] != 245   # no crash on either path

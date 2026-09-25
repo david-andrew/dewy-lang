@@ -4365,3 +4365,31 @@ the text the direct path no longer writes (`.s`/`.wat` in the cache, the
 `as`-then-`ld` command list), plus one code-size ratio that always-near
 jumps dilute (9.3% against a 10% bound). Those tests now pin the assembler
 path, and all five files pass in both modes.
+
+## Direct objects become the native default; running AArch64 and RISC-V (2026-09-25)
+
+Agreed with David: the native µDewy now writes its objects (and wasm
+modules) itself by default, and `UDEWY_OBJECT=as` selects the assembler
+(`be_direct_objects` in `common.udewy`). The Python µDewy keeps the
+assembler by default, since it is the faster route there. Tests that read
+the assembler's text now set `UDEWY_OBJECT=as` explicitly instead of
+clearing the variable.
+
+Cross tools now come from pixi (`pixi global install --environment cross
+binutils_impl_linux-aarch64 binutils_impl_linux-riscv64
+qemu-execve-aarch64 qemu-execve-riscv64`), plus distro-named symlinks
+(`aarch64-linux-gnu-as`/`ld`, `riscv64-linux-gnu-*`) in `~/.local/bin`.
+
+With those, every `udewy/tests` program that builds for AArch64 and RISC-V
+runs under qemu with the same exit code and output on the assembler and
+direct paths: 122 builds with the Python compiler and 98 with the native
+one. The rest need host-only libraries or web intrinsics, or are library
+modules. The direct test suites gained an execution check.
+
+Running the code also exposed an old bug in both backends, on both paths.
+`__alloca__` evaluated while call arguments were spilled put its buffer
+between the spilled words, so every later argument was read from the wrong
+slot and `test_alloca_spills` crashed. Like x86-64, the backends now slide
+the spilled words below the new top of the stack. More than 255 (AArch64)
+or 127 (RISC-V) pending values is a compile error, not an out-of-range
+offset.

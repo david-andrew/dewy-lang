@@ -1040,12 +1040,32 @@ let rv_unsigned_cmp = (kind:int):>void => {
     return void
 }
 
+# Spills belong below the buffer: their later pops must not discard the
+# allocation or read its contents as operands. Copy forward because the old
+# and new spill regions overlap for small allocations.
 let rv_alloca = ():>void => {
+    let spilled:int = rv_spilled_depth * 16
+    if spilled >? 2032 {
+        eprintl("error: __alloca__ under more than 127 pending values")
+        host_exit(1)
+    }
+    if spilled >? 0 { rv_emit_2op("mv" "t6" "sp") }
     rv_emit_indented("addi a0, a0, 15")
     rv_emit_indented("andi a0, a0, -16")
     rv_emit_3op("sub" "t0" "sp" "a0")
     rv_emit_2op("mv" "sp" "t0")
-    rv_emit_2op("mv" "a0" "t0")
+    let offset:int = 0
+    loop offset <? spilled {
+        rv_emit_mem("ld" "t1" offset "t6")
+        rv_emit_mem("sd" "t1" offset "sp")
+        offset = offset + 16
+    }
+    if spilled >? 0 {
+        let address:int = bb_new(40)
+        bb_push_str(address "    addi a0, sp, ")
+        bb_push_int(address spilled)
+        vec_push(rv_current_fn_code bb_finalize_as_string(address))
+    } else { rv_emit_2op("mv" "a0" "t0") }
     return void
 }
 
@@ -1503,10 +1523,9 @@ let rv_compile_and_link = (code:int input_name:int cache_dir:int options:int):>i
     bb_push_str(exe_bb input_name)
     let exe_path:int = bb_finalize_as_string(exe_bb)
 
-    # The direct path writes the object in process (UDEWY_OBJECT=direct);
-    # only the linker is still needed.
-    let object_mode:int = proc_getenv("UDEWY_OBJECT")
-    if object_mode not=? 0 and str_eq(object_mode "direct") {
+    # The direct path writes the object in process (the default; see
+    # be_direct_objects); only the linker is still needed.
+    if be_direct_objects() {
         let object:int = ro_assemble(code str_len(code))
         fs_write_file(path_to_cstr(obj_path) bb_data(object) bb_len(object))
     } else {

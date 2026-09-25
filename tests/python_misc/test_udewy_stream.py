@@ -108,8 +108,9 @@ def test_native_replay_reaches_the_parsed_assembly(tmp_path, native_udewy, name)
     work.mkdir()
     local = work / f'{name}.udewy'
     local.write_text(source.read_text())
-    env = {key: value for key, value in os.environ.items() if key not in ('UDEWY_OBJECT', 'UDEWY_RECORD')}
+    env = {key: value for key, value in os.environ.items() if key != 'UDEWY_RECORD'}
     env['UDEWY_JOBS'] = '1'
+    env['UDEWY_OBJECT'] = 'as'   # the check compares the assembly each build leaves
     subprocess.run([native_udewy, '--no-debug-info', '-c', str(local)], cwd=work, check=True, capture_output=True,
                    env={**env, 'UDEWY_RECORD': str(work / 'replay.ubc')})
     subprocess.run([native_udewy, '--no-debug-info', '-c', str(work / 'replay.ubc')], cwd=work, check=True,

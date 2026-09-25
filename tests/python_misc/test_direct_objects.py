@@ -104,7 +104,7 @@ def _direct(monkeypatch, enabled: bool) -> None:
     if enabled:
         monkeypatch.setenv('UDEWY_OBJECT', 'direct')
     else:
-        monkeypatch.delenv('UDEWY_OBJECT', raising=False)
+        monkeypatch.setenv('UDEWY_OBJECT', 'as')
 
 
 def test_encoding_edges_agree_with_gas(tmp_path):
@@ -245,9 +245,10 @@ def test_native_direct_path_matches_the_assembler_path(tmp_path, native_udewy, n
         work.mkdir()
         source = work / f'{name}.udewy'
         source.write_text(PROGRAMS[name])
+        # Direct objects are the native default; `as` is the opt-in.
         env = {key: value for key, value in os.environ.items() if key != 'UDEWY_OBJECT'}
-        if mode == 'direct':
-            env['UDEWY_OBJECT'] = 'direct'
+        if mode == 'as':
+            env['UDEWY_OBJECT'] = 'as'
         subprocess.run([native_udewy, '--no-debug-info', '-c', str(source)], cwd=work, check=True, env=env)
         binary = work / '__dewycache__' / name
         run = subprocess.run([binary], capture_output=True, timeout=30)
@@ -341,8 +342,7 @@ def test_the_native_backends_debug_output_matches_gas(tmp_path, native_udewy):
     work.mkdir()
     source = work / 'program.udewy'
     source.write_text(PROGRAMS['arithmetic'])
-    env = {key: value for key, value in os.environ.items() if key != 'UDEWY_OBJECT'}
-    subprocess.run([native_udewy, '-c', str(source)], cwd=work, check=True, env=env)
+    subprocess.run([native_udewy, '-c', str(source)], cwd=work, check=True, env={**os.environ, 'UDEWY_OBJECT': 'as'})
     text = (work / '__dewycache__' / 'program.s').read_text()
     assert '.loc ' in text
     native = tmp_path / 'native.o'

@@ -2714,13 +2714,9 @@ let x86_direct_assemble = (code:int cache_dir:int input_name:int obj_path:int sp
     return void
 }
 
-# Whether this build writes its object directly (UDEWY_OBJECT=direct)
-# rather than through `as`, debug information and line table included.
-let x86_direct_objects = ():>int => {
-    let mode:int = proc_getenv("UDEWY_OBJECT")
-    if mode =? 0 { return false }
-    return str_eq(mode "direct")
-}
+# Whether this build writes its object directly rather than through `as`
+# (the default; see be_direct_objects), debug information included.
+let x86_direct_objects = ():>int => { return be_direct_objects() }
 
 # Locate the x86_64 Linux dynamic linker. Matches udewy/backend/x86_64.py.
 let x86_find_dynamic_linker = ():>int => {

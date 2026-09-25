@@ -118,3 +118,24 @@ def test_native_and_python_write_identical_objects(tmp_path, native_udewy, name)
     subprocess.run([native_udewy, '--assemble', str(source), str(native), '--target', 'arm'], check=True,
                    env={key: value for key, value in os.environ.items() if key != 'UDEWY_OBJECT'})
     assert native.read_bytes() == assemble(source.read_text())
+
+
+RUN_PROGRAMS = PROGRAMS + ['test_alloca_spills', 'test_fib', 'test_stack_array']
+
+
+@pytest.mark.skipif(any(which(tool) is None for tool in ('aarch64-linux-gnu-as', 'aarch64-linux-gnu-ld', 'qemu-aarch64')),
+                    reason='running the objects needs the cross binutils and qemu-aarch64')
+@pytest.mark.parametrize('name', RUN_PROGRAMS)
+def test_programs_run_the_same_on_both_paths(tmp_path, monkeypatch, name):
+    results = []
+    for mode in ('as', 'direct'):
+        monkeypatch.setenv('UDEWY_OBJECT', mode)
+        backend = get_backend('arm')
+        backend.debug_info = False
+        loaded = t0.load_program(TESTS / f'{name}.udewy', target_backend='arm')
+        code = p0.parse(t1.tokenize(loaded.source), loaded.source, backend)
+        binary = backend.compile_and_link(code, name, tmp_path / mode, link_artifacts=loaded.link_artifacts)
+        run = subprocess.run(['qemu-aarch64', str(binary)], capture_output=True, timeout=60)
+        results.append((run.returncode, run.stdout))
+    assert results[0] == results[1]
+    assert results[0][0] != -11 and results[0][0] != 245   # no crash on either path

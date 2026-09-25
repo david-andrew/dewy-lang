@@ -842,12 +842,28 @@ class ArmBackend(Backend):
         self._pending_cc = {"gt": "hi", "lt": "lo", "gte": "hs", "lte": "ls"}[kind]
 
     def alloca(self) -> None:
-        """Allocate temporary stack storage and return its address."""
+        """Keep expression spills below storage that lives until return.
+
+        Merely moving sp puts the buffer between saved operands and their
+        eventual pops. Slide those words down with the stack top, copying
+        forward because the regions overlap for small allocations.
+        """
+        spilled = self._spilled_depth * 16
+        if spilled > 4080:
+            raise ValueError("__alloca__ under more than 255 pending values")
+        if spilled:
+            self._emit("mov x10, sp")
         self._emit("add x0, x0, #15")
         self._emit("and x0, x0, #-16")
         self._emit("sub x9, sp, x0")
         self._emit("mov sp, x9")
-        self._emit("mov x0, x9")
+        for offset in range(0, spilled, 16):
+            self._emit(f"ldr x9, [x10, #{offset}]")
+            self._emit(f"str x9, [sp, #{offset}]")
+        if spilled:
+            self._emit(f"add x0, sp, #{spilled}")
+        else:
+            self._emit("mov x0, x9")
     
     # ========================================================================
     # Calls

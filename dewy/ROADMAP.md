@@ -410,6 +410,17 @@ object writers because it is the host target: ordinary builds already pass
 6. x86-64 `.debug_line`.
 7. RISC-V in the long form.
 
+**Build settings belong to the language (David, 2026-09-25).** The knobs
+this work added are environment variables for now: `UDEWY_OBJECT=as` (the
+native µDewy writes objects directly by default; Python keeps `as`),
+`UDEWY_JOBS` and `UDEWY_RECORD`. Compilation settings should move into the
+language instead: small ones as source meta tags in the style of
+`$supported_targets` and `if $target =? ...`, and generally a Jai-style
+build configuration file written in Dewy that sets the compiler's options,
+so the language knows how to compile itself without an external build
+system. That needs a design (it builds on comptime) before the variables
+are retired.
+
 **Acceptance checks for direct objects.** Byte identity with `as` output
 is not a goal. Semantic equality per symbol is.
 

@@ -20,8 +20,8 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _assembler_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    # These tests check the assembly both compilers leave in the cache; UDEWY_OBJECT=direct would skip `as`.
-    monkeypatch.delenv('UDEWY_OBJECT', raising=False)
+    # These tests check the assembly both compilers leave in the cache, which the direct path skips.
+    monkeypatch.setenv('UDEWY_OBJECT', 'as')
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent

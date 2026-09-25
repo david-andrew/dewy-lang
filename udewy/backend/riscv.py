@@ -742,12 +742,28 @@ class RiscvBackend(Backend):
         self._pending_cc = {"gt": "gtu", "lt": "ltu", "gte": "geu", "lte": "leu"}[kind]
 
     def alloca(self) -> None:
-        """Allocate temporary stack storage and return its address."""
+        """Keep expression spills below storage that lives until return.
+
+        Merely moving sp puts the buffer between saved operands and their
+        eventual pops. Slide those words down with the stack top, copying
+        forward because the regions overlap for small allocations.
+        """
+        spilled = self._spilled_depth * 16
+        if spilled > 2032:
+            raise ValueError("__alloca__ under more than 127 pending values")
+        if spilled:
+            self._emit("mv t6, sp")
         self._emit("addi a0, a0, 15")
         self._emit("andi a0, a0, -16")
         self._emit("sub t0, sp, a0")
         self._emit("mv sp, t0")
-        self._emit("mv a0, t0")
+        for offset in range(0, spilled, 16):
+            self._emit(f"ld t1, {offset}(t6)")
+            self._emit(f"sd t1, {offset}(sp)")
+        if spilled:
+            self._emit(f"addi a0, sp, {spilled}")
+        else:
+            self._emit("mv a0, t0")
 
     def i64_to_f32_bits(self) -> None:
         """Convert signed i64 in a0 to f32 bits, zero-extended in a0."""

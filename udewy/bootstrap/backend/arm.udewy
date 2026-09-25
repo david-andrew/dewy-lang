@@ -1220,12 +1220,40 @@ let arm_unsigned_cmp = (kind:int):>void => {
     return void
 }
 
+# Spills belong below the buffer: their later pops must not discard the
+# allocation or read its contents as operands. Copy forward because the old
+# and new spill regions overlap for small allocations.
 let arm_alloca = ():>void => {
+    let spilled:int = arm_spilled_depth * 16
+    if spilled >? 4080 {
+        eprintl("error: __alloca__ under more than 255 pending values")
+        host_exit(1)
+    }
+    if spilled >? 0 { arm_emit_indented("mov x10, sp") }
     arm_emit_indented("add x0, x0, #15")
     arm_emit_indented("and x0, x0, #-16")
     arm_emit_indented("sub x9, sp, x0")
     arm_emit_indented("mov sp, x9")
-    arm_emit_indented("mov x0, x9")
+    let offset:int = 0
+    loop offset <? spilled {
+        let load:int = bb_new(40)
+        bb_push_str(load "    ldr x9, [x10, #")
+        bb_push_int(load offset)
+        bb_push_byte(load 93)
+        vec_push(arm_current_fn_code bb_finalize_as_string(load))
+        let store:int = bb_new(40)
+        bb_push_str(store "    str x9, [sp, #")
+        bb_push_int(store offset)
+        bb_push_byte(store 93)
+        vec_push(arm_current_fn_code bb_finalize_as_string(store))
+        offset = offset + 16
+    }
+    if spilled >? 0 {
+        let address:int = bb_new(40)
+        bb_push_str(address "    add x0, sp, #")
+        bb_push_int(address spilled)
+        vec_push(arm_current_fn_code bb_finalize_as_string(address))
+    } else { arm_emit_indented("mov x0, x9") }
     return void
 }
 
@@ -1698,10 +1726,9 @@ let arm_compile_and_link = (code:int input_name:int cache_dir:int options:int):>
     bb_push_str(exe_bb input_name)
     let exe_path:int = bb_finalize_as_string(exe_bb)
 
-    # The direct path writes the object in process (UDEWY_OBJECT=direct);
-    # only the linker is still needed.
-    let object_mode:int = proc_getenv("UDEWY_OBJECT")
-    if object_mode not=? 0 and str_eq(object_mode "direct") {
+    # The direct path writes the object in process (the default; see
+    # be_direct_objects); only the linker is still needed.
+    if be_direct_objects() {
         let object:int = ao_assemble(code str_len(code))
         fs_write_file(path_to_cstr(obj_path) bb_data(object) bb_len(object))
     } else {

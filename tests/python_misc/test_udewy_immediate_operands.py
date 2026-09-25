@@ -10,7 +10,7 @@ from udewy.backend.common import Backend
 def test_immediates_reduce_code_and_match_register_execution(tmp_path, monkeypatch):
     # Measured with gas's short jumps: the direct path's always-near jumps
     # add the same bytes to both builds and dilute the ratio.
-    monkeypatch.delenv('UDEWY_OBJECT', raising=False)
+    monkeypatch.setenv('UDEWY_OBJECT', 'as')
     source = (Path(__file__).parents[2] / 'udewy/tests/test_immediate_operands.udewy').read_text()
     text_sizes = []
     for optimized in (False, True):
