@@ -116,9 +116,11 @@ def compiler_wasm(tmp_path_factory) -> Path:
         if setup.returncode != 0:
             pytest.fail(f"setup_web_compiler.py failed ({setup.returncode}):\n{setup.stdout}\n{setup.stderr}")
     out_dir = tmp_path_factory.mktemp("playground")
+    # The harness reads the compiler's WAT, which UDEWY_OBJECT=direct skips.
+    text_env = {key: value for key, value in env.items() if key != "UDEWY_OBJECT"}
     subprocess.run(
         [sys.executable, "-m", "udewy", "-c", "--target", "wasm32", str(WEB_COMPILER_SRC)],
-        cwd=out_dir, check=True, env=env,
+        cwd=out_dir, check=True, env=text_env,
     )
     html = (out_dir / cache_artifact(WEB_COMPILER_SRC, ".html", cwd=out_dir)).read_text()
     import base64

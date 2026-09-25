@@ -138,6 +138,11 @@ def _section_bytes(path: str) -> dict[str, bytes]:
     raw = open(path, 'rb').read()
     shoff, = struct.unpack_from('<Q', raw, 0x28)
     shentsize, shnum, shstrndx = struct.unpack_from('<HHH', raw, 0x3A)
+    # Extended numbering: the real count and string table index are in
+    # section header 0 (sh_size, sh_link).
+    first = struct.unpack_from('<IIQQQQIIQQ', raw, shoff)
+    shnum = shnum or first[5]
+    shstrndx = first[6] if shstrndx == 0xFFFF else shstrndx
     headers = [struct.unpack_from('<IIQQQQIIQQ', raw, shoff + index * shentsize) for index in range(shnum)]
     names_offset = headers[shstrndx][4]
     result = {}

@@ -15,6 +15,12 @@ SHT_SYMTAB = 2
 SHT_STRTAB = 3
 SHT_RELA = 4
 SHT_NOBITS = 8
+SHT_SYMTAB_SHNDX = 18
+# Section indices from SHN_LORESERVE up do not fit a symbol's 16-bit
+# st_shndx (or the header's e_shnum/e_shstrndx): extended numbering stores
+# SHN_XINDEX there and the real index elsewhere.
+SHN_LORESERVE = 0xFF00
+SHN_XINDEX = 0xFFFF
 
 SHF_WRITE = 0x1
 SHF_ALLOC = 0x2
@@ -129,16 +135,27 @@ class ObjectFile:
         # relocation sections, symtab, strtab and shstrtab.
         content_index = {index: index + 1 for index in range(len(self.sections))}
         symtab = bytearray(24)
+        # Each symbol's real section index when it does not fit st_shndx
+        # (the SHT_SYMTAB_SHNDX table, parallel to the symbol table).
+        extended = bytearray(4)
         symbol_index: dict[str, int] = {}
         section_symbol_index: dict[int, int] = {}
+
+        def entry(name: int, info: int, other: int, shndx: int, value: int) -> None:
+            nonlocal symtab
+            large = shndx >= SHN_LORESERVE
+            symtab += struct.pack('<IBBHQQ', name, info, other, SHN_XINDEX if large else shndx, value, 0)
+            extended.extend(struct.pack('<I', shndx if large else 0))
+
         for index in range(len(self.sections)):
             section_symbol_index[index] = len(symtab) // 24
-            symtab += struct.pack('<IBBHQQ', 0, STT_SECTION, 0, content_index[index], 0, 0)
+            entry(0, STT_SECTION, 0, content_index[index], 0)
         for symbol in locals_ + globals_:
             symbol_index[symbol.name] = len(symtab) // 24
             info = (symbol.binding << 4) | STT_NOTYPE
             shndx = 0 if symbol.section is None else content_index[symbol.section]
-            symtab += struct.pack('<IBBHQQ', string(symbol.name), info, symbol.visibility, shndx, symbol.value, 0)
+            entry(string(symbol.name), info, symbol.visibility, shndx, symbol.value)
+        needs_extended = any(extended)
         first_global = 1 + len(self.sections) + len(locals_)
 
         relocation_sections: list[tuple[int, bytearray]] = []
@@ -195,10 +212,16 @@ class ObjectFile:
             offset = place(table, 8)
             headers.append(struct.pack('<IIQQQQIIQQ', name, SHT_RELA, SHF_INFO_LINK, 0, offset, len(table),
                                        symtab_header_index, content_index[index], 8, 24))
+        strtab_header_index = symtab_header_index + (2 if needs_extended else 1)
         name = section_name('.symtab')
         offset = place(symtab, 8)
         headers.append(struct.pack('<IIQQQQIIQQ', name, SHT_SYMTAB, 0, 0, offset, len(symtab),
-                                   symtab_header_index + 1, first_global, 8, 24))
+                                   strtab_header_index, first_global, 8, 24))
+        if needs_extended:
+            name = section_name('.symtab_shndx')
+            offset = place(extended, 4)
+            headers.append(struct.pack('<IIQQQQIIQQ', name, SHT_SYMTAB_SHNDX, 0, 0, offset, len(extended),
+                                       symtab_header_index, 0, 4, 4))
         name = section_name('.strtab')
         offset = place(strtab, 1)
         headers.append(struct.pack('<IIQQQQIIQQ', name, SHT_STRTAB, 0, 0, offset, len(strtab), 0, 0, 1, 0))
@@ -212,8 +235,15 @@ class ObjectFile:
         # GNU OS/ABI, as gas does, or `ld --gc-sections` ignores the flag.
         gnu = any(section.flags & SHF_GNU_RETAIN for section in self.sections)
         ident = b'\x7fELF' + bytes([2, 1, 1, ELFOSABI_GNU if gnu else 0]) + bytes(8)
+        # Extended numbering: the header count lives in section header 0's
+        # sh_size, and the string table index in its sh_link.
+        count = len(headers)
+        if count >= SHN_LORESERVE or shstrtab_index >= SHN_LORESERVE:
+            headers[0] = struct.pack('<IIQQQQIIQQ', 0, 0, 0, 0, 0, count if count >= SHN_LORESERVE else 0,
+                                     shstrtab_index if shstrtab_index >= SHN_LORESERVE else 0, 0, 0, 0)
         body[0:64] = ident + struct.pack('<HHIQQQIHHHHHH', 1, self.machine, 1, 0, 0, header_offset, self.flags,
-                                         64, 0, 0, 64, len(headers), shstrtab_index)
+                                         64, 0, 0, 64, count if count < SHN_LORESERVE else 0,
+                                         shstrtab_index if shstrtab_index < SHN_LORESERVE else SHN_XINDEX)
         for header in headers:
             body.extend(header)
         return bytes(body)

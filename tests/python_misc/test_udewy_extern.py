@@ -9,6 +9,12 @@ from udewy import p0, t1
 from udewy.backend import Backend, BackendName, get_backend
 
 
+@pytest.fixture(autouse=True)
+def _assembler_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These tests check the assembler path (`as` then `ld`); UDEWY_OBJECT=direct would skip `as`.
+    monkeypatch.delenv('UDEWY_OBJECT', raising=False)
+
+
 NATIVE_TARGETS: list[BackendName] = ["x86_64", "riscv", "arm"]
 
 EXTERN_SOURCE = """

@@ -71,7 +71,8 @@ def test_phase_timings_preserve_generated_code_and_program_arguments(tmp_path):
     assert run.returncode == 42 and 'dewy timing ' not in run.stderr
 
 
-def test_ordinary_and_debug_builds_keep_separate_metadata_and_caches(tmp_path) -> None:
+def test_ordinary_and_debug_builds_keep_separate_metadata_and_caches(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv('UDEWY_OBJECT', raising=False)   # the check reads each build's assembly
     source = tmp_path / 'answer.dewy'
     source.write_text('main=():>int64=>{let answer:int64=42 return answer}\n')
     ordinary = _dewy('--compile', str(source))

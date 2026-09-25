@@ -369,3 +369,35 @@ def test_a_debugger_stops_on_a_source_line(tmp_path, monkeypatch, native_udewy, 
                              str(binary)], capture_output=True, text=True, timeout=120)
     text = result.stdout + result.stderr
     assert 'Breakpoint 1, collatz' in text and 'lines.udewy:6' in text
+
+
+def _many_sections(count: int) -> str:
+    lines = ['.text', '.globl _start', '_start:', '    call f0', '    movq %rax, %rdi', '    movq $60, %rax', '    syscall']
+    for index in range(count):
+        lines += [f'.section .text.f{index},"ax",@progbits', f'.globl f{index}', f'f{index}:', f'    movq ${index % 100}, %rax']
+        if index < 3:
+            lines.append(f'    call f{index + 1}')
+        lines.append('    ret')
+    return '\n'.join(lines + ['.section .note.GNU-stack,"",@progbits']) + '\n'
+
+
+def test_more_sections_than_16_bit_indices_hold(tmp_path, native_udewy):
+    # A debug build is one object: past 0xff00 sections, symbols and the
+    # ELF header switch to extended numbering (SHN_XINDEX, .symtab_shndx).
+    text = _many_sections(0xFF00 + 10)
+    source = tmp_path / 'many.s'
+    source.write_text(text)
+    reference = tmp_path / 'gas.o'
+    subprocess.run(['as', str(source), '-o', str(reference)], check=True)
+    direct = tmp_path / 'direct.o'
+    direct.write_bytes(assemble(text))
+    assert ({name: data for name, data in _section_bytes(str(reference)).items() if name != '.note.gnu.property'} ==
+            _section_bytes(str(direct)))
+    assert sections(str(direct)) == {name: header for name, header in sections(str(reference)).items()
+                                     if name != '.note.gnu.property'}
+    native = tmp_path / 'native.o'
+    subprocess.run([native_udewy, '--assemble', str(source), str(native)], check=True)
+    assert native.read_bytes() == direct.read_bytes()
+    executable = tmp_path / 'many'
+    subprocess.run(['ld', '-static', '-e', '_start', '--gc-sections', str(direct), '-o', str(executable)], check=True)
+    assert subprocess.run([executable]).returncode == 3

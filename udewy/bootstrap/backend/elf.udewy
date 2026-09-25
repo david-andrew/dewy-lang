@@ -12,6 +12,12 @@ const ELF_SHT_SYMTAB:int = 2
 const ELF_SHT_STRTAB:int = 3
 const ELF_SHT_RELA:int = 4
 const ELF_SHT_NOBITS:int = 8
+const ELF_SHT_SYMTAB_SHNDX:int = 18
+# Section indices from SHN_LORESERVE up do not fit a symbol's 16-bit
+# st_shndx (or the header's e_shnum/e_shstrndx): extended numbering stores
+# SHN_XINDEX there and the real index elsewhere.
+const ELF_SHN_LORESERVE:int = 0xFF00
+const ELF_SHN_XINDEX:int = 0xFFFF
 
 const ELF_SHF_WRITE:int = 1
 const ELF_SHF_ALLOC:int = 2
@@ -179,11 +185,19 @@ let elf_section_header = (headers:int name:int kind:int flags:int offset:int siz
     elf_push_u64(headers entsize)
     return void
 }
-let elf_symbol_entry = (symtab:int name:int info:int other:int shndx:int value:int):>void => {
+# A symbol table entry; a section index that does not fit st_shndx goes to
+# the parallel `extended` table (SHT_SYMTAB_SHNDX), which is otherwise 0.
+let elf_symbol_entry = (symtab:int extended:int name:int info:int other:int shndx:int value:int):>void => {
     elf_push_u32(symtab name)
     bb_push_byte(symtab info)
     bb_push_byte(symtab other)
-    elf_push_u16(symtab shndx)
+    if shndx >=? ELF_SHN_LORESERVE {
+        elf_push_u16(symtab ELF_SHN_XINDEX)
+        elf_push_u32(extended shndx)
+    } else {
+        elf_push_u16(symtab shndx)
+        elf_push_u32(extended 0)
+    }
     elf_push_u64(symtab value)
     elf_push_u64(symtab 0)
     return void
@@ -239,10 +253,11 @@ let elf_write = ():>int => {
     let strtab:int = bb_new(names_size)
     bb_push_byte(strtab 0)
     let symtab:int = bb_new((symbol_count + section_count + 1) * 24)
-    elf_symbol_entry(symtab 0 0 0 0 0)
+    let extended:int = bb_new((symbol_count + section_count + 1) * 4)
+    elf_symbol_entry(symtab extended 0 0 0 0 0)
     si = 0
     loop si <? section_count {
-        elf_symbol_entry(symtab 0 ELF_STT_SECTION 0 si + 1 0)
+        elf_symbol_entry(symtab extended 0 ELF_STT_SECTION 0 si + 1 0)
         si = si + 1
     }
     let table_index:int = vec_new(symbol_count + 1)
@@ -263,7 +278,7 @@ let elf_write = ():>int => {
                 let name:int = elf_string(strtab vec_get(elf_symbol_ptrs yi) vec_get(elf_symbol_lens yi))
                 let shndx:int = 0
                 if section >=? 0 { shndx = section + 1 }
-                elf_symbol_entry(symtab name binding << 4 vec_get(elf_symbol_visibility yi) shndx vec_get(elf_symbol_values yi))
+                elf_symbol_entry(symtab extended name binding << 4 vec_get(elf_symbol_visibility yi) shndx vec_get(elf_symbol_values yi))
             }
             yi = yi + 1
         }
@@ -347,10 +362,18 @@ let elf_write = ():>int => {
         }
         si = si + 1
     }
+    let needs_extended:int = section_count >=? ELF_SHN_LORESERVE
+    let strtab_header:int = symtab_header + 1
+    if needs_extended { strtab_header = symtab_header + 2 }
     elf_pad(out 8)
     let symtab_offset:int = bb_len(out)
     bb_push_bytes(out bb_data(symtab) bb_len(symtab))
-    elf_section_header(headers elf_string(shstrtab ".symtab" 7) ELF_SHT_SYMTAB 0 symtab_offset bb_len(symtab) symtab_header + 1 first_global 8 24)
+    elf_section_header(headers elf_string(shstrtab ".symtab" 7) ELF_SHT_SYMTAB 0 symtab_offset bb_len(symtab) strtab_header first_global 8 24)
+    if needs_extended {
+        let extended_offset:int = bb_len(out)
+        bb_push_bytes(out bb_data(extended) bb_len(extended))
+        elf_section_header(headers elf_string(shstrtab ".symtab_shndx" 13) ELF_SHT_SYMTAB_SHNDX 0 extended_offset bb_len(extended) symtab_header 0 4 4)
+    }
     let strtab_offset:int = bb_len(out)
     bb_push_bytes(out bb_data(strtab) bb_len(strtab))
     elf_section_header(headers elf_string(shstrtab ".strtab" 7) ELF_SHT_STRTAB 0 strtab_offset bb_len(strtab) 0 0 1 0)
@@ -358,7 +381,7 @@ let elf_write = ():>int => {
     let shstrtab_offset:int = bb_len(out)
     bb_push_bytes(out bb_data(shstrtab) bb_len(shstrtab))
     elf_section_header(headers shstrtab_name ELF_SHT_STRTAB 0 shstrtab_offset bb_len(shstrtab) 0 0 1 0)
-    let header_count:int = symtab_header + 3
+    let header_count:int = strtab_header + 2
     elf_pad(out 8)
     let header_offset:int = bb_len(out)
     bb_push_bytes(out bb_data(headers) bb_len(headers))
@@ -381,7 +404,21 @@ let elf_write = ():>int => {
     __store_u32__(elf_flags h + 48)
     __store_u16__(64 h + 52)
     __store_u16__(64 h + 58)
-    __store_u16__(header_count h + 60)
-    __store_u16__(header_count - 1 h + 62)
+    # Extended numbering: the header count lives in section header 0's
+    # sh_size, and the string table index in its sh_link.
+    let shstrtab_index:int = header_count - 1
+    let first_header:int = bb_data(out) + header_offset
+    if header_count >=? ELF_SHN_LORESERVE {
+        __store_u64__(header_count first_header + 32)
+        __store_u16__(0 h + 60)
+    } else {
+        __store_u16__(header_count h + 60)
+    }
+    if shstrtab_index >=? ELF_SHN_LORESERVE {
+        __store_u32__(shstrtab_index first_header + 40)
+        __store_u16__(ELF_SHN_XINDEX h + 62)
+    } else {
+        __store_u16__(shstrtab_index h + 62)
+    }
     return out
 }

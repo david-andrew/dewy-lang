@@ -4318,3 +4318,50 @@ Unrelated fix on the way: two slow-marked tests in `test_breakpoint.py`
 failed on HEAD because their HIR walkers descended into node *classes*
 (which also have `__dataclass_fields__`). Skipping those made the walkers
 revisit shared nodes endlessly, so they now keep a visited set.
+
+## Step 4 sizing: Dewy writing the bytecode stream (2026-09-25)
+
+Steps 1–3 and 5–7 are in place, and this is the one left. The emitters
+(`dewy/backend/udewy/emit.py`, `dewy/bootstrap/backend/udewy/emit.dewy`
+and `program.dewy`, about 1,350 lines between them) write µDewy text from
+lowered HIR. A stream writer would walk the same HIR. To play back to the
+*same assembly* as the text route (the obvious oracle), it has to make p0's
+calls in p0's order:
+- operators in postfix order, with `binary_immediate` for a literal
+  right-hand side;
+- `save_value` around call arguments;
+- `cond_and/or_split` inside conditions;
+- strings interned at first use;
+- functions declared at first reference;
+- global initializers synthesized into `__udewy_global_init_N__` with
+  `set_module_init`;
+- the reachability set computed from the function-reference graph.
+
+That is p0's driving logic (about 1,900 lines) fused into the emitter, in
+both Dewy compilers. The payoff is the tokenize-and-parse share of the
+µDewy stage. Earlier, under load, playing the compiler's stream took 5.2 s
+against 8.4 s for parse plus code generation. So step 4 saves roughly 2–3 s
+of the self-build, minus whatever writing the stream costs over writing
+text.
+
+## Past 65,535 sections (2026-09-25)
+
+The full suite under `UDEWY_OBJECT=direct` turned up a real gap. A debug
+build is never split into chunks, so one object holds every function
+section and its relocation section. A Dewy program's object passes 0xff00
+sections, and the writers packed section indices into 16-bit fields. Both
+ELF writers now use extended numbering the way gas does:
+- a symbol whose section index is ≥ `SHN_LORESERVE` holds `SHN_XINDEX`,
+  and the real index goes in a parallel `.symtab_shndx` table;
+- the header count and string-table index move into section header 0.
+
+A 65,290-section fixture matches gas in section contents and headers, the
+native writer's bytes equal Python's, and the result links and runs.
+
+The acceptance run: the whole everyday suite with `UDEWY_OBJECT=direct`, so
+every µDewy build on every target writes its objects directly. After the
+numbering fix, 4,615 tests passed. The 52 failures were all tests that read
+the text the direct path no longer writes (`.s`/`.wat` in the cache, the
+`as`-then-`ld` command list), plus one code-size ratio that always-near
+jumps dilute (9.3% against a 10% bound). Those tests now pin the assembler
+path, and all five files pass in both modes.
