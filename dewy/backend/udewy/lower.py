@@ -2152,6 +2152,11 @@ class _Lowerer(
                         payload = ty.optional_payload(iterator.target.type)
                         if payload is not None and iterator.target.binding_id is not None:
                             self.optional_payloads[iterator.target.binding_id] = payload
+                        # A record element is one object pointer; a read that
+                        # narrows it to several children needs a family view.
+                        element_object = ty.structural_base(iterator.target.type)
+                        if iterator.target.binding_id is not None and isinstance(element_object, ty.ObjectType):
+                            self.object_storage[iterator.target.binding_id] = element_object
                         self._discover_node(
                             iterator.iterable,
                             scope,

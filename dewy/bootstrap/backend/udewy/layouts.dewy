@@ -72,6 +72,7 @@ field = (id:addr context:Context @nodes:types.Table active:set<addr>=set[]):>Sto
         return Storage[bytes as int64 bytes word.signed]
     }
     if types.is_primitive(type 'none') or handle(type) or plain in? context.nominals or views.string_valued(plain nodes) or views.enum_members(plain nodes) isnt? none or type is? types.MetaType return Storage[8 8 true]
+    if record_union(plain context nodes) isnt? none return Storage[8 8 true]
     if views.runtime_union_members(plain @nodes) isnt? none or views.optional_payload(plain @nodes) isnt? none return Storage[16 8 true]
     if type is? types.ObjectType {
         let layout=record(plain context @nodes active=active)
@@ -87,6 +88,48 @@ field = (id:addr context:Context @nodes:types.Table active:set<addr>=set[]):>Sto
         return Storage[layout.size alignment]
     }
     return Pending['record field has no selected runtime representation']
+}
+
+# A union whose alternatives are records of one storage root, perhaps with
+# `none`, is that root's handle rather than a tagged cell: a block with the
+# root's layout, or zero for `none`. The records either share one shape or
+# belong to one brand family, whose nearest common ancestor is the root; the
+# brand word tells them apart. A field holds the handle, which also keeps a
+# recursive family finite. Unit error mints are words and stay in cells.
+RecordUnion:type = const [root:addr nullable:bool]
+record_union = (id:addr context:Context nodes:types.Table):>RecordUnion? => {
+    let plain=types.unfold(types.strip_refinement(id nodes) nodes)
+    let node=types.node_at(nodes plain)
+    if node isnt? types.TypeOr return none
+    let nullable=false
+    let root:addr?=none
+    let shared:array<string>=[]
+    let branded=true
+    loop member in node.items {
+        let base=views.structural_base(member nodes)
+        let type=types.node_at(nodes base)
+        if types.is_primitive(type 'none') {nullable=true continue}
+        if type isnt? types.ObjectType or base in? context.nominals return none
+        if not type.minted or type.brand is? none {branded=false}
+        if root is? none {
+            root=base
+            if type.minted and type.brand isnt? none {shared=brands.ancestry(type.brand context.brands)}
+            continue
+        }
+        if types.same_type(root base nodes) continue
+        if not branded or not type.minted or type.brand is? none return none
+        # Keep the ancestors of the first record that also contain this one.
+        let ancestors=brands.ancestry(type.brand context.brands)
+        let common:array<string>=[]
+        loop name in shared {if name in? ancestors {common.push(name)}}
+        if common.length =? 0 return none
+        shared=common
+        let entry=brands.lookup(shared[0] context.brands)
+        if entry is? none return none
+        root=entry.value_type
+    }
+    if root is? none return none
+    return RecordUnion[root nullable]
 }
 
 # A root mint puts its brand word after the shared root fields. Descendants

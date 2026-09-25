@@ -4490,3 +4490,82 @@ freed the cached dictionary's arrays, and the next lookup crashed. Now
 releases the record itself (`DictParts.owner`). Hosted was not affected.
 Pair check `native_cached_record_fields` covers lookups, membership,
 lengths and iteration through such fields.
+
+## Record unions are handles (2026-09-25)
+
+David approved the representational fix proposed in the previous entry,
+and said representation choices are generally mine when they serve
+performance. A count of the self-build's union cells (a counting patch on
+the compiler's own µDewy) showed why it matters: 167.6 M cells were
+allocated. 62 % of them had a record payload, which was usually a fresh copy
+as well:
+- 30 % were unbranded records, mostly `Interval?`, `bigint?` and the fact
+  state's `State?`.
+- 25 % were narrowing results inside one family (`(AST & ~X) | X`).
+- 7 % were other branded records.
+Scalar payloads (`int64`, 33 %) are the remaining cell traffic.
+
+Native lowering now classifies such unions separately
+(`layouts.record_union`). A union qualifies when its non-`none` alternatives
+are records of one storage root: a single shape, or records of one brand
+family, whose root is their nearest common ancestor. Unit error mints stay
+in cells. Such a union is stored as the root's handle:
+- A value is a block with the root's full layout, or zero for `none`.
+- Record queries (`object_valued`, `object_type`, `object_layout`, the
+  copy/release/write helpers) see the root through `storage_base`.
+- Type tests read the brand word, with a zero check when the union can be
+  `none`.
+- Narrowing to a member, widening to the root and packing a root-sized
+  record are free.
+- A field of such a type holds the handle in one word (`field_read`/
+  `field_write`, copies share the block, releases go through the handle).
+  This also keeps recursive families finite.
+- Copies, uniqueness and pinning skip zero.
+- Forwarded field reads load one offset when every alternative keeps it
+  there; otherwise they dispatch on the brand.
+- Tagged cells convert at their boundaries: `cell_pack` packs zero as
+  `none`, a narrowed cell read yields the payload handle (zero for a `none`
+  tag), and `get`, iterator targets and borrowed union loans use the
+  handle directly.
+- A cast between a record and a record union follows the record-upcast
+  ownership rule for both cast kinds (`relative_cast`). The first build
+  missed this for representation casts. `return result` in a function
+  returning `State?` then copied the local while the return path also
+  transferred it, which leaked every refined fact state (about 90 MB
+  retained per compile). Finding it took a type bisection switch and an
+  allocation-site tracer over the lowered µDewy (see the Validation
+  paragraph).
+
+Self-build, cold, two rounds each against `phase1-q`: 71.5 s → 61.6 s, with
+152.0 → 122.7 GB allocated and peak arena bytes 3,017 → 2,933 MB. The 3-gen
+fixed point holds (generations 2 and 3 are byte-identical).
+
+Hosted lowering keeps its cells. The new fixture also crashed the hosted
+binary, a bug that predates this change. A loop target of record type,
+narrowed to several children and passed as a union, went out as the bare
+record pointer: iterator targets were never entered in `object_storage`,
+so no family view was built. Iterator discovery now registers them.
+
+Validation: pair check `native_record_unions`
+(`tests/fixtures/native_record_unions.dewy`, also run hosted by
+`tests/python_misc/test_record_unions.py` on x86-64 and C). It covers:
+- family unions from narrowed roots, including loop targets;
+- nullable records in fields, arrays, dictionaries and `get`;
+- mixed record/scalar cells;
+- fact-state style transfers through place parameters;
+- optional `bigint` bounds.
+A second pass must leave `_arena_live_bytes` unchanged. The old native
+compiler fails that leak check, and so did the first cut of this change.
+The leak was found by compiling a driver that runs `graph.compile` four
+times. It retained 166 MB per round with record unions and 76 MB without,
+which is a pre-existing native leak, left for the allocation work.
+Bisecting the root type ids narrowed the extra retention to `State?`. The
+tracer then located the leaking allocation site in
+`comparison_facts.refine`. After the fix, the driver retains 75.7 MB per
+round.
+
+Gate: 4,742 passed, 1 failed. The failure was `test_native_compiler_command`,
+which expected the coverage fixture's `Box|none` snapshot to be reported as
+a cell copy. It is a record copy now, so the test checks the copy site; the
+rerun passes. A 3-generation bootstrap from `phase1-q` gives identical
+generations (`phase1-r`), and `tools/check_native.sh` passes on that pair.

@@ -561,6 +561,17 @@ the native fixed point is not grounds for retiring them yet.
   self-build's frontend allocation traffic fell from 32.0 GB to 28.9 GB;
   the self-built compiler passes the fixture bundle on both backends.
 
+- Record unions are handles (2026-09-25). A union whose non-`none`
+  alternatives are records of one storage root (one shape, or one brand
+  family rooted at their nearest common ancestor) is no longer a cell. It
+  is the root's handle, and zero stands for `none` (`layouts.record_union`,
+  `storage_base`, `relative_cast`). Narrowing, widening and packing a
+  root-sized record cost nothing. Type tests read the brand word. A field
+  of such a type holds the handle, which keeps recursive families finite.
+  Cells convert at their boundaries. Unit error mints and unrelated record
+  shapes stay in cells. Self-build 71.5 s → 61.6 s, 152 → 123 GB
+  allocated. See PHASE1_PROGRESS.md.
+
 - Native lowering borrows more and allocates less (2026-09-15, performance
   campaign). Scope borrows no longer depend on a function-wide "opaque"
   bit: a local or parameter is stable when it is never written, captured,

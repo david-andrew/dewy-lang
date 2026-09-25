@@ -140,7 +140,9 @@ def test_native_compiler_command(tmp_path):
     assert coverage.returncode == 0, coverage.stdout + coverage.stderr
     entries = [line for line in coverage.stdout.splitlines() if line.startswith('copy: ') and 'copy_report_coverage.dewy:' in line]
     assert any(': string ' in line for line in entries)
-    assert any(': cell ' in line for line in entries)
+    # `Box|none` is a record handle natively (a cell in hosted lowering), so
+    # the union snapshot is reported by its site rather than a cell kind.
+    assert any('copied when bound to `saved`' in line for line in entries)
 
     # A later reassignment does not force a snapshot for an immediate key
     # probe. An eager default can change the key and must retain its snapshot.

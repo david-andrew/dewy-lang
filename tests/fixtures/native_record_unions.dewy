@@ -1,0 +1,131 @@
+# Unions of records with one storage root are the root's handle: a family
+# union shares its records' brand word, and `none` is the zero handle. These
+# paths convert between records, unions, tagged cells and fields; a second
+# run must not change the live arena bytes.
+Node=$abstract type of [loc:int64 name:string]
+Leaf=type of Node & [value:int64]
+Pair=type of Node & [value:int64 right:array<int64>]
+Name=type of Node & [text:string]
+Plain:type = [a:int64 b:string]
+Holder:type = [kid:Leaf|Pair tag:Plain? more:Leaf|Pair|none]
+Entry:type = const [a:int64 b:int64]
+State:type = [values:array<Entry>=[] heads:dict<int64 int64>=[] next:array<int64>=[]]
+Exit:type = const [levels:int64 state:State]
+Transfer:type = [normal:State? breaks:array<Exit>=[]]
+Interval:type = const [lower:bigint? upper:bigint? capped:bool=false]
+
+pick=(n:Node):>Leaf|Pair|none=>if n is? Leaf|Pair n else none
+find=(table:dict<string Plain> key:string):>Plain?=>table.get(key)
+wrap=(n:Leaf|Pair):>Holder=>Holder[n Plain[1 'q{n.loc}'] if n is? Leaf n else none]
+mixed=(i:int64):>Leaf|int64|none=>if i % 3 =? 0 Leaf[i 'm' i] else if i % 3 =? 1 i else none
+families=(nodes:array<Node> table:dict<string Plain> i:int64):>int64=>{
+    let sum:int64=0
+    loop n in nodes {
+        let p=pick(n)
+        if p isnt? none {sum+=p.value}
+        if p is? Pair {sum+=p.right.length}
+        if n is? Leaf|Pair {
+            let h=wrap(n)
+            sum+=h.kid.value
+            if h.tag isnt? none {sum+=h.tag.a}
+            let copy=h
+            copy.kid=Leaf[5 'z' 6]
+            sum+=copy.kid.value+h.kid.value
+            if h.more isnt? none {sum+=h.more.loc}
+        }
+    }
+    let f=find(table 'k{i % 4}')
+    if f isnt? none {sum+=f.a}
+    let m=mixed(i)
+    if m is? Leaf {sum+=m.value}
+    let kept:array<Leaf|Pair|none>=[]
+    loop n in nodes {kept.push(pick(n)) kept.push(none)}
+    loop k in kept {if k isnt? none {sum+=k.loc}}
+    return sum
+}
+
+put=(state:State x:int64):>State=>{
+    let s=state
+    s.values.push(Entry[x x])
+    s.heads[x]=x
+    s.next.push(x)
+    return s
+}
+join=(left:State? right:State?):>State?=>{
+    if left is? none return right
+    if right is? none return left
+    return put(left right.values.length)
+}
+refine=(state:State x:int64):>State?=>{
+    if x % 5 =? 0 return none
+    let result=state
+    result.next.push(x)
+    return result
+}
+step=(state:State x:int64):>Transfer=>{
+    let s=state
+    s.next.push(x)
+    if x % 7 =? 0 return Transfer[none [Exit[1 s]]]
+    return Transfer[s]
+}
+forget=(@state:State x:int64):>void=>{state.heads[x]=x}
+analyze=(state:State n:int64):>Transfer=>{
+    let output=Transfer[state]
+    loop index in 0.. and index <? n {
+        if output.normal is? none break
+        let transfer=step(output.normal index)
+        output.normal=transfer.normal
+        loop e in transfer.breaks {output.breaks.push(e)}
+    }
+    if output.normal isnt? none {
+        let remaining=output.normal
+        forget(@remaining 3)
+        output.normal=join(remaining refine(remaining n))
+    }
+    return output
+}
+evaluate=(@state:State n:int64):>void=>{
+    let output=analyze(state n)
+    if output.normal isnt? none {state=output.normal}
+}
+states=(i:int64):>int64=>{
+    let state=State[]
+    evaluate(@state i % 9)
+    evaluate(@state 3)
+    let t=analyze(state 4)
+    let total=state.values.length + t.breaks.length
+    let stored:dict<int64 State?>=[1->t.normal 2->none]
+    let got=stored.get(1)
+    if got isnt? none {total+=got.next.length}
+    return total
+}
+
+shift=(value:bigint? amount:int64):>bigint?=>if value is? none none else value + amount
+constraint=(other:Interval truth:bool):>Interval?=>{
+    if truth return Interval[none shift(other.upper (-1))]
+    return Interval[other.lower none]
+}
+intervals=(i:int64):>int64=>{
+    let total:int64=0
+    let a=Interval[i as bigint (i + 10) as bigint]
+    let c=constraint(a true)
+    if c isnt? none and c.upper isnt? none {total+=1}
+    let d=constraint(a false)
+    if d isnt? none and d.lower isnt? none {total+=1}
+    return total
+}
+
+exercise=():>int64=>{
+    let nodes:array<Node>=[Leaf[1 'a' 2] Pair[3 'b' 4 [1 2 3]] Name[6 'c' 'x']]
+    let table:dict<string Plain>=['k0'->Plain[1 'x'] 'k1'->Plain[2 'y']]
+    let total:int64=0
+    loop i in 0..40 {total+=families(nodes table i) + states(i) + intervals(i)}
+    return total
+}
+main=():>int64=>{
+    let first=exercise()
+    let before=_arena_live_bytes
+    let second=exercise()
+    if second not=? first return 1
+    return if _arena_live_bytes =? before 42 else 2
+}
