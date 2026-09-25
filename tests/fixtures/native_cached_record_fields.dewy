@@ -1,0 +1,30 @@
+# Fields of a record returned from a cache held in a mutable argument. The
+# call shares the cached block; a lookup or read through its field must
+# release that record afterwards, never the field alone (which freed the
+# cached dictionary's arrays).
+CachedLayout:type = const [size:int64 offsets:dict<string int64> order:array<int64> names:set<string>]
+LayoutCache:type = [cache:dict<int64 CachedLayout>=[] calls:int64=0]
+layout = (n:int64 @state:LayoutCache):>CachedLayout => {
+    let cached=state.cache.get(n)
+    if cached isnt? none return cached
+    state.calls+=1
+    let made=CachedLayout[n ["a"->n "b"->n+1] [n n+1 n+2] set["x" "y"]]
+    state.cache[n]=made
+    return made
+}
+let main = ():>int64 => {
+    let state=LayoutCache[]
+    let total:int64=0
+    loop i in 0..300 {
+        let key=i % 37
+        total+=layout(key @state).order.length * 2
+        total+=layout(key @state).order.length
+        loop x in layout(key @state).order {total+=x}
+        if 'x' in? layout(key @state).names {total+=1}
+        if 'b' in? layout(key @state).offsets {total+=1}
+        let found=layout(key @state).offsets.get('b')
+        if found isnt? none {total+=found}
+        total+=layout(key @state).offsets.length
+    }
+    return if total >? 0 and state.calls =? 37 42 else 1
+}

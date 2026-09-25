@@ -38,6 +38,7 @@ import p"native_lazy_graphemes.dewy" as lazy_graphemes
 import p"native_donated_arguments.dewy" as donated_arguments
 import p"native_shared_records.dewy" as shared_records
 import p"native_literal_union_joins.dewy" as literal_union_joins
+import p"native_cached_record_fields.dewy" as cached_record_fields
 import p"native_power_operator.dewy" as power_operator
 import p"native_iterator_formulas.dewy" as iterator_formulas
 import p"native_unpacking_targets.dewy" as unpacking_targets
@@ -175,5 +176,7 @@ let main=():>int64=>{
     if loop_else.main() not=?42 return 57
     printl('Checking type values')
     if type_values.main() not=?42 return 58
+    printl('Checking cached record fields')
+    if cached_record_fields.main() not=?42 return 59
     return 42
 }

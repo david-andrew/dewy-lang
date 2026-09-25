@@ -4442,3 +4442,51 @@ the parser, and records the backend calls of that compile as the `.ubc`.
 loaded the machine: emission 3.84 → 3.34 s (tokens, parse and encode
 together cost less than formatting text), the µDewy backend 5.26 → 3.38 s
 (replay instead of tokenize and parse), total 77.8 → 72.7 s.
+
+## Narrowed records stay handles (2026-09-25)
+
+A new profile of the self-build puts about 27% of samples in the
+allocation machinery, and `_copy_object` alone is 13% inclusive. The
+largest source was narrowing. `AST` is a branded parent record, so a local
+of that type holds one handle and the brand sits at +24. Narrowing it with
+`node is? A|B|…` gives a union of children, which is stored as a tagged
+cell. So every narrowed read packed a cell around a copy of the whole
+record. A read back as the parent (for example, passing the node on to
+`push_children`) then unpacked the cell and copied the record again, and
+released both afterwards. Tree walks paid this on every node.
+
+The lowering now reads such a value through the record's own handle when
+the cell is never needed:
+- `narrowed_record` recognizes the two shapes: a local whose read type
+  narrows a stored record type, and a cast narrowing a record-valued
+  expression. It returns the borrowed handle.
+- A forwarded field read (`node.value` over a union) reads the field in
+  place when every member keeps it at one offset and one type
+  (`forwarded_in_place`).
+- Upcasts back to a record, and borrowed record arguments, read the
+  handle.
+- Owned uses take one copy instead of two plus a cell.
+- A cast that consumers treat as owning a fresh value (a cast of a packing
+  cast) still returns a copy, so no consumer ever releases the local's own
+  handle.
+
+Generated code: 5,032 → 4,062 `_copy_object` call sites and 8,598 → 7,690
+cell constructions. Self-build (cold, two rounds each): 73.7 s → 70.1 s,
+with 160.9 → 151.2 GB allocated. Generations 6 and 7 are identical.
+
+The general fix is representational. A union whose members all carry
+brands could be a handle itself, discriminated by the brand, which would
+make every narrowing free. That would change union storage in both
+compilers, so it is a design question for David, not part of this slice.
+
+A native miscompile turned up on the way, and was fixed. It affects a
+dictionary read through a field of a record that a call returns
+(`layout(n @state).offsets.get(k)`, or `k in? layout(n @state).offsets`).
+The lookup treated the dictionary field as the temporary to release. When
+the call returns a block shared with storage it keeps (here a cache in a
+mutable argument, as `object_layout` does), releasing the field on its own
+freed the cached dictionary's arrays, and the next lookup crashed. Now
+`dict_parts` evaluates such a record once, looks up through its field, and
+releases the record itself (`DictParts.owner`). Hosted was not affected.
+Pair check `native_cached_record_fields` covers lookups, membership,
+lengths and iteration through such fields.

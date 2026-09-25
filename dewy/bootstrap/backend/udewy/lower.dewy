@@ -429,6 +429,15 @@ expression = (id:addr @state:State):>addr => {
     if node is? hir.ValueCast {
         let actual=hir.node_at(state.input.nodes node.expr).value_type
         if object_valued(actual state) and object_valued(node.value_type state) and expression_owns(node.expr @state) return owned_record(expression(node.expr @state) actual node.value_type node @state)
+        if object_valued(node.value_type state) {
+            let record=narrowed_record(node.expr @state)
+            if record isnt? none {
+                # The handle is borrowed; a read its consumers treat as owned
+                # (the cast of a packing cast) must still hand them a copy.
+                let read=read_value(record.handle record.type node.value_type node @state)
+                return if expression_owns(id @state) copy_value(read node.value_type node @state) else read
+            }
+        }
         if temporary_owner(node.expr @state) {
             if cell_members(actual @state) isnt? none return owned_cell_cast(node actual @state)
             if cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state 'packed into a cell') actual node.value_type node @state owned=true)
@@ -1065,6 +1074,10 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
     # ownership. An unresolved proof obligation is not: it still has to reach
     # the legalization that rejects it.
     if node is? hir.Block and not node.scoped and node.items.length =? 1 and state.transferred_binding isnt? none return owned_value(node.items[0] @state site)
+    if node is? hir.ValueCast|hir.RepresentationCast and object_valued(node.value_type state) {
+        let record=narrowed_record(node.expr @state)
+        if record isnt? none return copy_value(read_value(record.handle record.type node.value_type node @state) node.value_type node @state)
+    }
     if node is? hir.ValueCast {
         let source=hir.node_at(state.input.nodes node.expr)
         # A logical record upcast preserves the owned allocation, including
@@ -3252,6 +3265,13 @@ string_join = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr 
     return put(hir.Block[call.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
 representation = (node:hir.RepresentationCast @state:State):>addr => {
+    if object_valued(node.value_type state) {
+        let record=narrowed_record(node.expr @state)
+        if record isnt? none {
+            let read=read_value(record.handle record.type node.value_type node @state)
+            return if cast_owns(node @state) copy_value(read node.value_type node @state) else read
+        }
+    }
     let source=hir.node_at(state.input.nodes node.expr)
     let source_type=types.node_at(state.type_nodes types.unfold(types.strip_refinement(source.value_type state.type_nodes) state.type_nodes))
     let target_array=array_type(node.value_type state)
@@ -4440,6 +4460,37 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
 # block would otherwise yield an owned copy that nobody releases. The
 # casts keep the descriptor only between owned strings; a compact string
 # enum or a union cell would need a real conversion, so those copy.
+# A record (a branded parent's handle) read as a union of its children: a
+# local whose read narrows its stored record type, or a cast narrowing a
+# record-valued expression. The union is stored as a tagged cell, but the
+# value is still the record's block. When the result is read as a record
+# again (an upcast back to the parent, a record argument), the cell is never
+# needed: the handle, read as its own record type. Borrowed; never an owner.
+NarrowedRecord:type = const [handle:addr type:addr]
+# Whether consumers treat a cast of `node.expr` as a fresh owned value
+# (expression_owns, for a cast node known only by value).
+cast_owns = (node:hir.ValueCast|hir.RepresentationCast @state:State):>bool => {
+    let source=hir.node_at(state.input.nodes node.expr)
+    return cell_members(source.value_type @state) isnt? none and temporary_owner(node.expr @state)
+}
+narrowed_record = (id:addr @state:State):>NarrowedRecord? => {
+    let node=hir.node_at(state.input.nodes id)
+    if cell_members(node.value_type @state) is? none return none
+    if node is? hir.ExpressedIdentifier {
+        let binding=node.binding_id
+        if binding is? none or binding in? state.receiver_fields or binding in? state.capture_plan.named return none
+        let stored=stored_type(id state)
+        if not object_valued(stored state) or cell_members(stored @state) isnt? none return none
+        let handle=binding_storage(node stored @state)
+        if binding in? state.boxed {handle=array_load(handle stored node @state)}
+        return NarrowedRecord[handle stored]
+    }
+    if node isnt? hir.ValueCast|hir.RepresentationCast return none
+    let source=hir.node_at(state.input.nodes node.expr)
+    if not object_valued(source.value_type state) or cell_members(source.value_type @state) isnt? none return none
+    if temporary_owner(node.expr @state) or expression_owns(node.expr @state) return none
+    return NarrowedRecord[expression(node.expr @state) source.value_type]
+}
 peel_borrowed = (id:addr @state:State):>addr? => {
     let current=id
     loop true {
@@ -4453,6 +4504,7 @@ peel_borrowed = (id:addr @state:State):>addr? => {
             # A record read as a relative is the same block; the borrowing
             # callee reads the fields both layouts share.
             if node is? hir.ValueCast and object_valued(node.value_type state) and object_valued(inner.value_type state) {current=node.expr continue}
+
             return none
         }
         return current
@@ -4500,6 +4552,13 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
             prefix.push(store_word(word(member_tag(source.value_type @state) source @state) cell 0 source @state))
             prefix.push(store_word(value cell 8 source @state))
             return cell
+        }
+    }
+    if argument in? borrowed {
+        let upcast=hir.node_at(state.input.nodes argument)
+        if upcast is? hir.ValueCast|hir.RepresentationCast and object_valued(upcast.value_type state) {
+            let record=narrowed_record(upcast.expr @state)
+            if record isnt? none return snapshot(read_value(record.handle record.type upcast.value_type upcast @state) @prefix @state)
         }
     }
     let peeled:addr?=if argument in? borrowed peel_borrowed(argument @state) else none
@@ -5216,7 +5275,7 @@ iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @stat
                 if parts.owner_type isnt? none {
                     $runtime_assert state.cleanup_frames.length >? 0
                     let frame=state.cleanup_frames.pop
-                    frame.push(OwnedLocal[parts.pointer parts.owner_type])
+                    frame.push(OwnedLocal[dict_owner(parts) parts.owner_type])
                     state.cleanup_frames.push(frame)
                 }
             }
@@ -5641,10 +5700,45 @@ string_type_test = (value:addr tested:addr node:hir.AST @state:State):>addr => {
 # uses its own layout, and exception alternatives pass through unchanged.
 # The result then adopts the same enum/cell representation as an ordinary
 # value conversion; the receiver's tag is never reused as the field's tag.
+# `node.value` after `node is? A|B` where the local holds the branded parent's
+# handle: the narrowed union would be a tagged cell around a copy of the
+# record. When every member keeps the field at one offset and type, read it
+# from the handle instead: no record copy, no cell, and no release.
+forwarded_in_place = (node:hir.ForwardingAccess members:array<addr> @state:State):>addr? => {
+    let offset:addr?=none
+    let field_type:addr?=none
+    loop member in members {
+        if subtyping.is_subtype(member node.exception_type state.links @state.type_nodes) return none
+        let record=object_type(member state)
+        if record is? none return none
+        let field=types.object_field(record node.field)
+        if field is? none return none
+        let layout=object_layout(member node @state)
+        let found=layout.offsets.get(node.field)
+        if found is? none return none
+        if offset isnt? none and field_type isnt? none and (offset not=? found or not types.same_type(field_type field.value_type state.type_nodes)) return none
+        offset=found
+        field_type=field.value_type
+    }
+    if offset is? none or field_type is? none return none
+    let record=narrowed_record(node.value @state)
+    if record is? none return none
+    let actual=field_type
+    let value=field_read(address(record.handle offset node @state) actual node @state)
+    if enum_members(node.value_type state) isnt? none return enum_pack(value actual node.value_type node @state)
+    if enum_members(actual state) isnt? none return enum_read(value actual node.value_type node @state)
+    if cell_members(node.value_type @state) isnt? none {
+        let packed=cell_pack(value actual node.value_type node @state)
+        return if cell_members(actual @state) isnt? none copy_value(packed node.value_type node @state) else packed
+    }
+    return copy_value(read_value(value actual node.value_type node @state) node.value_type node @state)
+}
 forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
     let source_type=hir.node_at(state.input.nodes node.value).value_type
     let members=cell_members(source_type @state)
     if members is? none return reject(node 'forwarded fields require a tagged record union' @state)
+    let in_place=forwarded_in_place(node members @state)
+    if in_place isnt? none return in_place
     let prefix:array<addr>=[]
     let receiver=snapshot(expression(node.value @state) @prefix @state)
     let tag=snapshot(read_word(receiver 0 node @state) @prefix @state)
@@ -5692,14 +5786,28 @@ forwarding_field = (node:hir.ForwardingAccess @state:State):>addr => {
 # Hashes belong to entries; sparse probe slots contain entry positions, -1
 # for empty, and -2 for a removed slot. Rebuilding moves live handles inside
 # the same owning arrays, so it must not turn those moves into value copies.
-DictParts:type = const [pointer:addr layout:layouts.Record key:addr value:addr? owner_type:addr?=none]
+# `owner` is what a temporary lookup releases when it differs from the
+# dictionary itself: the fresh record a dictionary field belongs to.
+DictParts:type = const [pointer:addr layout:layouts.Record key:addr value:addr? owner_type:addr?=none owner:addr?=none]
 DictProbe:type = const [found:addr position:addr slot:addr hash:addr]
 # A lookup only rebuilds or compacts the dictionary's index arrays, which
 # every handle sharing the block may observe; only stores detach the block.
+dict_owner = (parts:DictParts):>addr => {
+    let owner=parts.owner
+    return if owner isnt? none owner else parts.pointer
+}
 dict_parts = (dictionary:addr @prefix:array<addr> @state:State copy:bool=false mutate:bool=false):>DictParts => {
     let source=hir.node_at(state.input.nodes dictionary)
     let entries=views.container_entry_types(types.unfold(types.strip_refinement(source.value_type state.type_nodes) state.type_nodes) state.type_nodes)
     $runtime_assert entries isnt? none
+    # A field of a fresh record (`layout(...).offsets.get(k)`): the call's
+    # result owns the block, which may be shared with the callee's storage.
+    # Release that record after the lookup, never the field on its own.
+    if not copy and not mutate and source is? hir.MemberAccess and temporary_owner(source.value @state) and not borrowed_getter_receiver(source.value @state) {
+        let record=snapshot(expression(source.value @state) @prefix @state)
+        let field=snapshot(field_address(record source @state) @prefix @state)
+        return DictParts[field object_layout(source.value_type source @state) entries.key entries.value hir.node_at(state.input.nodes source.value).value_type record]
+    }
     let pointer=snapshot((if copy owned_value(dictionary @state) else write_route(dictionary @state detach=mutate)) @prefix @state)
     let owner:addr?=if copy or temporary_owner(dictionary @state) source.value_type else none
     return DictParts[pointer object_layout(source.value_type source @state) entries.key entries.value owner]
@@ -5757,7 +5865,7 @@ finish_dictionary = (value:addr parts:DictParts node:hir.AST @prefix:array<addr>
     if parts.owner_type isnt? none {
         if copy_result {value=copy_value(value node.value_type node @state)}
         value=snapshot(value @prefix @state)
-        prefix.push(release_value(parts.pointer parts.owner_type node @state))
+        prefix.push(release_value(dict_owner(parts) parts.owner_type node @state))
     }
     prefix.push(value)
     return put(hir.Block[node.loc runtime_type(node.value_type node @state) prefix false] @state)
@@ -6110,7 +6218,7 @@ dict_store = (node:hir.DictStore @state:State):>addr => {
     if node.value isnt? none {value=snapshot(owned_value(node.value @state) @prefix @state)}
     let position=dict_insert(parts key value node @prefix @state)
     if node.position isnt? none {prefix.push(put(hir.Declare[node.loc types.primitive('void' @state.type_nodes) 'let' node.position types.primitive('int64' @state.type_nodes) position] @state))}
-    if parts.owner_type isnt? none {prefix.push(release_value(parts.pointer parts.owner_type node @state))}
+    if parts.owner_type isnt? none {prefix.push(release_value(dict_owner(parts) parts.owner_type node @state))}
     return sequence(prefix node @state)
 }
 dict_remove = (node:hir.DictRemove @state:State):>addr => {
@@ -6126,7 +6234,7 @@ dict_remove = (node:hir.DictRemove @state:State):>addr => {
             prefix.push(array_trim(descriptor word(0 node @state) element node @state))
         }
         prefix.push(dict_set_field(parts 'live' word(0 node @state) node @state))
-        if parts.owner_type isnt? none {prefix.push(release_value(parts.pointer parts.owner_type node @state))}
+        if parts.owner_type isnt? none {prefix.push(release_value(dict_owner(parts) parts.owner_type node @state))}
         return sequence(prefix node @state)
     }
     let key=snapshot(owned_value(node.key @state) @prefix @state)
