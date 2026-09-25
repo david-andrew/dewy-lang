@@ -246,6 +246,11 @@ let _test_summary=(json:bool brief:bool):>int64=>
     env['DEWY_UDEWY'] = str(backend_failure)
     result = invoke('test', program)
     assert result.returncode == 102, result.stdout + result.stderr
+    # A compile-only build names the backend that failed (an outdated
+    # installed `udewy` rejects newer arguments).
+    result = invoke('-c', program)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert 'the µDewy backend failed' in result.stderr and str(backend_failure) in result.stderr, result.stderr
     program.write_text('$test\nlet bad=(value:int64):>void=>{}')
     result = invoke('test', program)
     assert result.returncode == 102, result.stdout + result.stderr

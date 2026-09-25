@@ -99,6 +99,12 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
     timing.finish((if request.compile_only or request.command is? 'debug'|'test' 'backend' else 'backend_and_run') backend_started)
     if status isnt? int64 return Error[title='could not start the native µDewy compiler' message=backend]
     if request.command =? 'test' and status not=? 0 return 102
+    # A backend that only compiles and fails is named: an installed `udewy`
+    # older than this compiler rejects its arguments. (A run's status may be
+    # the program's own.)
+    if status not=? 0 and (request.compile_only or request.command =? 'debug') {
+        return Error[title='the µDewy backend failed' message=backend hint='If it is older than this compiler, run `dewy update` or point DEWY_UDEWY at a matching `udewy`.']
+    }
     let binary=paths.absolute(cache.artifact(source cwd) cwd)
     if request.command =? 'test' {
         # Distinguish a backend build failure (102) from a built test suite's
