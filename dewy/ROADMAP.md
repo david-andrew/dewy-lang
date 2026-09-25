@@ -267,7 +267,8 @@ What Jai does that Dewy does not, and the lever each implies:
    the system assembler parses that again: three serialize-and-reparse
    cycles. Lever: a µDewy bytecode input that replays straight into the
    backends, and object-byte output instead of assembly text. Both are
-   specified under "Direct binary fast path" below.
+   specified under "Direct binary fast path" below, and both landed on
+   2026-09-25.
 2. **The unoptimized backend is the fast one.** Jai uses LLVM only for
    release builds and its own backend for development, where compile speed
    is everything and output speed is nothing. Dewy's direct route is
@@ -316,6 +317,11 @@ rule from now on. Measure every batch as lines per second on the
 compiler's own sources, C route and direct route separately.
 
 ### Direct binary fast path (2026-09-24)
+
+**Status (2026-09-25): done.** All seven steps landed in both compilers.
+Both Dewy compilers write µDewy bytecode, and the native µDewy writes x86-64,
+AArch64, RISC-V and wasm32 objects itself by default. The details and
+verification are in `PHASE1_PROGRESS.md`.
 
 Accepted direction for lever 1. Two binary cuts around the µDewy backends,
 both fast paths beside the text pipeline. Source text, assembly text, and
