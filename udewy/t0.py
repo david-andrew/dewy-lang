@@ -417,7 +417,7 @@ def _load_imported_path(
     return LoadedProgram("", [str(import_path)], [])
 
 
-def _load_program(source_path: Path, target_backend: str, state: _LoadState) -> LoadedProgram:
+def _load_program(source_path: Path, target_backend: str, state: _LoadState, text: str | None = None) -> LoadedProgram:
     source_path = source_path.resolve()
     if source_path in state.imported_sources:
         return LoadedProgram("", [], [])
@@ -425,7 +425,7 @@ def _load_program(source_path: Path, target_backend: str, state: _LoadState) -> 
 
     # surrogateescape round-trips arbitrary bytes, so string literals can carry
     # any source bytes through to the binary verbatim (see decode_string_literal)
-    source = source_path.read_text(encoding="utf-8", errors="surrogateescape")
+    source = source_path.read_text(encoding="utf-8", errors="surrogateescape") if text is None else text
     source_dir = source_path.parent
     imported_source_parts: list[str] = []
     imported_source_paths: list[str] = []
@@ -467,6 +467,8 @@ def _load_program(source_path: Path, target_backend: str, state: _LoadState) -> 
 def load_program(
     source_path: PathLike,
     target_backend: str = "x86_64",
+    *,
+    source: str | None = None,
 ) -> LoadedProgram:
     """
     Load the full udewy source and imported native link artifacts.
@@ -474,9 +476,11 @@ def load_program(
     Imports ending in `.udewy` are treated as udewy source and recursively
     prepended to the current file. Any other imported path is treated as a
     direct external artifact that should be handed to the backend linker.
+    ``source`` supplies the entry file's text from memory (relative imports
+    still resolve against ``source_path``'s directory).
     """
 
-    return _load_program(Path(source_path), target_backend, _make_state())
+    return _load_program(Path(source_path), target_backend, _make_state(), source)
 
 
 def load_program_source(

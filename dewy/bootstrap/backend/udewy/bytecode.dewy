@@ -1,0 +1,1084 @@
+from reporting import Error
+
+doc"""
+µDewy bytecode (udewy/BYTECODE.md) written by the Dewy compiler.
+
+In token mode the emitter (emit.dewy) spells each top-level declaration as
+the µDewy tokens its text would tokenize to (udewy/t1.py), and this module
+parses them as the µDewy parser does (udewy/p0.py), recording the backend
+calls that parse makes. Playing the stream gives the assembly compiling the
+text would, with no text formatted, written, tokenized or parsed.
+
+Only what the emitter produces is accepted. Anything else is a problem
+naming the construct, never a guess. Debug locations come only from the
+emitter's `# @loc` markers: statements before the first marker have no
+location (the text route falls back to lines of the µDewy file, which a
+stream does not have).
+"""
+
+# Token kinds, numbered as the µDewy tokenizer numbers them: the stream
+# records operators by these numbers.
+const tk_ident:uint8=1
+const tk_ident_call:uint8=2
+const tk_string:uint8=3
+const tk_based_string:uint8=4
+const tk_type_param:uint8=5
+const tk_void:uint8=6
+const tk_number:uint8=7
+const tk_let:uint8=8
+const tk_const:uint8=9
+const tk_if:uint8=10
+const tk_loop:uint8=11
+const tk_else:uint8=12
+const tk_return:uint8=13
+const tk_break:uint8=14
+const tk_continue:uint8=15
+const tk_extern:uint8=16
+const tk_plus:uint8=17
+const tk_minus:uint8=18
+const tk_mul:uint8=19
+const tk_idiv:uint8=20
+const tk_mod:uint8=21
+const tk_eq:uint8=22
+const tk_not_eq:uint8=23
+const tk_gt:uint8=24
+const tk_gt_eq:uint8=25
+const tk_lt:uint8=26
+const tk_lt_eq:uint8=27
+const tk_and:uint8=28
+const tk_or:uint8=29
+const tk_xor:uint8=30
+const tk_not:uint8=31
+const tk_left_shift:uint8=32
+const tk_right_shift:uint8=33
+const tk_assign:uint8=34
+const tk_update_assign:uint8=35
+const tk_expr_call:uint8=36
+const tk_left_paren:uint8=37
+const tk_right_paren:uint8=38
+const tk_left_brace:uint8=39
+const tk_right_brace:uint8=40
+const tk_type:uint8=45
+const tk_fn_type:uint8=46
+const tk_fn_arrow:uint8=47
+const tk_transmute:uint8=48
+const tk_at:uint8=49
+# Not a µDewy token: a `# @loc` marker line (value: index into markers).
+const tk_location:uint8=100
+
+# Stream operation codes (udewy/BYTECODE.md).
+const op_begin_module:uint8=1
+const op_finish_module:uint8=2
+const op_set_module_init:uint8=3
+const op_set_imported_sources:uint8=4
+const op_mark_location:uint8=5
+const op_note_local:uint8=6
+const op_begin_scope:uint8=7
+const op_end_scope:uint8=8
+const op_intern_string:uint8=9
+const op_define_global:uint8=10
+const op_intern_static:uint8=12
+const op_intern_words:uint8=13
+const op_push_string_ref:uint8=14
+const op_push_static_ref:uint8=16
+const op_load_global:uint8=17
+const op_store_global:uint8=18
+const op_declare_function:uint8=19
+const op_begin_function:uint8=22
+const op_end_function:uint8=23
+const op_set_reachable_functions:uint8=24
+const op_load_param:uint8=25
+const op_alloc_local:uint8=26
+const op_load_local:uint8=27
+const op_store_local:uint8=28
+const op_push_const_i64:uint8=29
+const op_push_void:uint8=30
+const op_push_fn_ref:uint8=31
+const op_pop_value:uint8=32
+const op_save_value:uint8=33
+const op_unary_op:uint8=35
+const op_binary_op:uint8=36
+const op_binary_immediate:uint8=37
+const op_begin_if:uint8=38
+const op_begin_else:uint8=39
+const op_end_if:uint8=40
+const op_begin_loop:uint8=41
+const op_begin_loop_body:uint8=42
+const op_end_loop:uint8=43
+const op_emit_break:uint8=44
+const op_emit_continue:uint8=45
+const op_cond_and_split:uint8=46
+const op_cond_and_join:uint8=47
+const op_cond_or_split:uint8=48
+const op_cond_or_join:uint8=49
+const op_emit_return:uint8=50
+const op_call_direct:uint8=51
+const op_call_indirect:uint8=52
+const op_emit_intrinsic:uint8=53
+
+# Stable value kinds.
+const sv_int:uint8=1
+const sv_function:uint8=2
+const sv_string:uint8=3
+const sv_static:uint8=4
+
+const globals_init_name='__udewy_globals_init__'
+
+# ----------------------------------------------------------------------------
+# Tokens
+# ----------------------------------------------------------------------------
+
+Marker:type = const [path:string line:int64 column:int64]
+# Parallel arrays, one entry per token. `values` holds a number's value, an
+# update-assignment's operator kind, or an index into `texts` (names, type
+# spellings, string contents), `blobs` (based strings) or `markers`.
+Tokens:type = [
+    kinds:array<uint8>=[]
+    values:array<int64>=[]
+    texts:array<string>=[]
+    blobs:array<array<uint8>>=[]
+    markers:array<Marker>=[]
+]
+
+let push = (kind:uint8 value:int64 @tokens:Tokens):>void => {
+    tokens.kinds.push(kind)
+    tokens.values.push(value)
+}
+let push_text = (kind:uint8 text:string @tokens:Tokens):>void => {
+    push(kind tokens.texts.length as int64 @tokens)
+    tokens.texts.push(text)
+}
+let push_blob = (bytes:array<uint8> @tokens:Tokens):>void => {
+    push(tk_based_string tokens.blobs.length as int64 @tokens)
+    tokens.blobs.push(bytes)
+}
+let push_marker = (marker:Marker @tokens:Tokens):>void => {
+    push(tk_location tokens.markers.length as int64 @tokens)
+    tokens.markers.push(marker)
+}
+let clear = (@tokens:Tokens):>void => {
+    tokens.kinds.clear
+    tokens.values.clear
+    tokens.texts.clear
+    tokens.blobs.clear
+    tokens.markers.clear
+}
+let last_kind = (tokens:Tokens):>uint8 => {
+    if tokens.kinds.length =? 0 return 0
+    return tokens.kinds[end]
+}
+# `name(` is one token to the µDewy tokenizer, and `)(` is a closing paren
+# followed by a call on the parenthesized value.
+let open_paren = (@tokens:Tokens):>void => {
+    let last=last_kind(tokens)
+    if last =? tk_ident {
+        $runtime_assert tokens.kinds.length >? 0
+        tokens.kinds[end]=tk_ident_call
+    } else if last =? tk_right_paren {push(tk_expr_call 0 @tokens)}
+    else {push(tk_left_paren 0 @tokens)}
+}
+# A type annotation after `:` (`int64`, `array<int64>`) or `:>`: the name is
+# one token and a `<...>` parameter another.
+let push_annotation = (kind:uint8 text:string @tokens:Tokens):>void => {
+    let bytes=text as array<uint8>
+    let split:addr=0
+    loop split <? bytes.length and bytes[split] not=? 60 {split+=1}
+    if split =? 0 or split >=? text.length {push_text(kind text @tokens) return}
+    push_text(kind text[0..split-1] @tokens)
+    push_text(tk_type_param text[split..end] @tokens)
+}
+
+# ----------------------------------------------------------------------------
+# Parser state
+# ----------------------------------------------------------------------------
+
+Stable:type = const [kind:uint8 value:int64]
+Function:type = [id:int64 arity:int64=-1 defined:bool=false]
+Global:type = [id:int64 value:Stable?=none]
+Local:type = [slot:int64 value:Stable?=none constant:bool=false]
+Parser:type = [
+    debug:bool=false
+    intrinsics:set<string>=set[]
+    # Include definitions play before everything else, as the text route's
+    # `$include_bytes` declarations precede the program.
+    prologue:array<uint8>=[]
+    body:array<uint8>=[]
+    functions:dict<string Function>=[]
+    globals:dict<string Global>=[]
+    scopes:array<dict<string Local>>=[[]]
+    function_count:int64=0
+    global_count:int64=0
+    string_count:int64=0
+    static_count:int64=0
+    slot_count:int64=0
+    split_count:int64=0
+    current:int64=-1
+    references:dict<int64 set<int64>>=[]
+    top_references:set<int64>=set[]
+    global_inits:array<int64>=[]
+    loop_depth:int64=0
+    in_condition:bool=false
+    marker:Marker?=none
+    reported:Marker?=none
+    problem:Error?=none
+]
+
+let fail = (message:string @p:Parser):>void => {
+    if p.problem is? none {p.problem=Error[title='µDewy bytecode emission failed' message=message]}
+}
+
+# ----------------------------------------------------------------------------
+# Encoding
+# ----------------------------------------------------------------------------
+
+let write_u = (value:uint64 @out:array<uint8>):>void => {
+    let rest:uint64=value
+    loop rest >? 127 {
+        out.push(((rest and 127) or 128) transmute uint8)
+        rest >>= 7
+    }
+    out.push(rest transmute uint8)
+}
+let write_s = (value:int64 @out:array<uint8>):>void => {
+    let bits=value transmute uint64
+    let sign:uint64=if value <? 0 0xffffffffffffffff else 0
+    write_u((bits << 1) xor sign @out)
+}
+let write_raw = (bytes:array<uint8> @out:array<uint8>):>void => {
+    write_u(bytes.length as uint64 @out)
+    loop byte in bytes {out.push(byte)}
+}
+let write_text = (text:string @out:array<uint8>):>void => write_raw(text as array<uint8> @out)
+let write_optional = (text:string? @out:array<uint8>):>void => {
+    if text is? none {out.push(0) return}
+    let bytes=text as array<uint8>
+    write_u((bytes.length as uint64) + 1 @out)
+    loop byte in bytes {out.push(byte)}
+}
+let op = (code:uint8 @p:Parser):>void => {p.body.push(code)}
+let op_id = (code:uint8 id:int64 @p:Parser):>void => {
+    p.body.push(code)
+    write_u(id transmute uint64 @p.body)
+}
+let new_function = (@p:Parser):>int64 => {p.function_count+=1 return p.function_count-1}
+let new_global = (@p:Parser):>int64 => {p.global_count+=1 return p.global_count-1}
+let new_string = (@p:Parser):>int64 => {p.string_count+=1 return p.string_count-1}
+let new_static = (@p:Parser):>int64 => {p.static_count+=1 return p.static_count-1}
+let new_slot = (@p:Parser):>int64 => {p.slot_count+=1 return p.slot_count-1}
+let new_split = (@p:Parser):>int64 => {p.split_count+=1 return p.split_count-1}
+
+let intern_string = (bytes:array<uint8> @p:Parser):>int64 => {
+    op(op_intern_string @p)
+    write_raw(bytes @p.body)
+    let id=new_string(@p)
+    write_u(id transmute uint64 @p.body)
+    return id
+}
+let declare_function = (name:string arity:int64 @p:Parser):>int64 => {
+    op(op_declare_function @p)
+    write_optional(name @p.body)
+    write_u(arity transmute uint64 @p.body)
+    let id=new_function(@p)
+    write_u(id transmute uint64 @p.body)
+    return id
+}
+let write_stable = (value:Stable @out:array<uint8>):>void => {
+    out.push(value.kind)
+    if value.kind =? sv_int {write_s(value.value @out)} else {write_u(value.value transmute uint64 @out)}
+}
+let alloc_local = (@p:Parser):>int64 => {
+    op(op_alloc_local @p)
+    let slot=new_slot(@p)
+    write_u(slot transmute uint64 @p.body)
+    return slot
+}
+
+# `$include_bytes` binds a global to the file's bytes ahead of the program.
+let define_include = (name:string bytes:array<uint8> @p:Parser):>void => {
+    let string=new_string(@p)
+    p.prologue.push(op_intern_string)
+    write_raw(bytes @p.prologue)
+    write_u(string transmute uint64 @p.prologue)
+    let global=new_global(@p)
+    p.prologue.push(op_define_global)
+    write_optional(none @p.prologue)
+    write_stable(Stable[sv_string string] @p.prologue)
+    write_u(global transmute uint64 @p.prologue)
+    p.globals[name]=Global[global]
+}
+
+# ----------------------------------------------------------------------------
+# Tokens as the parser reads them
+# ----------------------------------------------------------------------------
+
+let kind_at = (toks:Tokens idx:addr):>uint8 => {
+    if idx >=? toks.kinds.length return 0
+    return toks.kinds[idx]
+}
+let value_at = (toks:Tokens idx:addr):>int64 => {
+    if idx >=? toks.values.length return 0
+    return toks.values[idx]
+}
+let text_at = (toks:Tokens idx:addr):>string => {
+    let index:int64=value_at(toks idx)
+    if index <? 0 or index >=? (toks.texts.length as int64) return ''
+    $runtime_assert (index as addr) <? toks.texts.length
+    return toks.texts[index as addr]
+}
+let blob_at = (toks:Tokens idx:addr):>array<uint8> => {
+    let index:int64=value_at(toks idx)
+    if index <? 0 or index >=? (toks.blobs.length as int64) return []
+    $runtime_assert (index as addr) <? toks.blobs.length
+    return toks.blobs[index as addr]
+}
+let expect = (toks:Tokens idx:addr kind:uint8 @p:Parser):>addr => {
+    if kind_at(toks idx) not=? kind {fail("expected token {kind}, got {kind_at(toks idx)}" @p) return toks.kinds.length}
+    return idx+1
+}
+# The bytes of a string token (the emitter supplies them undecoded).
+let string_bytes = (toks:Tokens idx:addr):>array<uint8> => {
+    if kind_at(toks idx) =? tk_based_string return blob_at(toks idx)
+    return text_at(toks idx) as array<uint8>
+}
+
+let precedence = (kind:uint8):>int64 => {
+    if kind =? tk_or return 2
+    if kind =? tk_xor return 3
+    if kind =? tk_and return 4
+    if kind >=? tk_eq and kind <=? tk_lt_eq return 5
+    if kind =? tk_left_shift or kind =? tk_right_shift return 6
+    if kind =? tk_plus or kind =? tk_minus return 7
+    if kind =? tk_mul or kind =? tk_idiv or kind =? tk_mod return 8
+    return 0
+}
+
+# ----------------------------------------------------------------------------
+# Names
+# ----------------------------------------------------------------------------
+
+let note_fn_use = (id:int64 @p:Parser):>void => {
+    if p.current <? 0 {p.top_references.add(id) return}
+    if p.current in? p.references {let callees=@p.references[p.current] callees.add(id)}
+    else {p.references[p.current]=set[id]}
+}
+let note_stable_use = (value:Stable @p:Parser):>void => {
+    if value.kind =? sv_function {note_fn_use(value.value @p)}
+}
+let lookup_local = (name:string p:Parser):>Local? => {
+    let depth:addr=p.scopes.length
+    loop depth >? 0 {
+        depth-=1
+        $runtime_assert depth <? p.scopes.length
+        let found=p.scopes[depth].get(name)
+        if found isnt? none return found
+    }
+    return none
+}
+let declare_local = (name:string local:Local @p:Parser):>void => {
+    if p.scopes.length =? 0 {fail('no scope for a local' @p) return}
+    let last:addr=p.scopes.length-1
+    $runtime_assert last <? p.scopes.length
+    if name in? p.scopes[last] {fail("Name {name} is already declared" @p) return}
+    $runtime_assert last <? p.scopes.length
+    let scope=@p.scopes[last]
+    scope[name]=local
+}
+let push_scope = (@p:Parser):>void => {
+    p.scopes.push([])
+    op(op_begin_scope @p)
+}
+let pop_scope = (@p:Parser):>void => {
+    if p.scopes.length >? 0 {let dropped=p.scopes.pop}
+    op(op_end_scope @p)
+}
+# A name's function: known, or declared now as a forward reference.
+let function_reference = (name:string arity:int64 @p:Parser):>int64 => {
+    let known=p.functions.get(name)
+    if known is? none {
+        let id=declare_function(name if arity <? 0 0 else arity @p)
+        p.functions[name]=Function[id arity]
+        return id
+    }
+    if arity >=? 0 and name in? p.functions {
+        let entry=@p.functions[name]
+        if entry.arity <? 0 {entry.arity=arity}
+        else if entry.arity not=? arity {fail("Function {name} used with conflicting arities" @p)}
+    }
+    return known.id
+}
+# A name's stable value: p0's lookup_stable_value (the innermost local of the
+# name decides, even when it has none).
+let lookup_stable = (name:string p:Parser):>Stable? => {
+    let depth:addr=p.scopes.length
+    loop depth >? 0 {
+        depth-=1
+        $runtime_assert depth <? p.scopes.length
+        let found=p.scopes[depth].get(name)
+        if found isnt? none return found.value
+    }
+    let global=p.globals.get(name)
+    if global isnt? none return global.value
+    return none
+}
+let push_stable = (value:Stable @p:Parser):>void => {
+    if value.kind =? sv_int {op(op_push_const_i64 @p) write_s(value.value @p.body) return}
+    if value.kind =? sv_function {op_id(op_push_fn_ref value.value @p) return}
+    if value.kind =? sv_string {op_id(op_push_string_ref value.value @p) return}
+    op_id(op_push_static_ref value.value @p)
+}
+
+# ----------------------------------------------------------------------------
+# Stable expressions: compile-time words (p0's try_parse_stable_expr)
+# ----------------------------------------------------------------------------
+
+Parsed:type = const [next:addr value:Stable?]
+
+let static_alloca_size = (toks:Tokens idx:addr @p:Parser):>Parsed => {
+    let kind=kind_at(toks idx)
+    let size:int64=0
+    if kind =? tk_number {size=value_at(toks idx)}
+    else if kind =? tk_ident {
+        let value=lookup_stable(text_at(toks idx) p)
+        if value is? none or value.kind not=? sv_int {fail('__static_alloca__ size must be a compile-time constant' @p) return Parsed[toks.kinds.length none]}
+        size=value.value
+    } else {fail('__static_alloca__ size must be a compile-time constant' @p) return Parsed[toks.kinds.length none]}
+    if kind_at(toks idx+1) not=? tk_right_paren or size <? 0 {fail('__static_alloca__ expects one non-negative constant' @p) return Parsed[toks.kinds.length none]}
+    return Parsed[idx+2 Stable[sv_int size]]
+}
+let static_words = (toks:Tokens start:addr @p:Parser):>Parsed => {
+    let idx:addr=start
+    let words:array<Stable>=[]
+    loop kind_at(toks idx) not=? tk_right_paren and idx <? toks.kinds.length and p.problem is? none {
+        let parsed=stable_expr(toks idx false @p)
+        if parsed.value is? none {fail('__static_words__ arguments must be compile-time stable words' @p) return Parsed[toks.kinds.length none]}
+        words.push(parsed.value)
+        idx=parsed.next
+    }
+    idx=expect(toks idx tk_right_paren @p)
+    op(op_intern_words @p)
+    write_u(words.length as uint64 @p.body)
+    loop word in words {write_stable(word @p.body)}
+    let id=new_static(@p)
+    write_u(id transmute uint64 @p.body)
+    return Parsed[idx Stable[sv_static id]]
+}
+let stable_expr = (toks:Tokens start:addr runtime:bool @p:Parser):>Parsed => {
+    let idx:addr=start
+    if kind_at(toks idx) =? tk_at and kind_at(toks idx+1) =? tk_ident {idx+=1}
+    let kind=kind_at(toks idx)
+    let result:Parsed=Parsed[idx none]
+    if kind =? tk_number {result=Parsed[idx+1 Stable[sv_int value_at(toks idx)]]}
+    else if kind =? tk_minus and kind_at(toks idx+1) =? tk_number {result=Parsed[idx+2 Stable[sv_int 0-value_at(toks idx+1)]]}
+    else if kind =? tk_string or kind =? tk_based_string {result=Parsed[idx+1 Stable[sv_string intern_string(string_bytes(toks idx) @p)]]}
+    else if kind =? tk_ident {
+        let name=text_at(toks idx)
+        let resolved=lookup_stable(name p)
+        if resolved isnt? none {
+            note_stable_use(resolved @p)
+            result=Parsed[idx+1 resolved]
+        } else {
+            if lookup_local(name p) isnt? none or name in? p.globals return Parsed[start none]
+            let id=function_reference(name (-1) @p)
+            note_fn_use(id @p)
+            result=Parsed[idx+1 Stable[sv_function id]]
+        }
+    } else if kind =? tk_left_paren {
+        let inner=stable_expr(toks idx+1 runtime @p)
+        if inner.value is? none or kind_at(toks inner.next) not=? tk_right_paren return Parsed[start none]
+        return Parsed[inner.next+1 inner.value]
+    } else if kind =? tk_ident_call {
+        let name=text_at(toks idx)
+        if name =? '__static_words__' {result=static_words(toks idx+1 @p)}
+        else if name =? '__static_alloca__' {
+            let size=static_alloca_size(toks idx+1 @p)
+            if size.value is? none return Parsed[toks.kinds.length none]
+            op(op_intern_static @p)
+            write_u(size.value.value transmute uint64 @p.body)
+            let id=new_static(@p)
+            write_u(id transmute uint64 @p.body)
+            result=Parsed[size.next Stable[sv_static id]]
+        } else return Parsed[start none]
+    } else return Parsed[start none]
+    if runtime and result.value isnt? none {push_stable(result.value @p)}
+    return result
+}
+# A declaration's initializer is stable only when the stable atom is the
+# whole expression.
+let stable_initializer = (toks:Tokens idx:addr @p:Parser):>Parsed => {
+    let parsed=stable_expr(toks idx false @p)
+    if parsed.value is? none return parsed
+    let following=kind_at(toks parsed.next)
+    if precedence(following) not=? 0 or following =? tk_expr_call or following =? tk_transmute return Parsed[idx none]
+    return parsed
+}
+
+# ----------------------------------------------------------------------------
+# Expressions (p0's parse_atom, parse_prefix and _parse_expr)
+# ----------------------------------------------------------------------------
+
+let matching_right_paren = (toks:Tokens idx:addr):>addr => {
+    let depth:int64=1
+    let scan:addr=idx+1
+    loop scan <? toks.kinds.length {
+        let kind=toks.kinds[scan]
+        if kind =? tk_left_paren or kind =? tk_ident_call or kind =? tk_expr_call {depth+=1}
+        else if kind =? tk_right_paren {
+            depth-=1
+            if depth =? 0 return scan
+        }
+        scan+=1
+    }
+    return toks.kinds.length
+}
+# In a condition, parentheses group a condition unless a value operator
+# follows them.
+let paren_is_value = (toks:Tokens idx:addr):>bool => {
+    let following=kind_at(toks matching_right_paren(toks idx)+1)
+    return precedence(following) >? 0 and following not=? tk_and and following not=? tk_or
+}
+let skip_cast = (toks:Tokens idx:addr):>addr => {
+    if kind_at(toks idx) not=? tk_transmute return idx
+    let next:addr=idx+1
+    let kind=kind_at(toks next)
+    if kind =? tk_ident {
+        next+=1
+        if kind_at(toks next) =? tk_type_param {next+=1}
+    } else if kind =? tk_type_param {next+=1}
+    return next
+}
+
+Counted:type = const [next:addr count:int64]
+let call_arguments = (toks:Tokens start:addr @p:Parser):>Counted => {
+    let idx:addr=start
+    let count:int64=0
+    loop kind_at(toks idx) not=? tk_right_paren and idx <? toks.kinds.length and p.problem is? none {
+        idx=parse_expr(toks idx 0 false @p)
+        op(op_save_value @p)
+        count+=1
+    }
+    return Counted[expect(toks idx tk_right_paren @p) count]
+}
+
+let parse_atom = (toks:Tokens idx:addr @p:Parser):>addr => {
+    let kind=kind_at(toks idx)
+    if kind =? tk_number {
+        op(op_push_const_i64 @p) write_s(value_at(toks idx) @p.body)
+        return idx+1
+    }
+    if kind =? tk_void {op(op_push_void @p) return idx+1}
+    if kind =? tk_string or kind =? tk_based_string {
+        op_id(op_push_string_ref intern_string(string_bytes(toks idx) @p) @p)
+        return idx+1
+    }
+    if kind =? tk_ident {
+        let name=text_at(toks idx)
+        let local=lookup_local(name p)
+        if local isnt? none {op_id(op_load_local local.slot @p) return idx+1}
+        let global=p.globals.get(name)
+        if global isnt? none {op_id(op_load_global global.id @p) return idx+1}
+        let id=function_reference(name (-1) @p)
+        note_fn_use(id @p)
+        op_id(op_push_fn_ref id @p)
+        return idx+1
+    }
+    if kind =? tk_ident_call {
+        let name=text_at(toks idx)
+        if name =? '__static_alloca__' or name =? '__static_words__' {
+            let parsed=stable_expr(toks idx true @p)
+            return parsed.next
+        }
+        if name in? p.intrinsics {
+            let next:addr=idx+1
+            let count:int64=0
+            loop kind_at(toks next) not=? tk_right_paren and next <? toks.kinds.length and p.problem is? none {
+                # The last runtime argument is the current value; only
+                # earlier ones are saved.
+                if count >? 0 {op(op_save_value @p)}
+                next=parse_expr(toks next 0 false @p)
+                count+=1
+            }
+            next=expect(toks next tk_right_paren @p)
+            op(op_emit_intrinsic @p)
+            write_text(name @p.body)
+            write_u(count transmute uint64 @p.body)
+            p.body.push(0)
+            return next
+        }
+        let arguments=call_arguments(toks idx+1 @p)
+        let count=arguments.count
+        let id=function_reference(name count @p)
+        note_fn_use(id @p)
+        op(op_call_direct @p)
+        write_u(id transmute uint64 @p.body)
+        write_u(count transmute uint64 @p.body)
+        return arguments.next
+    }
+    if kind =? tk_left_paren {
+        let inner=if p.in_condition and not paren_is_value(toks idx) parse_expr(toks idx+1 0 true @p) else parse_expr(toks idx+1 0 false @p)
+        return expect(toks inner tk_right_paren @p)
+    }
+    fail("unexpected token {kind} in an expression" @p)
+    return toks.kinds.length
+}
+let parse_prefix = (toks:Tokens idx:addr @p:Parser):>addr => {
+    let kind=kind_at(toks idx)
+    if kind =? tk_not {
+        let next=parse_prefix(toks idx+1 @p)
+        op(op_unary_op @p) write_u(tk_not as uint64 @p.body)
+        return next
+    }
+    if kind =? tk_at {
+        if kind_at(toks idx+1) not=? tk_ident {fail('`@` must be followed by a name' @p) return toks.kinds.length}
+        return parse_atom(toks idx+1 @p)
+    }
+    if kind =? tk_minus {
+        if kind_at(toks idx+1) =? tk_number {
+            op(op_push_const_i64 @p) write_s(0-value_at(toks idx+1) @p.body)
+            return idx+2
+        }
+        let next=parse_prefix(toks idx+1 @p)
+        op(op_unary_op @p) write_u(tk_minus as uint64 @p.body)
+        return next
+    }
+    return parse_atom(toks idx @p)
+}
+let parse_expr = (toks:Tokens start:addr min_precedence:int64 condition:bool @p:Parser):>addr => {
+    let outer=p.in_condition
+    p.in_condition=condition
+    let idx=skip_cast(toks parse_prefix(toks start @p))
+    loop idx <? toks.kinds.length and p.problem is? none {
+        let kind=toks.kinds[idx]
+        if kind =? tk_expr_call {
+            op(op_save_value @p)
+            let arguments=call_arguments(toks idx+1 @p)
+            op(op_call_indirect @p)
+            write_u(arguments.count transmute uint64 @p.body)
+            idx=arguments.next
+            continue
+        }
+        let level=precedence(kind)
+        if level =? 0 or level <? min_precedence break
+        idx+=1
+        if condition and kind =? tk_and {
+            op(op_cond_and_split @p)
+            let split=new_split(@p)
+            write_u(split transmute uint64 @p.body)
+            idx=parse_expr(toks idx level+1 true @p)
+            op_id(op_cond_and_join split @p)
+        } else if condition and kind =? tk_or {
+            op(op_cond_or_split @p)
+            let split=new_split(@p)
+            write_u(split transmute uint64 @p.body)
+            idx=parse_expr(toks idx level+1 true @p)
+            op_id(op_cond_or_join split @p)
+        } else {
+            # A literal is consumed directly only when it is the complete
+            # right-hand side at this precedence.
+            let literal:addr=if kind_at(toks idx) =? tk_minus idx+1 else idx
+            if kind_at(toks literal) =? tk_number {
+                let following=kind_at(toks literal+1)
+                if following not=? tk_expr_call and following not=? tk_transmute and precedence(following) <=? level {
+                    let value=value_at(toks literal)
+                    op(op_binary_immediate @p)
+                    write_u(kind as uint64 @p.body)
+                    write_s(if literal >? idx 0-value else value @p.body)
+                    idx=literal+1
+                    continue
+                }
+            }
+            op(op_save_value @p)
+            idx=parse_expr(toks idx level+1 false @p)
+            op(op_binary_op @p) write_u(kind as uint64 @p.body)
+        }
+    }
+    p.in_condition=outer
+    return idx
+}
+
+# ----------------------------------------------------------------------------
+# Statements
+# ----------------------------------------------------------------------------
+
+let mark_statement = (@p:Parser):>void => {
+    if not p.debug or p.marker is? none return
+    let marker=p.marker
+    let reported=p.reported
+    if reported isnt? none and reported.line =? marker.line and reported.column =? marker.column and reported.path =? marker.path return
+    p.reported=marker
+    op(op_mark_location @p)
+    write_text(marker.path @p.body)
+    write_u(marker.line transmute uint64 @p.body)
+    write_u(marker.column transmute uint64 @p.body)
+}
+let note_local = (slot:int64 name:string type:string parameter:bool @p:Parser):>void => {
+    if not p.debug return
+    op_id(op_note_local slot @p)
+    write_text(name @p.body)
+    write_text(type @p.body)
+    write_optional(none @p.body)
+    write_u(if parameter 1 else 0 @p.body)
+}
+let parse_declaration = (toks:Tokens start:addr @p:Parser):>addr => {
+    let constant=kind_at(toks start) =? tk_const
+    let idx:addr=start+1
+    if kind_at(toks idx) not=? tk_ident {fail('expected a name after a declaration keyword' @p) return toks.kinds.length}
+    let name=text_at(toks idx)
+    idx+=1
+    if kind_at(toks idx) not=? tk_type {fail("expected a type annotation for {name}" @p) return toks.kinds.length}
+    let annotation=text_at(toks idx)
+    if annotation =? 'type' and kind_at(toks idx+1) not=? tk_type_param {fail("type declaration {name} reached µDewy emission" @p) return toks.kinds.length}
+    idx+=1
+    if kind_at(toks idx) =? tk_type_param {idx+=1}
+    idx=expect(toks idx tk_assign @p)
+    let value:Stable?=none
+    if constant {
+        let stable=stable_initializer(toks idx @p)
+        if stable.value isnt? none {
+            value=stable.value
+            push_stable(stable.value @p)
+            idx=stable.next
+        } else {idx=parse_expr(toks idx 0 false @p)}
+    } else {idx=parse_expr(toks idx 0 false @p)}
+    let slot=alloc_local(@p)
+    declare_local(name Local[slot value constant] @p)
+    op_id(op_store_local slot @p)
+    note_local(slot name annotation false @p)
+    return idx
+}
+Block:type = const [next:addr returns:bool]
+let parse_block = (toks:Tokens start:addr @p:Parser):>Block => {
+    let idx:addr=start
+    let returns=false
+    loop idx <? toks.kinds.length and toks.kinds[idx] not=? tk_right_brace and p.problem is? none {
+        if toks.kinds[idx] =? tk_location {
+            let index:int64=value_at(toks idx)
+            if index >=? 0 and index <? (toks.markers.length as int64) {
+                $runtime_assert (index as addr) <? toks.markers.length
+                p.marker=toks.markers[index as addr]
+            }
+            idx+=1
+            continue
+        }
+        let statement=parse_statement(toks idx @p)
+        idx=statement.next
+        if statement.returns {returns=true}
+    }
+    return Block[idx returns]
+}
+let braced_block = (toks:Tokens start:addr @p:Parser):>Block => {
+    let idx=expect(toks start tk_left_brace @p)
+    push_scope(@p)
+    let block=parse_block(toks idx @p)
+    let next=expect(toks block.next tk_right_brace @p)
+    pop_scope(@p)
+    return Block[next block.returns]
+}
+let close_ifs = (count:int64 @p:Parser):>void => {
+    let closed:int64=0
+    loop closed <? count {op(op_end_if @p) closed+=1}
+}
+let parse_if = (toks:Tokens start:addr @p:Parser):>Block => {
+    let idx=parse_expr(toks start+1 0 true @p)
+    op(op_begin_if @p)
+    let first=braced_block(toks idx @p)
+    idx=first.next
+    let all_return=first.returns
+    let nested:int64=1
+    loop kind_at(toks idx) =? tk_else and p.problem is? none {
+        idx+=1
+        op(op_begin_else @p)
+        if kind_at(toks idx) =? tk_if {
+            idx=parse_expr(toks idx+1 0 true @p)
+            op(op_begin_if @p)
+            nested+=1
+            let arm=braced_block(toks idx @p)
+            idx=arm.next
+            all_return=all_return and arm.returns
+        } else {
+            let last=braced_block(toks idx @p)
+            close_ifs(nested @p)
+            return Block[last.next all_return and last.returns]
+        }
+    }
+    close_ifs(nested @p)
+    return Block[idx false]
+}
+let parse_statement = (toks:Tokens idx:addr @p:Parser):>Block => {
+    let kind=kind_at(toks idx)
+    mark_statement(@p)
+    if kind =? tk_let or kind =? tk_const return Block[parse_declaration(toks idx @p) false]
+    if kind =? tk_if return parse_if(toks idx @p)
+    if kind =? tk_loop {
+        op(op_begin_loop @p)
+        let next=parse_expr(toks idx+1 0 true @p)
+        op(op_begin_loop_body @p)
+        p.loop_depth+=1
+        let body=braced_block(toks next @p)
+        p.loop_depth-=1
+        op(op_end_loop @p)
+        return Block[body.next false]
+    }
+    if kind =? tk_return {
+        let next=parse_expr(toks idx+1 0 false @p)
+        op(op_emit_return @p)
+        return Block[next true]
+    }
+    if kind =? tk_break or kind =? tk_continue {
+        if p.loop_depth =? 0 {fail('`break` and `continue` may only appear inside a loop' @p)}
+        op(if kind =? tk_break op_emit_break else op_emit_continue @p)
+        return Block[idx+1 false]
+    }
+    if kind =? tk_ident and kind_at(toks idx+1) =? tk_assign {
+        let name=text_at(toks idx)
+        let next=parse_expr(toks idx+2 0 false @p)
+        store(name @p)
+        return Block[next false]
+    }
+    if kind =? tk_ident and kind_at(toks idx+1) =? tk_update_assign {
+        let name=text_at(toks idx)
+        let operator=value_at(toks idx+1)
+        load(name @p)
+        op(op_save_value @p)
+        let next=parse_expr(toks idx+2 0 false @p)
+        op(op_binary_op @p) write_u(operator transmute uint64 @p.body)
+        store(name @p)
+        return Block[next false]
+    }
+    let next=parse_expr(toks idx 0 false @p)
+    op(op_pop_value @p)
+    return Block[next false]
+}
+let load = (name:string @p:Parser):>void => {
+    let local=lookup_local(name p)
+    if local isnt? none {op_id(op_load_local local.slot @p) return}
+    let global=p.globals.get(name)
+    if global isnt? none {op_id(op_load_global global.id @p) return}
+    fail("Undefined variable {name}" @p)
+}
+let store = (name:string @p:Parser):>void => {
+    let local=lookup_local(name p)
+    if local isnt? none {
+        if local.constant {fail("Cannot assign to constant {name}" @p)}
+        op_id(op_store_local local.slot @p) return
+    }
+    let global=p.globals.get(name)
+    if global isnt? none {op_id(op_store_global global.id @p) return}
+    fail("Undefined variable {name}" @p)
+}
+
+# ----------------------------------------------------------------------------
+# Top level (p0's parse_program and parse_fn_decl)
+# ----------------------------------------------------------------------------
+
+Parameter:type = const [name:string annotation:string]
+let parse_function = (toks:Tokens start:addr @p:Parser):>addr => {
+    let name=text_at(toks start+1)
+    if name in? p.globals {fail("Name {name} is already declared" @p) return toks.kinds.length}
+    let idx=expect(toks start+2 tk_assign @p)
+    idx=expect(toks idx tk_left_paren @p)
+    let parameters:array<Parameter>=[]
+    loop kind_at(toks idx) =? tk_ident and p.problem is? none {
+        let parameter=text_at(toks idx)
+        if kind_at(toks idx+1) not=? tk_type {fail("expected a type annotation for parameter {parameter}" @p) return toks.kinds.length}
+        parameters.push(Parameter[parameter text_at(toks idx+1)])
+        idx+=2
+        if kind_at(toks idx) =? tk_type_param {idx+=1}
+    }
+    idx=expect(toks idx tk_right_paren @p)
+    idx=expect(toks idx tk_fn_type @p)
+    if kind_at(toks idx) =? tk_type_param {idx+=1}
+    idx=expect(toks idx tk_fn_arrow @p)
+    idx=expect(toks idx tk_left_brace @p)
+    let count=parameters.length as int64
+    let id:int64=0
+    if name in? p.functions {
+        let entry=@p.functions[name]
+        if entry.defined {fail("Function {name} is already defined" @p) return toks.kinds.length}
+        if entry.arity >=? 0 and entry.arity not=? count {fail("Function {name} defined with a different arity than its uses" @p) return toks.kinds.length}
+        entry.arity=count
+        entry.defined=true
+        id=entry.id
+    } else {
+        id=declare_function(name count @p)
+        p.functions[name]=Function[id count true]
+    }
+    op(op_begin_function @p)
+    write_u(id transmute uint64 @p.body)
+    write_optional(name @p.body)
+    write_u(count transmute uint64 @p.body)
+    write_u(if name =? 'main' 1 else 0 @p.body)
+    p.current=id
+    push_scope(@p)
+    let index:int64=0
+    loop parameter in parameters {
+        let slot=alloc_local(@p)
+        op(op_load_param @p) write_u(index transmute uint64 @p.body)
+        op_id(op_store_local slot @p)
+        declare_local(parameter.name Local[slot] @p)
+        note_local(slot parameter.name parameter.annotation true @p)
+        index+=1
+    }
+    let body=parse_block(toks idx @p)
+    idx=expect(toks body.next tk_right_brace @p)
+    if not body.returns {fail("Function {name} must explicitly return" @p)}
+    op(op_end_function @p)
+    p.current=-1
+    pop_scope(@p)
+    return idx
+}
+# A top-level declaration: a function, or a global with a stable initializer
+# or one computed by a synthesized initializer function.
+let parse_global = (toks:Tokens start:addr @p:Parser):>addr => {
+    let constant=kind_at(toks start) =? tk_const
+    let name=text_at(toks start+1)
+    let idx:addr=start+2
+    if kind_at(toks idx) not=? tk_type {fail("expected a type annotation for {name}" @p) return toks.kinds.length}
+    idx+=1
+    if kind_at(toks idx) =? tk_type_param {idx+=1}
+    idx=expect(toks idx tk_assign @p)
+    if name in? p.functions or name in? p.globals {fail("Name {name} is already declared" @p) return toks.kinds.length}
+    let stable=stable_initializer(toks idx @p)
+    let id:int64=0
+    let value:Stable?=none
+    if stable.value isnt? none {
+        idx=stable.next
+        op(op_define_global @p)
+        write_optional(none @p.body)
+        write_stable(stable.value @p.body)
+        id=new_global(@p)
+        write_u(id transmute uint64 @p.body)
+        if constant {value=stable.value}
+    } else {
+        op(op_define_global @p)
+        write_optional(none @p.body)
+        write_stable(Stable[sv_int 0] @p.body)
+        id=new_global(@p)
+        write_u(id transmute uint64 @p.body)
+        let init_name="__udewy_global_init_{p.global_inits.length}__"
+        let init=declare_function(init_name 0 @p)
+        p.global_inits.push(init)
+        op(op_begin_function @p)
+        write_u(init transmute uint64 @p.body)
+        write_optional(init_name @p.body)
+        write_u(0 @p.body)
+        write_u(0 @p.body)
+        p.current=init
+        idx=parse_expr(toks idx 0 false @p)
+        op_id(op_store_global id @p)
+        op(op_push_void @p)
+        op(op_emit_return @p)
+        op(op_end_function @p)
+        p.current=-1
+    }
+    p.globals[name]=Global[id value]
+    return idx
+}
+let looks_like_function = (toks:Tokens idx:addr):>bool => {
+    if kind_at(toks idx+2) not=? tk_assign or kind_at(toks idx+3) not=? tk_left_paren return false
+    let depth:int64=1
+    let scan:addr=idx+4
+    loop scan <? toks.kinds.length and depth >? 0 {
+        let kind=toks.kinds[scan]
+        if kind =? tk_left_paren {depth+=1} else if kind =? tk_right_paren {depth-=1}
+        scan+=1
+    }
+    if depth not=? 0 or kind_at(toks scan) not=? tk_fn_type return false
+    scan+=1
+    if kind_at(toks scan) =? tk_type_param {scan+=1}
+    return kind_at(toks scan) =? tk_fn_arrow
+}
+# Parse every top-level declaration in `toks`.
+let parse_top = (toks:Tokens @p:Parser):>void => {
+    let idx:addr=0
+    loop idx <? toks.kinds.length and p.problem is? none {
+        let kind=toks.kinds[idx]
+        if kind =? tk_location {
+            let index:int64=value_at(toks idx)
+            if index >=? 0 and index <? (toks.markers.length as int64) {
+                $runtime_assert (index as addr) <? toks.markers.length
+                p.marker=toks.markers[index as addr]
+            }
+            idx+=1
+            continue
+        }
+        if kind not=? tk_let and kind not=? tk_const {fail("only declarations are allowed at top level, got token {kind}" @p) return}
+        idx=if looks_like_function(toks idx) parse_function(toks idx @p) else parse_global(toks idx @p)
+    }
+}
+
+# The stream: header, module, include definitions, the program, then the
+# module initializer and reachability p0 computes at its end.
+let finish = (@p:Parser):>array<uint8>|Error => {
+    let globals_init:int64=-1
+    if p.global_inits.length >? 0 {
+        op(op_set_module_init @p)
+        write_optional(globals_init_name @p.body)
+        globals_init=declare_function(globals_init_name 0 @p)
+        op(op_begin_function @p)
+        write_u(globals_init transmute uint64 @p.body)
+        write_optional(globals_init_name @p.body)
+        write_u(0 @p.body)
+        write_u(0 @p.body)
+        p.current=globals_init
+        loop init in p.global_inits {
+            note_fn_use(init @p)
+            op(op_call_direct @p)
+            write_u(init transmute uint64 @p.body)
+            write_u(0 @p.body)
+            op(op_pop_value @p)
+        }
+        op(op_push_void @p)
+        op(op_emit_return @p)
+        op(op_end_function @p)
+        p.current=-1
+    } else {
+        op(op_set_module_init @p)
+        write_optional(none @p.body)
+    }
+    let undefined:string?=none
+    loop [name entry] in p.functions {
+        if not entry.defined and undefined is? none {undefined=name}
+    }
+    if undefined isnt? none {fail("Undefined function: {undefined}" @p)}
+    if p.problem isnt? none return p.problem
+    # Reachability from `main`, the initializers and top-level references.
+    let reachable:array<bool>=[]
+    reachable.reserve(p.function_count as addr)
+    let filled:int64=0
+    loop filled <? p.function_count {reachable.push(false) filled+=1}
+    let work:array<int64>=[]
+    let main=p.functions.get('main')
+    if main isnt? none {work.push(main.id)}
+    if globals_init >=? 0 {work.push(globals_init)}
+    loop init in p.global_inits {work.push(init)}
+    loop id in p.top_references {work.push(id)}
+    loop work.length >? 0 {
+        let id=work.pop
+        if id <? 0 or id >=? (reachable.length as int64) continue
+        let slot=id as addr
+        $runtime_assert slot <? reachable.length
+        if reachable[slot] continue
+        reachable[slot]=true
+        let callees=p.references.get(id)
+        if callees isnt? none {loop callee in callees {work.push(callee)}}
+    }
+    let count:int64=0
+    loop flag in reachable {if flag {count+=1}}
+    op(op_set_reachable_functions @p)
+    write_u(count transmute uint64 @p.body)
+    let index:int64=0
+    loop flag in reachable {
+        if flag {write_u(index transmute uint64 @p.body)}
+        index+=1
+    }
+    op(op_finish_module @p)
+    let stream:array<uint8>=[85 66 67 49]
+    stream.reserve(p.prologue.length + p.body.length + 8)
+    write_u(0 @stream)
+    stream.push(op_set_imported_sources)
+    write_u(0 @stream)
+    stream.push(op_begin_module)
+    loop byte in p.prologue {stream.push(byte)}
+    loop byte in p.body {stream.push(byte)}
+    return stream
+}

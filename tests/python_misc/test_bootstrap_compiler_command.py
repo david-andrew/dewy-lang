@@ -43,8 +43,9 @@ def test_native_compiler_command(tmp_path):
     (library / 'linux/system.dewy').write_text(ARENA)
     env = dict(os.environ, DEWY_LIBRARY_ROOT=str(library), DEWY_UDEWY=str(micro))
 
-    def invoke(*args):
-        return subprocess.run([compiler, *args], cwd=tmp_path, env=env,
+    def invoke(*args, emit=None):
+        run_env = env if emit is None else {**env, 'DEWY_EMIT': emit}
+        return subprocess.run([compiler, *args], cwd=tmp_path, env=run_env,
                               capture_output=True, text=True, timeout=120, check=False)
 
     # Audit executable defaults even when their function is unused or the
@@ -64,6 +65,8 @@ def test_native_compiler_command(tmp_path):
     audit_source.write_text('$no_prelude=true\nmain=():>int64=>42')
     assert invoke('-c', audit_source).returncode == 0
     assert not json.loads(audit_path.read_text())['assumptions']
+    # The µDewy compiler read bytecode (udewy/BYTECODE.md), not µDewy text.
+    assert (tmp_path / cache_artifact(audit_source, '.ubc', cwd=tmp_path)).is_file()
     # The same metadata must survive cached imported defaults. The temporary
     # library's empty files isolate this check from the full standard library.
     audit_prelude = next(path for path in library.rglob('*.dewy') if not path.read_text())
@@ -196,7 +199,7 @@ def test_native_compiler_command(tmp_path):
     origin = tmp_path / 'origin.dewy'
     origin.write_text('$no_prelude\nlet answer=(value:int64):>int64=>value+2\n')
     program.write_text('$no_prelude\nfrom p"origin.dewy" import answer\nlet main=():>int64=>answer(40)\n')
-    result = invoke('debug', '--build', program)
+    result = invoke('debug', '--build', program, emit='udewy')   # the markers are read from the text
     assert result.returncode == 0, result.stdout + result.stderr
     debug_binary = Path(result.stdout.splitlines()[-1])
     assert subprocess.run([debug_binary], timeout=30, check=False).returncode == 42

@@ -1,5 +1,6 @@
 from reporting import SrcFile, Error, Pointer
 import p"debug.dewy" as debug
+import p"bytecode.dewy" as bytecode
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/type_display.dewy" as display
@@ -14,6 +15,10 @@ Operand parentheses preserve the hosted emitter's conservative policy.
 Precedence-aware minimization remains an optional later improvement.
 Debug locations and variable formatters belong to the program emitter;
 this module handles expressions, statements, and concrete function units.
+
+A Writer in stream mode records the µDewy tokens the text would tokenize to
+(bytecode.dewy) instead of the text: each emission site spells both, side by
+side, so the two routes cannot drift apart.
 """
 
 Input:type = const [nodes:array<hir.AST> types:types.Table source_files:array<SrcFile>=[]]
@@ -27,8 +32,11 @@ Scope:type = [
     # their declarations are not written and their reads name the source.
     forwards:dict<string string>=[]
 ]
+Include:type = const [name:string bytes:array<uint8>]
 State:type = [
     includes:dict<string string>=[]
+    # Stream mode: includes named but not yet defined in the bytecode.
+    pending_includes:array<Include>=[]
     problem:Error?=none
     # Names of the program's global declarations: never alias sources.
     globals:set<string>=set[]
@@ -149,7 +157,12 @@ integer_literal = (node:hir.Integer):>string => {
 # All recursive visits share one writer. In particular, a block never joins
 # and re-indents its children's complete strings. Indentation is emitted once
 # per nonempty line, and the final output is joined only at the public boundary.
-Writer:type = [parts:array<string>=[] indents:array<string>=[''] depth:addr=0 line_start:bool=true]
+Writer:type = [
+    parts:array<string>=[] indents:array<string>=[''] depth:addr=0 line_start:bool=true
+    stream:bool=false tokens:bytecode.Tokens=bytecode.Tokens[]
+    # Whether the next token touches the previous one (`name(` and `)(` fuse).
+    adjacent:bool=false
+]
 # Fragments are single-line syntax (source string contents are escaped).
 # Only newline changes line state, so empty lines acquire no trailing spaces.
 write = (text:string @out:Writer):>void => {
@@ -161,15 +174,106 @@ write = (text:string @out:Writer):>void => {
     }
     out.parts.push(text)
 }
-newline = (@out:Writer):>void => {out.parts.push('\n') out.line_start=true}
+newline = (@out:Writer):>void => {
+    if out.stream {out.adjacent=false return}
+    out.parts.push('\n') out.line_start=true
+}
 nest = (@out:Writer):>void => {
+    if out.stream return
     out.depth+=1
     if out.depth =? out.indents.length {
         $runtime_assert out.depth >? 0 and out.depth-1 <? out.indents.length
         out.indents.push(out.indents[out.depth-1]+'    ')
     }
 }
-unnest = (@out:Writer):>void => {$runtime_assert out.depth >? 0 out.depth-=1}
+unnest = (@out:Writer):>void => {
+    if out.stream return
+    $runtime_assert out.depth >? 0 out.depth-=1
+}
+# Stream-mode spellings. `token` is a punctuation, keyword or operator
+# token; the others carry a name, a number or a string's bytes.
+let token = (kind:uint8 @out:Writer):>void => {bytecode.push(kind 0 @out.tokens) out.adjacent=true}
+let token_name = (text:string @out:Writer):>void => {bytecode.push_text(bytecode.tk_ident text @out.tokens) out.adjacent=true}
+let token_number = (value:int64 @out:Writer):>void => {bytecode.push(bytecode.tk_number value @out.tokens) out.adjacent=true}
+let token_space = (@out:Writer):>void => {out.adjacent=false}
+let token_open = (@out:Writer):>void => {
+    if out.adjacent {bytecode.open_paren(@out.tokens)} else {bytecode.push(bytecode.tk_left_paren 0 @out.tokens)}
+    out.adjacent=true
+}
+let token_close = (@out:Writer):>void => token(bytecode.tk_right_paren @out)
+let token_annotation = (kind:uint8 text:string @out:Writer):>void => {
+    # After `transmute`, `void` is the keyword rather than a type name.
+    if kind =? bytecode.tk_ident and text =? 'void' {token(bytecode.tk_void @out) return}
+    bytecode.push_annotation(kind text @out.tokens)
+    out.adjacent=true
+}
+# A µDewy number token: the literal's magnitude, after a `-` token when it
+# is negative (the tokenizer does not fold the sign).
+let token_integer = (value:bigint @out:Writer):>void => {
+    let magnitude=value
+    if value <? 0 {
+        token(bytecode.tk_minus @out)
+        magnitude = -value
+    }
+    let bits:uint64=0
+    if magnitude not=? 0 {
+        let limbs=magnitude.limbs
+        if limbs.length >? 0 {bits=limbs[0]}
+        if limbs.length >? 1 {bits=bits + limbs[1] * 4294967296}
+    }
+    token_number(bits transmute int64 @out)
+}
+# A forwarded read (see function_forwards): a local's name, an integer
+# literal, `(-literal)` or a boolean.
+let number_text = (text:string):>int64 => {
+    let bytes=text as array<uint8>
+    let radix:uint64=10
+    let start:addr=0
+    if bytes.length >? 2 and bytes[0] =? 48 and bytes[1] =? 120 {radix=16 start=2}
+    else if bytes.length >? 2 and bytes[0] =? 48 and bytes[1] =? 98 {radix=2 start=2}
+    let value:uint64=0
+    let i=start
+    loop i <? bytes.length {
+        let byte=bytes[i]
+        i+=1
+        let digit:uint64=if byte >=? 97 (byte as uint64) - 87 else if byte >=? 65 (byte as uint64) - 55 else (byte as uint64) - 48
+        value=value * radix + digit
+    }
+    return value transmute int64
+}
+let token_forward = (text:string @out:Writer):>void => {
+    if text =? 'true' {token_number((-1) @out) return}
+    if text =? 'false' {token_number(0 @out) return}
+    let bytes=text as array<uint8>
+    if text.length >? 3 and bytes.length >? 0 and bytes[0] =? 40 {
+        token(bytecode.tk_left_paren @out) token(bytecode.tk_minus @out)
+        token_number(number_text(text[2..text.length-2]) @out) token_close(@out) return
+    }
+    if bytes.length >? 0 and bytes[0] >=? 48 and bytes[0] <=? 57 {token_number(number_text(text) @out) return}
+    token_name(text @out)
+}
+# The µDewy token of an operator spelling in `binary`, `prefix` or an
+# assignment.
+let operator_kind = (text:string):>uint8 => {
+    if text =? '+' return bytecode.tk_plus
+    if text =? '-' return bytecode.tk_minus
+    if text =? '*' return bytecode.tk_mul
+    if text =? '//' return bytecode.tk_idiv
+    if text =? '%' return bytecode.tk_mod
+    if text =? '<<' return bytecode.tk_left_shift
+    if text =? '>>' return bytecode.tk_right_shift
+    if text =? '=?' return bytecode.tk_eq
+    if text =? 'not=?' return bytecode.tk_not_eq
+    if text =? '<?' return bytecode.tk_lt
+    if text =? '>?' return bytecode.tk_gt
+    if text =? '<=?' return bytecode.tk_lt_eq
+    if text =? '>=?' return bytecode.tk_gt_eq
+    if text =? 'and' return bytecode.tk_and
+    if text =? 'or' return bytecode.tk_or
+    if text =? 'xor' return bytecode.tk_xor
+    if text =? 'not' return bytecode.tk_not
+    return 0
+}
 first_parameter = (call:hir.FunctionCall input:Input):>string? => {
     let function=hir.node_at(input.nodes call.func)
     if function isnt? hir.ExpressedIdentifier return none
@@ -188,6 +292,10 @@ wrap_open = (type:string? @out:Writer):>void => {
     let width=widths.get(type)
     if width is? none or width =? 64 return
     $runtime_assert width >? 0 and width <? 64
+    if out.stream {
+        if not type.startswith('u') {token_name('__signed_shr__' @out) token_open(@out)}
+        token_open(@out) return
+    }
     write(if type.startswith('u') '(' else '__signed_shr__((' @out)
 }
 wrap_close = (type:string? @out:Writer):>void => {
@@ -195,8 +303,15 @@ wrap_close = (type:string? @out:Writer):>void => {
     let width=widths.get(type)
     if width is? none or width =? 64 return
     $runtime_assert width >? 0 and width <? 64
-    if type.startswith('u') {write(") and {(1 << width)-1}" @out) return}
+    if type.startswith('u') {
+        if out.stream {token_close(@out) token(bytecode.tk_and @out) token_number(((1 << width)-1) as int64 @out) return}
+        write(") and {(1 << width)-1}" @out) return
+    }
     let shift=64-(width as int64)
+    if out.stream {
+        token_close(@out) token(bytecode.tk_left_shift @out) token_number(shift @out)
+        token_space(@out) token_number(shift @out) token_close(@out) return
+    }
     write(") << {shift} {shift})" @out)
 }
 is_binary = (node:hir.AST input:Input):>bool => {
@@ -209,19 +324,27 @@ is_prefix = (node:hir.AST input:Input):>bool => {
     let function=hir.node_at(input.nodes node.func)
     return function is? hir.ExpressedIdentifier and function.name in? prefix
 }
+let open = (@out:Writer):>void => {if out.stream {token_open(@out)} else {write('(' @out)}}
+let close = (@out:Writer):>void => {if out.stream {token_close(@out)} else {write(')' @out)}}
+let space = (@out:Writer):>void => {if out.stream {token_space(@out)} else {write(' ' @out)}}
+# An operator between spaces (` + `, ` and `).
+let operator = (text:string @out:Writer):>void => {
+    if out.stream {token_space(@out) token(operator_kind(text) @out) token_space(@out) return}
+    write(' ' @out) write(text @out) write(' ' @out)
+}
 write_operand = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void => {
     let node=hir.node_at(input.nodes id)
     let parens=is_binary(node input) or node is? hir.Transmute|hir.ShortCircuit
-    if parens {write('(' @out)}
+    if parens {open(@out)}
     write_ast(id @scope input @state @out)
-    if parens {write(')' @out)}
+    if parens {close(@out)}
 }
 write_argument = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void => {
     let node=hir.node_at(input.nodes id)
     let parens=node is? hir.Transmute or node is? hir.Integer and node.value <? 0 or is_prefix(node input)
-    if parens {write('(' @out)}
+    if parens {open(@out)}
     write_ast(id @scope input @state @out)
-    if parens {write(')' @out)}
+    if parens {close(@out)}
 }
 # A call spelled by name: a declared function or an intrinsic that no local
 # shadows. Anything else calls through a function value.
@@ -239,9 +362,9 @@ write_call = (call:hir.FunctionCall @scope:Scope input:Input @state:State @out:W
         if call.pos_args.length =? 2 {
             let left=call.pos_args[0] let right=call.pos_args[1]
             if name in? ['__dewy_raw_lshift__' '__dewy_raw_rshift__'] {
-                write('(' @out) write_operand(left @scope input @state @out)
-                write(if name =? '__dewy_raw_lshift__' ' << ' else ' >> ' @out)
-                write_operand(right @scope input @state @out) write(')' @out) return
+                open(@out) write_operand(left @scope input @state @out)
+                operator(if name =? '__dewy_raw_lshift__' '<<' else '>>' @out)
+                write_operand(right @scope input @state @out) close(@out) return
             }
             let helper:string?=none
             if name in? unsigned and type isnt? none and type in? widths and type.startswith('u') {helper=unsigned[name]}
@@ -250,45 +373,55 @@ write_call = (call:hir.FunctionCall @scope:Scope input:Input @state:State @out:W
                 if not type.startswith('u') {helper='__signed_shr__'}
             }
             if helper isnt? none {
-                write(helper @out) write('(' @out) write_ast(left @scope input @state @out)
-                write(' ' @out) write_ast(right @scope input @state @out) write(')' @out) return
+                if out.stream {token_name(helper @out)} else {write(helper @out)}
+                open(@out) write_ast(left @scope input @state @out)
+                space(@out) write_ast(right @scope input @state @out) close(@out) return
             }
             if name in? binary {
                 if name in? wrapping {wrap_open(type @out)}
-                if name in? derived {write('not (' @out)}
+                if name in? derived {
+                    if out.stream {token(bytecode.tk_not @out) token_space(@out) token_open(@out)} else {write('not (' @out)}
+                }
                 write_operand(left @scope input @state @out)
-                write(' ' @out) write(if name in? derived derived[name] else binary[name] @out) write(' ' @out)
+                operator(if name in? derived derived[name] else binary[name] @out)
                 write_operand(right @scope input @state @out)
-                if name in? derived {write(')' @out)}
+                if name in? derived {close(@out)}
                 if name in? wrapping {wrap_close(type @out)}
                 return
             }
         }
         if call.pos_args.length =? 1 and name in? prefix {
-            wrap_open(type @out) write(prefix[name] @out)
-            if name =? '__not__' {write(' ' @out)}
+            wrap_open(type @out)
+            if out.stream {token(operator_kind(prefix[name]) @out)} else {write(prefix[name] @out)}
+            if name =? '__not__' {space(@out)}
             write_operand(call.pos_args[0] @scope input @state @out)
             wrap_close(type @out) return
         }
     }
     if function is? hir.ExpressedIdentifier {
         let direct=direct_call(call @scope input)
-        if not direct {write('(@' @out)}
-        write(function.name @out)
-        if not direct {write(')' @out)}
+        if out.stream {
+            if not direct {token_open(@out) token(bytecode.tk_at @out)}
+            token_name(function.name @out)
+            if not direct {token_close(@out)}
+        } else {
+            if not direct {write('(@' @out)}
+            write(function.name @out)
+            if not direct {write(')' @out)}
+        }
     } else {
         let parens=function isnt? hir.Block or function.scoped
-        if parens {write('(' @out)}
+        if parens {open(@out)}
         write_ast(call.func @scope input @state @out)
-        if parens {write(')' @out)}
+        if parens {close(@out)}
     }
-    write('(' @out)
+    open(@out)
     let first=true
     loop item in call.pos_args {
-        if not first {write(' ' @out)} first=false
+        if not first {space(@out)} first=false
         write_argument(item @scope input @state @out)
     }
-    write(')' @out)
+    close(@out)
 }
 
 # A statement list owns separators, but leaves its final line open. This
@@ -366,8 +499,13 @@ write_statements = (items:array<addr> @scope:Scope input:Input @state:State @out
         if node is? hir.Void and index <? count continue
         if not first {newline(@out)} first=false
         if scope.debug_source isnt? none {
-            let marker=debug.marker(hir.node_at(input.nodes id).loc scope.debug_source)
-            if marker isnt? none {write(marker @out) newline(@out)}
+            if out.stream {
+                let position=debug.position(hir.node_at(input.nodes id).loc scope.debug_source)
+                if position isnt? none {bytecode.push_marker(bytecode.Marker[position.path position.line position.column] @out.tokens)}
+            } else {
+                let marker=debug.marker(hir.node_at(input.nodes id).loc scope.debug_source)
+                if marker isnt? none {write(marker @out) newline(@out)}
+            }
         }
         write_ast(id @scope input @state @out)
         if node is? hir.Declare {scope.locals.add(node.name)}
@@ -376,32 +514,55 @@ write_statements = (items:array<addr> @scope:Scope input:Input @state:State @out
 write_flow_body = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void => {
     let node=hir.node_at(input.nodes id)
     if node is? hir.Block and node.scoped {write_ast(id @scope input @state @out) return}
-    write(r'{' @out) newline(@out) nest(@out)
+    brace(@out) newline(@out) nest(@out)
     write_ast(id @scope input @state @out)
-    unnest(@out) newline(@out) write(r'}' @out)
+    unnest(@out) newline(@out) unbrace(@out)
 }
+let brace = (@out:Writer):>void => {if out.stream {token(bytecode.tk_left_brace @out)} else {write(r'{' @out)}}
+let unbrace = (@out:Writer):>void => {if out.stream {token(bytecode.tk_right_brace @out)} else {write(r'}' @out)}}
+let keyword = (text:string kind:uint8 @out:Writer):>void => {if out.stream {token(kind @out) token_space(@out)} else {write(text @out)}}
 write_ast = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void => {
     if state.problem isnt? none return
     let node=hir.node_at(input.nodes id)
-    if node is? hir.Integer {write(integer_literal(node) @out) return}
-    if node is? hir.String {write(text_literal(node.content) @out) return}
-    if node is? hir.Bool {write(if node.value 'true' else 'false' @out) return}
-    if node is? hir.Void {write('void' @out) return}
+    if out.stream {
+        if node is? hir.Integer {token_integer(node.value @out) return}
+        if node is? hir.String {bytecode.push_text(bytecode.tk_string node.content @out.tokens) out.adjacent=true return}
+        if node is? hir.Bool {token_number(if node.value (-1) else 0 @out) return}
+        if node is? hir.Void {token(bytecode.tk_void @out) return}
+    } else {
+        if node is? hir.Integer {write(integer_literal(node) @out) return}
+        if node is? hir.String {write(text_literal(node.content) @out) return}
+        if node is? hir.Bool {write(if node.value 'true' else 'false' @out) return}
+        if node is? hir.Void {write('void' @out) return}
+    }
     if node is? hir.BasedString {
         if node.include_path isnt? none and include_path_literal(node.include_path) {
             let path=node.include_path
             let existing=state.includes.get(path)
-            if existing isnt? none {write(existing @out) return}
+            if existing isnt? none {
+                if out.stream {token_name(existing @out)} else {write(existing @out)}
+                return
+            }
             let name="__dewy_include_{state.includes.length+1}"
             state.includes[path]=name
-            write(name @out) return
+            if out.stream {state.pending_includes.push(Include[name node.content]) token_name(name @out)} else {write(name @out)}
+            return
         }
-        write(binary_literal(node.content) @out) return
+        if out.stream {bytecode.push_blob(node.content @out.tokens) out.adjacent=true} else {write(binary_literal(node.content) @out)}
+        return
     }
     if node is? hir.ExpressedIdentifier {
         let forwarded=scope.forwards.get(node.name)
-        if forwarded isnt? none {write(forwarded @out) return}
-        if types.node_at(input.types node.value_type) is? types.CallableType {write('@' @out)}
+        if forwarded isnt? none {
+            if out.stream {token_forward(forwarded @out)} else {write(forwarded @out)}
+            return
+        }
+        let callable=types.node_at(input.types node.value_type) is? types.CallableType
+        if out.stream {
+            if callable {token(bytecode.tk_at @out)}
+            token_name(node.name @out) return
+        }
+        if callable {write('@' @out)}
         write(node.name @out) return
     }
     if node is? hir.FunctionCall {write_call(node @scope input @state @out) return}
@@ -412,66 +573,92 @@ write_ast = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void =>
         let inner=hir.node_at(input.nodes node.expr)
         let indirect=inner is? hir.FunctionCall and not direct_call(inner @scope input)
         let parens=inner is? hir.Transmute or indirect
-        if parens {write('(' @out)} write_ast(node.expr @scope input @state @out)
-        if parens {write(')' @out)}
+        if parens {open(@out)} write_ast(node.expr @scope input @state @out)
+        if parens {close(@out)}
+        if out.stream {
+            token_space(@out) token(bytecode.tk_transmute @out) token_space(@out)
+            token_annotation(bytecode.tk_ident annotation(node.value_type input) @out) return
+        }
         write(' transmute ' @out) write(annotation(node.value_type input) @out) return
     }
     if node is? hir.Return {
-        write('return ' @out)
-        if node.item is? none {write('void' @out)} else {write_ast(node.item @scope input @state @out)}
+        keyword('return ' bytecode.tk_return @out)
+        if node.item is? none {
+            if out.stream {token(bytecode.tk_void @out)} else {write('void' @out)}
+        } else {write_ast(node.item @scope input @state @out)}
         return
     }
     if node is? hir.Break|hir.Continue {
         if node.label isnt? none or node.loop_levels not=? 0 {reject(node 'labeled loop exits require legalization' scope @state) return}
+        if out.stream {token(if node is? hir.Break bytecode.tk_break else bytecode.tk_continue @out) return}
         write(if node is? hir.Break 'break' else 'continue' @out) return
     }
     if node is? hir.Declare {
         if node.name in? scope.forwards return
         if hir.node_at(input.nodes node.expr) is? hir.FunctionLiteral {reject(node 'local functions require hoisting' scope @state) return}
         let type=if node.annotation is? none hir.node_at(input.nodes node.expr).value_type else node.annotation
-        write("{node.decltype} {node.name}:{annotation(type input)} = " @out)
+        if out.stream {
+            token(if node.decltype =? 'const' bytecode.tk_const else bytecode.tk_let @out) token_space(@out)
+            token_name(node.name @out)
+            token_annotation(bytecode.tk_type annotation(type input) @out)
+            token_space(@out) token(bytecode.tk_assign @out) token_space(@out)
+        } else {write("{node.decltype} {node.name}:{annotation(type input)} = " @out)}
         write_ast(node.expr @scope input @state @out) return
     }
     if node is? hir.Assign {
         let target=hir.node_at(input.nodes node.target)
         if target isnt? hir.ExpressedIdentifier {reject(node 'a projected assignment requires storage lowering' scope @state) return}
-        write("{target.name} {node.op} " @out) write_ast(node.value @scope input @state @out) return
+        if out.stream {
+            token_name(target.name @out) token_space(@out)
+            if node.op =? '=' {token(bytecode.tk_assign @out)}
+            else {
+                # `+=`: the tokenizer folds an operator followed by `=`.
+                let operator_text=if node.op.length >? 1 node.op[0..node.op.length-2] else node.op
+                bytecode.push(bytecode.tk_update_assign operator_kind(operator_text) as int64 @out.tokens)
+                out.adjacent=true
+            }
+            token_space(@out)
+        } else {write("{target.name} {node.op} " @out)}
+        write_ast(node.value @scope input @state @out) return
     }
     if node is? hir.ShortCircuit {
         let left_parens=hir.node_at(input.nodes node.left) is? hir.ShortCircuit
         let right_parens=hir.node_at(input.nodes node.right) is? hir.ShortCircuit
-        if left_parens {write('(' @out)} write_ast(node.left @scope input @state @out)
-        if left_parens {write(')' @out)}
-        write(" {node.op} " @out)
-        if right_parens {write('(' @out)} write_ast(node.right @scope input @state @out)
-        if right_parens {write(')' @out)} return
+        if left_parens {open(@out)} write_ast(node.left @scope input @state @out)
+        if left_parens {close(@out)}
+        if out.stream {operator(node.op @out)} else {write(" {node.op} " @out)}
+        if right_parens {open(@out)} write_ast(node.right @scope input @state @out)
+        if right_parens {close(@out)} return
     }
     if node is? hir.Block {
         if not node.scoped and node.items.length =? 1 {
             let item=hir.node_at(input.nodes node.items[0])
             let parens=item isnt? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.DictStore|hir.Declare|hir.Return|hir.Break|hir.Continue
-            if parens {write('(' @out)} write_ast(node.items[0] @scope input @state @out)
-            if parens {write(')' @out)} return
+            if parens {open(@out)} write_ast(node.items[0] @scope input @state @out)
+            if parens {close(@out)} return
         }
-        write(if node.scoped r'{' else '(' @out) newline(@out) nest(@out)
+        if node.scoped {brace(@out)} else {open(@out)}
+        newline(@out) nest(@out)
         if node.scoped {
             let child=scope
             write_statements(node.items @child input @state @out)
         } else {write_statements(node.items @scope input @state @out)}
-        unnest(@out) newline(@out) write(if node.scoped r'}' else ')' @out) return
+        unnest(@out) newline(@out)
+        if node.scoped {unbrace(@out)} else {close(@out)}
+        return
     }
     if node is? hir.Flow {
         let first=true
         loop id in node.arms {
             let arm=hir.node_at(input.nodes id)
             if arm isnt? hir.IfArm|hir.LoopArm {reject(arm 'a flow arm must be conditional or a loop' scope @state) return}
-            if not first {write(' else ' @out)} first=false
-            write(if arm is? hir.IfArm 'if ' else 'loop ' @out)
-            write_ast(arm.condition @scope input @state @out) write(' ' @out)
+            if not first {space(@out) keyword('else ' bytecode.tk_else @out)} first=false
+            if arm is? hir.IfArm {keyword('if ' bytecode.tk_if @out)} else {keyword('loop ' bytecode.tk_loop @out)}
+            write_ast(arm.condition @scope input @state @out) space(@out)
             write_flow_body(arm.body @scope input @state @out)
         }
         if node.default isnt? none {
-            if not first {write(' else ' @out)}
+            if not first {space(@out) keyword('else ' bytecode.tk_else @out)}
             write_flow_body(node.default @scope input @state @out)
         }
         return
@@ -508,29 +695,39 @@ write_function = (name:string function:hir.FunctionLiteral scope:Scope input:Inp
     let inner=Scope[scope.direct_functions set[] if function.source is? none scope.source else hir.source_at(function.source input.source_files)]
     inner.forwards=function_forwards(function input state)
     if scope.debug_locations and function.source isnt? none {inner.debug_locations=true inner.debug_source=debug.prepare(hir.source_at(function.source input.source_files))}
-    write("let {name} = (" @out)
+    if out.stream {
+        token(bytecode.tk_let @out) token_space(@out) token_name(name @out)
+        token_space(@out) token(bytecode.tk_assign @out) token_space(@out) token_open(@out)
+    } else {write("let {name} = (" @out)}
     let first=true
     loop arg in function.pos_or_kw_args {
         if arg is? hir.BoundParam {reject(function 'default parameters require legalization' scope @state) return}
-        if not first {write(' ' @out)} first=false
-        write("{arg.name}:{annotation(arg.value_type input)}" @out)
+        if not first {space(@out)} first=false
+        if out.stream {
+            token_name(arg.name @out)
+            token_annotation(bytecode.tk_type annotation(arg.value_type input) @out)
+        } else {write("{arg.name}:{annotation(arg.value_type input)}" @out)}
         inner.locals.add(arg.name)
     }
-    write("):>{annotation(function.rettype input)} => " @out)
+    if out.stream {
+        token_close(@out) token_annotation(bytecode.tk_fn_type annotation(function.rettype input) @out)
+        token_space(@out) token(bytecode.tk_fn_arrow @out) token_space(@out)
+    } else {write("):>{annotation(function.rettype input)} => " @out)}
     let body=hir.node_at(input.nodes function.body)
     # An early return in one branch does not close the other branch. Void
     # functions always have an explicit fallthrough return for the µDewy ABI.
     if types.is_primitive(types.node_at(input.types function.rettype) 'void') or types.is_primitive(types.node_at(input.types function.rettype) 'never') {
         let items:array<addr>=if body is? hir.Block body.items else [function.body]
-        write(r'{' @out) newline(@out) nest(@out)
+        brace(@out) newline(@out) nest(@out)
         write_statements(items @inner input @state @out)
         if items.length >? 0 {newline(@out)}
-        write('return void' @out) unnest(@out) newline(@out) write(r'}' @out)
+        if out.stream {token(bytecode.tk_return @out) token_space(@out) token(bytecode.tk_void @out)} else {write('return void' @out)}
+        unnest(@out) newline(@out) unbrace(@out)
     } else if contains_return(function.body input) {write_ast(function.body @inner input @state @out)}
     else {
-        write(r'{' @out) newline(@out) nest(@out) write('return ' @out)
+        brace(@out) newline(@out) nest(@out) keyword('return ' bytecode.tk_return @out)
         write_ast(function.body @inner input @state @out)
-        unnest(@out) newline(@out) write(r'}' @out)
+        unnest(@out) newline(@out) unbrace(@out)
     }
 }
 function_decl = (name:string function:hir.FunctionLiteral scope:Scope input:Input @state:State):>string => {

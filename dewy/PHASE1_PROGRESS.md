@@ -4393,3 +4393,52 @@ slot and `test_alloca_spills` crashed. Like x86-64, the backends now slide
 the spilled words below the new top of the stack. More than 255 (AArch64)
 or 127 (RISC-V) pending values is a compile error, not an out-of-range
 offset.
+
+## Step 4: the Dewy compilers write µDewy bytecode (2026-09-25)
+
+David approved step 4 after the sizing above. Both Dewy compilers now keep
+a module's bytecode (`<name>.ubc`) in the cache instead of its µDewy text.
+`DEWY_EMIT=udewy` keeps the text for reading, and is an interim knob (see
+the roadmap's note on build settings).
+
+**Native.** `emit.dewy`'s Writer has a stream mode. At every emission site
+the text spelling and the token spelling sit side by side, so the two
+routes cannot drift apart unnoticed. In stream mode it records the µDewy
+tokens the text would tokenize to:
+- `name(` fuses into one call token and `)(` into an expression call, only
+  when the text has no space between them;
+- update operators fold into one assignment token;
+- type annotations split at `<`;
+- `true`/`false` are number tokens;
+- `# @loc` markers become marker entries.
+
+`bytecode.dewy` parses those tokens with a port of `udewy/p0.py`
+(statements, precedence climbing, literal immediates, the parenthesis rule
+inside conditions, stable initializers, `__static_words__` and
+`__static_alloca__`, global initializer functions, reachability). It
+parses one top-level declaration at a time and writes the stream directly.
+`$include_bytes` globals go into a prologue that plays first, as their
+declarations do in text. Their ids are allocated at first use, which the
+players accept (ids map through tables).
+
+**Hosted.** `udewy.frontend.entry_point` takes the text from memory and a
+record path. The CLI compiles from memory, through the direct bridge or
+the parser, and records the backend calls of that compile as the `.ubc`.
+
+**Checks.**
+- An oracle compares the two routes: the native compiler writes both the
+  text and the stream, the text is parsed by the Python µDewy parser with
+  no source path, the stream is played, and the assemblies must be equal.
+  They are equal for hello world (x86-64 plain and debug, AArch64,
+  RISC-V) and for the compiler itself: 56 MB of assembly, from 10.7 MB of
+  bytecode against 23.8 MB of text.
+- A compiler built through the stream (gen3) is byte-identical to one built
+  through text (gen2).
+- `tests/python_misc/test_dewy_bytecode.py` covers five programs, plain and
+  debug, played on x86-64 and AArch64, and runs them. It also checks the
+  hosted artifact.
+
+**Timing.** Self-build with a direct-route compiler, while other work
+loaded the machine: emission 3.84 → 3.34 s (tokens, parse and encode
+together cost less than formatting text), the µDewy backend 5.26 → 3.38 s
+(replay instead of tokenize and parse), total 77.8 → 72.7 s.

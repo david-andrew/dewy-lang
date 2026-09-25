@@ -1,5 +1,6 @@
 from reporting import Error, SrcFile
 import p"emit.dewy" as emit
+import p"bytecode.dewy" as bytecode
 import p"../../semantic/hir.dewy" as hir
 import p"../../semantic/ty.dewy" as types
 
@@ -33,32 +34,80 @@ write_entrypoint = (program:Program functions:dict<string addr> scope:emit.Scope
         if function isnt? hir.FunctionLiteral return Error[title='entry function is not a function literal' srcfile=program.source]
         result=emit.annotation(function.rettype input)
     }
-    emit.write('let main = (' @out)
-    if program.argv_prologue isnt? none {
-        emit.write('__dewy_argc:int64 __dewy_argv:int64' @out)
-        inner.locals.add('__dewy_argc') inner.locals.add('__dewy_argv')
+    if out.stream {
+        emit.token(bytecode.tk_let @out) emit.token_space(@out) emit.token_name('main' @out)
+        emit.token_space(@out) emit.token(bytecode.tk_assign @out) emit.token_space(@out) emit.token_open(@out)
+        if program.argv_prologue isnt? none {
+            emit.token_name('__dewy_argc' @out) emit.token_annotation(bytecode.tk_type 'int64' @out) emit.token_space(@out)
+            emit.token_name('__dewy_argv' @out) emit.token_annotation(bytecode.tk_type 'int64' @out)
+        }
+        emit.token_close(@out) emit.token_annotation(bytecode.tk_fn_type result @out)
+        emit.token_space(@out) emit.token(bytecode.tk_fn_arrow @out) emit.token_space(@out) emit.token(bytecode.tk_left_brace @out)
+        emit.token_space(@out) emit.token_name(program.startup_symbol @out) emit.token_open(@out) emit.token_close(@out) emit.token_space(@out)
+    } else {
+        emit.write('let main = (' @out)
+        if program.argv_prologue isnt? none {emit.write('__dewy_argc:int64 __dewy_argv:int64' @out)}
+        emit.write("):>{result} => \{" @out) emit.newline(@out) emit.nest(@out)
+        emit.write("{program.startup_symbol}()" @out) emit.newline(@out)
     }
-    emit.write("):>{result} => \{" @out) emit.newline(@out) emit.nest(@out)
-    emit.write("{program.startup_symbol}()" @out) emit.newline(@out)
     if program.argv_prologue isnt? none {
+        inner.locals.add('__dewy_argc') inner.locals.add('__dewy_argv')
         emit.write_statements(program.argv_prologue @inner input @state @out)
         if program.argv_prologue.length >? 0 {emit.newline(@out)}
     }
-    if program.user_main_symbol is? none {emit.write('return void' @out)}
+    if program.user_main_symbol is? none {return_void(@out)}
     else {
-        if result not=? 'void' {emit.write('return ' @out)}
-        emit.write(program.user_main_symbol @out) emit.write('(' @out)
+        if result not=? 'void' {emit.keyword('return ' bytecode.tk_return @out)}
+        if out.stream {emit.token_name(program.user_main_symbol @out)} else {emit.write(program.user_main_symbol @out)}
+        emit.open(@out)
         if program.argv_value isnt? none {emit.write_argument(program.argv_value @inner input @state @out)}
-        emit.write(')' @out)
-        if result =? 'void' {emit.newline(@out) emit.write('return void' @out)}
+        emit.close(@out)
+        if result =? 'void' {emit.newline(@out) return_void(@out)}
     }
-    emit.unnest(@out) emit.newline(@out) emit.write('}' @out)
+    emit.unnest(@out) emit.newline(@out) emit.unbrace(@out)
     return none
+}
+let return_void = (@out:emit.Writer):>void => {
+    if out.stream {emit.token(bytecode.tk_return @out) emit.token_space(@out) emit.token(bytecode.tk_void @out)}
+    else {emit.write('return void' @out)}
 }
 
 # Publication is all-or-nothing: expression errors stay in State until this
 # boundary, which returns the diagnostic instead of partially emitted code.
 render = (program:Program input:emit.Input debug_locations:bool=false):>string|Error => {
+    let state=emit.State[]
+    let out=emit.Writer[]
+    let parser=bytecode.Parser[]
+    let problem=write_program(program input debug_locations @state @out @parser)
+    if problem isnt? none return problem
+    let directives:array<string>=[]
+    loop [path name] in state.includes {directives.push("$include_bytes(p\"{path}\") as {name}")}
+    let code=out.parts.join
+    if directives.length =? 0 return code
+    return directives.join('\n')+'\n'+code
+}
+# The program as µDewy bytecode (udewy/BYTECODE.md): the calls parsing the
+# rendered text would make on a backend, recorded without the text. `debug`
+# matches the µDewy compiler's debug information (locations, locals).
+let stream = (program:Program input:emit.Input debug:bool=false):>array<uint8>|Error => {
+    let state=emit.State[]
+    let out=emit.Writer[stream=true]
+    let parser=bytecode.Parser[debug=debug intrinsics=emit.intrinsics]
+    let problem=write_program(program input debug @state @out @parser)
+    if problem isnt? none return problem
+    return bytecode.finish(@parser)
+}
+# After each top-level declaration in stream mode: define the includes it
+# named, then parse its tokens.
+let flush = (@state:emit.State @out:emit.Writer @parser:bytecode.Parser):>void => {
+    if not out.stream return
+    loop include in state.pending_includes {bytecode.define_include(include.name include.bytes @parser)}
+    state.pending_includes.clear
+    bytecode.parse_top(out.tokens @parser)
+    bytecode.clear(@out.tokens)
+    if parser.problem isnt? none and state.problem is? none {state.problem=parser.problem}
+}
+let write_program = (program:Program input:emit.Input debug_locations:bool @state:emit.State @out:emit.Writer @parser:bytecode.Parser):>Error? => {
     if (program.argv_prologue is? none) not=? (program.argv_value is? none) return Error[title='command-line lowering must supply both a prologue and its argument value' srcfile=program.source]
     let functions:dict<string addr>=[]
     loop function in program.functions {
@@ -71,8 +120,6 @@ render = (program:Program input:emit.Input debug_locations:bool=false):>string|E
         direct.add('main') direct.add(program.startup_symbol)
     }
     let scope=emit.Scope[direct set[] program.source debug_locations=debug_locations]
-    let state=emit.State[]
-    let out=emit.Writer[]
     loop id in program.globals {
         let declaration=hir.node_at(input.nodes id)
         if declaration isnt? hir.Declare return Error[title='lowered global storage must be a declaration' srcfile=program.source]
@@ -82,26 +129,41 @@ render = (program:Program input:emit.Input debug_locations:bool=false):>string|E
         let global=hir.node_at(input.nodes id)
         if global is? hir.Declare {state.globals.add(global.name)}
         emit.write_ast(id @scope input @state @out) emit.newline(@out)
+        flush(@state @out @parser)
     }
     loop function in program.functions {
         let literal=hir.node_at(input.nodes function.literal)
         if literal isnt? hir.FunctionLiteral return Error[title='lowered function unit must contain a function literal' srcfile=program.source]
         emit.write_function(function.symbol literal scope input @state @out) emit.newline(@out)
+        flush(@state @out @parser)
     }
     if program.needs_startup {
         let startup=emit.Scope[direct set[] program.source]
-        emit.write("let {program.startup_symbol} = ():>void => \{" @out) emit.newline(@out) emit.nest(@out)
+        if out.stream {
+            emit.token(bytecode.tk_let @out) emit.token_space(@out) emit.token_name(program.startup_symbol @out)
+            emit.token_space(@out) emit.token(bytecode.tk_assign @out) emit.token_space(@out) emit.token_open(@out) emit.token_close(@out)
+            emit.token_annotation(bytecode.tk_fn_type 'void' @out) emit.token_space(@out) emit.token(bytecode.tk_fn_arrow @out)
+            emit.token_space(@out) emit.token(bytecode.tk_left_brace @out)
+        } else {emit.write("let {program.startup_symbol} = ():>void => \{" @out)}
+        emit.newline(@out) emit.nest(@out)
         emit.write_statements(program.startup_items @startup input @state @out)
         if program.startup_items.length >? 0 {emit.newline(@out)}
-        emit.write('return void' @out) emit.unnest(@out) emit.newline(@out) emit.write('}' @out) emit.newline(@out)
+        return_void(@out) emit.unnest(@out) emit.newline(@out) emit.unbrace(@out) emit.newline(@out)
+        flush(@state @out @parser)
         let problem=write_entrypoint(program functions scope input @state @out)
         if problem isnt? none return problem
         emit.newline(@out)
-    } else if 'main' not in? functions {emit.write(r'let main = ():>void => { return void }' @out) emit.newline(@out)}
-    if state.problem isnt? none return state.problem
-    let directives:array<string>=[]
-    loop [path name] in state.includes {directives.push("$include_bytes(p\"{path}\") as {name}")}
-    let code=out.parts.join
-    if directives.length =? 0 return code
-    return directives.join('\n')+'\n'+code
+        flush(@state @out @parser)
+    } else if 'main' not in? functions {
+        if out.stream {
+            emit.token(bytecode.tk_let @out) emit.token_space(@out) emit.token_name('main' @out)
+            emit.token_space(@out) emit.token(bytecode.tk_assign @out) emit.token_space(@out) emit.token_open(@out) emit.token_close(@out)
+            emit.token_annotation(bytecode.tk_fn_type 'void' @out) emit.token_space(@out) emit.token(bytecode.tk_fn_arrow @out)
+            emit.token_space(@out) emit.token(bytecode.tk_left_brace @out) emit.token_space(@out) return_void(@out)
+            emit.token_space(@out) emit.token(bytecode.tk_right_brace @out)
+        } else {emit.write(r'let main = ():>void => { return void }' @out)}
+        emit.newline(@out)
+        flush(@state @out @parser)
+    }
+    return state.problem
 }

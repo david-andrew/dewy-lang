@@ -73,20 +73,25 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
         printl("{compiled.analysis.notes.length} big integer representation decisions")
         return 0
     }
+    # The µDewy compiler reads bytecode (udewy/BYTECODE.md) by default; the
+    # text route stays available as DEWY_EMIT=udewy for reading the output.
+    let text=environment('DEWY_EMIT') =? 'udewy'
+    let debug=request.command =? 'debug'
     let emission_started=timing.start(request.timings)
-    let emitted=program.render(compiled.lowered.program compiled.lowered.input debug_locations=request.command =? 'debug')
+    let emitted:string|array<uint8>|Error=if text program.render(compiled.lowered.program compiled.lowered.input debug_locations=debug) else program.stream(compiled.lowered.program compiled.lowered.input debug=debug)
     timing.finish('emission' emission_started)
     if emitted is? Error return emitted
     $runtime_assert request.source isnt? none
-    let suffix=if request.command =? 'debug' '.debug.udewy' else if request.command =? 'test' '.test.udewy' else '.udewy'
+    let extension=if text '.udewy' else '.ubc'
+    let suffix=if debug ".debug{extension}" else if request.command =? 'test' ".test{extension}" else extension
     let source=cache.artifact(request.source cwd suffix)
     let error=platform.directories(p(source).parent.path)
     if error isnt? none return error
     let audit_path=cache.artifact(request.source cwd if request.command =? 'debug' '.debug.unsafe.json' else if request.command =? 'test' '.test.unsafe.json' else '.unsafe.json')
     let audited=p(audit_path).write_text(unsafe_audit.render(compiled.analysis.unsafe))
     if audited isnt? int64 return Error[title='cannot write unsafe assumption audit' message=audit_path]
-    let written=p(source).write_text(emitted)
-    if written isnt? int64 return Error[title='cannot write generated µDewy source' message=source]
+    let written=if emitted is? string p(source).write_text(emitted) else p(source).write_bytes(emitted)
+    if written isnt? int64 return Error[title='cannot write generated µDewy' message=source]
     let backend=platform.udewy(executable cwd)
     if backend is? Error return backend
     let arguments:array<string>=['--target' request.target]

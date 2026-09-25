@@ -1,0 +1,32 @@
+from reporting import Error
+import p"../../dewy/bootstrap/semantic/modules.dewy" as modules
+import p"../../dewy/bootstrap/semantic/prelude.dewy" as prelude
+import p"../../dewy/bootstrap/semantic/prelude_cache.dewy" as cache
+import p"../../dewy/bootstrap/backend/udewy/graph.dewy" as graph
+import p"../../dewy/bootstrap/backend/udewy/program.dewy" as program
+
+# Writes one program both ways: its µDewy text and the bytecode the native
+# compiler writes instead (tests/python_misc/test_dewy_bytecode.py checks the
+# two compile to the same assembly).
+# argv: source library prelude-cache text-output stream-output [debug]
+main=(argv:array<string>):>int64=>{
+    $runtime_assert argv.length >=? 6
+    let debug=argv.length >? 6 and argv[6] =? 'debug'
+    let files=prelude.files(argv[2] 'x86_64')
+    let engine=modules.Engine[library_roots=[argv[2]] prelude_files=files]
+    engine.prelude_cache=cache.Config[argv[0] argv[3] 'x86_64' [argv[2]] files]
+    engine.debug_names=debug
+    let entry=modules.load(argv[1] @engine)
+    if entry is? Error {entry.fail}
+    let compilation=graph.compile(entry @engine)
+    if compilation is? Error {compilation.fail}
+    let text=program.render(compilation.lowered.program compilation.lowered.input debug_locations=debug)
+    if text is? Error {text.fail}
+    let stream=program.stream(compilation.lowered.program compilation.lowered.input debug=debug)
+    if stream is? Error {stream.fail}
+    let wrote_text=p(argv[4]).write_text(text)
+    if wrote_text isnt? int64 return 2
+    let wrote_stream=p(argv[5]).write_bytes(stream)
+    if wrote_stream isnt? int64 return 2
+    return 0
+}

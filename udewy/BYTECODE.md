@@ -7,6 +7,16 @@ same call on a live backend, so a module can reach code generation without
 the same format: the Python recorder and player in `udewy/stream.py`, and
 the native ones in `udewy/bootstrap/stream.udewy`.
 
+The Dewy compilers write streams too, and both keep a module's bytecode
+(`<name>.ubc`) in the cache instead of its µDewy text by default
+(`DEWY_EMIT=udewy` keeps the text). The native compiler spells each
+declaration as µDewy tokens and parses them with a port of the µDewy parser
+(`dewy/bootstrap/backend/udewy/bytecode.dewy`). The hosted compiler records
+the backend calls of its own compile. Either stream compiles to exactly the
+assembly its text would, except for one case. With no `# @loc` marker yet, the
+text route's debug locations fall back to lines of the `.udewy` file itself,
+and a stream has no such file, so those statements get no location.
+
 A stream is only valid for the target it was recorded for: builtin constants
 such as syscall numbers are folded before the calls are made, and
 target-conditional imports are resolved by then.

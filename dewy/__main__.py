@@ -156,7 +156,6 @@ def _build_and_run(
             # TODO: for now wasm extra args are ignored
         )
         udewy_path.parent.mkdir(parents=True, exist_ok=True)
-        udewy_path.write_text(udewy_src)
         _write_unsafe_audit(udewy_path)
 
         # run the udewy compiler/executor
@@ -164,10 +163,10 @@ def _build_and_run(
             with timing.phase('backend' if compile_only else 'backend_and_run'):
                 generate = None if prepared is None else lambda backend: direct.compile_program(
                     prepared.program, prepared.root, backend)
-                return entry_point(udewy_path, program_args, options, generate=generate)
+                return _compile_udewy(udewy_path, udewy_src, program_args, options, generate)
         except Exception as e:
             print(f'Error: {e}')
-            recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{udewy_path}`)'])
+            recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{_udewy_artifact(udewy_path)}`)'])
             return 1
 
 
@@ -290,6 +289,25 @@ def _newest_mtime(*roots: Path, suffixes: tuple[str, ...]) -> float:
     return newest
 
 
+def _compile_udewy(udewy_path: Path, udewy_src: str, program_args: list[str], options: EntryPointOptions,
+                   generate=None) -> int:
+    """Hand generated µDewy to the µDewy compiler. By default it compiles from
+    memory and the cache keeps the module's bytecode (`<name>.ubc`, see
+    udewy/BYTECODE.md), as the native compiler writes it; DEWY_EMIT=udewy
+    keeps the text (`<name>.udewy`) instead, for reading."""
+    udewy_path.parent.mkdir(parents=True, exist_ok=True)
+    if os.environ.get('DEWY_EMIT') == 'udewy':
+        udewy_path.write_text(udewy_src)
+        return entry_point(udewy_path, program_args, options, generate=generate)
+    options.record = _udewy_artifact(udewy_path)
+    return entry_point(udewy_path, program_args, options, generate=generate, source=udewy_src)
+
+
+def _udewy_artifact(udewy_path: Path) -> Path:
+    """Where the generated µDewy of ``udewy_path``'s module is kept."""
+    return udewy_path if os.environ.get('DEWY_EMIT') == 'udewy' else udewy_path.with_suffix('.ubc')
+
+
 def _compiler_mtime() -> float:
     """When the compiler or the library last changed: anything built before it is stale."""
     return _newest_mtime(PROJECT_ROOT / 'dewy', PROJECT_ROOT / 'udewy', PROJECT_ROOT / 'library', suffixes=('.py', '.dewy'))
@@ -304,10 +322,10 @@ def _build_test_driver(target: BackendName) -> Path:
     if binary.is_file() and binary.stat().st_mtime >= sources_mtime:
         return binary
     udewy_path.parent.mkdir(parents=True, exist_ok=True)
-    udewy_path.write_text(codegen(SrcFile.from_path(TEST_DRIVER), target=target))
+    udewy_src = codegen(SrcFile.from_path(TEST_DRIVER), target=target)
     _write_unsafe_audit(udewy_path)
     with redirect_stdout(io.StringIO()):
-        status = entry_point(udewy_path, [], EntryPointOptions(compile_only=True, target=target, debug_info=False))
+        status = _compile_udewy(udewy_path, udewy_src, [], EntryPointOptions(compile_only=True, target=target, debug_info=False))
     if status != 0 or not binary.is_file():
         raise RuntimeError(f'could not build the test driver ({TEST_DRIVER})')
     return binary
@@ -360,13 +378,12 @@ def test(argv: list[str]) -> int:
             recorder.record(failure_log.error_text(failure))
             return TEST_NOT_BUILT
         udewy_path.parent.mkdir(parents=True, exist_ok=True)
-        udewy_path.write_text(udewy_src)
         _write_unsafe_audit(udewy_path)
         try:
-            return entry_point(udewy_path, program_args, EntryPointOptions(target=target, debug_info=False))
+            return _compile_udewy(udewy_path, udewy_src, program_args, EntryPointOptions(target=target, debug_info=False))
         except Exception as e:
             print(f'Error: {e}', file=sys.stderr)
-            recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{udewy_path}`)'])
+            recorder.record(f'Error: {e}', notes=[f'stage: µDewy (output at `{_udewy_artifact(udewy_path)}`)'])
             return TEST_NOT_BUILT
 
 

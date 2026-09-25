@@ -11,7 +11,10 @@ prepare = (source:SrcFile):>Source => {
     }
     return Source[source starts]
 }
-marker = (span:Span source:Source):>string? => {
+Position:type = const [path:string line:int64 column:int64]
+# A statement's source position, as its `# @loc path:line:column` marker
+# spells it.
+position = (span:Span source:Source):>Position? => {
     if span.start =? 0 and span.stop =? 0 or span.stop >? source.source.body.length return none
     # Newlines cannot be represented inside µDewy's line-comment marker.
     if source.source.path.contains('\n') or source.source.path.contains('\r') return none
@@ -25,5 +28,10 @@ marker = (span:Span source:Source):>string? => {
     $runtime_assert low >? 0 and low <=? source.starts.length
     let line=low-1
     let column=span.start-source.starts[line]+1
-    return "# @loc {source.source.path}:{source.source.first_row+line}:{column}"
+    return Position[source.source.path (source.source.first_row+line) as int64 column as int64]
+}
+marker = (span:Span source:Source):>string? => {
+    let found=position(span source)
+    if found is? none return none
+    return "# @loc {found.path}:{found.line}:{found.column}"
 }

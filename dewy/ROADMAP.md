@@ -413,7 +413,8 @@ object writers because it is the host target: ordinary builds already pass
 **Build settings belong to the language (David, 2026-09-25).** The knobs
 this work added are environment variables for now: `UDEWY_OBJECT=as` (the
 native µDewy writes objects directly by default; Python keeps `as`),
-`UDEWY_JOBS` and `UDEWY_RECORD`. Compilation settings should move into the
+`UDEWY_JOBS`, `UDEWY_RECORD`, and `DEWY_EMIT=udewy` (both Dewy compilers
+keep µDewy bytecode by default; this keeps the text). Compilation settings should move into the
 language instead: small ones as source meta tags in the style of
 `$supported_targets` and `if $target =? ...`, and generally a Jai-style
 build configuration file written in Dewy that sets the compiler's options,

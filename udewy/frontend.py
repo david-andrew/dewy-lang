@@ -16,10 +16,12 @@ class EntryPointOptions:
     split_wasm: bool = False
     serve_wasm: bool = False
     debug_info: bool = True
+    # Also write the module's bytecode (udewy/BYTECODE.md) here.
+    record: Path | None = None
 
 @compiler_allocation_scope()
 def entry_point(input_file: Path, script_args: list[str], options: EntryPointOptions|None=None,
-                *, generate: Callable[[Backend], str] | None = None) -> int:
+                *, generate: Callable[[Backend], str] | None = None, source: str | None = None) -> int:
     """
     Entry point for the udewy compiler.
 
@@ -29,6 +31,7 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
         options: Options for the compiler
         generate: Optional internal backend producer for an already lowered
             module. Loading still supplies its link artifacts and source inputs.
+        source: The input's text, when it is not (or not yet) on disk.
 
     Returns:
         Exit code of the program or 0 if in compile-only mode
@@ -50,11 +53,11 @@ def entry_point(input_file: Path, script_args: list[str], options: EntryPointOpt
         link_artifacts = stream.link_artifacts
         imported_sources = [str(path) for path in stream.imported_sources]
     else:
-        loaded = t0.load_program(input_file, target_backend=options.target)
+        loaded = t0.load_program(input_file, target_backend=options.target, source=source)
         link_artifacts = loaded.link_artifacts
         imported_sources = loaded.imported_sources
         # UDEWY_RECORD=path also writes the module's bytecode to `path`.
-        record_path = os.environ.get('UDEWY_RECORD')
+        record_path = options.record or os.environ.get('UDEWY_RECORD')
         target = Recorder(backend, link_artifacts) if record_path else backend
         target.set_imported_sources([Path(path) for path in loaded.imported_sources])
         if generate is None:
