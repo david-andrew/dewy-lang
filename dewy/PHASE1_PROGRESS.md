@@ -4639,3 +4639,37 @@ Self-build, cold, two rounds each: `phase1-q` 68.5 s / 152.1 GB, `phase1-s`
 
 Gate: 4,743 passed. A 3-generation bootstrap from `phase1-s` gives identical
 generations (`phase1-t`), and `check_native` passes on that pair.
+
+## Prelude validation reuse; lazy initialization requirements (2026-09-25)
+
+The saved prelude validation (`proofs.Prelude`) was never reused, in cold
+or warm builds. `lifecycle_runtime.prepare` ran over every module, prelude
+included, after the prelude's decisions were saved. It rewrote prelude
+bodies, which is an edit inside the saved graph, and `reusable` then
+discarded the saved decisions. So every compilation, even of a hello-world
+program, bounds-checked the whole prelude again (about 3 s, mostly
+`reporting.layout`). Now:
+- The prelude stage runs the lifecycle rewrite over the prelude before
+  analyzing and caching it (`modules.dewy`).
+- Full validation passes `prepared=` (the saved prelude's module count).
+  Lifecycle collects hooks from every module, but rewrites only the bodies
+  of later modules and only reads settled items.
+- Generated lifecycle helpers join the last (entry) module instead of the
+  first, which is a prelude module.
+A warm hello-world compile went from 6.0 s to 2.9 s (validation 3.5 s →
+0.27 s). A cold one went from 9.9 s to 7.1 s, both measured under load.
+
+The initialization analysis recorded every requirement into every
+enclosing call frame, on each cache hit as well (`record_requirements`, 3 %
+of the self-build's samples). A nested call starts from its caller's
+initialized set, so an inner frame's available bindings contain an outer
+frame's. Requirements are now recorded in the innermost frame and merged
+into the parent once, when the frame closes. A cached call drops the
+frame's own id from the calls it assumed.
+
+Self-build, cold, two rounds: `phase1-t` 53.2 s → 50.2 s, 90.9 → 87.7 GB
+allocated. Initialization and reachability 2.5 s → 1.2 s; validation
+16.2 s → 14.6 s. Generations 2 and 3 are identical.
+
+Gate: 4,743 passed. A 3-generation bootstrap from `phase1-t` gives identical
+generations (`phase1-u`), and `check_native` passes on that pair.

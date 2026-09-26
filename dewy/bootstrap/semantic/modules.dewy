@@ -20,6 +20,7 @@ import p"module_state.dewy" as state
 import p"prelude_cache.dewy" as cache
 import p"validation_state.dewy" as proofs
 import p"validation_analysis.dewy" as analysis
+import p"lifecycle_runtime.dewy" as lifecycle_runtime
 
 doc"""
 File-relative source modules, corresponding to semantic/modules.py.
@@ -273,6 +274,14 @@ ensure_prelude = (@engine:Engine):>Error? => {
     if cached isnt? none {
         let word=types.primitive('int64' @engine.session.types)
         let analysis_started=timing.start(engine.timings)
+        # Rewrite prelude lifecycle operations before analyzing and caching,
+        # as full validation does, so the cached graph needs no later edit.
+        if engine.modules.length >? 0 {
+            let prelude_roots:array<addr>=[]
+            loop module in engine.modules {prelude_roots.push(module.root)}
+            let lifecycle_error=lifecycle_runtime.prepare(prelude_roots sources.srcfile(engine.modules[0].context engine.session) @engine.session)
+            if lifecycle_error isnt? none return lifecycle_error
+        }
         let decisions=analysis.analyze(word engine.modules engine.prelude_bindings engine.session timings=engine.timings)
         timing.finish('prelude_analysis' analysis_started)
         if decisions is? Error return decisions

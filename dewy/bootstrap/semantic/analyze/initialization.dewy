@@ -39,16 +39,31 @@ Checker:type = [
     problem:Error?=none
 ]
 
+# Requirements are recorded in the innermost frame only and merged into the
+# enclosing frame when a frame closes (`close_frame`). A nested call starts
+# from its caller's initialized bindings, so an inner frame's `available`
+# contains every outer one's: the inner filter keeps whatever an outer frame
+# would. Merging once per frame avoids re-adding every cached requirement to
+# every enclosing frame on each cache hit. `assumed_calls` holds every call
+# assumed while the frame was open; `close_frame` drops the frame's own.
 # Update each frame in place rather than copying it out and back, which
 # would detach (copy) every set for one insertion.
 record_frame_requirements = (@frame:CheckFrame required:set<addr> assumed:set<addr>):>void => {
     loop id in required { if dense.contains(frame.available id) { frame.required.add(id) } }
-    loop id in assumed { if id not=? frame.function_id { frame.assumed_calls.add(id) } }
+    loop id in assumed { frame.assumed_calls.add(id) }
 }
 record_requirements = (required:set<addr> assumed:set<addr> @checker:Checker):>void => {
-    loop i in 0.. and i <? checker.frames.length {
-        record_frame_requirements(@checker.frames[i] required assumed)
-    }
+    let last=checker.frames.length
+    if last =? 0 return void
+    last-=1
+    record_frame_requirements(@checker.frames[last] required assumed)
+}
+# Merge a closed frame's requirements into the frame that encloses it.
+close_frame = (frame:CheckFrame @checker:Checker):>void => {
+    let last=checker.frames.length
+    if last =? 0 return void
+    last-=1
+    record_frame_requirements(@checker.frames[last] frame.required frame.assumed_calls)
 }
 # The common case is one required binding per identifier read: record it
 # without building a one-element set for every read.
@@ -56,9 +71,10 @@ record_frame_requirement = (@frame:CheckFrame id:addr):>void => {
     if dense.contains(frame.available id) { frame.required.add(id) }
 }
 record_requirement = (id:addr @checker:Checker):>void => {
-    loop i in 0.. and i <? checker.frames.length {
-        record_frame_requirement(@checker.frames[i] id)
-    }
+    let last=checker.frames.length
+    if last =? 0 return void
+    last-=1
+    record_frame_requirement(@checker.frames[last] id)
 }
 member_key = (id:addr nodes:array<hir.AST>):>MemberRoute | none => {
     let current = id
@@ -536,9 +552,12 @@ check_function = (id:addr initialized:dense.Set arguments:array<addr> keywords:d
     checker.srcfile=source
     $runtime_assert checker.frames.length >? 0
     let frame = checker.frames.pop
+    close_frame(frame @checker)
     if checker.problem is? none {
+        let assumed=frame.assumed_calls
+        assumed.pop(id default=id);
         let checked=checker.checked.get(key [])
-        checked.push(CheckedCall[frame.required frame.assumed_calls])
+        checked.push(CheckedCall[frame.required assumed])
         checker.checked[key]=checked
     }
 }

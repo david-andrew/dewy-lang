@@ -2084,15 +2084,20 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     plan.function_source=previous_function_source
     plan.result_type=previous_result
 }
-prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? => {
+# `prepared` leading roots were already rewritten (the prelude, before its
+# validation was cached). Their hooks still apply everywhere, but their
+# bodies are not rewritten again: doing so would edit the cached graph.
+prepare = (roots:array<addr> source:SrcFile @session:contexts.Session prepared:addr=0):>Error? => {
     let plan=Plan[source=source]
     # Hooks are hoisted module declarations. Unannotated programs need only
     # this small inventory scan, not another traversal of every function body.
     let items:array<addr>=[]
-    loop root in roots {
-        let block=hir.node_at(session.hir root)
+    let settled:addr=0
+    loop index in 0.. and index <? roots.length {
+        let block=hir.node_at(session.hir roots[index])
         $runtime_assert block is? hir.Block
         loop item in block.items {items.push(item)}
+        if index <? prepared {settled=items.length}
     }
     loop id in items {
         let node=hir.node_at(session.hir id)
@@ -2115,47 +2120,61 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
     }
     if plan.hooks.length =? 0 return none
     let iteration_seen:set<addr>=set[]
-    loop root in roots {prepare_iterations(root @iteration_seen @plan @session)}
+    loop index in 0.. and index <? roots.length {
+        if index >=? prepared {prepare_iterations(roots[index] @iteration_seen @plan @session)}
+    }
     # Before rewriting bodies, summarize calls which may change a selected
     # resource-array receiver. This includes transitive captured/global writes.
     let receivers:set<addr>=set[]
-    let pending=items
     let visited:set<addr>=set[]
-    loop pending.length >? 0 {
-        let id=pending.pop
-        if id in? visited {continue}
-        visited.add(id)
-        let node=hir.node_at(session.hir id)
-        if node is? hir.ArrayMethod and node.name =? 'truncate' and resource(hir.node_at(session.hir node.array).value_type session.types) isnt? none {
-            let root=receiver_root(node.array session.hir)
-            if root isnt? none {receivers.add(root)}
+    # Settled items are scanned second and only read.
+    loop phase in 0..1 {
+        let rewritable=phase =? 0
+        let pending:array<addr>=[]
+        let first=if rewritable settled else 0
+        let stop=if rewritable items.length else settled
+        let index=first
+        loop index <? stop {
+            $runtime_assert index <? items.length
+            pending.push(items[index])
+            index+=1
         }
-        if node is? hir.MemberAssign|hir.IndexAssign and resource(hir.node_at(session.hir node.target).value_type session.types) isnt? none {
-            let root=receiver_root(node.target session.hir)
-            if root isnt? none {receivers.add(root)}
-        }
-        if node is? hir.MemberAccess|hir.Index and resource(node.value_type session.types) isnt? none {
-            let root=receiver_root(id session.hir)
-            if root isnt? none {receivers.add(root)}
-        }
-        if node is? hir.Return and node.item isnt? none and resource(hir.node_at(session.hir node.item).value_type session.types) isnt? none {
-            let root=receiver_root(node.item session.hir)
-            if root isnt? none {receivers.add(root)}
-        }
-        if node is? hir.DictStore|hir.DictRemove|hir.DictLookup {
-            let values=node.values
-            if values isnt? none and resource(hir.node_at(session.hir values).value_type session.types) isnt? none {
-                let root=receiver_root(node.keys session.hir)
+        loop pending.length >? 0 {
+            let id=pending.pop
+            if id in? visited {continue}
+            visited.add(id)
+            let node=hir.node_at(session.hir id)
+            if node is? hir.ArrayMethod and node.name =? 'truncate' and resource(hir.node_at(session.hir node.array).value_type session.types) isnt? none {
+                let root=receiver_root(node.array session.hir)
                 if root isnt? none {receivers.add(root)}
-                if node is? hir.DictLookup {
-                    # Synthesized copies may compact this dictionary. Keep
-                    # membership proof, but recompute its physical position.
-                    node.position=none node.static_position=none
-                    store(id node @session)
+            }
+            if node is? hir.MemberAssign|hir.IndexAssign and resource(hir.node_at(session.hir node.target).value_type session.types) isnt? none {
+                let root=receiver_root(node.target session.hir)
+                if root isnt? none {receivers.add(root)}
+            }
+            if node is? hir.MemberAccess|hir.Index and resource(node.value_type session.types) isnt? none {
+                let root=receiver_root(id session.hir)
+                if root isnt? none {receivers.add(root)}
+            }
+            if node is? hir.Return and node.item isnt? none and resource(hir.node_at(session.hir node.item).value_type session.types) isnt? none {
+                let root=receiver_root(node.item session.hir)
+                if root isnt? none {receivers.add(root)}
+            }
+            if node is? hir.DictStore|hir.DictRemove|hir.DictLookup {
+                let values=node.values
+                if values isnt? none and resource(hir.node_at(session.hir values).value_type session.types) isnt? none {
+                    let root=receiver_root(node.keys session.hir)
+                    if root isnt? none {receivers.add(root)}
+                    if node is? hir.DictLookup and rewritable {
+                        # Synthesized copies may compact this dictionary. Keep
+                        # membership proof, but recompute its physical position.
+                        node.position=none node.static_position=none
+                        store(id node @session)
+                    }
                 }
             }
+            hir.push_children(node @pending)
         }
-        hir.push_children(node @pending)
     }
     if receivers.length >? 0 {
         let empty=types.primitive('void' @session.types)
@@ -2163,8 +2182,11 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
         plan.argument_writes=effects.analyze_global_writes(joined session.hir receivers session.registry)
         plan.readonly_arguments=effects.read_only_places(joined session.hir session.types)
     }
-    loop root in roots {
-        let block=hir.node_at(session.hir root)
+    let next=prepared
+    loop next <? roots.length {
+        let index=next
+        next+=1
+        let block=hir.node_at(session.hir roots[index])
         $runtime_assert block is? hir.Block
         loop item in block.items {
             let node=hir.node_at(session.hir item)
@@ -2173,13 +2195,17 @@ prepare = (roots:array<addr> source:SrcFile @session:contexts.Session):>Error? =
             if plan.problem isnt? none return plan.problem
         }
     }
+    # Generated helpers join the last module (the entry), not a prelude
+    # module: an edit inside the prelude's checked graph would discard its
+    # cached validation on every compilation.
     if plan.generated.length >? 0 {
         $runtime_assert roots.length >? 0
-        let root=hir.node_at(session.hir roots[0])
+        let last=roots[roots.length-1]
+        let root=hir.node_at(session.hir last)
         $runtime_assert root is? hir.Block
         let block:hir.Block=root
         loop declaration in plan.generated {block.items.push(declaration)}
-        store(roots[0] block @session)
+        store(last block @session)
     }
     return none
 }

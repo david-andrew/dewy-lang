@@ -88,7 +88,12 @@ validate = (@engine:modules.Engine):>Result|Error => {
         }
         timing.finish('validation.local_places' places_started)
         let lifecycle_started=timing.start(engine.timings)
-        ownership_error=lifecycle_runtime.prepare(roots source @engine.session)
+        # A saved prelude validation already covers the prelude's rewritten
+        # bodies (see `modules.prepare_prelude`); rewriting them again would
+        # edit the cached graph and discard it.
+        let settled=engine.prelude_validation
+        let prepared:addr=if settled is? none 0 else settled.roots.length
+        ownership_error=lifecycle_runtime.prepare(roots source @engine.session prepared=prepared)
         timing.finish('validation.lifecycle' lifecycle_started)
     }
     let decisions=analyze_modules(word engine)
