@@ -550,3 +550,177 @@ Implementation order: (1) runtime foundation: arena chunks in
 (2) `Arena` in the prelude and the store-owner rule; (3) the directive in
 both compilers with copy notes and the `$explicit_copies` policy; (4) the
 bounds checker as first customer, measured with `--timings`.
+
+## Equality of arrays and records — proposal (2026-09-26)
+
+**Problem.** The reference leaves container equality provisional, and both
+compilers reject `=?` on sets and dictionaries. On arrays and records they
+accept it and answer something no one intended:
+
+```dewy
+let a:array<int64>=[1 2 3]
+let b:array<int64>=[1 2 3]
+let c=a
+a =? a            # hosted false, native true
+a =? b            # false in both
+a =? c            # hosted false, native true (the same shared handle)
+P[1 'x'] =? P[1 'x']   # false in both
+```
+
+Native compares handles, which leaks copy-on-write sharing into program
+meaning; hosted compares something else. Neither is value semantics.
+The native compiler's own sources hit this once: `t2.rewrite_child`
+compared two child arrays with `=?` (now an element-wise helper).
+
+**Proposal.** `=?` on arrays and records is value equality, the way
+Python's `==` treats lists and dataclasses. Arrays are equal when they
+have the same length and their elements are pairwise `=?`. Records are
+equal when their fields are pairwise `=?`. Both are defined only when the
+elements or fields support `=?` themselves, and `not =?` is its negation.
+Two records of different branded types are unequal. Strings keep their
+current meaning. Sets and dictionaries stay rejected until their own
+decision; if accepted later, they would be order-insensitive, like
+Python's.
+
+**Until then.** Reject `=?` and `not =?` on arrays and records in both
+compilers, with the same "provisional" diagnostic that sets and
+dictionaries get. Today both compilers answer these comparisons silently
+and differently, and a rejection is better than that. This removes an
+accepted program form, so it waits for your OK.
+
+**Cost.** This needs one generated comparison helper per element or record
+layout, which is cheap. A handle-equality fast path (the same handle
+means equal) stays sound under value semantics, since values are
+immutable through a shared handle.
+
+## Scoped raw storage access and bulk byte reads — proposal (2026-09-26)
+
+**Problem.** Library I/O gets storage addresses by raw exposure, as in
+`__load_i64__(bytes)` in `_write_bytes_at`. The compiler cannot see where
+a raw pointer goes, so exposure *pins* the array or string: its storage
+is never released. Until 2026-09-26 it also switched off cleanup for every
+local of the enclosing function. Three consequences:
+
+- A NUL-terminated path used to leak once per file operation. A compile
+  opens about 20 files; the path is now copied into a PATH_MAX frame
+  buffer instead (`_c_path_into`).
+- `write_bytes`/`write_text` pin every buffer they write. A compiler
+  emitting a large artifact keeps that whole buffer until exit.
+- A bulk read cannot fill an array's storage directly, so
+  `_read_bytes_at` pushes one byte at a time. That is about half of a
+  warm compile's cache restore. This is the bulk-read API you okayed.
+
+**Proposal.** Add a scoped raw access with a lifetime the compiler can
+check. A block borrows a container's storage as an address for its
+duration:
+
+```dewy
+$raw(bytes) as data {                 # read-only: `data` is the element address
+    written = __syscall3__(1 fd data bytes.length)
+}
+$raw(@contents reserve=size) as data {   # writable, with `size` more bytes reserved
+    let count = __syscall3__(0 fd data + contents.length size)
+    contents.set_length(contents.length + count)   # checked: count <= reserved
+}
+```
+
+Inside the block the container is lent to `data`. It cannot be read,
+written or moved through its name, except for the explicit
+`set_length`, which is bounds-checked against what was reserved. The
+address cannot be stored or returned. The analysis already has these
+proofs for views (`scoped_views`, `view_regions`). After the block the
+container is ordinary again, so nothing is pinned and nothing leaks.
+Exposing storage without `$raw` keeps today's pinning rule.
+
+**Library result.** Reads become
+`read(fd, data + length, reserved)` into reserved capacity, and writes
+become one `write` over the borrowed address. `_c_path_into` stays the
+pattern for small fixed-size buffers.
+
+**Needs your decision:** the spelling (`$raw` as a meta directive,
+matching `$allocator(@a) {...}`) and whether `set_length` should instead
+be the block's result (`$raw(...) as data => count`). Until then the
+byte-by-byte read stays. Since the prelude cache is going away, this
+matters more for writes and general I/O than for the cache.
+
+## Juxtaposition narrowing — proposal only (2026-09-26)
+
+Nothing here is implemented. ROADMAP 1.4 item 1 stays as decided.
+
+**Where the cost is.** Both parsers insert a juxtaposition only between
+touching atoms, and a token-pair blacklist filters its options
+(`t2.jux_options`). What remains undecided takes one of two forms:
+
+- A `BinOp` whose operator is still {call, index, multiply}, e.g. `f(x)`
+  or `f(x)+1`. The tree shape is already fixed. The native checker picks
+  the operation once from the left operand's type; this is cheap.
+- An `Ambiguous` node holding whole alternative chains. The parser makes
+  one when an operator whose precedence falls between call and multiply
+  sits next to an undecided juxtaposition: `^`, backtick, `~`/`no`, `?`,
+  type-parameter or ellipsis juxtaposition, or a second multi-option
+  juxtaposition. Readings multiply across the chain (a warning fires
+  above 50), every precedence query merges option powers, and the checker
+  checks every candidate. Native checks N+1 times with a checkpoint and
+  restore; hosted forks a whole context per candidate. `sin(x)^2` and
+  `g(1)2` both take this path.
+
+No measurement isolates this cost. The "~18k lines/s" figure in ROADMAP
+lever 6 has no recorded source. PHASE0_MEASUREMENTS attributes most
+frontend time to allocation and copying, and parsing is now about 13% of a
+self-build.
+
+**Step 0: measure.** Count `Ambiguous` nodes and time `checking.ambiguous`
+on the compiler's own sources (a `--timings` sub-phase). Proceed only if
+the number is material.
+
+**Proposal: structure from tokens, operation from types.** Let the left
+token category alone choose the juxtaposition's precedence, so the parser
+always builds a single tree:
+
+| left of the juxtaposition | precedence |
+|---|---|
+| number literal (`2x`, `2(x+1)`) | multiply: `2x^2` is `2*(x^2)` |
+| identifier, group, call or index result | call/index: `f(x)^2` is `(f(x))^2` |
+
+The checker still picks the operation from the left operand's type, as
+native already does: a callable calls, a container indexes, a number
+multiplies. It is an error only when the operand's type would have chosen
+the other precedence *and* an operator between the two levels is
+adjacent. The diagnostic prescribes `*`:
+
+```dewy
+2x^2          # 2*(x^2), unchanged
+sin(x)^2      # (sin(x))^2, unchanged
+f(x)          # call, unchanged
+printl"hi"    # call, unchanged
+(x+1)5        # multiply, unchanged (nothing adjacent)
+g(1)2         # unchanged: g(1), then its result's type decides
+a(x)^2        # a:number -> error: write `a*x^2` or `(a*x)^2`
+(x+1)5^2      # error: write `(x+1)*5^2`
+```
+
+**What changes.**
+- `Ambiguous` never comes from juxtaposition, and each juxtaposition
+  token has a single binding power.
+- The callable-or-number union error still applies.
+- Two current forms become errors with a mechanical fix: a *variable*
+  number juxtaposed before a group that is then raised or postfixed
+  (`a(x)^2`), and a group times a number that is then raised
+  (`(x+1)5^2`). Literal coefficients (`2x^2`, `3(x+1)^2`) are
+  unaffected.
+- `tests/fixtures/juxtaposition_precedence.dewy` changes for
+  `(x+1)5^2`; `(square)2^2` keeps the call reading.
+- Checker helpers that match `QJuxtapose` options (hosted `check.py`,
+  native `loop_syntax`, `test_syntax`, `binary_literals`) are unaffected
+  (the options stay; only the precedence is fixed).
+
+**Alternative, if the errors above are unwanted.** Keep today's language
+and remove the checker's repeated work instead. Resolve an `Ambiguous`
+node by checking its shared left operand once and choosing the candidate
+from that type (a callable or container selects the call-precedence tree,
+a number the multiply tree), without checkpointing. This only moves cost
+out of the checker; the parser still builds every chain.
+
+**Your decision:** whether the two new errors are acceptable. They buy a
+parser with no juxtaposition forks. If they are not, take the
+alternative. Either way, step 0 first.

@@ -40,6 +40,7 @@ import p"native_shared_records.dewy" as shared_records
 import p"native_literal_union_joins.dewy" as literal_union_joins
 import p"native_cached_record_fields.dewy" as cached_record_fields
 import p"native_record_unions.dewy" as record_unions
+import p"native_argument_temporaries.dewy" as argument_temporaries
 import p"native_power_operator.dewy" as power_operator
 import p"native_iterator_formulas.dewy" as iterator_formulas
 import p"native_unpacking_targets.dewy" as unpacking_targets
@@ -181,5 +182,7 @@ let main=():>int64=>{
     if cached_record_fields.main() not=?42 return 59
     printl('Checking record unions')
     if record_unions.main() not=?42 return 60
+    printl('Checking argument temporaries')
+    if argument_temporaries.main() not=?42 return 61
     return 42
 }

@@ -4229,7 +4229,9 @@ iterator = (id:addr env:Environment @guards:array<addr> @prelude:array<addr> @se
     if value is? hir.Range and value.step_pair is? none and value.left isnt? none and value.right isnt? none and (value.bounds is? none or value.bounds.startswith('[')) {
         if constant_integer(value.left session) isnt? none and constant_integer(value.right session) is? none {
             runtime_end = value.right
-            if value.bounds isnt? none and value.bounds.endswith(']') { end_comparison = '<=?' }
+            # A bare `a..b` is inclusive, like `[a..b]`; only `[a..b)` excludes.
+            let bounds = if value.bounds is? none '[]' else value.bounds
+            if bounds.endswith(']') { end_comparison = '<=?' }
             iterable = put(hir.Range[value.loc value.value_type '[]' none value.left none] @session)
             value = node_at(iterable session)
         }

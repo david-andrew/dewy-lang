@@ -739,7 +739,7 @@ class _OptionalLowering:
         loc: Span,
         *,
         prepared: bool = True,
-        move: bool = False,
+        move: bool | str = False,
         inline: bool = False,
     ) -> list[hir.AST]:
         """Copy a whole union cell, deep-copying an active aggregate member.
@@ -809,7 +809,8 @@ class _OptionalLowering:
             else:
                 body = self._union_aggregate_copy_into(
                     dest, self._union_source_pointer(source, loc), member, slots.get(index), loc,
-                    move=move and isinstance(member, ty.ObjectType),
+                    move=bool(move) and isinstance(member, ty.ObjectType),
+                    take=move is True,
                 )
             arms.append(
                 hir.IfArm(
@@ -833,9 +834,12 @@ class _OptionalLowering:
         loc: Span,
         *,
         move: bool = False,
+        take: bool = False,
     ) -> list[hir.AST]:
         """Copy the aggregate at ``source_pointer`` into ``dest``'s member storage
-        (its prepared tree at ``slot``, else a fresh handle) and point the payload at it."""
+        (its prepared tree at ``slot``, else a fresh handle) and point the payload at it.
+        With ``take`` the source cell is a dead temporary nobody releases: its
+        arena record payload changes owner by handle instead of being cloned."""
         layout = ty.structural_base(member)
         if slot is not None:
             dest_prelude, dest_root = self._union_tree_root(dest, slot, member, loc)
@@ -852,6 +856,10 @@ class _OptionalLowering:
                 )
             handle: hir.AST = replace(dest_root, type='int64')
             prelude = [*dest_prelude, *source_prelude, *copy]
+        elif take and self._has_arena() and isinstance(layout, ty.ObjectType) and not self._object_copy_uses_frame_storage(layout):
+            source_root = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('source'))
+            handle = source_root
+            prelude = [hir.Declare(loc, ty.VOID_TYPE, 'let', source_root.name, 'int64', source_pointer)]
         else:
             source_root = hir.ExpressedIdentifier(loc, 'int64', self._new_optional_name('source'))
             clone_prelude, handle = self._union_handle_clone(source_root, member, loc)

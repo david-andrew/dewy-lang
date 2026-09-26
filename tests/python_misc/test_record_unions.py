@@ -27,3 +27,25 @@ def test_record_unions_run_without_leaking(tmp_path, target):
     assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
     result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=30)
     assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_argument_temporaries_run_without_leaking(tmp_path, target):
+    source = tmp_path / 'argument-temporaries.dewy'
+    source.write_text((ROOT / 'tests/fixtures/native_argument_temporaries.dewy').read_text())
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), target=target))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 42, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'c'])
+def test_runtime_range_ends_run(tmp_path, target):
+    source = tmp_path / 'range-ends.dewy'
+    source.write_text((ROOT / 'tests/fixtures/native_runtime_range_ends.dewy').read_text())
+    output = source.with_suffix('.udewy')
+    output.write_text(codegen(SrcFile.from_path(source), target=target))
+    assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
+    result = subprocess.run([cache_artifact(output).resolve()], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 42, result.stdout + result.stderr

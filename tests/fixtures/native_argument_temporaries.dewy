@@ -1,0 +1,80 @@
+# Temporaries made for a call or a store belong to someone. An unproven
+# `get` passed to a read-only parameter is either read in place or released
+# after the call; a fresh record literal pushed into an array moves its
+# payloads there. A second run must not change the live arena bytes.
+Interval:type = const [lower:bigint? upper:bigint?]
+Holder:type = [interval:Interval? name:string?]
+Snapshot:type = [numbers:dict<addr Interval>=[] optional:dict<addr Interval?>=[] names:dict<string string>=[] list:array<Interval>=[] holders:array<Holder>=[]]
+
+meet=(left:Interval? right:Interval?):>Interval?=>{
+    if left is? none return right
+    if right is? none return left
+    return Interval[left.lower right.upper]
+}
+width=(text:string?):>int64=>if text is? none 0 else text.length
+low=(interval:Interval?):>int64=>{
+    if interval is? none return 0
+    let value=interval.lower
+    if value is? none or value <? 0 or value >? 1000 return 0
+    return value as int64
+}
+make=(i:int64):>Interval=>Interval[i as bigint (i + 1) as bigint]
+
+# A field read of a getter's result returns only that field, which the
+# reader owns: `source_of(...).body` must not be retained twice.
+Source:type = [path:string body:string]
+Session:type = [sources:array<Source>=[]]
+source_of=(session:Session index:addr):>Source=>{
+    $runtime_assert index <? session.sources.length
+    return session.sources[index]
+}
+body_width=(session:Session index:addr):>int64=>{
+    let text=source_of(session index).body
+    return text.length
+}
+
+record=(@snapshot:Snapshot id:addr i:int64):>int64=>{
+    let total:int64=0
+    let met=meet(snapshot.numbers.get(id) Interval[0 none])
+    if met isnt? none {snapshot.numbers[id]=met}
+    total+=low(snapshot.optional.get(id))
+    total+=width(snapshot.names.get('k{id}'))
+    let fallback=meet(snapshot.numbers.get(id default=Interval[1 none]) none)
+    total+=low(fallback)
+    snapshot.list.push(Interval[i as bigint none])
+    snapshot.list.push(make(i))
+    snapshot.holders.push(Holder[make(i) 'h{i}'])
+    return total
+}
+exercise=():>int64=>{
+    let snapshot=Snapshot[]
+    let total:int64=0
+    loop k in [0..60) {
+        let i:int64=k
+        let id=(i % 11) as addr
+        snapshot.numbers[id]=make(i)
+        snapshot.optional[(i % 7) as addr]=if i % 2 =? 0 make(i) else none
+        snapshot.names['k{i % 5}']='v{i}'
+        total+=record(@snapshot id i)
+    }
+    let session=Session[]
+    loop k in [0..4) {session.sources.push(Source['p{k}' 'body text {k}'])}
+    loop k in [0..40) {total+=body_width(session (k % 4) as addr)}
+    snapshot.list.sort(key=(v)=>low(v))
+    let previous:int64=0
+    loop v in snapshot.list {
+        if low(v) <? previous return -1
+        previous=low(v)
+        total+=previous
+    }
+    loop h in snapshot.holders {total+=low(h.interval) + width(h.name)}
+    return total
+}
+main=():>int64=>{
+    let first=exercise()
+    if first <? 0 return 3
+    let before=_arena_live_bytes
+    let second=exercise()
+    if second not=? first return 1
+    return if _arena_live_bytes =? before 42 else 2
+}

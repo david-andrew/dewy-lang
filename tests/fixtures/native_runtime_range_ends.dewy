@@ -5,6 +5,19 @@ count_to = (n:int64):>int64 => {
     loop i in [1..n) { total += 2 }
     return total
 }
+# A bare range is inclusive, as with a constant end: 0..5 is six values.
+inclusive_count = (items:array<string>):>int64 => {
+    let count:int64 = 0
+    loop i in 0..items.length { count += 1 }
+    return count
+}
+# A counter converts to a fixed width when its range is proven: `i % 7` of
+# a nonnegative counter fits `addr`.
+wrapped_sum = (n:int64):>int64 => {
+    let total:int64 = 0
+    loop i in [0..n) { let slot = (i % 7) as addr total += slot as int64 }
+    return total
+}
 main=():>int64=>{
     let total:int64 = 0
     total += count_to(3)                           # 3 + 4 = 7
@@ -15,6 +28,6 @@ main=():>int64=>{
     # is a word-sized integer.
     let index_sum:int64 = 0
     loop i in 0.. and w in words { index_sum += i }
-    if index_sum =? 10 { total += 12 }               # 42
+    if index_sum =? 10 and inclusive_count(words) =? 6 and wrapped_sum(9) =? 22 { total += 12 }   # 42
     return total
 }

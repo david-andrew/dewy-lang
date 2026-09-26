@@ -307,7 +307,15 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
                     # A sort invokes its key inside the method. In particular
                     # a function-valued parameter can hide ambient writes;
                     # it is not an ordinary HIR call with a known dependency.
-                    if callee.name =? 'sort' and 'key' in? node.kw_args {opaque.add(id) exposes_storage.add(id)}
+                    # A literal key (`(.power)`, `(r)=>r.power`) is a known
+                    # function the method calls, analyzed like a direct call.
+                    if callee.name =? 'sort' and 'key' in? node.kw_args {
+                        let key=node.kw_args['key']
+                        if hir.node_at(nodes key) is? hir.FunctionLiteral {
+                            called.add(key)
+                            if shares_storage(node key plan nodes) {shared.add(key)}
+                        } else {opaque.add(id) exposes_storage.add(id)}
+                    }
                 } else if callee is? hir.FunctionLiteral {
                     called.add(node.func)
                     if shares_storage(node node.func plan nodes) {shared.add(node.func)}
@@ -355,7 +363,7 @@ ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Tabl
 }
 # `rejections` explains, per source binding, why its last considered use as
 # an argument was not borrowed (for `dewy analyze`).
-Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[] view_regions:dict<addr array<addr>>=[] nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[] indirect:dict<addr array<addr>>=[]]
+Plan:type = const [arguments:dict<addr set<addr>> escaping_places:set<addr> disposable_arguments:dict<addr set<addr>> array_snapshots:set<addr> stable_bindings:set<addr>=set[] stable_parameters:dict<addr effects.ParameterEffects>=[] consumed_arguments:dict<addr set<addr>>=[] consumed_uses:set<addr>=set[] rejections:dict<addr string>=[] owned_parameters:set<addr>=set[] scoped_views:set<addr>=set[] view_scopes:dict<addr addr>=[] view_regions:dict<addr array<addr>>=[] nonescaping_places:set<addr>=set[] fixed_places:set<addr>=set[] indirect:dict<addr array<addr>>=[] reclaimable_arguments:dict<addr set<addr>>=[]]
 
 # Required views can end at the last use of all their derived aliases.
 # Statements containing control flow remain indivisible, so a read in a loop
@@ -778,6 +786,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let array_snapshots:set<addr>=set[]
     let result:dict<addr set<addr>>=[]
     let disposable:dict<addr set<addr>>=[]
+    let reclaimable:dict<addr set<addr>>=[]
     let rejections:dict<addr string>=[]
     let safe_places:set<addr>=set[]
     let unsafe_places:set<addr>=set[]
@@ -829,6 +838,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         let allowed_all:set<addr>=set[]
         loop argument in arguments(node) {allowed_all.add(argument)}
         let temporary_all=allowed_all
+        let reclaim_all=allowed_all
         let consumed_all=allowed_all
         loop direct in targets {
             let literal=hir.node_at(nodes direct)
@@ -842,7 +852,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                         if source isnt? none and source.binding not in? rejections {rejections[source.binding]='the arguments could not be paired with the parameters'}
                     }
                 }
-                allowed_all.clear temporary_all.clear consumed_all.clear
+                allowed_all.clear temporary_all.clear consumed_all.clear reclaim_all.clear
                 break
             }
             loop pair in pairs {
@@ -858,11 +868,13 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             let rejected:set<addr>=set[]
             let temporary:set<addr>=set[]
             let retained:set<addr>=set[]
+            let reclaim:set<addr>=set[]
+            let kept:set<addr>=set[]
             let donated:set<addr>=set[]
             let position:addr=0
             loop pair in pairs {
                 if pair.parameter isnt? none and (pair.parameter in? consumed.parameters or pair.parameter in? owned) {
-                    donated.add(pair.argument) rejected.add(pair.argument) retained.add(pair.argument)
+                    donated.add(pair.argument) rejected.add(pair.argument) retained.add(pair.argument) kept.add(pair.argument)
                     position+=1
                     continue
                 }
@@ -870,6 +882,11 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
                 if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.add(pair.argument)}
                 else {retained.add(pair.argument)}
+                # A by-value callee that keeps its parameter keeps its own
+                # share or copy of it; only raw exposure can keep the caller's
+                # snapshot itself. That snapshot is the caller's to release.
+                if direct not in? retaining and summary isnt? none {reclaim.add(pair.argument)}
+                else {kept.add(pair.argument)}
                 # A record borrows on the callee's own summary: raw exposure
                 # of its parameter is an escape there (effects.raw_callee),
                 # and each deeper boundary decides for itself. Arrays keep
@@ -889,10 +906,12 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             # and an indirect call must be safe for every possible callee.
             allowed_all=allowed_all & (allowed-rejected)
             temporary_all=temporary_all & (temporary-retained)
+            reclaim_all=reclaim_all & (reclaim-kept)
             consumed_all=consumed_all & donated
         }
         result[id]=allowed_all
         disposable[id]=temporary_all
+        reclaimable[id]=reclaim_all
         let proven=forwarded.get(id set[])
         if proven.length >? 0 {result[id]=result.get(id set[]) | proven}
         if consumed_all.length >? 0 {consumed_arguments[id]=consumed_all}
@@ -917,5 +936,5 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     loop id in unsafe_places {safe_places.pop(id default=id); fixed_places.pop(id default=id);}
     loop id in changed_places {fixed_places.pop(id default=id);}
     loop binding in storage_proofs.local_views {stable.add(binding)}
-    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned (scoped.bindings | storage_proofs.local_views) scoped.scopes scoped.regions safe_places fixed_places indirect]
+    return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned (scoped.bindings | storage_proofs.local_views) scoped.scopes scoped.regions safe_places fixed_places indirect reclaimable_arguments=reclaimable]
 }

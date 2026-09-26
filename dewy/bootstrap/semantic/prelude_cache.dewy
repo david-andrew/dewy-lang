@@ -134,9 +134,9 @@ store = (entry:Entry snapshot:state.PreludeSnapshot):>void => {
     let temporary="{entry.path}.tmp-{__syscall0__(39)}"
     let written=p(temporary).write_bytes(output.bytes)
     if written isnt? int64 or written not=? output.bytes.length {p(temporary).unlink; return}
-    let source_path=_c_path(temporary)
-    let destination_path=_c_path(entry.path)
+    let source_path=_c_path_into(temporary __alloca__(4096))
+    let destination_path=_c_path_into(entry.path __alloca__(4096))
     # Rename within the cache directory: readers see either the previous
     # complete entry or this complete entry, never a partial file.
-    if __syscall2__(82 __load_i64__(source_path) __load_i64__(destination_path)) not=? 0 {p(temporary).unlink;}
+    if __syscall2__(82 source_path destination_path) not=? 0 {p(temporary).unlink;}
 }

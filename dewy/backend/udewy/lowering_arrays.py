@@ -2239,11 +2239,13 @@ class _ArrayLowering(_ArraySharing):
             index = name('sort_build')
             method = node.func
             assert isinstance(method, hir.ArrayMethod)
-            key_call = hir.FunctionCall(
-                loc, key_type, key_function,
-                [hir.Index(loc, element_type, method.array, index, None)], {},
-            )
+            # The key reads the stored element in place: a function value
+            # borrows its by-value parameters, as in the native lowerer, so
+            # no per-element copy is made (or left behind).
+            argument = name('sort_argument')
+            key_call = hir.FunctionCall(loc, key_type, key_function, [replace(argument, type=element_type)], {})
             key_prelude, key_value = self._extract_expression(key_call)
+            key_prelude.insert(0, declare(argument, replace(self._array_load(element_at(data, index), element_type, loc), type='int64')))
             # Materialize the callback result before bit normalization, as the
             # native lowerer does. An indirect call nested inside a transmute
             # is not a µDewy expression supported by its call parser.
@@ -2379,6 +2381,7 @@ class _ArrayLowering(_ArraySharing):
         if key_bytes % 2 == 1:
             # an odd number of passes leaves the result in the buffer
             radix.extend(counting_loop('sort_index', length, lambda index: move(record_at(source, index), record_at(base, index))))
+        radix.append(self._arena_release_call(buffer, times(length, record_bytes), loc))
         statements = [
             *setup,
             hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(
@@ -2395,6 +2398,7 @@ class _ArrayLowering(_ArraySharing):
                     element_at(data, index), element_type, loc,
                 ),
             ]))
+            statements.append(self._arena_release_call(base, times(length, record_bytes), loc))
         return statements
 
     def _dynamic_array_result_write(self, item: hir.AST) -> list[hir.AST]:

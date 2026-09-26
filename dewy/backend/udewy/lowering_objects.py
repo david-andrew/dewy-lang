@@ -1811,7 +1811,7 @@ class _ObjectLowering:
             statements: list[hir.AST] = []
             members = self._field_union_members(field.type)
             if members is not None:
-                statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False, move=bool(move)))
+                statements.extend(self._union_copy_cell(dest_address, source_address, members, loc, prepared=False, move=move if move == 'adopt' else bool(move)))
                 if move == 'adopt' and any(self._is_string_valued(member) for member in members):
                     # a string payload moved by handle: empty the local's payload word
                     statements.append(self._intrinsic_call('__store_i64__', [self._int64_literal(loc, 0), self._int64_binary('__add__', source_address, self._int64_literal(loc, 8), loc)], ty.VOID_TYPE, loc))

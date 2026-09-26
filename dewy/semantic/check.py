@@ -16958,9 +16958,13 @@ def _explicit_value_conversion(
         return node
     if ctx.type_system.promote_type(source, target) == target:
         return hir.ValueCast(loc, target, node)
-    if ty.fixed_integer_layout(ty.strip_refinement(source)) is not None and ty.fixed_integer_layout(target) is not None:
-        # `src.length as uint64`: one fixed width to another, a value cast the
-        # bounds analysis must prove in range (as at an annotated binding)
+    if ty.fixed_integer_layout(target) is not None and (
+        ty.fixed_integer_layout(ty.strip_refinement(source)) is not None
+        or ctx.type_system.is_subtype(source, 'int')
+    ):
+        # `src.length as uint64`, `(i % 7) as addr`: an integer to a fixed
+        # width, a value cast the bounds analysis must prove in range (as at
+        # an annotated binding). An abstract `int` converts the same way.
         return hir.ValueCast(loc, target, node)
     if _is_string_type(target) and isinstance(ty.unfold(ty.strip_refinement(node.type)), ty.MetaType):
         return _typename(node, loc, ctx=ctx)   # a type value converts to its name

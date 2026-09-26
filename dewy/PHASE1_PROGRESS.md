@@ -4697,3 +4697,83 @@ cold). Generations 2 and 3 are identical.
 
 Gate: 4,743 passed. A 3-generation bootstrap from `phase1-u` gives identical
 generations (`phase1-v`), and `check_native` passes on that pair.
+
+## Compile leak: argument temporaries, raw-exposure cleanup; range ends (2026-09-26)
+
+A repeat-compile driver (`compile_once` per round, retained bytes measured
+between round starts) put the true per-compile leak at 1.72 MB after the
+earlier 2026-09-26 fixes. An allocation-site tracer that also records the
+calling site found these:
+
+- **Unproven `get` passed to a read-only parameter** (native). The borrowed
+  argument path evaluated `snapshot.numbers.get(id)` with `expression`,
+  which shares the stored element into an owned result, but treated it as
+  a view, so nothing released it. `call_argument` now reads the stored
+  element in place (`dict_lookup(view=true)`) when `get_view_lookup`
+  allows. Otherwise the owned result is passed and released after the
+  call. Every `meet(facts.lookup(...) ...)`-style interval in the bounds
+  analysis leaked through this path: 1.72 MB → 433 KB per compile.
+- **Raw exposure switched off all cleanup** (native). A raw intrinsic with
+  an aggregate operand (`__load_i64__(c_path)`) disabled cleanup for every
+  local of the function, so `_read_bytes_at` never released its result's
+  source array. The exposed array or string is pinned, and releasing
+  pinned storage does nothing, so only record and cell exposure (whose
+  blocks are not pinned) still disables cleanup.
+- **Pinned C paths** (library). Each file operation pinned a
+  NUL-terminated path copy. `_c_path_into` now copies the path into the
+  caller's PATH_MAX frame buffer; the prelude cache's rename uses it too.
+  Together with the previous item: 433 KB → 89 KB per compile.
+- **Projected getter reads retained twice** (native). `srcfile(...).body`
+  lowers through a getter projection that returns the selected leaf,
+  already owned. `expression_owns` still answered as for a borrowed
+  getter's field, so the consumer retained it again. One handle leaked per
+  use, and it kept each source text and its boundary table alive.
+  `projected_read` now decides both the lowering and the ownership:
+  89 KB → 7 KB per compile.
+- **Record literals pushed into arrays** (hosted). A `move` copy of a dying
+  literal cloned its record-typed cell payload (e.g. a `bigint` field) and
+  abandoned the original. A dead temporary's arena payload now changes
+  owner by handle (`take`); `adopt` keeps cloning, because its source is
+  released later.
+- **Keyed sort** (hosted). Each key call copied the element into a frame
+  slot without releasing it, and the record and radix buffers were never
+  released. The key now reads the stored element, as in native, and both
+  buffers are released.
+- Also in this batch: intrinsic operand temporaries are released after the
+  call; a literal sort key is analyzed like a direct call instead of
+  poisoning its callers' borrows; `t2` compares child id arrays element-wise
+  (`same_ids`) instead of with `=?`; and by-value arguments to a callee that
+  keeps its own share are reclaimed (`reclaimable_arguments`).
+
+**Parity.**
+- A bare runtime range `0..n` is inclusive in both compilers (native had
+  treated it as `[0..n)`); `native_runtime_range_ends` covers it.
+- Hosted now converts an abstract `int` to a fixed width with a
+  range-proven value cast, like native, so `(i % 7) as addr` over a loop
+  counter compiles on both. An unprovable conversion is still rejected by
+  both.
+
+New fixture `native_argument_temporaries` (pair check 61 and hosted
+x86-64/C tests) checks `get` arguments, optional and string lookups,
+defaulted lookups, literal pushes with `bigint` fields, a keyed sort and a
+projected getter read.
+It requires an unchanged live arena on a second run. It fails on the old
+native (2) and on the old hosted (2).
+
+Known leftovers:
+- Hosted still leaks in `bytes as string|none`.
+- `write_bytes` pins what it writes; see the scoped raw access proposal.
+- `nat_types` needs no decision: it passes (42).
+- Proposals for array/record `=?` and scoped raw access are in
+  `PHASE1_DESIGN_PROPOSALS.md`.
+
+Per-compile retained memory on the repeat-compile driver (hello world) went
+4.2 MB (`phase1-v`) → 7 KB. Self-build: 50.7 → 49.5 s, peak RSS
+2.88 → 2.63 GB.
+
+Validation:
+- Gate: 4,747 passed.
+- A 3-generation bootstrap from `phase1-w` gives identical generations
+  (`phase1-x`), and `check_native` passes on that pair.
+- The intermediate `phase1-w` pair (without the projected-read fix)
+  also bootstrapped identically and passed `check_native`.

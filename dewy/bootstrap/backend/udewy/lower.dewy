@@ -120,6 +120,7 @@ State:type = [
     array_snapshots:set<addr>=set[]
     view_writes:array<addr>=[]
     disposable_arguments:dict<addr set<addr>>=[]
+    reclaimable_arguments:dict<addr set<addr>>=[]
     code_symbols:dict<addr string>=[]
     # A place is an address of the binding's storage, including the handle
     # slot for an aggregate. Replacing a record/array through @ must replace
@@ -502,17 +503,13 @@ expression = (id:addr @state:State):>addr => {
         # Most fields read a local, not a call result. Inspect its brand in
         # place before asking for a variant, avoiding a record/cell snapshot
         # on every ordinary field access just to rule this optimization out.
-        $runtime_assert node.value <? state.input.nodes.length
-        if state.input.nodes[node.value] is? hir.FunctionCall|hir.MemberAccess {
+        let projection=projected_read(node @state)
+        if projection isnt? none {
             let call_id=projection_call(node.value state.input.nodes)
-            if call_id isnt? none {
-                let projection=scalar_getter_projection(node call_id @state)
-                if projection isnt? none {
-                    let call=hir.node_at(state.input.nodes call_id)
-                    $runtime_assert call is? hir.FunctionCall
-                    return ordinary_call(call_id call runtime_type(node.value_type node @state) @state projection=projection)
-                }
-            }
+            $runtime_assert call_id isnt? none
+            let call=hir.node_at(state.input.nodes call_id)
+            $runtime_assert call is? hir.FunctionCall
+            return ordinary_call(call_id call runtime_type(node.value_type node @state) @state projection=projection)
         }
         let stored=stored_type(id @state)
         let prefix:array<addr>=[]
@@ -731,17 +728,32 @@ expression = (id:addr @state:State):>addr => {
             # concrete runtime signature records the selected word width;
             # the original overload set has no runtime representation.
             let raw=callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') or callee.name in? ['__load__' '__store__']
+            # An operand that owns a fresh aggregate (a forwarded field, a
+            # call result) is only read by the intrinsic: release it after.
+            let prefix:array<addr>=[]
+            let owners:array<OwnedLocal>=[]
             loop argument in node.pos_args {
                 let source=hir.node_at(state.input.nodes argument)
                 let value=if raw and aggregate(source.value_type @state) exposed_value(argument node @state) else expression(argument @state)
+                if not raw and temporary_owner(argument @state) {
+                    value=snapshot(value @prefix @state)
+                    owners.push(OwnedLocal[value source.value_type])
+                }
                 args.push(value)
             }
             let parameters:array<types.PosOrKwArg>=[]
             loop argument in args {parameters.push(types.PosOrKwArg[none hir.node_at(state.nodes argument).value_type])}
             let signature=types.function_type(parameters [] none type [] @state.type_nodes)
             function=put(hir.ExpressedIdentifier[callee.loc signature callee.name callee.binding_id] @state)
+            let call=put(hir.FunctionCall[node.loc type function args [] node.selected_method_index node.integer_operation] @state)
+            if owners.length =? 0 return call
+            let void_result=types.is_primitive(types.node_at(state.type_nodes type) 'void')
+            let result=if void_result call else snapshot(call @prefix @state)
+            if void_result {prefix.push(call)}
+            loop owner in owners {prefix.push(release_value(owner.value owner.value_type node @state))}
+            if not void_result {prefix.push(result)}
+            return put(hir.Block[node.loc type prefix false] @state)
         } else {return ordinary_call(id node type @state)}
-        return put(hir.FunctionCall[node.loc type function args [] node.selected_method_index node.integer_operation] @state)
     }
     if node is? hir.FunctionLiteral return function_value(id node @state)
     if node is? hir.ShortCircuit return put(hir.ShortCircuit[node.loc type node.op expression(node.left @state) expression(node.right @state)] @state)
@@ -911,6 +923,7 @@ expression_owns = (id:addr @state:State):>bool => {
     # A receiver read through a getter borrow is a view of arena storage,
     # so a field or element taken from it is not a fresh temporary either.
     if node is? hir.DictEntries and temporary_owner(node.dictionary @state) and not borrowed_getter_receiver(node.dictionary @state) return true
+    if node is? hir.MemberAccess and projected_read(node @state) isnt? none return true
     if node is? hir.MemberAccess and temporary_owner(node.value @state) and not borrowed_getter_receiver(node.value @state) return true
     if node is? hir.Index and (id in? state.array_snapshots or (temporary_owner(node.array @state) and not borrowed_getter_receiver(node.array @state))) return true
     if node is? hir.Block|hir.Flow and state.cleanup_enabled return true
@@ -3683,7 +3696,10 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
         let first=true
         loop parameter in key_signature.pos_or_kw {
             let argument:addr?=none
-            if first {argument=snapshot(owned_copy(element type.element call @state shared=true) @building @state)}
+            # Function values take by-value parameters as borrows (a callee
+            # that writes one copies it on entry), so the key reads the
+            # element in place; an owned copy here was never released.
+            if first {argument=element}
             call_slot(argument parameter.value_type parameter.required call @args @state)
             first=false
         }
@@ -3904,6 +3920,15 @@ projection_call = (id:addr nodes:array<hir.AST>):>addr? => {
         if node is? hir.MemberAccess {current=node.value continue}
         return if node is? hir.FunctionCall current else none
     }
+}
+# A member read of a getter call's result lowers through a projection of
+# the getter that returns only the selected leaf, which the reader owns.
+projected_read = (node:hir.MemberAccess @state:State):>ScalarProjection? => {
+    $runtime_assert node.value <? state.input.nodes.length
+    if state.input.nodes[node.value] isnt? hir.FunctionCall|hir.MemberAccess return none
+    let call_id=projection_call(node.value state.input.nodes)
+    if call_id is? none return none
+    return scalar_getter_projection(node call_id @state)
 }
 scalar_getter_projection = (node:hir.MemberAccess call_id:addr @state:State):>ScalarProjection? => {
     let call=hir.node_at(state.input.nodes call_id)
@@ -4539,17 +4564,18 @@ ordinary_call = (id:addr node:hir.FunctionCall result_type:addr @state:State pro
     if projection isnt? none {function=put(hir.ExpressedIdentifier[node.loc code_type(projection.function node @state result=projection.result) projection.symbol] @state)}
     let borrowed=state.borrowed_arguments.get(id set[])
     let disposable=state.disposable_arguments.get(id set[])-borrowed
+    let reclaimable=state.reclaimable_arguments.get(id set[])
     let temporary:array<OwnedLocal>=[]
     let positional:array<addr>=[]
     let views_allowed=string_free_type(signature.ret @state)
     let consumed=state.consumed_arguments.get(id set[])
     loop argument in node.pos_args {
-        let value=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
+        let value=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state reclaimable=reclaimable)
         positional.push(value)
     }
     let keywords:dict<string addr>=[]
     loop [name argument] in node.kw_args {
-        keywords[name]=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state)
+        keywords[name]=call_argument(argument borrowed disposable consumed views_allowed @temporary @prefix @state reclaimable=reclaimable)
     }
     let args:array<addr>=[]
     if receiver isnt? none {args.push(receiver)}
@@ -4673,7 +4699,7 @@ string_free_type = (id:addr @state:State depth:addr=0):>bool => {
     if plain is? types.FunctionType return false
     return true
 }
-call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State):>addr => {
+call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:set<addr> views_allowed:bool @temporary:array<OwnedLocal> @prefix:array<addr> @state:State reclaimable:set<addr>=set[]):>addr => {
     # A donated argument is an owned value the callee takes over: a fresh
     # temporary passes as is, a kept value is copied, and nothing is
     # released here.
@@ -4703,7 +4729,14 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
         }
     }
     let peeled:addr?=if argument in? borrowed peel_borrowed(argument @state) else none
-    if peeled isnt? none return snapshot(expression(peeled @state) @prefix @state)
+    if peeled isnt? none {
+        # An unproven `get` result owns its payload. The callee may instead
+        # read the stored element in place; otherwise the owned result is
+        # passed below and released after the call.
+        let lookup=hir.node_at(state.input.nodes peeled)
+        if lookup isnt? hir.DictLookup or lookup.proven return snapshot(expression(peeled @state) @prefix @state)
+        if get_view_lookup(lookup @state) return snapshot(dict_lookup(lookup @state view=true) @prefix @state)
+    }
     let source=hir.node_at(state.input.nodes argument)
     # A one-grapheme or slice temporary of a stable string, passed to a
     # callee that neither keeps nor exposes it, is read through the
@@ -4717,7 +4750,7 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
     }
     let value=snapshot(owned_value(argument @state 'passed to a call') @prefix @state)
     # A literal argument is static: nothing to release after the call.
-    if (argument in? disposable or argument in? borrowed) and source isnt? hir.Place and not static_literal(argument state) and releasable(source.value_type @state) {temporary.push(OwnedLocal[value source.value_type])}
+    if (argument in? disposable or argument in? borrowed or argument in? reclaimable) and source isnt? hir.Place and not static_literal(argument state) and releasable(source.value_type @state) {temporary.push(OwnedLocal[value source.value_type])}
     return value
 }
 # Only the lifted code signature contains captures. Ordinary function values
@@ -4842,7 +4875,13 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             let callee=hir.node_at(state.input.nodes current.func)
             if callee is? hir.ArrayMethod and callee.name not=? 'join' {mark_mutated(callee.array @mutated state)}
             if callee is? hir.ExpressedIdentifier and (callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') or callee.name in? ['__load__' '__store__']) {
-                loop argument in current.pos_args {if aggregate(hir.node_at(state.input.nodes argument).value_type @state) {enabled=false}}
+                # An exposed array or string is pinned, and releasing pinned
+                # storage does nothing. A record or cell block is not pinned,
+                # so its raw exposure keeps every local of the function alive.
+                loop argument in current.pos_args {
+                    let exposed=hir.node_at(state.input.nodes argument).value_type
+                    if aggregate(exposed @state) and not array_valued(exposed state) and not owned_string(exposed state) {enabled=false}
+                }
                 loop argument in current.pos_args {mark_mutated(argument @mutated state)}
             }
         }
@@ -5077,6 +5116,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.stable_parameters=borrowed.stable_parameters
     state.array_snapshots=borrowed.array_snapshots
     state.disposable_arguments=borrowed.disposable_arguments
+    state.reclaimable_arguments=borrowed.reclaimable_arguments
     state.consumed_arguments=borrowed.consumed_arguments
     state.consumed_uses=borrowed.consumed_uses
     state.owned_parameters=borrowed.owned_parameters
