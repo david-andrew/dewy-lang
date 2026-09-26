@@ -921,6 +921,21 @@ push_children = (node:AST @result:array<addr>):>void => {
     result.push(node.range)
     return void
 }
+# A worklist popped from the end visits these in source order.
+push_children_reversed = (node:AST @result:array<addr>):>void => {
+    let start=result.length
+    push_children(node @result)
+    let low=start
+    let high=result.length
+    loop low+1 <? high {
+        high-=1
+        $runtime_assert low <? result.length and high <? result.length
+        let item=result[low]
+        result[low]=result[high]
+        result[high]=item
+        low+=1
+    }
+}
 children = (node:AST):>array<addr> => {
     let result:array<addr> = []
     push_children(node @result)

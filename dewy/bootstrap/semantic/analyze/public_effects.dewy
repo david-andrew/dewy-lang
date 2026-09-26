@@ -363,7 +363,7 @@ inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
                     if word_iterator(child body input) {scan.words.add(target.binding_id)}
                 }
             }
-            loop child in hir.children(body) {pending.push(child)}
+            hir.push_children(body @pending)
         }
         visit(node.body input @scan)
         loop param in params {if param is? hir.BoundParam {visit(param.value input @scan)}}
@@ -403,7 +403,7 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
         if id in? seen continue
         seen.add(id)
         let node=hir.node_at(session.hir id)
-        loop child in hir.children(node) {pending.push(child)}
+        hir.push_children(node @pending)
         if node is? hir.FunctionLiteral {
             let signature=types.node_at(session.types node.value_type)
             if signature is? types.FunctionType and signature.effects isnt? none {constrained.push(id)}

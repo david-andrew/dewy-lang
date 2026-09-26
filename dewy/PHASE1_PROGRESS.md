@@ -4569,3 +4569,45 @@ which expected the coverage fixture's `Box|none` snapshot to be reported as
 a cell copy. It is a record copy now, so the test checks the copy site; the
 rerun passes. A 3-generation bootstrap from `phase1-q` gives identical
 generations (`phase1-r`), and `tools/check_native.sh` passes on that pair.
+
+## Allocation sites: lazy strings, in-place Unicode tables, const views (2026-09-25)
+
+A per-statement allocation counter over the self-build's lowered µDewy
+(`__site` stores before each statement, counted in the arena entry points)
+attributed 631 M allocations. The largest findable costs were:
+
+- Every dynamic string segmented eagerly. `lazy_strings` requires the
+  `_utf8_grapheme_scan` runtime helper, which `library/unicode/runtime.dewy`
+  provides as an import alias (`from … import scan as …`) since 2026-09-20.
+  An alias is not an export, so the helper never reached `prelude_bindings`
+  and lazy segmentation stayed off. Each `"{id}"` then built a boundary
+  table, a byte descriptor, a scratch array and two optional cells.
+  `graph.runtime_helpers` now also finds a helper in a prelude module's
+  scope.
+- With segmentation lazy, the cold length query in `cold_string_length`
+  showed a second cost. A non-ASCII scalar copied a whole Unicode property
+  table (about 24 KB) per lookup, because `property(table:array<uint8> …)`
+  materializes its binary-literal argument. The segmenter now reads the
+  tables in place (`table_byte`, selected by a small `TABLE` enum). This
+  also speeds up eager segmentation of any non-ASCII text.
+- `const` globals never change after startup, so borrowing now treats them
+  as stable owners (`captures.Plan.constants`). `info = BASE_SPECS[base]` in
+  the tokenizer used to copy the record every call and rebuild its inner
+  set's hash index each time (14 M allocations). It is now a view, and the
+  index is built once.
+- Traversals that allocated `hir.children(node)` per node now push onto
+  their worklist: `effects.collect_roots` (via `push_children_reversed`, which
+  keeps the source order), `predicate_effects`, `hir_facts`, `public_effects`,
+  and `captures.discover`/`locals`/`references`, which were recursive and are
+  now worklists with the same preorder.
+
+Self-build against the record-union compiler, cold, two rounds with a test
+running alongside: 64.0 s → 59.8 s, 122.7 → 105.0 GB allocated, peak
+2,935 → 2,843 MB. Generations 2 and 3 are identical.
+
+Gate: 4,736 passed, 7 failed. All seven were `test_library_graphemes` cases,
+whose harness calls the library's `word(bytes offset)` helper. The first cut
+had changed that helper's signature. It is public again, and the in-place
+reader is `table_word`. The rerun passes, along with the union-view and
+string-descriptor tests. A 3-generation bootstrap from `phase1-r` gives
+identical generations (`phase1-s`), and `check_native` passes on that pair.

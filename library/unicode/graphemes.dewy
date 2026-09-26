@@ -10,6 +10,23 @@ $include_bytes(p"extended_pictographic.bin") as pictographic_table
 const GCB=[other=0 cr=1 lf=2 control=3 l=4 v=5 t=6 lv=7 lvt=8 extend=9 zwj=10 spacing_mark=11 prepend=12 regional_indicator=13]
 const INCB=[other=0 consonant=1 extend=2 linker=3]
 
+# Tables are read in place: passing one as an `array<uint8>` argument would
+# materialize a private copy of the whole table for every lookup.
+const TABLE=[breaks=0 indic=1 pictographic=2]
+table_length = (table:int64):>int64 => if table =? TABLE.breaks break_table.length else if table =? TABLE.indic indic_table.length else pictographic_table.length
+table_byte = (table:int64 offset:int64):>int64 => {
+    $runtime_assert offset >=? 0
+    if table =? TABLE.breaks {
+        $runtime_assert offset <? break_table.length
+        return break_table[offset] as int64
+    }
+    if table =? TABLE.indic {
+        $runtime_assert offset <? indic_table.length
+        return indic_table[offset] as int64
+    }
+    $runtime_assert offset <? pictographic_table.length
+    return pictographic_table[offset] as int64
+}
 word = (table:array<uint8> offset:int64):>int64 => {
     $runtime_assert table.length >=? 4
     $runtime_assert offset >=? 0 and offset <=? table.length-4
@@ -19,19 +36,24 @@ word = (table:array<uint8> offset:int64):>int64 => {
     let d=table[offset+3] as int64
     return a+(b<<8)+(c<<16)+(d<<24)
 }
-property = (table:array<uint8> scalar:int64):>int64 => {
+table_word = (table:int64 offset:int64):>int64 => {
+    let a=table_byte(table offset)
+    let b=table_byte(table offset+1)
+    let c=table_byte(table offset+2)
+    let d=table_byte(table offset+3)
+    return a+(b<<8)+(c<<16)+(d<<24)
+}
+property = (table:int64 scalar:int64):>int64 => {
     let low:int64=0
-    let high:int64=table.length // 9
+    let high:int64=table_length(table) // 9
     loop low <? high {
         let middle:int64=(low+high)//2
         let offset:int64=middle*9
-        $runtime_assert table.length >=? 9
-        $runtime_assert offset >=? 0 and offset <=? table.length-9
-        let start=word(table offset)
-        let stop=word(table offset+4)
+        let start=table_word(table offset)
+        let stop=table_word(table offset+4)
         if scalar <? start {high=middle}
         else if scalar >? stop {low=middle+1}
-        else return table[offset+8] as int64
+        else return table_byte(table offset+8)
     }
     return 0
 }
@@ -108,9 +130,9 @@ let scan = (bytes:array<uint8> @result:array<int64> destination:int64):>int64 =>
             else if scalar =? 10 {current=GCB.lf}
             else if scalar <? 32 or scalar =? 127 {current=GCB.control}
         } else {
-            current=property(break_table scalar)
-            indic=property(indic_table scalar)
-            pictographic=property(pictographic_table scalar) =? 1
+            current=property(TABLE.breaks scalar)
+            indic=property(TABLE.indic scalar)
+            pictographic=property(TABLE.pictographic scalar) =? 1
         }
         let boundary:bool=true
         if previous =? GCB.cr and current =? GCB.lf {boundary=false}

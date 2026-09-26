@@ -166,8 +166,7 @@ collect_roots = (roots:array<addr> nodes:array<hir.AST>):>Analysis => {
             if target.binding_id isnt? none { analysis.reassigned.add(target.binding_id) }
         }
         # Reverse for the stack so traversal retains source declaration order.
-        let children = hir.children(node)
-        loop children.length >? 0 { pending.push(children.pop) }
+        hir.push_children_reversed(node @pending)
     }
     return analysis
 }

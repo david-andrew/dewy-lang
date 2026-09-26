@@ -252,7 +252,7 @@ assigned_binding_ids = (root:addr nodes:array<hir.AST>):>set<addr> => {
                 if binding isnt? none { found.add(binding) }
             }
         }
-        loop child in hir.children(node) { pending.push(child) }
+        hir.push_children(node @pending)
     }
     return found
 }

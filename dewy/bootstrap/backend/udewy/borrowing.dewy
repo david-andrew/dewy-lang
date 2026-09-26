@@ -750,6 +750,9 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # callees with raw operations receive their arguments by copy. Only the
     # function's own raw exposures of that storage disqualify it.
     let exposed=exposed_roots(plan nodes type_nodes)
+    # A `const` global never changes after startup initialization, so any
+    # function may view its storage (a lookup's index cache aside).
+    loop binding in plan.constants {if binding not in? exposed {stable.add(binding)}}
     loop [id function] in plan.functions {
         loop binding in function.locals {
             if binding not in? function.writes and binding not in? places and binding not in? plan.globals and binding not in? captured and binding not in? exposed {stable.add(binding)}

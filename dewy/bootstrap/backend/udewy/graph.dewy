@@ -3,6 +3,7 @@ import p"../../timing.dewy" as timing
 import p"../../semantic/modules.dewy" as modules
 import p"../../semantic/source_views.dewy" as sources
 import p"../../semantic/hir.dewy" as hir
+import p"../../semantic/bindings.dewy" as bindings
 import p"../../semantic/proofs.dewy" as checked_proofs
 import p"../../semantic/ty.dewy" as types
 import p"../../semantic/validation.dewy" as validation
@@ -90,12 +91,31 @@ lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
     let allocator=engine.prelude_bindings.get('_arena_alloc')
     let required:array<addr>=[]
     if allocator isnt? none {required.push(allocator)}
-    loop name in ['_utf8_boundaries' '_utf8_boundaries_into' '_utf8_grapheme_scan' 'exit' '_arena_release' '_arena_alloc₈' '_arena_alloc₁₆' '_arena_alloc₃₂' '_arena_alloc₆₄' '_arena_alloc₁₂₈' '_arena_alloc₂₅₆' '_arena_release₈' '_arena_release₁₆' '_arena_release₃₂' '_arena_release₆₄' '_arena_release₁₂₈' '_arena_release₂₅₆' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop' '_shareable' '_arena_alloc_for' '_allocator_enter' '_allocator_exit'] {
-        let helper=engine.prelude_bindings.get(name)
+    let helpers=runtime_helpers(engine)
+    loop name in helper_names {
+        let helper=helpers.get(name)
         if helper isnt? none {required.push(helper)}
     }
     let prepared=assemble(entry @engine required_bindings=required)
-    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry)
+    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry)
+}
+const helper_names=['_utf8_boundaries' '_utf8_boundaries_into' '_utf8_grapheme_scan' 'exit' '_arena_release' '_arena_alloc₈' '_arena_alloc₁₆' '_arena_alloc₃₂' '_arena_alloc₆₄' '_arena_alloc₁₂₈' '_arena_alloc₂₅₆' '_arena_release₈' '_arena_release₁₆' '_arena_release₃₂' '_arena_release₆₄' '_arena_release₁₂₈' '_arena_release₂₅₆' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop' '_shareable' '_arena_alloc_for' '_allocator_enter' '_allocator_exit']
+# Runtime helpers are the prelude's exports, plus a compiler-private helper
+# that a prelude module imports under its own name (`from … import scan as
+# _utf8_grapheme_scan`) to keep the original function's identity. An import
+# alias is no export, so look it up in that module's scope.
+runtime_helpers = (engine:modules.Engine):>dict<string addr> => {
+    let helpers=engine.prelude_bindings
+    loop name in helper_names {
+        if name in? helpers continue
+        loop module in engine.modules {
+            if not module.prelude continue
+            let scope=bindings.scope_at(engine.session.scopes module.context.scope)
+            let found=scope.names.get(name)
+            if found isnt? none {helpers[name]=found break}
+        }
+    }
+    return helpers
 }
 # The executable boundary: every module proves its contracts before storage
 # selection, and startup is checked with the explicit entry export. Keep the
@@ -110,8 +130,9 @@ compile = (entry:addr @engine:modules.Engine timings:bool=false):>Compilation|Er
     let allocator=engine.prelude_bindings.get('_arena_alloc')
     let required:array<addr>=[]
     if allocator isnt? none {required.push(allocator)}
-    loop name in ['_utf8_boundaries' '_utf8_boundaries_into' '_utf8_grapheme_scan' 'exit' '_arena_release' '_arena_alloc₈' '_arena_alloc₁₆' '_arena_alloc₃₂' '_arena_alloc₆₄' '_arena_alloc₁₂₈' '_arena_alloc₂₅₆' '_arena_release₈' '_arena_release₁₆' '_arena_release₃₂' '_arena_release₆₄' '_arena_release₁₂₈' '_arena_release₂₅₆' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop' '_shareable' '_arena_alloc_for' '_allocator_enter' '_allocator_exit'] {
-        let helper=engine.prelude_bindings.get(name)
+    let helpers=runtime_helpers(engine)
+    loop name in helper_names {
+        let helper=helpers.get(name)
         if helper isnt? none {required.push(helper)}
     }
     let prepared=assemble(entry @engine required_bindings=required)
@@ -119,7 +140,7 @@ compile = (entry:addr @engine:modules.Engine timings:bool=false):>Compilation|Er
     timing.finish('initialization_and_reachability' preparation_started)
     if error isnt? none return error
     let lowering_started=timing.start(timings)
-    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=engine.prelude_bindings links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry timings=timings)
+    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry timings=timings)
     timing.finish('lowering' lowering_started)
     if lowered is? Error return lowered
     return Compilation[lowered validated]
