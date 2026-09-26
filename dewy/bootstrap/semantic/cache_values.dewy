@@ -7131,6 +7131,10 @@ encode=(value:Value0):>array<uint8>|CacheMiss=>{
 }
 decode=(value:array<uint8>):>Value0|CacheMiss=>{
     let input=bytes.Reader[value]
+    return decode_from(@input)
+}
+# Decode the rest of a reader, which must end with the value.
+decode_from=(@input:bytes.Reader):>Value0|CacheMiss=>{
     let result=decode_Value0(@input)
     if result is? CacheMiss return result
     if not bytes.complete(input) return miss(@input)

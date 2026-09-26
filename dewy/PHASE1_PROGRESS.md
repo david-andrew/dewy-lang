@@ -4673,3 +4673,27 @@ allocated. Initialization and reachability 2.5 s → 1.2 s; validation
 
 Gate: 4,743 passed. A 3-generation bootstrap from `phase1-t` gives identical
 generations (`phase1-u`), and `check_native` passes on that pair.
+
+## Warm compiles: prelude cache key and restore (2026-09-25)
+
+With prelude validation reused, `prelude_restore` dominated a warm
+hello-world compile. A profile showed where it went:
+- `prelude_cache.locate` read the whole compiler executable (22 MB) byte by
+  byte with `push`, only to hash it for the cache key. The key now uses the
+  executable's stat identity: device, inode, size and modification time.
+  That comes from `_file_stamp` in `library/linux/files.dewy`, a
+  compiler-private helper beside `_file_mode`.
+- `restore` copied the 16 MB payload out of the file's bytes before
+  decoding it. The codec gains `decode_from(@reader)`, emitted by
+  `tools/generate_native_cache.py`, and the checksum is taken over the
+  payload in place (`fingerprint_from`).
+- `_read_bytes_at` reserves the file's size (fstat) once, instead of
+  growing per 4 KB chunk.
+
+A warm hello-world compile now takes 1.75 s: 6.0 s before this session's
+validation reuse, and 2.9 s after it. Restore takes 1.1 s, split between the
+per-byte file read and the decode. The self-build is unaffected (it is
+cold). Generations 2 and 3 are identical.
+
+Gate: 4,743 passed. A 3-generation bootstrap from `phase1-u` gives identical
+generations (`phase1-v`), and `check_native` passes on that pair.

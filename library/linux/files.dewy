@@ -40,6 +40,12 @@ let _read_bytes_at = (path:string):>array<uint8>|FileNotFound|FileAccessDenied|I
     let c_path = _c_path(path)
     let fd:int64 = __syscall3__(2 __load_i64__(c_path) 0 0)
     if fd <? 0 { return _file_error(fd) }
+    # fstat(2): reserve st_size (offset 48) once instead of growing per chunk.
+    let status:int64 = __alloca__(144)
+    if __syscall2__(5 fd status) >=? 0 {
+        let size:int64 = __load_i64__(status + 48)
+        if size >? 0 and size <? 4294967296 { contents.reserve(size) }
+    }
     let chunk:int64 = __alloca__(4096)
     let count:int64 = __syscall3__(0 fd chunk 4096)
     loop count >? 0 {
@@ -107,6 +113,16 @@ let _file_mode = (path:string):>int64 => {
     return (mode and 61440) transmute int64
 }
 
+# A cheap identity for a file's current contents without reading them:
+# device, inode, size and modification time (seconds, nanoseconds) from
+# stat(2) on x86_64 Linux; none when the file cannot be stat-ed.
+let _file_stamp = (path:string):>array<int64>|none => {
+    let c_path = _c_path(path)
+    let buffer:int64 = __alloca__(144)
+    let status:int64 = __syscall2__(4 __load_i64__(c_path) buffer)
+    if status <? 0 { return none }
+    return [__load_i64__(buffer) __load_i64__(buffer + 8) __load_i64__(buffer + 48) __load_i64__(buffer + 88) __load_i64__(buffer + 96)]
+}
 let is_file = (path:string):>bool => _file_mode(path) =? 32768
 let is_directory = (path:string):>bool => _file_mode(path) =? 16384
 

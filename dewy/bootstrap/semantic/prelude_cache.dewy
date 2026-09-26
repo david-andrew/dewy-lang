@@ -24,6 +24,16 @@ fingerprint = (value:array<uint8>):>uint64 => {
     loop byte in value {result=(result xor (byte as uint64))*0x100000001b3}
     return result
 }
+# The fingerprint of `value[start..]`, without copying that suffix.
+fingerprint_from = (value:array<uint8> start:addr):>uint64 => {
+    let result:uint64=0xcbf29ce484222325
+    let index=start
+    loop index <? value.length {
+        result=(result xor (value[index] as uint64))*0x100000001b3
+        index+=1
+    }
+    return result
+}
 hex = (value:uint64):>string => {
     let alphabet='0123456789abcdef'
     let result:array<string>=[]
@@ -40,11 +50,13 @@ hex = (value:uint64):>string => {
 locate = (config:Config):>Entry? => {
     let disabled=environment('DEWY_NO_PRELUDE_CACHE')
     if disabled isnt? none and disabled not=? '' return none
-    let compiler=p(config.compiler).read_bytes
-    if compiler isnt? array<uint8> return none
+    # The compiler is identified by its file's stat identity, not by hashing
+    # its whole executable (tens of MB) on every compilation.
+    let stamp=_file_stamp(config.compiler)
+    if stamp is? none return none
     let identity=bytes.Writer[]
     bytes.write_text(FORMAT @identity)
-    bytes.write_word(fingerprint(compiler) @identity)
+    loop word in stamp {bytes.write_word(if word <? 0 0 else word as uint64 @identity)}
     bytes.write_text(config.compiler @identity)
     bytes.write_text(config.target @identity)
     bytes.write_word(config.library_roots.length as uint64 @identity)
@@ -102,9 +114,10 @@ restore = (entry:Entry):>state.PreludeSnapshot? => {
     if bytes.read_text(@input) not=? FORMAT return none
     if bytes.read_text(@input) not=? entry.identity return none
     let checksum=bytes.read_word(@input)
-    let payload=bytes.read_bytes(@input)
-    if not bytes.complete(input) or fingerprint(payload) not=? checksum return none
-    let snapshot=codec.decode(payload)
+    # Decode the payload where it lies in the file's bytes, not a copy.
+    let length=bytes.read_count(@input)
+    if input.failed or input.position+length not=? contents.length or fingerprint_from(contents input.position) not=? checksum return none
+    let snapshot=codec.decode_from(@input)
     if snapshot is? codec.CacheMiss return none
     if not inputs_match(snapshot entry) return none
     return snapshot
