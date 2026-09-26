@@ -4611,3 +4611,31 @@ had changed that helper's signature. It is public again, and the in-place
 reader is `table_word`. The rerun passes, along with the union-view and
 string-descriptor tests. A 3-generation bootstrap from `phase1-r` gives
 identical generations (`phase1-s`), and `check_native` passes on that pair.
+
+## Allocation sites, second pass (2026-09-25)
+
+A re-profile after the previous slice (493 M allocations) led to four more
+source-level fixes in the compiler's own analyses:
+- `fact_state.find` returned `addr?`, a heap cell per call (17.6 M). The
+  entries now answer through `position_of`, a plain word that is -1 when
+  absent. `join` reads held intervals in place instead of through
+  `evidence`, which copied each interval into a union. Its vacuous branch
+  no longer copies the candidate interval up front.
+- The tokenizer's `is_based_digit` scanned the base's alphabet as grapheme
+  views, one string descriptor per character (7.8 M). The digit sets are
+  now built once (`BASE_DIGITS`, `FOLDED_DIGITS`). Only a case-insensitive
+  miss still casefolds.
+- `has_proposition` built two escaped `identity_key` strings per
+  comparison. `propositions.same_identity` compares the same fields
+  directly.
+- The bounds checker's `evaluate_inner` and the effect analysis's child
+  visits staged children in a fresh array per node. They now use a segment
+  of a shared stack (`Checker.child_stack`, `Analysis.child_stack`) above
+  the caller's segment.
+
+Self-build, cold, two rounds each: `phase1-q` 68.5 s / 152.1 GB, `phase1-s`
+55.7 s / 105.1 GB, this slice 53.2 s / 91.2 GB. Peak memory is unchanged at
+2,847 MB.
+
+Gate: 4,743 passed. A 3-generation bootstrap from `phase1-s` gives identical
+generations (`phase1-t`), and `check_native` passes on that pair.

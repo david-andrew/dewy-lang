@@ -68,26 +68,28 @@ describe = (fact:Fact):>string => {
 # Removal can reorder the entries; proof-state equality compares facts,
 # never their positions. Construct facts through the factories above so
 # equal descriptions always choose the same bucket.
-find = (state:State fact:Fact):>addr? => {
+# The entry position, or -1: a plain word, not an optional cell, on the
+# solver's hottest query.
+position_of = (state:State fact:Fact):>int64 => {
     let position:int64=state.heads.get(fact.hash default=(-1))
     loop position >=? 0 {
         $runtime_assert position >=? 0 and position <? state.values.length and position <? state.next.length
         if same(state.values[position].fact fact) return position
         position=state.next[position]
     }
-    return none
+    return -1
 }
-contains = (state:State fact:Fact):>bool => find(state fact) isnt? none
+contains = (state:State fact:Fact):>bool => position_of(state fact) >=? 0
 
 lookup = (state:State fact:Fact):>ranges.Interval? => {
-    let position = find(state fact)
-    if position is? none return none
+    let position = position_of(state fact)
+    if position <? 0 return none
     $runtime_assert position <? state.values.length
     return state.values[position].interval
 }
 put = (@state:State fact:Fact interval:ranges.Interval):>void => {
-    let position=find(state fact)
-    if position isnt? none {
+    let position=position_of(state fact)
+    if position >=? 0 {
         $runtime_assert position <? state.values.length
         # Reinstalling evidence is common during expression recording and
         # loop analysis. Preserve shared snapshots until an actual change;
@@ -122,8 +124,8 @@ unlink = (@state:State hash:uint64 position:addr):>void => {
     }
 }
 remove = (@state:State fact:Fact):>void => {
-    let position=find(state fact)
-    if position is? none return
+    let position=position_of(state fact)
+    if position <? 0 return
     $runtime_assert position <? state.values.length and position <? state.next.length
     unlink(@state fact.hash position)
     $runtime_assert state.values.length >? 0 and state.next.length >? 0
@@ -257,25 +259,40 @@ join = (states:array<State> context:Context):>State => {
             let combined:ranges.Interval? = none
             let present:bool = true
             loop state in states {
-                let part = evidence(state candidate.fact context)
+                # A held fact is read in place; only a missing one derives
+                # evidence (`evidence` would copy the interval into a union).
+                let position=position_of(state candidate.fact)
+                if position >=? 0 {
+                    $runtime_assert position <? state.values.length
+                    let held=state.values[position].interval
+                    if combined is? none { combined = held }
+                    else { combined = ranges.union(combined held) }
+                    continue
+                }
+                let part = implied(state candidate.fact context)
                 if part is? none { present = false break }
                 if part is? Vacuous continue
                 if combined is? none { combined = part }
                 else { combined = ranges.union(combined part) }
             }
             if not present continue
-            let joined:ranges.Interval=candidate.interval
-            if combined isnt? none { joined=combined }
-            else {
-                # Vacuous everywhere: the last state holding the fact supplies it.
-                let later=index+1
-                loop later <? states.length {
-                    let held=lookup(states[later] candidate.fact)
-                    if held isnt? none { joined=held }
-                    later+=1
-                }
+            if combined isnt? none {
+                put(@result candidate.fact combined)
+                continue
             }
-            put(@result candidate.fact joined)
+            # Vacuous everywhere: the last state holding the fact supplies it.
+            let supplier=index
+            let supplied=position_of(states[index] candidate.fact)
+            let later=index+1
+            loop later <? states.length {
+                let position=position_of(states[later] candidate.fact)
+                if position >=? 0 { supplier=later supplied=position }
+                later+=1
+            }
+            $runtime_assert supplier <? states.length
+            let values=states[supplier].values
+            $runtime_assert supplied >=? 0 and supplied <? values.length
+            put(@result candidate.fact values[supplied].interval)
         }
     }
     return result

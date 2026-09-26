@@ -68,6 +68,20 @@ const BASE_SPECS: totaldict<BasePrefix BaseInfo> = [
     '0g' -> ['0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/' true ['-'->62 '_'->63 '='->none]]
 ]
 
+# Each base's digits as sets, built once: the alphabet itself, and its
+# casefolded digits for bases that ignore case.
+alphabet_sets = (folded:bool):>dict<BasePrefix set<string>> => {
+    let result:dict<BasePrefix set<string>>=[]
+    loop [base info] in BASE_SPECS {
+        let digits:set<string>=set[]
+        loop digit in info.alphabet {digits.add(if folded digit.casefold else digit)}
+        result[base]=digits
+    }
+    return result
+}
+const BASE_DIGITS=alphabet_sets(false)
+const FOLDED_DIGITS=alphabet_sets(true)
+
 # commonly used bases
 const base10 = '0d'
 const base16 = '0x'
@@ -295,11 +309,8 @@ probe_symbol = (src:nonemptystring):>SymbolMatch? => {
 is_based_digit = (c:string base:BasePrefix):>bool => {
     info = BASE_SPECS[base]
     if c in? info.extra_chars return true
-    loop digit in info.alphabet {
-        if c =? digit return true
-        if not info.case_sensitive and c.casefold =? digit.casefold return true
-    }
-    return false
+    if base in? BASE_DIGITS and c in? BASE_DIGITS[base] return true
+    return not info.case_sensitive and base in? FOLDED_DIGITS and c.casefold in? FOLDED_DIGITS[base]
 }
 
 probe_number = (src:nonemptystring default_base:BasePrefix srcfile:SrcFile offset:addr):>NumberMatch? | TokenError => {

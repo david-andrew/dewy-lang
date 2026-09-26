@@ -103,3 +103,20 @@ identity_key = (p:Proposition):>string => {
     return "{_quoted(p.subject)}:{p.op}:{_bigint_as_string(p.value)}:{p.projection}:{term}:{p.term_projection}:{p.tested_type}:{p.when}:{axiom}"
 }
 storage_key = (p:Proposition):>string => "{identity_key(p)}:{p.term_id}:{p.subject_id}"
+# `identity_key(a) =? identity_key(b)` without building either string.
+same_identity = (a:Proposition b:Proposition):>bool => {
+    if a.subject not=? b.subject or a.op not=? b.op or a.value not=? b.value or a.projection not=? b.projection or a.term_projection not=? b.term_projection return false
+    if not same_text(a.term b.term) or not same_text(a.axiom b.axiom) return false
+    let tested=a.tested_type
+    let other_tested=b.tested_type
+    if tested is? none or other_tested is? none {if tested isnt? none or other_tested isnt? none return false}
+    else if tested not=? other_tested return false
+    let when=a.when
+    let other_when=b.when
+    if when is? none or other_when is? none return when is? none and other_when is? none
+    return when =? other_when
+}
+same_text = (a:string? b:string?):>bool => {
+    if a is? none or b is? none return a is? none and b is? none
+    return a =? b
+}

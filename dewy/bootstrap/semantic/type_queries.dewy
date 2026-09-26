@@ -104,7 +104,7 @@ const NAT = facts.Proposition[subject='self' op='>=?']
 const ADDR = facts.Proposition[subject='self' op='<?' axiom='addr']
 const nat_bases:dict<string string> = ['nat' -> 'int' 'nat8' -> 'int8' 'nat16' -> 'int16' 'nat32' -> 'int32' 'nat64' -> 'int64']
 has_proposition = (items:array<facts.Proposition> item:facts.Proposition):>bool => {
-    loop candidate in items { if facts.identity_key(candidate) =? facts.identity_key(item) return true }
+    loop candidate in items { if facts.same_identity(candidate item) return true }
     return false
 }
 addr_type = (@nodes:types.Table):>addr => types.refined_type(types.primitive('int64' @nodes) [NAT ADDR] @nodes)

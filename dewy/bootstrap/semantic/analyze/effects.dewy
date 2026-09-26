@@ -30,6 +30,8 @@ ProgramEffects:type = [by_literal:dict<addr FunctionEffects> by_param_binding:di
 EffectTransfer:type = const [caller:addr caller_parameter:addr callee_parameter:addr prefix:Route]
 Analysis:type = [
     literals:array<addr>=[] declares:dict<addr addr>=[]
+    # Staging for child visits (see `visit_children`).
+    child_stack:array<addr>=[]
     calls:array<addr>=[]
     reassigned:set<addr>=set[] param_ids:set<addr>=set[]
     effects:dict<addr FunctionEffects>=[]
@@ -298,6 +300,23 @@ resolve_route = (id:addr params:dict<addr ParameterEffects> nodes:array<hir.AST>
     }
 }
 
+# A node's children, staged on a shared stack segment above the caller's
+# instead of in a fresh array per visited node.
+visit_children = (node:hir.AST @params:dict<addr ParameterEffects> @analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
+    let base=analysis.child_stack.length
+    hir.push_children(node @analysis.child_stack)
+    let stop=analysis.child_stack.length
+    let changed:bool=false
+    let cursor=base
+    loop cursor <? stop {
+        $runtime_assert cursor <? analysis.child_stack.length
+        let child=analysis.child_stack[cursor]
+        if visit(child @params @analysis nodes type_nodes) {changed=true}
+        cursor+=1
+    }
+    loop analysis.child_stack.length >? base {analysis.child_stack.pop;}
+    return changed
+}
 visit_all = (ids:array<addr> @params:dict<addr ParameterEffects> @analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
     let changed:bool = false
     loop id in ids { if visit(id @params @analysis nodes type_nodes) { changed = true } }
@@ -354,7 +373,7 @@ visit = (id:addr @params:dict<addr ParameterEffects> @analysis:Analysis nodes:ar
     }
     if node is? hir.Index | hir.MemberAccess {
         let resolved = resolve_route(id params nodes)
-        if resolved is? none return visit_all(hir.children(node) @params @analysis nodes type_nodes)
+        if resolved is? none return visit_children(node @params @analysis nodes type_nodes)
         let changed = record(resolved.binding_id 'read' resolved.route @params)
         if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }
         return changed
@@ -410,7 +429,7 @@ visit = (id:addr @params:dict<addr ParameterEffects> @analysis:Analysis nodes:ar
         if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }
         return changed
     }
-    return visit_all(hir.children(node) @params @analysis nodes type_nodes)
+    return visit_children(node @params @analysis nodes type_nodes)
 }
 
 visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> @analysis:Analysis nodes:array<hir.AST> type_nodes:types.Table):>bool => {
@@ -459,7 +478,7 @@ visit_call = (call:hir.FunctionCall @params:dict<addr ParameterEffects> @analysi
         let resolved = resolve_route(node.target params nodes)
         if resolved is? none {
             let target = hir.node_at(nodes node.target)
-            if visit_all(hir.children(target) @params @analysis nodes type_nodes) { changed = true }
+            if visit_children(target @params @analysis nodes type_nodes) { changed = true }
             continue
         }
         if visit_all(resolved.inner @params @analysis nodes type_nodes) { changed = true }

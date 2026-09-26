@@ -36,6 +36,7 @@ Exit:type = const [levels:addr state:facts.State]
 Transfer:type = [normal:facts.State? breaks:array<Exit>=[] continues:array<Exit>=[]]
 Checker:type = [
     data:predicates.Data srcfile:SrcFile word_type:addr
+    child_stack:array<addr>=[]
     # `--timings`: report functions whose checking takes 20 ms or more.
     timings:bool=false
     source_files:array<SrcFile>=[]
@@ -761,8 +762,21 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         if output.normal isnt? none {state=output.normal}
         return
     }
-    let children=if node is? hir.DictLookup|hir.DictContains|hir.DictStore|hir.DictRemove dictionary_children(node @checker validate) else hir.children(node)
-    loop child in children {evaluate(child @state @checker validate)}
+    # Children are staged on a shared stack segment above the caller's, not
+    # in a fresh array per node; nested evaluations stage above this one.
+    let base=checker.child_stack.length
+    if node is? hir.DictLookup|hir.DictContains|hir.DictStore|hir.DictRemove {
+        loop child in dictionary_children(node @checker validate) {checker.child_stack.push(child)}
+    } else {hir.push_children(node @checker.child_stack)}
+    let stop=checker.child_stack.length
+    let cursor=base
+    loop cursor <? stop {
+        $runtime_assert cursor <? checker.child_stack.length
+        let child=checker.child_stack[cursor]
+        evaluate(child @state @checker validate)
+        cursor+=1
+    }
+    loop checker.child_stack.length >? base {checker.child_stack.pop;}
     if node is? hir.MemberAccess {refinements.seed_siblings(@state node checker.data.env @checker.data.registry)}
     if node is? hir.MemberAssign {
         let target=node_at(node.target checker)
@@ -1075,9 +1089,7 @@ mentioned_loop_pairs=(body:addr @checker:Checker):>array<facts.TermPair>=>{
                 if not found {pairs.push(facts.TermPair[left.term right.term])}
             }
         }
-        let children=hir.children(node)
-        let cursor=children.length
-        loop cursor>?0 {cursor-=1 pending.push(children[cursor])}
+        hir.push_children_reversed(node @pending)
     }
     checker.loop_qualifier_pairs[body]=pairs
     return pairs
