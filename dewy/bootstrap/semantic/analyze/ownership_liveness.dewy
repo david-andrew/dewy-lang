@@ -5,6 +5,11 @@ import p"../ty.dewy" as types
 # Branches join future reads; loop backedges retain outer owners, while
 # assignments kill the old value and iteration locals are born anew. A view keeps its source alive until its
 # birth is crossed walking backwards; a return has no advancing edge.
+# Liveness is kept per field route, so a component can leave its owner while
+# a sibling is still read. A `store` entry needs the enclosing storage of a
+# field assignment, but not the component's old value.
+Entry:type=const [binding:addr path:array<string>=[] store:bool=false]
+Live:type=dict<string Entry>
 Analysis:type=[
     owners:set<addr>
     aliases:dict<addr addr>=[]
@@ -12,8 +17,32 @@ Analysis:type=[
     occurrences:dict<addr addr>=[]
     candidates:set<addr>=set[]
     consumes:dict<addr addr>=[]
+    # component consumptions: the field path below the consumed owner
+    paths:dict<addr array<string>>=[]
     declarations:dict<addr addr>=[]
 ]
+entry_key=(entry:Entry):>string=>{
+    let key="{entry.binding}{if entry.store '!' else ':'}"
+    loop name in entry.path {key="{key}.{name}"}
+    return key
+}
+add_entry=(@live:Live entry:Entry):>void=>{live[entry_key(entry)]=entry}
+merge=(@live:Live other:Live):>void=>{loop [key entry] in other {live[key]=entry}}
+under=(path:array<string> prefix:array<string>):>bool=>{
+    if path.length <? prefix.length return false
+    loop i in [0..prefix.length) {if path[i] not=? prefix[i] return false}
+    return true
+}
+# The binding and field path of a route of field reads from a name.
+field_route=(id:addr nodes:array<hir.AST>):>Entry?=>{
+    let reverse:array<string>=[]
+    let node=hir.node_at(nodes id)
+    loop node is? hir.MemberAccess {reverse.push(node.name) node=hir.node_at(nodes node.value)}
+    if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return none
+    let path:array<string>=[]
+    loop reverse.length >? 0 {path.push(reverse.pop)}
+    return Entry[node.binding_id path]
+}
 roots=(binding:addr aliases:dict<addr addr>):>set<addr>=>{
     let result:set<addr>=set[]
     let current:addr?=binding
@@ -35,24 +64,48 @@ read_roots=(id:addr aliases:dict<addr addr> nodes:array<hir.AST>):>set<addr>=>{
     }
     return result
 }
-alive=(binding:addr live:set<addr> aliases:dict<addr addr>):>bool=>{
-    loop later in live {if binding in? roots(later aliases) return true}
+# Whether a live entry needs the value a consumption of `path` takes.
+needed=(binding:addr path:array<string> live:Live aliases:dict<addr addr>):>bool=>{
+    loop entry in live.values {
+        if binding not in? roots(entry.binding aliases) continue
+        if entry.binding not=? binding return true
+        if entry.store {
+            # Storing into a component needs its ancestors, not the component.
+            if path.length <? entry.path.length and under(entry.path path) return true
+        } else if under(path entry.path) or under(entry.path path) return true
+    }
     return false
 }
-LoopExit:type=const [after:set<addr> repeated:set<addr>]
-visit=(id:addr after:set<addr> enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> exits:array<LoopExit>=[]):>set<addr>=>{
+LoopExit:type=const [after:Live repeated:Live]
+consume=(id:addr binding:addr path:array<string> live:Live enabled:set<addr> @analysis:Analysis):>void=>{
+    if binding in? enabled and id in? analysis.candidates and not needed(binding path live analysis.aliases) {
+        analysis.consumes[id]=binding
+        if path.length >? 0 {analysis.paths[id]=path}
+    } else {
+        analysis.consumes.pop(id default=0);
+        analysis.paths.pop(id default=[]);
+    }
+}
+visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> exits:array<LoopExit>=[]):>Live=>{
     let node=hir.node_at(nodes id)
     let live=after
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none {
-            if node.binding_id in? enabled and id in? analysis.candidates and not alive(node.binding_id live analysis.aliases) {analysis.consumes[id]=node.binding_id}
-            else {analysis.consumes.pop(id default=0);}
-            live.add(node.binding_id)
+            consume(id node.binding_id [] live enabled @analysis)
+            add_entry(@live Entry[node.binding_id])
         }
         return live
     }
+    if node is? hir.MemberAccess {
+        let route=field_route(id nodes)
+        if route isnt? none {
+            consume(id route.binding route.path live enabled @analysis)
+            add_entry(@live route)
+            return live
+        }
+    }
     if node is? hir.FunctionLiteral {
-        loop binding in read_roots(id analysis.aliases nodes) {live.add(binding)}
+        loop binding in read_roots(id analysis.aliases nodes) {add_entry(@live Entry[binding])}
         return live
     }
     if node is? hir.Break|hir.Continue and node.loop_levels <? exits.length {
@@ -61,7 +114,7 @@ visit=(id:addr after:set<addr> enabled:set<addr> @analysis:Analysis nodes:array<
         let continuation=exits[selected]
         return if node is? hir.Break continuation.after else continuation.repeated
     }
-    if node is? hir.Return {return if node.item is? none set[] else visit(node.item set[] analysis.owners @analysis nodes exits)}
+    if node is? hir.Return {return if node.item is? none [] else visit(node.item [] analysis.owners @analysis nodes exits)}
     if node is? hir.Flow {
         let following=if node.default is? none live else visit(node.default live enabled @analysis nodes exits)
         let index=node.arms.length
@@ -78,16 +131,16 @@ visit=(id:addr after:set<addr> enabled:set<addr> @analysis:Analysis nodes:array<
                     let nested=exits
                     nested.push(LoopExit[live head])
                     let entering=visit(arm.body head enabled @analysis nodes nested)
-                    loop binding in following {entering.add(binding)}
+                    merge(@entering following)
                     let next=visit(arm.condition entering enabled @analysis nodes nested)
                     let before=head.length
-                    loop binding in next {head.add(binding)}
+                    merge(@head next)
                     if head.length=?before break
                 }
                 following=head
             } else {
                 let taken=visit(arm.body live enabled @analysis nodes exits)
-                loop binding in taken {following.add(binding)}
+                merge(@following taken)
                 following=visit(arm.condition following enabled @analysis nodes exits)
             }
         }
@@ -96,11 +149,26 @@ visit=(id:addr after:set<addr> enabled:set<addr> @analysis:Analysis nodes:array<
     if node is? hir.Assign and node.op=?'=' {
         let target=hir.node_at(nodes node.target)
         if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
-            live.pop(target.binding_id default=target.binding_id);
-            return visit(node.value live enabled @analysis nodes exits)
+            let kept:Live=[]
+            loop [key entry] in live {if entry.binding not=? target.binding_id {kept[key]=entry}}
+            return visit(node.value kept enabled @analysis nodes exits)
         }
     }
-    if node is? hir.Declare and node.binding_id isnt? none {live.pop(node.binding_id default=node.binding_id);}
+    if node is? hir.MemberAssign and hir.node_at(nodes node.target) is? hir.MemberAccess {
+        let route=field_route(node.target nodes)
+        if route isnt? none {
+            # The old component is dead; the store needs only its ancestors.
+            let kept:Live=[]
+            loop [key entry] in live {if entry.binding not=? route.binding or not under(entry.path route.path) {kept[key]=entry}}
+            add_entry(@kept Entry[route.binding route.path true])
+            return visit(node.value kept enabled @analysis nodes exits)
+        }
+    }
+    if node is? hir.Declare and node.binding_id isnt? none {
+        let kept:Live=[]
+        loop [key entry] in live {if entry.binding not=? node.binding_id {kept[key]=entry}}
+        live=kept
+    }
     let children=hir.children(node)
     loop children.length >? 0 {live=visit(children.pop live enabled @analysis nodes exits)}
     return live
@@ -163,8 +231,20 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table)
                 value=hir.node_at(nodes selected)
             }
             if value is? hir.ExpressedIdentifier and value.binding_id isnt? none and value.binding_id in? owners and value.binding_id not in? analysis.captured and analysis.occurrences.get(selected 0) =? 1 and counts.get(value.binding_id 0) =? 1 {analysis.candidates.add(selected)}
+            if value is? hir.MemberAccess {
+                # A field route of an owner; the caller decides which
+                # component types may leave it.
+                let route=field_route(selected nodes)
+                let root=selected
+                loop hir.node_at(nodes root) is? hir.MemberAccess {
+                    let member=hir.node_at(nodes root)
+                    $runtime_assert member is? hir.MemberAccess
+                    root=member.value
+                }
+                if route isnt? none and route.binding in? owners and route.binding not in? analysis.captured and analysis.occurrences.get(root 0) =? 1 and counts.get(route.binding 0) =? 1 {analysis.candidates.add(selected)}
+            }
         }
     }
-    visit(body set[] owners @analysis nodes);
+    visit(body [] owners @analysis nodes);
     return analysis
 }

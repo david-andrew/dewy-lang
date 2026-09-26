@@ -4777,3 +4777,44 @@ Validation:
   (`phase1-x`), and `check_native` passes on that pair.
 - The intermediate `phase1-w` pair (without the projected-read fix)
   also bootstrapped identically and passed `check_native`.
+
+## Conditional component transfers (2026-09-26)
+
+A component can now leave its owner on some paths only, in both compilers:
+
+```dewy
+if yes {taken=consume(pair.left)}        # pair.right is still read later
+loop i in [0..3) {
+    total+=consume(pair.left)
+    pair.left=Handle[10+i]               # renewal before the next iteration
+}
+```
+
+Both were rejected before ("requires an independent copy"). Branch-aware
+liveness (`ownership_liveness`) now keeps entries per field route: a read of
+`pair.right` no longer keeps `pair.left` alive. A field assignment kills the
+replaced component and leaves a *store* entry, which needs the enclosing
+storage (so consuming an ancestor stays rejected) but not the old component.
+A consumed component gets a flag in its owner (`component_flags`), declared
+with the owner. Consumption clears it; the owner's cleanup (scope exit,
+return, break, whole replacement) drops that component only while the flag
+is set; and a field replacement drops the old value under the same guard,
+then sets it again. Whole-owner replacement restores all of an owner's
+component flags. Only field routes through hook-free wrappers to components
+without a custom move qualify. Element routes and custom moves keep today's
+rules, and a later read of a maybe-moved component, a consuming loop
+without renewal, or whole-owner use after the transfer are still rejected.
+
+Also, hosted: a fresh `bytes as string | none` now moves into its optional
+local instead of being copied, which leaked the decoded string (hosted
+only). The decode-and-return pattern joins `native_argument_temporaries`.
+
+New tests: `test_lifecycle_conditional_components.py` (six runtime cases,
+three rejections, the `lifecycle_conditional_components` kernel, and the
+native comparison). The kernel checks that every handle is dropped exactly
+once.
+
+Validation:
+- Gate: 4,758 passed.
+- A 3-generation bootstrap from `phase1-x` gives identical generations
+  (`phase1-y`), and `check_native` passes on that pair.

@@ -16,9 +16,12 @@ import p"analyze/predicate_effects.dewy" as predicate_effects
 # at last use. Custom copy/move hooks remain checked calls, and drop precedes
 # field/element storage cleanup. Branch consumption uses last-use proofs and
 # conditional cleanup. Replacements re-establish ownership across checked
-# backedges. Last-use components transfer through synthesized wrappers; using
-# remaining parts of a partially transferred owner still needs further analysis.
+# backedges. Last-use components transfer through synthesized wrappers; a
+# component consumed on some paths only is tracked by a per-component flag.
 Extraction:type = const [binding:addr path:array<string|addr> moved:bool=false]
+# A component consumed on some paths only: its owner holds it while the flag
+# is true, and cleanup consults the flag instead of a static route.
+ComponentFlag:type = const [path:array<string> flag:Captured]
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 # An expression can contain a block, branch, or early return. Carry its
 # enclosing lexical lifetime explicitly through expression traversal.
@@ -28,6 +31,7 @@ Frame:type = const [
 ]
 Plan:type = [
     flags:dict<addr Captured>=[]
+    component_flags:dict<addr array<ComponentFlag>>=[]
     extractions:dict<addr array<Extraction>>=[]
     hooks:dict<addr Hook>=[]
     composed_moves:dict<addr addr>=[]
@@ -97,7 +101,22 @@ move_remainder=(shape:types.ObjectType plan:Plan session:contexts.Session):>arra
     }
     return current.fields
 }
-drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none extraction:Extraction?=none additional:array<Extraction>=[] inline_array:bool=false):>void => {
+drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<addr> @plan:Plan @session:contexts.Session run_hook:bool=true tail:Suffix?=none extraction:Extraction?=none additional:array<Extraction>=[] inline_array:bool=false guards:array<ComponentFlag>=[]):>void => {
+    loop guard in guards {
+        if guard.path.length >? 0 continue
+        # Drop a conditionally consumed component only while it is held.
+        let rest:array<ComponentFlag>=[]
+        loop other in guards {if other.path.length >? 0 {rest.push(other)}}
+        let inner:array<addr>=[]
+        drop_value(value type_id loc ancestors @inner @plan @session run_hook=run_hook tail=tail extraction=extraction additional=additional inline_array=inline_array guards=rest)
+        if inner.length >? 0 {
+            let empty=types.primitive('void' @session.types)
+            let body=put(hir.Block[loc empty inner true] @session)
+            let arm=put(hir.IfArm[loc empty guard.flag.value body] @session)
+            calls.push(put(hir.Flow[loc empty [arm] none] @session))
+        }
+        return
+    }
     if extraction isnt? none and extraction.path.length=?0 {
         if not extraction.moved return
         run_hook=false
@@ -109,7 +128,7 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
     if plan.problem isnt? none or resource(type_id session.types) is? none return
     let owner=views.structural_base(type_id session.types)
     let type=types.node_at(session.types owner)
-    if owner in? ancestors and routes.length=?0 {
+    if owner in? ancestors and routes.length=?0 and guards.length=?0 {
         # Close recursive structural expansion with a checked borrowed helper.
         # Publish the callable before its body so recursive calls reuse it.
         let key="{owner}:{run_hook}"
@@ -389,7 +408,16 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         }
         let first:Extraction?=none
         if remaining.length>?0 {first=remaining.pop}
-        drop_value(member field.value_type loc nested @calls @plan @session extraction=first additional=remaining)
+        let held:array<ComponentFlag>=[]
+        loop guard in guards {
+            if guard.path.length>?0 and guard.path[0]=?field.name {
+                let path:array<string>=[]
+                let i:addr=1
+                loop i<?guard.path.length {path.push(guard.path[i]) i+=1}
+                held.push(ComponentFlag[path guard.flag])
+            }
+        }
+        drop_value(member field.value_type loc nested @calls @plan @session extraction=first additional=remaining guards=held)
     }
 }
 cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fields_only:addr?=none extracted:Extraction?=none):>array<addr> => {
@@ -409,7 +437,7 @@ cleanup = (owners:array<addr> loc:Span @plan:Plan @session:contexts.Session fiel
         if extracted isnt? none and extracted.binding=?declared.binding_id {routes.push(extracted)}
         let first:Extraction?=none
         if routes.length>?0 {first=routes.pop}
-        drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only extraction=first additional=routes)
+        drop_value(value owner loc set[] @calls @plan @session run_hook=fields_only is? none or owners[index] not=? fields_only extraction=first additional=routes guards=plan.component_flags.get(declared.binding_id []))
         let flag=plan.flags.get(declared.binding_id)
         if flag isnt? none and owners[index] not=? fields_only {
             let empty=types.primitive('void' @session.types)
@@ -451,6 +479,59 @@ returning_projection=(id:addr owners:array<addr> session:contexts.Session):>Extr
         return Extraction[value.binding_id path]
     }
     return none
+}
+# The flag of a conditionally consumed component route, if any.
+component_flag=(route:Extraction plan:Plan):>Captured?=>{
+    loop component in plan.component_flags.get(route.binding []) {
+        if component.path.length not=? route.path.length continue
+        let same=true
+        loop i in [0..route.path.length) {
+            let step=route.path[i]
+            if step isnt? string or step not=? component.path[i] {same=false break}
+        }
+        if same return component.flag
+    }
+    return none
+}
+# Components under `path` of an owner, relative to it.
+held_under=(binding:addr path:array<string> plan:Plan):>array<ComponentFlag>=>{
+    let result:array<ComponentFlag>=[]
+    loop component in plan.component_flags.get(binding []) {
+        if component.path.length <? path.length continue
+        let inside=true
+        loop i in [0..path.length) {if component.path[i] not=? path[i] {inside=false break}}
+        if not inside continue
+        let rest:array<string>=[]
+        let i:addr=path.length
+        loop i <? component.path.length {rest.push(component.path[i]) i+=1}
+        result.push(ComponentFlag[rest component.flag])
+    }
+    return result
+}
+restore_flags=(held:array<ComponentFlag> loc:Span @session:contexts.Session):>array<addr>=>{
+    let result:array<addr>=[]
+    loop component in held {
+        let present=put(hir.Bool[loc types.primitive('bool' @session.types) true] @session)
+        result.push(put(hir.Assign[loc types.primitive('void' @session.types) component.flag.value '=' present] @session))
+    }
+    return result
+}
+# A hook-free route to a component without a custom move: the remaining
+# owner can drop around it, guarded by one flag.
+transferable_component=(id:addr session:contexts.Session):>bool=>{
+    let node=hir.node_at(session.hir id)
+    if resource(node.value_type session.types) is? none return false
+    let shape=types.node_at(session.types views.structural_base(node.value_type session.types))
+    if shape isnt? types.ObjectType return false
+    loop method in shape.methods {if method.lifecycle =? 'move' return false}
+    let current=node
+    loop current is? hir.MemberAccess {
+        let owner=types.node_at(session.types views.structural_base(hir.node_at(session.hir current.value).value_type session.types))
+        if owner isnt? types.ObjectType return false
+        loop method in owner.methods {if method.lifecycle isnt? none return false}
+        current=hir.node_at(session.hir current.value)
+    }
+    return true
 }
 transfer = (id:addr expected:addr? @plan:Plan @session:contexts.Session):>addr => {
     let value=hir.node_at(session.hir id)
@@ -635,6 +716,16 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
             $runtime_assert frozen isnt? none
             let result=transfer(selected candidate.value_type @plan @session)
             let saved=capture_result(result candidate.loc @session)
+            let held=component_flag(frozen plan)
+            if held isnt? none {
+                # Consumed on this path only: clear the owner's flag.
+                let cleared=put(hir.Bool[candidate.loc types.primitive('bool' @session.types) false] @session)
+                prefix.push(saved.declaration)
+                prefix.push(put(hir.Assign[candidate.loc types.primitive('void' @session.types) held.value '=' cleared] @session))
+                prefix.push(saved.value)
+                store(id hir.Block[candidate.loc hir.node_at(session.hir saved.value).value_type prefix false] @session)
+                return
+            }
             let routes=plan.extractions.get(frozen.binding [])
             routes.push(Extraction[frozen.binding frozen.path result not=?selected])
             plan.extractions[frozen.binding]=routes
@@ -1335,6 +1426,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             if original is? hir.Declare and original.binding_id isnt? none {
                 let flag=plan.flags.get(original.binding_id)
                 if flag isnt? none {items.push(flag.declaration)}
+                loop component in plan.component_flags.get(original.binding_id []) {items.push(component.flag.declaration)}
             }
         }
         current.items=items
@@ -1451,6 +1543,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             let present=put(hir.Bool[node.loc types.primitive('bool' @session.types) true] @session)
             items.push(put(hir.Assign[node.loc types.primitive('void' @session.types) flag.value '=' present] @session))
         }
+        loop restore in restore_flags(held_under(target.binding_id [] plan) node.loc @session) {items.push(restore)}
         store(id hir.Block[node.loc node.value_type items false] @session)
         return
     }
@@ -1591,9 +1684,14 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         let reverse_path:array<string>=[]
         loop part is? hir.MemberAccess {reverse_path.push(part.name) part=hir.node_at(session.hir part.value)}
         let removed:array<Extraction>=[]
+        let held:array<ComponentFlag>=[]
+        let restored:array<addr>=[]
         if part is? hir.ExpressedIdentifier and part.binding_id isnt? none {
             let path:array<string>=[]
             loop reverse_path.length>?0 {path.push(reverse_path.pop)}
+            # The new value restores every component under this route.
+            held=held_under(part.binding_id path plan)
+            restored=restore_flags(held node.loc @session)
             let retained:array<Extraction>=[]
             loop route in plan.extractions.get(part.binding_id []) {
                 let inside=path.length<=?route.path.length
@@ -1613,9 +1711,10 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         }
         let first:Extraction?=none
         if removed.length>?0 {first=removed.pop}
-        drop_value(selected target.value_type node.loc set[] @prefix @plan @session extraction=first additional=removed)
+        drop_value(selected target.value_type node.loc set[] @prefix @plan @session extraction=first additional=removed guards=held)
         let stored=if node is? hir.MemberAssign hir.MemberAssign[node.loc node.value_type selected replacement.value] else hir.IndexAssign[node.loc node.value_type selected replacement.value]
         prefix.push(put(stored @session))
+        loop restore in restored {prefix.push(restore)}
         store(id hir.Block[node.loc node.value_type prefix false] @session)
         return
     }
@@ -2039,6 +2138,25 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     }
     let conditional=ownership_liveness.consumptions(function.body owned session.hir session.types)
     loop [read owner] in conditional.consumes {
+        let path=conditional.paths.get(read [])
+        if path.length >? 0 {
+            if read in? plan.consume_sites or not transferable_component(read session) continue
+            plan.consume_sites.add(read)
+            let components=plan.component_flags.get(owner [])
+            let known=false
+            loop component in components {
+                if component.path.length not=? path.length continue
+                let same=true
+                loop i in [0..path.length) {if component.path[i] not=? path[i] {same=false break}}
+                if same {known=true}
+            }
+            if not known {
+                let boolean=types.primitive('bool' @session.types)
+                components.push(ComponentFlag[path capture_result(put(hir.Bool[function.loc boolean true] @session) function.loc @session)])
+                plan.component_flags[owner]=components
+            }
+            continue
+        }
         let declaration=conditional.declarations.get(read)
         if read in? plan.consume_sites or (declaration isnt? none and declaration in? plan.transfer_sites) continue
         if declaration isnt? none {plan.transfer_sites.add(declaration)}
@@ -2071,6 +2189,7 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
         $runtime_assert declared.binding_id isnt? none
         let flag=plan.flags.get(declared.binding_id)
         if flag isnt? none {prefix.push(flag.declaration)}
+        loop component in plan.component_flags.get(declared.binding_id []) {prefix.push(component.flag.declaration)}
     }
     if prefix.length >? 0 {
         let body=hir.node_at(session.hir function.body)

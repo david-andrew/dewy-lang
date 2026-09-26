@@ -5,11 +5,36 @@ whether a resource may change owners, so cleanup can follow the executed path.
 Loop backedges solve a finite liveness fixed point; assignments kill the old
 value, so a fresh owner can replace it before the next iteration.
 Aliases and captures keep their root live, while returns have no backedge. No traversal order is treated as a branch join.
+
+Liveness is kept per field route, so a component can leave its owner while a
+sibling is still read. A live entry is `(binding, path, kind)`: a `read` of
+the route, or a `store` into it, which needs the enclosing storage but not
+the component's old value.
 """
 from .. import hir
 
 
-def conditional_consumptions(body, parameter_owners, resource):
+def field_route(node):
+    """`(binding, field path)` of a route of field reads from a name, else None."""
+    path = []
+    while isinstance(node, hir.MemberAccess):
+        path.append(node.name)
+        node = node.value
+    if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+        return node.binding_id, tuple(reversed(path))
+    return None
+
+
+def conflicts(path, entry_path, kind):
+    """Whether a live entry needs the value a consumption of `path` takes."""
+    if kind == 'store':
+        # Storing into a component needs its ancestors, not the component.
+        return len(path) < len(entry_path) and entry_path[:len(path)] == path
+    shared = min(len(path), len(entry_path))
+    return path[:shared] == entry_path[:shared]
+
+
+def conditional_consumptions(body, parameter_owners, resource, component=None):
     nodes, owners, aliases, captured, occurrences = [], set(), {}, set(), {}
     owners.update(p.binding_id for p in parameter_owners)
     pending = [body]
@@ -38,7 +63,7 @@ def conditional_consumptions(body, parameter_owners, resource):
         result = set()
         for child in hir.walk(node):
             if isinstance(child, hir.ExpressedIdentifier):
-                result.update(roots(child.binding_id))
+                result.update((root, (), 'read') for root in roots(child.binding_id))
         return result
 
     captured = set().union(*(roots(binding) for binding in captured)) if captured else set()
@@ -82,16 +107,38 @@ def conditional_consumptions(body, parameter_owners, resource):
                     and resource(value.type) is not None and value.binding_id not in captured
                     and occurrences[id(value)] == 1 and counts.get(value.binding_id) == 1):
                 candidates.add(id(value))
+            route = field_route(value) if isinstance(value, hir.MemberAccess) and component is not None else None
+            if route is not None:
+                root = value
+                while isinstance(root, hir.MemberAccess):
+                    root = root.value
+                if (route[0] in owners and route[0] not in captured and occurrences[id(root)] == 1
+                        and resource(value.type) is not None and component(value)
+                        and counts.get(route[0]) == 1):
+                    candidates.add(id(value))
 
     consumes = {}
+    def needed(binding, path, live):
+        for entry, entry_path, kind in live:
+            if binding in roots(entry) and (entry != binding or conflicts(path, entry_path, kind)):
+                return True
+        return False
+
+    def consume(node, binding, path, live, enabled):
+        if binding in enabled and id(node) in candidates and not needed(binding, path, live):
+            consumes[id(node)] = (binding, path)
+        else:
+            consumes.pop(id(node), None)  # a later fixed-point iteration may reveal a use
+
     def visit(node, after, enabled, exits=()):
         live = set(after)
         if isinstance(node, hir.ExpressedIdentifier):
-            if node.binding_id in enabled and id(node) in candidates and not any(node.binding_id in roots(binding) for binding in live):
-                consumes[id(node)] = node.binding_id
-            else:
-                consumes.pop(id(node), None)  # a later fixed-point iteration may reveal a use
-            live.add(node.binding_id)
+            consume(node, node.binding_id, (), live, enabled)
+            live.add((node.binding_id, (), 'read'))
+            return live
+        if isinstance(node, hir.MemberAccess) and (route := field_route(node)) is not None:
+            consume(node, route[0], route[1], live, enabled)
+            live.add((route[0], route[1], 'read'))
             return live
         if isinstance(node, hir.FunctionLiteral):
             return live | reads(node)
@@ -107,7 +154,7 @@ def conditional_consumptions(body, parameter_owners, resource):
                     # Solve liveness at the condition, including each continue
                     # edge. Reassignment kills the old value; every path back
                     # to a consuming use must therefore provide a new owner.
-                    # The finite binding set only grows, so this terminates.
+                    # The finite entry set only grows, so this terminates.
                     head = set(following)
                     while True:
                         nested = (*exits, (live, head))
@@ -122,10 +169,17 @@ def conditional_consumptions(body, parameter_owners, resource):
                     following = visit(arm.condition, following | taken, enabled, exits)
             return following
         if isinstance(node, hir.Assign) and node.op == '=' and isinstance(node.target, hir.ExpressedIdentifier):
-            live.discard(node.target.binding_id)
+            live = {entry for entry in live if entry[0] != node.target.binding_id}
+            return visit(node.value, live, enabled, exits)
+        if (isinstance(node, hir.MemberAssign) and isinstance(node.target, hir.MemberAccess)
+                and (route := field_route(node.target)) is not None):
+            # The old component is dead; the store needs only its ancestors.
+            binding, path = route
+            live = {entry for entry in live if entry[0] != binding or entry[1][:len(path)] != path}
+            live.add((binding, path, 'store'))
             return visit(node.value, live, enabled, exits)
         if isinstance(node, hir.Declare):
-            live.discard(node.binding_id)
+            live = {entry for entry in live if entry[0] != node.binding_id}
         for child in reversed(tuple(hir.children(node))):
             live = visit(child, live, enabled, exits)
         return live

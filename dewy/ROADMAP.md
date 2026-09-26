@@ -746,8 +746,13 @@ in both lowerings and the parity tool is the gate.
   preserving cleanup of remaining old components and the new value.
   Whole-owner replacements re-establish ownership across loop backedges;
   every advancing path must provide a fresh value before another consuming use.
-  Broader partial transfers and remaining resource-container mutations still
-  require further lifetime analysis. Same-block owning input
+  A component can also leave its owner on some paths only (a branch, some
+  loop iterations): liveness is kept per field route, a field assignment
+  ends only the replaced component's lifetime, and the owner keeps one flag
+  per such component that its cleanup and replacements consult.
+  Element (index) routes, components with custom moves or behind hooked
+  wrappers, and remaining resource-container mutations still require
+  further lifetime analysis. Same-block owning input
   transfers now include owning parameters, custom move hooks and union owners;
   first if conditions are unconditional input sites, while loop conditions
   and later arms still need the more general lifetime join. Fresh arguments, factory results and explicit copies

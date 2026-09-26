@@ -1,0 +1,66 @@
+# A component can leave its owner on some paths only: a per-component flag
+# tells the owner's cleanup whether it still holds that component. Every
+# handle must be dropped exactly once.
+let dropped:array<int64>=[]
+Handle=type of [id:int64
+$__drop__
+release=():>void=>{dropped.push(id)}
+
+]
+Pair:type=[left:Handle right:Handle]
+Outer:type=[inner:Pair tag:int64]
+consume=(h:Handle):>int64=>h.id
+
+# Taken on one branch; the sibling is still read afterwards.
+branch=(yes:bool base:int64):>int64=>{
+    let pair=Pair[Handle[base] Handle[base+1]]
+    let taken:int64=0
+    if yes {taken=consume(pair.left)}
+    return taken + pair.right.id
+}
+# Taken and replaced on every iteration; the replacement drops nothing.
+refill=(base:int64):>int64=>{
+    let pair=Pair[Handle[base] Handle[base+1]]
+    let total:int64=0
+    loop i in [0..3) {
+        total+=consume(pair.left)
+        pair.left=Handle[base+10+i]
+    }
+    return total + pair.right.id
+}
+# Taken on some iterations; a replacement drops the old value only when the
+# owner still holds it.
+sometimes=(base:int64):>int64=>{
+    let pair=Pair[Handle[base] Handle[base+1]]
+    let total:int64=0
+    loop i in [0..4) {
+        if i % 2 =? 0 {total+=consume(pair.left)}
+        pair.left=Handle[base+20+i]
+    }
+    return total + pair.right.id
+}
+# A nested component through a hook-free wrapper.
+nested=(yes:bool base:int64):>int64=>{
+    let outer=Outer[Pair[Handle[base] Handle[base+1]] 7]
+    let taken:int64=0
+    if yes {taken=consume(outer.inner.right)}
+    return taken + outer.inner.left.id + outer.tag
+}
+count=(id:int64):>int64=>{
+    let n:int64=0
+    loop d in dropped {if d =? id {n+=1}}
+    return n
+}
+main=():>int64=>{
+    if branch(true 100) not=? 201 return 1
+    if branch(false 110) not=? 111 return 2
+    if refill(200) not=? 200+210+211+201 return 3
+    if sometimes(300) not=? 300+321+301 return 4
+    if nested(true 400) not=? 401+400+7 return 5
+    if nested(false 410) not=? 410+7 return 6
+    # every handle made was dropped exactly once
+    let made:array<int64>=[100 101 110 111 200 201 210 211 212 300 301 320 321 322 323 400 401 410 411]
+    loop id in made {if count(id) not=? 1 return 10}
+    if dropped.length not=? made.length return 11
+    return 42
+}

@@ -17,6 +17,7 @@ from ..parser import t0
 from .errors import not_implemented, user_error
 from ..reporting import Pointer
 from .analyze import public_effects, effects, predicate_effects
+from .analyze.ownership_liveness import conditional_consumptions, field_route
 
 
 def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, validate: bool = True,
@@ -118,6 +119,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
     component_copies = {}
     generated = []
     ownership_flags = {}
+    # Components consumed on some paths only: owner -> {field path: flag}.
+    # The flag is true while the owner still holds that component.
+    component_flags = {}
     extractions = {}  # last-use components; the remaining owner keeps its lexical cleanup
 
     def move_remainder(shape):
@@ -139,7 +143,18 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
 
     def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None, extracted=None):
         result = []
-        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None, additional=(), inline_array=False):
+        def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None, additional=(), inline_array=False, guards=None):
+            if guards and () in guards:
+                # Drop a conditionally consumed component only while its
+                # owner still holds it.
+                calls = []
+                drop(value, type_, ancestors, run_hook, into=calls, tail=tail, extraction=extraction,
+                     additional=additional, inline_array=inline_array,
+                     guards={path: flag for path, flag in guards.items() if path})
+                if calls:
+                    into.append(hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, guards[()],
+                                                                        hir.Block(loc, ty.VOID_TYPE, calls, True))], None))
+                return
             routes = (() if extraction is None else (extraction,)) + tuple(additional)
             if extraction is not None and not extraction[0]:
                 if not extraction[1]:
@@ -150,7 +165,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             if resource(type_) is None:
                 return
             shape = ty.structural_base(type_)
-            if id(shape) in ancestors and not routes:
+            if id(shape) in ancestors and not routes and not guards:
                 # A recursive value has finite runtime storage but an infinite
                 # structural expansion. Close that expansion with a borrowed
                 # helper call, publishing its identity before checking its body.
@@ -341,8 +356,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             for field in reversed(fields):
                 if resource(field.type) is not None:
                     selected_routes = [(path[1:], moved) for path, moved in routes if path and path[0] == field.name]
+                    nested = {path[1:]: flag for path, flag in (guards or {}).items() if path and path[0] == field.name}
                     drop(hir.MemberAccess(loc, field.type, value, field.name), field.type, ancestors | {id(shape)}, into=into,
-                         extraction=selected_routes[0] if selected_routes else None, additional=selected_routes[1:])
+                         extraction=selected_routes[0] if selected_routes else None, additional=selected_routes[1:],
+                         guards=nested or None)
         for owner in reversed(owners):
             owner_type = owner.annotation or owner.expr.type
             value = hir.ExpressedIdentifier(loc, owner_type, owner.name, binding_id=owner.binding_id)
@@ -350,8 +367,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             routes = list(extractions.get(owner.binding_id, ()))
             if extracted is not None and extracted[0] == owner.binding_id:
                 routes.append(extracted[1:])
+            guards = {path: flag[1] for path, flag in component_flags.get(owner.binding_id, {}).items()}
             drop(value, owner_type, set(), owner.binding_id not in fields_only, into=calls,
-                 extraction=routes[0] if routes else None, additional=routes[1:])
+                 extraction=routes[0] if routes else None, additional=routes[1:], guards=guards or None)
             flag = ownership_flags.get(owner.binding_id)
             if flag is not None and owner.binding_id not in fields_only:
                 body = hir.Block(loc, ty.VOID_TYPE, calls, True)
@@ -366,12 +384,16 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 path.append(part.name)
                 part = part.value
             routes = []
+            guards = {}
             if isinstance(part, hir.ExpressedIdentifier):
                 path = tuple(reversed(path))
                 existing = extractions.get(part.binding_id, ())
                 routes = [(route[len(path):], moved) for route, moved in existing if route[:len(path)] == path]
                 extractions[part.binding_id] = [(route, moved) for route, moved in existing if route[:len(path)] != path]
-            drop(selected, selected.type, set(), extraction=routes[0] if routes else None, additional=routes[1:])
+                guards = {route[len(path):]: flag[1] for route, flag in component_flags.get(part.binding_id, {}).items()
+                          if route[:len(path)] == path}
+            drop(selected, selected.type, set(), extraction=routes[0] if routes else None, additional=routes[1:],
+                 guards=guards or None)
         if suffix is not None:
             value, first, before = suffix
             drop(value, value.type, set(), tail=(first, before))
@@ -1249,6 +1271,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         projection = returning_projection(selected, owners)
                         value, moved = transfer(selected, child.type)
                         saved, value = capture(value, child.loc)
+                        flag = (component_flags.get(projection[0], {}).get(projection[1])
+                                if all(isinstance(step, str) for step in projection[1]) else None)
+                        if flag is not None:
+                            # Consumed on this path only: the owner's cleanup
+                            # consults the flag instead of a static route.
+                            cleared = hir.Assign(child.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(child.loc, 'bool', False))
+                            return hir.Block(child.loc, value.type, [*prefix, saved, cleared, value], False)
                         extractions.setdefault(projection[0], []).append((projection[1], moved))
                         # Keep the wrapper alive until its lexical cleanup. Only
                         # this component transfers; siblings still drop there.
@@ -1289,6 +1318,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     items.append(statement(item, active, loops, fresh_result=fresh_result and resource(item.type) is not None))
                     if isinstance(item, hir.Declare) and item.binding_id in ownership_flags:
                         items.append(ownership_flags[item.binding_id][0])
+                    if isinstance(item, hir.Declare):
+                        items.extend(flag[0] for flag in component_flags.get(item.binding_id, {}).values())
                 local = active[start:]
                 if local and node.scoped:
                     result = None
@@ -1347,6 +1378,8 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 declaration, value = capture(fresh(node.value, live, False, control=control), node.loc)
                 flag = ownership_flags.get(source.binding_id)
                 activate = [hir.Assign(node.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(node.loc, 'bool', True))] if flag is not None else []
+                activate.extend(hir.Assign(node.loc, ty.VOID_TYPE, component[1], '=', hir.Bool(node.loc, 'bool', True))
+                                for component in component_flags.get(source.binding_id, {}).values())
                 released = cleanup([source], node.loc)
                 extractions.pop(source.binding_id, None)
                 return hir.Block(node.loc, node.type, [declaration, *released,
@@ -1431,8 +1464,13 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 selected = freeze_route(selected, node.loc, root_id, prefix)
                 check_selection(node.value, root_id)
                 declaration, value = capture(fresh(node.value, live, False, control=control), node.loc)
+                # The new value restores every component under this route.
+                route = field_route(selected)
+                activate = [] if route is None else [
+                    hir.Assign(node.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(node.loc, 'bool', True))
+                    for path, flag in component_flags.get(route[0], {}).items() if path[:len(route[1])] == route[1]]
                 return hir.Block(node.loc, node.type, [*prefix, declaration,
-                    *cleanup((), node.loc, selected=selected), replace(node, target=selected, value=value)], False)
+                    *cleanup((), node.loc, selected=selected), replace(node, target=selected, value=value), *activate], False)
             if isinstance(node, hir.MemberAssign):
                 return replace(node, target=expression(node.target, live, inherited=literal.lifecycle == 'drop', control=control),
                                value=expression(node.value, live, inherited=literal.lifecycle == 'drop', control=control))
@@ -1450,9 +1488,27 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         elif not body.scoped:
             body = replace(body, scoped=True)
         transfers, views, consumes = local_transfers(body, parameter_owners, allowed)
-        from .analyze.ownership_liveness import conditional_consumptions
-        conditional, declarations_by_read = conditional_consumptions(body, parameter_owners, resource)
-        for read, owner in conditional.items():
+        def component(node):
+            # A hook-free route to a component without a custom move: the
+            # remaining owner can drop around it, guarded by one flag.
+            shape = ty.structural_base(node.type)
+            if not isinstance(shape, ty.ObjectType) or any(method.lifecycle == 'move' for method in shape.methods):
+                return False
+            while isinstance(node, hir.MemberAccess):
+                owner_shape = ty.structural_base(node.value.type)
+                if not isinstance(owner_shape, ty.ObjectType) or any(method.lifecycle is not None for method in owner_shape.methods):
+                    return False
+                node = node.value
+            return True
+        conditional, declarations_by_read = conditional_consumptions(body, parameter_owners, resource, component)
+        for read, (owner, path) in conditional.items():
+            if path:
+                if read not in consumes:
+                    consumes.add(read)
+                    flags = component_flags.setdefault(owner, {})
+                    if path not in flags:
+                        flags[path] = capture(hir.Bool(literal.loc, 'bool', True), literal.loc)
+                continue
             declaration = declarations_by_read.get(read)
             if read in consumes or declaration in transfers:
                 continue
@@ -1464,6 +1520,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 ownership_flags[owner] = capture(hir.Bool(literal.loc, 'bool', True), literal.loc)
         prepared_body = statement(body, list(parameter_owners), [], entry=True)
         prefix = [ownership_flags[owner.binding_id][0] for owner in parameter_owners if owner.binding_id in ownership_flags]
+        prefix.extend(flag[0] for owner in parameter_owners for flag in component_flags.get(owner.binding_id, {}).values())
         if prefix:
             prepared_body = replace(prepared_body, items=[*prefix, *prepared_body.items])
         prepared = replace(literal, body=prepared_body)

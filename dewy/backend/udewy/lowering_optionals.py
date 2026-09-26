@@ -1019,14 +1019,21 @@ class _OptionalLowering:
                 if isinstance(source, hir.ExpressedIdentifier)
                 else source
             )
+            fresh_call = (isinstance(value, hir.FunctionCall)
+                          and isinstance(value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral)))
+            # `bytes as string | none` decodes into a fresh temporary cell.
+            fresh_decode = (isinstance(value, hir.RepresentationCast)
+                            and isinstance(value.expr.type, ty.ArrayType)
+                            and value.expr.type.element == 'uint8'
+                            and ty.optional_payload(value.type) is not None)
             if (not self._union_tree_slots(members, prepared=prepared)
                     and (ty.optional_payload(value.type) is not None or not self._union_tree_slots(members))
-                    and isinstance(value, hir.FunctionCall)
-                    and isinstance(value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
+                    and (fresh_call or fresh_decode)):
                 # With no caller-frame trees on either side, an ordinary
-                # call's dead result can transfer its active payload. This
-                # includes general unions whose record alternatives are
-                # arena handles. The source cell itself remains frame-owned.
+                # call's dead result (or a fresh decode) can transfer its
+                # active payload. This includes general unions whose record
+                # alternatives are arena handles. The source cell itself
+                # remains frame-owned.
                 return [*prelude,
                         self._intrinsic_call('__store_i64__', [self._optional_tag(source_word, value.loc), cell], ty.VOID_TYPE, value.loc),
                         self._store_i64_field(cell, 8, self._load_i64_field(source_word, 8, value.loc), value.loc),

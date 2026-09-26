@@ -28,6 +28,14 @@ source_of=(session:Session index:addr):>Source=>{
     $runtime_assert index <? session.sources.length
     return session.sources[index]
 }
+# A fresh decode moves into its optional local instead of being copied.
+decode=(n:int64):>string=>{
+    let raw:array<uint8>=[]
+    loop k in [0..n) {raw.push(((k % 26) + 97) as uint8)}
+    let text = raw as string|none
+    if text is? none return ''
+    return text
+}
 body_width=(session:Session index:addr):>int64=>{
     let text=source_of(session index).body
     return text.length
@@ -60,6 +68,8 @@ exercise=():>int64=>{
     let session=Session[]
     loop k in [0..4) {session.sources.push(Source['p{k}' 'body text {k}'])}
     loop k in [0..40) {total+=body_width(session (k % 4) as addr)}
+    if decode(3) not=? 'abc' return -1
+    loop k in [0..20) {total+=decode(k + 30).length}
     snapshot.list.sort(key=(v)=>low(v))
     let previous:int64=0
     loop v in snapshot.list {
