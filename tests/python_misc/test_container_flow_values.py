@@ -25,8 +25,8 @@ from udewy.frontend import EntryPointOptions, entry_point
     let choose=(flag:bool):>set<int64>=>if flag original else other
     let a=choose(true)
     let b=choose(false)
-    a.add(7)
-    b.add(8)
+    a.push(7)
+    b.push(8)
     let literal=if flag set[42] else set[99]
     return if original.length=?1 and other.length=?1 and 42 in? literal 42 else 1''',
 ], ids=['dictionary', 'set'])

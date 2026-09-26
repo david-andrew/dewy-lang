@@ -21,3 +21,9 @@ def test_set_push(tmp_path):
 def test_const_set_push_is_rejected():
     with pytest.raises(UserError, match='const'):
         codegen(SrcFile(None, 'let main=():>int64=>{const s:set<int64>=set[] s.push(1) return 0}'))
+
+
+def test_set_add_is_not_a_spelling():
+    # `push` is the only insertion spelling; there is no `add` alias.
+    with pytest.raises(UserError, match='a set has no member `add`'):
+        codegen(SrcFile(None, 'let main=():>int64=>{let s:set<int64>=set[] s.add(1) return s.length}'))

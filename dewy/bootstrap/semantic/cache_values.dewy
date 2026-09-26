@@ -1003,7 +1003,7 @@ decode_Value37=(@input:bytes.Reader):>Value37|CacheMiss=>{
         let item=decode_Value9(@input)
         if item is? CacheMiss return item
         if item in? result return miss(@input)
-        result.add(item)
+        result.push(item)
     }
     return result
 }
@@ -1165,7 +1165,7 @@ decode_Value48=(@input:bytes.Reader):>Value48|CacheMiss=>{
         let item=decode_Value13(@input)
         if item is? CacheMiss return item
         if item in? result return miss(@input)
-        result.add(item)
+        result.push(item)
     }
     return result
 }

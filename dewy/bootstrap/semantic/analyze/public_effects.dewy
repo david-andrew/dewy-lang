@@ -335,32 +335,32 @@ inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
         loop [binding declaration_id] in placement.local_values(node session.hir session.types frame_places.nonescaping frame_places.fixed_storage borrowed) {
             let declaration=hir.node_at(session.hir declaration_id)
             $runtime_assert declaration is? hir.Declare
-            scan.frame_values.add(binding)
-            loop literal in placement.literal_storage(declaration.expr session.hir session.types) {scan.frame_literals.add(literal)}
+            scan.frame_values.push(binding)
+            loop literal in placement.literal_storage(declaration.expr session.hir session.types) {scan.frame_literals.push(literal)}
         }
         if not scalar(node.rettype session.types) and types.node_at(session.types node.rettype) isnt? types.FunctionType|types.OverloadType {storage(@scan)}
         let params=access.literal_params(node)
         loop index in 0.. and index <? params.length {
             let param=params[index]
             if param.binding_id is? none continue
-            if not param.place {scan.value_parameters.add(param.binding_id)}
+            if not param.place {scan.value_parameters.push(param.binding_id)}
             # The internal receiver place is the operated-on value, not an
             # external public-effect subject. Access summaries still track
             # its physical storage for ownership and alias checking.
             if param.place and not (index =? 0 and node.lifecycle isnt? none) {scan.places[param.binding_id]="{index}"}
-            else {scan.private.add(param.binding_id)}
+            else {scan.private.push(param.binding_id)}
         }
         let pending:array<addr>=[node.body]
         loop pending.length >? 0 {
             let child=pending.pop
             let body=hir.node_at(session.hir child)
             if body is? hir.FunctionLiteral continue
-            if body is? hir.Declare and body.binding_id isnt? none {scan.private.add(body.binding_id)}
+            if body is? hir.Declare and body.binding_id isnt? none {scan.private.push(body.binding_id)}
             if body is? hir.IteratorExpression {
                 let target=hir.node_at(session.hir body.target)
                 if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
-                    scan.private.add(target.binding_id)
-                    if word_iterator(child body input) {scan.words.add(target.binding_id)}
+                    scan.private.push(target.binding_id)
+                    if word_iterator(child body input) {scan.words.push(target.binding_id)}
                 }
             }
             hir.push_children(body @pending)
@@ -401,7 +401,7 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=hir.node_at(session.hir id)
         hir.push_children(node @pending)
         if node is? hir.FunctionLiteral {

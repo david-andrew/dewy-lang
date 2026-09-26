@@ -26,12 +26,12 @@ Prepared:type = const [root:addr entry:addr? source:SrcFile source_by_item:dict<
 # without relying on spelling or on which declaration was visited first.
 visit = (id:addr functions:dict<addr addr> nodes:array<hir.AST> @seen:set<addr> @live:set<addr>):>void => {
     if id in? seen return void
-    seen.add(id)
+    seen.push(id)
     let node=hir.node_at(nodes id)
     if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
         let declaration=functions.get(node.binding_id)
         if declaration isnt? none {
-            live.add(node.binding_id)
+            live.push(node.binding_id)
             visit(declaration functions nodes @seen @live)
         }
     }
@@ -63,7 +63,7 @@ assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):
     if main isnt? none {roots.push(main)}
     loop binding in roots {
         let declaration=functions.get(binding)
-        if declaration isnt? none {live.add(binding) visit(declaration functions engine.session.hir @seen @live)}
+        if declaration isnt? none {live.push(binding) visit(declaration functions engine.session.hir @seen @live)}
     }
     loop id in items {
         let declaration=hir.node_at(engine.session.hir id)
@@ -83,7 +83,7 @@ assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):
 explicit_copy_sources = (engine:modules.Engine):>set<addr> => {
     let sources:set<addr>=set[]
     loop module in engine.modules {
-        if module.options.explicit_copies {sources.add(module.context.source)}
+        if module.options.explicit_copies {sources.push(module.context.source)}
     }
     return sources
 }

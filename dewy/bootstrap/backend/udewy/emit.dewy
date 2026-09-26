@@ -438,7 +438,7 @@ collect_forwards = (root:addr input:Input @assigned:set<string> @candidates:arra
         if node is? hir.FunctionLiteral continue
         if node is? hir.Assign {
             let target=hir.node_at(input.nodes node.target)
-            if target is? hir.ExpressedIdentifier {assigned.add(target.name)}
+            if target is? hir.ExpressedIdentifier {assigned.push(target.name)}
         }
         if node is? hir.Declare and node.decltype =? 'let' {
             let expr=hir.node_at(input.nodes node.expr)
@@ -508,7 +508,7 @@ write_statements = (items:array<addr> @scope:Scope input:Input @state:State @out
             }
         }
         write_ast(id @scope input @state @out)
-        if node is? hir.Declare {scope.locals.add(node.name)}
+        if node is? hir.Declare {scope.locals.push(node.name)}
     }
 }
 write_flow_body = (id:addr @scope:Scope input:Input @state:State @out:Writer):>void => {
@@ -707,7 +707,7 @@ write_function = (name:string function:hir.FunctionLiteral scope:Scope input:Inp
             token_name(arg.name @out)
             token_annotation(bytecode.tk_type annotation(arg.value_type input) @out)
         } else {write("{arg.name}:{annotation(arg.value_type input)}" @out)}
-        inner.locals.add(arg.name)
+        inner.locals.push(arg.name)
     }
     if out.stream {
         token_close(@out) token_annotation(bytecode.tk_fn_type annotation(function.rettype input) @out)

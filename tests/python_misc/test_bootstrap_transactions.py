@@ -23,7 +23,7 @@ main = ():>int64 => {{
     let word=types.primitive('int64' @session.types)
     let original=hir.append_node(@session.hir hir.Integer[Span[0 1] word '0d' 1])
     session.read_states.push(contexts.ReadState[types=[1 -> word]])
-    session.retained_read_states.add(0)
+    session.retained_read_states.push(0)
     subtyping.add_link(@session.links subtyping.Link['Before' 'int'])
     let before=contexts.checkpoint(session)
     subtyping.add_link(@session.links subtyping.Link['Outer' 'Before'])
@@ -37,7 +37,7 @@ main = ():>int64 => {{
     session.syntax_refs.push(contexts.SyntaxRef[0 0 0])
     session.named_refs[12]=added
     session.read_states.push(contexts.ReadState[types=[2 -> word]])
-    session.retained_read_states.add(1)
+    session.retained_read_states.push(1)
     contexts.restore(inner @session)
     $runtime_assert subtyping.nominal_subtype('Outer' 'int' session.links)
     $runtime_assert not subtyping.nominal_subtype('Before' 'bool' session.links)
@@ -66,7 +66,7 @@ main = ():>int64 => {{
     # environments keep stable indices even when earlier slots are cleared.
     session.read_states.push(contexts.ReadState[types=[2 -> word]])
     session.read_states.push(contexts.ReadState[types=[3 -> word]])
-    session.retained_read_states.add(2)
+    session.retained_read_states.push(2)
     session.read_states.push(contexts.ReadState[types=[4 -> word]])
     contexts.release_read_states(1 @session)
     $runtime_assert session.read_states.length =? 3

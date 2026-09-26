@@ -50,13 +50,13 @@ main=():>int64=>{
             if path isnt? hir.String or row isnt? hir.Integer or contents isnt? hir.String return 4
             if row.value =? 18 {
                 if path.content not=? 'left' or contents.content not=? '👨‍👩‍👧‍👦' return 5
-                rows.add(18)
+                rows.push(18)
             } else if row.value =? 31 {
                 if path.content not=? 'right' or contents.content not=? 'last' return 6
-                rows.add(31)
+                rows.push(31)
             } else if row.value =? 32 {
                 if path.content not=? 'right' or contents.content not=? '' return 7
-                rows.add(32)
+                rows.push(32)
             } else return 8
         } else if function.name is? '_assertion_report'|'_expectation_report' {
             if args.length not=? 4 return 9

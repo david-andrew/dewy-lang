@@ -203,7 +203,7 @@ class Generator:
             elif array:
                 decode.append('    result.push(item)')
             else:
-                decode += ['    if item in? result return miss(@input)', '    result.add(item)']
+                decode += ['    if item in? result return miss(@input)', '    result.push(item)']
             decode += ['}', 'return result']
             return encode, decode
         variants = self.variants(value)

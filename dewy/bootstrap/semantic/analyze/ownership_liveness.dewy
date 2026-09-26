@@ -47,7 +47,7 @@ roots=(binding:addr aliases:dict<addr addr>):>set<addr>=>{
     let result:set<addr>=set[]
     let current:addr?=binding
     loop current isnt? none and current not in? result {
-        result.add(current)
+        result.push(current)
         current=aliases.get(current)
     }
     return result
@@ -58,7 +58,7 @@ read_roots=(id:addr aliases:dict<addr addr> nodes:array<hir.AST>):>set<addr>=>{
     loop pending.length >? 0 {
         let node=hir.node_at(nodes pending.pop)
         if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
-            loop binding in roots(node.binding_id aliases) {result.add(binding)}
+            loop binding in roots(node.binding_id aliases) {result.push(binding)}
         }
         hir.push_children(node @pending)
     }
@@ -182,7 +182,7 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table)
         let node=hir.node_at(nodes id)
         order.push(id)
         if node is? hir.FunctionLiteral {
-            loop binding in read_roots(id [] nodes) {analysis.captured.add(binding)}
+            loop binding in read_roots(id [] nodes) {analysis.captured.push(binding)}
             continue
         }
         if node is? hir.ExpressedIdentifier {analysis.occurrences[id]=analysis.occurrences.get(id 0)+1}
@@ -193,7 +193,7 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table)
         hir.push_children(node @pending)
     }
     let captured=analysis.captured
-    loop binding in captured {loop root in roots(binding analysis.aliases) {analysis.captured.add(root)}}
+    loop binding in captured {loop root in roots(binding analysis.aliases) {analysis.captured.push(root)}}
     loop id in order {
         let node=hir.node_at(nodes id)
         let inputs:array<addr>=[]
@@ -230,7 +230,7 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table)
                 else {break}
                 value=hir.node_at(nodes selected)
             }
-            if value is? hir.ExpressedIdentifier and value.binding_id isnt? none and value.binding_id in? owners and value.binding_id not in? analysis.captured and analysis.occurrences.get(selected 0) =? 1 and counts.get(value.binding_id 0) =? 1 {analysis.candidates.add(selected)}
+            if value is? hir.ExpressedIdentifier and value.binding_id isnt? none and value.binding_id in? owners and value.binding_id not in? analysis.captured and analysis.occurrences.get(selected 0) =? 1 and counts.get(value.binding_id 0) =? 1 {analysis.candidates.push(selected)}
             if value is? hir.MemberAccess {
                 # A field route of an owner; the caller decides which
                 # component types may leave it.
@@ -241,7 +241,7 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table)
                     $runtime_assert member is? hir.MemberAccess
                     root=member.value
                 }
-                if route isnt? none and route.binding in? owners and route.binding not in? analysis.captured and analysis.occurrences.get(root 0) =? 1 and counts.get(route.binding 0) =? 1 {analysis.candidates.add(selected)}
+                if route isnt? none and route.binding in? owners and route.binding not in? analysis.captured and analysis.occurrences.get(root 0) =? 1 and counts.get(route.binding 0) =? 1 {analysis.candidates.push(selected)}
             }
         }
     }

@@ -703,7 +703,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
                         if lifecycle isnt? none return contexts.problem(item 'a lifecycle marker must mark a method declaration' 'put it immediately before the method' context session)
                         let role=if tag.name =? '__drop__' 'drop' else if tag.name =? '__copy__' 'copy' else 'move'
                         if role in? lifecycle_roles return contexts.problem(item 'duplicate lifecycle hook' role context session)
-                        lifecycle_roles.add(role)
+                        lifecycle_roles.push(role)
                         lifecycle=role
                         continue
                     }
@@ -713,7 +713,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
                     let body = contexts.node_at(row.right context session)
                     if name isnt? none and body is? parser.BinOp and source_views.is_operator(body.op '=>' context session) {
                         if source_views.is_operator(row.op '=' context session) and name in? names return contexts.problem(item "duplicate object member `{name}`" 'this member repeats a name' context session)
-                        names.add(name)
+                        names.push(name)
                         if lifecycle isnt? none and source_views.is_operator(row.op '&=' context session) return contexts.problem(item 'a lifecycle marker must mark a method declaration' 'a lifecycle hook cannot be an overload' context session)
                         methods.push(types.MethodSpec[name contexts.syntax_ref(row.right inner @session) lifecycle=lifecycle])
                         lifecycle=none
@@ -729,7 +729,7 @@ resolve = (id:addr context:contexts.Context @session:contexts.Session):>addr|Err
                     if p.term not in? names return contexts.problem(id "`{declared.name}` names `{p.term}`, which is not an earlier field" 'a field invariant may name a sibling field declared before it' context session)
                     if not context.immutable_record return contexts.problem(id "`{declared.name}` relates to `{p.term}` in a writable record" 'the relation would not survive assignment' context session hint='make the record immutable: `const [...]`')
                 }
-                names.add(declared.name)
+                names.push(declared.name)
                 fields.push(declared)
             }
             if lifecycle isnt? none return contexts.problem(id 'a lifecycle marker must mark a method declaration' 'the marker has no following method' context session)
@@ -1059,7 +1059,7 @@ generic_parameters = (parameters:parser.Block context:contexts.Context @session:
         }
         if name is? none return contexts.problem(item 'invalid generic type parameter' 'expected `T`, `T of Bound`, or `E:Effect`' context session)
         if name in? names return contexts.problem(item "duplicate generic type parameter `{name}`" 'this parameter name is repeated' context session)
-        names.add(name)
+        names.push(name)
         let identity=if effect "{name}@{contexts.source_at(context session).srcfile.path}:{node.loc.start}" else ''
         params.push(types.GenericParam[name bound if effect 'effect' else 'type' identity])
         let binding_id = bindings.allocate_param(@session.registry name types.primitive('type' @session.types) node.loc)
@@ -1148,7 +1148,7 @@ resolve_alias = (binding_id:addr @session:contexts.Session):>types.TypeAliasValu
         session.named_refs[binding_id] = named
         return named
     }
-    session.resolving_aliases.add(binding_id)
+    session.resolving_aliases.push(binding_id)
     let expression = contexts.node_at(pending.expression.node context session)
     let value:types.TypeAliasValue|Error = types.primitive('never' @session.types)
     if source_views.is_mint(pending.expression.node context session) { value = mint(binding_id pending.expression.node context @session) }
@@ -1204,7 +1204,7 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
                     let row = contexts.node_at(item context session)
                     if row is? parser.BinOp and source_views.is_operator(row.op '=' context session) {
                         let name = source_views.identifier(row.left context session)
-                        if name isnt? none { default_only.add(name) }
+                        if name isnt? none { default_only.push(name) }
                     }
                 }
             }
@@ -1223,7 +1223,7 @@ mint = (binding_id:addr id:addr context:contexts.Context @session:contexts.Sessi
         if additions.length =? 0 {
             subtyping.add_link(@session.links subtyping.Link[name parent_node.name])
             let minted=types.primitive(name @session.types)
-            session.error_types.add(minted)
+            session.error_types.push(minted)
             return minted
         }
     }

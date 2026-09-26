@@ -15,7 +15,7 @@ constraints=(actual:addr required:addr table:types.Table):>array<inference.Const
         if a =? b continue
         let key="{a}:{b}"
         if key in? seen continue
-        seen.add(key)
+        seen.push(key)
         let left=types.node_at(table a)
         let right=types.node_at(table b)
         if left is? types.FunctionType and right is? types.FunctionType {

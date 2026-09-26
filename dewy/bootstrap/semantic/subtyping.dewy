@@ -23,7 +23,7 @@ add_link = (@graph:Graph link:Link):>void => {
     graph.edges.push(link)
     if link.parent not in? graph.ancestors {graph.ancestors[link.parent]=set[]}
     let inherited=graph.ancestors.get(link.parent default=set[])
-    inherited.add(link.parent)
+    inherited.push(link.parent)
     let previous=graph.ancestors.get(link.child default=set[])
     if link.parent in? previous return
     # A new edge adds exactly ancestors(parent) to descendants(child).
@@ -442,7 +442,7 @@ covered = (member:addr other:addr seen:set<string> links:Graph @nodes:types.Tabl
     if member =? other return true
     let pair = "{member}:{other}"
     if pair in? seen return true
-    seen.add(pair)
+    seen.push(pair)
     let m_id = types.unfold(member nodes)
     let o_id = types.unfold(other nodes)
     if m_id =? o_id return true

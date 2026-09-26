@@ -79,7 +79,7 @@ lower = (root:addr helpers:dict<string addr> @session:contexts.Session):>Error? 
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=hir.node_at(session.hir id)
         hir.push_children(node @pending)
         if node isnt? hir.RuntimeFailure or node.lowered isnt? none continue

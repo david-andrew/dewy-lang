@@ -18,7 +18,7 @@ let touch = (box:Box=make()):>int64 => {
     return box.items.length
 }
 let identity = (box:Box=make()):>Box => box
-let add = (items:set<int64>=set[]):>set<int64> => { items.add(7) return items }
+let add = (items:set<int64>=set[]):>set<int64> => { items.push(7) return items }
 let map = (... items:dict<int64 string>=[1 -> 'one']):>dict<int64 string> => {
     items[2] = 'two'
     return items
@@ -36,7 +36,7 @@ let main = ():>int64 => {
     printl(saved.label)
     printl(saved.items.length)
     let first = add()
-    first.add(8)
+    first.push(8)
     let second = add()
     printl(8 in? second)
     let original:dict<int64 string>=[3 -> 'three']

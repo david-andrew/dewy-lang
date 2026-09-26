@@ -4818,3 +4818,24 @@ Validation:
 - Gate: 4,758 passed.
 - A 3-generation bootstrap from `phase1-x` gives identical generations
   (`phase1-y`), and `check_native` passes on that pair.
+
+## `push` is the only set insertion (2026-09-26)
+
+David: insertion is only `push`; no compatibility aliases like `add`
+(ROADMAP 1.4 item 8). Both checkers now reject `s.add(x)`: "a set has no
+member `add`" points to `push`, and a dictionary or set otherwise lists its
+members instead of its internal record fields. The HIR insertion operation
+keeps its internal name. 439 uses in the compiler, library, fixtures and
+programs, 23 in Dewy sources embedded in Python tests, and the learn book's
+set example now use `push`. Module functions and record methods that happen
+to be named `add` (`ranges.add`, `dense.add`, `effect_rows.add`, `o.add`)
+are unaffected. The name-based mutating-method lists no longer include `add`.
+`tools/generate_native_cache.py` emits `push` for set decoding, and the HIR
+display prints set insertion as `.push(`.
+
+Validation:
+- Gate: 4,758 passed, plus 1 failure: the codec-currency check, before
+  the generator fix. With the fix it passes, together with the display
+  tests.
+- A 3-generation bootstrap from `phase1-y` gives identical generations
+  (`phase1-z`), and `check_native` passes on that pair.

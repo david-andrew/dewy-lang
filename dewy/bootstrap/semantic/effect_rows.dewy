@@ -268,10 +268,10 @@ replace_contracts = (contract:Contract? solutions:dict<string Contract>):>Contra
     }
     let excluded=contract.excluded
     let known:set<string>=set[]
-    loop atom in excluded {known.add(atom_key(atom))}
+    loop atom in excluded {known.push(atom_key(atom))}
     loop atom in combined.excluded {
         let key=atom_key(atom)
-        if key not in? known {known.add(key) excluded.push(atom)}
+        if key not in? known {known.push(key) excluded.push(atom)}
     }
     return Contract[combined.allowed excluded]
 }

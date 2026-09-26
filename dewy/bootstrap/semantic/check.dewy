@@ -78,7 +78,7 @@ label_scope = (name:string control:Control):>addr? => {
 }
 function_control = (control:Control):>Control => {
     let names=control.outer_labels
-    loop scope in control.scopes {loop [name position] in scope.labels {names.add(name)}}
+    loop scope in control.scopes {loop [name position] in scope.labels {names.push(name)}}
     return Control[outer_labels=names]
 }
 collect_labels = (node:parser.Block env:Environment session:contexts.Session):>Control|Error => {
@@ -163,8 +163,8 @@ collect_proof_annotations = (node:parser.Block env:Environment @session:contexts
         let name=source_views.identifier(declaration.left env.lexical session)
         let literal=contexts.node_at(declaration.right env.lexical session)
         if name is? none or literal isnt? parser.BinOp or not source_views.is_operator(literal.op '=>' env.lexical session) return problem(id '`$proof` must mark a function declaration' 'expected a named function with a fact return contract next' env session)
-        marked.add(literal.right)
-        markers.add(id)
+        marked.push(literal.right)
+        markers.push(id)
     }
     if markers.length >? 0 {
         session.proof_literals[env.lexical.source]=marked
@@ -219,7 +219,7 @@ carries_promises = (id:addr target:types.RefinedType session:contexts.Session):>
     let own=types.node_at(session.types node.value_type)
     if own is? types.RefinedType {
         let carried:set<string>=set[]
-        loop p in own.propositions {carried.add(propositions.identity_key(p))}
+        loop p in own.propositions {carried.push(propositions.identity_key(p))}
         let all_carried=true
         loop promise in target.propositions { if propositions.identity_key(promise) not in? carried {all_carried=false break} }
         if all_carried return true
@@ -1296,7 +1296,7 @@ call = (function:addr positional:array<addr> keyword:dict<string addr> id:addr e
                 let entry=session.methods.get(method_key(path.owner method))
                 if entry isnt? none {session.methods[method_key(path.value_type method)]=entry}
             }
-            session.prepared_methods.add(path.value_type)
+            session.prepared_methods.push(path.value_type)
         }
     }
     let result = put(hir.FunctionCall[source.loc result_type callee args kwargs selected proof=is_proof_binding(callee session)] @session)
@@ -2533,7 +2533,7 @@ predeclare_function = (id:addr env:Environment @session:contexts.Session):>Error
     binding.literal_path_parameter=source_views.path_parameter(literal env.lexical session)
     if signature_type.type_params.length >? 0 {
         let literal_ref = contexts.syntax_ref(node.right env.lexical @session)
-        session.retained_read_states.add(env.state)
+        session.retained_read_states.push(env.state)
         binding.function = put(hir.GenericFunction[literal.loc shape name hir.GenericSource[literal_ref env.state signature_type.type_params]] @session)
     }
     bindings.store_binding(@session.registry binding_id binding)
@@ -2581,7 +2581,7 @@ function_literal_inner = (id:addr literal:parser.BinOp env:Environment @session:
     if shape.type_params.length >? 0 {
         if name =? '<anonymous>' return problem(id 'a generic function must be declared with `let`' 'its instances are created where it is called by name' env session)
         let reference = contexts.syntax_ref(id env.lexical @session)
-        session.retained_read_states.add(env.state)
+        session.retained_read_states.push(env.state)
         return put(hir.GenericFunction[literal.loc resolved name hir.GenericSource[reference env.state shape.type_params]] @session)
     }
     shape.pos_or_kw=contextual_parameters(literal shape expected_signature env session)
@@ -2844,9 +2844,9 @@ refined = (condition:addr truth:bool env:Environment @session:contexts.Session i
         let conjunction = node.op in? ['and' 'nand']
         if effective_truth =? conjunction {
             let changed = invalidated
-            loop binding in predicate_effects.mutated_bindings(node.right session.hir) { changed.add(binding) }
+            loop binding in predicate_effects.mutated_bindings(node.right session.hir) { changed.push(binding) }
             let compacted = moved
-            loop binding in predicate_effects.compacted_bindings(node.right session.hir) { compacted.add(binding) }
+            loop binding in predicate_effects.compacted_bindings(node.right session.hir) { compacted.push(binding) }
             result = refined(node.left effective_truth result @session invalidated=changed moved=compacted)
             result = refined(node.right effective_truth result @session invalidated=invalidated moved=moved)
         }
@@ -2874,7 +2874,7 @@ join_reads = (exits:array<Environment> env:Environment @session:contexts.Session
     let names:set<addr> = set[]
     loop exit in exits {
         $runtime_assert exit.state <? session.read_states.length
-        loop [binding type] in session.read_states[exit.state].types { names.add(binding) }
+        loop [binding type] in session.read_states[exit.state].types { names.push(binding) }
     }
     let joined = contexts.ReadState[]
     let first = true
@@ -3094,7 +3094,7 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
             keyword[name] = value
             order.push(name)
             if signature is? types.FunctionType {
-                loop i in 0.. and i <? signature.pos_or_kw.length {if signature.pos_or_kw[i].name =? name {bound.add(i)}}
+                loop i in 0.. and i <? signature.pos_or_kw.length {if signature.pos_or_kw[i].name =? name {bound.push(i)}}
             }
         } else {
             if keyword.length >? 0 {interleaved=true}
@@ -3109,7 +3109,7 @@ call_syntax = (function:addr arguments_id:addr? id:addr env:Environment @session
             if value is? Error return value
             positional.push(value)
             order.push(none)
-            bound.add(index)
+            bound.push(index)
         }
     }
     return call(function positional keyword id env @session expected=expected order=if interleaved order else [])
@@ -3481,14 +3481,14 @@ record_literal = (id:addr node:parser.Block env:Environment @session:contexts.Se
                 let row=contexts.node_at(row_id env.lexical session)
                 if row isnt? parser.BinOp or not source_views.is_operator(row.op '=' env.lexical session) continue
                 let name=source_views.identifier(row.left env.lexical session)
-                if name isnt? none {written.add(name)}
+                if name isnt? none {written.push(name)}
             }
             let matching:array<addr>=[]
             loop candidate in candidates {
                 let record=types.node_at(session.types candidate)
                 $runtime_assert record is? types.ObjectType
                 let names:set<string>=set[]
-                loop field in record.fields {names.add(field.name)}
+                loop field in record.fields {names.push(field.name)}
                 if names.length =? written.length and (names - written).length =? 0 {matching.push(candidate)}
             }
             if matching.length =? 1 {candidates=matching}
@@ -4356,7 +4356,7 @@ collect_iterators = (part:addr body_env:Environment arm:parser.KeywordExpr chang
         let target=node_at(iter.target session)
         $runtime_assert target is? hir.ExpressedIdentifier
         if target.name in? names return problem(part 'duplicate iterator target' target.name env session)
-        names.add(target.name)
+        names.push(target.name)
         let owner=node_at(iter.iterable session)
         let route=bindings.access_path(if owner is? hir.DictEntries owner.dictionary else iter.iterable session.hir)
         let root=node_at(route.root session)
@@ -4433,8 +4433,8 @@ loop_flow_inner = (id:addr arm:parser.KeywordExpr env:Environment @session:conte
     $runtime_assert arm.parts.length =? 3
     let changed = source_views.mutations(arm.parts[2] env.lexical session)
     let replaced = source_views.mutations(arm.parts[2] env.lexical session true)
-    loop name in source_views.mutations(arm.parts[1] env.lexical session) { changed.add(name) }
-    loop name in source_views.mutations(arm.parts[1] env.lexical session true) { replaced.add(name) }
+    loop name in source_views.mutations(arm.parts[1] env.lexical session) { changed.push(name) }
+    loop name in source_views.mutations(arm.parts[1] env.lexical session true) { replaced.push(name) }
     let iterator_syntax=source_views.contains_iterator(arm.parts[1] env.lexical session)
     # Iterator inputs are evaluated once, before the body can mutate them.
     # A Boolean condition repeats, so it starts with the backedge facts gone.
@@ -4774,7 +4774,7 @@ container_member = (receiver:addr entry:views.EntryTypes name:string id:addr env
         let type = if name =? 'keys' views.set_type(entry.key @session.types) else types.array_type(if entry.value is? none entry.key else entry.value none @session.types)
         return put(hir.DictView[loc type receiver name] @session)
     }
-    if (name =? 'get' and not is_set) or name in? ['pop' 'clear'] or (name in? ['add' 'push'] and is_set) {
+    if (name =? 'get' and not is_set) or name in? ['pop' 'clear'] or (name =? 'push' and is_set) {
         if name not=? 'get' {
             let target = writable_container(receiver id env @session)
             if target is? Error return target
@@ -4785,12 +4785,14 @@ container_member = (receiver:addr entry:views.EntryTypes name:string id:addr env
             if declared isnt? none and total is? none { total = views.total_dict_key(declared session.types) }
             if total isnt? none and name in? ['pop' 'clear'] return problem(id 'cannot remove keys from a total dictionary' 'its type promises every key remains present' env session)
         }
-        # `push` is uniform across containers. `add` remains a compatibility
-        # alias, and both lower to the same insertion operation and effects.
+        # `push` is the only insertion spelling; the operation keeps its
+        # internal name `add`.
         let operation=if name =? 'push' 'add' else name
         return put(hir.DictMethod[loc container_methods.signature(operation entry @session.types) receiver operation] @session)
     }
-    return problem(id 'unknown container member' name env session)
+    let kind=if is_set 'set' else 'dictionary'
+    let detail=if is_set and name =? 'add' 'insert a member with `push`' else if is_set 'set members: `push`, `pop`, `clear`, `length`, `values`' else 'dictionary members: `get`, `pop`, `clear`, `length`, `keys`, `values`'
+    return problem(id "a {kind} has no member `{name}`" detail env session)
 }
 writable_container = (value:addr id:addr env:Environment @session:contexts.Session):>addr|Error => {
     let path = bindings.access_path(value session.hir dictionaries=true)
@@ -5338,7 +5340,7 @@ directive = (id:addr node:parser.Directive env:Environment @session:contexts.Ses
             let held=refined(condition true env @session)
             join_reads([held] env @session)
             let assertion=put(hir.Assert[node.loc empty condition text message dimmed=dimmed unsafe=true] @session)
-            session.unsafe_assertions.add(assertion)
+            session.unsafe_assertions.push(assertion)
             return assertion
         }
         if value is? hir.Bool {
@@ -5762,7 +5764,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         if not type.minted return problem(reference.node 'lifecycle hooks require a nominal type' 'declare the owner with `type of [...]`' defining session)
         if types.object_field(type method.name) isnt? none return problem(reference.node 'a lifecycle hook cannot implement a callable field' 'lifecycle members are compiler-only, not runtime function values' defining session)
         if method.lifecycle in? lifecycle_roles return problem(reference.node 'duplicate lifecycle hook' method.lifecycle defining session)
-        lifecycle_roles.add(method.lifecycle)
+        lifecycle_roles.push(method.lifecycle)
         let count:addr=0
         loop other in type.methods {if other.name =? method.name {count+=1}}
         if count not=? 1 return problem(reference.node 'a lifecycle hook cannot be overloaded' method.name defining session)
@@ -5774,11 +5776,11 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let reference=session.syntax_refs[first.literal]
         return pending(reference.node 'methods on a type declared inside a function' Environment[contexts.Context[reference.source reference.scope] env.state] session)
     }
-    session.preparing_methods.add(type_id)
+    session.preparing_methods.push(type_id)
     let names:set<string>=set['typename']
     let fields:set<string>=set['typename']
-    loop field in type.fields {names.add(field.name) fields.add(field.name)}
-    loop method in type.methods {names.add(method.name)}
+    loop field in type.fields {names.push(field.name) fields.push(field.name)}
+    loop method in type.methods {names.push(method.name)}
     let plans:array<MethodPlan>=[]
     let instances:set<string>=set[]
     loop method in type.methods {
@@ -5794,7 +5796,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
                 let inherited=inherit_lifecycle(type_id method reference.node Environment[lexical env.state] @session)
                 if inherited is? Error return inherited
                 session.methods[method_key(type_id method)]=contexts.MethodEntry[inherited type_id true method.lifecycle]
-                instances.add(method.name)
+                instances.push(method.name)
                 continue
             }
             let parent=method_owner(method.owner lexical @session)
@@ -5805,22 +5807,22 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
                 let inherited=session.methods.get(method_key(views.structural_base(parent session.types) method))
                 if inherited isnt? none {
                     session.methods[method_key(type_id method)]=inherited
-                    if inherited.receiver_type isnt? none {instances.add(method.name)}
+                    if inherited.receiver_type isnt? none {instances.push(method.name)}
                     continue
                 }
             }
         }
         let hidden=source_views.method_parameters(literal lexical session)
-        loop name in source_views.method_locals(literal.right lexical session) {hidden.add(name)}
+        loop name in source_views.method_locals(literal.right lexical session) {hidden.push(name)}
         let visible:set<string>=set[]
-        loop name in names {if name not in? hidden {visible.add(name)}}
+        loop name in names {if name not in? hidden {visible.push(name)}}
         let analysis=source_views.method_scan(literal.right visible lexical session)
         loop candidate in type.methods {
             if candidate.lifecycle isnt? none and candidate.name in? analysis.references return problem(reference.node 'a lifecycle hook is compiler-only' candidate.name Environment[lexical env.state] session)
         }
         let instance=method.lifecycle isnt? none
         loop name in analysis.references {if name in? fields {instance=true}}
-        if instance {instances.add(method.name)}
+        if instance {instances.push(method.name)}
         plans.push(MethodPlan[method analysis.references instance analysis.mutates])
     }
     let changed=true
@@ -5828,7 +5830,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         changed=false
         loop plan in plans {
             loop name in plan.references {
-                if name in? instances and plan.method.name not in? instances {instances.add(plan.method.name) changed=true}
+                if name in? instances and plan.method.name not in? instances {instances.push(plan.method.name) changed=true}
             }
         }
     }
@@ -5869,7 +5871,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         let binding=bindings.binding_at(session.registry binding_id)
         binding.value_type=full binding.store_type=full
         bindings.store_binding(@session.registry binding_id binding)
-        session.hidden_bindings.add(binding_id)
+        session.hidden_bindings.push(binding_id)
         session.methods[method_key(type_id spec)]=contexts.MethodEntry[binding_id if instance type_id else none place_self spec.lifecycle]
     }
     # Prefer callees before callers so inferred methods have concrete results.
@@ -5915,7 +5917,7 @@ prepare_methods = (owner:addr alias:string env:Environment @session:contexts.Ses
         bindings.store_binding(@session.registry binding.id binding)
         session.hoisted.push(declared)
     }
-    session.prepared_methods.add(type_id)
+    session.prepared_methods.push(type_id)
     if type_id in? session.preparing_methods {session.preparing_methods.pop(type_id);}
     return none
 }
@@ -6339,7 +6341,7 @@ hoist_hidden_function = (name:string text:string aliases:array<HiddenAlias> id:a
     let declared=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'let' name none value binding_id] @session)
     binding.declaration=declared
     bindings.store_binding(@session.registry binding_id binding)
-    session.hidden_bindings.add(binding_id)
+    session.hidden_bindings.push(binding_id)
     session.hoisted.push(declared)
     return binding_id
 }
@@ -6577,7 +6579,7 @@ object_text_function = (owner:addr id:addr env:Environment @session:contexts.Ses
     binding.value_type=signature binding.store_type=signature
     bindings.store_binding(@session.registry helper binding)
     session.object_strings[owner]=helper
-    session.hidden_bindings.add(helper)
+    session.hidden_bindings.push(helper)
 
     let parameter=bindings.allocate_param(@session.registry '__dewy_value' owner loc)
     let receiver=put(hir.ExpressedIdentifier[loc owner '__dewy_value' parameter] @session)
@@ -6658,7 +6660,7 @@ declare_constructor = (constructor:hir.TypeValue literal_id:addr id:addr env:Env
     let declaration=put(hir.Declare[literal.loc types.primitive('void' @session.types) 'const' name none checked binding_id] @session)
     binding.declaration=declaration
     bindings.store_binding(@session.registry binding_id binding)
-    session.hidden_bindings.add(binding_id)
+    session.hidden_bindings.push(binding_id)
     session.hoisted.push(declaration)
     overloads.bindings.push(binding_id)
     session.constructors[owner]=overloads

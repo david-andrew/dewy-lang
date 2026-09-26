@@ -29,7 +29,7 @@ borrowable=(type:addr table:types.Table):>bool=>{
     loop pending.length>?0 {
         let id=views.structural_base(pending.pop table)
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let item=types.node_at(table id)
         if item is? types.ObjectType {
             loop method in item.methods {if method.lifecycle isnt? none return false}
@@ -94,7 +94,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         let locals:set<addr>=set[]
-        loop param in effects.literal_params(literal) {if param.binding_id isnt? none {locals.add(param.binding_id)}}
+        loop param in effects.literal_params(literal) {if param.binding_id isnt? none {locals.push(param.binding_id)}}
         let body:array<addr>=[]
         let pending:array<addr>=[literal.body]
         loop param in effects.literal_params(literal) {if param is? hir.BoundParam {pending.push(param.value)}}
@@ -103,11 +103,11 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             let item=pending.pop
             let node=hir.node_at(nodes item)
             if item in? seen or node is? hir.FunctionLiteral continue
-            seen.add(item) body.push(item)
-            if node is? hir.Declare and node.binding_id isnt? none {locals.add(node.binding_id)}
+            seen.push(item) body.push(item)
+            if node is? hir.Declare and node.binding_id isnt? none {locals.push(node.binding_id)}
             if node is? hir.IteratorExpression {
                 let target=hir.node_at(nodes node.target)
-                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {locals.add(target.binding_id)}
+                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {locals.push(target.binding_id)}
             }
             hir.push_children(node @pending)
         }
@@ -121,7 +121,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             if target isnt? none {
                 let path=bindings.access_path(target nodes facts=true)
                 let root=hir.node_at(nodes path.root)
-                if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {written.add(root.binding_id)}
+                if root is? hir.ExpressedIdentifier and root.binding_id isnt? none {written.push(root.binding_id)}
             }
             if node is? hir.Declare and node.binding_id isnt? none and not node.view {
                 let value=hir.node_at(nodes node.expr)
@@ -133,17 +133,17 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         writes[id]=written
         loop item in body {
             let node=hir.node_at(nodes item)
-            if node is? hir.RepresentationCast and not independent_materialization(node.expr nodes) and union_loan_source(item nodes table) is? none {blocked.add(id)}
+            if node is? hir.RepresentationCast and not independent_materialization(node.expr nodes) and union_loan_source(item nodes table) is? none {blocked.push(id)}
             else if node is? hir.ExpressedIdentifier {
                 let local=node.binding_id isnt? none and node.binding_id in? locals
-                if not local and node.binding_id isnt? none {captured.add(node.binding_id)}
+                if not local and node.binding_id isnt? none {captured.push(node.binding_id)}
                 let operation=primitive(node registry)
-                if not local and not operation and effects.flatten_callable(item set[] analysis nodes) is? none {blocked.add(id)}
+                if not local and not operation and effects.flatten_callable(item set[] analysis nodes) is? none {blocked.push(id)}
             } else if node is? hir.FunctionCall {
                 let targets=effects.direct_targets(node analysis nodes)
                 if targets is? none {
                     let func=hir.node_at(nodes effects.unwrap(node.func nodes))
-                    if not primitive(func registry) {blocked.add(id)}
+                    if not primitive(func registry) {blocked.push(id)}
                 } else {
                     loop target in targets {
                         # Extend the live adjacency set, rather than copying
@@ -164,7 +164,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
         if target not in? edges continue
         const callers=@edges[target]
         loop caller in callers {
-            if caller not in? blocked {blocked.add(caller) pending.push(caller)}
+            if caller not in? blocked {blocked.push(caller) pending.push(caller)}
         }
     }
     let result:dict<addr set<addr>>=[]
@@ -208,7 +208,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             }
             if stored is? none or not types.same_type(views.structural_base(stored table) views.structural_base(value.value_type table) table) continue
             if node.annotation isnt? none and not types.same_type(views.structural_base(node.annotation table) views.structural_base(value.value_type table) table) continue
-            local_views.add(node.binding_id)
+            local_views.push(node.binding_id)
         }
         loop item in body {
             let node=hir.node_at(nodes item)
@@ -216,8 +216,8 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
             let targets=effects.direct_targets(node analysis nodes)
             if targets is? none or targets.length =? 0 continue
             let allowed:set<addr>=set[]
-            loop arg in node.pos_args {allowed.add(arg)}
-            loop arg in node.kw_args.values {allowed.add(arg)}
+            loop arg in node.pos_args {allowed.push(arg)}
+            loop arg in node.kw_args.values {allowed.push(arg)}
             loop target in targets {
                 let callee=hir.node_at(nodes target)
                 $runtime_assert callee is? hir.FunctionLiteral
@@ -256,7 +256,7 @@ prove=(analysis:effects.Analysis summaries:effects.ProgramEffects nodes:array<hi
                                 safe=effects.read_only(outgoing)
                             }
                         }
-                        if safe {current.add(pair.argument)} else {rejected.add(pair.argument)}
+                        if safe {current.push(pair.argument)} else {rejected.push(pair.argument)}
                     }
                 }
                 # Filter the candidates once. Building two intermediate set

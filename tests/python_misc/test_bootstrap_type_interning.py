@@ -65,7 +65,7 @@ BODY = '''let main=():>int64=>{
     loop text in texts {
         let id=types.string_literal(text @literals)
         if types.string_literal(text @literals) not=? id return 23
-        text_ids.add(id)
+        text_ids.push(id)
     }
     if text_ids.length not=? texts.length return 24
     let binaries:array<array<uint8>>=[[] [0] [0 0] [1 23] [12 3] [255] [10 11] [171]]
@@ -75,7 +75,7 @@ BODY = '''let main=():>int64=>{
         let id=types.binary_literal(bytes @literals)
         if types.binary_literal(bytes @literals) not=? id return 25
         if id in? text_ids return 26
-        binary_ids.add(id)
+        binary_ids.push(id)
     }
     if binary_ids.length not=? binaries.length return 27
     let original=literals

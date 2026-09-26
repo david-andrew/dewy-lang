@@ -352,13 +352,13 @@ infer_type_args = (method:types.FunctionType pos:array<addr> kw:dict<string addr
     let variables:set<string> = set[]
     let inference = Inference[]
     loop param in method.type_params {
-        if param.kind =? 'effect' {inference.effect_variables.add(param.identity)}
-        else {variables.add(param.name)}
+        if param.kind =? 'effect' {inference.effect_variables.push(param.identity)}
+        else {variables.push(param.name)}
     }
     let ret_name = variable_name(method.ret variables nodes)
     if expected isnt? none and ret_name isnt? none {
         inference.bindings[ret_name] = expected
-        inference.contextual.add(ret_name)
+        inference.contextual.push(ret_name)
     }
     loop pair in shape.pairs {
         let actual = types.strip_refinement(pair.actual nodes)

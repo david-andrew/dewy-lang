@@ -8,16 +8,16 @@ from dewy.semantic.errors import UserError
 
 STATE = 'State:type=[input:set<int64> output:set<int64>]\n'
 CASES = [
-    STATE + 'let scan=(state:State):>void=>{loop value in state.input {state.output.add(value)}}',
+    STATE + 'let scan=(state:State):>void=>{loop value in state.input {state.output.push(value)}}',
     STATE + 'let scan=(state:State):>void=>{loop value in state.input {state.output=set[42]}}',
     STATE + 'let scan=(state:State):>void=>{loop value in state.input {state.output.clear}}',
     STATE + 'let scan=(state:State):>void=>{loop value in state.input {let deferred=():>void=>state.input.clear}}',
-    STATE + 'Box:type=[state:State]\nlet scan=(box:Box):>void=>{loop value in box.state.input {box.state.output.add(value)}}',
+    STATE + 'Box:type=[state:State]\nlet scan=(box:Box):>void=>{loop value in box.state.input {box.state.output.push(value)}}',
     'State:type=[input:dict<string int64> output:dict<string int64>]\nlet scan=(state:State):>void=>{loop [key value] in state.input {state.output[key]=value}}',
     'State:type=[input:dict<string int64> output:int64]\nlet scan=(state:State):>void=>{loop [key value] in state.input {state.output+=value}}',
 ]
 ERRORS = [
-    STATE + 'let scan=(state:State):>void=>{loop value in state.input {state.input.add(value)}}',
+    STATE + 'let scan=(state:State):>void=>{loop value in state.input {state.input.push(value)}}',
     STATE + 'let scan=(state:State):>void=>{loop value in state.input {state.input.clear}}',
     STATE + 'let scan=(state:State):>void=>{loop value in state.input {state.input=set[42]}}',
     STATE + 'let scan=(state:State):>void=>{loop value in state.input {state=State[set[] set[]]}}',

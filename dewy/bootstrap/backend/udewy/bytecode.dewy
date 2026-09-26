@@ -357,8 +357,8 @@ let precedence = (kind:uint8):>int64 => {
 # ----------------------------------------------------------------------------
 
 let note_fn_use = (id:int64 @p:Parser):>void => {
-    if p.current <? 0 {p.top_references.add(id) return}
-    if p.current in? p.references {let callees=@p.references[p.current] callees.add(id)}
+    if p.current <? 0 {p.top_references.push(id) return}
+    if p.current in? p.references {let callees=@p.references[p.current] callees.push(id)}
     else {p.references[p.current]=set[id]}
 }
 let note_stable_use = (value:Stable @p:Parser):>void => {

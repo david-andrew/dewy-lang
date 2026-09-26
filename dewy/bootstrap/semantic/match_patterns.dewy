@@ -114,7 +114,7 @@ family = (id:addr nodes:types.Table):>addr? => {
 }
 concrete_brands = (name:string registry:brands.Registry):>set<string> => {
     let result:set<string>=set[]
-    loop child in brands.descendants(name registry) {if brands.concrete(child registry) {result.add(child)}}
+    loop child in brands.descendants(name registry) {if brands.concrete(child registry) {result.push(child)}}
     return result
 }
 full = (member:Member):>bool => {
@@ -203,7 +203,7 @@ cover_member = (pattern:Pattern @member:Member @session:contexts.Session):>bool 
             if subtyping.is_subtype(base family_id session.links @session.types) {
                 let admitted=concrete_brands(tested.brand session.brands)
                 let changed=false
-                loop brand in admitted {if brand not in? member.covered_brands {member.covered_brands.add(brand) changed=true}}
+                loop brand in admitted {if brand not in? member.covered_brands {member.covered_brands.push(brand) changed=true}}
                 return changed
             }
             return false

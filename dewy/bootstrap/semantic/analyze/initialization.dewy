@@ -49,8 +49,8 @@ Checker:type = [
 # Update each frame in place rather than copying it out and back, which
 # would detach (copy) every set for one insertion.
 record_frame_requirements = (@frame:CheckFrame required:set<addr> assumed:set<addr>):>void => {
-    loop id in required { if dense.contains(frame.available id) { frame.required.add(id) } }
-    loop id in assumed { frame.assumed_calls.add(id) }
+    loop id in required { if dense.contains(frame.available id) { frame.required.push(id) } }
+    loop id in assumed { frame.assumed_calls.push(id) }
 }
 record_requirements = (required:set<addr> assumed:set<addr> @checker:Checker):>void => {
     let last=checker.frames.length
@@ -68,7 +68,7 @@ close_frame = (frame:CheckFrame @checker:Checker):>void => {
 # The common case is one required binding per identifier read: record it
 # without building a one-element set for every read.
 record_frame_requirement = (@frame:CheckFrame id:addr):>void => {
-    if dense.contains(frame.available id) { frame.required.add(id) }
+    if dense.contains(frame.available id) { frame.required.push(id) }
 }
 record_requirement = (id:addr @checker:Checker):>void => {
     let last=checker.frames.length
@@ -103,7 +103,7 @@ collect = (root:addr @checker:Checker):>void => {
     loop pending.length >? 0 {
         let id = pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node = hir.node_at(checker.nodes id)
         if node is? hir.FunctionLiteral { checker.functions.push(id) }
         if node is? hir.Assign {
@@ -111,8 +111,8 @@ collect = (root:addr @checker:Checker):>void => {
             $runtime_assert target is? hir.ExpressedIdentifier
             if target.binding_id isnt? none {
                 let value_type = types.node_at(checker.type_nodes target.value_type)
-                if value_type is? types.CallableType { checker.reassigned_callables.add(target.binding_id) }
-                if value_type is? types.ObjectType { checker.reassigned_objects.add(target.binding_id) }
+                if value_type is? types.CallableType { checker.reassigned_callables.push(target.binding_id) }
+                if value_type is? types.ObjectType { checker.reassigned_objects.push(target.binding_id) }
             }
         }
         if node is? hir.MemberAssign {
@@ -183,7 +183,7 @@ function_results = (id:addr checker:Checker):>array<addr> => {
 cannot_be_callable = (id:addr nodes:types.Table seen:set<addr>=set[]):>bool => {
     let current = types.unfold(types.strip_refinement(id nodes) nodes)
     if current in? seen return false
-    seen.add(current)
+    seen.push(current)
     let type = types.node_at(nodes current)
     if type is? types.TypeOr {
         loop item in type.items { if not cannot_be_callable(item nodes seen) return false }
@@ -228,7 +228,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
         if binding.builtin return []
         if binding.kind =? 'function' and binding.function isnt? none return [binding.function]
         if binding.declaration is? none or node.binding_id in? checker.reassigned_callables return none
-        seen.add(node.binding_id)
+        seen.push(node.binding_id)
         let declaration = hir.node_at(checker.nodes binding.declaration)
         $runtime_assert declaration is? hir.Declare
         return callable_targets(declaration.expr parameters seen seen_nodes checker)
@@ -262,7 +262,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
         loop producer in producers {
             if producer in? seen_nodes continue
             let visited = seen_nodes
-            visited.add(producer)
+            visited.push(producer)
             let literal = hir.node_at(checker.nodes producer)
             $runtime_assert literal is? hir.FunctionLiteral
             let values = function_results(literal.body checker)
@@ -283,7 +283,7 @@ callable_targets = (id:addr parameters:dict<addr CallableEffect> seen:set<addr> 
             let declaration = hir.node_at(checker.nodes binding.declaration)
             $runtime_assert declaration is? hir.Declare
             array = hir.node_at(checker.nodes declaration.expr)
-            seen.add(binding.id)
+            seen.push(binding.id)
         }
         if array isnt? hir.ArrayLiteral return none
         loop item in array.items { if hir.node_at(checker.nodes item) is? hir.Spread return none }
@@ -320,12 +320,12 @@ object_field_value = (id:addr name:string parameters:dict<addr CallableEffect> s
         if binding is? none or binding.declaration is? none or node.binding_id in? checker.reassigned_callables return none
         let declaration = hir.node_at(checker.nodes binding.declaration)
         $runtime_assert declaration is? hir.Declare
-        seen.add(node.binding_id)
+        seen.push(node.binding_id)
         return object_field_value(declaration.expr name parameters seen seen_nodes checker)
     }
     if node is? hir.FunctionCall {
         if current in? seen_nodes return none
-        seen_nodes.add(current)
+        seen_nodes.push(current)
         let producers = callable_targets(node.func parameters seen seen_nodes checker)
         if producers is? none return none
         loop producer in producers {
@@ -483,7 +483,7 @@ check_eager = (id:addr initialized:dense.Set parameters:dict<addr CallableEffect
     if node is? hir.Range {
         let unique:array<addr> = []
         let seen:set<addr> = set[]
-        loop child in children { if child not in? seen { seen.add(child) unique.push(child) } }
+        loop child in children { if child not in? seen { seen.push(child) unique.push(child) } }
         children = unique
     }
     return check_children(children initialized parameters stack @checker)
@@ -543,7 +543,7 @@ check_function = (id:addr initialized:dense.Set arguments:array<addr> keywords:d
     loop param in params { if param.binding_id isnt? none { dense.add(@available param.binding_id) } }
     if function.rest_args isnt? none and function.rest_args.binding_id isnt? none { dense.add(@available function.rest_args.binding_id) }
     checker.frames.push(CheckFrame[id initialized])
-    stack.add(id)
+    stack.push(id)
     let source=checker.srcfile
     if function.source isnt? none {checker.srcfile=hir.source_at(function.source checker.source_files)}
     let body = hir.node_at(checker.nodes function.body)

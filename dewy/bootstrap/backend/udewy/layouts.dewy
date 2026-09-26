@@ -141,7 +141,7 @@ record_union = (id:addr context:Context nodes:types.Table):>RecordUnion? => {
 record = (id:addr context:Context @nodes:types.Table active:set<addr>=set[]):>Record|Pending => {
     let plain=views.structural_base(id nodes)
     if plain in? active return Pending['recursive record storage needs an indirection']
-    active.add(plain)
+    active.push(plain)
     let type=types.node_at(nodes plain)
     if type isnt? types.ObjectType return Pending['record layout requires an object type']
     let root_fields:addr?=none

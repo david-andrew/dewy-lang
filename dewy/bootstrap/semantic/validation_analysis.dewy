@@ -105,7 +105,7 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
     # edges authorize frame-word counters in allocation contracts.
     if loaded.length >? 0 {
         let word_iterators:set<addr>=set[]
-        loop decision in decisions {loop id in decision.word_iterators {word_iterators.add(id)}}
+        loop decision in decisions {loop id in decision.word_iterators {word_iterators.push(id)}}
         let effects_started=timing.start(timings)
         let effect_error=public_effects.validate(ids sources.srcfile(loaded[0].context session) session word_iterators)
         timing.finish('validation.public_effects' effects_started)

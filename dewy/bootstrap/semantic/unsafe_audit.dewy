@@ -41,7 +41,7 @@ collect = (root:addr source:SrcFile session:contexts.Session scope:string='<modu
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=hir.node_at(session.hir id)
         if node is? hir.Declare {
             let value=hir.node_at(session.hir node.expr)
@@ -58,7 +58,7 @@ collect = (root:addr source:SrcFile session:contexts.Session scope:string='<modu
         let category=kind(node)
         if category isnt? none {
             let key="{node.loc.start}:{node.loc.stop}:{category}"
-            if key not in? keys {keys.add(key) checks.push(Check[node.loc category])}
+            if key not in? keys {keys.push(key) checks.push(Check[node.loc category])}
         }
         let children=hir.children(node)
         let index=children.length

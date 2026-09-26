@@ -37,7 +37,7 @@ main=():>int64=>{
     let before:int64=_arena_allocated_bytes
     let graph=borrowing.ambient_graph(plan nodes ts)
     let initial=graph.opaque
-    loop id in graph.globals {initial.add(id)}
+    loop id in graph.globals {initial.push(id)}
     let ambient=borrowing.propagate_ambient(initial graph.callers)
     let opaque=borrowing.propagate_ambient(graph.opaque graph.callers)
     let retaining=borrowing.propagate_ambient(graph.exposes_storage graph.shared_callers)

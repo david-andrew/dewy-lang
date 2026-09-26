@@ -432,7 +432,7 @@ class DictStore(AST):
     key: AST
     value: AST | None
     position: str | None = None
-    """``values``/``value`` are None for a set (`s.add(key)`)."""
+    """``values``/``value`` are None for a set (`s.push(key)`)."""
 
 
 @dataclass(slots=True, weakref_slot=True)

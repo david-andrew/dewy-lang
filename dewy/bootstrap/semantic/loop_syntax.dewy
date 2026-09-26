@@ -78,7 +78,7 @@ mutation_target = (node:tokens.Token nodes:array<tokens.Token> replacements:bool
         }
         if not replacements and op =? '.' {
             let method=syntax.identifier(node.right nodes)
-            if method in? ['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'add' 'remove'] return node.left
+            if method in? ['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'remove'] return node.left
         }
     }
     return none
@@ -92,10 +92,10 @@ mutations = (id:addr nodes:array<tokens.Token> replacements:bool=false):>set<str
     let target=mutation_target(node nodes replacements)
     if target isnt? none {
         let name=root_name(target nodes)
-        if name isnt? none {names.add(name)}
+        if name isnt? none {names.push(name)}
     }
     loop child in children(node) {
-        loop name in mutations(child nodes replacements) {names.add(name)}
+        loop name in mutations(child nodes replacements) {names.push(name)}
     }
     return names
 }

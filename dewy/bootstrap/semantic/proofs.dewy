@@ -74,7 +74,7 @@ body = (id:addr parameters:set<addr> @dependencies:set<addr> @state:State):>void
         loop item in node.items {
             body(item available @dependencies @state)
             let declaration=hir.node_at(state.input.nodes item)
-            if declaration is? hir.Declare and declaration.binding_id isnt? none {available.add(declaration.binding_id)}
+            if declaration is? hir.Declare and declaration.binding_id isnt? none {available.push(declaration.binding_id)}
         }
         return
     }
@@ -96,7 +96,7 @@ body = (id:addr parameters:set<addr> @dependencies:set<addr> @state:State):>void
     }
     if node is? hir.FunctionCall and node.proof {
         let target=check_call(node @state parameters)
-        if target isnt? none {dependencies.add(target)}
+        if target isnt? none {dependencies.push(target)}
         return
     }
     if node is? hir.Flow {
@@ -124,7 +124,7 @@ visit = (id:addr statement:bool @state:State):>void => {
             if node.rest_args isnt? none {fail(node 'proof parameters must be explicit values' 'rest parameters are outside the initial proof subset' @state)}
             loop param in params {
                 if param.place or param is? hir.BoundParam {fail(node 'proof parameters must be explicit values' 'place and default parameters are outside the initial proof subset' @state)}
-                if param.binding_id isnt? none {ids.add(param.binding_id)}
+                if param.binding_id isnt? none {ids.push(param.binding_id)}
             }
             let dependencies:set<addr>=set[]
             body(node.body ids @dependencies @state)
@@ -170,10 +170,10 @@ acyclic = (binding:addr @active:set<addr> @checked:set<addr> @state:State):>void
         fail(node 'a checked proof cannot depend on itself' 'the initial proof-call graph must be acyclic' @state)
         return
     }
-    active.add(binding)
+    active.push(binding)
     loop dependency in state.edges.get(id set[]) {acyclic(dependency @active @checked @state)}
     active.pop(binding default=binding);
-    checked.add(binding)
+    checked.push(binding)
 }
 validate = (root:addr source:SrcFile session:contexts.Session):>Error? => {
     if session.proof_literals.length =? 0 return none

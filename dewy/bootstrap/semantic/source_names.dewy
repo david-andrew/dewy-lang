@@ -46,7 +46,7 @@ validate = (root:addr source:SrcFile nodes:array<tokens.Token>):>Error? => {
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=tokens.node_at(nodes id)
         let error:Error?=none
         if node is? parser.BinOp {
@@ -58,7 +58,7 @@ validate = (root:addr source:SrcFile nodes:array<tokens.Token>):>Error? => {
             if first is? tokens.Keyword {
                 if first.name =? 'match' and node.parts.length =? 3 {
                     let clauses=tokens.node_at(nodes node.parts[2])
-                    if clauses is? parser.Block {loop arm in clauses.inner {match_arms.add(arm)}}
+                    if clauses is? parser.Block {loop arm in clauses.inner {match_arms.push(arm)}}
                 }
                 if first.name in? ['let' 'const' 'local_const'] and node.parts.length =? 2 {error=bound(node.parts[1] source nodes)}
                 else if first.name =? 'from' and node.parts.length =? 4 {error=imported(node.parts[3] source nodes)}

@@ -32,7 +32,7 @@ inventory = (roots:array<addr> session:contexts.Session):>Plan => {
     loop pending.length >? 0 {
         let item=pending.pop
         if item.id in? seen continue
-        seen.add(item.id)
+        seen.push(item.id)
         result.original.push(item.id)
         let node=hir.node_at(session.hir item.id)
         let scope=item.scope
@@ -44,14 +44,14 @@ inventory = (roots:array<addr> session:contexts.Session):>Plan => {
         if node is? hir.Block {scope=item.id}
         if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
             let binding=bindings.find_binding(session.registry node.binding_id)
-            if binding isnt? none and not binding.builtin {result.symbols.add(node.binding_id)}
+            if binding isnt? none and not binding.builtin {result.symbols.push(node.binding_id)}
         }
         if node is? hir.Declare and node.binding_id isnt? none {
-            result.symbols.add(node.binding_id)
+            result.symbols.push(node.binding_id)
             if mutable(node) {
                 result.aliases[node.binding_id]=Alias[item.id node.binding_id scope source]
                 result.order.push(node.binding_id)
-                if function isnt? none {affected.add(function)}
+                if function isnt? none {affected.push(function)}
             }
         }
         let children=hir.children(node)
@@ -156,7 +156,7 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
     let joined=put(hir.Block[Span[0 0] types.primitive('void' @session.types) roots false] @session)
     let functions=captures.analyze(joined session.hir plan.symbols)
     let captured:set<addr>=set[]
-    loop function in functions.functions.values {loop binding in function.captures {captured.add(binding)}}
+    loop function in functions.functions.values {loop binding in function.captures {captured.push(binding)}}
     let exposed=borrowing.exposed_roots(functions session.hir session.types)
     let scopes:dict<addr borrowing.ViewScope>=[]
     loop binding in plan.order {
@@ -168,7 +168,7 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
         let traversed:set<addr>=set[]
         loop source isnt? none and source.binding in? plan.aliases {
             if source.binding in? traversed return selection_error(alias fallback session)
-            traversed.add(source.binding)
+            traversed.push(source.binding)
             let parent=hir.node_at(session.hir plan.aliases[source.binding].declaration)
             $runtime_assert parent is? hir.Declare
             let route=borrowing.route(parent.expr session.hir)
@@ -192,7 +192,7 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
         loop pending.length >? 0 {
             let next=pending.pop
             loop dependent in prepared.dependents.get(next set[]) {
-                if dependent not in? live {live.add(dependent) pending.push(dependent)}
+                if dependent not in? live {live.push(dependent) pending.push(dependent)}
             }
         }
         if borrowing.view_conflicts(region live source session.hir functions) return selection_error(alias fallback session detail='a write or call may change the owner before the place’s last use')
@@ -222,7 +222,7 @@ rebind_facts=(plan:Plan @session:contexts.Session):>void=>{
             loop [index dependent] in dependencies {
                 if canonical in? dependent or old.id in? dependent {
                     let updated=dependent
-                    updated.add(replacement) session.registry.index_routes[index]=updated
+                    updated.push(replacement) session.registry.index_routes[index]=updated
                 }
             }
         }
@@ -234,7 +234,7 @@ rebind_facts=(plan:Plan @session:contexts.Session):>void=>{
             let binding_id=node.binding_id
             if binding_id isnt? none {
                 let binding=bindings.find_binding(session.registry binding_id)
-                if binding isnt? none and not binding.builtin {symbols.add(binding_id)}
+                if binding isnt? none and not binding.builtin {symbols.push(binding_id)}
             }
         }
         node.value_type=type_terms.rebind(node.value_type @mapping @session.types)
@@ -252,27 +252,27 @@ rebind_facts=(plan:Plan @session:contexts.Session):>void=>{
             loop original in node.pos_or_kw_args {
                 let p=original
                 p.value_type=type_terms.rebind(p.value_type @mapping @session.types)
-                if p.binding_id isnt? none {symbols.add(p.binding_id)}
+                if p.binding_id isnt? none {symbols.push(p.binding_id)}
                 pos.push(p)
             }
             loop original in node.kw_only_args {
                 let p=original
                 p.value_type=type_terms.rebind(p.value_type @mapping @session.types)
-                if p.binding_id isnt? none {symbols.add(p.binding_id)}
+                if p.binding_id isnt? none {symbols.push(p.binding_id)}
                 kw.push(p)
             }
             node.pos_or_kw_args=pos node.kw_only_args=kw
             let rest=node.rest_args
             if rest isnt? none {
                 rest.value_type=type_terms.rebind(rest.value_type @mapping @session.types)
-                if rest.binding_id isnt? none {symbols.add(rest.binding_id)}
+                if rest.binding_id isnt? none {symbols.push(rest.binding_id)}
                 node.rest_args=rest
             }
         }
         store(id node @session)
     }
     let roots=symbols
-    loop root in roots {loop route in session.registry.routes_by_root.get(root []) {symbols.add(route.id)}}
+    loop root in roots {loop route in session.registry.routes_by_root.get(root []) {symbols.push(route.id)}}
     loop id in symbols {
         let binding=bindings.binding_at(session.registry id)
         if binding.value_type isnt? none {binding.value_type=type_terms.rebind(binding.value_type @mapping @session.types)}

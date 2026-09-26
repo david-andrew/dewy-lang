@@ -191,7 +191,7 @@ A set holds each member once and remembers first-seen order:
 
 ```dewy
 let permissions = set["read" "write" "read"]     # two members
-permissions.add("execute")
+permissions.push("execute")
 "read" in? permissions
 permissions.length
 

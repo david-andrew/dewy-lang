@@ -234,7 +234,7 @@ assigned_binding_ids = (root:addr nodes:array<hir.AST>):>set<addr> => {
     loop pending.length >? 0 {
         let id = pending.pop
         if id in? visited continue
-        visited.add(id)
+        visited.push(id)
         let node = hir.node_at(nodes id)
         let target:addr? = none
         if node is? hir.Assign | hir.IndexAssign | hir.MemberAssign | hir.Place { target = node.target }
@@ -249,7 +249,7 @@ assigned_binding_ids = (root:addr nodes:array<hir.AST>):>set<addr> => {
             let owner = hir.node_at(nodes path.root)
             if owner is? hir.ExpressedIdentifier {
                 let binding = owner.binding_id
-                if binding isnt? none { found.add(binding) }
+                if binding isnt? none { found.push(binding) }
             }
         }
         hir.push_children(node @pending)

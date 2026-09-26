@@ -48,7 +48,7 @@ literal_storage=(value:addr nodes:array<hir.AST> table:types.Table):>set<addr>=>
     loop pending.length>?0 {
         let id=pending.pop
         if id in? result continue
-        result.add(id)
+        result.push(id)
         let unwrapped=initializer(id nodes table)
         if unwrapped not=?id {pending.push(unwrapped) continue}
         let node=hir.node_at(nodes id)
@@ -80,7 +80,7 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
             let nested:array<addr>=[node.body]
             loop nested.length >? 0 {
                 let child=hir.node_at(nodes nested.pop)
-                if child is? hir.ExpressedIdentifier and child.binding_id isnt? none {blocked.add(child.binding_id)}
+                if child is? hir.ExpressedIdentifier and child.binding_id isnt? none {blocked.push(child.binding_id)}
                 hir.push_children(child @nested)
             }
             continue
@@ -131,21 +131,21 @@ local_values=(literal:hir.FunctionLiteral nodes:array<hir.AST> table:types.Table
             let target=hir.node_at(nodes node.target)
             if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
                 allowed[node.target]=allowed.get(node.target 0)+1
-                whole_places.add(target.binding_id)
+                whole_places.push(target.binding_id)
             }
         }
         if node is? hir.Place and id not in? nonescaping_places {
             let selected:array<addr>=[node.target]
             loop selected.length >? 0 {
                 let part=hir.node_at(nodes selected.pop)
-                if part is? hir.ExpressedIdentifier and part.binding_id isnt? none {blocked.add(part.binding_id)}
+                if part is? hir.ExpressedIdentifier and part.binding_id isnt? none {blocked.push(part.binding_id)}
                 hir.push_children(part @selected)
             }
         }
     }
     loop id in items {
         let node=hir.node_at(nodes id)
-        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and occurrences.get(id 0) not=? allowed.get(id 0) {blocked.add(node.binding_id)}
+        if node is? hir.ExpressedIdentifier and node.binding_id isnt? none and occurrences.get(id 0) not=? allowed.get(id 0) {blocked.push(node.binding_id)}
     }
     let result:dict<addr addr>=[]
     let used:addr<v=>v<=?4096>=0

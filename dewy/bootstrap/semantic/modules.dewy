@@ -149,7 +149,7 @@ install = (spec:imports.Import module:Module id:addr env:checking.Environment @e
         }
     }
     let reference = contexts.syntax_ref(id env.lexical @engine.session)
-    engine.session.prepared_imports.add(reference)
+    engine.session.prepared_imports.push(reference)
     return none
 }
 

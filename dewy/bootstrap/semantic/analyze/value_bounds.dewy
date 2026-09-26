@@ -134,7 +134,7 @@ constant_binding = (id:addr? nodes:array<hir.AST> type_nodes:types.Table registr
     let declaration = hir.node_at(nodes declaration_id)
     if declaration isnt? hir.Declare return none
     if declaration.decltype not=? 'const' return none
-    seen.add(id)
+    seen.push(id)
     return constant_expr(declaration.expr nodes type_nodes registry @seen)
 }
 constant_expr = (id:addr nodes:array<hir.AST> type_nodes:types.Table registry:bindings.Registry @seen:set<addr>):>ranges.Interval? => {

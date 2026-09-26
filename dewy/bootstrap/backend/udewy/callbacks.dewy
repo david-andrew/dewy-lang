@@ -29,7 +29,7 @@ contains_callable = (root:addr nodes:types.Table):>bool => {
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=types.node_at(nodes id)
         if node is? types.CallableType return true
         if node is? types.Primitive and node.name in? ['any' 'function'] return true
@@ -60,11 +60,11 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let discovered:set<addr>=set[]
     captures.locals(root nodes @bindings @discovered)
     loop [id function] in plan.functions {
-        loop binding in function.locals {bindings.add(binding)}
+        loop binding in function.locals {bindings.push(binding)}
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         loop parameter in effects.literal_params(literal) {
-            if parameter.binding_id isnt? none {parameters.add(parameter.binding_id)}
+            if parameter.binding_id isnt? none {parameters.push(parameter.binding_id)}
         }
     }
     let calls:array<hir.FunctionCall>=[]
@@ -74,7 +74,7 @@ analyze = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=hir.node_at(nodes id)
         let exposed:array<addr>=[]
         if node is? hir.Transmute {

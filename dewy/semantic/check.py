@@ -5824,7 +5824,7 @@ def _assert_note_value_supported(type_: ty.Type, *, ctx: Context) -> bool:
     return isinstance(type_, str) and type_ not in ('int', 'uint') and ctx.type_system.is_subtype(type_, 'int')
 
 
-_MUTATING_METHODS = {'push', 'pop', 'insert', 'clear', 'truncate', 'reserve', 'sort', 'add'}
+_MUTATING_METHODS = {'push', 'pop', 'insert', 'clear', 'truncate', 'reserve', 'sort'}
 
 
 def _method_row(item: p0.AST, *, symbol: str = '=') -> tuple[str, p0.AST] | None:
@@ -8914,7 +8914,7 @@ def _mutated_container_routes(ast: p0.AST) -> set[tuple[str, tuple[str, ...]]]:
     return routes
 
 
-_MUTATING_METHOD_NAMES = frozenset({*(_ARRAY_METHOD_NAMES - _READ_ONLY_ARRAY_METHOD_NAMES), 'add'})  # arrays, dictionaries, sets
+_MUTATING_METHOD_NAMES = frozenset(_ARRAY_METHOD_NAMES - _READ_ONLY_ARRAY_METHOD_NAMES)  # arrays, dictionaries, sets
 
 
 def _binding_write_names(ast: p0.AST) -> tuple[set[str], set[str]]:
@@ -9216,11 +9216,11 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
             _forget_positions(dictionary, ctx=ctx)
             _invalidate_dict_lengths(dictionary, ctx=ctx)
             return hir.DictView(binop.loc, view_type, dictionary, name)
-    if name in {'get', 'pop', 'clear', 'add', 'push'}:
+    if name in {'get', 'pop', 'clear', 'push'}:
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
         found_dict = _dict_value(value)
         dict_methods = {'get', 'pop', 'clear'}
-        set_methods = {'add', 'push', 'pop', 'clear'}
+        set_methods = {'push', 'pop', 'clear'}
         if found_dict is not None and name in (set_methods if found_dict[2] is None else dict_methods):
             dictionary, key_type, value_type = found_dict
             if name in ('pop', 'clear') and value_type is not None:
@@ -9257,7 +9257,7 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                     None,
                     key_type,
                 )
-            elif name in {'add', 'push'}:
+            elif name == 'push':
                 signature = ty.FunctionType([ty.PosOrKwArg('key', key_type)], [], None, ty.VOID_TYPE)
             else:
                 signature = ty.FunctionType([], [], None, ty.VOID_TYPE)
@@ -9275,8 +9275,8 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                         user_error(ctx.srcfile, 'cannot mutate a const dictionary field',
                                    Pointer(span=binop.left.loc, message=f'`{step.name}` is const'))
                 _refuse_immutable_write(dictionary, binop.left.loc, 'mutate a dictionary member', ctx=ctx)
-            # One insertion operation in HIR; `push` is the uniform public
-            # spelling. Keep `add` as a compatibility alias for existing code.
+            # `push` is the only insertion spelling; the HIR operation keeps
+            # its internal name `add`.
             return hir.DictMethod(binop.loc, signature, dictionary, 'add' if name == 'push' else name)
     if name == 'length':
         value = typecheck_and_resolve_inner(binop.left, ctx=ctx)
@@ -9359,6 +9359,17 @@ def _tcr_member_access(binop: p0.BinOp, *, ctx: Context) -> hir.AST:
                 return hir.BoundMethod(binop.loc, function_binding.type, function, None)   # needs no receiver; still only ever called
             bound_type = replace(function_binding.type, pos_or_kw=function_binding.type.pos_or_kw[1:], effects=effect_rows.bind_receiver(function_binding.type.effects, len(function_binding.type.pos_or_kw) + len(function_binding.type.kw_only)))
             return hir.BoundMethod(binop.loc, bound_type, function, value)
+        container = _dict_value(value)
+        if container is not None:
+            # A dictionary or set is a record internally; name its members.
+            kind = 'set' if container[2] is None else 'dictionary'
+            members = '`push`, `pop`, `clear`, `length`, `values`' if kind == 'set' else '`get`, `pop`, `clear`, `length`, `keys`, `values`'
+            user_error(
+                ctx.srcfile,
+                f'a {kind} has no member `{name}`',
+                Pointer(span=binop.right.loc, message='insert a member with `push`' if kind == 'set' and name == 'add' else 'this member is not present'),
+                hint=f'{kind} members: {members}',
+            )
         user_error(
             ctx.srcfile,
             f'unknown object field `{name}`',

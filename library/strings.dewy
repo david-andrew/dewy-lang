@@ -189,13 +189,13 @@ let chr = (scalar:int64<scalar >=? 0 and scalar <? 0x110000>):>string => {
 
 let _set_of_graphemes = (text:string):>set<string> => {
     let members:set<string> = set[]
-    loop g in text { members.add(g) }
+    loop g in text { members.push(g) }
     return members
 }
 
 let _set_of_array = <T>(values:array<T>):>set<T> => {
     let members:set<T> = set[]
-    loop v in values { members.add(v) }
+    loop v in values { members.push(v) }
     return members
 }
 
@@ -208,7 +208,7 @@ let _capture_push = <T>(@values:array<T> value:T):>void => {
 }
 
 let _capture_add = <T>(@members:set<T> value:T):>void => {
-    members.add(value)
+    members.push(value)
 }
 
 let _capture_store = <K V>(@entries:dict<K V> key:K value:V):>void => {

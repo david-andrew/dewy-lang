@@ -241,7 +241,7 @@ analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer =
             let item=node.items[index]
             if output.normal is? none break
             let declared=node_at(item checker)
-            if declared is? hir.Declare and declared.binding_id isnt? none {locals.add(declared.binding_id)}
+            if declared is? hir.Declare and declared.binding_id isnt? none {locals.push(declared.binding_id)}
             let required:array<addr>=if index+1 =? node.items.length checker.result_obligations.get(id []) else []
             let transfer=analyze_result(item output.normal required @checker validate)
             output.normal=transfer.normal
@@ -315,7 +315,7 @@ analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer =
 function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Checker validate:bool):>void => {
     if id in? checker.checked return
     # Exploratory loop passes must not mark a body validated.
-    if validate {checker.checked.add(id)}
+    if validate {checker.checked.push(id)}
     let prototype=checker.prototype
     if node.proof {checker.prototype=false}
     let enclosing=state
@@ -605,7 +605,7 @@ bind_arm = (id:addr body_id:addr arm_state:facts.State @checker:Checker validate
             if index + 1 =? body.items.length break
             let item=body.items[index]
             let declared=node_at(item checker)
-            if declared is? hir.Declare and declared.binding_id isnt? none {locals.add(declared.binding_id)}
+            if declared is? hir.Declare and declared.binding_id isnt? none {locals.push(declared.binding_id)}
             let current=output.normal
             if current is? none break
             let transfer=analyze(item current @checker validate)
@@ -858,7 +858,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
                 let previous=checker.constant_indices.get(id)
                 if checked.constant_index is? none or previous is? none or previous not=?checked.constant_index {checker.constant_indices.pop(id default=0);}
             } else {
-                checker.checked_indices.add(id)
+                checker.checked_indices.push(id)
                 if checked.constant_index isnt? none {checker.constant_indices[id]=checked.constant_index}
             }
         }
@@ -1074,7 +1074,7 @@ mentioned_loop_pairs=(body:addr @checker:Checker):>array<facts.TermPair>=>{
     loop pending.length>?0 and pairs.length<?64 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=node_at(id checker)
         if node is? hir.FunctionLiteral continue
         let function=if node is? hir.FunctionCall node_at(node.func checker) else none
@@ -1194,7 +1194,7 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool wo
             let proved=word_candidates and iterator_steps_fit(unbounded body checker)
             if word_candidates and not proved return loop_body(arm state @checker validate false)
             if validate {
-                if proved {loop id in unbounded {checker.word_iterators.add(id)}}
+                if proved {loop id in unbounded {checker.word_iterators.push(id)}}
                 body=analyze(arm.body positive @checker true)
             }
         } else {body=analyze(arm.body positive @checker validate)}
@@ -1220,7 +1220,7 @@ collect = (root:addr @checker:Checker):>void => {
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=node_at(id checker)
         let target:addr?=none
         if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place {target=node.target}
@@ -1230,7 +1230,7 @@ collect = (root:addr @checker:Checker):>void => {
             let owner=node_at(path.root checker)
             let indexed=false
             loop step in path.steps {if node_at(step checker) is? hir.Index|hir.DictLookup {indexed=true}}
-            if indexed and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.container_receivers.add(owner.binding_id)}
+            if indexed and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.container_receivers.push(owner.binding_id)}
         }
         else if node is? hir.FunctionCall {
             let method=node_at(node.func checker)
@@ -1239,16 +1239,16 @@ collect = (root:addr @checker:Checker):>void => {
         if target isnt? none {
             let access=bindings.access_path(target checker.data.env.nodes facts=true)
             let owner=node_at(access.root checker)
-            if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.assigned.add(owner.binding_id)}
+            if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.assigned.push(owner.binding_id)}
         }
         hir.push_children(node @pending)
     }
     let node=node_at(root checker)
     $runtime_assert node is? hir.Block
     loop id in node.items {
-        checker.root_items.add(id)
+        checker.root_items.push(id)
         let item=node_at(id checker)
-        if item is? hir.Declare and item.decltype =? 'let' and item.binding_id isnt? none and item.binding_id in? checker.assigned {checker.mutable_globals.add(item.binding_id)}
+        if item is? hir.Declare and item.decltype =? 'let' and item.binding_id isnt? none and item.binding_id in? checker.assigned {checker.mutable_globals.push(item.binding_id)}
     }
 }
 validate = (root:addr @checker:Checker read_only:set<addr> | none=none):>void => {
@@ -1256,7 +1256,7 @@ validate = (root:addr @checker:Checker read_only:set<addr> | none=none):>void =>
     let tracked=checker.mutable_globals
     if checker.container_receivers.length>?0 {
         loop binding in effects.nonlocal_bindings(root checker.data.env.nodes) {
-            if binding in? checker.container_receivers {tracked.add(binding)}
+            if binding in? checker.container_receivers {tracked.push(binding)}
         }
     }
     checker.call_writes=effects.analyze_global_writes(root checker.data.env.nodes tracked checker.data.env.registry)

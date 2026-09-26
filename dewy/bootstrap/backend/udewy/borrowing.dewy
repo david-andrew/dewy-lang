@@ -78,7 +78,7 @@ expression_conflicts = (root:addr source:Route? nodes:array<hir.AST> plan:captur
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=hir.node_at(nodes id)
         if node is? hir.FunctionLiteral|hir.GenericFunction continue
         if deep and node is? hir.FunctionCall {
@@ -152,7 +152,7 @@ exposed_roots = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table)
     let expose = (id:addr @exposed:set<addr>):>void => {
         if word_value(hir.node_at(nodes id).value_type type_nodes) return void
         let binding=captures.root_binding(id nodes)
-        if binding isnt? none {exposed.add(binding)}
+        if binding isnt? none {exposed.push(binding)}
     }
     loop [id function] in plan.functions {
         let literal=hir.node_at(nodes id)
@@ -163,7 +163,7 @@ exposed_roots = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table)
         loop pending.length >? 0 {
             let child=pending.pop
             if child in? seen continue
-            seen.add(child)
+            seen.push(child)
             let node=hir.node_at(nodes child)
             if node is? hir.FunctionLiteral|hir.GenericFunction continue
             if node is? hir.RuntimeFailure {
@@ -202,13 +202,13 @@ exposed_roots = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table)
 global_placed = (plan:captures.Plan nodes:array<hir.AST> indirect:dict<addr array<addr>>):>set<addr> => {
     let marked:set<addr>=set[]
     let forwards:dict<addr array<addr>>=[]
-    loop [callee targets] in indirect {loop target in targets {marked.add(target)}}
+    loop [callee targets] in indirect {loop target in targets {marked.push(target)}}
     loop [id function] in plan.functions {
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         let own_places:set<addr>=set[]
         loop parameter in effects.literal_params(literal) {
-            if parameter.place and parameter.binding_id isnt? none {own_places.add(parameter.binding_id)}
+            if parameter.place and parameter.binding_id isnt? none {own_places.push(parameter.binding_id)}
         }
         let pending:array<addr>=[literal.body]
         loop parameter in effects.literal_params(literal) {if parameter is? hir.BoundParam {pending.push(parameter.value)}}
@@ -216,7 +216,7 @@ global_placed = (plan:captures.Plan nodes:array<hir.AST> indirect:dict<addr arra
         loop pending.length >? 0 {
             let child=pending.pop
             if child in? seen continue
-            seen.add(child)
+            seen.push(child)
             let node=hir.node_at(nodes child)
             if node is? hir.FunctionLiteral|hir.GenericFunction continue
             if node is? hir.FunctionCall {
@@ -227,10 +227,10 @@ global_placed = (plan:captures.Plan nodes:array<hir.AST> indirect:dict<addr arra
                     let source=route(value.target nodes)
                     if direct is? none {
                         # An unresolved callee with a place: mark every possible target.
-                        loop target in indirect.get(node.func []) {marked.add(target)}
+                        loop target in indirect.get(node.func []) {marked.push(target)}
                         continue
                     }
-                    if source is? none or source.binding in? plan.globals {marked.add(direct) continue}
+                    if source is? none or source.binding in? plan.globals {marked.push(direct) continue}
                     if source.binding in? own_places {
                         let users=forwards.get(id [])
                         users.push(direct)
@@ -254,7 +254,7 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
     let callers:dict<addr array<addr>>=[]
     let shared_callers:dict<addr array<addr>>=[]
     loop [id function] in plan.functions {
-        loop binding in function.writes {if binding in? plan.globals {globals.add(id)}}
+        loop binding in function.writes {if binding in? plan.globals {globals.push(id)}}
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         let called:set<addr>=set[]
@@ -265,7 +265,7 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
         loop pending.length >? 0 {
             let child=pending.pop
             if child in? seen continue
-            seen.add(child)
+            seen.push(child)
             let node=hir.node_at(nodes child)
             if node is? hir.FunctionLiteral|hir.GenericFunction continue
             # Reporting is an intrinsic failure operation at the source level.
@@ -279,28 +279,28 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
             # Reinterpreting scalar bits does not expose aggregate storage.
             # Pointer/aggregate transmutes and raw memory calls still prevent
             # borrowing: they can escape or mutate an otherwise read-only value.
-            if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) {opaque.add(id) exposes_storage.add(id)}
+            if node is? hir.Transmute and (not word_value(node.value_type type_nodes) or not word_value(hir.node_at(nodes node.expr).value_type type_nodes)) {opaque.push(id) exposes_storage.push(id)}
             if node is? hir.FunctionCall {
                 let callee=hir.node_at(nodes node.func)
                 let direct=captures.resolve(node.func node.selected_method_index plan nodes)
                 let targets:array<addr> | none = if direct is? none indirect.get(node.func) else [direct]
                 if targets isnt? none {
                     loop target in targets {
-                        called.add(target)
-                        if shares_storage(node target plan nodes) {shared.add(target)}
+                        called.push(target)
+                        if shares_storage(node target plan nodes) {shared.push(target)}
                     }
                 } else if callee is? hir.ExpressedIdentifier {
                     let memory=callee.name.startswith('__load_') or callee.name.startswith('__store_')
                     let unknown=(callee.binding_id isnt? none and callee.binding_id in? plan.source_bindings) or (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix)
-                    if unknown or callee.name.startswith('__syscall') {opaque.add(id) exposes_storage.add(id)}
+                    if unknown or callee.name.startswith('__syscall') {opaque.push(id) exposes_storage.push(id)}
                     else if memory {
                         # Raw memory can alias caller storage, so still copy
                         # value arguments. Word-only operands do not expose
                         # the descriptor of that private copy. Aggregate raw
                         # operands and aggregate transmutes keep retention.
-                        opaque.add(id)
+                        opaque.push(id)
                         loop argument in arguments(node) {
-                            if not word_value(hir.node_at(nodes argument).value_type type_nodes) {exposes_storage.add(id)}
+                            if not word_value(hir.node_at(nodes argument).value_type type_nodes) {exposes_storage.push(id)}
                         }
                     }
                 } else if callee is? hir.ArrayMethod {
@@ -312,15 +312,15 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
                     if callee.name =? 'sort' and 'key' in? node.kw_args {
                         let key=node.kw_args['key']
                         if hir.node_at(nodes key) is? hir.FunctionLiteral {
-                            called.add(key)
-                            if shares_storage(node key plan nodes) {shared.add(key)}
-                        } else {opaque.add(id) exposes_storage.add(id)}
+                            called.push(key)
+                            if shares_storage(node key plan nodes) {shared.push(key)}
+                        } else {opaque.push(id) exposes_storage.push(id)}
                     }
                 } else if callee is? hir.FunctionLiteral {
-                    called.add(node.func)
-                    if shares_storage(node node.func plan nodes) {shared.add(node.func)}
+                    called.push(node.func)
+                    if shares_storage(node node.func plan nodes) {shared.push(node.func)}
                 }
-                else {opaque.add(id) exposes_storage.add(id)}
+                else {opaque.push(id) exposes_storage.push(id)}
             }
             hir.push_children(node @pending)
         }
@@ -347,7 +347,7 @@ propagate_ambient = (initial:set<addr> callers:dict<addr array<addr>>):>set<addr
         let id=pending.pop
         loop caller in callers.get(id []) {
             if caller in? dirty continue
-            dirty.add(caller)
+            dirty.push(caller)
             pending.push(caller)
         }
     }
@@ -358,7 +358,7 @@ propagate_ambient = (initial:set<addr> callers:dict<addr array<addr>>):>set<addr
 ambient_writers = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table opaque_only:bool=false value_boundaries:bool=false indirect:dict<addr array<addr>>=[]):>set<addr> => {
     let graph=ambient_graph(plan nodes type_nodes indirect)
     let initial=if value_boundaries graph.exposes_storage else graph.opaque
-    if not opaque_only {loop id in graph.globals {initial.add(id)}}
+    if not opaque_only {loop id in graph.globals {initial.push(id)}}
     return propagate_ambient(initial (if value_boundaries graph.shared_callers else graph.callers))
 }
 # `rejections` explains, per source binding, why its last considered use as
@@ -377,7 +377,7 @@ view_nodes = (id:addr nodes:array<hir.AST> dependencies:bool=false):>array<addr>
     loop pending.length >? 0 {
         let current=pending.pop
         if current in? seen {continue}
-        seen.add(current) found.push(current)
+        seen.push(current) found.push(current)
         let node=hir.node_at(nodes current)
         if node isnt? hir.FunctionLiteral|hir.GenericFunction and not (dependencies and node is? hir.CopyValue) {hir.push_children(node @pending)}
     }
@@ -397,13 +397,13 @@ prepare_view_scope = (scope:addr nodes:array<hir.AST> type_nodes:types.Table):>V
         let reads:set<addr>=set[]
         loop id in view_nodes(block.items[index] nodes) {
             let node=hir.node_at(nodes id)
-            if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {reads.add(node.binding_id)}
+            if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {reads.push(node.binding_id)}
             let target:addr?=none
             let value:addr?=none
             if node is? hir.Declare {
                 if id not in? starts {starts[id]=index}
                 ends[id]=index
-                if node.binding_id isnt? none {locals.add(node.binding_id)}
+                if node.binding_id isnt? none {locals.push(node.binding_id)}
                 if node.view or not word_value(hir.node_at(nodes node.expr).value_type type_nodes) {target=node.binding_id value=node.expr}
             } else if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign and not word_value(hir.node_at(nodes node.value).value_type type_nodes) {
                 let path=route(node.target nodes)
@@ -414,7 +414,7 @@ prepare_view_scope = (scope:addr nodes:array<hir.AST> type_nodes:types.Table):>V
                     let read=hir.node_at(nodes read_id)
                     if read is? hir.ExpressedIdentifier and read.binding_id isnt? none {
                         let edges=dependents.get(read.binding_id set[])
-                        edges.add(target) dependents[read.binding_id]=edges
+                        edges.push(target) dependents[read.binding_id]=edges
                     }
                 }
             }
@@ -436,7 +436,7 @@ view_region = (scope:ViewScope declaration:addr excluded:set<addr> nodes:array<h
     loop pending.length >? 0 {
         let current=pending.pop
         loop target in scope.dependents.get(current set[]) {
-            if target not in? live {live.add(target) pending.push(target)}
+            if target not in? live {live.push(target) pending.push(target)}
         }
     }
     loop binding in live {if binding in? excluded or binding not in? scope.locals return scope.items}
@@ -522,11 +522,11 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
             let item=pending.pop
             if item.scope is? none {
                 if item.id in? unscoped continue
-                unscoped.add(item.id)
+                unscoped.push(item.id)
             } else {
                 let scopes=seen.get(item.id set[])
                 if item.scope in? scopes continue
-                scopes.add(item.scope) seen[item.id]=scopes
+                scopes.push(item.scope) seen[item.id]=scopes
             }
             let node=hir.node_at(nodes item.id)
             if node is? hir.FunctionLiteral continue
@@ -534,7 +534,7 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
             if node is? hir.Block and node.scoped {scope=item.id}
             if node is? hir.Declare and node.binding_id isnt? none and node.binding_id in? demands and scope isnt? none {
                 let known=candidates.get(item.id set[])
-                known.add(scope) candidates[item.id]=known
+                known.push(scope) candidates[item.id]=known
                 result.scopes[node.binding_id]=scope
             }
             loop child in hir.children(node) {pending.push(ScopeItem[child scope])}
@@ -557,7 +557,7 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
                 loop pending_aliases.length >? 0 {
                     let current=pending_aliases.pop
                     loop dependent in prepared[scope].dependents.get(current set[]) {
-                        if dependent not in? aliases {aliases.add(dependent) pending_aliases.push(dependent)}
+                        if dependent not in? aliases {aliases.push(dependent) pending_aliases.push(dependent)}
                     }
                 }
                 let region=view_region(prepared[scope] declaration excluded nodes)
@@ -567,7 +567,7 @@ scoped_views = (demands:set<addr> nodes:array<hir.AST> type_nodes:types.Table pl
                 if source isnt? none and view_conflicts(region aliases source nodes plan retained=retained) {safe=false}
             }
             result.regions[binding]=regions
-            if safe {result.bindings.add(binding)}
+            if safe {result.bindings.push(binding)}
         }
     }
     return result
@@ -645,7 +645,7 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
             let binding=parameter.binding_id
             if binding is? none or parameter.place or parameter is? hir.BoundParam continue
             if word_value(parameter.value_type type_nodes) continue
-            bindings.push(binding) wanted.add(binding)
+            bindings.push(binding) wanted.push(binding)
         }
         if bindings.length =? 0 continue
         let scan=ReadScan[]
@@ -661,7 +661,7 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
                 if binding in? result.parameters continue
                 let use=consuming_use(scan.reads.get(binding default=[]) nodes plan result.parameters)
                 if use is? none continue
-                result.parameters.add(binding) result.uses.add(use) changed=true
+                result.parameters.push(binding) result.uses.push(use) changed=true
             }
         }
         if not changed break
@@ -678,7 +678,7 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
 owned_array_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects valued:set<addr> retaining:set<addr> captured:set<addr> consumed:set<addr>):>set<addr> => {
     let result:set<addr>=set[]
     let named:set<addr>=set[]
-    loop id in plan.named.values {named.add(id)}
+    loop id in plan.named.values {named.push(id)}
     loop [id function] in plan.functions {
         if id not in? named or id in? valued or id in? retaining continue
         let literal=hir.node_at(nodes id)
@@ -690,7 +690,7 @@ owned_array_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captu
             let type=types.node_at(type_nodes types.unfold(types.strip_refinement(parameter.value_type type_nodes) type_nodes))
             if type isnt? types.ArrayType continue
             let summary=summaries.by_param_binding.get(binding)
-            if summary isnt? none and summary.escapes.length =? 0 and effects.writes(summary) {result.add(binding)}
+            if summary isnt? none and summary.escapes.length =? 0 and effects.writes(summary) {result.push(binding)}
         }
     }
     return result
@@ -712,7 +712,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let indirect=callbacks.analyze(root nodes type_nodes plan links function_values=valued)
     # Compiler-generated callers also keep the ordinary ABI. They are not
     # added to source callback targets merely because the runtime calls them.
-    loop id in external {valued.add(id)}
+    loop id in external {valued.push(id)}
     # Checked value casts borrow while evaluating but do not expose raw
     # storage. At a value boundary lowering supplies an independent owner,
     # including an aggregate wrapped into an optional result.
@@ -722,7 +722,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let forwarded=storage_proofs.arguments
     let ambient=ambient_graph(plan nodes type_nodes indirect)
     let initial=ambient.opaque
-    loop id in ambient.globals {initial.add(id)}
+    loop id in ambient.globals {initial.push(id)}
     let dirty=propagate_ambient(initial ambient.callers)
     # Raw address operations and unknown callbacks can expose storage even
     # without a declared place. They always require the ordinary value copy;
@@ -738,7 +738,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
         loop parameter in effects.literal_params(literal) {
-            if parameter.place and parameter.binding_id isnt? none {places.add(parameter.binding_id)}
+            if parameter.place and parameter.binding_id isnt? none {places.push(parameter.binding_id)}
         }
     }
     # A scope borrow needs a longer guarantee than a call-argument borrow.
@@ -749,7 +749,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     # This reuses the existing graph instead of rescanning a body per local.
     let captured:set<addr>=set[]
     loop function in plan.functions.values {
-        loop binding in function.captures {captured.add(binding)}
+        loop binding in function.captures {captured.push(binding)}
     }
     let stable:set<addr>=set[]
     let stable_parameters:dict<addr effects.ParameterEffects>=[]
@@ -760,10 +760,10 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     let exposed=exposed_roots(plan nodes type_nodes)
     # A `const` global never changes after startup initialization, so any
     # function may view its storage (a lookup's index cache aside).
-    loop binding in plan.constants {if binding not in? exposed {stable.add(binding)}}
+    loop binding in plan.constants {if binding not in? exposed {stable.push(binding)}}
     loop [id function] in plan.functions {
         loop binding in function.locals {
-            if binding not in? function.writes and binding not in? places and binding not in? plan.globals and binding not in? captured and binding not in? exposed {stable.add(binding)}
+            if binding not in? function.writes and binding not in? places and binding not in? plan.globals and binding not in? captured and binding not in? exposed {stable.push(binding)}
         }
         let literal=hir.node_at(nodes id)
         $runtime_assert literal is? hir.FunctionLiteral
@@ -797,7 +797,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=hir.node_at(nodes id)
         hir.push_children(node @pending)
         if node is? hir.Declare and node.binding_id isnt? none {
@@ -806,19 +806,19 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             # An unwritten let uses the same lifetime proof as const. Skip
             # excluded owners before preparing per-scope dependency graphs.
             let inferred=not word_value(expr.value_type type_nodes) and expr is? hir.Index|hir.MemberAccess|hir.DictLookup and node.binding_id in? stable and source isnt? none and source.binding not in? plan.globals and source.binding not in? captured and source.binding not in? exposed and source.binding not in? places and not stable_owner(source stable stable_parameters)
-            if node.view or inferred {view_demands.add(node.binding_id)}
+            if node.view or inferred {view_demands.push(node.binding_id)}
         }
         if node is? hir.Index {
             let source=route(node.array nodes)
             # A place may alias a different parameter's route. Its spelling
             # cannot establish disjoint storage from another written route.
             if source isnt? none and source.binding in? places {source=none}
-            if expression_conflicts(node.index source nodes plan dirty) {array_snapshots.add(id)}
+            if expression_conflicts(node.index source nodes plan dirty) {array_snapshots.push(id)}
         }
         if node is? hir.DictLookup {
             let source=route(node.values nodes)
             if source isnt? none and source.binding in? places {source=none}
-            if expression_conflicts(node.key source nodes plan dirty) {array_snapshots.add(id)}
+            if expression_conflicts(node.key source nodes plan dirty) {array_snapshots.push(id)}
         }
         if node isnt? hir.FunctionCall continue
         let callee=hir.node_at(nodes node.func)
@@ -827,7 +827,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         if targets is? none {targets=effects.direct_targets(node analysis nodes)}
         if targets is? none {
             loop argument in arguments(node) {
-                if hir.node_at(nodes argument) is? hir.Place {unsafe_places.add(argument)}
+                if hir.node_at(nodes argument) is? hir.Place {unsafe_places.push(argument)}
                 else {
                     let source=route(peel_argument(argument nodes type_nodes) nodes)
                     if source isnt? none and source.binding not in? rejections {rejections[source.binding]='the callee is not resolved statically'}
@@ -836,7 +836,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             continue
         }
         let allowed_all:set<addr>=set[]
-        loop argument in arguments(node) {allowed_all.add(argument)}
+        loop argument in arguments(node) {allowed_all.push(argument)}
         let temporary_all=allowed_all
         let reclaim_all=allowed_all
         let consumed_all=allowed_all
@@ -846,7 +846,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             let pairs=effects.pair_arguments(node literal)
             if pairs is? none {
                 loop argument in arguments(node) {
-                    if hir.node_at(nodes argument) is? hir.Place {unsafe_places.add(argument)}
+                    if hir.node_at(nodes argument) is? hir.Place {unsafe_places.push(argument)}
                     else {
                         let source=route(peel_argument(argument nodes type_nodes) nodes)
                         if source isnt? none and source.binding not in? rejections {rejections[source.binding]='the arguments could not be paired with the parameters'}
@@ -859,10 +859,10 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 if hir.node_at(nodes pair.argument) isnt? hir.Place continue
                 let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
                 if summary isnt? none and summary.escapes.length =? 0 {
-                    safe_places.add(pair.argument)
-                    if effects.preserves_storage(summary hir.node_at(nodes pair.argument).value_type type_nodes) {fixed_places.add(pair.argument)}
-                    else {changed_places.add(pair.argument)}
-                } else {unsafe_places.add(pair.argument)}
+                    safe_places.push(pair.argument)
+                    if effects.preserves_storage(summary hir.node_at(nodes pair.argument).value_type type_nodes) {fixed_places.push(pair.argument)}
+                    else {changed_places.push(pair.argument)}
+                } else {unsafe_places.push(pair.argument)}
             }
             let allowed:set<addr>=set[]
             let rejected:set<addr>=set[]
@@ -874,28 +874,28 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
             let position:addr=0
             loop pair in pairs {
                 if pair.parameter isnt? none and (pair.parameter in? consumed.parameters or pair.parameter in? owned) {
-                    donated.add(pair.argument) rejected.add(pair.argument) retained.add(pair.argument) kept.add(pair.argument)
+                    donated.push(pair.argument) rejected.push(pair.argument) retained.push(pair.argument) kept.push(pair.argument)
                     position+=1
                     continue
                 }
                 let source=route(peel_argument(pair.argument nodes type_nodes) nodes)
                 let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
-                if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.add(pair.argument)}
-                else {retained.add(pair.argument)}
+                if direct not in? retaining and summary isnt? none and summary.escapes.length =? 0 {temporary.push(pair.argument)}
+                else {retained.push(pair.argument)}
                 # A by-value callee that keeps its parameter keeps its own
                 # share or copy of it; only raw exposure can keep the caller's
                 # snapshot itself. That snapshot is the caller's to release.
-                if direct not in? retaining and summary isnt? none {reclaim.add(pair.argument)}
-                else {kept.add(pair.argument)}
+                if direct not in? retaining and summary isnt? none {reclaim.push(pair.argument)}
+                else {kept.push(pair.argument)}
                 # A record borrows on the callee's own summary: raw exposure
                 # of its parameter is an escape there (effects.raw_callee),
                 # and each deeper boundary decides for itself. Arrays keep
                 # the call-graph rule: a callee's value share of a borrowed
                 # array made the caller detach on every later write.
                 let raw_blocked=direct in? opaque and not record_value(pair.argument nodes type_nodes)
-                if not raw_blocked and source isnt? none and source.binding not in? exposed and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.add(pair.argument)}
+                if not raw_blocked and source isnt? none and source.binding not in? exposed and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.push(pair.argument)}
                 else {
-                    rejected.add(pair.argument)
+                    rejected.push(pair.argument)
                     if source isnt? none {
                         rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? exposed 'its storage has been exposed to raw operations' else if source.binding in? plan.globals 'it is a global' else if source.binding in? places and direct in? dirty 'it is a place argument of a call that writes' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
                     }
@@ -922,19 +922,19 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         if node is? hir.Place {
             let source=route(node.target nodes)
             if source isnt? none {
-                if id not in? safe_places or id in? unsafe_places {escaping.add(source.binding)}
+                if id not in? safe_places or id in? unsafe_places {escaping.push(source.binding)}
             }
         }
     }
     let excluded=captured
-    loop binding in exposed {excluded.add(binding)}
-    loop binding in places {excluded.add(binding)}
+    loop binding in exposed {excluded.push(binding)}
+    loop binding in places {excluded.push(binding)}
     # Nonescaping calls only lend storage during the call. Conflicts inside
     # a view's live interval are still checked, including mutable places.
-    loop binding in escaping {excluded.add(binding)}
+    loop binding in escaping {excluded.push(binding)}
     let scoped=scoped_views(view_demands nodes type_nodes plan excluded)
     loop id in unsafe_places {safe_places.pop(id default=id); fixed_places.pop(id default=id);}
     loop id in changed_places {fixed_places.pop(id default=id);}
-    loop binding in storage_proofs.local_views {stable.add(binding)}
+    loop binding in storage_proofs.local_views {stable.push(binding)}
     return Plan[result escaping disposable array_snapshots stable stable_parameters consumed_arguments consumed.uses rejections owned (scoped.bindings | storage_proofs.local_views) scoped.scopes scoped.regions safe_places fixed_places indirect reclaimable_arguments=reclaimable]
 }

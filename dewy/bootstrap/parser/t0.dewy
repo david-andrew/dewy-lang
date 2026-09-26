@@ -74,7 +74,7 @@ alphabet_sets = (folded:bool):>dict<BasePrefix set<string>> => {
     let result:dict<BasePrefix set<string>>=[]
     loop [base info] in BASE_SPECS {
         let digits:set<string>=set[]
-        loop digit in info.alphabet {digits.add(if folded digit.casefold else digit)}
+        loop digit in info.alphabet {digits.push(if folded digit.casefold else digit)}
         result[base]=digits
     }
     return result

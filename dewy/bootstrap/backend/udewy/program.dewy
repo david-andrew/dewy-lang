@@ -51,7 +51,7 @@ write_entrypoint = (program:Program functions:dict<string addr> scope:emit.Scope
         emit.write("{program.startup_symbol}()" @out) emit.newline(@out)
     }
     if program.argv_prologue isnt? none {
-        inner.locals.add('__dewy_argc') inner.locals.add('__dewy_argv')
+        inner.locals.push('__dewy_argc') inner.locals.push('__dewy_argv')
         emit.write_statements(program.argv_prologue @inner input @state @out)
         if program.argv_prologue.length >? 0 {emit.newline(@out)}
     }
@@ -117,17 +117,17 @@ let write_program = (program:Program input:emit.Input debug_locations:bool @stat
     let direct=functions.keys
     if program.needs_startup {
         if 'main' in? functions or program.startup_symbol in? functions return Error[title='startup symbols must be reserved during legalization' srcfile=program.source]
-        direct.add('main') direct.add(program.startup_symbol)
+        direct.push('main') direct.push(program.startup_symbol)
     }
     let scope=emit.Scope[direct set[] program.source debug_locations=debug_locations]
     loop id in program.globals {
         let declaration=hir.node_at(input.nodes id)
         if declaration isnt? hir.Declare return Error[title='lowered global storage must be a declaration' srcfile=program.source]
-        scope.locals.add(declaration.name)
+        scope.locals.push(declaration.name)
     }
     loop id in program.globals {
         let global=hir.node_at(input.nodes id)
-        if global is? hir.Declare {state.globals.add(global.name)}
+        if global is? hir.Declare {state.globals.push(global.name)}
         emit.write_ast(id @scope input @state @out) emit.newline(@out)
         flush(@state @out @parser)
     }

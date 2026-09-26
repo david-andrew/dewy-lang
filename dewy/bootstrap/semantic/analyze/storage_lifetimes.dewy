@@ -16,7 +16,7 @@ Candidate:type=const [id:addr source:addr function:addr? binding:addr?]
 owner=(binding:addr? session:contexts.Session):>addr?=>{
     let seen:set<addr>=set[]
     loop binding isnt? none and binding not in? seen {
-        seen.add(binding)
+        seen.push(binding)
         let entry=bindings.find_binding(session.registry binding)
         if entry is? none or entry.declaration is? none break
         let declaration=hir.node_at(session.hir entry.declaration)
@@ -51,7 +51,7 @@ validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.
     loop pending.length>?0 {
         let item=pending.pop
         if item.id in? seen continue
-        seen.add(item.id)
+        seen.push(item.id)
         let node=hir.node_at(session.hir item.id)
         let source=item.source
         let function=item.function
@@ -63,8 +63,8 @@ validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.
             let reads:set<addr>=set[]
             loop param in effects.literal_params(node) {
                 if param.binding_id isnt? none {
-                    local.add(param.binding_id)
-                    if param.place {borrowed_parameters.add(param.binding_id)} else {owned.add(param.binding_id)}
+                    local.push(param.binding_id)
+                    if param.place {borrowed_parameters.push(param.binding_id)} else {owned.push(param.binding_id)}
                 }
             }
             let body=hir.children(node)
@@ -72,31 +72,31 @@ validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.
             loop body.length>?0 {
                 let id=body.pop
                 if id in? visited continue
-                visited.add(id)
+                visited.push(id)
                 let part=hir.node_at(session.hir id)
                 if part is? hir.FunctionLiteral continue
                 if part is? hir.Declare and part.binding_id isnt? none {
-                    local.add(part.binding_id)
-                    if not part.view {owned.add(part.binding_id)}
+                    local.push(part.binding_id)
+                    if not part.view {owned.push(part.binding_id)}
                 }
                 if part is? hir.IteratorExpression {
                     let target=hir.node_at(session.hir part.target)
-                    if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {local.add(target.binding_id)}
+                    if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {local.push(target.binding_id)}
                 }
-                if part is? hir.ExpressedIdentifier and part.binding_id isnt? none {reads.add(part.binding_id)}
+                if part is? hir.ExpressedIdentifier and part.binding_id isnt? none {reads.push(part.binding_id)}
                 hir.push_children(part @body)
             }
             private[item.id]=owned
             loop binding in reads {
                 if binding in? local continue
                 let selected=owner(binding session)
-                if selected isnt? none {captured.add(selected)}
+                if selected isnt? none {captured.push(selected)}
             }
         }
         let target=predicates.write_target(node session.hir)
         if target isnt? none {
             let selected=root_of(target session)
-            if selected isnt? none {written.add(selected)}
+            if selected isnt? none {written.push(selected)}
         }
         if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
             let selected=owner(node.binding_id session)
@@ -104,7 +104,7 @@ validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.
         }
         if node is? hir.Place|hir.Transmute {
             let selected=root_of(if node is? hir.Place node.target else node.expr session)
-            if selected isnt? none {exposed.add(selected)}
+            if selected isnt? none {exposed.push(selected)}
         }
         if node is? hir.FunctionCall {
             let method=hir.node_at(session.hir node.func)
@@ -114,9 +114,9 @@ validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.
     }
     if candidates.length=?0 return none
     let tracked:set<addr>=set[]
-    loop binding in captured {if binding in? written {tracked.add(binding)}}
-    loop candidate in candidates {if candidate.binding isnt? none {tracked.add(candidate.binding)}}
-    loop [alias target] in aliases {if target in? tracked {tracked.add(alias)}}
+    loop binding in captured {if binding in? written {tracked.push(binding)}}
+    loop candidate in candidates {if candidate.binding isnt? none {tracked.push(candidate.binding)}}
+    loop [alias target] in aliases {if target in? tracked {tracked.push(alias)}}
     let writes=effects.analyze_global_writes_in(ids session.hir tracked registry=session.registry)
     let readonly=effects.read_only_places_in(ids session.hir session.types)
     loop candidate in candidates {

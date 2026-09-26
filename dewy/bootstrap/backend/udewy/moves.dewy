@@ -195,7 +195,7 @@ borrow_live_after = (binding:addr sequence:addr borrows:dict<addr set<addr>> ana
     loop pending.length >? 0 {
         let owner=pending.pop
         if owner in? visited continue
-        visited.add(owner)
+        visited.push(owner)
         loop borrower in borrows.get(owner set[]) {
             loop use in analysis.uses.get(borrower []) {
                 if use.sequence >? sequence or use.nested return true
@@ -223,16 +223,16 @@ compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[]):>s
         if nested continue
         # A `return` leaves every path: a returned local is always at its
         # last use there, whatever follows the return in the text.
-        loop use in uses {if use.returned {moves.add(use.id)}}
+        loop use in uses {if use.returned {moves.push(use.id)}}
         loop candidate in analysis.candidates.get(binding []) {
             if candidate.id in? moves or not quiet_until(binding candidate analysis) continue
             if borrow_live_between(binding candidate.sequence candidate.until borrows analysis) continue
-            moves.add(candidate.id)
+            moves.push(candidate.id)
         }
         if not last.transfer or last.returned continue
         if last.depth >? declared continue
         if borrow_live_after(binding last.sequence borrows analysis) continue
-        moves.add(last.id)
+        moves.push(last.id)
     }
     return moves
 }
@@ -252,7 +252,7 @@ borrow_live_between = (binding:addr sequence:addr until:addr borrows:dict<addr s
     loop pending.length >? 0 {
         let owner=pending.pop
         if owner in? visited continue
-        visited.add(owner)
+        visited.push(owner)
         loop borrower in borrows.get(owner set[]) {
             loop use in analysis.uses.get(borrower []) {
                 if use.nested or (use.sequence >? sequence and use.sequence <=? until) return true

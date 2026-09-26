@@ -882,7 +882,7 @@ def _to_doc(node: hir.AST | hir.Param, min_prec: int, indent: int) -> Doc:
         return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('.pop('), _to_doc(node.key, 0, indent), _text(')'))
     if isinstance(node, hir.DictStore):
         if node.value is None:
-            return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('.add('), _to_doc(node.key, 0, indent), _text(')'))
+            return _seq(_to_doc(node.keys, _CALL_PREC, indent), _text('.push('), _to_doc(node.key, 0, indent), _text(')'))
         return _seq(
             _to_doc(node.keys, _CALL_PREC, indent), _text('['), _to_doc(node.key, 0, indent),
             _text('] = '), _to_doc(node.value, 0, indent),

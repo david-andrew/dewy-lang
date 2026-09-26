@@ -13,7 +13,7 @@ let seen:set<int64>=set[] let children:dict<int64 set<int64>>=[1->set[42]]
 let result:int64=0
 loop pending.length>?0 {
     loop child in children.get(pending.pop set[]) {
-        if child not in? seen {seen.add(child) pending.push(child) result=child}
+        if child not in? seen {seen.push(child) pending.push(child) result=child}
     }
 }
 return result}''',

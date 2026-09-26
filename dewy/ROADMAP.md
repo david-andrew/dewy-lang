@@ -1043,7 +1043,9 @@ Decisions were made by David on 2026-09-13.
    was whether sets should keep `add` or use `push` like arrays. Decision:
    `push` is the uniform name for adding to any container, sets included
    (their insertion order is guaranteed, so "push" is meaningful); `pop`
-   is the uniform name for removing. Uniform names may take
+   is the uniform name for removing. There are no compatibility aliases:
+   `s.add(x)` is an error that points to `push` (removed 2026-09-26, with
+   every source use rewritten). Uniform names may take
    container-specific parameters, but the name and the broad signature are
    the same everywhere. `length` is the uniform accessor for both length
    and shape: on a multidimensional array `myarr.length` returns an array

@@ -105,9 +105,9 @@ let main=():>int64=>{
 def test_container_algebra_reads_left_before_effectful_right(tmp_path):
     source = '''
 let left:set<int64>=set[40]
-let change=():>set<int64>=>{left.clear left.add(99) return set[2]}
+let change=():>set<int64>=>{left.clear left.push(99) return set[2]}
 let exercise=():>void=>{
-    left.clear left.add(40)
+    left.clear left.push(40)
     let result=left|change()
     let total:int64=0
     loop value in result {total+=value}

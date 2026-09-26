@@ -28,7 +28,7 @@ parameter_names = (literal:parser.BinOp nodes:array<tokens.Token>):>set<string> 
     let params=tokens.node_at(nodes id)
     let rows:array<addr>=if params is? parser.Block params.inner else [id]
     let names:set<string>=set[]
-    loop row in rows {let name=parameter_name(row nodes) if name isnt? none {names.add(name)}}
+    loop row in rows {let name=parameter_name(row nodes) if name isnt? none {names.push(name)}}
     return names
 }
 # Keep the hosted conservative classification of explicit locals and loop
@@ -40,14 +40,14 @@ locals = (id:addr nodes:array<tokens.Token>):>set<string> => {
         let keyword=tokens.node_at(nodes node.parts[0])
         if keyword is? tokens.Keyword and keyword.name in? ['let' 'const'] {
             let name=parameter_name(node.parts[1] nodes)
-            if name isnt? none {names.add(name)}
+            if name isnt? none {names.push(name)}
         }
     }
     if node is? parser.BinOp and syntax.is_operator(node.op 'in' nodes) {
         let name=syntax.identifier(node.left nodes)
-        if name isnt? none {names.add(name)}
+        if name isnt? none {names.push(name)}
     }
-    loop child in traversal.children(node) {loop name in locals(child nodes) {names.add(name)}}
+    loop child in traversal.children(node) {loop name in locals(child nodes) {names.push(name)}}
     return names
 }
 record_value = (id:addr nodes:array<tokens.Token>):>addr? => {
@@ -60,7 +60,7 @@ scan = (id:addr visible:set<string> nodes:array<tokens.Token>):>Analysis => {
     let node=tokens.node_at(nodes id)
     let result=Analysis[]
     let name=syntax.identifier(id nodes)
-    if name isnt? none and name in? visible {result.references.add(name)}
+    if name isnt? none and name in? visible {result.references.push(name)}
     let children=traversal.children(node)
     if node is? parser.BinOp {
         let op=syntax.symbol(node.op nodes)
@@ -71,7 +71,7 @@ scan = (id:addr visible:set<string> nodes:array<tokens.Token>):>Analysis => {
         }
         # A mutating library member borrows its receiver even without an
         # explicit source `@`. Its root may itself be a record field.
-        if op =? '.' and syntax.identifier(node.right nodes) in? ['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'add' 'remove'] {
+        if op =? '.' and syntax.identifier(node.right nodes) in? ['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'remove'] {
             let root=traversal.root_name(node.left nodes)
             if root isnt? none and root in? visible {result.mutates=true}
         }
@@ -86,7 +86,7 @@ scan = (id:addr visible:set<string> nodes:array<tokens.Token>):>Analysis => {
     }
     loop child in children {
         let nested=scan(child visible nodes)
-        loop reference in nested.references {result.references.add(reference)}
+        loop reference in nested.references {result.references.push(reference)}
         result.mutates=result.mutates or nested.mutates
     }
     return result

@@ -228,7 +228,7 @@ cell_read_keeps_handle = (stored:addr read:addr @state:State):>bool => {
     let narrowed=cell_members(read @state)
     if original is? none or narrowed is? none return false
     let tags:set<addr>=set[]
-    loop target in narrowed {tags.add(member_tag(target @state))}
+    loop target in narrowed {tags.push(member_tag(target @state))}
     loop member in original {
         if member_tag(member @state) in? tags continue
         if object_valued(member @state) and not type_tests.disjoint(member read state.links @state.type_nodes) return false
@@ -334,8 +334,8 @@ discover = (id:addr @state:State):>void => {
     if node is? hir.Place {
         let target=hir.node_at(state.input.nodes node.target)
         if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
-            state.addressed.add(target.binding_id)
-            if not inline_place(node.value_type @state) {state.boxed.add(target.binding_id)}
+            state.addressed.push(target.binding_id)
+            if not inline_place(node.value_type @state) {state.boxed.push(target.binding_id)}
         }
     }
     if node is? hir.Declare and node.binding_id isnt? none {
@@ -354,9 +354,9 @@ discover = (id:addr @state:State):>void => {
         loop parameter in parameters(node) {
             if parameter.binding_id isnt? none {state.symbols[parameter.binding_id]=binding_symbol(parameter.binding_id parameter.name state) state.storage_types[parameter.binding_id]=parameter.value_type}
             if parameter.place and parameter.binding_id isnt? none {
-                state.addressed.add(parameter.binding_id)
-                state.place_parameters.add(parameter.binding_id)
-                if not inline_place(parameter.value_type @state) {state.boxed.add(parameter.binding_id)}
+                state.addressed.push(parameter.binding_id)
+                state.place_parameters.push(parameter.binding_id)
+                if not inline_place(parameter.value_type @state) {state.boxed.push(parameter.binding_id)}
             }
         }
     }
@@ -660,7 +660,7 @@ expression = (id:addr @state:State):>addr => {
                 let box:addr?=none
                 if node.binding_id in? state.boxed {box=read read=array_load(read stored node @state)}
                 frame.push(OwnedLocal[read stored box])
-                state.cleanup_owned.add(node.binding_id)
+                state.cleanup_owned.push(node.binding_id)
                 state.cleanup_frames.push(frame)
             }
         }
@@ -1530,10 +1530,10 @@ layout_key_inner = (type:addr node:hir.AST visiting:set<addr> @state:State):>str
     if plain in? visiting return "@{plain}"
     if owned_string(plain state) return 's'
     let array=array_type(plain state)
-    if array isnt? none {visiting.add(plain) return "a<{layout_key_inner(array.element node visiting @state)}>"}
+    if array isnt? none {visiting.push(plain) return "a<{layout_key_inner(array.element node visiting @state)}>"}
     let members=cell_members(plain @state)
     if members isnt? none {
-        visiting.add(plain)
+        visiting.push(plain)
         let parts:array<string>=[]
         loop member in members {parts.push("{member_tag(member @state)}:{layout_key_inner(member node visiting @state)}")}
         return "c<{parts.join(' ')}>"
@@ -1542,7 +1542,7 @@ layout_key_inner = (type:addr node:hir.AST visiting:set<addr> @state:State):>str
         let record=object_type(plain @state)
         $runtime_assert record isnt? none
         if record.minted and record.brand isnt? none return "o#{record.brand}"
-        visiting.add(plain)
+        visiting.push(plain)
         let layout=object_layout(plain node @state)
         let parts:array<string>=[]
         loop field in record.fields {
@@ -2053,13 +2053,13 @@ read_value = (value:addr stored:addr read:addr node:hir.AST @state:State):>addr 
         # parent tag with a narrower logical annotation.
         let retag:set<addr>=set[]
         let tags:set<addr>=set[]
-        loop target in narrowed {tags.add(member_tag(target @state))}
+        loop target in narrowed {tags.push(member_tag(target @state))}
         loop member in original {
             if member_tag(member @state) in? tags continue
             # Array length facts refine a read without changing its physical
             # payload or presence tag. Only record family conversions need
             # to split a parent tag into children (or widen children back).
-            if object_valued(member @state) and not type_tests.disjoint(member read state.links @state.type_nodes) {retag.add(member)}
+            if object_valued(member @state) and not type_tests.disjoint(member read state.links @state.type_nodes) {retag.push(member)}
         }
         if retag.length >? 0 {
             let prefix:array<addr>=[]
@@ -2478,7 +2478,7 @@ runtime_test_value = (operand:addr node:hir.TypeTest @state:State):>addr => {
     loop member in members {
         let tag_number=member_tag(member @state)
         if tag_number in? seen continue
-        seen.add(tag_number)
+        seen.push(tag_number)
         # String alternatives share the descriptor representation and tag.
         # Their literal spelling is in the payload, never in that shared tag.
         if string_type(member state) {
@@ -3779,7 +3779,7 @@ record_union = (id:addr @state:State):>layouts.RecordUnion? => {
     if cached isnt? none return cached
     if id in? state.plain_unions return none
     let result=layouts.record_union(views.structural_base(id state.type_nodes) state.layout_context state.type_nodes)
-    if result is? none {state.plain_unions.add(id)} else {state.record_unions[id]=result}
+    if result is? none {state.plain_unions.push(id)} else {state.record_unions[id]=result}
     return result
 }
 # Packing a record into (or selecting it from) a record union keeps its
@@ -3878,7 +3878,7 @@ getter_read = (body:addr nodes:array<hir.AST>):>addr? => {
         loop pending.length >? 0 {
             let child=pending.pop
             if child in? prefix_nodes continue
-            prefix_nodes.add(child)
+            prefix_nodes.push(child)
             let current=hir.node_at(nodes child)
             if current is? hir.FunctionLiteral continue
             if current is? hir.Return return none
@@ -3981,7 +3981,7 @@ required_view_error = (node:hir.Declare @state:State):>addr => {
         loop pending.length >? 0 {
             let id=pending.pop
             if id in? within continue
-            within.add(id)
+            within.push(id)
             let value=hir.node_at(state.input.nodes id)
             if value isnt? hir.FunctionLiteral {hir.push_children(value @pending)}
         }
@@ -4114,7 +4114,7 @@ borrowed_route_local = (node:hir.Declare @state:State):>bool => {
 }
 mark_mutated = (id:addr @mutated:set<addr> state:State):>void => {
     let source=borrowing.route(id state.input.nodes)
-    if source isnt? none {mutated.add(source.binding)}
+    if source isnt? none {mutated.push(source.binding)}
 }
 # The storage route a getter's result refers to, in terms of the getter's
 # own parameters. A terminal call to another getter contributes the route of
@@ -4825,17 +4825,17 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     loop pending.length >? 0 {
         let child=pending.pop
         if child in? visited continue
-        visited.add(child)
+        visited.push(child)
         let current=hir.node_at(state.input.nodes child)
         if current is? hir.FunctionLiteral continue
         if current is? hir.Declare {local_declarations.push(child)}
         if current is? hir.Assign {
             let target=hir.node_at(state.input.nodes current.target)
-            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {rebound.add(target.binding_id)}
+            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {rebound.push(target.binding_id)}
         } else {
             loop target in captures.write_targets(current state.input.nodes) {
                 let root=captures.root_binding(target state.input.nodes)
-                if root isnt? none {written.add(root)}
+                if root isnt? none {written.push(root)}
             }
         }
         # A shared array descriptor is detached through the route that
@@ -4905,7 +4905,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             let allocated=intrinsic_call('__alloca__' [word(layout.size literal @state)] word_type literal @state)
             prologue.push(put(hir.Declare[literal.loc void_type 'const' name word_type allocated] @state))
             state.frame_records[initializer]=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
-            state.frame_record_bindings.add(binding)
+            state.frame_record_bindings.push(binding)
             continue
         }
         $runtime_assert literal is? hir.ArrayLiteral|hir.CopyValue
@@ -4920,7 +4920,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         prologue.push(put(hir.Declare[literal.loc void_type 'const' name word_type allocated] @state))
         let descriptor=put(hir.ExpressedIdentifier[literal.loc word_type name] @state)
         state.frame_arrays[initializer]=ArrayMemory[descriptor address(descriptor layouts.array_descriptor.size literal @state) []]
-        frame_array_bindings.add(binding)
+        frame_array_bindings.push(binding)
     }
     loop binding in capture.locals {
         if binding not in? state.boxed or binding in? excluded or binding in? state.place_parameters continue
@@ -4961,7 +4961,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             else if borrowed_getter_local(declaration @state) isnt? none {route=getter_route(declaration.expr 0 @state)}
             if route isnt? none {
                 let dependents=borrow_dependents.get(route.binding set[])
-                dependents.add(declaration.binding_id)
+                dependents.push(declaration.binding_id)
                 borrow_dependents[route.binding]=dependents
             }
         }
@@ -4973,7 +4973,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     state.moved_bindings=set[]
     loop use in state.moved_uses {
         let moved=hir.node_at(state.input.nodes use)
-        if moved is? hir.ExpressedIdentifier and moved.binding_id isnt? none {state.moved_bindings.add(moved.binding_id)}
+        if moved is? hir.ExpressedIdentifier and moved.binding_id isnt? none {state.moved_bindings.push(moved.binding_id)}
     }
     state.loop_depth=0 state.loop_levels=none state.loop_kind=none state.loop_prologue=[]
     let frame_start=state.cleanup_frames.length
@@ -5035,7 +5035,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
             let frame=state.cleanup_frames.pop
             frame.push(OwnedLocal[value argument.value_type box condition])
             state.cleanup_frames.push(frame)
-            if private and argument.binding_id isnt? none {state.cleanup_owned.add(argument.binding_id)}
+            if private and argument.binding_id isnt? none {state.cleanup_owned.push(argument.binding_id)}
         }
     }
     loop binding in capture.captures {
@@ -5094,11 +5094,11 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let external:set<addr>=set[]
     loop [binding id] in state.capture_plan.named {
         let source_name=state.capture_plan.names.get(binding)
-        if (entry_binding isnt? none and binding =? entry_binding) or (infer_entry and source_name isnt? none and source_name =? 'main') {external.add(id)}
+        if (entry_binding isnt? none and binding =? entry_binding) or (infer_entry and source_name isnt? none and source_name =? 'main') {external.push(id)}
     }
     loop binding in runtime_helpers.values {
         let id=state.capture_plan.named.get(binding)
-        if id isnt? none {external.add(id)}
+        if id isnt? none {external.push(id)}
     }
     timing.finish('lowering.captures' captures_started)
     let borrowing_started=timing.start(timings)
@@ -5123,7 +5123,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.borrow_rejections=borrowed.rejections
     state.cleanup_excluded=borrowed.escaping_places
     loop unit in state.capture_plan.functions.values {
-        loop binding in unit.captures {state.cleanup_excluded.add(binding)}
+        loop binding in unit.captures {state.cleanup_excluded.push(binding)}
     }
     let units=state.capture_plan.functions
     let named=state.capture_plan.named
@@ -6895,7 +6895,7 @@ allocator_hazards = (@state:State):>set<addr> => {
             if node is? hir.FunctionLiteral|hir.GenericFunction continue
             loop target in captures.write_targets(node nodes) {
                 let root=captures.root_binding(target nodes)
-                if (root is? none or root in? plan.globals) and stores_owned(node @state) {initial.add(id)}
+                if (root is? none or root in? plan.globals) and stores_owned(node @state) {initial.push(id)}
             }
             if node is? hir.FunctionCall {
                 let direct=captures.resolve(node.func node.selected_method_index plan nodes)
@@ -6907,7 +6907,7 @@ allocator_hazards = (@state:State):>set<addr> => {
                         users.push(id)
                         callers[callee]=users
                     }
-                } else if unknown_call(node @state) {initial.add(id)}
+                } else if unknown_call(node @state) {initial.push(id)}
             }
             hir.push_children(node @pending)
         }
@@ -6973,12 +6973,12 @@ arena_eligible = (node:hir.AllocatorBlock @state:State):>bool => {
         let id=pending.pop
         let item=hir.node_at(state.input.nodes id)
         if item is? hir.FunctionLiteral return false
-        if item is? hir.AllocatorBlock {arenas.add(item.arena)}
+        if item is? hir.AllocatorBlock {arenas.push(item.arena)}
         if id not in? arenas {inside.push(id)}
-        if item is? hir.Declare and item.binding_id isnt? none {declared.add(item.binding_id)}
+        if item is? hir.Declare and item.binding_id isnt? none {declared.push(item.binding_id)}
         if item is? hir.IteratorExpression {
             let target=hir.node_at(state.input.nodes item.target)
-            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {declared.add(target.binding_id)}
+            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {declared.push(target.binding_id)}
         }
         hir.push_children(item @pending)
     }

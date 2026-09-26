@@ -81,10 +81,10 @@ block_escapes = (block:hir.AllocatorBlock nodes:array<hir.AST> type_nodes:types.
         let node=hir.node_at(nodes id)
         if node is? hir.FunctionLiteral continue
         inside.push(id)
-        if node is? hir.Declare and node.binding_id isnt? none {declared.add(node.binding_id)}
+        if node is? hir.Declare and node.binding_id isnt? none {declared.push(node.binding_id)}
         if node is? hir.IteratorExpression {
             let target=hir.node_at(nodes node.target)
-            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {declared.add(target.binding_id)}
+            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {declared.push(target.binding_id)}
         }
         hir.push_children(node @pending)
     }

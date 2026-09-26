@@ -343,7 +343,7 @@ ARENA_CASES = [
     ('let main=():>int64=>{let d:dict<int64 int64>=[1->19 2->23 3->99] d.pop(3); return d.pop(1)+d.pop(2)}', 42),
     ('let main=():>int64=>{let d:dict<int64 int64>=[1->7 2->20] d.pop(1); d[3]=22 let sum:int64=0 loop [k v] in d {sum+=v} return sum}', 42),
     ('let main=():>int64=>{let d:dict<int64 int64>=[1->99] d.clear d[2]=42 return d[2]}', 42),
-    ('let main=():>int64=>{let s:set<int64>=set[1 2] s.add(3) s.pop(1); if 1 not in? s and 2 in? s and 3 in? s return 42 return 0}', 42),
+    ('let main=():>int64=>{let s:set<int64>=set[1 2] s.push(3) s.pop(1); if 1 not in? s and 2 in? s and 3 in? s return 42 return 0}', 42),
     ('let main=():>int64=>{let d:dict<string int64>=["é"->42] let source:string="xéy" let key=source[1..2) if key in? d return d[key] return 0}', 42),
     ('Box:type=[value:int64]\nlet main=():>int64=>{let d:dict<int64 Box>=[1->Box[42]] let copy=d copy[1]=Box[0] return d[1].value}', 42),
     ('A:type=type of [text:string]\nB:type=type of [code:int64 text:string]\nlet size=(value:A|B):>int64=>value.text.length\nlet main=():>int64=>size(A["abcd"])+size(B[99 "xy"])+36', 42),

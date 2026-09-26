@@ -11,7 +11,7 @@ runtime_sized = (id:addr nodes:types.Table registry:brands.Registry @memo:dict<a
     let known=memo.get(plain)
     if known isnt? none return known
     if plain in? active return true
-    active.add(plain)
+    active.push(plain)
     let result=inspect(plain nodes registry @memo active)
     memo[plain]=result
     return result

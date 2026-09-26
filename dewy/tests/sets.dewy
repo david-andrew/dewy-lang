@@ -9,8 +9,8 @@ let tally = (words:set<string>):>int64 => {
 
 let main = ():>int64 => {
     let seen = set["read" "write" "read"]        # duplicates collapse: 2 members
-    seen.add("execute")
-    seen.add("write")                            # already present: no change
+    seen.push("execute")
+    seen.push("write")                            # already present: no change
     let checks:int64 = 0
     if "read" in? seen { checks += 1 }
     if "delete" in? seen { checks += 100 }
@@ -22,7 +22,7 @@ let main = ():>int64 => {
     if seen.length =? 1 { checks += 4 }
     let numbers:set<int64> = set[]
     let i:int64 = 0
-    loop i <? 50 { numbers.add(i % 7)  i = i + 1 }
+    loop i <? 50 { numbers.push(i % 7)  i = i + 1 }
     let sum:int64 = 0
     loop n in numbers { sum = sum + n }          # 0..6 in first-seen order: 21
     if numbers.length =? 7 { checks += 8 }

@@ -102,7 +102,7 @@ abstract_integer = (id:addr session:contexts.Session literals:bool=false):>bool 
 }
 mark = (id:addr @seen:set<addr> @state:State @session:contexts.Session):>void => {
     if id in? seen return void
-    seen.add(id)
+    seen.push(id)
     let node=node_at(id session)
     let binding_id:addr?=none
     let initializer=false
@@ -114,7 +114,7 @@ mark = (id:addr @seen:set<addr> @state:State @session:contexts.Session):>void =>
     if binding_id isnt? none and binding_id not in? state.big_bindings {
         let binding=bindings.binding_at(session.registry binding_id)
         if binding.kind =? 'value' and binding.value_type isnt? none and abstract_integer(binding.value_type session literals=initializer) {
-            state.big_bindings.add(binding_id)
+            state.big_bindings.push(binding_id)
             binding.value_type=state.big_type binding.store_type=state.big_type
             bindings.store_binding(@session.registry binding_id binding)
             if binding.declaration isnt? none {
@@ -269,7 +269,7 @@ rewrite_call = (id:addr node:hir.FunctionCall @state:State @session:contexts.Ses
 }
 rewrite = (id:addr @seen:set<addr> @state:State @session:contexts.Session):>void => {
     if id in? seen or state.problem isnt? none return void
-    seen.add(id)
+    seen.push(id)
     loop child in hir.children(node_at(id session)) {rewrite(child @seen @state @session)}
     let rewritten=rewrite_node(id @state @session)
     $runtime_assert id <? session.hir.length
@@ -279,7 +279,7 @@ rewrite = (id:addr @seen:set<addr> @state:State @session:contexts.Session):>void
 # rewrite iteration would see a mixture of old and new binding types.
 returns = (id:addr @seen:set<addr> @state:State session:contexts.Session):>void => {
     if id in? seen return void
-    seen.add(id)
+    seen.push(id)
     let node=node_at(id session)
     if node is? hir.FunctionLiteral return void
     if node is? hir.Return and node.item isnt? none and is_big(node.item state session) {
@@ -289,7 +289,7 @@ returns = (id:addr @seen:set<addr> @state:State session:contexts.Session):>void 
 }
 boundaries = (id:addr @seen:set<addr> @state:State session:contexts.Session):>void => {
     if id in? seen return void
-    seen.add(id)
+    seen.push(id)
     let node=node_at(id session)
     if node is? hir.FunctionLiteral and abstract_integer(node.rettype session) {
         let returned:set<addr>=set[]

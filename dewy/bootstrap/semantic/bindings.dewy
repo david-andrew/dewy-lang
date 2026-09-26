@@ -326,7 +326,7 @@ array_route_id = (id:addr nodes:array<hir.AST> @registry:Registry):>addr? => {
     let result=route_id(@registry root.binding_id fields node.value_type node.loc)
     loop index in indices {
         let routes=registry.index_routes.get(index set[])
-        if result not in? routes {routes.add(result) registry.index_routes[index]=routes}
+        if result not in? routes {routes.push(result) registry.index_routes[index]=routes}
     }
     return result
 }
@@ -339,7 +339,7 @@ local_place_containers=(id:addr nodes:array<hir.AST> @registry:Registry):>set<ad
     let seen:set<addr>=set[]
     let current:addr?=id
     loop current isnt? none and current not in? seen {
-        seen.add(current)
+        seen.push(current)
         let binding=find_binding(registry current)
         if binding is? none or binding.declaration is? none break
         let declaration=hir.node_at(nodes binding.declaration)
@@ -351,7 +351,7 @@ local_place_containers=(id:addr nodes:array<hir.AST> @registry:Registry):>set<ad
                 let keys=hir.node_at(nodes node.keys)
                 if keys is? hir.MemberAccess {
                     let container=array_route_id(keys.value nodes @registry)
-                    if container isnt? none {result.add(container)}
+                    if container isnt? none {result.push(container)}
                 }
             }
         }

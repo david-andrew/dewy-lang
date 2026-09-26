@@ -135,7 +135,7 @@ def test_pop_with_a_default_needs_no_proof() -> None:
 
 
 def test_set_literals_and_methods() -> None:
-    root = _check("    let s = set[1 2 2 3]\n    s.add(4)\n    let n = s.length\n    let m = 2 in? s\n    let one = s.pop(1)\n    s.pop(9 default=none);\n    loop x in s { let y = x }")
+    root = _check("    let s = set[1 2 2 3]\n    s.push(4)\n    let n = s.length\n    let m = 2 in? s\n    let one = s.pop(1)\n    s.pop(9 default=none);\n    loop x in s { let y = x }")
     body = root.items[0].expr.body.items
     literal = body[0].expr
     assert isinstance(literal, hir.ObjectLiteral) and ty.set_element(literal.type) == 'int64'

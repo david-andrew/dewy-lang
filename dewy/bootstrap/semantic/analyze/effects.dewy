@@ -147,7 +147,7 @@ collect_roots = (roots:array<addr> nodes:array<hir.AST>):>Analysis => {
     loop pending.length >? 0 {
         let id = pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node = hir.node_at(nodes id)
         if node is? hir.FunctionLiteral {
             analysis.literals.push(id)
@@ -155,7 +155,7 @@ collect_roots = (roots:array<addr> nodes:array<hir.AST>):>Analysis => {
             let declared = literal_params(node)
             loop param in declared {
                 if param.binding_id is? none continue
-                analysis.param_ids.add(param.binding_id)
+                analysis.param_ids.push(param.binding_id)
                 params[param.binding_id] = ParameterEffects[]
             }
             analysis.effects[id] = FunctionEffects[id params]
@@ -165,7 +165,7 @@ collect_roots = (roots:array<addr> nodes:array<hir.AST>):>Analysis => {
         else if node is? hir.Assign {
             let target = hir.node_at(nodes node.target)
             $runtime_assert target is? hir.ExpressedIdentifier
-            if target.binding_id isnt? none { analysis.reassigned.add(target.binding_id) }
+            if target.binding_id isnt? none { analysis.reassigned.push(target.binding_id) }
         }
         # Reverse for the stack so traversal retains source declaration order.
         hir.push_children_reversed(node @pending)
@@ -192,7 +192,7 @@ flatten_callable = (id:addr seen:set<addr> analysis:Analysis nodes:array<hir.AST
     if binding_id not in? analysis.declares return none
     let declared = hir.node_at(nodes analysis.declares[binding_id])
     $runtime_assert declared is? hir.Declare
-    seen.add(binding_id)
+    seen.push(binding_id)
     return flatten_callable(declared.expr seen analysis nodes)
 }
 # Runtime alternatives are separate from the dispatch order inside one value.
@@ -222,17 +222,17 @@ value_targets = (id:addr selected:addr? analysis:Analysis nodes:array<hir.AST>):
     loop pending.length >? 0 {
         let step=pending.pop
         let current=unwrap(step.id nodes)
-        if step.leaving {active.pop(current default=current); done.add(current) continue}
+        if step.leaving {active.pop(current default=current); done.push(current) continue}
         if current in? active return none
         if current in? done continue
-        active.add(current) pending.push(TargetVisit[current true])
+        active.push(current) pending.push(TargetVisit[current true])
         let node=hir.node_at(nodes current)
         if node is? hir.FunctionLiteral|hir.OverloadedFunction {
             let choices=flatten_callable(current set[] analysis nodes)
             if choices is? none return none
             let selected_choices=select_targets(choices selected)
             if selected_choices is? none return none
-            loop choice in selected_choices {if choice not in? included {included.add(choice) result.push(choice)}}
+            loop choice in selected_choices {if choice not in? included {included.push(choice) result.push(choice)}}
         } else if node is? hir.ValueCast {pending.push(TargetVisit[node.expr])}
         else if node is? hir.ExpressedIdentifier {
             if node.binding_id is? none return none
@@ -536,7 +536,7 @@ analyze_collected = (analysis:Analysis nodes:array<hir.AST> type_nodes:types.Tab
     # of the source summary while the destination grows.
     let pending=analysis.literals
     let queued:set<addr>=set[]
-    loop id in pending {queued.add(id)}
+    loop id in pending {queued.push(id)}
     loop pending.length >? 0 {
         let id=pending.pop
         queued.pop(id default=id);
@@ -548,7 +548,7 @@ analyze_collected = (analysis:Analysis nodes:array<hir.AST> type_nodes:types.Tab
             if translated(transfer.caller_parameter callee.params[transfer.callee_parameter] transfer.prefix @caller.params) {
                 analysis.effects[transfer.caller]=caller
                 if transfer.caller in? queued continue
-                queued.add(transfer.caller)
+                queued.push(transfer.caller)
                 pending.push(transfer.caller)
             }
         }
@@ -584,12 +584,12 @@ place_loans = (analysis:Analysis summaries:ProgramEffects nodes:array<hir.AST> t
         let call=hir.node_at(nodes id)
         $runtime_assert call is? hir.FunctionCall
         let places:set<addr>=set[]
-        loop arg in call.pos_args {if hir.node_at(nodes arg) is? hir.Place {places.add(arg)}}
-        loop arg in call.kw_args.values {if hir.node_at(nodes arg) is? hir.Place {places.add(arg)}}
+        loop arg in call.pos_args {if hir.node_at(nodes arg) is? hir.Place {places.push(arg)}}
+        loop arg in call.kw_args.values {if hir.node_at(nodes arg) is? hir.Place {places.push(arg)}}
         if places.length =? 0 continue
         let targets=direct_targets(call analysis nodes)
         if targets is? none or targets.length =? 0 {
-            loop place in places {unsafe.add(place)}
+            loop place in places {unsafe.push(place)}
             continue
         }
         loop target in targets {
@@ -600,16 +600,16 @@ place_loans = (analysis:Analysis summaries:ProgramEffects nodes:array<hir.AST> t
             if pairs isnt? none {
                 loop pair in pairs {
                     if pair.argument not in? places continue
-                    paired.add(pair.argument)
+                    paired.push(pair.argument)
                     let summary=if pair.parameter is? none none else summaries.by_param_binding.get(pair.parameter)
                     if summary isnt? none and summary.escapes.length =? 0 {
-                        safe.add(pair.argument)
-                        if preserves_storage(summary hir.node_at(nodes pair.argument).value_type table) {fixed.add(pair.argument)}
-                        else {changed.add(pair.argument)}
-                    } else {unsafe.add(pair.argument)}
+                        safe.push(pair.argument)
+                        if preserves_storage(summary hir.node_at(nodes pair.argument).value_type table) {fixed.push(pair.argument)}
+                        else {changed.push(pair.argument)}
+                    } else {unsafe.push(pair.argument)}
                 }
             }
-            loop place in places {if place not in? paired {unsafe.add(place)}}
+            loop place in places {if place not in? paired {unsafe.push(place)}}
         }
     }
     loop place in unsafe {safe.pop(place default=place); fixed.pop(place default=place);}
@@ -633,7 +633,7 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=hir.node_at(nodes id)
         if node is? hir.FunctionCall {
             let function=hir.node_at(nodes node.func)
@@ -671,7 +671,7 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
         let writes:set<addr>=set[]
         loop expression in expressions {
             loop binding in local_effects.mutated_bindings(expression nodes) {
-                if binding in? globals {writes.add(binding)}
+                if binding in? globals {writes.push(binding)}
             }
             pending=[expression]
             loop pending.length >? 0 {
@@ -684,7 +684,7 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
                     else {
                         loop callee in targets[child] {
                             let parents=callers.get(callee set[])
-                            parents.add(id)
+                            parents.push(id)
                             callers[callee]=parents
                         }
                     }
@@ -696,7 +696,7 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
     }
     pending=analysis.literals
     let queued:set<addr>=set[]
-    loop id in pending {queued.add(id)}
+    loop id in pending {queued.push(id)}
     loop pending.length >? 0 {
         let callee=pending.pop
         queued.pop(callee default=callee);
@@ -707,18 +707,18 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
             let writes=summaries[caller]
             let changed=false
             loop binding in incoming {
-                if binding not in? writes {writes.add(binding) changed=true}
+                if binding not in? writes {writes.push(binding) changed=true}
             }
             if not changed continue
             summaries[caller]=writes
-            if caller not in? queued {queued.add(caller) pending.push(caller)}
+            if caller not in? queued {queued.push(caller) pending.push(caller)}
         }
     }
     loop [call resolved] in targets {
         let writes:set<addr>=set[]
         loop callee in resolved {
             if callee not in? summaries {writes=globals break}
-            loop binding in summaries[callee] {writes.add(binding)}
+            loop binding in summaries[callee] {writes.push(binding)}
         }
         result[call]=writes
     }
@@ -740,7 +740,7 @@ read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.T
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=hir.node_at(nodes id)
         if node is? hir.FunctionCall {
             let has_place=false
@@ -775,7 +775,7 @@ read_only_places_in = (roots:array<addr> nodes:array<hir.AST> type_nodes:types.T
                     if summary is? none or not read_only(summary) {readonly=false break}
                 }
             }
-            if readonly {safe.add(arg)} else {unsafe.add(arg)}
+            if readonly {safe.push(arg)} else {unsafe.push(arg)}
         }
     }
     loop arg in unsafe {safe.pop(arg default=arg);}
@@ -789,30 +789,30 @@ nonlocal_bindings=(root:addr nodes:array<hir.AST>):>set<addr>=>{
     loop pending.length>?0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let literal=hir.node_at(nodes id)
         hir.push_children(literal @pending)
         if literal isnt? hir.FunctionLiteral continue
         let local:set<addr>=set[] let reads:set<addr>=set[]
         let body:array<addr>=[literal.body] let visited:set<addr>=set[]
         loop parameter in literal_params(literal) {
-            if parameter.binding_id isnt? none {local.add(parameter.binding_id)}
+            if parameter.binding_id isnt? none {local.push(parameter.binding_id)}
             if parameter is? hir.BoundParam {body.push(parameter.value)}
         }
         loop body.length>?0 {
             let item=body.pop
             if item in? visited continue
-            visited.add(item)
+            visited.push(item)
             let node=hir.node_at(nodes item)
             if node is? hir.FunctionLiteral continue
-            if node is? hir.Declare and node.binding_id isnt? none {local.add(node.binding_id)}
+            if node is? hir.Declare and node.binding_id isnt? none {local.push(node.binding_id)}
             else if node is? hir.IteratorExpression {
                 let target=hir.node_at(nodes node.target)
-                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {local.add(target.binding_id)}
-            } else if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {reads.add(node.binding_id)}
+                if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {local.push(target.binding_id)}
+            } else if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {reads.push(node.binding_id)}
             hir.push_children(node @body)
         }
-        loop binding in reads {if binding not in? local {result.add(binding)}}
+        loop binding in reads {if binding not in? local {result.push(binding)}}
     }
     return result
 }

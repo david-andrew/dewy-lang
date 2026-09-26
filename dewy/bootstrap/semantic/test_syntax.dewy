@@ -80,7 +80,7 @@ case_arguments = (id:addr statements:array<addr> source:SrcFile nodes:array<toke
     # A declaration cycle is not a literal cases list; ordinary checking will
     # report it. Do not recurse indefinitely while preparing the test runner.
     if id in? seen return none
-    seen.add(id)
+    seen.push(id)
     let name=syntax.identifier(id nodes)
     if name isnt? none {
         loop statement in statements {

@@ -58,7 +58,7 @@ validate = (roots:array<Root> source_files:array<SrcFile> session:contexts.Sessi
     loop pending.length >? 0 {
         let item=pending.pop
         if item.id in? seen {continue}
-        seen.add(item.id)
+        seen.push(item.id)
         let node=hir.node_at(session.hir item.id)
         let source=item.source
         if node is? hir.FunctionLiteral and node.source isnt? none {source=node.source}

@@ -14,7 +14,7 @@ Context:type = const [nodes:array<hir.AST> facts:facts.Context call_writes:dict<
 
 merged_writes = (existing:set<addr> expression:addr context:Context):>set<addr> => {
     let result=existing
-    loop id in effects.mutated_bindings(expression context.nodes context.call_writes) {result.add(id)}
+    loop id in effects.mutated_bindings(expression context.nodes context.call_writes) {result.push(id)}
     return result
 }
 join = (left:facts.State? right:facts.State? context:facts.Context):>facts.State? => {

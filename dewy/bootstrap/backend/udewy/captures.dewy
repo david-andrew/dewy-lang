@@ -14,14 +14,14 @@ discover = (start:addr nodes:array<hir.AST> @plan:Plan @seen:set<addr>):>void =>
     loop pending.length >? 0 {
         let root=pending.pop
         if root in? seen continue
-        seen.add(root)
+        seen.push(root)
         let node=hir.node_at(nodes root)
         if node is? hir.FunctionLiteral {plan.functions[root]=Function[root]}
         # A stored callback is a runtime value after any assignment or writable
         # exposure. Its initializer alone is not a call-target proof.
         loop target in write_targets(node nodes) {
             let binding=root_binding(target nodes)
-            if binding isnt? none {plan.reassigned.add(binding)}
+            if binding isnt? none {plan.reassigned.push(binding)}
         }
         if node is? hir.Declare and node.binding_id isnt? none {
             plan.definitions[node.binding_id]=node.expr
@@ -37,7 +37,7 @@ discover = (start:addr nodes:array<hir.AST> @plan:Plan @seen:set<addr>):>void =>
 # cycle guard: two alternatives may legitimately share one source function.
 callables = (id:addr plan:Plan nodes:array<hir.AST> seen:set<addr>=set[]):>array<addr>|none => {
     if id in? seen return none
-    seen.add(id)
+    seen.push(id)
     let node=hir.node_at(nodes id)
     if node is? hir.FunctionLiteral return [id]
     if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
@@ -79,7 +79,7 @@ value_functions = (root:addr nodes:array<hir.AST> plan:Plan):>set<addr> => {
     loop pending.length >? 0 {
         let id=pending.pop
         if id in? seen continue
-        seen.add(id)
+        seen.push(id)
         let node=hir.node_at(nodes id)
         loop child in hir.children(node) {
             let value=hir.node_at(nodes child)
@@ -87,7 +87,7 @@ value_functions = (root:addr nodes:array<hir.AST> plan:Plan):>set<addr> => {
             if node is? hir.Declare and node.expr =? child and value is? hir.FunctionLiteral continue
             if value isnt? hir.ExpressedIdentifier|hir.FunctionLiteral|hir.OverloadedFunction|hir.Block continue
             let targets=callables(child plan nodes)
-            if targets isnt? none {loop target in targets {result.add(target)}}
+            if targets isnt? none {loop target in targets {result.push(target)}}
         }
         hir.push_children(node @pending)
     }
@@ -98,16 +98,16 @@ locals = (id:addr nodes:array<hir.AST> @result:set<addr> @seen:set<addr>):>void 
     loop pending.length >? 0 {
         let current=pending.pop
         if current in? seen continue
-        seen.add(current)
+        seen.push(current)
         let node=hir.node_at(nodes current)
         if node is? hir.FunctionLiteral continue
-        if node is? hir.Declare and node.binding_id isnt? none {result.add(node.binding_id)}
+        if node is? hir.Declare and node.binding_id isnt? none {result.push(node.binding_id)}
         if node is? hir.ObjectLiteral {
-            loop field in node.fields {if field.binding_id isnt? none {result.add(field.binding_id)}}
+            loop field in node.fields {if field.binding_id isnt? none {result.push(field.binding_id)}}
         }
         if node is? hir.IteratorExpression {
             let target=hir.node_at(nodes node.target)
-            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {result.add(target.binding_id)}
+            if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {result.push(target.binding_id)}
         }
         hir.push_children(node @pending)
     }
@@ -135,13 +135,13 @@ references = (id:addr nodes:array<hir.AST> plan:Plan symbols:set<addr> @function
     loop pending.length >? 0 {
         let current=pending.pop
         if current in? seen continue
-        seen.add(current)
+        seen.push(current)
         let node=hir.node_at(nodes current)
-        if node is? hir.FunctionLiteral {function.dependencies.add(current) continue}
+        if node is? hir.FunctionLiteral {function.dependencies.push(current) continue}
         if node is? hir.FunctionCall {
             let direct=resolve(node.func node.selected_method_index plan nodes)
             if direct isnt? none {
-                function.dependencies.add(direct)
+                function.dependencies.push(direct)
                 loop argument in node.pos_args {pending.push(argument)}
                 loop argument in node.kw_args.values {pending.push(argument)}
                 continue
@@ -149,13 +149,13 @@ references = (id:addr nodes:array<hir.AST> plan:Plan symbols:set<addr> @function
         }
         loop target in write_targets(node nodes) {
             let binding=root_binding(target nodes)
-            if binding isnt? none {function.writes.add(binding)}
+            if binding isnt? none {function.writes.push(binding)}
         }
         if node is? hir.ExpressedIdentifier and node.binding_id isnt? none {
             let binding=node.binding_id
             let code=plan.named.get(binding)
-            if code isnt? none {function.dependencies.add(code)}
-            else if binding in? symbols and binding not in? plan.globals and binding not in? function.locals {function.direct.add(binding)}
+            if code isnt? none {function.dependencies.push(code)}
+            else if binding in? symbols and binding not in? plan.globals and binding not in? function.locals {function.direct.push(binding)}
         }
         hir.push_children(node @pending)
     }
@@ -185,8 +185,8 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
             let id=pending.pop
             let node=hir.node_at(nodes id)
             if node is? hir.Declare and node.binding_id isnt? none {
-                result.globals.add(node.binding_id)
-                if node.decltype =? 'const' {result.constants.add(node.binding_id)}
+                result.globals.push(node.binding_id)
+                if node.decltype =? 'const' {result.constants.push(node.binding_id)}
             }
             if node is? hir.Block and not node.scoped {loop item in node.items {pending.push(item)}}
         }
@@ -199,7 +199,7 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
         $runtime_assert literal is? hir.FunctionLiteral
         let parameters=literal.pos_or_kw_args
         loop parameter in literal.kw_only_args {parameters.push(parameter)}
-        loop parameter in parameters {if parameter.binding_id isnt? none {function.locals.add(parameter.binding_id)}}
+        loop parameter in parameters {if parameter.binding_id isnt? none {function.locals.push(parameter.binding_id)}}
         seen=set[]
         locals(literal.body nodes @function.locals @seen)
         loop parameter in parameters {
@@ -231,7 +231,7 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
     # boundary; a recursive component converges when its capture sets stop growing.
     let pending:array<addr>=[]
     let queued:set<addr>=set[]
-    loop id in functions {pending.push(id) queued.add(id)}
+    loop id in functions {pending.push(id) queued.push(id)}
     loop pending.length >? 0 {
         let id=pending.pop
         queued.pop(id default=id);
@@ -243,12 +243,12 @@ analyze = (root:addr nodes:array<hir.AST> symbols:set<addr>):>Plan => {
             let changed=false
             loop binding in other.captures {
                 if binding in? result.globals or binding in? function.locals or binding in? function.captures continue
-                function.captures.add(binding)
+                function.captures.push(binding)
                 changed=true
             }
             if changed {
                 result.functions[caller]=function
-                if caller not in? queued {queued.add(caller) pending.push(caller)}
+                if caller not in? queued {queued.push(caller) pending.push(caller)}
             }
         }
     }

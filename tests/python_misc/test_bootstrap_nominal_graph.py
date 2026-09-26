@@ -19,7 +19,7 @@ reachable=(child:string parent:string edges:array<subtyping.Link>):>bool=>{
         loop edge in edges {
             if edge.child not=? current continue
             if edge.parent =? parent return true
-            if edge.parent not in? seen {seen.add(edge.parent) pending.push(edge.parent)}
+            if edge.parent not in? seen {seen.push(edge.parent) pending.push(edge.parent)}
         }
     }
     return false

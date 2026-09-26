@@ -533,7 +533,7 @@ inline_temporaries = (@items:array<addr> uses:Uses @state:State):>void => {
                 k+=1
             }
             if inlined {
-                removed.add(items[i])
+                removed.push(items[i])
                 # The previous live declaration may now reach its use.
                 loop i >? 0 {i-=1 if items[i] not in? removed break}
                 continue

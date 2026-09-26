@@ -13,7 +13,7 @@ copy_blocker = (id:addr nodes:types.Table):>CopyBlocker? => {
         let item=pending.pop
         let id=views.structural_base(item.id nodes)
         if id in? seen {continue}
-        seen.add(id)
+        seen.push(id)
         let type=types.node_at(nodes id)
         if type is? types.ObjectType {
             let copies=false

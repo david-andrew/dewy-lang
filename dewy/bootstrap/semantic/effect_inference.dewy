@@ -50,10 +50,10 @@ solve=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[] p
         loop name in rules[index].source.variables {
             if name in? solutions {
                 let dependents=users.get(name set[])
-                dependents.add(index) users[name]=dependents
+                dependents.push(index) users[name]=dependents
             }
         }
-        work.push(index) queued.add(index)
+        work.push(index) queued.push(index)
     }
     loop work.length >? 0 {
         let index=work.pop
@@ -79,7 +79,7 @@ solve=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[] p
             if rows.identity(rows.Contract[updated]) =? rows.identity(rows.Contract[solutions[name]]) continue
             solutions[name]=updated
             loop user in users.get(name set[]) {
-                if user not in? queued {work.push(user) queued.add(user)}
+                if user not in? queued {work.push(user) queued.push(user)}
             }
         }
     }
@@ -140,7 +140,7 @@ projection_candidates=(projections:dict<string Projection> @vocabulary:array<row
             loop i <? subject.route.length {suffix.push(subject.route[i]) i+=1}
             let candidate=rows.Atom[atom.family rows.Subject['parameter' mapping.slot suffix]]
             let key=rows.atom_key(candidate)
-            if key not in? known {known.add(key) vocabulary.push(candidate)}
+            if key not in? known {known.push(key) vocabulary.push(candidate)}
         }
     }
 }
@@ -152,7 +152,7 @@ add_candidates=(contract:rows.Contract? @vocabulary:array<rows.Atom> @known:set<
     if contract is? none return
     loop atom in contract.excluded {
         let key=rows.atom_key(atom)
-        if key not in? known {known.add(key) vocabulary.push(atom)}
+        if key not in? known {known.push(key) vocabulary.push(atom)}
     }
 }
 solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constraint>=[] projections:dict<string Projection>=[]):>dict<string rows.Contract>=>{
@@ -188,11 +188,11 @@ solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constr
     let work:array<addr>=[]
     let queued:set<addr>=set[]
     loop i in 0.. and i <? rules.length {
-        work.push(i) queued.add(i)
+        work.push(i) queued.push(i)
         loop name in admitted(rules[i].source).variables {
             if name in? solutions {
                 let list=users.get(name set[])
-                list.add(i) users[name]=list
+                list.push(i) users[name]=list
             }
         }
     }
@@ -224,7 +224,7 @@ solve_contracts=(definitions:dict<string rows.Contract> constraints:array<Constr
         if kept.length =? previous.excluded.length continue
         solutions[rule.name]=rows.Contract[previous.allowed kept]
         loop user in users.get(rule.name set[]) {
-            if user not in? queued {work.push(user) queued.add(user)}
+            if user not in? queued {work.push(user) queued.push(user)}
         }
     }
     return solutions

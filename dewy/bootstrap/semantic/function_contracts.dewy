@@ -104,7 +104,7 @@ unknown_parameter = (id:addr parameters:array<hir.Param> nodes:types.Table):>str
     }
     if node is? types.RefinedType {
         let names:set<string>=set[]
-        loop param in parameters {names.add(param.name)}
+        loop param in parameters {names.push(param.name)}
         loop promise in node.propositions {
             if promise.term isnt? none {
                 let route=facts.named_route(promise.term)
