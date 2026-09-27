@@ -295,11 +295,14 @@ infer = (formal:Contract? actual:Contract? variables:set<string> @arguments:dict
     let remaining:array<string>=[]
     loop key in supplied.variables {if key not in? fixed {remaining.push(key)}}
     let excluded:array<Atom>=[]
-    if actual isnt? none {excluded=actual.excluded}
-    loop atom in atoms {
-        if atom.subject isnt? none and atom.subject.kind =? 'parameter' return false
+    # Keep local exclusions at the callback boundary, not in E. The
+    # instantiated signature still checks explicitly requested exclusions.
+    if actual isnt? none {
+        loop atom in actual.excluded {
+            if atom.subject is? none or atom.subject.kind not=? 'parameter' {excluded.push(atom)}
+        }
     }
-    loop atom in excluded {
+    loop atom in atoms {
         if atom.subject isnt? none and atom.subject.kind =? 'parameter' return false
     }
     let key=free[0]

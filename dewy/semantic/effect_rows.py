@@ -267,8 +267,12 @@ def infer(formal: Contract | None, actual: Contract | None, variables: set[str],
     fixed = Row(formal.allowed.atoms, tuple(key for key in formal.allowed.variables if key not in variables), formal.allowed.unknown)
     remainder = Row(tuple(atom for atom in supplied.atoms if not any(covers(old, atom) for old in fixed.atoms)),
                     tuple(key for key in supplied.variables if key not in fixed.variables), supplied.unknown)
-    excluded = actual.excluded if actual is not None else ()
-    if any(atom.subject is not None and atom.subject.kind == 'parameter' for atom in (*remainder.atoms, *excluded)):
+    # A callback-local negative guarantee stays at that call boundary.
+    # Dropping it from E is conservative; the instantiated callback contract
+    # separately checks any explicitly requested local exclusion.
+    excluded = tuple(atom for atom in actual.excluded
+                     if atom.subject is None or atom.subject.kind != 'parameter') if actual is not None else ()
+    if any(atom.subject is not None and atom.subject.kind == 'parameter' for atom in remainder.atoms):
         # Callback-relative places cannot escape into the enclosing signature
         # as if they were that signature's parameter slots.
         return False

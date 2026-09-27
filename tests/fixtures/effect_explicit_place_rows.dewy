@@ -1,0 +1,24 @@
+Filesystem=type of any
+
+# E has no callback-local parameter identities. The explicit permissions
+# relate each signature's own place to its caller's actual argument.
+let forward=<E:Effect>(f:(@x:int64):>void & mutates<x> & E @y:int64):>void & mutates<y> & E=>f(@y)
+let set=(@x:int64):>void & mutates<x> & reads<Filesystem>=>{x=42}
+Box:type=[value:int64 other:int64]
+let field=<E:Effect>(@box:Box f:(@x:int64):>void & mutates<x> & E):>void & mutates<box.value> & E=>forward(@f @box.value)
+
+# A callback's local exclusion is useful at this boundary, but must never
+# become an exclusion on the wrapper's unrelated parameter slot zero.
+let unread=<E:Effect>(f:(@x:int64):>void & mutates<x> & no reads<x> & E @y:int64):>void & mutates<y> & no reads<y> & E=>f(@y)
+let write_only=(@x:int64):>void & mutates<x> & no reads<x> & reads<Filesystem>=>{x=42}
+main=():>int64=>{
+    let value:int64=0
+    forward(@set @value)
+    if value not=?42 return 1
+    let box=Box[0 7]
+    field(@box @set)
+    if box.value not=?42 or box.other not=?7 return 2
+    value=0
+    unread(@write_only @value)
+    return value
+}

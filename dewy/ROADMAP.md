@@ -899,8 +899,10 @@ Inferred call rows now retain their subject environment until the source row
 is resolved, including reordered parameters, field routes and reassigned
 callbacks. Body equations and callable boundaries share the same solver.
 Inverse mappings propagate demanded exclusions through a finite vocabulary of
-route suffixes without strengthening their scope. User-written polymorphic
-place rows remain in progress. Bare
+route suffixes without strengthening their scope. Generic row parameters carry nonlocal effects; place permissions stay
+explicit in callback and wrapper signatures. This Phase 1 boundary was
+approved on 2026-09-27. Rows carrying/remapping callback-local places await
+a separate design review. Bare
 `allocates` / `no allocates` now classify logical copies and aggregate
 construction; fixed scalar local arrays and scalar record literals now share
 a bounded nonescaping frame-placement proof with lowering. Native record

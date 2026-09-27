@@ -324,9 +324,19 @@ mapping until their behavior is known, including through reassigned handles.
 
 Negative guarantees retain their scope: `no mutates<box.field>` does not promise
 `no mutates<box>`. Unknown behavior cannot establish a missing guarantee.
-User-written generic rows with callback-relative place subjects still have
-conservative implementation limits; nominal resource rows and their negative
-guarantees can be forwarded through `<E:Effect>`.
+Generic row parameters carry nonlocal effects, including nominal resource
+permissions and negative guarantees. Place permissions stay explicit in each
+signature, for example:
+
+```dewy
+let forward=<E:Effect>(f:(@x:int64):>void & mutates<x> & E @y:int64):>void & mutates<y> & E=>f(@y)
+```
+
+Here the call translates `mutates<x>` to `mutates<y>`. A callback-local place
+effect cannot instead be inferred into `E`: its parameter number would have a
+different meaning in the wrapper. Local exclusions remain at the callback
+boundary and are omitted from the nonlocal remainder. A more general syntax
+for rows carrying/remapping place identities remains a separate design item.
 
 Type aliases can also take row parameters. Each argument is checked against
 its parameter's kind; a row cannot become a value type or runtime value.
@@ -453,7 +463,7 @@ assumptions produces an empty report instead of leaving a stale one.
 
 ## Provisional Boundary
 
-The complete proposition grammar and qualifier inference still need work. The initial `$proof` statement boundary below is implemented. Both compilers now check explicit `no_effects` / `Effect<>` contracts for an initial conservative subset: scalar computation, private scalar mutation, read-only value access, direct calls, and explicitly constrained callbacks. Calls and signature substitution preserve these contracts; unknown storage operations or callback behavior cannot count as pure. Named nominal/place effects, kind-checked row parameters and the initial allocation vocabulary are implemented. Omitted literal rows now flow through ordinary callable values, generics, recursive calls and callback joins/reassignment; unknown callback parameters remain open. Inferred wrappers retain negative-only guarantees when every contributing operation establishes them. Generic row substitutions also retain their shared negative guarantees. Scoped place-row inference and broader backend storage proofs remain in progress. The broader reviewed effect rules are: positive rows are upper bounds, omitted rows are inferred, `no_effects` is the explicit empty row, and `no reads<resource>` excludes one effect while `no reads` excludes the family. Empty family forms such as `reads<>` are rejected by the design; `Effect<>` is the desugared empty row. Error-value propagation has its own settled core and provisional surface details; see [Errors and Forwarding](errors-and-forwarding.md) and [Design Maturity](design-status.md).
+The complete proposition grammar and qualifier inference still need work. The initial `$proof` statement boundary below is implemented. Both compilers now check explicit `no_effects` / `Effect<>` contracts for an initial conservative subset: scalar computation, private scalar mutation, read-only value access, direct calls, and explicitly constrained callbacks. Calls and signature substitution preserve these contracts; unknown storage operations or callback behavior cannot count as pure. Named nominal/place effects, kind-checked row parameters and the initial allocation vocabulary are implemented. Omitted literal rows now flow through ordinary callable values, generics, recursive calls and callback joins/reassignment; unknown callback parameters remain open. Inferred wrappers retain negative-only guarantees when every contributing operation establishes them. Generic row substitutions also retain their shared negative guarantees. Place-bearing generic remainders are outside the current row design; broader backend storage proofs remain in progress. The broader reviewed effect rules are: positive rows are upper bounds, omitted rows are inferred, `no_effects` is the explicit empty row, and `no reads<resource>` excludes one effect while `no reads` excludes the family. Empty family forms such as `reads<>` are rejected by the design; `Effect<>` is the desugared empty row. Error-value propagation has its own settled core and provisional surface details; see [Errors and Forwarding](errors-and-forwarding.md) and [Design Maturity](design-status.md).
 
 
 ### Checked proof statements

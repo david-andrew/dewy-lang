@@ -19,7 +19,7 @@ all source shapes or the complete integration matrix have been certified.
 | 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Dynamic conditional element routes, transfers through hooked wrappers, resource sort/key ownership and other unsupported resource operations; captured/exposed storage lifetimes. |
 | 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
-| 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | User-written polymorphic rows with callback-local place subjects; more precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
+| 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | More precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
 | 1.4 Settled surface decisions | Type-directed juxtaposition (including numeric RHS), reserved names, unit nominals, uniform `set.push`, digit-label normalization, array/record value equality. | Final integration checks and documentation consistency. Keep the expressly open decisions below separate. |
 
 Integration exit: a fresh hosted-built native route, paired acceptance and
@@ -29,7 +29,8 @@ point nor a passing subset of tests alone closes the phase. Native build
 performance retains the 30-second minimum target and 10-second stretch target.
 
 Explicitly open designs remain open: fallible allocation and failure policy,
-resource-parameterized allocator rows/user allocator kinds, non-power-of-two
+resource-parameterized allocator rows/user allocator kinds, generic rows that
+carry/remap callback-local place identities, non-power-of-two
 base-string packing and Unicode repertoire/escape decisions. The provisional
 COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
@@ -5185,3 +5186,19 @@ explicit, named-local, implicit and record returns, outer-field assignment,
 subsequent string operations and zero retained bytes over repeated calls. The
 native implementation already passes these cases and needs no corresponding
 change. The parity manifest now includes this regression.
+
+
+## Generic rows with explicit place permissions (2026-09-27)
+
+David approved keeping callback-local place permissions explicit in each
+signature, with `E` carrying the remaining nonlocal effects. The call rule
+translates those permissions normally, including reordered parameters and
+field routes. Positive place effects cannot escape into `E`. Callback-local
+exclusions are omitted from that remainder rather than rejecting otherwise
+valid inference; explicit exclusions still apply at the callback boundary.
+
+Thirty focused checks passed using a native-built driver, including paired
+execution/rejection tests on both backends. Tests cover unrelated wrapper
+slots, incorrect translated permissions, nominal remainders and exclusions.
+More general place-bearing generic rows remain a separately reviewed design;
+they are outside this approved Phase 1 subset.

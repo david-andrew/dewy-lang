@@ -246,6 +246,28 @@ Unknown callback behavior cannot be inferred as empty. This introduces no
 first-class runtime effect values. The same positive-bound/exclusion rules
 apply after substitution.
 
+### Place permissions in generic rows — approved Phase 1 boundary
+
+David approved this boundary on 2026-09-27: `E` carries nonlocal effects;
+callback-local place permissions stay explicit in each signature.
+
+```dewy
+let forward=<E:Effect>(f:(@x:int64):>void & mutates<x> & E @y:int64):>void & mutates<y> & E=>f(@y)
+```
+
+The callback's `x` and wrapper's `y` belong to different parameter scopes.
+The ordinary call rule translates the explicit permission. A positive place
+effect not covered by the callback's explicit row cannot be inferred into
+`E`. Local negative guarantees likewise stay at the callback boundary; they
+are omitted from the nonlocal remainder, while the instantiated callback
+signature must still satisfy any explicit exclusions. Nominal resource
+permissions and exclusions continue through `E`.
+
+A row that itself carries scoped place identities and remaps them between
+signatures needs a separate design review. It is outside Phase 1's accepted
+row-polymorphism subset, rather than a permission to substitute bare slot
+numbers across scopes.
+
 ### What allocation contracts measure — approved initial rules
 
 Keep public effects distinct from internal per-parameter access summaries.
@@ -272,8 +294,8 @@ resource contracts and negative source rows for a conservative initial subset.
 Effect-row generic parameters now support callback-row inference and
 substitution in both compilers. The initial conservative limits are documented
 in the reference: no arbitrary split between multiple row remainders, no
-callback-relative place subjects escaping their signature, and no inferred
-negative row arguments yet. A future builtin `resource` base type could make resource mints
+callback-relative place subjects escaping their signature, and no arbitrary callback-local place identities in the inferred remainder.
+Shared nonlocal negative guarantees are implemented. A future builtin `resource` base type could make resource mints
 more explicit; ordinary nominal mints suffice for this first implementation.
 The allocation rule remains open to refinement from practical experience.
 
