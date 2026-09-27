@@ -173,12 +173,12 @@ visit = (id:addr input:Input @scan:Scan):>void => {
     if node is? hir.FunctionCall {
         if node.proof return
         let method=hir.node_at(input.nodes node.func)
-        if method is? hir.ArrayMethod and method.name in? ['push' 'pop' 'insert' 'truncate' 'clear' 'reserve' 'join' 'sort'] {
+        if method is? hir.ArrayMethod and method.name in? ['push' 'pop' 'insert' 'truncate' 'clear' 'reserve' 'lend_write' 'set_length' 'join' 'sort'] {
             # Storage permission includes logical copies and COW detachments.
             # Sort callbacks contribute their distinct call boundary.
             record_access(method.array 'reads' input @scan)
             if method.name not=? 'join' {record_access(method.array 'mutates' input @scan)}
-            storage(@scan)
+            if method.name not=? 'set_length' {storage(@scan)}
             let key=node.kw_args.get('key')
             if method.name =? 'sort' and key isnt? none {callback(key input @scan)}
             loop arg in node.pos_args {visit(arg input @scan)}

@@ -10,7 +10,7 @@ import p"bindings.dewy" as bindings
 # Unknown calls, captures and escaping results cannot consume the loan.
 const SCALARS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
 const LOADS:set<string>=set['__load_i8__' '__load_u8__' '__load_i16__' '__load_u16__' '__load_i32__' '__load_u32__' '__load_i64__' '__load_u64__']
-Input:type=const [owner:addr root:addr nodes:array<hir.AST> types:types.Table registry:bindings.Registry source:SrcFile target:string]
+Input:type=const [owner:addr root:addr nodes:array<hir.AST> types:types.Table registry:bindings.Registry source:SrcFile target:string writable:bool=false]
 Scan:type=[locals:set<addr>=set[] addresses:set<addr>=set[] checked_reads:array<addr>=[] problem:Error?=none]
 reject=(id:addr detail:string input:Input @scan:Scan):>void=>{
     if scan.problem isnt? none return
@@ -65,17 +65,32 @@ visit=(id:addr input:Input @scan:Scan result:bool=false):>void=>{
         return
     }
     if node is? hir.FunctionCall {
+        let method=hir.node_at(input.nodes node.func)
+        if method is? hir.ArrayMethod and method.name =? 'set_length' {
+            let owner=hir.node_at(input.nodes method.array)
+            if not input.writable or owner isnt? hir.ExpressedIdentifier or owner.binding_id not=? input.root {reject(id 'only the writable loan owner can commit its length' input @scan) return}
+            let arguments=node.pos_args
+            loop argument in node.kw_args.values {arguments.push(argument)}
+            loop argument in arguments {
+                if derived(argument input scan.addresses) {reject(argument 'an address cannot be committed as a length' input @scan) return}
+                visit(argument input @scan)
+            }
+            return
+        }
         let name=intrinsic_name(node input)
         if extraction(node input) {scan.checked_reads.push(id) return}
         if name =? '__syscall3__' {
             let args=node.pos_args
             if input.target not in? ['x86_64' 'c'] or args.length not=? 4 {reject(id 'only synchronous write consumes a scoped address in this initial subset' input @scan) return}
             let number=hir.node_at(input.nodes args[0])
-            if number isnt? hir.Integer or number.value not=? 1 {reject(id 'only synchronous write consumes a scoped address in this initial subset' input @scan) return}
+            if number isnt? hir.Integer or (number.value not=? 1 and (not input.writable or number.value not=? 0)) {reject(id 'only synchronous write consumes a scoped address in this initial subset' input @scan) return}
+            if number.value =? 0 and not derived(args[2] input scan.addresses) {reject(id 'read requires an address derived from the writable loan' input @scan) return}
             loop index in [0 1 3] {
                 $runtime_assert index >=? 0 and index <? args.length
                 if derived(args[index] input scan.addresses) {reject(id 'only synchronous write consumes a scoped address in this initial subset' input @scan) return}
             }
+        } else if input.writable and name =? '__store_u8__' {
+            if node.pos_args.length not=? 2 or derived(node.pos_args[0] input scan.addresses) or not derived(node.pos_args[1] input scan.addresses) {reject(id 'raw writes require a byte value and a lent-storage address' input @scan) return}
         } else if name is? none or (name not in? SCALARS and name not in? LOADS) {
             reject(id 'this call has no checked scoped-storage lifetime' input @scan) return
         }
@@ -107,19 +122,23 @@ visit=(id:addr input:Input @scan:Scan result:bool=false):>void=>{
         return
     }
     if node is? hir.Integer|hir.Bool|hir.Void|hir.Break|hir.Continue|hir.NoneValue return
+    if node is? hir.Assert {
+        if node.runtime or node.expect {reject(id 'runtime reporting is outside the raw-scope subset' input @scan) return}
+        visit(node.condition input @scan) return
+    }
     if node is? hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Suppress|hir.ValueCast|hir.RepresentationCast|hir.Transmute|hir.Obligation {
         loop child in hir.children(node) {visit(child input @scan)}
         return
     }
-    reject(id 'this operation is outside the initial read-only raw-scope subset' input @scan)
+    reject(id 'this operation is outside the initial raw-scope subset' input @scan)
 }
-validate_read=(owner_id:addr body:addr source:SrcFile @session:contexts.Session):>Error?=>{
+validate_read=(owner_id:addr body:addr source:SrcFile @session:contexts.Session writable:bool=false):>Error?=>{
     let owner_node=hir.node_at(session.hir owner_id)
     let shape=types.node_at(session.types views.structural_base(owner_node.value_type session.types))
     let valid=false
     if shape is? types.ArrayType {valid=types.is_primitive(types.node_at(session.types types.strip_refinement(shape.element session.types)) 'uint8')}
     if owner_node isnt? hir.ExpressedIdentifier or owner_node.binding_id is? none or not valid return Error[srcfile=source title='cannot prove scoped storage access' pointers=[Pointer[span=owner_node.loc message='this read-only loan currently requires a named byte array']]]
-    let input=Input[owner=owner_id root=(owner_node.binding_id) nodes=session.hir types=session.types registry=session.registry source=source target=session.target]
+    let input=Input[owner=owner_id root=(owner_node.binding_id) nodes=session.hir types=session.types registry=session.registry source=source target=session.target writable=writable]
     let scan=Scan[]
     let nodes:array<addr>=[]
     let pending:array<addr>=[body]

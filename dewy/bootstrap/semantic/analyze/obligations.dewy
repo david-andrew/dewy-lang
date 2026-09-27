@@ -165,6 +165,13 @@ position = (id:addr state:facts.State data:predicates.Data):>bool => {
     return false
 }
 
+sum_operand_below = (operand:addr term:facts.Term? bound:facts.Term state:facts.State data:predicates.Data):>bool => {
+    if term isnt? none and relations.ordered(term bound 0 state data.relations) return true
+    let actual=data.snapshot.numbers.get(operand)
+    let limit=relations.interval_of(bound state data.relations)
+    return actual isnt? none and actual.upper isnt? none and limit.lower isnt? none and actual.upper <=? limit.lower
+}
+
 verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<addr> @data:predicates.Data):>bool? => {
     if p.tested_type isnt? none {
         # `:> x is? T` holds when the result is true and the returned value
@@ -219,6 +226,19 @@ verdict = (p:propositions.Proposition value:addr state:facts.State assigned:set<
             let held=false
             if target.term isnt? none {
                 held=if upper relations.ordered(target.term term direction.gap state data.relations) else relations.ordered(term target.term direction.gap state data.relations)
+            }
+            if not held and target.expression isnt? none and p.term_projection =? 'value' and intervals.stable(target.expression data.snapshot data.env.nodes) {
+                let sum=intervals.checked_sum(target.expression data.snapshot data.env @data.registry)
+                if not held and upper and sum isnt? none {
+                    let node=hir.node_at(data.env.nodes expressions.strip_casts(target.expression data.env.nodes))
+                    $runtime_assert node is? hir.FunctionCall and node.pos_args.length =? 2
+                    loop entry in state.values {
+                        let fact=entry.fact
+                        if fact isnt? facts.Remainder or entry.interval.lower is? none or entry.interval.lower <? direction.gap continue
+                        let offset=facts.Term[fact.offset]
+                        if relations.ordered(fact.upper term 0 state data.relations) and ((sum_operand_below(node.pos_args[0] sum.left fact.subject state data) and sum_operand_below(node.pos_args[1] sum.right offset state data)) or (sum_operand_below(node.pos_args[1] sum.right fact.subject state data) and sum_operand_below(node.pos_args[0] sum.left offset state data))) {held=true break}
+                    }
+                }
             }
             if not held and target.expression isnt? none and p.term_projection =? 'length' and intervals.stable(target.expression data.snapshot data.env.nodes) {
                 if p.subject =? 'length' and propositions.field(p) is? none {

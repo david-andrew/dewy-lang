@@ -90,6 +90,11 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
     }
     if not intervals.stable(value data.snapshot data.env.nodes) return
     terms.seed_sum(@state subject value data.env data.relations @data.registry)
+    let sum=intervals.checked_sum(value data.snapshot data.env @data.registry)
+    if sum isnt? none and sum.left isnt? none and sum.right isnt? none and sum.left.binding_id not=? subject and sum.right.binding_id not=? subject {
+        if sum.right.projection =? 'value' {facts.put(@state facts.remainder(sum.left facts.Term[subject] sum.right.binding_id) ranges.Interval[0 none])}
+        else if sum.left.projection =? 'value' {facts.put(@state facts.remainder(sum.right facts.Term[subject] sum.left.binding_id) ranges.Interval[0 none])}
+    }
     let id=expressions.strip_casts(value data.env.nodes)
     let node=hir.node_at(data.env.nodes id)
     let target=facts.Term[subject]
@@ -118,7 +123,13 @@ seed = (@state:facts.State subject:addr value:addr word_type:addr loc:Span @data
         relations.copy_relational(@state saved.term target)
         # A scalar snapshot equals the source until one endpoint changes.
         # Casts require their own representation proof; do not erase them here.
-        if id =? value and views.fixed_integer_layout(types.strip_refinement(node.value_type data.env.types) data.env.types) isnt? none {
+        let transparent=value
+        loop true {
+            let wrapper=hir.node_at(data.env.nodes transparent)
+            if wrapper isnt? hir.Obligation break
+            transparent=wrapper.value
+        }
+        if id =? transparent and views.fixed_integer_layout(types.strip_refinement(node.value_type data.env.types) data.env.types) isnt? none {
             facts.put(@state facts.order(saved.term target) ranges.Interval[0 none])
             facts.put(@state facts.order(target saved.term) ranges.Interval[0 none])
         }

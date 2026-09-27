@@ -247,6 +247,10 @@ affine = (id:addr snapshot:Snapshot env:values.Environment @registry:bindings.Re
     if node.pos_args.length not=? 2 return none
     let function=hir.node_at(env.nodes node.func)
     if function isnt? hir.ExpressedIdentifier or (function.name not=? '__add__' and function.name not=? '__sub__') return none
+    if function.binding_id isnt? none {
+        let binding=bindings.find_binding(registry function.binding_id)
+        if binding is? none or not binding.builtin return none
+    }
     # An affine relationship is mathematical evidence, not modular word
     # arithmetic. Retain it only if each fixed-width intermediate fits.
     let width=values.result_width(node.value_type env.types)
@@ -286,4 +290,37 @@ record = (@snapshot:Snapshot id:addr state:facts.State env:values.Environment @r
     else {sequence=terms.sequence_id(id env @registry)}
     if sequence isnt? none {snapshot.sequences[id]=sequence}
     else if id in? snapshot.sequences {snapshot.sequences.pop(id);}
+}
+
+# A sum relation describes operands observed together. Restrict live term
+# identities to simple reads, and require every fixed-width sum to fit.
+Sum:type = const [left:facts.Term? right:facts.Term?]
+simple_operand = (id:addr nodes:array<hir.AST>):>bool => {
+    let node=hir.node_at(nodes id)
+    if node is? hir.ExpressedIdentifier|hir.Integer return true
+    if node is? hir.Obligation return simple_operand(node.value nodes)
+    if node is? hir.ArrayLength return simple_operand(node.array nodes)
+    if node is? hir.StringLength return simple_operand(node.string nodes)
+    if node is? hir.MemberAccess return simple_operand(node.value nodes)
+    return false
+}
+checked_sum = (id:addr snapshot:Snapshot env:values.Environment @registry:bindings.Registry):>Sum? => {
+    let node=hir.node_at(env.nodes id)
+    loop node is? hir.Obligation {node=hir.node_at(env.nodes node.value)}
+    if node isnt? hir.FunctionCall or node.pos_args.length not=? 2 return none
+    let function=hir.node_at(env.nodes node.func)
+    if function isnt? hir.ExpressedIdentifier or function.name not=? '__add__' return none
+    if function.binding_id isnt? none {
+        let binding=bindings.find_binding(registry function.binding_id)
+        if binding is? none or not binding.builtin return none
+    }
+    loop argument in node.pos_args {
+        if not simple_operand(argument env.nodes) or not stable(argument snapshot env.nodes) return none
+    }
+    let left=snapshot.numbers.get(node.pos_args[0])
+    let right=snapshot.numbers.get(node.pos_args[1])
+    if left is? none or right is? none return none
+    let width=values.result_width(node.value_type env.types)
+    if width isnt? none and ranges.fits(ranges.add(left right) width) is? none return none
+    return Sum[terms.binding_term(node.pos_args[0] env @registry) terms.binding_term(node.pos_args[1] env @registry)]
 }

@@ -1,0 +1,29 @@
+append_byte=(@bytes:array<uint8> value:uint8):>void=>{
+    $lend(@bytes reserve=1) {
+        let address=__load_i64__(bytes)
+        __store_u8__(value address+bytes.length)
+        bytes.set_length(bytes.length+1)
+    }
+}
+
+reserve_once=(@calls:int64):>int64<v=>v=?1>=>{calls+=1 return 1}
+exercise=():>int64=>{
+    let bytes:array<uint8>=[7]
+    let before=bytes
+    let calls:int64=0
+    $lend(@bytes reserve=reserve_once(@calls)) {
+        let address=__load_i64__(bytes)
+        __store_u8__(41 address+bytes.length)
+        bytes.set_length(bytes.length+1)
+    }
+    if calls not=?1 return 1
+    append_byte(@bytes 42)
+    if before.length not=?1 or before[0] not=?7 return 2
+    return if bytes.length=?3 bytes[2] as int64 else 3
+}
+main=():>int64=>{
+    if exercise() not=?42 return 4
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 5}
+    return if _arena_live_bytes=?before 42 else 6
+}

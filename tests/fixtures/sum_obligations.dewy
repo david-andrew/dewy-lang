@@ -1,0 +1,7 @@
+within=(bound:int64 item:int64<v=>v<=?bound>):>int64=>42
+check_sum=(a:int64 b:int64 c:int64):>int64=>{
+    if a<?0 or a>?100 or b<?0 or b>?100 or c<?0 or c>?b return 1
+    let limit=a+b
+    return within(limit a+c)
+}
+main=():>int64=>check_sum(20 30 22)

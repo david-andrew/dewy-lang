@@ -216,7 +216,7 @@ def inventory(root, registry, allocator_scopes=None):
             if isinstance(node, hir.FunctionCall):
                 if node.proof:
                     return
-                if isinstance(node.func, hir.ArrayMethod) and node.func.name in {'push', 'pop', 'insert', 'truncate', 'clear', 'reserve', 'join', 'sort'}:
+                if isinstance(node.func, hir.ArrayMethod) and node.func.name in {'push', 'pop', 'insert', 'truncate', 'clear', 'reserve', 'join', 'sort', 'lend_write', 'set_length'}:
                     # Growth, detachment, returned storage and implicit value
                     # copies need permission. COW postponement is not proof of
                     # no allocation. Lifecycle calls added later are checked
@@ -224,7 +224,8 @@ def inventory(root, registry, allocator_scopes=None):
                     access(node.func.array, 'reads')
                     if node.func.name != 'join':
                         access(node.func.array, 'mutates')
-                    storage()
+                    if node.func.name != 'set_length':
+                        storage()
                     if node.func.name == 'sort' and (key := node.kw_args.get('key')) is not None:
                         callback(key)
                     for argument in [*node.pos_args, *node.kw_args.values()]:

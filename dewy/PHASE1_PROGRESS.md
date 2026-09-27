@@ -17,7 +17,7 @@ all source shapes or the complete integration matrix have been certified.
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
 | 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Conditional element routes, transfers through hooked wrappers, resource sort/key ownership and other unsupported resource operations; captured/exposed storage lifetimes. |
-| 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | Writable `$lend` and bulk I/O; owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
+| 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | Bulk input adoption of writable `$lend`; owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | User-written polymorphic rows with callback-local place subjects; more precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
 | 1.4 Settled surface decisions | Type-directed juxtaposition (including numeric RHS), reserved names, unit nominals, uniform `set.push`, digit-label normalization, array/record value equality. | Final integration checks and documentation consistency. Keep the expressly open decisions below separate. |
@@ -5103,3 +5103,31 @@ cleanup evidence, not a new aliasing exemption. Five native-built paired
 loan/allocation/projection groups passed (both execution backends), including
 repeated stdout/stderr/file writes with zero retained bytes. Additional
 ambient-graph regressions and the next full parity checkpoint are pending.
+
+
+## Writable storage loans and checked commits (2026-09-27)
+
+Both compilers now implement `$lend(@bytes reserve=n)` for named growable
+arrays of unrestricted bytes. Entry evaluates the extra reservation once,
+captures the length bound, detaches shared snapshots and invalidates element
+facts. The existing reserve operation supplies storage. `set_length` inside
+the loan owes ordinary nonnegative and reservation-bound obligations; there
+is no implicit trap. The checked body permits byte stores and synchronous
+x86-64/C reads, rejects escaping addresses/aliases/owner mutation, and keeps
+normal cleanup on every exit. This checks lifetime and commit bounds, not
+the correctness of arbitrary raw pointer arithmetic.
+
+The bound uses finite sum relations already supported by the proof state.
+New sum evidence requires stable operands and a nonwrapping result; writes
+invalidate its identities. Transparent proof obligations retain scalar-copy
+equality, while casts do not gain that exemption. Tests cover partial and
+keyword commits, COW independence, one-time reservation evaluation, stale
+facts, invalid length commits and repeated zero-retained-byte operation.
+All 23 focused hosted tests, four native-built paired groups (both execution
+backends), and 35 surrounding proof/loop/affine tests passed.
+
+The preceding output checkpoint passed all 215 parity cases and a native
+three-generation fixed point in the isolated `phase1-output-integration`
+build. Six ambient-analysis regressions also passed. The manifest now has
+217 cases. Bulk file-read adoption and a new integration checkpoint follow;
+this does not close Phase 1.

@@ -10,9 +10,10 @@ settled, so an unknown count loses precision rather than asserting a proof.
 Element evidence is transferred separately before changing the length.
 """
 
-Method:type = 'push' | 'insert' | 'pop' | 'truncate' | 'clear'
+Method:type = 'push' | 'insert' | 'pop' | 'truncate' | 'clear' | 'set_length'
 Change:type = const [after:ranges.Interval delta:ranges.Interval]
 transition = (before:ranges.Interval method:Method count:ranges.Interval? cap:bigint):>Change => {
+    if method =? 'set_length' return Change[if count is? none ranges.Interval[0 cap true] else count ranges.UNKNOWN]
     if method =? 'push' or method =? 'insert' {
         return Change[
             ranges.Interval[ranges.shift_endpoint(before.lower 1) ranges.minimum_upper(ranges.shift_endpoint(before.upper 1) cap)]

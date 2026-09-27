@@ -66,6 +66,7 @@ class Context:
     began (0 at module level): the scopes above it are the function's own,
     which is what `$breakpoint` shows."""
     refinements: dict[int, ty.Type] = field(default_factory=dict)
+    lent_storage: tuple[int, sb.Binding] | None = None  # writable owner and captured reservation bound
     immutable_record: bool = False   # the `[...]` being read is under `const`: an immutable record (not its nested type expressions)
     refinement_subject: str | None = None
     """The name being annotated (`d:int64<d not=? 0>`): inside its type's
@@ -5555,17 +5556,57 @@ def _relocated(node: object, loc: Span) -> object:
 
 def _tcr_lend(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
     from . import scoped_storage
+    from ..targets import max_length
     assert isinstance(ast.condition, p0.Block) and isinstance(ast.message, p0.Block)
     arguments, keywords, _ = parse_call_arguments(ast.condition, ctx=ctx)
-    if len(arguments) != 1 or keywords:
+    if len(arguments) != 1 or set(keywords) - {'reserve'}:
         user_error(ctx.srcfile, '`$lend` requires one storage argument',
-                   Pointer(span=ast.condition.loc, message='write `$lend(bytes) { ... }`'))
+                   Pointer(span=ast.condition.loc, message='write `$lend(bytes)` or `$lend(@bytes reserve=n)`'))
     owner = arguments[0]
-    if isinstance(owner, hir.Place):
-        not_implemented(ctx.srcfile, owner.loc, 'writable scoped storage')
-    body = tcr_block(ast.message, ctx=ctx)
-    scoped_storage.validate_read(owner, body, ctx.srcfile, target=ctx.target)
-    return body
+    if not isinstance(owner, hir.Place):
+        if keywords:
+            user_error(ctx.srcfile, 'only a writable loan can reserve storage', Pointer(span=ast.condition.loc, message='reserve belongs to `$lend(@bytes ...)`'))
+        body = tcr_block(ast.message, ctx=ctx)
+        scoped_storage.validate_read(owner, body, ctx.srcfile, target=ctx.target)
+        return body
+    owner = owner.target
+    if not isinstance(owner, hir.ExpressedIdentifier) or not isinstance(owner.type, ty.ArrayType):
+        user_error(ctx.srcfile, 'writable loans require a named byte array', Pointer(span=owner.loc, message='use a mutable byte-array binding'))
+    method = _tcr_array_method(owner, 'reserve', owner.loc, ctx=ctx)
+    owner = method.array
+    if not isinstance(owner, hir.ExpressedIdentifier) or owner.type.element != 'uint8':
+        user_error(ctx.srcfile, 'writable loans require a named array of unrestricted bytes', Pointer(span=owner.loc, message='use a mutable byte-array binding'))
+    prefix = []
+
+    def saved(value, role):
+        name = f'__dewy_lend_{role}_{ctx.binding_registry.next_id}'
+        binding = ctx.binding_registry.allocate(_fresh_syntax(ctx), name, 'value', value.loc)
+        binding.type = 'int64'
+        binding.declaration = hir.Declare(value.loc, 'void', 'const', name, 'int64', value, binding_id=binding.id)
+        prefix.append(binding.declaration)
+        return hir.ExpressedIdentifier(value.loc, 'int64', name, binding_id=binding.id), binding
+
+    # Evaluate the reservation before reading the owner's current length. It
+    # can run ordinary source code before the storage loan begins. Address-
+    # space bounds keep the sum representable without an implicit trap.
+    extra = keywords.get('reserve', hir.Integer(owner.loc, 'int64', t0.base10, 0))
+    extra = check_against(extra, 'int64', ctx=ctx)
+    domain = ty.RefinedType('int64', (ty.Proposition('self', '>=?', 0),
+                                    ty.Proposition('self', '<=?', max_length(ctx.target))))
+    extra, _ = saved(hir.Obligation(extra.loc, 'int64', extra, domain, 'a nonnegative address-sized reservation'), 'extra')
+    signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64'), ty.PosOrKwArg(None, 'int64')], [], None, 'int64')
+    total = hir.FunctionCall(owner.loc, 'int64', hir.ExpressedIdentifier(owner.loc, signature, '__add__'),
+                             [hir.ArrayLength(owner.loc, 'int64', owner), extra], {})
+    capacity, bound = saved(total, 'limit')
+    # This internal mutation has reserve's runtime behavior, and additionally
+    # forgets element facts before raw writes become possible. It is not a
+    # user-callable method or a new source intrinsic.
+    entry = replace(method, name='lend_write')
+    prefix.append(hir.FunctionCall(owner.loc, 'void', entry, [capacity], {}))
+    _invalidate_routes(owner.binding_id, ctx=ctx, prefix=('[]',))
+    body = tcr_block(ast.message, ctx=replace(ctx, lent_storage=(owner.binding_id, bound)))
+    scoped_storage.validate_read(owner, body, ctx.srcfile, target=ctx.target, writable=True)
+    return hir.Block(body.loc, body.type, [*prefix, body], True)
 
 
 def _tcr_allocator(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
@@ -8711,7 +8752,7 @@ def _tcr_object_literal(
     return hir.ObjectLiteral(block.loc, object_type, marked)
 
 
-_ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve', 'insert', 'truncate', 'sort', 'join'})
+_ARRAY_METHOD_NAMES = frozenset({'push', 'pop', 'clear', 'reserve', 'set_length', 'insert', 'truncate', 'sort', 'join'})
 _READ_ONLY_ARRAY_METHOD_NAMES = frozenset({'join'})
 
 
@@ -8792,6 +8833,9 @@ def _apply_array_method_transition(
         else:
             new_exact = None if exact is None else min(exact, index_value)
             new_minimum = min(minimum, index_value)
+    elif method.name == 'set_length':
+        new_exact = index_value
+        new_minimum = index_value if index_value is not None else 0
     elif method.name == 'clear':
         new_exact = 0
         new_minimum = 0
@@ -9002,6 +9046,9 @@ def _tcr_array_method(
     ever reached through the container value.
     """
     assert isinstance(value.type, ty.ArrayType)
+    if name == 'set_length' and (ctx.lent_storage is None or not isinstance(value, hir.ExpressedIdentifier)
+                                 or value.binding_id != ctx.lent_storage[0]):
+        user_error(ctx.srcfile, '`set_length` requires the active writable storage loan', Pointer(span=loc, message='commit only inside `$lend(@bytes ...)`'))
     if name in _READ_ONLY_ARRAY_METHOD_NAMES:
         # `xs.join`: reads any array value, named or not, of any length
         return _bind_array_method(value, value.type, name, loc, ctx=ctx)
@@ -9095,6 +9142,8 @@ def _bind_array_method(
         # puts the separator between them. The result is a new string.
         'join': ty.FunctionType([ty.PosOrKwArg('sep', 'string', required=False)], [], None, ty.StringType()),
     }
+    if name == 'set_length':
+        signatures[name] = ty.FunctionType([ty.PosOrKwArg('count', 'int64')], [], None, 'void')
     if name == 'join' and not _is_string_type(element):
         user_error(
             ctx.srcfile,
@@ -16581,6 +16630,17 @@ def tcr_function_call(left: hir.AST, right: p0.AST, *, ctx: Context, expected: t
         _apply_array_method_transition(
             left, call.loc, ctx=ctx, index=_array_method_index_argument(left.name, call),
         )
+        if left.name == 'set_length':
+            assert ctx.lent_storage is not None
+            bound = ctx.lent_storage[1]
+            count = call.pos_args[0] if call.pos_args else call.kw_args['count']
+            domain = ty.RefinedType('int64', (ty.Proposition('self', '>=?', 0),
+                      ty.Proposition('self', '<=?', 0, term=bound.name, term_id=bound.id, term_of='value')))
+            checked = hir.Obligation(count.loc, count.type, count, domain, 'a length within the writable loan reservation')
+            if call.pos_args:
+                call.pos_args[0] = checked
+            else:
+                call.kw_args['count'] = checked
     if isinstance(left, hir.DictMethod):
         return _dict_method_call(left, call, ctx=ctx)
     if isinstance(left, hir.CopyMethod):
@@ -16821,7 +16881,7 @@ def _array_method_index_argument(name: str, call: hir.FunctionCall) -> hir.AST |
         return call.pos_args[0] if call.pos_args else call.kw_args.get('idx')
     if name == 'insert':
         return call.pos_args[1] if len(call.pos_args) > 1 else call.kw_args.get('idx')
-    if name == 'truncate':
+    if name in {'truncate', 'set_length'}:
         return call.pos_args[0] if call.pos_args else call.kw_args.get('count')
     return None
 

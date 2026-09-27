@@ -1946,6 +1946,11 @@ class _ArrayLowering(_ArraySharing):
         prelude, descriptor = self._extract_write_route(method.array)
         if isinstance(descriptor, hir.ExpressedIdentifier):
             descriptor = replace(descriptor, type='int64')
+        if method.name == 'set_length':
+            # Entry detached/reserved the owner. No alias can be created in
+            # the checked body, and the argument owes its reservation bound.
+            count_prelude, count = self._extract_expression(node.pos_args[0] if node.pos_args else node.kw_args['count'])
+            return [*prelude, *count_prelude], self._store_i64_field(descriptor, ARRAY_LENGTH_OFFSET, count, loc)
         prelude.extend(self._ensure_unique_array(descriptor, element_type, loc))
         element_bytes, _signed = self._array_element_layout(element_type, node)
         length = hir.ExpressedIdentifier(loc, 'int64', self._new_array_name('method_length'))
@@ -2076,7 +2081,7 @@ class _ArrayLowering(_ArraySharing):
             return [*prelude, length_declare, *self._array_sort_statements(
                 descriptor, data, length, element_type, element_bytes, node, loc,
             )], hir.Void(loc, ty.VOID_TYPE)
-        if method.name == 'reserve':
+        if method.name in {'reserve', 'lend_write'}:
             count_prelude, count = self._extract_expression(node.pos_args[0])
             return [
                 *prelude,

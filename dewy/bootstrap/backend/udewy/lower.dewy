@@ -3718,19 +3718,27 @@ push_helper = (element:addr stride:addr call:hir.AST @state:State):>string => {
 array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr => {
     if method.name =? 'join' return string_join(call method @state)
     if method.name =? 'sort' return array_sort(call method @state)
-    if method.name not in? ['push' 'pop' 'clear' 'truncate' 'reserve' 'insert'] return reject(call "array {method.name} lowering" @state)
+    if method.name not in? ['push' 'pop' 'clear' 'truncate' 'reserve' 'lend_write' 'set_length' 'insert'] return reject(call "array {method.name} lowering" @state)
     let type=array_type(hir.node_at(state.input.nodes method.array).value_type state)
     $runtime_assert type isnt? none
     let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
     if layout is? layouts.Pending return reject(call layout.detail @state)
     let prefix:array<addr>=[]
     let route=array_route(method.array @prefix @state)
+    if method.name =? 'set_length' {
+        # Entry detached the storage; the checked body cannot create aliases.
+        let count=if call.pos_args.length >? 0 call.pos_args[0] else call.kw_args.get('count')
+        $runtime_assert count isnt? none
+        let descriptor=route_descriptor(route call @prefix @state)
+        prefix.push(store_word(owned_value(count @state 'passed to a call') descriptor layouts.array_descriptor.length call @state))
+        return sequence(prefix call @state)
+    }
     let descriptor=detach_array(route type.element call @prefix @state)
     let arguments:dict<string addr>=[]
     let names:array<string>=[]
     if method.name in? ['push' 'insert'] {names.push('value')}
     if method.name in? ['pop' 'insert'] {names.push('idx')}
-    if method.name in? ['truncate' 'reserve'] {names.push('count')}
+    if method.name in? ['truncate' 'reserve' 'lend_write'] {names.push('count')}
     loop i in 0.. and i <? call.pos_args.length {
         $runtime_assert i <? names.length
         arguments[names[i]]=snapshot(owned_value(call.pos_args[i] @state 'passed to a call') @prefix @state)
@@ -3749,7 +3757,7 @@ array_method_call = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length call @state) @prefix @state)
     let new_length=length
     let result:addr?=none
-    if method.name =? 'reserve' {
+    if method.name in? ['reserve' 'lend_write'] {
         $runtime_assert 'count' in? arguments
         prefix.push(array_reserve(descriptor arguments['count'] layout.size call @state))
     }

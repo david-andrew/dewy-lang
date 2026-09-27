@@ -1381,6 +1381,25 @@ class _BoundsValidator:
                         subject_id = self._element_route_of(subject_node)
                     smaller, larger = (subject_id, proposition.term_id) if direction == 'upper' else (proposition.term_id, subject_id)
                     held = subject_id is not None and self._ordered(smaller, larger, gap, state)
+                    if not held and direction == 'upper':
+                        summed = self._checked_sum_terms(subject_node, state)
+                        if summed is not None:
+                            operands = _strip_casts(subject_node).pos_args
+                            def below(index, bound):
+                                term = summed[index]
+                                if term is not None and self._ordered(term, bound, 0, state):
+                                    return True
+                                actual = self._eval(operands[index], dict(state), validate=False)
+                                limit = _known_interval(state, bound, self.max_length) if bound < 0 else self._binding_interval(state, bound)
+                                return actual is not None and actual.upper is not None and limit.lower is not None and actual.upper <= limit.lower
+                            for key, evidence in state.items():
+                                if not isinstance(key, RemainderFact) or evidence.lower is None or evidence.lower < gap:
+                                    continue
+                                if (self._ordered(key.upper, proposition.term_id, 0, state)
+                                        and ((below(0, key.subject) and below(1, key.offset))
+                                             or (below(1, key.subject) and below(0, key.offset)))):
+                                    held = True
+                                    break
                     if not held:
                         # by intervals, when the subject is an expression
                         subject_interval = self._eval(subject_node, state, validate=False)
@@ -3015,7 +3034,7 @@ class _BoundsValidator:
             elif name == 'insert':
                 index_arg = node.pos_args[1] if len(node.pos_args) > 1 else node.kw_args.get('idx')
                 index_interval = arguments[1] if len(arguments) > 1 else keyword_arguments.get('idx')
-            elif name == 'truncate':
+            elif name in {'truncate', 'set_length'}:
                 index_arg = node.pos_args[0] if node.pos_args else node.kw_args.get('count')
                 index_interval = arguments[0] if arguments else keyword_arguments.get('count')
             else:
@@ -3083,15 +3102,22 @@ class _BoundsValidator:
                         state[_order_key(key, cap_term)] = Interval(0, None)
                         if fits:
                             state[_order_key(cap_term, key)] = Interval(0, None)
+                elif name == 'set_length':
+                    state[key] = index_interval or self._length_default()
+                    _change_length_facts(state, array_id, Interval(None, None))
+                    count_term = self._binding_id(_strip_casts(index_arg)) if index_arg is not None else None
+                    if count_term is not None and count_term != key:
+                        state[_order_key(key, count_term)] = Interval(0, None)
+                        state[_order_key(count_term, key)] = Interval(0, None)
                 elif name == 'clear':
                     state[key] = Interval.exact(0)
                     _change_length_facts(state, array_id, Interval(
                         None if current.upper is None else -current.upper,
                         0 if current.lower is None else -current.lower,
                     ))
-                if validate and name in {'push', 'insert', 'pop', 'truncate', 'clear'}:
+                if validate and name in {'push', 'insert', 'pop', 'truncate', 'clear', 'set_length'}:
                     self._validate_length_invariant(node, array_id, state[key], state)
-            if name in {'push', 'insert', 'pop', 'truncate', 'clear', 'sort', 'reverse'}:
+            if name in {'push', 'insert', 'pop', 'truncate', 'clear', 'sort', 'reverse', 'set_length', 'lend_write'}:
                 self._forget_container_value(node.func.array, state, keep_length=array_id)
             return None
         if isinstance(node.func, hir.ExpressedIdentifier) and node.func.name.startswith(('_capture_push', '_capture_add')) and len(node.pos_args) == 2 and isinstance(node.pos_args[0], hir.Place):
@@ -3720,7 +3746,7 @@ class _BoundsValidator:
         term = self._offset_term(bare)
         if term is None or self._binding_id(bare) is not None:
             return term
-        if not isinstance(bare, hir.FunctionCall):
+        if not isinstance(bare, hir.FunctionCall) or not isinstance(bare.func, hir.ExpressedIdentifier) or bare.func.binding_id is not None:
             return None
         for argument in bare.pos_args:
             if self._offset_term(argument) is not None and self._checked_offset_term(argument, state) is None:
@@ -3954,6 +3980,12 @@ class _BoundsValidator:
             return
         self._seed_call_term_facts(subject, value, state)
         self._seed_sum_facts(subject, value, state)
+        terms = self._checked_sum_terms(value, state)
+        if terms is not None and all(term is not None for term in terms) and subject not in terms:
+            # subject = left + right implies left <= subject - right.
+            # Reuse the existing finite remainder relation and its invalidation.
+            state[_remainder_key(terms[0], subject, terms[1])] = Interval(0, None)
+
         stripped = _strip_casts(value)
         if isinstance(stripped, hir.ArrayLiteral) and stripped.items:
             lengths = [self._static_element_length(item) for item in stripped.items]
@@ -3988,7 +4020,10 @@ class _BoundsValidator:
             # endpoint is written. Keep this in the ordinary relation state,
             # so assignment/alias invalidation applies to the equality too.
             # Casts are excluded: their representation must be checked first.
-            if stripped is value and ty.fixed_integer_layout(ty.strip_refinement(value.type)) is not None:
+            transparent = value
+            while isinstance(transparent, hir.Obligation):
+                transparent = transparent.value
+            if stripped is transparent and ty.fixed_integer_layout(ty.strip_refinement(value.type)) is not None:
                 state[_order_key(source, subject)] = Interval(0, None)
                 state[_order_key(subject, source)] = Interval(0, None)
             if _has_sequence_length(stripped.type):
@@ -4181,6 +4216,34 @@ class _BoundsValidator:
             if remainder is not None and remainder[2] == term and interval.lower - shift >= 0:
                 shifted[key] = Interval(interval.lower - shift, None, capped=interval.capped)
         return shifted
+
+    def _checked_sum_terms(self, value: hir.AST, state: State) -> tuple[int | None, int | None] | None:
+        """Two stable scalar terms whose addition cannot wrap.
+
+        The relation describes values observed together, so an operand that
+        runs code or changes a binding cannot supply a live term identity.
+        """
+        while isinstance(value, hir.Obligation):
+            value = value.value
+        if not (isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier)
+                and value.func.binding_id is None and value.func.name == '__add__' and len(value.pos_args) == 2):
+            return None
+        def stable(node):
+            if isinstance(node, hir.Obligation):
+                return stable(node.value)
+            if isinstance(node, (hir.ExpressedIdentifier, hir.Integer)):
+                return True
+            if isinstance(node, (hir.ArrayLength, hir.StringLength)):
+                return stable(node.array if isinstance(node, hir.ArrayLength) else node.string)
+            return isinstance(node, hir.MemberAccess) and stable(node.value)
+        if not all(stable(argument) for argument in value.pos_args):
+            return None
+        terms = tuple(self._binding_id(argument) for argument in value.pos_args)
+        intervals = [self._eval(argument, dict(state), validate=False) for argument in value.pos_args]
+        mathematical = self._binary_interval('__add__', *intervals, 'int')
+        if self._fit_type(mathematical, ty.strip_refinement(value.type)) is None:
+            return None
+        return terms
 
     def _seed_sum_facts(self, subject: int, value: hir.AST, state: State) -> None:
         """`let stop = i + length` under `length <= src.length - i`: `stop <= src.length`;

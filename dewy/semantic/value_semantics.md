@@ -244,7 +244,7 @@ without requiring a copy hook. Dictionary mutation during iteration remains
 rejected by the existing container-stability check.
 
 
-## Scoped raw reads
+## Scoped raw storage
 
 `$lend(bytes) { ... }` lends a named byte array's storage for one expression.
 The existing `__load_i64__(bytes)` operation obtains the element address, and
@@ -268,7 +268,29 @@ the compiler grants unpinned access only after checking the whole body.
 The Linux x86-64/C stdout, stderr and file-writing library paths use these
 loans. Unscoped raw exposure retains the existing pinning rule.
 
-Writable `$lend(@bytes reserve=n)` and `bytes.set_length(n)` are approved
-extensions still being implemented; they are not part of this read-only
-checkpoint. Strings and arbitrary aggregate owners are also outside this
-initial implementation.
+Writable `$lend(@bytes reserve=n)` accepts a named, growable array of
+unrestricted `uint8`. It evaluates `n` once, reserves that many **additional**
+bytes and detaches existing shared snapshots before lending the address.
+Omitting `reserve` means zero additional bytes. Byte stores and synchronous
+Linux x86-64/C reads may write through the scoped address.
+
+```dewy
+$lend(@bytes reserve=4096) {
+    let address = __load_i64__(bytes)
+    let count = __syscall3__(0 fd address + bytes.length 4096)
+    if count >? 0 and count <=? 4096 {
+        bytes.set_length(bytes.length + count)
+    }
+}
+```
+
+`set_length` is available only on the active writable owner. Every commit
+must prove a nonnegative length no greater than the captured entry length
+plus reservation; the compiler inserts no implicit runtime check. Raw writes
+invalidate element facts. Ordinary owner reads, alias creation, growth and
+replacement remain forbidden inside the scope. Raw address arithmetic is
+still low-level code: this lifetime permission does not prove each byte
+store's offset or initialization of every committed byte. Allocation failure
+policy remains open, as for ordinary array reservation.
+
+Strings and arbitrary aggregate owners are outside this initial subset.

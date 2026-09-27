@@ -21,7 +21,7 @@ SCALARS = frozenset({
 LOADS = frozenset(f'__load_{word}__' for word in ('i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64'))
 
 
-def validate_read(owner, body, source, *, target):
+def validate_read(owner, body, source, *, target, writable=False):
     def reject(node, detail):
         user_error(source, 'cannot prove scoped storage access',
                    Pointer(span=node.loc, message=detail),
@@ -87,6 +87,15 @@ def validate_read(owner, body, source, *, target):
                 visit(item, result=item.type not in ('void', 'never'))
             return
         if isinstance(node, hir.FunctionCall):
+            if isinstance(node.func, hir.ArrayMethod) and node.func.name == 'set_length':
+                if (not writable or not isinstance(node.func.array, hir.ExpressedIdentifier)
+                        or node.func.array.binding_id != root):
+                    reject(node, 'only the writable loan owner can commit its length')
+                for argument in [*node.pos_args, *node.kw_args.values()]:
+                    if derived(argument):
+                        reject(argument, 'an address cannot be committed as a length')
+                    visit(argument)
+                return
             name = intrinsic(node)
             if extraction(node):
                 checked_reads.append(node)
@@ -95,9 +104,13 @@ def validate_read(owner, body, source, *, target):
                 args = node.pos_args
                 # Linux x86-64 write(2) consumes the source synchronously.
                 # Other syscall numbers have no such permission here.
-                if (target not in ('x86_64', 'c') or len(args) != 4 or not isinstance(args[0], hir.Integer) or args[0].value != 1
-                        or any(derived(args[index]) for index in (0, 1, 3))):
+                if (target not in ('x86_64', 'c') or len(args) != 4 or not isinstance(args[0], hir.Integer) or args[0].value not in ({0, 1} if writable else {1})
+                        or any(derived(args[index]) for index in (0, 1, 3))
+                        or args[0].value == 0 and not derived(args[2])):
                     reject(node, 'only synchronous write consumes a scoped address in this initial subset')
+            elif writable and name == '__store_u8__':
+                if len(node.pos_args) != 2 or derived(node.pos_args[0]) or not derived(node.pos_args[1]):
+                    reject(node, 'write only scalar bytes through the lent address')
             elif name not in SCALARS | LOADS:
                 reject(node, 'this call has no checked scoped-storage lifetime')
             for argument in node.pos_args:
@@ -130,6 +143,11 @@ def validate_read(owner, body, source, *, target):
                 visit(node.item, result=True)
             return
         if isinstance(node, (hir.Integer, hir.Bool, hir.Void, hir.Break, hir.Continue, hir.NoneValue)):
+            return
+        if isinstance(node, hir.Assert):
+            if node.runtime or node.expect:
+                reject(node, 'runtime reporting is outside the raw-scope subset')
+            visit(node.condition)
             return
         if isinstance(node, (hir.Flow, hir.IfArm, hir.LoopArm, hir.ShortCircuit, hir.Suppress,
                              hir.ValueCast, hir.RepresentationCast, hir.Transmute, hir.Obligation)):

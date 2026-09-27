@@ -7,7 +7,7 @@ specifies calls. `pop` has an optional index, `sort` a keyword key/reverse,
 and `join` an optional separator. No allocator policy is implied here.
 """
 
-const names:set<string> = set['push' 'pop' 'clear' 'reserve' 'insert' 'truncate' 'sort' 'join']
+const names:set<string> = set['push' 'pop' 'clear' 'reserve' 'set_length' 'insert' 'truncate' 'sort' 'join']
 signature = (name:string element:addr @nodes:types.Table):>addr => {
     $runtime_assert name in? names
     let word = types.primitive('int64' @nodes)
@@ -21,7 +21,7 @@ signature = (name:string element:addr @nodes:types.Table):>addr => {
         result = element
     }
     if name =? 'insert' { pos.push(types.PosOrKwArg['idx' word]) }
-    if name =? 'truncate' or name =? 'reserve' { pos.push(types.PosOrKwArg['count' word]) }
+    if name in? ['truncate' 'reserve' 'set_length'] { pos.push(types.PosOrKwArg['count' word]) }
     if name =? 'join' {
         result = types.string_type(none @nodes)
         pos.push(types.PosOrKwArg['sep' result required=false])

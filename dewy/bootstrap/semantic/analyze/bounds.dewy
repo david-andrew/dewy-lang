@@ -343,7 +343,7 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
     let sequence=terms.sequence_id(method.array checker.data.env @checker.data.registry)
     if sequence is? none return
     let index:addr?=none
-    if method.name in? ['pop' 'truncate'] {
+    if method.name in? ['pop' 'truncate' 'set_length'] {
         index=if call.pos_args.length >? 0 call.pos_args[0] else call.kw_args.get(if method.name =? 'pop' 'idx' else 'count')
     } else if method.name =? 'insert' {index=if call.pos_args.length >? 1 call.pos_args[1] else call.kw_args.get('idx')}
     let count:ranges.Interval?=none
@@ -380,18 +380,25 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
         let value=if call.pos_args.length >? 0 call.pos_args[0] else call.kw_args.get('value')
         if value isnt? none {elements.store(@state sequence value checker.word_type call.loc checker.data.env @checker.data.registry) note_element_routes(sequence @checker)}
     }
-    if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear'] {
-        let name:lengths.Method=if method.name =? 'push' 'push' else if method.name =? 'insert' 'insert' else if method.name =? 'pop' 'pop' else if method.name =? 'truncate' 'truncate' else 'clear'
+    if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear' 'set_length'] {
+        let name:lengths.Method=if method.name =? 'push' 'push' else if method.name =? 'insert' 'insert' else if method.name =? 'pop' 'pop' else if method.name =? 'truncate' 'truncate' else if method.name =? 'set_length' 'set_length' else 'clear'
         intervals.forget(@checker.data.snapshot sequence)
         let after=lengths.apply(@state sequence name count checker.data.env.cap unchanged=unchanged fits=fits)
         if cap_term isnt? none and not facts.same_term(cap_term length) {
             facts.put(@state facts.order(length cap_term) ranges.Interval[0 none])
             if fits {facts.put(@state facts.order(cap_term length) ranges.Interval[0 none])}
         }
+        if method.name =? 'set_length' and index isnt? none {
+            let count_term=terms.binding_term(index checker.data.env @checker.data.registry)
+            if count_term isnt? none and not facts.same_term(count_term length) {
+                facts.put(@state facts.order(length count_term) ranges.Interval[0 none])
+                facts.put(@state facts.order(count_term length) ranges.Interval[0 none])
+            }
+        }
         checker.data.snapshot.lengths[method.array]=after
         if validate {length_contract(id method array=sequence after=after state=state @checker)}
     }
-    if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear' 'sort' 'reverse'] {forget_value(method.array @state @checker keep_length=sequence)}
+    if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear' 'sort' 'reverse' 'set_length' 'lend_write'] {forget_value(method.array @state @checker keep_length=sequence)}
 }
 length_contract = (id:addr method:hir.ArrayMethod array:addr after:ranges.Interval state:facts.State @checker:Checker):>void => {
     let conditions=expressions.member_invariant(method.array checker.data.env.nodes checker.data.env.types)
