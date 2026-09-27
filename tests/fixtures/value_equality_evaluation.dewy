@@ -1,0 +1,28 @@
+# Each operand denotes its value when evaluated, before later operands run.
+Root=$abstract type of [value:int64]
+A=type of Root
+B=type of Root
+Box:type=[value:int64 items:array<int64>]
+change=(@xs:array<int64>):>array<int64>=>{
+    if xs.length >? 0 {xs[0]=2}
+    return [2]
+}
+replace_array=(@xs:array<int64>):>array<int64>=>{xs=[2 3] return [2 3]}
+change_box=(@box:Box):>Box=>{box.value=2 return Box[2 [1]]}
+same=(a:Root b:Root):>bool=>a =? b
+check=():>int64=>{
+    let xs:array<int64>=[1]
+    if xs =? change(@xs) return 1
+    let ys:array<int64>=[1]
+    if ys =? replace_array(@ys) return 2
+    let box=Box[1 [1]]
+    if box =? change_box(@box) return 3
+    if same(A[1] B[1]) or not same(A[1] A[1]) return 4
+    return 42
+}
+main=():>int64=>{
+    if check() not=? 42 return 5
+    let before=_arena_live_bytes
+    let result=check()
+    return if result =? 42 and _arena_live_bytes =? before 42 else 6
+}

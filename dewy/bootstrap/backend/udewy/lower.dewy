@@ -718,7 +718,7 @@ expression = (id:addr @state:State):>addr => {
             if callee.name in? ['__eq__' '__ne__'] and node.pos_args.length =? 2 {
                 let left=hir.node_at(state.input.nodes node.pos_args[0])
                 let right=hir.node_at(state.input.nodes node.pos_args[1])
-                if value_compared(left.value_type @state) and value_compared(right.value_type @state) return aggregate_equality(node callee.name =? '__ne__' @state)
+                if value_compared(left.value_type @state) and value_compared(right.value_type @state) return aggregate_equality(node callee.name =? '__ne__' @state snapshot_left=id in? state.array_snapshots)
             }
             if callee.name =? '__unreachable__' {
                 # µDewy has no unreachable opcode. As in the hosted backend,
@@ -2818,13 +2818,22 @@ string_equal = (node:hir.StringEqual @state:State):>addr => {
 # `=?` on arrays and records compares values, element-wise and field-wise,
 # never the handles. Each compared layout gets one generated helper.
 value_compared = (type:addr @state:State):>bool => (array_valued(type state) or object_valued(type @state)) and not string_type(type state) and views.container_entry_types(type state.type_nodes) is? none
-aggregate_equality = (node:hir.FunctionCall negated:bool @state:State):>addr => {
+aggregate_equality = (node:hir.FunctionCall negated:bool @state:State snapshot_left:bool=false):>addr => {
     let prefix:array<addr>=[]
     let owners:array<OwnedLocal>=[]
     let values:array<addr>=[]
     loop argument in node.pos_args {
         let value=snapshot(expression(argument @state) @prefix @state)
-        if temporary_owner(argument @state) {owners.push(OwnedLocal[value hir.node_at(state.input.nodes argument).value_type])}
+        let original=hir.node_at(state.input.nodes argument)
+        if temporary_owner(argument @state) {owners.push(OwnedLocal[value original.value_type])}
+        else if values.length =? 0 and snapshot_left {
+            # Preserve the left value before a later expression can mutate or
+            # replace its owner. Merely saving its address is not a snapshot.
+            let kind=copy_kind(original.value_type @state)
+            if kind isnt? none {note_copy(kind original.value_type 'snapshotted before comparison' 'the right operand may change the value being read' original @state)}
+            value=snapshot(copy_value(value original.value_type original @state) @prefix @state)
+            owners.push(OwnedLocal[value original.value_type])
+        }
         values.push(value)
     }
     $runtime_assert values.length =? 2 and node.pos_args.length =? 2

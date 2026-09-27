@@ -3191,6 +3191,8 @@ class _Lowerer(
                 selected_method_index=None,
             )
             self._keyed_nodes_keepalive.append(transformed)
+            if id(node) in self.borrow_plan.comparison_snapshots:
+                self.borrow_plan.comparison_snapshots.add(id(transformed))
             if id(node) in self.source_intrinsic_calls:
                 self.source_intrinsic_calls.add(id(transformed))
             borrowed = self.forwarded_values.get(id(node), ())
@@ -5889,11 +5891,15 @@ class _Lowerer(
                     ))
                     eager_args.append(target)
                 call = replace(call, pos_args=eager_args)
-            return self._finish_scalar_call_place_writebacks(
-                call,
-                prelude,
-                place_postlude,
-            )
+            prelude, value = self._finish_scalar_call_place_writebacks(call, prelude, place_postlude)
+            if place_postlude and id(node) not in self.consumed_string_values and not self.lowering_module_startup:
+                # Capture the result before writing back places, then track
+                # its ownership just like a call without place arguments.
+                if self._is_named_array_call(node):
+                    return self._array_result_temporary(node, value, prelude)
+                if self._is_owned_string_result(node):
+                    return self._string_result_temporary(node, value, prelude)
+            return prelude, value
         if isinstance(node, (hir.ValueCast, hir.Transmute)):
             if isinstance(node, hir.ValueCast) and ty.fixed_integer_layout(node.type) is not None:
                 enum = self._enum_of(node.expr)

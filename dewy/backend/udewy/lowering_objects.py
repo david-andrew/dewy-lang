@@ -675,8 +675,24 @@ class _ObjectLowering:
         loc = node.loc
         prelude: list[hir.AST] = []
         values = []
-        for arg in node.pos_args:
-            arg_prelude, value = self._extract_expression(arg)
+        snapshots = set()
+        for index, arg in enumerate(node.pos_args):
+            shape = ty.structural_base(arg.type)
+            snapshot = index == 0 and id(node) in self.borrow_plan.comparison_snapshots
+            if snapshot and isinstance(shape, ty.ArrayType) and not self._array_expression_owns_fresh_storage(arg):
+                self._note_copy('array', arg.type, 'snapshotted before comparison',
+                                'the right operand may change the value being read', arg.loc)
+                arg_prelude, value = self._clone_dynamic_array_value(arg, shape, arena=True)
+                arg_prelude, value = self._array_result_temporary(replace(arg, type=shape), value, arg_prelude)
+                snapshots.add(index)
+            elif snapshot and isinstance(shape, ty.ObjectType) and not self._object_expression_owns_fresh_storage(arg):
+                self._note_copy('record', arg.type, 'snapshotted before comparison',
+                                'the right operand may change the value being read', arg.loc)
+                arg_prelude, value = self._clone_object_value(arg, shape)
+                arg_prelude, value = self._object_statement_temporary(arg_prelude, value, shape, arg.loc)
+                snapshots.add(index)
+            else:
+                arg_prelude, value = self._extract_expression(arg)
             prelude.extend(arg_prelude)
             held = hir.ExpressedIdentifier(loc, 'int64', self._new_result_name())
             prelude.append(hir.Declare(loc, ty.VOID_TYPE, 'let', held.name, 'int64', replace(value, type='int64')))
@@ -685,8 +701,8 @@ class _ObjectLowering:
         if isinstance(shape, ty.ArrayType):
             # A local may keep its elements in the frame without a descriptor.
             parts = []
-            for arg, value in zip(node.pos_args, values):
-                if self._array_use_representation(arg) is not None:
+            for index, (arg, value) in enumerate(zip(node.pos_args, values)):
+                if index not in snapshots and self._array_use_representation(arg) is not None:
                     parts.extend([value, self._int64_literal(loc, self._raw_array_length(arg))])
                 else:
                     parts.extend(self._array_parts(value, loc))
@@ -756,6 +772,9 @@ class _ObjectLowering:
     def _value_equal_update(self, left: hir.AST, right: hir.AST, type_: ty.Type, same: hir.AST, loc: Span) -> list[hir.AST]:
         """`same = left =? right` for two values of `type_` (cells and inline records by address)."""
         statements: list[hir.AST] = []
+        shape = ty.structural_base(type_)
+        if ty.dict_key_value(shape) is not None or ty.set_element(shape) is not None:
+            self._target_error(hir.Void(loc, ty.VOID_TYPE), 'value equality of a dictionary or set')
         if self._is_string_valued(type_):
             a = hir.ExpressedIdentifier(loc, 'int64', self._new_result_name())
             b = hir.ExpressedIdentifier(loc, 'int64', self._new_result_name())
@@ -764,8 +783,6 @@ class _ObjectLowering:
             prelude, equal = self._extract_string_equal(hir.StringEqual(loc, 'bool', replace(a, type=type_), replace(b, type=type_)))
             statements.extend(prelude)
         elif ty.enum_members(type_) is None and (self._value_compared(type_) or self._field_union_members(type_) is not None):
-            if ty.dict_key_value(ty.structural_base(type_)) is not None:
-                self._target_error(hir.Void(loc, ty.VOID_TYPE), 'value equality of a dictionary or set')
             equal = self._value_equal_call(left, right, type_, loc)
         else:
             operand = left.type
@@ -803,11 +820,12 @@ class _ObjectLowering:
                     steps.append(guarded(self._value_equal_update(self._value_load(address_a, field.type, loc),
                                                                   self._value_load(address_b, field.type, loc), field.type, same, loc)))
                 return guarded(steps)
-            if self._descendant_extra_fields(shape):
-                # Equal values share their brand; each brand compares its own fields.
+            _size, offsets = self._object_layout(shape, void)
+            if self.BRAND_FIELD in offsets:
+                # Distinct brands are unequal even when neither adds fields.
                 brand = self._int64_comparison('__eq__', self._brand_word_load(a, shape, loc), self._brand_word_load(b, shape, loc), loc)
                 dispatched = self._record_dispatch(a, shape, loc, fields)
-                return [hir.Assign(loc, ty.VOID_TYPE, same, '=', brand), guarded(dispatched)]
+                return [hir.Assign(loc, ty.VOID_TYPE, same, '=', brand), guarded(dispatched or [fields(shape)])]
             return [fields(shape)]
         members = self._field_union_members(type_)
         assert members is not None

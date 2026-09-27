@@ -822,6 +822,15 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         }
         if node isnt? hir.FunctionCall continue
         let callee=hir.node_at(nodes node.func)
+        if callee is? hir.ExpressedIdentifier and callee.name in? ['__eq__' '__ne__'] and (callee.binding_id is? none or callee.binding_id not in? plan.source_bindings) and node.pos_args.length =? 2 {
+            let source=route(peel_argument(node.pos_args[0] nodes type_nodes) nodes)
+            if source is? none or not stable_owner(source stable stable_parameters) {
+                if source isnt? none and source.binding in? places {source=none}
+                # Comparisons have the same evaluation-order obligation as
+                # indexing: a later operand must not change an earlier value.
+                if expression_conflicts(node.pos_args[1] source nodes plan dirty) {array_snapshots.push(id)}
+            }
+        }
         let direct=captures.resolve(node.func node.selected_method_index plan nodes)
         let targets:array<addr> | none = if direct is? none indirect.get(node.func) else [direct]
         if targets is? none {targets=effects.direct_targets(node analysis nodes)}
