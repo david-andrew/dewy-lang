@@ -1,0 +1,8 @@
+main=():>int64=>{
+    let bytes:array<uint8>=[97 98 99]
+    let written=$lend(bytes) {
+        let address=__load_i64__(bytes)
+        __syscall3__(1 1 address bytes.length)
+    }
+    return if written=?3 42 else 1
+}

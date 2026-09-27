@@ -17,7 +17,7 @@ all source shapes or the complete integration matrix have been certified.
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
 | 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Conditional element routes, transfers through hooked wrappers, resource sort/key ownership and other unsupported resource operations; captured/exposed storage lifetimes. |
-| 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | Approved `$lend` and bulk I/O; owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
+| 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | Writable `$lend` and bulk I/O; owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | User-written polymorphic rows with callback-local place subjects; more precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
 | 1.4 Settled surface decisions | Type-directed juxtaposition (including numeric RHS), reserved names, unit nominals, uniform `set.push`, digit-label normalization, array/record value equality. | Final integration checks and documentation consistency. Keep the expressly open decisions below separate. |
@@ -5059,3 +5059,28 @@ hosted string/ownership tests passed; four native-built driver groups passed
 on both execution backends (including scoped-read tests being developed in
 parallel). Fresh hosted-built driver and fixed-point verification continue
 at the next checkpoint. Phase 1 remains open.
+
+
+## Checked read-only storage loans (2026-09-27)
+
+Both compilers accept the approved `$lend(bytes) { ... }` form for named byte
+arrays. A finite provenance analysis tracks addresses through scalar locals,
+assignments and loop backedges; escaping results, enclosing stores, captures,
+owner mutations and unmodeled callees are rejected. Raw loads and the modeled
+synchronous write syscall are permitted. Only validated address extractions
+receive the nonescaping marker; other raw operations keep their existing
+exposure semantics. Native builtin identities are checked through the binding
+registry, not just their spelling. The native HIR cache format is version 8.
+Hosted fixed arrays return their existing data address, while descriptor-based
+arrays load the data field; neither checked path pins the buffer.
+
+Validation: 15 hosted acceptance/rejection tests passed, and the native-built
+driver passed the corresponding paired cases on x86-64 and C. The repeated
+read kernel retains zero bytes and preserves later independent mutation.
+A three-generation native build passed its execution checks and produced
+byte-identical final Dewy/µDewy generations at
+`../dewy-build-artifacts/phase1-scoped-reads`. The final two builds took 50/53
+seconds alongside other tests; these are not isolated performance measurements.
+The fresh hosted-built driver check is still running. Library adoption,
+writable reservations/length commits and bulk reads remain next; the read-only
+subset does not close the storage item or Phase 1.

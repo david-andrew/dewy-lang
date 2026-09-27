@@ -840,6 +840,8 @@ class FunctionCall(AST):
     proof: bool = field(default=False, kw_only=True)
     # Ownership inserted a custom copy where the source remains live.
     implicit_copy: bool = field(default=False, kw_only=True)
+    # Granted only by scoped-storage checking for a canonical raw read.
+    scoped_read: bool = field(default=False, kw_only=True)
     #TODO: spread args
 
 @dataclass(slots=True, weakref_slot=True)

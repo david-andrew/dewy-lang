@@ -5347,6 +5347,7 @@ encode_Value268=(value:Value268 @out:bytes.Writer):>void=>{
     encode_Value36(value.integer_operation @out)
     encode_Value32(value.proof @out)
     encode_Value32(value.implicit_copy @out)
+    encode_Value32(value.scoped_read @out)
 }
 decode_Value268=(@input:bytes.Reader):>Value268|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -5368,7 +5369,9 @@ decode_Value268=(@input:bytes.Reader):>Value268|CacheMiss=>{
     if field_7 is? CacheMiss return field_7
     let field_8=decode_Value32(@input)
     if field_8 is? CacheMiss return field_8
-    return Value268[loc=field_0 value_type=field_1 func=field_2 pos_args=field_3 kw_args=field_4 selected_method_index=field_5 integer_operation=field_6 proof=field_7 implicit_copy=field_8]
+    let field_9=decode_Value32(@input)
+    if field_9 is? CacheMiss return field_9
+    return Value268[loc=field_0 value_type=field_1 func=field_2 pos_args=field_3 kw_args=field_4 selected_method_index=field_5 integer_operation=field_6 proof=field_7 implicit_copy=field_8 scoped_read=field_9]
 }
 
 encode_Value269=(value:Value269 @out:bytes.Writer):>void=>{

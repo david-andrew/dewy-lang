@@ -31,7 +31,7 @@ const prefix_symbols = set['@' '~' 'not' 'no' '`' '+' '-' 'type of']
 const postfix_symbols = set['`' '?' 'or_throw']
 const comparisons = set['=?' '>?' '<?' '>=?' '<=?' 'in?' 'is?' 'isnt?']
 const partial_symbols = comparisons | set['.' 'as' 'transmute' '*' '/' '//' '^' '%' '\\']
-const directives = set['assert' 'unsafe_assume' 'runtime_assert' 'expect' 'fail' 'abstract' 'breakpoint' 'allocator']
+const directives = set['assert' 'unsafe_assume' 'runtime_assert' 'expect' 'fail' 'abstract' 'breakpoint' 'allocator' 'lend']
 const flows = set['if' 'loop' 'match']
 const no_stops:set<string> = set[]
 
@@ -405,7 +405,7 @@ collect_directive = (items:array<addr> start:addr stop:set<string> srcfile:SrcFi
     if tag isnt? compound.Metatag return compound.lexical_error(srcfile tag.loc 'Expected directive')
     let i:addr = start+1
     if tag.name =? 'breakpoint' return Collected[compound.append_node(@nodes Directive[loc=tag.loc name=tag.name]) i]
-    if tag.name =? 'allocator' return collect_allocator(items start stop srcfile @nodes)
+    if tag.name in? ['allocator' 'lend'] return collect_allocator(items start stop srcfile @nodes)
     let ends_here:bool = i >=? items.length
     if i <? items.length {
         let next = compound.node_at(nodes items[i])
@@ -456,15 +456,15 @@ collect_allocator = (items:array<addr> start:addr stop:set<string> srcfile:SrcFi
     if tag isnt? compound.Metatag return compound.lexical_error(srcfile tag.loc 'Expected directive')
     let i:addr = start+1
     if i <? items.length and compound.node_at(nodes items[i]) is? Juxtapose { i += 1 }
-    if i >=? items.length return compound.lexical_error(srcfile tag.loc '`$allocator` takes its allocator in parentheses')
+    if i >=? items.length return compound.lexical_error(srcfile tag.loc "`${tag.name}` takes its storage argument in parentheses")
     let group = compound.node_at(nodes items[i])
-    if group isnt? compound.Block or group.delims not=? '()' return compound.lexical_error(srcfile tag.loc '`$allocator` takes its allocator in parentheses')
+    if group isnt? compound.Block or group.delims not=? '()' return compound.lexical_error(srcfile tag.loc "`${tag.name}` takes its storage argument in parentheses")
     let group_id = items[i]
     i += 1
     if i <? items.length and compound.node_at(nodes items[i]) is? Juxtapose { i += 1 }
-    if i >=? items.length return compound.lexical_error(srcfile group.loc '`$allocator(...)` needs an expression after it')
+    if i >=? items.length return compound.lexical_error(srcfile group.loc "`${tag.name}(...)` needs an expression after it")
     let next=compound.node_at(nodes items[i])
-    if is_stop(next stop) or next is? compound.Semicolon return compound.lexical_error(srcfile group.loc '`$allocator(...)` needs an expression after it')
+    if is_stop(next stop) or next is? compound.Semicolon return compound.lexical_error(srcfile group.loc "`${tag.name}(...)` needs an expression after it")
     let collected=collect_expr(items i stop srcfile @nodes)
     if collected is? compound.TokenError return collected
     let body=compound.node_at(nodes collected.id)

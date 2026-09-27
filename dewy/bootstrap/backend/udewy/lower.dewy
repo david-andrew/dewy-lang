@@ -740,7 +740,7 @@ expression = (id:addr @state:State):>addr => {
             # Builtins and intrinsics have already converted their operands. Their
             # concrete runtime signature records the selected word width;
             # the original overload set has no runtime representation.
-            let raw=callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') or callee.name in? ['__load__' '__store__']
+            let raw=not node.scoped_read and (callee.name.startswith('__load_') or callee.name.startswith('__store_') or callee.name.startswith('__syscall') or callee.name in? ['__load__' '__store__'])
             # An operand that owns a fresh aggregate (a forwarded field, a
             # call result) is only read by the intrinsic: release it after.
             let prefix:array<addr>=[]

@@ -45,6 +45,15 @@ class _ArraySharing:
             return None
         if not any(self._pin_type(arg.type) for arg in node.pos_args):
             return None
+        if node.scoped_read:
+            argument = node.pos_args[0]
+            prefix, value = self._extract_expression(argument)
+            # Hosted fixed arrays may be raw frame/static data; native arrays
+            # always use descriptors. A loan obtains the actual data address
+            # in either representation, without creating a pinned snapshot.
+            if self._array_use_representation(argument) is not None:
+                return prefix, replace(value, type='int64')
+            return prefix, self._intrinsic_call('__load_i64__', [value], 'int64', node.loc)
         prefix, arguments = [], []
         for argument in node.pos_args:
             before, value = self._extract_expression(argument)

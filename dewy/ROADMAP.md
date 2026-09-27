@@ -813,6 +813,14 @@ while mutable entry routes detach shared dictionary/payload storage and
 publish replacement handles back to their slots. Other entry writes remain
 conservative; lifetimes for captured or exposed owners remain pending.
 
+Read-only `$lend(bytes) { ... }` now checks scoped raw access to named byte
+arrays in both compilers. It permits address extraction, scalar local work,
+raw reads and modeled synchronous writes without permanently pinning the
+owner. Address escape, owner mutation and unknown callees remain rejected.
+The repeated-read kernel and native three-generation fixed point pass.
+Library adoption and the approved writable reservation/length-commit form
+remain required for the bulk-I/O checkpoint.
+
 ### 1.2 The proof engine
 
 Today the refinement system is an interval analysis plus a growing set of

@@ -1,0 +1,20 @@
+make=(n:int64):>array<uint8>=>{
+    let bytes:array<uint8>=[]
+    loop i in 0.. and i <? n and i <? 1024 {bytes.push(42)}
+    return bytes
+}
+read=(bytes:array<uint8>):>int64=>$lend(bytes) {
+    let address=__load_i64__(bytes)
+    __load_u8__(address) as int64
+}
+main=():>int64=>{
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if read(make(16)) not=?42 return 1}
+    $runtime_assert _arena_live_bytes =? before
+    let bytes=make(4)
+    let saved=bytes
+    if read(bytes) not=?42 return 2
+    if bytes.length=?0 return 3
+    bytes[0]=7
+    return if saved.length>?0 and saved[0]=?42 42 else 4
+}

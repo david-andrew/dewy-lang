@@ -242,3 +242,32 @@ The compiler can borrow a stable source or transfer an owner at its last use;
 otherwise it needs a valid copy. Move-only elements can therefore be read
 without requiring a copy hook. Dictionary mutation during iteration remains
 rejected by the existing container-stability check.
+
+
+## Scoped raw reads
+
+`$lend(bytes) { ... }` lends a named byte array's storage for one expression.
+The existing `__load_i64__(bytes)` operation obtains the element address, and
+`bytes.length` remains readable. The owner stays alive through the expression;
+the checked extraction does not permanently pin its storage.
+
+```dewy
+let written = $lend(bytes) {
+    let address = __load_i64__(bytes)
+    __syscall3__(1 fd address bytes.length)
+}
+```
+
+The initial implementation accepts scalar local work, raw word reads, and
+Linux x86-64 synchronous `write` (also through the C backend). An address or
+anything derived from it cannot escape through a result, outer assignment,
+aggregate, closure or unmodeled call. Assignments and loop backedges propagate
+address origins to a fixed point. The owner cannot be mutated, replaced or
+passed elsewhere inside the expression. Unknown operations are rejected;
+the compiler grants unpinned access only after checking the whole body.
+Unscoped raw exposure retains the existing pinning rule.
+
+Writable `$lend(@bytes reserve=n)` and `bytes.set_length(n)` are approved
+extensions still being implemented; they are not part of this read-only
+checkpoint. Strings and arbitrary aggregate owners are also outside this
+initial implementation.

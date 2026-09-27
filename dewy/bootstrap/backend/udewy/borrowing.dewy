@@ -176,13 +176,13 @@ exposed_roots = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table)
                 let direct=captures.resolve(node.func node.selected_method_index plan nodes)
                 let raw=false
                 if direct is? none and callee is? hir.ExpressedIdentifier {
-                    let memory=callee.name.startswith('__load_') or callee.name.startswith('__store_')
+                    let memory=not node.scoped_read and (callee.name.startswith('__load_') or callee.name.startswith('__store_'))
                     let unknown=(callee.binding_id isnt? none and callee.binding_id in? plan.source_bindings) or (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix)
                     raw=memory or unknown or callee.name.startswith('__syscall')
                 } else if direct is? none and callee is? hir.ArrayMethod {
                     raw=callee.name =? 'sort' and 'key' in? node.kw_args
                 } else if direct is? none and callee isnt? hir.FunctionLiteral {raw=true}
-                if raw {
+                if raw and not node.scoped_read {
                     loop argument in arguments(node) {
                         let value=hir.node_at(nodes argument)
                         expose((if value is? hir.Place value.target else argument) @exposed)
@@ -290,7 +290,7 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
                         if shares_storage(node target plan nodes) {shared.push(target)}
                     }
                 } else if callee is? hir.ExpressedIdentifier {
-                    let memory=callee.name.startswith('__load_') or callee.name.startswith('__store_')
+                    let memory=not node.scoped_read and (callee.name.startswith('__load_') or callee.name.startswith('__store_'))
                     let unknown=(callee.binding_id isnt? none and callee.binding_id in? plan.source_bindings) or (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix)
                     if unknown or callee.name.startswith('__syscall') {opaque.push(id) exposes_storage.push(id)}
                     else if memory {

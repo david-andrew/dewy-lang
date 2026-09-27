@@ -677,6 +677,8 @@ class _EffectAnalyzer:
         a caller borrowing against that summary sees the exposure at this
         boundary rather than through a whole-call-graph bit. Every other
         callee, resolved or not, is a value boundary that decides for itself."""
+        if call.scoped_read:
+            return False
         function = _unwrap(call.func)
         if not isinstance(function, hir.ExpressedIdentifier) or function.binding_id is not None:
             return False

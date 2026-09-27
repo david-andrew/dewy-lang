@@ -70,6 +70,7 @@ word_type = (id:addr type_nodes:types.Table):>bool => {
 # than through a whole-call-graph bit. Every other callee, resolved or not,
 # is a value boundary that decides for itself.
 raw_callee = (call:hir.FunctionCall nodes:array<hir.AST>):>bool => {
+    if call.scoped_read return false
     let function = hir.node_at(nodes unwrap(call.func nodes))
     if function isnt? hir.ExpressedIdentifier or function.binding_id isnt? none return false
     return function.name.startswith('__load_') or function.name.startswith('__store_') or function.name.startswith('__syscall') or function.name in? ['__load__' '__store__']

@@ -5424,6 +5424,8 @@ def tcr_assert(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
         return _tcr_breakpoint(ast, ctx=ctx)
     if ast.name == 'allocator':
         return _tcr_allocator(ast, ctx=ctx)
+    if ast.name == 'lend':
+        return _tcr_lend(ast, ctx=ctx)
     if ast.name == 'abstract':
         user_error(
             ctx.srcfile,
@@ -5549,6 +5551,21 @@ def _relocated(node: object, loc: Span) -> object:
         if field_.init and field_.name not in ('type', 'annotation')
     }
     return replace(node, **changes)
+
+
+def _tcr_lend(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:
+    from . import scoped_storage
+    assert isinstance(ast.condition, p0.Block) and isinstance(ast.message, p0.Block)
+    arguments, keywords, _ = parse_call_arguments(ast.condition, ctx=ctx)
+    if len(arguments) != 1 or keywords:
+        user_error(ctx.srcfile, '`$lend` requires one storage argument',
+                   Pointer(span=ast.condition.loc, message='write `$lend(bytes) { ... }`'))
+    owner = arguments[0]
+    if isinstance(owner, hir.Place):
+        not_implemented(ctx.srcfile, owner.loc, 'writable scoped storage')
+    body = tcr_block(ast.message, ctx=ctx)
+    scoped_storage.validate_read(owner, body, ctx.srcfile, target=ctx.target)
+    return body
 
 
 def _tcr_allocator(ast: p0.AssertDirective, *, ctx: Context) -> hir.AST:

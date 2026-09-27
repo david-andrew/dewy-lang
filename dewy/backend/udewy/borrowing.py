@@ -197,6 +197,8 @@ def _word_value(type_: ty.Type) -> bool:
 
 def is_raw_call(node: hir.FunctionCall, plan: Plan, source_bindings: set[int]) -> bool:
     """A call that may expose an aggregate argument's storage (borrowing.dewy `raw`)."""
+    if node.scoped_read:
+        return False
     callee = node.func
     if isinstance(callee, hir.ExpressedIdentifier):
         if callee.binding_id is not None and callee.binding_id in plan.named:

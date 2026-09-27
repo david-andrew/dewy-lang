@@ -1,0 +1,163 @@
+from reporting import Error, Pointer, SrcFile
+import p"hir.dewy" as hir
+import p"ty.dewy" as types
+import p"type_queries.dewy" as views
+import p"context.dewy" as contexts
+import p"bindings.dewy" as bindings
+
+# A lowering permission for checked, scoped reads, not a general exemption
+# for raw code. Address origins flow through scalar locals to a fixed point.
+# Unknown calls, captures and escaping results cannot consume the loan.
+const SCALARS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
+const LOADS:set<string>=set['__load_i8__' '__load_u8__' '__load_i16__' '__load_u16__' '__load_i32__' '__load_u32__' '__load_i64__' '__load_u64__']
+Input:type=const [owner:addr root:addr nodes:array<hir.AST> types:types.Table registry:bindings.Registry source:SrcFile target:string]
+Scan:type=[locals:set<addr>=set[] addresses:set<addr>=set[] extractions:array<addr>=[] problem:Error?=none]
+reject=(id:addr detail:string input:Input @scan:Scan):>void=>{
+    if scan.problem isnt? none return
+    scan.problem=Error[srcfile=input.source title='cannot prove scoped storage access' pointers=[Pointer[span=hir.node_at(input.nodes id).loc message=detail] Pointer[span=hir.node_at(input.nodes input.owner).loc message='storage is lent here']]]
+}
+intrinsic_name=(node:hir.FunctionCall input:Input):>string?=>{
+    let callee=hir.node_at(input.nodes node.func)
+    if callee is? hir.ExpressedIdentifier and node.kw_args.length =? 0 {
+        if callee.binding_id is? none return callee.name
+        let binding=bindings.find_binding(input.registry callee.binding_id)
+        if binding isnt? none and binding.builtin return callee.name
+    }
+    return none
+}
+extraction=(node:hir.AST input:Input):>bool=>{
+    if node isnt? hir.FunctionCall or intrinsic_name(node input) not=? '__load_i64__' or node.pos_args.length not=? 1 return false
+    let argument=hir.node_at(input.nodes node.pos_args[0])
+    return argument is? hir.ExpressedIdentifier and argument.binding_id =? input.root
+}
+derived=(id:addr input:Input addresses:set<addr>):>bool=>{
+    let node=hir.node_at(input.nodes id)
+    if node is? hir.Declare|hir.Assign|hir.Void|hir.Break|hir.Continue return false
+    if node is? hir.Block {
+        loop item in node.items {
+            let type=types.node_at(input.types hir.node_at(input.nodes item).value_type)
+            if not types.is_primitive(type 'void') and not types.is_primitive(type 'never') and derived(item input addresses) return true
+        }
+        return false
+    }
+    if extraction(node input) return true
+    if node is? hir.ExpressedIdentifier return node.binding_id isnt? none and node.binding_id in? addresses
+    if node is? hir.FunctionCall {
+        let name=intrinsic_name(node input)
+        if name isnt? none and (name in? LOADS or name =? '__syscall3__') return false
+    }
+    loop child in hir.children(node) {if derived(child input addresses) return true}
+    return false
+}
+scalar=(id:addr input:Input):>bool=>{
+    let type=types.node_at(input.types types.strip_refinement(id input.types))
+    return type is? types.Primitive|types.IntegerLiteralType
+}
+visit=(id:addr input:Input @scan:Scan result:bool=false):>void=>{
+    if scan.problem isnt? none return
+    let node=hir.node_at(input.nodes id)
+    if result and derived(id input scan.addresses) {reject(id 'an address derived from lent storage cannot leave its scope' input @scan) return}
+    if node is? hir.Block {
+        loop item in node.items {
+            let type=types.node_at(input.types hir.node_at(input.nodes item).value_type)
+            visit(item input @scan result=not types.is_primitive(type 'void') and not types.is_primitive(type 'never'))
+        }
+        return
+    }
+    if node is? hir.FunctionCall {
+        let name=intrinsic_name(node input)
+        if extraction(node input) {scan.extractions.push(id) return}
+        if name =? '__syscall3__' {
+            let args=node.pos_args
+            if input.target not in? ['x86_64' 'c'] or args.length not=? 4 {reject(id 'only synchronous write consumes a scoped address in this initial subset' input @scan) return}
+            let number=hir.node_at(input.nodes args[0])
+            if number isnt? hir.Integer or number.value not=? 1 {reject(id 'only synchronous write consumes a scoped address in this initial subset' input @scan) return}
+            loop index in [0 1 3] {
+                $runtime_assert index >=? 0 and index <? args.length
+                if derived(args[index] input scan.addresses) {reject(id 'only synchronous write consumes a scoped address in this initial subset' input @scan) return}
+            }
+        } else if name is? none or (name not in? SCALARS and name not in? LOADS) {
+            reject(id 'this call has no checked scoped-storage lifetime' input @scan) return
+        }
+        loop argument in node.pos_args {visit(argument input @scan)}
+        return
+    }
+    if node is? hir.ExpressedIdentifier {
+        if node.binding_id =? input.root {reject(id 'use the lent owner only to obtain its address or read its length' input @scan)}
+        else if not scalar(node.value_type input) {reject(id 'this subset permits scalar local work while storage is lent' input @scan)}
+        return
+    }
+    if node is? hir.ArrayLength {
+        let array=hir.node_at(input.nodes node.array)
+        if array is? hir.ExpressedIdentifier and array.binding_id =? input.root return
+        reject(id "only the lent owner's length is available in this raw scope" input @scan) return
+    }
+    if node is? hir.Declare {
+        if node.view or not scalar(hir.node_at(input.nodes node.expr).value_type input) {reject(id 'a raw scope may only declare scalar local values' input @scan) return}
+        visit(node.expr input @scan) return
+    }
+    if node is? hir.Assign {
+        let target=hir.node_at(input.nodes node.target)
+        if target isnt? hir.ExpressedIdentifier or target.binding_id is? none or target.binding_id not in? scan.locals {reject(id 'a raw scope may only assign its own scalar locals' input @scan) return}
+        visit(node.value input @scan) return
+    }
+    if node is? hir.Return {
+        if node.item isnt? none {visit(node.item input @scan result=true)}
+        return
+    }
+    if node is? hir.Integer|hir.Bool|hir.Void|hir.Break|hir.Continue|hir.NoneValue return
+    if node is? hir.Flow|hir.IfArm|hir.LoopArm|hir.ShortCircuit|hir.Suppress|hir.ValueCast|hir.RepresentationCast|hir.Transmute|hir.Obligation {
+        loop child in hir.children(node) {visit(child input @scan)}
+        return
+    }
+    reject(id 'this operation is outside the initial read-only raw-scope subset' input @scan)
+}
+validate_read=(owner_id:addr body:addr source:SrcFile @session:contexts.Session):>Error?=>{
+    let owner_node=hir.node_at(session.hir owner_id)
+    let shape=types.node_at(session.types views.structural_base(owner_node.value_type session.types))
+    let valid=false
+    if shape is? types.ArrayType {valid=types.is_primitive(types.node_at(session.types types.strip_refinement(shape.element session.types)) 'uint8')}
+    if owner_node isnt? hir.ExpressedIdentifier or owner_node.binding_id is? none or not valid return Error[srcfile=source title='cannot prove scoped storage access' pointers=[Pointer[span=owner_node.loc message='this read-only loan currently requires a named byte array']]]
+    let input=Input[owner=owner_id root=(owner_node.binding_id) nodes=session.hir types=session.types registry=session.registry source=source target=session.target]
+    let scan=Scan[]
+    let nodes:array<addr>=[]
+    let pending:array<addr>=[body]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.push(id) nodes.push(id)
+        let node=hir.node_at(input.nodes id)
+        if node is? hir.Declare and node.binding_id isnt? none {scan.locals.push(node.binding_id)}
+        hir.push_children(node @pending)
+    }
+    # Branches and backedges retain every possible origin. The finite set
+    # grows until stable; a traversal budget never grants permission.
+    let changed=true
+    loop changed {
+        changed=false
+        loop id in nodes {
+            let node=hir.node_at(input.nodes id)
+            let binding:addr?=none
+            let value:addr?=none
+            if node is? hir.Declare {binding=node.binding_id value=node.expr}
+            else if node is? hir.Assign {
+                let target=hir.node_at(input.nodes node.target)
+                if target is? hir.ExpressedIdentifier {binding=target.binding_id value=node.value}
+            }
+            if binding isnt? none and value isnt? none and binding not in? scan.addresses and derived(value input scan.addresses) {
+                scan.addresses.push(binding) changed=true
+            }
+        }
+    }
+    visit(body input @scan result=true)
+    if scan.problem isnt? none return scan.problem
+    # No partially checked permission can reach lowering.
+    loop id in scan.extractions {
+        let node=hir.node_at(session.hir id)
+        $runtime_assert node is? hir.FunctionCall and id <? session.hir.length
+        node.scoped_read=true
+        session.hir[id]=node
+    }
+    return none
+}

@@ -193,7 +193,7 @@ class Chain(t1.InedibleToken):
 # condition from the message — so the comma's operator precedence (tighter
 # than the comparisons) never applies to it. `$assert pair =? 1, 2` therefore
 # needs `$assert pair =? (1, 2)`, exactly as a form's argument would elsewhere.
-assertion_directives: set[str] = {'assert', 'unsafe_assume', 'runtime_assert', 'expect', 'fail', 'abstract', 'breakpoint', 'allocator'}   # `$fail [message]` takes no condition; `$abstract type of …` marks a mint; `$breakpoint` stands alone
+assertion_directives: set[str] = {'assert', 'unsafe_assume', 'runtime_assert', 'expect', 'fail', 'abstract', 'breakpoint', 'allocator', 'lend'}   # `$fail [message]` takes no condition; `$abstract type of …` marks a mint; `$breakpoint` stands alone
 
 @dataclass
 class Directive(t1.InedibleToken):
@@ -905,7 +905,7 @@ def collect_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[
     if metatag.name == "breakpoint":
         # `$breakpoint` takes nothing: whatever follows is the next statement
         return Directive(metatag.loc, metatag, None), i
-    if metatag.name == "allocator":
+    if metatag.name in {"allocator", "lend"}:
         return _collect_allocator_directive(tokens, start, stop_keywords=stop_keywords, ctx=ctx)
     ends_here = (
         i >= len(tokens)
@@ -976,16 +976,16 @@ def _collect_allocator_directive(tokens: list[t1.Token], start: int, *, stop_key
     if not isinstance(group, t1.Block) or group.kind != '()':
         Error(
             srcfile=ctx.srcfile,
-            title="`$allocator` takes its allocator in parentheses",
+            title=f"`${metatag.name}` takes its storage argument in parentheses",
             message="",
-            pointer_messages=[Pointer(span=metatag.loc, message="expected `(@arena)` after the metatag")],
-            hint="`$allocator(@scratch) { ... }`",
+            pointer_messages=[Pointer(span=metatag.loc, message="expected a parenthesized argument after the metatag")],
+            hint=f"`${metatag.name}(value) {{ ... }}",
         ).throw()
     i += 1
     if i < len(tokens) and isinstance(tokens[i], (Juxtapose, QJuxtapose)):
         i += 1
     if i >= len(tokens) or is_stop_keyword(tokens[i], stop_keywords) or isinstance(tokens[i], t1.Semicolon):
-        Error(srcfile=ctx.srcfile, title="`$allocator(...)` needs an expression after it",
+        Error(srcfile=ctx.srcfile, title=f"`${metatag.name}(...)` needs an expression after it",
               pointer_messages=[Pointer(span=group.loc, message="expected an expression or `{ ... }`")]).throw()
     body, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
     # Desugar to a scoped block so lifetime and escape rules stay identical
