@@ -42,6 +42,7 @@ from .lowering_shared import (
 
 
 from .lowering_sharing import _ArraySharing
+from . import borrowing
 
 
 class _ArrayLowering(_ArraySharing):
@@ -410,7 +411,12 @@ class _ArrayLowering(_ArraySharing):
                     if parameter is not None and parameter.binding_id is not None
                     else None
                 )
-                raw_kind = self._potential_raw_array_group(group)
+                # Storage representation does not decide value independence.
+                # A growable descriptor can be borrowed just like a fixed
+                # buffer, provided raw/ambient aliases cannot change it.
+                ambient = self.borrow_plan.ambient_writes.get(id(call), ())
+                nonlocal_source = storage_root_id in (
+                    self.borrow_plan.place_bindings | self.borrow_plan.captured_bindings)
                 safe = (
                     function is not None
                     and parameter_analysis is not None
@@ -421,10 +427,10 @@ class _ArrayLowering(_ArraySharing):
                     # A place into the same storage needs a snapshot; sibling
                     # record fields do not overlap merely by sharing a root.
                     and not any(self._storage_routes_overlap(storage_route, place) for place in place_routes)
-                    and (
-                        raw_kind is None
-                        or self._raw_array_group_uses_are_safe(group, raw_kind)
-                    )
+                    and storage_root_id not in self.borrow_plan.exposed_bindings
+                    and storage_root_id not in self.borrow_plan.globals
+                    and not (nonlocal_source and ambient)
+                    and self._array_later_arguments_stable(call, position, storage_route)
                 )
                 # The shared parameter proof is also consumed by public
                 # allocation contracts; use exactly that storage decision.
@@ -445,6 +451,19 @@ class _ArrayLowering(_ArraySharing):
                     )
                 )
         return boundary_uses
+
+    def _array_later_arguments_stable(self, call, position, storage_route):
+        # A place can refer to a global under a different binding identity.
+        # Later argument evaluation must preserve the earlier value too.
+        root, fields = storage_route
+        source = None if root in self.borrow_plan.place_bindings else borrowing.Route(root, fields)
+        after = False
+        for key, argument in [*enumerate(call.pos_args), *call.kw_args.items()]:
+            if after and borrowing.expression_conflicts(
+                    argument, source, self.borrow_plan, self.binding_by_semantic_id):
+                return False
+            after |= key == position
+        return True
 
     @staticmethod
     def _call_array_arguments(
@@ -507,71 +526,6 @@ class _ArrayLowering(_ArraySharing):
                 node = node.array
             else:
                 return self._array_argument_binding(node)
-
-    def _potential_raw_array_group(
-        self,
-        group: frozenset[int],
-    ) -> Literal['stack_data', 'static_words', 'static_bytes'] | None:
-        local_literals = [
-            declaration
-            for binding_id in group
-            if (
-                (declaration := self.array_declarations.get(binding_id)) is not None
-                and self.binding_by_semantic_id[binding_id].owner_function is not None
-                and isinstance(declaration.expr, hir.ArrayLiteral)
-                and isinstance(declaration.expr.type, ty.ArrayType)
-                and declaration.expr.type.length == len(declaration.expr.items)
-            )
-        ]
-        if len(local_literals) == 1:
-            return 'stack_data'
-        if len(group) != 1:
-            return None
-        binding_id = next(iter(group))
-        declaration = self.array_declarations.get(binding_id)
-        binding = self.binding_by_semantic_id.get(binding_id)
-        if (
-            declaration is None
-            or binding is None
-            or binding.owner_function is not None
-            or declaration.decltype != 'const'
-        ):
-            return None
-        array_type = declaration.annotation or declaration.expr.type
-        if not isinstance(array_type, ty.ArrayType):
-            return None
-        if (
-            isinstance(declaration.expr, hir.ArrayLiteral)
-            and declaration.expr.items
-            and self._static_word_array_is_stable(
-                declaration.expr,
-                array_type,
-            )
-        ):
-            return 'static_words'
-        if (
-            array_type.element == 'uint8'
-            and self._static_binary_array_initializer(declaration.expr, set())
-            is not None
-        ):
-            return 'static_bytes'
-        return None
-
-    def _raw_array_group_uses_are_safe(
-        self,
-        group: frozenset[int],
-        raw_kind: Literal['stack_data', 'static_words', 'static_bytes'],
-    ) -> bool:
-        uses = {
-            use
-            for binding_id in group
-            for use in self.array_uses.get(binding_id, set())
-        } - {'alias', 'call_boundary_pending'}
-        allowed: set[ArrayUse] = {'length', 'index_read'}
-        allowed.add('copy_call_boundary')
-        if raw_kind == 'stack_data':
-            allowed.add('index_write')
-        return uses <= allowed
 
     def _classify_array_representations(self) -> None:
         self.frame_array_bindings: set[int] = set()

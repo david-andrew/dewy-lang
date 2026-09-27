@@ -1,0 +1,19 @@
+$explicit_copies
+# A syscall that receives no storage cannot reach this argument. Its presence
+# must not force a caller snapshot of a separately proven read-only array.
+read=(values:array<int64>):>int64=>{
+    __syscall0__(39);
+    return values.length
+}
+forward=(values:array<int64>):>int64=>read(values)
+make=():>array<int64>=>{
+    let values:array<int64>=[]
+    loop i in [0..42) {values.push(i)}
+    return values
+}
+main=():>int64=>{
+    let values=make()
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..20) {if forward(values) not=?42 return 1}
+    return if _arena_allocated_bytes=?before 42 else 2
+}

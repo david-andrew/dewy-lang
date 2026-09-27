@@ -58,6 +58,8 @@ class Plan:
     globals: set[int] = field(default_factory=set)
     named: dict[int, hir.FunctionLiteral] = field(default_factory=dict)   # binding id -> literal it names
     exposed_bindings: set[int] = field(default_factory=set)
+    captured_bindings: set[int] = field(default_factory=set)
+    place_bindings: set[int] = field(default_factory=set)
     stable_bindings: set[int] = field(default_factory=set)
     stable_parameters: dict[int, ParameterEffects] = field(default_factory=dict)
     array_snapshots: set[int] = field(default_factory=set)             # id(Index) whose index may write the array
@@ -444,6 +446,8 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
     places: set[int] = set()
     for function in plan.functions.values():
         places |= function.places
+    plan.captured_bindings = captured
+    plan.place_bindings = places
     exposed = exposed_roots(plan, source_bindings)
     plan.exposed_bindings = exposed
     # A single place parameter can be stable too, provided no call can

@@ -527,6 +527,9 @@ class _Lowerer(
             create_scope=False,
             function_body=False,
         )
+        # Scope borrows need the captured-binding set discovery just collected.
+        captured = {binding.semantic_id for uses in self.captures.values() for _use, binding in uses if binding.semantic_id is not None}
+        self.borrow_plan = borrowing.analyze(self.root, captured, self.program_effects, set(self.binding_by_semantic_id))
         self._classify_array_representations()
         self._analyze_string_results()
         self._check_captures()
@@ -546,9 +549,6 @@ class _Lowerer(
                     binding = self.identifier_bindings.get(id(child))
                     if binding is not None and binding.kind in {'function', 'overload'}:
                         self.value_function_ids.update(id(function.literal) for function in self._resolve_callable(child))
-        # Scope borrows need the captured-binding set discovery just collected.
-        captured = {binding.semantic_id for uses in self.captures.values() for _use, binding in uses if binding.semantic_id is not None}
-        self.borrow_plan = borrowing.analyze(self.root, captured, self.program_effects, set(self.binding_by_semantic_id))
         self.user_main_takes_argv = any(
             isinstance(item, hir.Declare)
             and item.name == self.entry_name

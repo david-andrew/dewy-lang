@@ -144,9 +144,10 @@ shares_storage = (call:hir.FunctionCall target:addr plan:captures.Plan nodes:arr
 # Storage whose address may reach a raw memory operation, a system call, an
 # aggregate transmute, an unknown callee or a keyed sort inside its own
 # function. Only such roots can be changed behind a scope borrow: every
-# other callee receives the value by copy, or borrows it only when it is
-# transitively free of raw operations (see `arguments` below). Binding ids
-# are program-unique, so one set covers every function.
+# other callee receives the value by copy, or borrows it only when its
+# parameter is independently proven unexposed, uncaptured and read-only
+# (see the call-boundary proof below). Binding ids are program-unique,
+# so one set covers every function.
 exposed_roots = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table):>set<addr> => {
     let exposed:set<addr>=set[]
     let expose = (id:addr @exposed:set<addr>):>void => {
@@ -901,17 +902,17 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 let private_lifetime=pair.parameter isnt? none and pair.parameter not in? exposed and pair.parameter not in? captured and summary isnt? none and summary.escapes.length =? 0
                 if summary isnt? none and (direct not in? retaining or private_lifetime) {reclaim.push(pair.argument)}
                 else {kept.push(pair.argument)}
-                # A record borrows on the callee's own summary: raw exposure
-                # of its parameter is an escape there (effects.raw_callee),
-                # and each deeper boundary decides for itself. Arrays keep
-                # the call-graph rule: a callee's value share of a borrowed
-                # array made the caller detach on every later write.
-                let raw_blocked=direct in? opaque and not record_value(pair.argument nodes type_nodes)
-                if not raw_blocked and source isnt? none and source.binding not in? exposed and source.binding not in? plan.globals and (source.binding not in? places or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.push(pair.argument)}
+                # Raw operations elsewhere in the callee cannot reach a
+                # parameter whose own storage is unexposed and uncaptured.
+                # The caller's source must also be unexposed, non-global and
+                # free of conflicting argument/place writes below. This is
+                # separate from retaining a later private argument snapshot.
+                let raw_blocked=direct in? opaque and not record_value(pair.argument nodes type_nodes) and not private_lifetime
+                if not raw_blocked and source isnt? none and source.binding not in? exposed and source.binding not in? plan.globals and (source.binding not in? places and source.binding not in? captured or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.push(pair.argument)}
                 else {
                     rejected.push(pair.argument)
                     if source isnt? none {
-                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? exposed 'its storage has been exposed to raw operations' else if source.binding in? plan.globals 'it is a global' else if source.binding in? places and direct in? dirty 'it is a place argument of a call that writes' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
+                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? exposed 'its storage has been exposed to raw operations' else if source.binding in? plan.globals 'it is a global' else if (source.binding in? places or source.binding in? captured) and direct in? dirty 'ambient writes may reach its storage' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
                     }
                 }
                 position+=1

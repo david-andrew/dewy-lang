@@ -5291,3 +5291,31 @@ requires an owning field copy, and native `read_input(argv)` still falls back
 to a copy because unrelated raw I/O blocks the array borrow. Hosted accepts
 the latter without a source copy. These are follow-up proof/acceptance work,
 not reasons to add explicit copies merely to enable the directive.
+
+
+## Argument storage independent of unrelated raw work (2026-09-27)
+
+Native array arguments now use the particular parameter's nonescaping,
+uncaptured, unexposed lifetime proof even when its callee performs unrelated
+raw work. The source still needs independent storage: exposed/global owners,
+ambient writes through places/captures, and overlapping later arguments keep
+the snapshot. This enables `$explicit_copies` in `parser/parser.dewy` without
+adding explicit copies; standalone lowering passed in both compilers.
+
+The paired kernels exposed a hosted correctness gap: forwarding an array
+through a place could observe a callee's global mutation. Hosted array call
+planning now consults the existing exposure/ambient graph before selecting
+representations, and checks later argument evaluation too. Fixed versus
+growable storage no longer determines borrow safety; the actual representation
+still selects the descriptor adapter. Two duplicate classification helpers
+were removed. A grown local array now passes strict mode with zero allocation
+across repeated read-only calls.
+
+Nine focused hosted cases and their paired native group passed on both
+execution backends, including exposed aliases, ambient place writes, later
+argument writes and private-copy cleanup. The copy/clear kernel warms the
+source's persistent COW control block before checking per-call retention.
+The surrounding sharing/field-call/effects/review batch passed 39 tests; the
+final later-argument extension passed the focused group afterward. A fresh
+hosted-built route and fixed-point check remain for this batch. The manifest
+now has 223 cases. Phase 1 remains open.
