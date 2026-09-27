@@ -5012,3 +5012,29 @@ hosted-built warning route left outstanding at the prior checkpoint.
 The full 206-case parity run was stopped after 67 passing cases to prioritize
 a newly reproduced loop-budget correctness defect (see the next checkpoint).
 It is not recorded as a completed parity run. Phase 1 remains in progress.
+
+
+## Loop convergence is an obligation, not a budget (2026-09-27)
+
+The convergence audit found a correctness defect in both compilers: widening
+stopped after eight transfers even when its candidate was still changing,
+then used that candidate for proof. A 24-variable shift chain reproduced an
+accepted `$assert x0 =? 0` that becomes false on later iterations. Both
+compilers now discard the unstable loop-carried facts at budget exhaustion.
+Narrowing and final validation start from a safe unknown state, never from an
+unverified invariant. This may reject a proof requiring more precision; it
+cannot silently certify an unfinished analysis.
+
+A separate hosted defect omitted evaluation of a while condition during
+widening and narrowing. Writes made by the condition therefore failed to
+propagate through later loop iterations. Condition evaluation now participates
+in every transfer, as it already did in the native analyzer. A three-variable
+regression distinguishes this defect from the iteration budget.
+
+Validation so far: 46 hosted loop/qualifier regressions passed; three paired
+native driver groups passed, including ordinary while loops, single/multiple
+iterators, condition effects, negative proofs and runtime behavior. Four
+manifest regressions require the specific assertion diagnostic. The updated
+native generation has passed its execution checks; fixed-point and full
+parity verification are in progress. No performance claim is made from
+these concurrent runs.

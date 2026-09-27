@@ -1,0 +1,14 @@
+advance=(@value:int64):>bool=>{value=1 return true}
+main=():>int64=>{
+let x0:int64=0
+let x1:int64=0
+let x2:int64=0
+let step:int64=0
+loop step <? 11 and advance(@x2) {
+$assert x0 =? 0
+x0=x1
+x1=x2
+step+=1
+}
+return if x0 =? 1 42 else 1
+}

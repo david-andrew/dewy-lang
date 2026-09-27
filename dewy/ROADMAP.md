@@ -858,7 +858,11 @@ keys are structural, and both registries keep declaration/route identities
 disjoint beyond the old packing boundaries. Arithmetic differences and slice
 lengths consume the same graph, retaining address-cap provenance through
 transfers and widening. The general liquid qualifier/invariant
-work remains broader than these completed fixtures.
+work remains broader than these completed fixtures. The 2026-09-27 convergence
+audit found and fixed an unsound eight-transfer cutoff: budget exhaustion now
+discards unstable facts rather than treating them as inductive. Both compilers
+include condition writes in each while-loop transfer. Delayed-dependency
+regressions cover while loops and single/multiple iterators.
 
 ### 1.3 Effects as a real vocabulary
 

@@ -1947,8 +1947,13 @@ class _BoundsValidator:
     ) -> State:
         state = _seed_loop_relations(state, self.assigned, self.registry, self._mentioned_loop_pairs(body))
         head = dict(state)
+        # Each transfer includes evaluating the condition. Its writes are
+        # loop-carried too; applying them only for final body validation
+        # misses facts they invalidate indirectly on subsequent iterations.
         for _ in range(8):
-            true_state = self._refine(head, condition, truth=True)
+            current = dict(head)
+            self._eval(condition, current, validate=False)
+            true_state = self._refine(current, condition, truth=True)
             if true_state is None:
                 break
             transfer = self._loop_transfer(body, true_state, validate=False)
@@ -1961,13 +1966,20 @@ class _BoundsValidator:
             if widened == head:
                 break
             head = widened
+        else:
+            # The budget is not a convergence proof. A delayed dependency
+            # can reach a binding after the eighth transfer. Start from top
+            # rather than validate (or narrow) an unstable candidate.
+            head = {}
 
         # Narrowing: widening over-approximates (`i += 1` sends `i` to [0, ∞]),
         # so re-run the body from the widened head with the guard applied and
         # keep what comes back — under `loop i <? xs.length` that is [0, cap].
         # A decreasing iteration from a post-fixpoint stays sound.
         for _ in range(3):
-            true_state = self._refine(head, condition, truth=True)
+            current = dict(head)
+            self._eval(condition, current, validate=False)
+            true_state = self._refine(current, condition, truth=True)
             if true_state is None:
                 break
             transfer = self._loop_transfer(body, true_state, validate=False)
@@ -2100,6 +2112,10 @@ class _BoundsValidator:
             if widened == head:
                 break
             head = widened
+        else:
+            # Unknown loop-carried facts are safe when widening runs out of
+            # budget; the last non-inductive candidate is not.
+            head = {}
         unbounded = [item for item in iterators if isinstance(item.iterable, hir.Range) and item.count is None]
         if unbounded:
             transfer = self._loop_transfer(body, enter(head, word_candidates), validate=False)

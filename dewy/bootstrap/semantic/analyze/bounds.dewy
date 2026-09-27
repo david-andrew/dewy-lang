@@ -1135,7 +1135,14 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool wo
     # Widening prevents an accumulator from retaining the entry interval
     # forever. Narrowing then recovers bounds imposed by a while guard.
     let pass:addr=0
+    let stabilized=false
     loop pass <? 11 {
+        if pass =? 8 and not stabilized {
+            # The budget is not evidence of induction. Delayed dependencies
+            # may still invalidate facts after eight transfers. Top is safe;
+            # narrowing an unverified candidate would preserve false facts.
+            head=facts.State[]
+        }
         if pass >=? 8 and iterators.length >? 0 break
         checker.data.snapshot=intervals.Snapshot[]
         let current=if iterators.length >? 0 enter_iterators(iterators head @checker word_candidates) else head
@@ -1162,6 +1169,7 @@ loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool wo
         let candidate=facts.join(candidates checker.data.relations.facts)
         let next=if pass <? 8 facts.widen(head candidate checker.data.relations.facts) else facts.narrow(head candidate checker.data.relations.facts)
         if same_state(head next) {
+            stabilized=true
             if pass <? 8 and iterators.length =? 0 {pass=8 continue}
             break
         }
