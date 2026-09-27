@@ -69,7 +69,9 @@ reusable = (saved:proofs.Prelude loaded:array<modules.Module> session:contexts.S
     return true
 }
 
-analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> session:contexts.Session saved:proofs.Prelude?=none timings:bool=false):>array<proofs.Decision>|Error => {
+Result:type = const [decisions:array<proofs.Decision> warnings:array<Warning>]
+
+analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> session:contexts.Session saved:proofs.Prelude?=none timings:bool=false):>Result|Error => {
     let cached=saved
     if cached isnt? none and not reusable(cached loaded session) {cached=none}
     let source_files=sources.files(session)
@@ -103,13 +105,15 @@ analyze = (word:addr loaded:array<modules.Module> prelude:dict<string addr> sess
     # Infer direct-call effects across the complete loaded graph, including
     # imported helpers and unused source functions. Only checked advancing
     # edges authorize frame-word counters in allocation contracts.
+    let warnings:array<Warning>=[]
     if loaded.length >? 0 {
         let word_iterators:set<addr>=set[]
         loop decision in decisions {loop id in decision.word_iterators {word_iterators.push(id)}}
         let effects_started=timing.start(timings)
-        let effect_error=public_effects.validate(ids sources.srcfile(loaded[0].context session) session word_iterators)
+        let effect_error=public_effects.validate(ids sources.srcfile(loaded[0].context session) session @warnings word_iterators)
         timing.finish('validation.public_effects' effects_started)
         if effect_error isnt? none return effect_error
     }
-    return decisions
+    # Whole-program warnings are recomputed, never cached as module proofs.
+    return Result[decisions warnings]
 }

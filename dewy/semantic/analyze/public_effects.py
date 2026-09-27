@@ -7,7 +7,7 @@ allocation/escape behavior has a checked model; unknown never means pure.
 """
 
 from .. import bindings, effect_rows as rows, effect_inference as inference, hir, ty, placement
-from ..errors import user_error
+from ..errors import user_error, user_warning
 from ...reporting import Pointer
 from .effects import _EffectAnalyzer, _literal_params, _unwrap, place_loans
 from . import storage_borrows
@@ -42,7 +42,7 @@ def word_iterator(node):
         for value in (node.first, node.step, node.last, node.count))
 
 
-def inventory(root, registry):
+def inventory(root, registry, allocator_scopes=None):
     """Collect finite body/call equations; keep call environments until solving."""
     analysis = _EffectAnalyzer(root)
     storage_effects = analysis.solve()
@@ -180,6 +180,24 @@ def inventory(root, registry):
                 or bool(path.steps) and path.binding_id in value_parameters)
 
         def visit(node):
+            nonlocal summary
+            if isinstance(node, hir.AllocatorBlock):
+                # Collect the scope in the same call equations as its function.
+                # Diagnose the body, excluding setup of its own arena.
+                # Aggregate results still owe their copy-out storage.
+                enclosing = summary
+                summary = rows.Contract(rows.Row())
+                if not scalar(node.type):
+                    storage()
+                for child in node.items:
+                    visit(child)
+                if allocator_scopes is not None:
+                    allocator_scopes.append((node, literal.source, summary))
+                summary = rows.join(enclosing, summary)
+                # Arena entry may create a region and mutate its handle.
+                # Retain the existing conservative public effect boundary.
+                visit(node.arena)
+                return
             if isinstance(node, hir.ValueCast) and node.effect_target is not None:
                 visit(node.expr)
                 return
@@ -390,11 +408,12 @@ def summarize(root, registry):
     return {key: solutions[body_name(key)] for key in local}
 
 
-def validate(root, registry, srcfile):
+def validate(root, registry, srcfile, *, warn_allocators=False):
     # Do not add a second whole-program fixed point to unannotated programs.
     constrained = [node for node in hir.walk(root) if isinstance(node, hir.FunctionLiteral)
                    and isinstance(node.type, ty.FunctionType) and node.type.effects is not None]
-    if not constrained:
+    requested = warn_allocators and any(isinstance(node, hir.AllocatorBlock) for node in hir.walk(root))
+    if not constrained and not requested:
         return
     definitions = {}
     bodies = []
@@ -413,9 +432,10 @@ def validate(root, registry, srcfile):
     required = any(edge.required is not None and not rows.implies(None, edge.required)
                    and (not inference.pending(edge.required) or edge.required.excluded)
                    for _, edge in boundaries)
-    if not written and not required:
+    if not written and not required and not requested:
         return
-    summaries, projections = inventory(root, registry)
+    allocator_scopes = []
+    summaries, projections = inventory(root, registry, allocator_scopes if requested else None)
     definitions.update((body_name(key), body) for key, body in summaries.items())
     for name, node in bodies:
         body = rows.Contract(rows.Row(variables=(body_name(id(node)),)))
@@ -434,3 +454,13 @@ def validate(root, registry, srcfile):
             user_error(literal.source or srcfile, 'function does not satisfy its effect contract',
                        Pointer(span=literal.loc, message='an operation or callee may exceed the permitted effects or violate an exclusion'),
                        hint='omit the row to infer conservatively, or remove the operation requiring effects')
+
+    # Keep diagnostics after all contracts have been checked. An unverified
+    # annotation must never be evidence for this warning. Unknown behavior,
+    # including hidden allocation, does not satisfy the negative contract.
+    no_allocation = rows.Contract(excluded=(rows.Atom('allocates'),))
+    for block, source, behavior in allocator_scopes:
+        if rows.implies(inference.resolve_contracts(behavior, solutions), no_allocation):
+            user_warning(source or srcfile, 'allocator scope does not allocate',
+                         Pointer(span=block.loc, message='the scope body requires no allocation'),
+                         hint='remove the unnecessary `$allocator` directive')

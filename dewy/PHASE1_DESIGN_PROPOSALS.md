@@ -541,9 +541,13 @@ implemented on 2026-09-27:
   allocator instead of its arena gets a `dewy analyze` note saying why
   ("stores a string into `kept`, which outlives the block", "calls `f`,
   which may store into a global").
-- **Warn about nothing to allocate (pending).** A block or expression that provably
-  allocates nothing gets a warning. Exact detection needs the
-  `allocates<A>` effect rows; before them, only the provable cases.
+- **Warn about nothing to allocate (implemented 2026-09-27).** A block or expression that provably
+  allocates nothing gets a warning. Both compilers reuse checked public
+  effect equations, including callees, after lifecycle materialization.
+  Unknown calls and logical copies remain conservative. The proof concerns
+  the scope body; arena entry itself may allocate region metadata and keeps
+  its conservative public effects. Resource-specific rows can improve this
+  precision later.
 
 Implementation order: (1) runtime foundation: arena chunks in
 `library/linux/system.dewy`, owner lookup by chunk, arena-aware release;

@@ -1,0 +1,8 @@
+# The inner arithmetic scope needs no allocation. The outer scope stays
+# conservative: entering the inner arena may create its region metadata.
+next=(value:int64):>int64 & no allocates=>value + 1
+main=():>int64=>{
+    let outer=Arena[]
+    let inner=Arena[]
+    return $allocator(@outer) {$allocator(@inner) next(41)}
+}

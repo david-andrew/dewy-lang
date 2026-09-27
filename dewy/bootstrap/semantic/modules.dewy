@@ -287,7 +287,7 @@ ensure_prelude = (@engine:Engine):>Error? => {
         if decisions is? Error return decisions
         let roots:array<addr>=[]
         loop module in engine.modules {roots.push(module.root)}
-        let saved=proofs.Prelude[roots engine.session.hir.length engine.session.hir_edits.length decisions]
+        let saved=proofs.Prelude[roots engine.session.hir.length engine.session.hir_edits.length decisions.decisions]
         engine.prelude_validation=saved
         let store_started=timing.start(engine.timings)
         cache.store(cached state.PreludeSnapshot[engine.session engine.modules engine.by_path engine.prelude_bindings saved])

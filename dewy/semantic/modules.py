@@ -750,7 +750,7 @@ class ModuleCompiler:
         # Imported direct callees participate in the same inference as local
         # helpers. Every module's bounds pass has certified iterator storage
         # by now; a syntactic `guarded` hint alone is never allocation proof.
-        public_effects.validate(source_graph, self.registry, entry.srcfile)
+        public_effects.validate(source_graph, self.registry, entry.srcfile, warn_allocators=True)
         # Snapshot source assumptions before pruning unused imports or
         # lowering. Warm prelude records carry the same checked HIR.
         if any('$unsafe_assume' in record.srcfile.body for record in self.order):

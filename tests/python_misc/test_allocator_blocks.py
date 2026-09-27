@@ -171,3 +171,44 @@ def test_native_allocator_fallback_report(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     notes = result.stdout.splitlines()
     assert len(notes) == 1 and '`kept`' in notes[0] and 'outside the block' in notes[0], notes
+
+
+NO_ALLOCATION = Path(__file__).resolve().parents[1] / 'fixtures/allocator_no_allocation.dewy'
+
+
+def test_allocator_no_allocation_warning(tmp_path, capsys):
+    code = codegen(SrcFile.from_path(NO_ALLOCATION))
+    warnings = capsys.readouterr().err
+    assert warnings.count('allocator scope does not allocate') == 1, warnings
+    assert str(NO_ALLOCATION) in warnings
+    execute(tmp_path, 'allocator-no-allocation', code)
+
+
+@pytest.mark.parametrize('source', [
+    # A copied array has a logical storage obligation even if COW defers it.
+    'f=(xs:array<int64>):>int64=>{let a=Arena[] return $allocator(@a) xs.copy().length}',
+    # An omitted callback row is unknown, not a promise of no allocation.
+    'f=(callback:():>int64):>int64=>{let a=Arena[] return $allocator(@a) callback()}',
+    # Aggregate results owe copy-out storage even when their source is static.
+    'f=():>string=>{let a=Arena[] return $allocator(@a) "hello"}',
+])
+def test_allocator_unknown_or_logical_allocation_does_not_warn(source, capsys):
+    codegen(SrcFile(None, source))
+    assert 'allocator scope does not allocate' not in capsys.readouterr().err
+
+
+def test_allocator_invalid_contract_is_not_warning_evidence(capsys):
+    source = '''bad=(xs:array<int64>):>array<int64> & no allocates=>xs.copy()
+f=(xs:array<int64>):>int64=>{let a=Arena[] return $allocator(@a) bad(xs).length}
+'''
+    with pytest.raises(ReportException, match='effect contract'):
+        codegen(SrcFile(None, source))
+    assert 'allocator scope does not allocate' not in capsys.readouterr().err
+
+
+def test_native_allocator_no_allocation_warning(tmp_path):
+    # Reusing the checked prelude must not lose or duplicate source warnings.
+    for _ in range(2):
+        compiled = compile_native(tmp_path, 'allocator-no-allocation', NO_ALLOCATION.read_text())
+        assert compiled.returncode == 0, compiled.stderr
+        assert compiled.stderr.count('allocator scope does not allocate') == 1, compiled.stderr

@@ -1,4 +1,4 @@
-from reporting import SrcFile, Error, Pointer
+from reporting import SrcFile, Error, Pointer, Warning
 import p"../context.dewy" as contexts
 import p"../hir.dewy" as hir
 import p"../ty.dewy" as types
@@ -22,7 +22,9 @@ scalar = (id:addr nodes:types.Table):>bool => {
 }
 Input:type = const [nodes:array<hir.AST> types:types.Table registry:bindings.Registry analysis:access.Analysis storage_effects:access.ProgramEffects word_iterators:set<addr>=set[] borrowed_arguments:dict<addr set<addr>>=[] local_views:set<addr>=set[]]
 Call:type = const [source:rows.Contract subjects:dict<string rows.Subject?>]
-Scan:type = [private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[] value_parameters:set<addr>=set[] frame_values:set<addr>=set[] frame_literals:set<addr>=set[]]
+Scope:type = const [id:addr summary:rows.Contract calls:array<Call>]
+ScopeContract:type = const [id:addr source:addr? behavior:rows.Contract]
+Scan:type = [scopes:array<Scope>=[] private:set<addr>=set[] places:dict<addr string>=[] summary:rows.Contract=rows.Contract[rows.Row[]] calls:array<Call>=[] words:set<addr>=set[] value_parameters:set<addr>=set[] frame_values:set<addr>=set[] frame_literals:set<addr>=set[]]
 Location:type = const [known:bool subject:rows.Subject?=none]
 word_iterator = (id:addr node:hir.IteratorExpression input:Input):>bool => {
     if hir.node_at(input.nodes node.iterable) isnt? hir.Range return false
@@ -146,6 +148,22 @@ callback=(id:addr input:Input @scan:Scan):>void=>{
 }
 visit = (id:addr input:Input @scan:Scan):>void => {
     let node=hir.node_at(input.nodes id)
+    if node is? hir.AllocatorBlock {
+        # Diagnose the body separately from setup of its own arena.
+        let enclosing=scan.summary
+        let calls=scan.calls
+        scan.summary=rows.Contract[rows.Row[]]
+        scan.calls=[]
+        if not scalar(node.value_type input.types) {storage(@scan)}
+        loop child in node.items {visit(child input @scan)}
+        scan.scopes.push(Scope[id scan.summary scan.calls])
+        scan.summary=rows.join(enclosing scan.summary)
+        loop call in calls {scan.calls.push(call)}
+        # Entry may create a region and mutate the handle. Keep that
+        # conservative public effect, including in any enclosing scope.
+        visit(node.arena input @scan)
+        return
+    }
     if node is? hir.ValueCast and node.effect_target isnt? none {visit(node.expr input @scan) return}
     if node is? hir.FunctionLiteral return
     if node is? hir.Void|hir.NoneValue|hir.Bool|hir.Integer|hir.String|hir.Break|hir.Continue|hir.ScopeMetatag|hir.TypeValue return
@@ -317,7 +335,7 @@ visit = (id:addr input:Input @scan:Scan):>void => {
 }
 # The behavior inventory is independent of whether a source contract exists.
 # Validation and omitted-row inference share this same checked call graph.
-Inventory:type = const [bodies:dict<addr rows.Contract> projections:dict<string inference.Projection>]
+Inventory:type = const [bodies:dict<addr rows.Contract> projections:dict<string inference.Projection> scopes:array<ScopeContract>=[]]
 body_name=(id:addr):>string=>"{inference.PREFIX}body:{id}"
 inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[]):>Inventory => {
     let analysis=access.collect_roots(roots session.hir)
@@ -328,6 +346,7 @@ inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
     let input=Input[session.hir session.types session.registry analysis access_summaries word_iterators borrowed storage_proofs.local_views]
     let local:dict<addr rows.Contract>=[]
     let projections:dict<string inference.Projection>=[]
+    let scopes:array<ScopeContract>=[]
     loop id in analysis.literals {
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionLiteral
@@ -367,17 +386,26 @@ inventory = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
         }
         visit(node.body input @scan)
         loop param in params {if param is? hir.BoundParam {visit(param.value input @scan)}}
-        loop call in scan.calls {
-            if call.subjects.length =? 0 {contribute(call.source @scan)}
-            else {
-                let name="{inference.PREFIX}call:{projections.length}"
-                projections[name]=inference.Projection[call.source call.subjects]
-                contribute(rows.Contract[rows.Row[variables=[name]]] @scan)
-            }
+        loop scope in scan.scopes {
+            scopes.push(ScopeContract[scope.id node.source resolve_calls(scope.summary scope.calls @projections)])
         }
+        scan.summary=resolve_calls(scan.summary scan.calls @projections)
         local[id]=scan.summary
     }
-    return Inventory[local projections]
+    return Inventory[local projections scopes]
+}
+# Both body and nested-scope equations retain callee parameter environments.
+resolve_calls = (summary:rows.Contract calls:array<Call> @projections:dict<string inference.Projection>):>rows.Contract => {
+    let result=summary
+    loop call in calls {
+        if call.subjects.length =? 0 {result=rows.join(result call.source)}
+        else {
+            let name="{inference.PREFIX}call:{projections.length}"
+            projections[name]=inference.Projection[call.source call.subjects]
+            result=rows.join(result rows.Contract[rows.Row[variables=[name]]])
+        }
+    }
+    return result
 }
 summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>=set[]):>dict<addr rows.Contract> => {
     let graph=inventory(roots session word_iterators)
@@ -393,8 +421,8 @@ summarize = (roots:array<addr> session:contexts.Session word_iterators:set<addr>
     return summaries
 }
 
-validate = (roots:array<addr> source:SrcFile session:contexts.Session word_iterators:set<addr>=set[]):>Error? => {
-    if not session.types.effect_contracts return none
+validate = (roots:array<addr> source:SrcFile session:contexts.Session @warnings:array<Warning> word_iterators:set<addr>=set[]):>Error? => {
+    let requested=false
     let constrained:array<addr>=[]
     let pending=roots
     let seen:set<addr>=set[]
@@ -404,12 +432,13 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
         seen.push(id)
         let node=hir.node_at(session.hir id)
         hir.push_children(node @pending)
+        if node is? hir.AllocatorBlock {requested=true}
         if node is? hir.FunctionLiteral {
             let signature=types.node_at(session.types node.value_type)
             if signature is? types.FunctionType and signature.effects isnt? none {constrained.push(id)}
         }
     }
-    if constrained.length =? 0 return none
+    if constrained.length =? 0 and not requested return none
     let written=false
     loop id in constrained {
         let signature=types.node_at(session.types hir.node_at(session.hir id).value_type)
@@ -443,7 +472,7 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
     loop edge in constraints {
         if edge.required isnt? none and not rows.implies(none edge.required) and (not inference.pending(edge.required) or edge.required.excluded.length >? 0) {required=true}
     }
-    if not written and not required return none
+    if not written and not required and not requested return none
     let graph=inventory(roots session word_iterators)
     let summaries=graph.bodies
     loop [id body] in summaries {definitions[body_name(id)]=body}
@@ -484,6 +513,20 @@ validate = (roots:array<addr> source:SrcFile session:contexts.Session word_itera
                 src=session.sources[node.source].srcfile
             }
             return Error[srcfile=src title='function does not satisfy its effect contract' pointers=[Pointer[span=node.loc message='an operation or callee may exceed the permitted effects or violate an exclusion']] hint='omit the row to infer conservatively, or remove the operation requiring effects']
+        }
+    }
+    # Only verified rows may justify a diagnostic. Unknown effects retain
+    # the possibility of allocation; COW deferral never removes its demand.
+    let no_allocation=rows.Contract[excluded=[rows.Atom['allocates']]]
+    loop scope in graph.scopes {
+        if rows.implies(inference.resolve_contracts(scope.behavior solutions) no_allocation) {
+            let src=source
+            if scope.source isnt? none {
+                $runtime_assert scope.source <? session.sources.length
+                src=session.sources[scope.source].srcfile
+            }
+            let node=hir.node_at(session.hir scope.id)
+            warnings.push(Warning[srcfile=src title='allocator scope does not allocate' pointers=[Pointer[span=node.loc message='the scope body requires no allocation']] hint='remove the unnecessary `$allocator` directive'])
         }
     }
     return none

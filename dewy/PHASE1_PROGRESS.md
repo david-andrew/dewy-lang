@@ -4959,3 +4959,26 @@ all nine strict-copy acceptance/execution cases agreed with the verified
 second-generation native compiler. The trailing-result regression is also
 recorded in the phase-1 parity manifest. Scoped raw loans (`$lend`), general owner promotion and
 no-allocation warnings remain separate implementation work.
+
+
+## Allocator scopes with no allocation work (2026-09-27)
+
+Both compilers now warn when the checked body of an allocator scope requires
+no allocation. Scope equations reuse the public-effect inventory and solver,
+including direct calls, negative callback guarantees and nested scopes.
+Warnings run after contract validation and lifecycle materialization; an
+unverified annotation is never proof. Logical copies and unresolved behavior
+retain their allocation possibility. Arena entry may create region metadata,
+so it retains its conservative public effects even when its body warns.
+
+Native whole-program diagnostics are returned separately from cached module
+proof decisions. Restoring a checked prelude cannot retain stale scope warnings.
+The execution-test driver now renders analysis warnings like the native CLI.
+
+Validation: 45 existing hosted allocation/allocator checks passed, followed by
+14 hosted allocator checks with the new regressions. The six focused warning
+checks passed using a freshly native-built program driver, including repeated
+compilation with a shared prelude. The initial hosted-built driver test used
+the old driver fixture that did not render warnings and failed that diagnostic
+assertion; the fixture is now corrected. A fresh hosted-built route and full
+integration remain to be verified for this checkpoint.

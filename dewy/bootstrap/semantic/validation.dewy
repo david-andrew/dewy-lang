@@ -69,7 +69,7 @@ validate_module = (module:modules.Module source_files:array<SrcFile> env:values.
 # All modules read the same immutable graph. Representation selection and
 # proof discharge happen after this scope returns, so no analysis can observe
 # a partly rewritten graph and no old snapshot survives the first write.
-analyze_modules = (word:addr engine:modules.Engine):>array<Decision>|Error => {
+analyze_modules = (word:addr engine:modules.Engine):>analysis.Result|Error => {
     return analysis.analyze(word engine.modules engine.prelude_bindings engine.session saved=engine.prelude_validation timings=engine.timings)
 }
 validate = (@engine:modules.Engine):>Result|Error => {
@@ -96,13 +96,14 @@ validate = (@engine:modules.Engine):>Result|Error => {
         ownership_error=lifecycle_runtime.prepare(roots source @engine.session prepared=prepared)
         timing.finish('validation.lifecycle' lifecycle_started)
     }
-    let decisions=analyze_modules(word engine)
-    if decisions is? Error return decisions
+    let analyzed=analyze_modules(word engine)
+    if analyzed is? Error return analyzed
+    let decisions=analyzed.decisions
     # Unsupported ownership still receives source fact/effect diagnostics.
     # No rejected, partially prepared graph can reach runtime lowering.
     if ownership_error isnt? none return ownership_error
     let finishing_started=timing.start(engine.timings)
-    let result=Result[]
+    let result=Result[warnings=analyzed.warnings]
     let loaded=engine.modules
     $runtime_assert decisions.length =? loaded.length
     loop index in 0.. and index <? loaded.length {
