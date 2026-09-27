@@ -31,7 +31,10 @@ def test_added_permission_can_invalidate_a_substituted_exclusion():
 
 def test_callback_relative_exclusion_does_not_escape_its_scope():
     private = rows.Atom('reads', rows.Subject('parameter', '0'))
-    assert not rows.infer(E, rows.Contract(excluded=(private,)), {'E'}, {})
+    bindings = {}
+    assert rows.infer(E, rows.Contract(excluded=(private,)), {'E'}, bindings)
+    assert bindings['E'] == rows.Contract(rows.Row(unknown=True))
+    assert not rows.implies(bindings['E'], rows.Contract(excluded=(private,)))
 
 
 def test_generic_negative_rows_execute(tmp_path):

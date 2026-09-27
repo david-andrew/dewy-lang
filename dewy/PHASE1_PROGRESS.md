@@ -5225,3 +5225,22 @@ x86-64/C, exact copy/drop counts, reverse order, a 40-element sort, zero
 retained bytes and rejection of hidden effects/receiver mutation/forbidden
 copies. The three paired resource/effect/lifetime groups passed together;
 26 surrounding hosted sort checks also passed. Full integration follows.
+
+
+## Resource-sort integration and hosted escape correction (2026-09-27)
+
+The resource-sort checkpoint (`4b24b067`) passed a three-generation native
+fixed point and execution checks at `../dewy-build-artifacts/phase1-resource-sort-integration`.
+All 221 paired manifest cases passed against that isolated source checkout.
+The broad hosted suite passed 4,133 tests (13 skipped) and found four failures:
+three aggregate-return lifetime kernels and one obsolete row-inference test.
+
+The decoded-string correction had unnecessarily marked every returned
+aggregate child as escaping, including temporary numeric-formatting buffers.
+Owning aggregate writes already acquire their payloads; keep their child
+formatting buffers scoped and apply the explicit region/arena distinction at
+the decoded optional transfer. The crash and repeated optional-return fixture
+still pass, and the three aggregate lifetime kernels no longer retain bytes.
+The row test now checks that callback-local exclusions are dropped from `E`
+and cannot establish a wrapper guarantee, matching the approved boundary.
+All 66 focused aggregate/string/effect checks passed after these corrections.
