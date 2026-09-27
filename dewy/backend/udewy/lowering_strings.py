@@ -2758,7 +2758,7 @@ class _StringLowering:
             if isinstance(expr, (hir.StringSlice, hir.StringIndex, hir.InterpolatedString)):
                 return True   # a view (region: 0; returned: an arena view, 2) or a frame interpolation (0)
             if isinstance(expr, hir.Flow):
-                return all(fresh(arm.body) for arm in expr.arms) and expr.default is not None and fresh(expr.default)
+                return self._has_arena()  # every selected string arm establishes an owned result
             if isinstance(expr, hir.Block):
                 return bool(expr.items) and fresh(expr.items[-1])
             return False
@@ -2920,7 +2920,7 @@ class _StringLowering:
     def _is_owned_string_result(self, node: hir.AST) -> bool:
         """A string call or explicit copy with a caller-owned result."""
         node = self._unwrap_transparent(node)
-        if isinstance(node, hir.CopyValue):
+        if isinstance(node, (hir.CopyValue, hir.Flow)) or isinstance(node, hir.Block) and node.scoped:
             return self._is_string_valued(node.type) and self._has_arena()
         return (
             isinstance(node, hir.FunctionCall)
@@ -3532,8 +3532,13 @@ class _StringLowering:
                 declare('piece_source', 'int64', source),
             ))
 
-        def string_piece(part: hir.AST) -> None:
+        def string_piece(part: hir.AST, *, snapshot: bool = False) -> None:
             prelude, descriptor = self._extract_expression(part)
+            if snapshot and not self._is_owned_string_result(part):
+                self._note_copy('string', part.type, 'snapshotted before interpolation',
+                                'a later field may replace the string being read', part.loc)
+                prelude, descriptor = self._string_result_temporary(
+                    part, self._string_clone_call(descriptor, part.loc), prelude, force=True)
             statements.extend(prelude)
             word = (
                 replace(descriptor, type='int64')
@@ -3637,7 +3642,8 @@ class _StringLowering:
                 self._int64_binary('__add__', digits, position, loc),
             )
 
-        for part in node.parts:
+        snapshots = self.borrow_plan.interpolation_snapshots.get(id(node), ())
+        for index, part in enumerate(node.parts):
             part_type = part.type
             if isinstance(part_type, ty.IntegerLiteralType):
                 string_piece(
@@ -3648,7 +3654,7 @@ class _StringLowering:
                     )
                 )
             elif self._is_string_valued(part_type):
-                string_piece(part)
+                string_piece(part, snapshot=index in snapshots)
             elif part_type == 'bool':
                 bool_piece(part)
             elif isinstance(part_type, str) and (

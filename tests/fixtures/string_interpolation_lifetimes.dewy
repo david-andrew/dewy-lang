@@ -1,0 +1,14 @@
+# Earlier pieces survive later mutations, and every exit releases them.
+Box:type=[text:string]
+replace_text=(@box:Box):>int64=>{box.text="{'after'}" return 7}
+work=(early:bool):>int64=>{
+    let box=Box["{'before'}"]
+    let text="{box.text}/{replace_text(@box)}/{if early return 42 else box.text}"
+    return if text=?'before/7/after' 42 else 1
+}
+main=():>int64=>{
+    if work(false) not=?42 or work(true) not=?42 return 2
+    let before:int64=_arena_live_bytes
+    loop i in [0..50) {if work(false) not=?42 or work(true) not=?42 return 3}
+    return if _arena_live_bytes=?before 42 else 4
+}

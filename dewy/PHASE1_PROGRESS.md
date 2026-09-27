@@ -5038,3 +5038,24 @@ manifest regressions require the specific assertion diagnostic. The updated
 native generation has passed its execution checks; fixed-point and full
 parity verification are in progress. No performance claim is made from
 these concurrent runs.
+
+
+## Interpolation snapshots and cleanup (2026-09-27)
+
+The proof-convergence checkpoint closed a two-generation native fixed point.
+Its full parity run passed 209/210 cases, exposing a hosted interpolation
+snapshot defect: a later expression could replace a previously read field
+before its bytes were copied. Borrow planning now records only conflicting
+parts, preserving the evidence through callable rewriting and concatenation
+normalization. Stable field reads keep borrowing.
+
+The lifetime regression also exposed two cleanup gaps. Hosted string flow
+results now establish the same ownership convention in every arm, and their
+temporary consumers release them. Native interpolation retains evaluated
+pieces in a cleanup frame, so an early return from a later field releases
+previous pieces too. Repeated normal/early paths have zero retained bytes.
+Validation: ten focused hosted comparison/interpolation tests and 34 broader
+hosted string/ownership tests passed; four native-built driver groups passed
+on both execution backends (including scoped-read tests being developed in
+parallel). Fresh hosted-built driver and fixed-point verification continue
+at the next checkpoint. Phase 1 remains open.

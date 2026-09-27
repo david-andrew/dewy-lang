@@ -977,7 +977,10 @@ class _FlowLowering:
             self._note_copy('record', target_type, 'kept as a flow result', self._copy_reason(item), item.loc)
             return [*prelude, hir.Declare(item.loc, ty.VOID_TYPE, 'let', cell.name, 'int64', self._object_allocation(item.loc, size)), *self._object_copy(cell, source, target_type, item.loc)], cell
         if self._is_string_valued(item.type):
-            return self._kept_string_value(item)   # the flow's temporary keeps a call's result
+            # A flow result has one ownership convention across every arm.
+            # Otherwise a temporary consumer cannot distinguish a borrowed
+            # local from a retained field/call result that must be released.
+            return self._escaping_string_value(item)
         return self._extract_expression(item)
 
     def _placeholder(self, node: hir.AST) -> hir.AST:

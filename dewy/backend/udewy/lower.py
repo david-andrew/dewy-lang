@@ -3052,22 +3052,17 @@ class _Lowerer(
             if id(node) in self.borrow_plan.comparison_snapshots:
                 self.borrow_plan.comparison_snapshots.add(id(transformed))
             return transformed
-        if isinstance(node, hir.StringConcat):
-            # Concatenation has exactly the materialization and grapheme
-            # re-segmentation semantics of two adjacent interpolation fields.
-            return hir.InterpolatedString(
+        if isinstance(node, (hir.StringConcat, hir.InterpolatedString)):
+            # Both operations materialize adjacent fields with the same
+            # evaluation order and grapheme re-segmentation semantics.
+            parts = [node.left, node.right] if isinstance(node, hir.StringConcat) else node.parts
+            transformed = hir.InterpolatedString(
                 node.loc, node.type,
-                [self._require_node(self._transform_node(node.left)),
-                 self._require_node(self._transform_node(node.right))],
+                [self._require_node(self._transform_node(part)) for part in parts],
             )
-        if isinstance(node, hir.InterpolatedString):
-            return replace(
-                node,
-                parts=[
-                    self._require_node(self._transform_node(part))
-                    for part in node.parts
-                ],
-            )
+            if id(node) in self.borrow_plan.interpolation_snapshots:
+                self.borrow_plan.interpolation_snapshots[id(transformed)] = self.borrow_plan.interpolation_snapshots[id(node)]
+            return transformed
         if isinstance(node, hir.IteratorExpression):
             return replace(
                 node,
@@ -4381,7 +4376,7 @@ class _Lowerer(
         node = self._unwrap_transparent(node)
         while isinstance(node, (hir.ValueCast, hir.RepresentationCast)) and self._is_string_valued(node.type):
             node = self._unwrap_transparent(node.expr)   # `xs as string` is a call inside a cast
-        if isinstance(node, (hir.FunctionCall, hir.CopyValue)):
+        if isinstance(node, (hir.FunctionCall, hir.CopyValue, hir.Flow, hir.Block)):
             self.consumed_string_values.add(id(node))
 
     def _string_result_temporary(self, node: hir.AST, value: hir.AST, prelude: list[hir.AST], *, force: bool = False) -> tuple[list[hir.AST], hir.AST]:
@@ -5508,7 +5503,10 @@ class _Lowerer(
                 self._placeholder(node),
             )
             flow_prelude, flow = self._lower_flow(node, target=target)
-            return [declaration, *flow_prelude, flow], target
+            statements = [declaration, *flow_prelude, flow]
+            if self._is_owned_string_result(node):
+                return self._string_result_temporary(node, target, statements)
+            return statements, target
         if isinstance(node, hir.ShortCircuit):
             return self._extract_expression(self._short_circuit_flow(node))
         if isinstance(node, hir.RangeMembership):
@@ -5931,6 +5929,8 @@ class _Lowerer(
             flow = hir.Flow(node.loc, node.type, [hir.IfArm(
                 node.loc, node.type, hir.Bool(node.loc, 'bool', True), node,
             )], None)
+            if id(node) in self.consumed_string_values:
+                self.consumed_string_values.add(id(flow))
             return self._extract_expression(flow)
         if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
             prelude, item = self._extract_expression(node.items[0])

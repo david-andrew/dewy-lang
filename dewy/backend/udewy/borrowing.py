@@ -62,6 +62,7 @@ class Plan:
     stable_parameters: dict[int, ParameterEffects] = field(default_factory=dict)
     array_snapshots: set[int] = field(default_factory=set)             # id(Index) whose index may write the array
     comparison_snapshots: set[int] = field(default_factory=set)        # comparison identities whose right operand may write the left
+    interpolation_snapshots: dict[int, set[int]] = field(default_factory=dict)  # parts invalidated before materialization
     ambient_writes: dict[int, set[int]] = field(default_factory=dict)  # call identity -> nonlocal owners written
     scoped_views: set[int] = field(default_factory=set)                # view binding -> interval/lexical proof
     view_scopes: dict[int, hir.Block] = field(default_factory=dict)
@@ -386,7 +387,12 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
     """Compute the borrow plan for a module (borrowing.dewy `details`, the scope-borrow part)."""
     plan = Plan()
     comparisons: dict[int, tuple[hir.AST, hir.AST]] = {}
+    interpolations: dict[int, list[hir.AST]] = {}
     def comparison(node):
+        if isinstance(node, hir.InterpolatedString):
+            interpolations[id(node)] = node.parts
+        elif isinstance(node, hir.StringConcat):
+            interpolations[id(node)] = [node.left, node.right]
         if isinstance(node, hir.StringEqual):
             comparisons[id(node)] = (node.left, node.right)
         elif (isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier)
@@ -469,6 +475,21 @@ def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source
         if (not isinstance(unwrap(left), hir.String)
                 and expression_conflicts(right, source, plan, source_bindings)):
             plan.comparison_snapshots.add(identity)
+    # Materialization evaluates every field before it copies the bytes. Keep
+    # a snapshot only where a later field may invalidate an earlier read.
+    # Record indices now, before callable rewriting changes call identities.
+    for identity, parts in interpolations.items():
+        for index, part in enumerate(parts[:-1]):
+            if isinstance(unwrap(part), hir.String):
+                continue
+            source = route(part)
+            if source is not None and stable_owner(source, plan):
+                continue
+            if source is not None and source.binding in places:
+                source = None
+            if any(expression_conflicts(later, source, plan, source_bindings)
+                   for later in parts[index + 1:]):
+                plan.interpolation_snapshots.setdefault(identity, set()).add(index)
     # A nonescaping place call only lends its owner for that call. It must
     # conflict while a view is live, but need not lengthen the view past its
     # last use. Unknown or retaining calls keep the whole-scope exclusion.

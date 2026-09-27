@@ -3423,7 +3423,10 @@ integer_text = (value:addr type:addr node:hir.AST @prefix:array<addr> @state:Sta
 interpolated_string = (node:hir.InterpolatedString @state:State):>addr => {
     let prefix:array<addr>=[]
     let pieces:array<TextBytes>=[]
-    let owners:array<addr>=[]
+    # Each evaluated piece is live across subsequent fields, including a
+    # return or outer-loop exit inside one of those expressions.
+    let frame_start=state.cleanup_frames.length
+    state.cleanup_frames.push([])
     let total=word(0 node @state)
     # Parts are copied into the result after all are evaluated. A string
     # part is borrowed when every later part is quiet.
@@ -3435,7 +3438,12 @@ interpolated_string = (node:hir.InterpolatedString @state:State):>addr => {
         let plain=types.node_at(state.type_nodes types.unfold(types.strip_refinement(original.value_type state.type_nodes) state.type_nodes))
         let borrowed=if last_loud <=? i and enum_members(original.value_type state) is? none string_frame_view(id @prefix @state immediate=true) else none
         let value=if borrowed isnt? none borrowed else snapshot(owned_value(id @state) @prefix @state)
-        if borrowed is? none and owned_string(original.value_type state) {owners.push(value)}
+        if borrowed is? none and owned_string(original.value_type state) {
+            $runtime_assert state.cleanup_frames.length >? 0
+            let frame=state.cleanup_frames.pop
+            frame.push(OwnedLocal[value original.value_type])
+            state.cleanup_frames.push(frame)
+        }
         let part:TextBytes=[word(0 node @state) word(0 node @state)]
         if string_type(original.value_type state) {
             if enum_members(original.value_type state) isnt? none {value=enum_read(value original.value_type types.primitive('string' @state.type_nodes) original @state)}
@@ -3458,7 +3466,9 @@ interpolated_string = (node:hir.InterpolatedString @state:State):>addr => {
         prefix.push(counted_bytes(part.data word_op('__add__' buffer cursor node @state) word(0 node @state) part.length node @state))
         cursor=word_op('__add__' cursor part.length node @state)
     }
-    loop owner in owners {prefix.push(string_runtime('_native_string_release' [owner] node @state result_void=true))}
+    loop released in cleanup_since(frame_start node @state) {prefix.push(released)}
+    $runtime_assert state.cleanup_frames.length >? 0
+    state.cleanup_frames.pop;
     prefix.push(segmented_string(buffer total node false @state))
     return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
 }
