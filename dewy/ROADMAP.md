@@ -772,8 +772,11 @@ in both lowerings and the parity tool is the gate.
   Conditional field transfers now include custom moves, arrays and resource
   unions. A custom move cleans its leftover nested resources on the consuming
   edge before marking the field absent; replacements restore that field.
-  Element (index) routes, components behind hooked wrappers,
-  and remaining resource-container mutations still require
+  Literal array-element routes now participate in the same branch liveness
+  and cleanup flags, including nested arrays, field projections, replacement
+  and custom moves. Length reads keep the container alive without demanding
+  its consumed elements. Dynamic index routes, components behind hooked
+  wrappers, and remaining resource-container mutations still require
   further lifetime analysis. Same-block owning input
   transfers now include owning parameters, custom move hooks and union owners;
   first if conditions are unconditional input sites, while loop conditions

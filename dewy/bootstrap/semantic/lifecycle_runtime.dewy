@@ -21,7 +21,7 @@ import p"analyze/predicate_effects.dewy" as predicate_effects
 Extraction:type = const [binding:addr path:array<string|addr> moved:bool=false]
 # A component consumed on some paths only: its owner holds it while the flag
 # is true, and cleanup consults the flag instead of a static route.
-ComponentFlag:type = const [path:array<string> flag:Captured]
+ComponentFlag:type = const [path:array<string|int64> flag:Captured]
 Hook:type = const [owner:addr binding:addr name:string signature:addr role:string]
 # An expression can contain a block, branch, or early return. Carry its
 # enclosing lexical lifetime explicitly through expression traversal.
@@ -209,7 +209,7 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         calls.push(put(hir.FunctionCall[loc empty operation arguments []] @session))
         return
     }
-    if type is? types.ArrayType and extraction isnt? none {
+    if type is? types.ArrayType and (extraction isnt? none or guards.length >? 0) {
         let empty=types.primitive('void' @session.types)
         let word=types.primitive('int64' @session.types)
         let boolean=types.primitive('bool' @session.types)
@@ -226,36 +226,49 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         nested.push(owner)
         # Equal literal selectors share one arm, so disjoint fields in the
         # same element retain all their transferred-component exclusions.
-        let pending=routes
+        let selectors:array<addr>=[]
+        loop route in routes {
+            $runtime_assert route.path.length >? 0 and route.path[0] is? addr
+            selectors.push(route.path[0])
+        }
+        loop guard in guards {
+            $runtime_assert guard.path.length >? 0 and guard.path[0] is? int64
+            selectors.push(put(hir.Integer[loc word '0d' guard.path[0]] @session))
+        }
         let selected_arms:array<addr>=[]
-        loop pending.length>?0 {
-            let selected_route=pending.pop
-            $runtime_assert selected_route.path.length>?0
-            let selector=selected_route.path[0]
-            $runtime_assert selector is? addr
+        loop selectors.length >? 0 {
+            let selector=selectors.pop
             let selected_node=hir.node_at(session.hir selector)
-            let matching:array<Extraction>=[selected_route]
-            let rest:array<Extraction>=[]
-            loop route in pending {
-                $runtime_assert route.path.length>?0
-                let other=route.path[0]
-                $runtime_assert other is? addr
+            let rest:array<addr>=[]
+            loop other in selectors {
                 let other_node=hir.node_at(session.hir other)
-                if other=?selector or (selected_node is? hir.Integer and other_node is? hir.Integer and selected_node.value=?other_node.value) {matching.push(route)}
-                else {rest.push(route)}
+                if other not=? selector and not (selected_node is? hir.Integer and other_node is? hir.Integer and selected_node.value =? other_node.value) {rest.push(other)}
             }
-            pending=rest
+            selectors=rest
             let children:array<Extraction>=[]
-            loop route in matching {
+            loop route in routes {
+                $runtime_assert route.path.length >? 0 and route.path[0] is? addr
+                let other=route.path[0]
+                let other_node=hir.node_at(session.hir other)
+                if other not=? selector and not (selected_node is? hir.Integer and other_node is? hir.Integer and selected_node.value =? other_node.value) continue
                 let path:array<string|addr>=[]
                 let i:addr=1
                 loop i<?route.path.length {path.push(route.path[i]) i+=1}
                 children.push(Extraction[route.binding path route.moved])
             }
-            $runtime_assert children.length>?0
-            let first=children.pop
+            let held:array<ComponentFlag>=[]
+            loop guard in guards {
+                $runtime_assert guard.path.length >? 0
+                if selected_node isnt? hir.Integer or guard.path[0] isnt? int64 or guard.path[0] not=? selected_node.value continue
+                let path:array<string|int64>=[]
+                let i:addr=1
+                loop i<?guard.path.length {path.push(guard.path[i]) i+=1}
+                held.push(ComponentFlag[path guard.flag])
+            }
+            let first:Extraction?=none
+            if children.length >? 0 {first=children.pop}
             let selected_calls:array<addr>=[]
-            drop_value(element type.element loc nested @selected_calls @plan @session extraction=first additional=children)
+            drop_value(element type.element loc nested @selected_calls @plan @session extraction=first additional=children guards=held)
             let selected_condition=put(hir.FunctionCall[loc boolean equal [cursor.value selector] []] @session)
             let selected_body=put(hir.Block[loc empty selected_calls true] @session)
             selected_arms.push(put(hir.IfArm[loc empty selected_condition selected_body] @session))
@@ -411,7 +424,7 @@ drop_value = (value:addr type_id:addr loc:Span ancestors:set<addr> @calls:array<
         let held:array<ComponentFlag>=[]
         loop guard in guards {
             if guard.path.length>?0 and guard.path[0]=?field.name {
-                let path:array<string>=[]
+                let path:array<string|int64>=[]
                 let i:addr=1
                 loop i<?guard.path.length {path.push(guard.path[i]) i+=1}
                 held.push(ComponentFlag[path guard.flag])
@@ -481,27 +494,32 @@ returning_projection=(id:addr owners:array<addr> session:contexts.Session):>Extr
     return none
 }
 # The flag of a conditionally consumed component route, if any.
-component_flag=(route:Extraction plan:Plan):>Captured?=>{
+component_flag=(route:Extraction plan:Plan session:contexts.Session):>Captured?=>{
     loop component in plan.component_flags.get(route.binding []) {
         if component.path.length not=? route.path.length continue
         let same=true
         loop i in [0..route.path.length) {
             let step=route.path[i]
-            if step isnt? string or step not=? component.path[i] {same=false break}
+            if step is? string {if step not=? component.path[i] {same=false break}}
+            else {
+                let index=hir.node_at(session.hir step)
+                let logical=component.path[i]
+                if index isnt? hir.Integer or logical isnt? int64 or index.value not=? logical {same=false break}
+            }
         }
         if same return component.flag
     }
     return none
 }
 # Components under `path` of an owner, relative to it.
-held_under=(binding:addr path:array<string> plan:Plan):>array<ComponentFlag>=>{
+held_under=(binding:addr path:array<string|int64> plan:Plan):>array<ComponentFlag>=>{
     let result:array<ComponentFlag>=[]
     loop component in plan.component_flags.get(binding []) {
         if component.path.length <? path.length continue
         let inside=true
         loop i in [0..path.length) {if component.path[i] not=? path[i] {inside=false break}}
         if not inside continue
-        let rest:array<string>=[]
+        let rest:array<string|int64>=[]
         let i:addr=path.length
         loop i <? component.path.length {rest.push(component.path[i]) i+=1}
         result.push(ComponentFlag[rest component.flag])
@@ -524,7 +542,8 @@ transferable_component=(id:addr session:contexts.Session):>bool=>{
     let shape=types.node_at(session.types views.structural_base(node.value_type session.types))
     if shape isnt? types.ObjectType|types.ArrayType|types.TypeOr return false
     let current=node
-    loop current is? hir.MemberAccess {
+    loop current is? hir.MemberAccess|hir.Index {
+        if current is? hir.Index {current=hir.node_at(session.hir current.array) continue}
         let owner=types.node_at(session.types views.structural_base(hir.node_at(session.hir current.value).value_type session.types))
         if owner isnt? types.ObjectType return false
         loop method in owner.methods {if method.lifecycle isnt? none return false}
@@ -715,7 +734,7 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
             $runtime_assert frozen isnt? none
             let result=transfer(selected candidate.value_type @plan @session)
             let saved=capture_result(result candidate.loc @session)
-            let held=component_flag(frozen plan)
+            let held=component_flag(frozen plan session)
             if held isnt? none {
                 # Consumed on this path only: clear the owner's flag.
                 let cleared=put(hir.Bool[candidate.loc types.primitive('bool' @session.types) false] @session)
@@ -1682,24 +1701,27 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
         prefix.push(replacement.declaration)
         # Preserve still-owned descendants, then retire the old route's
         # extraction metadata. Indexed replacements remain conservative.
-        let part=hir.node_at(session.hir selected)
-        let reverse_path:array<string>=[]
-        loop part is? hir.MemberAccess {reverse_path.push(part.name) part=hir.node_at(session.hir part.value)}
+        let logical_route=ownership_liveness.field_route(selected session.hir)
         let removed:array<Extraction>=[]
         let held:array<ComponentFlag>=[]
         let restored:array<addr>=[]
-        if part is? hir.ExpressedIdentifier and part.binding_id isnt? none {
-            let path:array<string>=[]
-            loop reverse_path.length>?0 {path.push(reverse_path.pop)}
+        if logical_route isnt? none {
+            let path=logical_route.path
             # The new value restores every component under this route.
-            held=held_under(part.binding_id path plan)
+            held=held_under(logical_route.binding path plan)
             restored=restore_flags(held node.loc @session)
             let retained:array<Extraction>=[]
-            loop route in plan.extractions.get(part.binding_id []) {
+            loop route in plan.extractions.get(logical_route.binding []) {
                 let inside=path.length<=?route.path.length
                 let i:addr=0
                 loop inside and i<?path.length and i<?route.path.length {
-                    if route.path[i] isnt? string or route.path[i] not=?path[i] {inside=false}
+                    let step=route.path[i]
+                    if step is? string {if step not=? path[i] {inside=false}}
+                    else {
+                        let index=hir.node_at(session.hir step)
+                        let logical=path[i]
+                        if index isnt? hir.Integer or logical isnt? int64 or index.value not=? logical {inside=false}
+                    }
                     i+=1
                 }
                 if inside {
@@ -1709,7 +1731,7 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
                     removed.push(Extraction[route.binding rest route.moved])
                 } else {retained.push(route)}
             }
-            plan.extractions[part.binding_id]=retained
+            plan.extractions[logical_route.binding]=retained
         }
         let first:Extraction?=none
         if removed.length>?0 {first=removed.pop}

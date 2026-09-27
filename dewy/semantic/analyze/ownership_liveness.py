@@ -15,11 +15,17 @@ from .. import hir
 
 
 def field_route(node):
-    """`(binding, field path)` of a route of field reads from a name, else None."""
+    """A stable route from a name: fields and nonnegative literal indices."""
     path = []
-    while isinstance(node, hir.MemberAccess):
-        path.append(node.name)
-        node = node.value
+    while isinstance(node, (hir.MemberAccess, hir.Index)):
+        if isinstance(node, hir.MemberAccess):
+            path.append(node.name)
+            node = node.value
+        else:
+            if not isinstance(node.index, hir.Integer) or node.index.value < 0:
+                return None
+            path.append(node.index.value)
+            node = node.array
     if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
         return node.binding_id, tuple(reversed(path))
     return None
@@ -27,6 +33,8 @@ def field_route(node):
 
 def conflicts(path, entry_path, kind):
     """Whether a live entry needs the value a consumption of `path` takes."""
+    if kind == 'length':
+        return len(path) <= len(entry_path) and entry_path[:len(path)] == path
     if kind == 'store':
         # Storing into a component needs its ancestors, not the component.
         return len(path) < len(entry_path) and entry_path[:len(path)] == path
@@ -107,11 +115,11 @@ def conditional_consumptions(body, parameter_owners, resource, component=None):
                     and resource(value.type) is not None and value.binding_id not in captured
                     and occurrences[id(value)] == 1 and counts.get(value.binding_id) == 1):
                 candidates.add(id(value))
-            route = field_route(value) if isinstance(value, hir.MemberAccess) and component is not None else None
+            route = field_route(value) if isinstance(value, (hir.MemberAccess, hir.Index)) and component is not None else None
             if route is not None:
                 root = value
-                while isinstance(root, hir.MemberAccess):
-                    root = root.value
+                while isinstance(root, (hir.MemberAccess, hir.Index)):
+                    root = root.value if isinstance(root, hir.MemberAccess) else root.array
                 if (route[0] in owners and route[0] not in captured and occurrences[id(root)] == 1
                         and resource(value.type) is not None and component(value)
                         and counts.get(route[0]) == 1):
@@ -136,9 +144,12 @@ def conditional_consumptions(body, parameter_owners, resource, component=None):
             consume(node, node.binding_id, (), live, enabled)
             live.add((node.binding_id, (), 'read'))
             return live
-        if isinstance(node, hir.MemberAccess) and (route := field_route(node)) is not None:
+        if isinstance(node, (hir.MemberAccess, hir.Index)) and (route := field_route(node)) is not None:
             consume(node, route[0], route[1], live, enabled)
             live.add((route[0], route[1], 'read'))
+            return live
+        if isinstance(node, hir.ArrayLength) and (route := field_route(node.array)) is not None:
+            live.add((route[0], route[1], 'length'))
             return live
         if isinstance(node, hir.FunctionLiteral):
             return live | reads(node)
@@ -171,7 +182,7 @@ def conditional_consumptions(body, parameter_owners, resource, component=None):
         if isinstance(node, hir.Assign) and node.op == '=' and isinstance(node.target, hir.ExpressedIdentifier):
             live = {entry for entry in live if entry[0] != node.target.binding_id}
             return visit(node.value, live, enabled, exits)
-        if (isinstance(node, hir.MemberAssign) and isinstance(node.target, hir.MemberAccess)
+        if (isinstance(node, (hir.MemberAssign, hir.IndexAssign)) and isinstance(node.target, (hir.MemberAccess, hir.Index))
                 and (route := field_route(node.target)) is not None):
             # The old component is dead; the store needs only its ancestors.
             binding, path = route

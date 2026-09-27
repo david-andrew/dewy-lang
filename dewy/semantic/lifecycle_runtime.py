@@ -230,7 +230,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 function = hir.ExpressedIdentifier(loc, signature, name, binding_id=binding.id)
                 into.append(hir.FunctionCall(loc, ty.VOID_TYPE, function, arguments, {}))
                 return
-            if isinstance(shape, ty.ArrayType) and extraction is not None:
+            if isinstance(shape, ty.ArrayType) and (extraction is not None or guards):
                 # The selected element transfers; the other elements retain
                 # reverse-order cleanup. Saved selectors name the same slot
                 # for both the return value and this cleanup traversal.
@@ -249,11 +249,19 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     selector = route[0]
                     key = ('literal', selector.value) if isinstance(selector, hir.Integer) else ('saved', id(selector))
                     groups.setdefault(key, (selector, []))[1].append((route[1:], moved))
+                for path in guards or {}:
+                    # Literal element identities share one arm with static
+                    # extractions from that same slot.
+                    selector = hir.Integer(loc, 'int64', t0.base10, path[0])
+                    groups.setdefault(('literal', path[0]), (selector, []))
                 selected_arms, other_calls = [], []
                 for selector, selected_routes in groups.values():
                     selected_calls = []
+                    held = {path[1:]: flag for path, flag in (guards or {}).items()
+                            if isinstance(selector, hir.Integer) and path[0] == selector.value}
                     drop(element, shape.element, ancestors | {id(shape)}, into=selected_calls,
-                         extraction=selected_routes[0], additional=selected_routes[1:])
+                         extraction=selected_routes[0] if selected_routes else None,
+                         additional=selected_routes[1:], guards=held or None)
                     selected_arms.append(hir.IfArm(loc, ty.VOID_TYPE, comparison('__eq__', selector),
                                                   hir.Block(loc, ty.VOID_TYPE, selected_calls, True)))
                 drop(element, shape.element, ancestors | {id(shape)}, into=other_calls)
@@ -380,16 +388,24 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             # Replacing an ancestor of a moved component cleans only the
             # still-owned remainder. The new value then restores that route.
             part, path = selected, []
-            while isinstance(part, hir.MemberAccess):
-                path.append(part.name)
-                part = part.value
+            while isinstance(part, (hir.MemberAccess, hir.Index)):
+                if isinstance(part, hir.MemberAccess):
+                    path.append(part.name)
+                    part = part.value
+                elif isinstance(part.index, hir.Integer):
+                    path.append(part.index.value)
+                    part = part.array
+                else:
+                    break
             routes = []
             guards = {}
             if isinstance(part, hir.ExpressedIdentifier):
                 path = tuple(reversed(path))
                 existing = extractions.get(part.binding_id, ())
-                routes = [(route[len(path):], moved) for route, moved in existing if route[:len(path)] == path]
-                extractions[part.binding_id] = [(route, moved) for route, moved in existing if route[:len(path)] != path]
+                routes = [(route[len(path):], moved) for route, moved in existing
+                          if tuple(step.value if isinstance(step, hir.Integer) else step for step in route[:len(path)]) == path]
+                extractions[part.binding_id] = [(route, moved) for route, moved in existing
+                    if tuple(step.value if isinstance(step, hir.Integer) else step for step in route[:len(path)]) != path]
                 guards = {route[len(path):]: flag[1] for route, flag in component_flags.get(part.binding_id, {}).items()
                           if route[:len(path)] == path}
             drop(selected, selected.type, set(), run_hook=not selected_moved, extraction=routes[0] if routes else None, additional=routes[1:],
@@ -1271,8 +1287,9 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         projection = returning_projection(selected, owners)
                         value, moved = transfer(selected, child.type)
                         saved, value = capture(value, child.loc)
-                        flag = (component_flags.get(projection[0], {}).get(projection[1])
-                                if all(isinstance(step, str) for step in projection[1]) else None)
+                        conditional_route = field_route(selected)
+                        flag = (component_flags.get(conditional_route[0], {}).get(conditional_route[1])
+                                if conditional_route is not None else None)
                         if flag is not None:
                             # Consumed on this path only: the owner's cleanup
                             # consults the flag instead of a static route.
@@ -1499,7 +1516,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             shape = ty.structural_base(node.type)
             if not isinstance(shape, (ty.ObjectType, ty.ArrayType, ty.TypeOr)):
                 return False
-            while isinstance(node, hir.MemberAccess):
+            while isinstance(node, (hir.MemberAccess, hir.Index)):
+                if isinstance(node, hir.Index):
+                    node = node.array
+                    continue
                 owner_shape = ty.structural_base(node.value.type)
                 if not isinstance(owner_shape, ty.ObjectType) or any(method.lifecycle is not None for method in owner_shape.methods):
                     return False

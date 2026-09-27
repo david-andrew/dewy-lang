@@ -16,7 +16,7 @@ all source shapes or the complete integration matrix have been certified.
 | Area | Implemented foundation | Remaining closure work |
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
-| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Conditional element routes, transfers through hooked wrappers, resource sort/key ownership and other unsupported resource operations; captured/exposed storage lifetimes. |
+| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Dynamic conditional element routes, transfers through hooked wrappers, resource sort/key ownership and other unsupported resource operations; captured/exposed storage lifetimes. |
 | 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | User-written polymorphic rows with callback-local place subjects; more precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
@@ -5145,3 +5145,25 @@ Hosted and native-built tests execute on both backends, check every byte
 across multiple chunks and a short tail, preserve independent snapshots,
 handle empty/missing/directory inputs and retain zero bytes after repeated
 reads. Native fixed-point and broad integration checks follow this checkpoint.
+
+
+## Conditional ownership of literal array slots (2026-09-27)
+
+Ownership liveness now uses stable field and literal-index paths. The same
+conditional component flags govern nested record/array cleanup, custom move
+remainders and slot replacement. Reading an array's length keeps its storage
+alive without treating every element as read; consuming the whole array
+still conflicts with that observation. Dynamic selectors remain conservative.
+A replacement retires old extraction metadata and restores the new component.
+
+Eleven focused hosted checks passed, including nested arrays, array fields,
+branch choices, repeated custom moves/replacement with zero retained bytes,
+and rejection of future overlapping uses. The native-built driver passed the
+paired element and existing component groups on x86-64/C; additional opposite-
+branch and whole-owner length-use checks passed separately. Sixty-seven
+surrounding hosted ownership checks also passed. This closes the literal-slot
+case, not general dynamic disjointness or the complete ownership item.
+
+The bulk-read checkpoint also passed its three-generation native fixed point
+and execution checks (`phase1-bulk-integration`). Full 217-case parity and
+broad hosted tests are still running against that isolated checkpoint.
