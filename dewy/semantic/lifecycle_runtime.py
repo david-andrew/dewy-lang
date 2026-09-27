@@ -1099,11 +1099,14 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         dependent, born = {}, {}
         for block in blocks:
             for node in block.items:
-                if (isinstance(node, hir.Declare) and isinstance(node.expr, hir.ExpressedIdentifier)
-                        and resource(node.expr.type) is not None
-                        and not {node.binding_id, node.expr.binding_id} & (captured | written)):
-                    dependent.setdefault(node.expr.binding_id, set()).add(node.binding_id)
-                    born[node.binding_id] = positions[id(node.expr)]
+                if not isinstance(node, hir.Declare) or resource(node.expr.type) is None:
+                    continue
+                source = bindings.access_path(node.expr, dictionaries=True).root
+                if isinstance(source, hir.ExpressedIdentifier) and (node.view or (
+                        isinstance(node.expr, hir.ExpressedIdentifier)
+                        and not {node.binding_id, source.binding_id} & (captured | written))):
+                    dependent.setdefault(source.binding_id, set()).add(node.binding_id)
+                    born[node.binding_id] = positions[id(source)]
         def alive_after(binding, read):
             pending = list(dependent.get(binding, ()))
             seen = set()
@@ -1228,7 +1231,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 if (isinstance(source, hir.ExpressedIdentifier) and source.binding_id in lexical
                         and not {source.binding_id, node.binding_id} & (captured | written)):
                     views.add(id(node))
-                if resource(source.type) is not None:
+                if resource(source.type) is not None and not node.view:
                     local.add(node.binding_id)
         return result, views, consumes
 
@@ -1410,7 +1413,17 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     allowed.add(node.binding_id)
                     return replace(node, view=True)
                 if node.view:
-                    reject(node, 'a resource view without a stable lifetime')
+                    # A required view borrows a rooted owner, including a
+                    # field or indexed element. The shared lowering view proof
+                    # still checks stability, escape and conflicting writes.
+                    # No logical cleanup is attached to this second name.
+                    selected = expression(hir.Place(node.loc, node.expr.type, node.expr),
+                                          live, inherited=literal.lifecycle == 'drop', control=control)
+                    source = bindings.access_path(selected.target, dictionaries=True).root
+                    if not isinstance(source, hir.ExpressedIdentifier) or source.binding_id not in live:
+                        reject(node, 'a resource view without a live owner')
+                    allowed.add(node.binding_id)
+                    return replace(node, expr=selected.target)
                 node = replace(node, expr=fresh(node.expr, live, literal.lifecycle == 'drop', control=control))
                 owners.append(node)
                 return node
@@ -1550,7 +1563,14 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     return False
                 node = node.value
             return True
-        conditional, declarations_by_read = conditional_consumptions(body, parameter_owners, resource, component)
+        conditional, declarations_by_read, view_conflicts = conditional_consumptions(
+            body, parameter_owners, resource, component,
+            call_writes=argument_writes, read_only_places=readonly_arguments)
+        if view_conflicts:
+            mutation, view = view_conflicts[0]
+            user_error(current_source, 'resource view conflicts with a storage mutation',
+                       Pointer(span=mutation.loc, message='this operation may change storage still borrowed by the view'),
+                       Pointer(span=view.loc, message='this required view is still live'))
         for read, (owner, path) in conditional.items():
             if path:
                 if read not in consumes:

@@ -1,0 +1,12 @@
+# A required dynamic-element view keeps one logical owner across repeated loops.
+let drops:int64=0
+Token=type of [id:int64 payload:array<int64>
+$__drop__ release=():>void=>{drops+=1 payload.clear}]
+work=():>int64=>{let items=[Token[1 [1]] Token[2 [2]]]
+loop i in [0..items.length) {const item=@items[i]
+if item.id not=?i+1 return 1
+if item.payload.length not=?1 or item.payload[0] not=?i+1 return 2}
+return 42}
+main=():>int64=>{let before:int64=_arena_live_bytes
+loop i in [0..20) {if work() not=?42 return 3}
+return if drops=?40 and _arena_live_bytes=?before 42 else 4}

@@ -5244,3 +5244,27 @@ still pass, and the three aggregate lifetime kernels no longer retain bytes.
 The row test now checks that callback-local exclusions are dropped from `E`
 and cannot establish a wrapper guarantee, matching the approved boundary.
 All 66 focused aggregate/string/effect checks passed after these corrections.
+
+
+## Required views of resource projections (2026-09-27)
+
+`const item=@items[i]` and required field/dictionary-entry views now borrow
+the existing resource owner without adding a second cleanup. Alias dependencies
+keep the owner live through derived names; a view is never eligible as an
+independent owner for transfer. The existing lowering proof still checks
+physical storage stability and escaping/captured storage. Array writes that
+may detach storage remain conservative, including sibling slots.
+
+Logical mutation conflicts also run in ownership liveness before reachability.
+This prevents an unused resource function from hiding a clear/replacement
+through a live view. The backwards branch/loop analysis checks live aliases
+and translated call writes, preserving field prefixes above indexed storage.
+This covers resource ownership contracts; general required-view validation
+for ordinary values before native reachability remains to be audited.
+
+Twenty-one focused hosted/native checks passed on both backends, including
+dynamic indices, dictionary views, chained aliases, repeated zero-retained-
+byte loops, rejection of consumed/replaced owners and unused-function errors.
+Thirty-nine adjacent hosted view/conditional/renewal checks passed before the
+source-contract extension; its 24-case focused subset passed afterward. The
+manifest now has 222 cases. Broader integration follows the next batch.

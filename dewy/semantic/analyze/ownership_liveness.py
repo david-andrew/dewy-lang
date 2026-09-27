@@ -11,7 +11,8 @@ sibling is still read. A live entry is `(binding, path, kind)`: a `read` of
 the route, or a `store` into it, which needs the enclosing storage but not
 the component's old value.
 """
-from .. import hir
+from .. import hir, bindings
+from . import predicate_effects
 
 
 def field_route(node):
@@ -42,9 +43,19 @@ def conflicts(path, entry_path, kind):
     return path[:shared] == entry_path[:shared]
 
 
-def conditional_consumptions(body, parameter_owners, resource, component=None):
+def conditional_consumptions(body, parameter_owners, resource, component=None, *, call_writes=None, read_only_places=frozenset()):
     nodes, owners, aliases, captured, occurrences = [], set(), {}, set(), {}
     owners.update(p.binding_id for p in parameter_owners)
+    required_views, view_conflicts = {}, {}
+    def storage_route(node):
+        path = bindings.access_path(node, dictionaries=True)
+        prefix = []
+        for step in path.steps:
+            if not isinstance(step, hir.MemberAccess):
+                break  # resizing/detachment can relocate any indexed slot
+            prefix.append(step.name)
+        return path.binding_id, tuple(prefix)
+
     pending = [body]
     while pending:
         node = pending.pop()
@@ -55,9 +66,13 @@ def conditional_consumptions(body, parameter_owners, resource, component=None):
         if isinstance(node, hir.ExpressedIdentifier):
             occurrences[id(node)] = occurrences.get(id(node), 0) + 1
         if isinstance(node, hir.Declare) and resource(node.annotation or node.expr.type) is not None:
-            owners.add(node.binding_id)
-            if isinstance(node.expr, hir.ExpressedIdentifier):
-                aliases[node.binding_id] = node.expr.binding_id
+            if not node.view:
+                owners.add(node.binding_id)
+            else:
+                required_views[node.binding_id] = (node, storage_route(node.expr))
+            source = bindings.access_path(node.expr, dictionaries=True).root if node.view else node.expr
+            if isinstance(source, hir.ExpressedIdentifier):
+                aliases[node.binding_id] = source.binding_id
         pending.extend(hir.children(node))
 
     def roots(binding):
@@ -140,6 +155,27 @@ def conditional_consumptions(body, parameter_owners, resource, component=None):
 
     def visit(node, after, enabled, exits=()):
         live = set(after)
+        # Logical borrows are source contracts, even in an unused function.
+        # Check writes against aliases live on this path before lowering or
+        # reachability can hide the conflict. Physical placement checks remain
+        # with the common view proof in lowering.
+        changed = []
+        target = predicate_effects.write_target(node)
+        if isinstance(node, hir.Place) and id(node) in read_only_places:
+            target = None
+        if isinstance(node, (hir.DictStore, hir.DictRemove)) and isinstance(target, hir.MemberAccess):
+            target = target.value
+        if target is not None:
+            changed.append(storage_route(target))
+        if isinstance(node, hir.FunctionCall) and call_writes:
+            changed.extend((binding, ()) for binding in call_writes.get(id(node), ()))
+        if changed:
+            for entry, _, _ in live:
+                for alias in roots(entry) & required_views.keys():
+                    declaration, (owner, prefix) = required_views[alias]
+                    for changed_owner, changed_path in changed:
+                        if changed_owner is not None and owner in roots(changed_owner) and conflicts(prefix, changed_path, 'read'):
+                            view_conflicts[id(node)] = (node, declaration)
         if isinstance(node, hir.ExpressedIdentifier):
             consume(node, node.binding_id, (), live, enabled)
             live.add((node.binding_id, (), 'read'))
@@ -195,4 +231,4 @@ def conditional_consumptions(body, parameter_owners, resource, component=None):
             live = visit(child, live, enabled, exits)
         return live
     visit(body, set(), owners)
-    return consumes, declarations
+    return consumes, declarations, tuple(view_conflicts.values())

@@ -1559,7 +1559,16 @@ statement = (id:addr @owners:array<addr> loops:array<addr> allowed:set<addr> inh
             store(id declared @session)
             return
         }
-        if declared.view {reject(declared 'a resource view without a stable lifetime' @plan) return}
+        if declared.view {
+            # The view borrows a rooted owner; lowering still owes the common
+            # stability/escape proof. Only the original owner receives cleanup.
+            let place=put(hir.Place[declared.loc value.value_type declared.expr] @session)
+            expression(place live inherited @plan @session frame=frame)
+            let source=receiver_root(declared.expr session.hir)
+            if source is? none or source not in? live {reject(declared 'a resource view without a live owner' @plan) return}
+            plan.view_bindings.push(declared.binding_id)
+            return
+        }
         fresh(declared.expr live inherited @plan @session frame=frame)
         owners.push(id)
         return
@@ -1992,11 +2001,13 @@ local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Pla
         loop item in block.items {
             let node=hir.node_at(session.hir item)
             if node isnt? hir.Declare or node.binding_id is? none continue
-            let source=hir.node_at(session.hir node.expr)
-            if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and resource(source.value_type session.types) isnt? none and node.binding_id not in? captured and source.binding_id not in? captured and node.binding_id not in? written and source.binding_id not in? written {
+            let value=hir.node_at(session.hir node.expr)
+            let source_id=if node.view bindings.access_path(node.expr session.hir dictionaries=true).root else node.expr
+            let source=hir.node_at(session.hir source_id)
+            if source is? hir.ExpressedIdentifier and source.binding_id isnt? none and resource(value.value_type session.types) isnt? none and (node.view or (node.binding_id not in? captured and source.binding_id not in? captured and node.binding_id not in? written and source.binding_id not in? written)) {
                 let aliases=dependent.get(source.binding_id set[])
                 aliases.push(node.binding_id) dependent[source.binding_id]=aliases
-                born[node.binding_id]=positions.get(node.expr 0)
+                born[node.binding_id]=positions.get(source_id 0)
             }
         }
     }
@@ -2062,7 +2073,7 @@ local_transfers = (body:addr parameters:array<addr> borrowed:set<addr> @plan:Pla
                 if last.get(source.binding_id) =? declaration.expr and occurrences.get(declaration.expr 0) =? 1 and not alias_alive(source.binding_id declaration.expr dependent born last positions) {plan.transfer_sites.push(item)}
             }
             if declaration.binding_id isnt? none and source is? hir.ExpressedIdentifier and source.binding_id isnt? none and source.binding_id in? lexical and source.binding_id not in? captured and declaration.binding_id not in? captured and source.binding_id not in? written and declaration.binding_id not in? written {plan.view_sites.push(item)}
-            if declaration.binding_id isnt? none and resource(source.value_type session.types) isnt? none {locals.push(declaration.binding_id)}
+            if declaration.binding_id isnt? none and not declaration.view and resource(source.value_type session.types) isnt? none {locals.push(declaration.binding_id)}
         }
     }
 }
@@ -2178,14 +2189,23 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
         $runtime_assert declared is? hir.Declare and declared.binding_id isnt? none
         owned.push(declared.binding_id)
     }
+    let required_views:dict<addr addr>=[]
     let pending:array<addr>=[function.body]
     loop pending.length >? 0 {
-        let current=hir.node_at(session.hir pending.pop)
+        let id=pending.pop
+        let current=hir.node_at(session.hir id)
         if current is? hir.FunctionLiteral continue
-        if current is? hir.Declare and current.binding_id isnt? none and resource((if current.annotation is? none hir.node_at(session.hir current.expr).value_type else current.annotation) session.types) isnt? none {owned.push(current.binding_id)}
+        if current is? hir.Declare and current.binding_id isnt? none and resource((if current.annotation is? none hir.node_at(session.hir current.expr).value_type else current.annotation) session.types) isnt? none {
+            if current.view {required_views[current.binding_id]=id}
+            else {owned.push(current.binding_id)}
+        }
         hir.push_children(current @pending)
     }
-    let conditional=ownership_liveness.consumptions(function.body owned session.hir session.types)
+    let conditional=ownership_liveness.consumptions(function.body owned session.hir session.types required_views=required_views call_writes=plan.argument_writes read_only_places=plan.readonly_arguments)
+    loop [mutation view] in conditional.view_conflicts {
+        if plan.problem is? none {plan.problem=Error[srcfile=plan.source title='resource view conflicts with a storage mutation' pointers=[Pointer[hir.node_at(session.hir mutation).loc 'this operation may change storage still borrowed by the view'] Pointer[hir.node_at(session.hir view).loc 'this required view is still live']]]}
+        return
+    }
     loop [read owner] in conditional.consumes {
         let path=conditional.paths.get(read [])
         if path.length >? 0 {

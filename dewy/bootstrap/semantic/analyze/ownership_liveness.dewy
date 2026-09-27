@@ -1,4 +1,6 @@
+import p"../bindings.dewy" as bindings
 import p"../hir.dewy" as hir
+import p"predicate_effects.dewy" as predicate_effects
 import p"../ty.dewy" as types
 
 # Logical ownership liveness, independent of physical storage lowering.
@@ -12,6 +14,10 @@ Entry:type=const [binding:addr path:array<string|int64>=[] store:bool=false meas
 Live:type=dict<string Entry>
 Analysis:type=[
     owners:set<addr>
+    required_views:dict<addr addr>=[]
+    view_conflicts:dict<addr addr>=[]
+    call_writes:dict<addr set<addr>>=[]
+    read_only_places:set<addr>=set[]
     aliases:dict<addr addr>=[]
     captured:set<addr>=set[]
     occurrences:dict<addr addr>=[]
@@ -96,9 +102,56 @@ consume=(id:addr binding:addr path:array<string|int64> live:Live enabled:set<add
         analysis.paths.pop(id default=[]);
     }
 }
+# Keep fields above the first selection. A write through any array slot may
+# detach its container; dictionary operations similarly retain the owner.
+storage_route=(id:addr nodes:array<hir.AST>):>Entry?=>{
+    let path=bindings.access_path(id nodes dictionaries=true)
+    let root=hir.node_at(nodes path.root)
+    if root isnt? hir.ExpressedIdentifier or root.binding_id is? none return none
+    let prefix:array<string|int64>=[]
+    loop id in path.steps {
+        let step=hir.node_at(nodes id)
+        if step isnt? hir.MemberAccess break
+        prefix.push(step.name)
+    }
+    return Entry[root.binding_id prefix]
+}
+check_view_writes=(id:addr live:Live @analysis:Analysis nodes:array<hir.AST>):>void=>{
+    if analysis.required_views.length=?0 return
+    let node=hir.node_at(nodes id)
+    let changed:array<Entry>=[]
+    let target=predicate_effects.write_target(node nodes)
+    if node is? hir.Place and id in? analysis.read_only_places {target=none}
+    if node is? hir.DictStore|hir.DictRemove and target isnt? none {
+        let member=hir.node_at(nodes target)
+        if member is? hir.MemberAccess {target=member.value}
+    }
+    if target isnt? none {
+        let route=storage_route(target nodes)
+        if route isnt? none {changed.push(route)}
+    }
+    if node is? hir.FunctionCall {
+        loop binding in analysis.call_writes.get(id set[]) {changed.push(Entry[binding])}
+    }
+    if changed.length=?0 return
+    loop entry in live.values {
+        loop alias in roots(entry.binding analysis.aliases) {
+            let view=analysis.required_views.get(alias)
+            if view is? none continue
+            let declaration=hir.node_at(nodes view)
+            $runtime_assert declaration is? hir.Declare
+            let borrowed=storage_route(declaration.expr nodes)
+            if borrowed is? none continue
+            loop write in changed {
+                if borrowed.binding in? roots(write.binding analysis.aliases) and (under(borrowed.path write.path) or under(write.path borrowed.path)) {analysis.view_conflicts[id]=view}
+            }
+        }
+    }
+}
 visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> exits:array<LoopExit>=[]):>Live=>{
     let node=hir.node_at(nodes id)
     let live=after
+    check_view_writes(id live @analysis nodes)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none {
             consume(id node.binding_id [] live enabled @analysis)
@@ -187,8 +240,8 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
     loop children.length >? 0 {live=visit(children.pop live enabled @analysis nodes exits)}
     return live
 }
-consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table):>Analysis=>{
-    let analysis=Analysis[owners]
+consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table required_views:dict<addr addr>=[] call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[]):>Analysis=>{
+    let analysis=Analysis[owners required_views=required_views call_writes=call_writes read_only_places=read_only_places]
     let order:array<addr>=[]
     let pending:array<addr>=[body]
     loop pending.length >? 0 {
@@ -200,8 +253,8 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table)
             continue
         }
         if node is? hir.ExpressedIdentifier {analysis.occurrences[id]=analysis.occurrences.get(id 0)+1}
-        if node is? hir.Declare and node.binding_id isnt? none and node.binding_id in? owners {
-            let value=hir.node_at(nodes node.expr)
+        if node is? hir.Declare and node.binding_id isnt? none and (node.binding_id in? owners or node.view) {
+            let value=hir.node_at(nodes if node.view bindings.access_path(node.expr nodes dictionaries=true).root else node.expr)
             if value is? hir.ExpressedIdentifier and value.binding_id isnt? none {analysis.aliases[node.binding_id]=value.binding_id}
         }
         hir.push_children(node @pending)
