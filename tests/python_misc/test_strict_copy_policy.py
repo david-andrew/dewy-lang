@@ -8,14 +8,14 @@ from dewy.semantic.check import typecheck_and_resolve
 from test_scalar_projection import execute
 
 SOURCE = """
-Box:type=[text:string number:int64]
+Box:type=[text:array<int64> number:int64]
 read=(values:array<Box>):>int64=>{
     if values.length =? 0 return 0
     let saved=values[0]
     values[0].number=99
     return saved.number
 }
-main=():>int64=>read([Box['hello' 42]])
+main=():>int64=>read([Box[[1] 42]])
 """
 
 
@@ -128,3 +128,30 @@ def test_fresh_nested_replacement_reports_a_move_instead_of_a_copy(tmp_path):
     assert not any(note.site == 'assigned to `rows`' and note.srcfile.path == fixture
                    for note in lower.last_copy_notes)
     execute(tmp_path, 'fresh_replacement', output)
+
+
+def test_shared_strings_nested_in_fixed_layouts(tmp_path):
+    from pathlib import Path
+    source = Path(__file__).resolve().parents[1] / 'fixtures/strict_copy_shared_strings.dewy'
+    execute(tmp_path, 'shared-strings', codegen(SrcFile.from_path(source), debug_locations=False))
+
+
+def test_placement_exemption_does_not_claim_bounded_work():
+    from dewy.backend.udewy import lower
+    source = SrcFile(None, '$explicit_copies\n'
+                     'keep=(text:string):>array<string>=>[text]\n'
+                     'main=():>int64=>{let texts = keep("{42}")\n return 42}')
+    codegen(source)
+    notes = [note for note in lower.last_copy_notes if note.srcfile == source and note.kind == 'string']
+    assert notes
+    assert all(note.policy_exempt and note.runtime_sized for note in notes)
+
+
+def test_native_shared_strings_and_mutable_copy_policy(tmp_path):
+    from pathlib import Path
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    fixtures = Path(__file__).resolve().parents[1] / 'fixtures'
+    check_structural_text(build_program_driver(tmp_path), tmp_path,
+                          cases=[(fixtures / f'strict_copy_{name}.dewy').read_text()
+                                 for name in ['shared_strings', 'explicit', 'owned_parameter']],
+                          errors=['$explicit_copies\n' + SOURCE])

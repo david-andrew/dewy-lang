@@ -1,4 +1,5 @@
-# Copies through tagged storage and string ownership must appear in budgets.
+# Copies through tagged storage must appear in budgets. Keeping a string
+# shares it (no copy); the hosted backend only reports its placement copy.
 Box:type=[value:int64]
 snapshot=(value:Box|none):>Box|none=>{
     let saved=value

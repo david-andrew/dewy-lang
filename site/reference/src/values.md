@@ -117,6 +117,14 @@ its external read effect; binding a local name does not hide that access.
 The file-level `$explicit_copies` directive rejects an implicit copy of
 runtime-sized storage when the compiler cannot prove a borrow or move.
 It applies to that module, including when it is imported.
+Only copies that cost something count. Sharing an immutable string never
+duplicates its bytes, so keeping, passing or storing a string is not a copy
+under the policy. A string still counts when it leaves an `$allocator` block,
+which copies it for real. This distinction applies recursively: a fixed
+record or fixed array of strings can share its immutable bytes, while a
+runtime-length array still has an unbounded mutable-storage copy. Backend
+placement copies remain visible in analysis reports without changing which
+programs the source policy accepts.
 `$explicit_copies = false` disables the policy; a file may set it once.
 
 Use `.copy()` when an independent value is intended, or

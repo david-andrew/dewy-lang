@@ -458,6 +458,7 @@ class _Lowerer(
         self.current_object_field_names: dict[int, str] = {}
         self.current_literal: hir.FunctionLiteral | None = None   # the function being lowered (locals are traced through it)
         self.copy_bound_memo: dict[int, tuple[ty.Type, bool]] = {}
+        self.shared_copy_bound_memo: dict[int, tuple[ty.Type, bool]] = {}
         self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
         self.owned_array_elements: dict[str, ty.TypeExpr] = {}   # one element contract drives recursive cleanup
@@ -3756,7 +3757,7 @@ class _Lowerer(
                 self._note_copy(kind, escape.value_type, escape.site,
                                 'requested with `.copy()`' if escape.explicit else
                                 f'values leave the `$allocator(@{escape.arena})` block by copy', escape.loc,
-                                explicit=escape.explicit)
+                                explicit=escape.explicit, escape=True)
 
     def _compute_moves(self, literal: hir.FunctionLiteral) -> set[int]:
         """Find transfer sites that can consume an owned local.

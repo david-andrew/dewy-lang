@@ -48,7 +48,7 @@ ProjectionField:type = const [name:string owner:addr result:addr]
 ScalarProjection:type = const [function:addr read:addr fields:array<ProjectionField> result:addr symbol:string borrowed:bool=false]
 # One dynamic aggregate copy the lowering decided, for `dewy analyze`: what
 # was copied, at which kind of site, and why no borrow or move applied.
-CopyNote:type = const [kind:string type:string site:string reason:string loc:Span source:addr? explicit:bool=false runtime_sized:bool=true]
+CopyNote:type = const [kind:string type:string site:string reason:string loc:Span source:addr? explicit:bool=false runtime_sized:bool=true policy_exempt:bool=false]
 State:type = [
     input:emit.Input
     source:SrcFile
@@ -56,6 +56,7 @@ State:type = [
     copy_notes:array<CopyNote>=[]
     copy_names:dict<addr string>=[]
     copy_bound_memo:dict<addr bool>=[]
+    shared_copy_bound_memo:dict<addr bool>=[]
     explicit_copy_sources:set<addr>=set[]
     borrow_rejections:dict<addr string>=[]
     # The owned local a `return` is transferring: its reads own the value.
@@ -180,10 +181,15 @@ copy_name = (type:addr @state:State):>string => {
     state.copy_names[type]=name
     return name
 }
-note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state:State explicit:bool=false):>void => {
+# Sharing an immutable string is not a copy: its bytes are never duplicated.
+# A string still counts when requested with `.copy()` or when it leaves an
+# `$allocator` block, where its bytes are copied.
+note_copy = (kind:string type:addr site:string reason:string node:hir.AST @state:State explicit:bool=false escape:bool=false):>void => {
+    if kind =? 'string' and not explicit and not escape return
     let name=copy_name(type @state)
     let dynamic=copy_policy.runtime_sized(type state.type_nodes state.layout_context.brands @state.copy_bound_memo)
-    state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index explicit dynamic])
+    let exempt=not escape and not copy_policy.runtime_sized(type state.type_nodes state.layout_context.brands @state.shared_copy_bound_memo share_strings=true)
+    state.copy_notes.push(CopyNote[kind name site reason node.loc state.source_index explicit dynamic exempt])
 }
 # Values leaving `$allocator` blocks are copies (see allocator_escapes).
 note_allocator_escapes = (body:addr @state:State):>void => {
@@ -191,7 +197,7 @@ note_allocator_escapes = (body:addr @state:State):>void => {
         let value=hir.node_at(state.input.nodes escape.value)
         let kind=copy_kind(value.value_type @state)
         if kind is? none continue
-        note_copy(kind value.value_type escape.site (if escape.explicit 'requested with `.copy()`' else "values leave the `$allocator(@{escape.arena})` block by copy") value @state explicit=escape.explicit)
+        note_copy(kind value.value_type escape.site (if escape.explicit 'requested with `.copy()`' else "values leave the `$allocator(@{escape.arena})` block by copy") value @state explicit=escape.explicit escape=true)
     }
 }
 copy_kind = (type:addr @state:State):>string? => {
@@ -5381,7 +5387,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     let normalized=statements.normalize(program.Program[functions globals startup main needs_startup=true source=source argv_prologue=if argv is? none none else argv.prologue argv_value=if argv is? none none else argv.value] emit.Input[state.nodes state.type_nodes input.source_files])
     timing.finish('lowering.normalize' normalize_started)
     loop note in state.copy_notes {
-        if note.explicit or not note.runtime_sized or note.source is? none or note.source not in? state.explicit_copy_sources {continue}
+        if note.explicit or not note.runtime_sized or note.policy_exempt or note.source is? none or note.source not in? state.explicit_copy_sources {continue}
         $runtime_assert note.source <? state.input.source_files.length
         return Error[srcfile=state.input.source_files[note.source] title='unproven copy'
             pointers=[Pointer[note.loc "{note.kind} copied when {note.site}: {note.reason}"]]

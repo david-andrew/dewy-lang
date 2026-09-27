@@ -4890,3 +4890,36 @@ Validation:
 Juxtaposition ambiguity was also measured (for the rejected narrowing): 622
 `Ambiguous` nodes in a self-build, 0.87 s of checking, about 2% of the
 build. Details are in `PHASE1_DESIGN_PROPOSALS.md`.
+
+## Shared strings are not copies (2026-09-27)
+
+David: explicit copies are for copies that actually cost something, and
+sharing immutable data is not one. Both compilers therefore stop recording a
+string share as a copy (`note_copy`/`_note_copy`). A string still counts
+when it is requested with `.copy()` or leaves an `$allocator` block. Hosted
+still copies frame-region strings into the arena when they escape. That is a
+placement choice, not a copy the program asks for: `dewy analyze` still
+reports its runtime-sized cost, but a separate policy exemption keeps
+`$explicit_copies` acceptance independent of backend placement. The exemption
+also applies recursively to immutable strings in records, fixed arrays and
+unions; runtime-length mutable arrays still carry an unbounded copy obligation.
+Allocator-boundary copies retain their recursive byte-copy obligation.
+
+The compiler's copy inventory goes from 4,111 to 2,631 sites: 1,534
+record, 706 array and 391 cell. The largest reasons are
+"may be used again, no proven last-use move" (883) and "stays owned by its
+container, nothing borrows it" (810). New parity case
+`strict_copy_shared_strings`: shared strings under `$explicit_copies` are
+accepted by both compilers (the previous native rejected it).
+
+Review follow-up: the shared-string exemption now follows nested records,
+fixed arrays, unions and nominal child fields in both compilers. Separate
+memo tables retain the physical byte-copy bound and the shared-string bound;
+`CopyNote.policy_exempt` records the policy choice without claiming bounded
+physical work. Allocator escapes use the byte-copy rule. Mutable payload
+fixtures continue to reject implicit copies and accept explicit remedies.
+Hosted copy/report tests, native classification, and a freshly hosted-built
+native driver pass the shared-string snapshot and mutable-copy cases (both
+x86-64 and C execution). The original pending shared-string changes are now
+completed by this slice; the reported site-count reduction is not a timing
+measurement.

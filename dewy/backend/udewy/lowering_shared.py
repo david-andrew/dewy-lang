@@ -275,6 +275,8 @@ class CopyNote:
     site: str = 'stored'
     explicit: bool = False
     runtime_sized: bool = True
+    # Exemption from source policy is not evidence of bounded physical work.
+    policy_exempt: bool = False
 
     @property
     def line(self) -> str:

@@ -3183,7 +3183,10 @@ class _StringLowering:
         if explicit:
             self._note_copy('string', node.type, 'explicit copy', 'requested with `.copy()`', node.loc, explicit=True)
         else:
-            self.copy_notes.append(CopyNote(self.srcfile, node.loc, reasons[storage]))
+            # This backend's placement copies the bytes here; the program does
+            # not ask for a copy (strings are immutable and shared), so the note
+            # informs `dewy analyze` without counting under `$explicit_copies`.
+            self.copy_notes.append(CopyNote(self.srcfile, node.loc, reasons[storage], policy_exempt=True))
         loc = node.loc
         statements = list(prelude)
         if isinstance(value, hir.ExpressedIdentifier):

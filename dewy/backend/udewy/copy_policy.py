@@ -2,12 +2,14 @@
 
 A fixed outer record or array can still contain runtime-sized storage.
 String length counts graphemes, not bytes: even one grapheme has no fixed
-byte bound. Facts and COW handles do not by themselves bound the copy.
+byte bound. Immutable string sharing is bounded; copying those bytes at an allocator
+boundary is not. Mutable COW handles do not bound the eventual copy.
 """
 from ...semantic import ty
 
 
-def runtime_sized(type_: ty.Type, memo: dict[int, tuple[ty.Type, bool]] | None = None) -> bool:
+def runtime_sized(type_: ty.Type, memo: dict[int, tuple[ty.Type, bool]] | None = None, *, share_strings: bool = False) -> bool:
+    """Bound recursive copy work; a memo belongs to one sharing mode."""
     active: set[int] = set()
     memo = {} if memo is None else memo
 
@@ -19,9 +21,9 @@ def runtime_sized(type_: ty.Type, memo: dict[int, tuple[ty.Type, bool]] | None =
         if identity in memo:
             return memo[identity][1]
         if isinstance(plain, str):
-            return plain in {'string', 'char', 'grapheme'}
+            return not share_strings and plain in {'string', 'char', 'grapheme'}
         if isinstance(plain, ty.StringType):
-            return plain.length != 0
+            return not share_strings and plain.length != 0
         if isinstance(plain, ty.ArrayType) and plain.length is None:
             return True
         active.add(identity)
@@ -55,7 +57,7 @@ def validate(notes, sources) -> None:
     # assembly, renaming, proof erasure and direct lowering API calls.
     policies = {source.path for source in sources}
     for note in notes:
-        if note.explicit or not note.runtime_sized:
+        if note.explicit or not note.runtime_sized or note.policy_exempt:
             continue
         if note.srcfile.path not in policies:
             continue

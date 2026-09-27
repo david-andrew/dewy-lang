@@ -139,7 +139,8 @@ def test_native_compiler_command(tmp_path):
                               text=True, timeout=900, check=False)
     assert coverage.returncode == 0, coverage.stdout + coverage.stderr
     entries = [line for line in coverage.stdout.splitlines() if line.startswith('copy: ') and 'copy_report_coverage.dewy:' in line]
-    assert any(': string ' in line for line in entries)
+    # Sharing an immutable string is not a copy, so a kept parameter string is not in the budget.
+    assert entries and not any(': string ' in line for line in entries)
     # `Box|none` is a record handle natively (a cell in hosted lowering), so
     # the union snapshot is reported by its site rather than a cell kind.
     assert any('copied when bound to `saved`' in line for line in entries)
@@ -153,7 +154,9 @@ def test_native_compiler_command(tmp_path):
     key_notes = [line for line in key_inventory.stdout.splitlines()
                  if line.startswith('copy: ') and 'dictionary_key_borrows.dewy:' in line]
     assert not any('`probe`' in line for line in key_notes), key_notes
-    assert any('`key`' in line for line in key_notes), key_notes
+    # The eager default's snapshot of the string key is a share of immutable
+    # bytes, not a copy, so it no longer appears in the budget either.
+    assert not any('`key`' in line for line in key_notes), key_notes
 
     # Field, element and narrowed optional strings read with nothing running
     # before their builtin consumer are borrowed; a binding owns its value,

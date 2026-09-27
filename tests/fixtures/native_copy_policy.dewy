@@ -30,5 +30,11 @@ main=():>int64=>{
     $runtime_assert policy.runtime_sized(child nodes registry @memo)
     # The cached false result is distinct from an absent dictionary entry.
     $runtime_assert not policy.runtime_sized(fixed nodes registry @memo)
+    let shared:dict<addr bool>=[]
+    $runtime_assert not policy.runtime_sized(string nodes registry @shared share_strings=true)
+    $runtime_assert not policy.runtime_sized(nested nodes registry @shared share_strings=true)
+    $runtime_assert not policy.runtime_sized(parent nodes registry @shared share_strings=true)
+    $runtime_assert not policy.runtime_sized(child nodes registry @shared share_strings=true)
+    $runtime_assert policy.runtime_sized(dynamic nodes registry @shared share_strings=true)
     return 42
 }

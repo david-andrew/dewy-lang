@@ -46,3 +46,17 @@ def test_native_copy_bound_classification(tmp_path):
 
     source = Path(__file__).resolve().parents[2] / 'tests/fixtures/native_copy_policy.dewy'
     execute(tmp_path, 'native-copy-bound', codegen(SrcFile.from_path(source), debug_locations=False))
+
+
+@pytest.mark.parametrize('type_,expected', [
+    ('string', False),
+    (ty.StringType(1), False),
+    (ty.ArrayType('string', 2), False),
+    (ty.ArrayType('string'), True),
+    (ty.ObjectType((ty.ObjectField('text', 'string'),)), False),
+    (ty.TypeOr(['string', 'none']), False),
+    (ty.TypeOr([ty.ArrayType('string'), 'none']), True),
+    (ty.ObjectType((ty.ObjectField('data', ty.ArrayType('string')),)), True),
+])
+def test_recursive_shared_string_cost(type_, expected):
+    assert runtime_sized(type_, share_strings=True) is expected

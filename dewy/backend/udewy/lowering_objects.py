@@ -940,13 +940,22 @@ class _ObjectLowering:
             loc,
         )
 
-    def _note_copy(self, kind: str, type_: ty.Type, site: str, reason: str, loc: Span, *, explicit: bool = False) -> None:
-        """Record one aggregate copy for `dewy analyze` (see CopyNote)."""
+    def _note_copy(self, kind: str, type_: ty.Type, site: str, reason: str, loc: Span, *, explicit: bool = False, escape: bool = False) -> None:
+        """Record one aggregate copy for `dewy analyze` (see CopyNote).
+
+        Sharing an immutable string is not a copy: its bytes are never
+        duplicated. A string still counts when requested with `.copy()` or
+        when it leaves an `$allocator` block, where its bytes are copied.
+        """
+        if kind == 'string' and not explicit and not escape:
+            return
         name = type_to_dewy(type_)
         if len(name) > 48:
             name = name[:45] + '...'
         self.copy_notes.append(CopyNote(self.srcfile, loc, reason, kind, name, site, explicit,
-                                        copy_policy.runtime_sized(type_, self.copy_bound_memo)))
+                                        copy_policy.runtime_sized(type_, self.copy_bound_memo),
+                                        policy_exempt=not escape and not copy_policy.runtime_sized(
+                                            type_, self.shared_copy_bound_memo, share_strings=True)))
 
     def _copy_reason(self, expr: hir.AST) -> str:
         """Why the copied expression could not be borrowed or moved."""
