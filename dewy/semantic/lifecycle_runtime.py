@@ -141,7 +141,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             assert parent is not None
             current = ty.USER_BRAND_TYPES[parent]
 
-    def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None, extracted=None):
+    def cleanup(owners, loc, fields_only=frozenset(), *, suffix=None, selected=None, extracted=None, selected_moved=False):
         result = []
         def drop(value, type_, ancestors, run_hook=True, into=result, tail=None, extraction=None, additional=(), inline_array=False, guards=None):
             if guards and () in guards:
@@ -392,7 +392,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 extractions[part.binding_id] = [(route, moved) for route, moved in existing if route[:len(path)] != path]
                 guards = {route[len(path):]: flag[1] for route, flag in component_flags.get(part.binding_id, {}).items()
                           if route[:len(path)] == path}
-            drop(selected, selected.type, set(), extraction=routes[0] if routes else None, additional=routes[1:],
+            drop(selected, selected.type, set(), run_hook=not selected_moved, extraction=routes[0] if routes else None, additional=routes[1:],
                  guards=guards or None)
         if suffix is not None:
             value, first, before = suffix
@@ -1277,7 +1277,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                             # Consumed on this path only: the owner's cleanup
                             # consults the flag instead of a static route.
                             cleared = hir.Assign(child.loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(child.loc, 'bool', False))
-                            return hir.Block(child.loc, value.type, [*prefix, saved, cleared, value], False)
+                            # A custom move consumes the outer resource but
+                            # leaves its old nested resources to clean up. Do
+                            # that on this path before marking the field absent.
+                            remainder = cleanup((), child.loc, selected=selected, selected_moved=True) if moved else []
+                            return hir.Block(child.loc, value.type, [*prefix, saved, *remainder, cleared, value], False)
                         extractions.setdefault(projection[0], []).append((projection[1], moved))
                         # Keep the wrapper alive until its lexical cleanup. Only
                         # this component transfers; siblings still drop there.
@@ -1489,10 +1493,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             body = replace(body, scoped=True)
         transfers, views, consumes = local_transfers(body, parameter_owners, allowed)
         def component(node):
-            # A hook-free route to a component without a custom move: the
-            # remaining owner can drop around it, guarded by one flag.
+            # Hook-free wrappers can remain partially live. A custom move
+            # cleans its remainder at the consuming edge before clearing the
+            # component flag; the wrapper still owns its other fields.
             shape = ty.structural_base(node.type)
-            if not isinstance(shape, ty.ObjectType) or any(method.lifecycle == 'move' for method in shape.methods):
+            if not isinstance(shape, (ty.ObjectType, ty.ArrayType, ty.TypeOr)):
                 return False
             while isinstance(node, hir.MemberAccess):
                 owner_shape = ty.structural_base(node.value.type)

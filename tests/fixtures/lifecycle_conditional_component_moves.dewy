@@ -1,0 +1,58 @@
+# A custom move transfers the field's resource, but does not transfer the
+# source's nested resources unless its hook does so. Clean that remainder on
+# the taken edge, then let the wrapper drop only its still-owned fields.
+let dropped:array<int64>=[]
+let children:array<int64>=[]
+let moves:int64=0
+MovePayload=type of [id:int64
+    $__drop__
+    release=():>void=>{children.push(id)}
+]
+Handle=type of [id:int64 child:MovePayload
+    $__move__
+    relocate=():>Handle=>{moves+=1 return Handle[id+100 MovePayload[child.id+100]]}
+    $__drop__
+    release=():>void=>{dropped.push(id)}
+]
+Pair:type=[left:Handle right:Handle]
+consume=(value:Handle):>int64=>value.id
+exercise=(take:bool):>int64=>{
+    let pair=Pair[Handle[1 MovePayload[11]] Handle[2 MovePayload[12]]]
+    let result:int64=0
+    if take {result=consume(pair.left)}
+    if pair.right.id not=?2 return 0
+    return if take result else 42
+}
+refill=():>int64=>{
+    let pair=Pair[Handle[3 MovePayload[13]] Handle[4 MovePayload[14]]]
+    let result:int64=0
+    loop i in [0..2) {
+        result+=consume(pair.left)
+        pair.left=Handle[5+i MovePayload[15+i]]
+    }
+    return result
+}
+exercise_all=():>int64=>{
+    dropped.clear
+    children.clear
+    moves=0
+    if exercise(true) not=?101 return 1
+    if moves not=?1 or dropped not=?[101 2] or children not=?[11 111 12] return 2
+    dropped.clear
+    children.clear
+    if exercise(false) not=?42 return 3
+    if moves not=?1 or dropped not=?[2 1] or children not=?[12 11] return 4
+    dropped.clear
+    children.clear
+    if refill() not=?208 return 5
+    if moves not=?3 or dropped not=?[103 105 4 6] or children not=?[13 113 15 115 14 16] return 6
+    return 42
+}
+
+main=():>int64=>{
+    if exercise_all() not=?42 return 7
+    let before:int64=_arena_live_bytes
+    loop i in [0..40) {if exercise_all() not=?42 return 8}
+    $runtime_assert _arena_live_bytes =? before
+    return 42
+}

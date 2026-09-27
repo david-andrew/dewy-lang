@@ -1,8 +1,18 @@
 # Value semantics, copies, and places
 
-BLUF: Dewy primarily has value semantics. Ordinary rebinding behaves as an independent value, while the compiler may realize that with a copy, move, ownership transfer, or unobservable sharing. `@` explicitly requests a reference and is required at both the call site and in the signature.
+Dewy primarily has value semantics. Ordinary rebinding behaves as an independent value, while the compiler may realize that with a copy, move, ownership transfer, or unobservable sharing. `@` explicitly requests a reference and is required at both the call site and in the signature.
 
-Intended language rule. Implementation is in progress: objects and arrays now recursively copy nested exact arrays, structural-object array elements, and array-valued object fields across ordinary local bindings, assignments, calls, and returns. For recursively fixed return layouts, the caller prepares the complete mutable storage tree before the call. Runtime-length array copies use a counted element loop in non-escaping contexts. Mutable scalar, array, and structural-object bindings can also root explicitly marked place routes with `@`; field/index projection and mutation are visible to the caller, as is whole-value rebinding when the selected layout is recursively fixed. First-class or escaping places and function handles remain to be implemented. Lowering may share storage only when that sharing is unobservable or the program asked for a place with `@`.
+Both compilers preserve independent values across ordinary bindings,
+assignments, arguments and returns. The implementation combines proven
+borrows and moves with a provisional copy-on-write fallback. Fixed local
+storage may live in the frame when lifetime analysis proves it cannot escape.
+Runtime arrays, nested records, dictionaries and tagged unions retain their
+value semantics regardless of placement. This is not a promise that every
+source assignment performs a physical copy.
+
+Implementation coverage and remaining ownership restrictions are tracked in
+[the Phase 1 checklist](../PHASE1_PROGRESS.md#current-completion-checklist-2026-09-27).
+First-class escaping places and capturing function values remain unsupported.
 
 A binding names a value. Assignment, argument passing, and return give you that value, not another name for the same cell. Element and field writes go through the binding you wrote. Sharing is either unobservable or spelled.
 
@@ -39,8 +49,21 @@ the synthesized operation. Strings retain their contents independently of
 the receiver's storage lifetime; unused temporary copies are released at the
 end of their consuming statement. General unions and optional aggregates
 support the same operation: only the active alternative is copied, and a
-user-declared `copy` member is not silently replaced. Lifecycle-hook dispatch
-and `$explicit_copies` enforcement remain pending.
+user-declared `copy` member is not silently replaced. Declared `$__copy__` hooks and synthesized component copies participate in
+ordinary fact/effect checking. A `$__drop__` type without `$__copy__` is
+move-only: a read may borrow, and a last use may transfer ownership, but a use
+requiring two independent resources is rejected.
+
+`$explicit_copies` opts a module into rejecting unproven runtime-sized copies.
+Use `.copy()` when an independent value is intended, or `const view = @owner`
+when stable borrowed storage is required. Without the directive, permitted
+implicit copies remain visible in `dewy analyze`. Shared immutable strings,
+including strings nested in fixed aggregates, are exempt from this policy;
+mutable runtime-length payloads and strings copied out of an allocator scope
+retain their copy obligations. Backend placement must not change acceptance.
+
+Custom copy/move hooks may have effects. Their effects remain checked, but
+elidable operations do not guarantee a particular hook invocation count.
 
 Slices and nested elements are values too. `A[1]` on a multidimensional array, and `nested[1]` on an `array<array<T>>`, both produce a value. `A[1 0] = 9` mutates `A`. `row = A[1]  row[0] = 9` does not.
 
@@ -54,7 +77,10 @@ Default argument expressions run on every call that omits them, so `(a:array = [
 
 ## Places
 
-The current compiler supports places rooted in named mutable scalar, array, or structural-object bindings, including routes through object fields and individual array elements. The caller and parameter storage contracts must match, a `const` root cannot be passed, and potentially overlapping routes cannot occupy two place arguments in one call. Nested calls may forward a place. The place cannot be returned, stored, or bound to another local.
+The current compiler supports places rooted in named mutable scalar, array, or structural-object bindings, including routes through object fields and individual array elements. The caller and parameter storage contracts must match, a `const` root cannot be passed, and potentially overlapping routes cannot occupy two place arguments in one call. Nested calls may forward a place. A local `let cursor = @route` may retain a checked place through its last use;
+`const view = @route` requests a read-only view. Both require the owner to
+remain alive and its selected storage to remain stable. A place cannot be
+returned or stored in an aggregate.
 
 A nominal child may lend its parent portion when the inherited fields have
 identical writable contracts. The callee's transitive access summary must
@@ -72,7 +98,7 @@ Field and index selection form one place route. `@` occurs only at the beginning
 Mark a place on both sides for ordinary values:
 
 ```dewy
-some_fn = (@a:array<int length>?10> b:bool) => {
+some_fn = (@a:array<int64><length>?10> b:bool) => {
     a[10] = 42     # writes the caller's place
     b = false      # rebinds the local copy
 }
@@ -90,19 +116,19 @@ Signature-only marking makes `some_fn(myarr)` look like a copy. Call-site-only m
 Once `a` is a place, both element writes and rebinding write the caller:
 
 ```dewy
-some_fn = (@a:array<int length>?10>) => {
-    a[10] = 42   # update in place
+some_fn = (@a:array<int64>) => {
+    if a.length >? 10 {a[10] = 42}   # update in place
     a = [0 0 0]  # replaces the whole thing in place
 }
 
 myarr = [1 2 3 4 5 6 7 8 9 10 11 12 13]
-some_fn(@a)
-# a = [0 0 0]
+some_fn(@myarr)
+# myarr = [0 0 0]
 ```
 
 After `some_fn(@myarr)`, refinements on `myarr` are suspect. That invalidation is local to the `@` argument.
 
-For now, a place cannot outlive the binding that roots its route. Legal today: pass `@myarr`, `@myarr[3]`, or `@obj.field`, write through the parameter, and return normally. Planned: a lifetime-bounded local such as `let c = @a`. Not legal initially: return `@a`, store `@a` in an object, or use `@[1 2 3]` (a temporary has no stable root to update).
+For now, a place cannot outlive the binding that roots its route. Legal today: pass `@myarr`, `@myarr[3]`, or `@obj.field`, write through the parameter, and return normally. A lifetime-bounded local such as `let c = @a` uses the same checked routes. Not legal: return `@a`, store `@a` in an object, or use `@[1 2 3]` (a temporary has no stable root to update).
 
 `@?` (pronounced "is at?") means "is same place?", not residual copy-on-write sharing. Two copies are never the same place, even before anyone writes. If `@?` could see shared buffers, the optimization would leak into the semantics.
 

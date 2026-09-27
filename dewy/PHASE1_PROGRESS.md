@@ -6,29 +6,34 @@ first. This ledger records implementation and validation, not new language
 decisions. Fundamental new directions still need review; obvious Dewy-aligned
 extensions may proceed provisionally and are recorded here for David.
 
-## Work remaining
+## Current completion checklist (2026-09-27)
 
-- Correctness/parity: `nat_types` now passes through sound finite-loop
-  reasoning. Continue explicit fixture manifests and fresh paired native
-  checkpoints at integration boundaries.
-- 1.1: complete copy reporting and explicit-copy policy across entry points;
-  explicit aggregate copies and local places/views; last-use moves in both
-  implementations; deterministic lifecycle hooks and move-only resources;
-  measured scoped placement and copy budgets. Keep COW as a provisional
-  fallback rather than changing value semantics.
-- 1.2: bounded relational proof machinery, mutation/alias-aware facts,
-  loop invariants, checked proof boundaries and auditable unsafe boundaries.
-  Unsettled surface forms require design review; unsupported proofs must
-  remain unknown rather than silently accepted.
-- 1.3: effect vocabulary and propagation, effect polymorphism and contracts;
-  errors remain return alternatives, separate from effects.
-- 1.4: implement and test the settled juxtaposition, reserved-name,
-  unit-nominal, and uniform-container decisions. Repair the right-side
-  number juxtaposition correction is implemented and paired-tested:
-  `(x+1)5` multiplies and `(f)2` calls or multiplies by the type of `f`
-  (ROADMAP 1.4 item 1, corrected 2026-09-21). Preserve the decisions to
-  keep type brackets and conventional export privacy. Keep the explicitly
-  open byte-packing and Unicode escape questions visible.
+Phase 1 is **not complete**. The entries below replace the original generic
+work list; historical checkpoints below still describe their own dates.
+Implemented means that the mechanism and focused regressions exist, not that
+all source shapes or the complete integration matrix have been certified.
+
+| Area | Implemented foundation | Remaining closure work |
+| --- | --- | --- |
+| 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
+| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Conditional element routes, transfers through hooked wrappers, resource sort/key ownership and other unsupported resource operations; captured/exposed storage lifetimes. |
+| 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | Approved `$lend` and bulk I/O; owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
+| 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
+| 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | User-written polymorphic rows with callback-local place subjects; more precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
+| 1.4 Settled surface decisions | Type-directed juxtaposition (including numeric RHS), reserved names, unit nominals, uniform `set.push`, digit-label normalization, array/record value equality. | Final integration checks and documentation consistency. Keep the expressly open decisions below separate. |
+
+Integration exit: a fresh hosted-built native route, paired acceptance and
+execution manifests, relevant ownership/allocation counters, and a native
+two-generation fixed point. Record evidence per checkpoint; neither a fixed
+point nor a passing subset of tests alone closes the phase. Native build
+performance retains the 30-second minimum target and 10-second stretch target.
+
+Explicitly open designs remain open: fallible allocation and failure policy,
+resource-parameterized allocator rows/user allocator kinds, non-power-of-two
+base-string packing and Unicode repertoire/escape decisions. The provisional
+COW implementation preserves value independence; predictable zero-cost
+ownership remains the long-term design question. This checklist does not
+approve new syntax or remove these items from the roadmap.
 
 ## Strict-copy cleanup
 
@@ -4982,3 +4987,28 @@ compilation with a shared prelude. The initial hosted-built driver test used
 the old driver fixture that did not render warnings and failed that diagnostic
 assertion; the fixture is now corrected. A fresh hosted-built route and full
 integration remain to be verified for this checkpoint.
+
+
+## Conditional custom moves and container fields (2026-09-27)
+
+Per-field liveness now permits conditional transfers of custom-move records,
+whole resource arrays and resource union fields through hook-free wrappers.
+A custom move's result is saved first; its source's remaining nested resources
+are dropped on the consuming path before clearing the component flag. An
+untaken path retains ordinary cleanup. Replacing the field restores ownership.
+Arrays transfer their complete element ownership; unions select the active arm.
+Hooked wrapper and conditional element-route restrictions remain in place.
+
+Both implementations pass the new branch/loop/replacement and active-union
+kernels. The custom-move kernel checks cleanup order and retained allocation
+bytes over 40 repeated calls. Existing last-use component, field renewal and
+conditional ownership tests also pass. The combined fresh hosted-built native
+suite passed **122 tests**, including both execution backends and allocator
+warnings with cold/warm preludes. The direct two-generation bootstrap passed,
+with byte-identical Dewy and µDewy binaries and all native execution checks:
+`../dewy-build-artifacts/phase1-scopes-and-moves`. This also verifies the fresh
+hosted-built warning route left outstanding at the prior checkpoint.
+
+The full 206-case parity run was stopped after 67 passing cases to prioritize
+a newly reproduced loop-budget correctness defect (see the next checkpoint).
+It is not recorded as a completed parity run. Phase 1 remains in progress.

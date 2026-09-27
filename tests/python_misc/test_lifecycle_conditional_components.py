@@ -58,9 +58,26 @@ def test_conditional_components(tmp_path, source):
 def test_later_component_use(source):
     with pytest.raises(ReportException): codegen(SrcFile(None, source))
 FIXTURE = Path(__file__).resolve().parents[1] / 'fixtures/lifecycle_conditional_components.dewy'
-def test_conditional_components_kernel(tmp_path):
-    execute(tmp_path, 'conditional-component-kernel', codegen(SrcFile.from_path(FIXTURE), debug_locations=False))
+MOVE_FIXTURE = FIXTURE.with_name('lifecycle_conditional_component_moves.dewy')
+CONTAINER_FIXTURE = FIXTURE.with_name('lifecycle_conditional_container_fields.dewy')
+@pytest.mark.parametrize('fixture', [FIXTURE, MOVE_FIXTURE, CONTAINER_FIXTURE])
+def test_conditional_components_kernel(tmp_path, fixture):
+    execute(tmp_path, 'conditional-component-kernel', codegen(SrcFile.from_path(fixture), debug_locations=False))
 
 def test_native_conditional_components(tmp_path):
     from test_bootstrap_structural_text import build_program_driver, check_structural_text
-    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[*CASES, FIXTURE.read_text()], errors=ERRORS)
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[*CASES, FIXTURE.read_text(), MOVE_FIXTURE.read_text(), CONTAINER_FIXTURE.read_text()], errors=ERRORS)
+
+
+@pytest.mark.parametrize('field, operation', [
+    ('items', 'take_array'), ('maybe', 'take_union'),
+])
+def test_conditional_container_field_cannot_be_read_after_transfer(field, operation):
+    header = CONTAINER_FIXTURE.read_text().split('exercise=')[0]
+    source = header + f'''probe=(bundle:Bundle flag:bool):>int64=>{{
+    if flag {{{operation}(bundle.{field});}}
+    return {operation}(bundle.{field})
+}}
+'''
+    with pytest.raises(ReportException):
+        codegen(SrcFile(None, source))

@@ -516,14 +516,13 @@ restore_flags=(held:array<ComponentFlag> loc:Span @session:contexts.Session):>ar
     }
     return result
 }
-# A hook-free route to a component without a custom move: the remaining
-# owner can drop around it, guarded by one flag.
+# Hook-free wrappers may remain partially live. Custom moves clean their
+# remainder on the consuming edge before the component flag is cleared.
 transferable_component=(id:addr session:contexts.Session):>bool=>{
     let node=hir.node_at(session.hir id)
     if resource(node.value_type session.types) is? none return false
     let shape=types.node_at(session.types views.structural_base(node.value_type session.types))
-    if shape isnt? types.ObjectType return false
-    loop method in shape.methods {if method.lifecycle =? 'move' return false}
+    if shape isnt? types.ObjectType|types.ArrayType|types.TypeOr return false
     let current=node
     loop current is? hir.MemberAccess {
         let owner=types.node_at(session.types views.structural_base(hir.node_at(session.hir current.value).value_type session.types))
@@ -721,6 +720,9 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
                 # Consumed on this path only: clear the owner's flag.
                 let cleared=put(hir.Bool[candidate.loc types.primitive('bool' @session.types) false] @session)
                 prefix.push(saved.declaration)
+                if result not=? selected {
+                    drop_value(selected candidate.value_type candidate.loc set[] @prefix @plan @session run_hook=false)
+                }
                 prefix.push(put(hir.Assign[candidate.loc types.primitive('void' @session.types) held.value '=' cleared] @session))
                 prefix.push(saved.value)
                 store(id hir.Block[candidate.loc hir.node_at(session.hir saved.value).value_type prefix false] @session)

@@ -769,8 +769,11 @@ in both lowerings and the parity tool is the gate.
   loop iterations): liveness is kept per field route, a field assignment
   ends only the replaced component's lifetime, and the owner keeps one flag
   per such component that its cleanup and replacements consult.
-  Element (index) routes, components with custom moves or behind hooked
-  wrappers, and remaining resource-container mutations still require
+  Conditional field transfers now include custom moves, arrays and resource
+  unions. A custom move cleans its leftover nested resources on the consuming
+  edge before marking the field absent; replacements restore that field.
+  Element (index) routes, components behind hooked wrappers,
+  and remaining resource-container mutations still require
   further lifetime analysis. Same-block owning input
   transfers now include owning parameters, custom move hooks and union owners;
   first if conditions are unconditional input sites, while loop conditions

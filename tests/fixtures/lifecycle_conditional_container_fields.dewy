@@ -1,0 +1,43 @@
+# The same field-liveness rule applies to whole arrays and active union arms.
+# A transfer of an array transfers its element owners intact.
+let dropped:array<int64>=[]
+let moves:int64=0
+Token=type of [id:int64
+    $__drop__
+    release=():>void=>{dropped.push(id)}
+]
+Moved=type of [id:int64
+    $__move__
+    relocate=():>Moved=>{moves+=1 return Moved[id+100]}
+    $__drop__
+    release=():>void=>{dropped.push(id)}
+]
+Bundle:type=[items:array<Token> maybe:Moved|Token|none other:Token]
+take_array=(items:array<Token>):>int64=>items.length
+take_union=(value:Moved|Token|none):>int64=>{
+    if value is? Moved|Token return value.id
+    return 0
+}
+exercise=(take:bool kind:int64):>int64=>{
+    let bundle=Bundle[[Token[1] Token[2]] (if kind=?0 none else if kind=?1 Moved[3] else Token[4]) Token[5]]
+    let total:int64=0
+    if take {
+        total+=take_array(bundle.items)
+        total+=take_union(bundle.maybe)
+    }
+    return total+bundle.other.id
+}
+main=():>int64=>{
+    if exercise(true 1) not=?110 return 1
+    if moves not=?1 or dropped not=?[2 1 103 5] return 2
+    dropped.clear
+    if exercise(false 1) not=?5 return 3
+    if moves not=?1 or dropped not=?[5 3 2 1] return 4
+    dropped.clear
+    if exercise(true 2) not=?11 return 5
+    if moves not=?1 or dropped not=?[2 1 4 5] return 6
+    dropped.clear
+    if exercise(true 0) not=?7 return 7
+    if moves not=?1 or dropped not=?[2 1 5] return 8
+    return 42
+}
