@@ -4773,7 +4773,12 @@ class _Lowerer(
                 statements.extend(self._optional_write(cell, value, payload))
                 return statements
             if self._is_string_valued(node.target.type) and self._has_arena():
-                prelude, value = self._kept_string_value(node.value)   # the binding keeps a call's result
+                if node.target.binding_id in self.current_place_parameter_cells:
+                    # The caller keeps a place assignment beyond this frame.
+                    # A materialized result must leave the local region now.
+                    prelude, value = self._escaping_string_value(node.value)
+                else:
+                    prelude, value = self._kept_string_value(node.value)
             else:
                 prelude, value = self._extract_expression(node.value)
             if node.target.name in self.owned_strings and self._is_string_valued(node.target.type):

@@ -1072,6 +1072,12 @@ class _StringLowering:
         # particular, a conditional's other arm or a local initializer can
         # prevent a size formula while this arm still builds frame bytes.
         materialized = any(isinstance(expr, (hir.InterpolatedString, hir.StringConcat)) for expr in reached)
+        parameters = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
+        # A reassigned parameter no longer describes the incoming bytes or
+        # their length. Its replacement can live in this function's region.
+        # Use a caller-owned result region when that parameter reaches a return.
+        materialized |= any(isinstance(expr, hir.ExpressedIdentifier) and expr.binding_id in parameters
+                            and self._string_parameter_changes(expr.binding_id) for expr in reached)
         for expr in returned:
             expr_bound = self._string_value_bound(expr, literal, local_cache)
             if expr_bound is not None and expr_bound.materialized:
@@ -1230,6 +1236,8 @@ class _StringLowering:
             if expr.binding_id is not None:
                 for index, param in enumerate(literal.pos_or_kw_args):
                     if param.binding_id == expr.binding_id:
+                        if self._string_parameter_changes(expr.binding_id):
+                            return None
                         return StringResultBound(0, ((index, 1),), False)
                 if expr.binding_id in local_cache:
                     return local_cache[expr.binding_id]
@@ -2827,6 +2835,15 @@ class _StringLowering:
             default = hir.Block(loc, ty.BOTTOM_TYPE, [spin, hir.Return(loc, ty.BOTTOM_TYPE, hir.Void(loc, ty.VOID_TYPE))], True)
         return replace(expr, type=ty.VOID_TYPE, arms=[replace(arm, body=returning(arm.body)) for arm in expr.arms], default=default)
 
+    def _string_parameter_changes(self, binding: int | None) -> bool:
+        """Whether a parameter can cease to refer to the caller's input value.
+
+        Use the same transitive effects for direct assignments and writes
+        through place helpers; an incoming parameter length bounds neither.
+        """
+        summary = self.program_effects.for_param_binding(binding) if binding is not None else None
+        return summary is None or summary.writes
+
     def _string_sources(self, item: hir.AST) -> set[tuple[str, int | None]]:
         """Where a string value's descriptor comes from, precisely: `static`, `fresh`
         (a view, an interpolation, a decode: an arena descriptor of this frame's),
@@ -2878,7 +2895,8 @@ class _StringLowering:
                     # its initializer a fresh decode or call result.
                     found.add(('owning', expr.binding_id))
                 elif expr.binding_id in params:
-                    found.add(('fresh' if viewed else 'param', None))
+                    found.add(('unknown' if self._string_parameter_changes(expr.binding_id)
+                               else 'fresh' if viewed else 'param', None))
                 elif expr.binding_id in self.owning_string_bindings:
                     found.add(('owning', expr.binding_id))
                 elif expr.binding_id in self.array_element_targets:
@@ -3085,7 +3103,7 @@ class _StringLowering:
             if literal is None:
                 return 'static'   # module level: startup values live in static storage
             if any(param.binding_id == node.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]):
-                return 'caller'
+                return 'frame' if self._string_parameter_changes(node.binding_id) else 'caller'
             if node.binding_id in visiting:
                 return 'frame'
             candidates = self._string_local_candidates(literal).get(node.binding_id)
