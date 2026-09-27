@@ -818,8 +818,9 @@ arrays in both compilers. It permits address extraction, scalar local work,
 raw reads and modeled synchronous writes without permanently pinning the
 owner. Address escape, owner mutation and unknown callees remain rejected.
 The repeated-read kernel and native three-generation fixed point pass.
-Library adoption and the approved writable reservation/length-commit form
-remain required for the bulk-I/O checkpoint.
+Stdout, stderr and file writes now use these loans on x86-64/C, with a
+zero-retained-bytes output kernel. The approved writable reservation/length-
+commit form and bulk reads remain required for the bulk-I/O checkpoint.
 
 ### 1.2 The proof engine
 

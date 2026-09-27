@@ -1,0 +1,19 @@
+from linux.io import (_write_stdout _write_stderr)
+# Each output call borrows fresh storage; nothing stays pinned afterward.
+make_bytes=(n:int64):>array<uint8>=>{
+    let bytes:array<uint8>=[]
+    loop i in 0.. and i <? n and i <? 1024 {bytes.push(42)}
+    return bytes
+}
+exercise_output=():>int64=>{
+    if _write_stdout(make_bytes(3)) not=?3 return 1
+    if _write_stderr(make_bytes(2)) not=?2 return 2
+    let written=write_bytes('/dev/null' make_bytes(5))
+    return if written is? int64 and written=?5 42 else 3
+}
+main=():>int64=>{
+    if exercise_output not=?42 return 4
+    let before:int64=_arena_live_bytes
+    loop i in [0..10) {if exercise_output not=?42 return 5}
+    return if _arena_live_bytes=?before 42 else 6
+}

@@ -35,7 +35,7 @@ def validate_read(owner, body, source, *, target):
     nodes = list(hir.walk(body))
     local = {node.binding_id for node in nodes if isinstance(node, hir.Declare)}
     addresses = set()
-    extractions = []
+    checked_reads = []
 
     def intrinsic(node):
         callee = node.func
@@ -89,7 +89,7 @@ def validate_read(owner, body, source, *, target):
         if isinstance(node, hir.FunctionCall):
             name = intrinsic(node)
             if extraction(node):
-                extractions.append(node)
+                checked_reads.append(node)
                 return
             if name == '__syscall3__':
                 args = node.pos_args
@@ -102,6 +102,8 @@ def validate_read(owner, body, source, *, target):
                 reject(node, 'this call has no checked scoped-storage lifetime')
             for argument in node.pos_args:
                 visit(argument)
+            if name in LOADS or name == '__syscall3__':
+                checked_reads.append(node)
             return
         if isinstance(node, hir.ExpressedIdentifier):
             if node.binding_id == root:
@@ -138,5 +140,5 @@ def validate_read(owner, body, source, *, target):
 
     visit(body, result=True)
     # Grant the narrowly scoped permission only after every use is checked.
-    for node in extractions:
+    for node in checked_reads:
         node.scoped_read = True

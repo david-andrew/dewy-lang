@@ -5081,6 +5081,25 @@ A three-generation native build passed its execution checks and produced
 byte-identical final Dewy/µDewy generations at
 `../dewy-build-artifacts/phase1-scoped-reads`. The final two builds took 50/53
 seconds alongside other tests; these are not isolated performance measurements.
-The fresh hosted-built driver check is still running. Library adoption,
+The fresh hosted-built driver check passed all 21 tests. Library adoption,
 writable reservations/length commits and bulk reads remain next; the read-only
 subset does not close the storage item or Phase 1.
+
+
+## Scoped output consumers (2026-09-27)
+
+Stdout, stderr and file writes use checked read loans on the supported
+x86-64/C route. Other targets retain their existing implementation until
+their syscall lifetime models are available. The permission now includes
+validated synchronous consumers and loads, not just address extraction.
+Otherwise the native ambient graph conservatively retained the caller's
+snapshot despite the callee's checked loan.
+
+Native snapshot reclamation also uses the particular parameter's lifetime:
+a nonescaping, uncaptured, unexposed parameter cannot retain its caller's
+private snapshot merely because the function opens/closes a file or performs
+an unrelated raw operation. Ambient writes still block borrowing; this is
+cleanup evidence, not a new aliasing exemption. Five native-built paired
+loan/allocation/projection groups passed (both execution backends), including
+repeated stdout/stderr/file writes with zero retained bytes. Additional
+ambient-graph regressions and the next full parity checkpoint are pending.

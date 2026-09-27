@@ -50,3 +50,17 @@ def test_native_scoped_reads(tmp_path):
     from test_bootstrap_structural_text import build_program_driver, check_structural_text
     check_structural_text(build_program_driver(tmp_path), tmp_path,
                           cases=[READ, WRITE, KERNEL], errors=ERRORS, outputs=['', 'abc', ''])
+
+
+OUTPUT = (FIXTURES / 'scoped_storage_output.dewy').read_text()
+
+
+def test_library_output_releases_lent_storage(tmp_path):
+    results = execute(tmp_path, 'scoped-output', codegen(SrcFile(None, OUTPUT)))
+    assert all(result.stdout == '*' * 33 and result.stderr == '*' * 22 for result in results)
+
+
+def test_native_library_output_releases_lent_storage(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    check_structural_text(build_program_driver(tmp_path), tmp_path,
+                          cases=[OUTPUT], errors=[], outputs=['*' * 33])

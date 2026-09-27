@@ -265,7 +265,8 @@ aggregate, closure or unmodeled call. Assignments and loop backedges propagate
 address origins to a fixed point. The owner cannot be mutated, replaced or
 passed elsewhere inside the expression. Unknown operations are rejected;
 the compiler grants unpinned access only after checking the whole body.
-Unscoped raw exposure retains the existing pinning rule.
+The Linux x86-64/C stdout, stderr and file-writing library paths use these
+loans. Unscoped raw exposure retains the existing pinning rule.
 
 Writable `$lend(@bytes reserve=n)` and `bytes.set_length(n)` are approved
 extensions still being implemented; they are not part of this read-only

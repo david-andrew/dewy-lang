@@ -92,8 +92,13 @@ let _write_bytes_at = (path:string bytes:array<uint8>):>int64|FileNotFound|FileA
     let c_path = _c_path_into(path __alloca__(4096))
     let fd:int64 = __syscall3__(2 c_path 577 420)
     if fd <? 0 { return _file_error(fd) }
-    let data:int64 = __load_i64__(bytes)
-    let written:int64 = __syscall3__(1 fd data bytes.length)
+    let written:int64 = if $target in? ['x86_64' 'c'] $lend(bytes) {
+        let data:int64 = __load_i64__(bytes)
+        __syscall3__(1 fd data bytes.length)
+    } else {
+        let data:int64 = __load_i64__(bytes)
+        __syscall3__(1 fd data bytes.length)
+    }
     let closed:int64 = __syscall1__(3 fd)
     if written <? 0 { return _file_error(written) }
     if written not=? bytes.length { return FileError }

@@ -292,7 +292,7 @@ ambient_graph = (plan:captures.Plan nodes:array<hir.AST> type_nodes:types.Table 
                 } else if callee is? hir.ExpressedIdentifier {
                     let memory=not node.scoped_read and (callee.name.startswith('__load_') or callee.name.startswith('__store_'))
                     let unknown=(callee.binding_id isnt? none and callee.binding_id in? plan.source_bindings) or (callee.name not in? emit.intrinsics and callee.name not in? emit.binary and callee.name not in? emit.prefix)
-                    if unknown or callee.name.startswith('__syscall') {opaque.push(id) exposes_storage.push(id)}
+                    if not node.scoped_read and (unknown or callee.name.startswith('__syscall')) {opaque.push(id) exposes_storage.push(id)}
                     else if memory {
                         # Raw memory can alias caller storage, so still copy
                         # value arguments. Word-only operands do not expose
@@ -894,7 +894,12 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 # A by-value callee that keeps its parameter keeps its own
                 # share or copy of it; only raw exposure can keep the caller's
                 # snapshot itself. That snapshot is the caller's to release.
-                if direct not in? retaining and summary isnt? none {reclaim.push(pair.argument)}
+                # Unrelated raw operations (e.g. opening/closing a file)
+                # cannot retain this private argument when its own root is
+                # unexposed, uncaptured and nonescaping. This proves cleanup
+                # only; the stronger ambient-write test still gates borrowing.
+                let private_lifetime=pair.parameter isnt? none and pair.parameter not in? exposed and pair.parameter not in? captured and summary isnt? none and summary.escapes.length =? 0
+                if summary isnt? none and (direct not in? retaining or private_lifetime) {reclaim.push(pair.argument)}
                 else {kept.push(pair.argument)}
                 # A record borrows on the callee's own summary: raw exposure
                 # of its parameter is an escape there (effects.raw_callee),

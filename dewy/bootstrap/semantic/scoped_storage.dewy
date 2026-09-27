@@ -11,7 +11,7 @@ import p"bindings.dewy" as bindings
 const SCALARS:set<string>=set['__add__' '__sub__' '__mul__' '__div__' '__floordiv__' '__mod__' '__unary_sub__' '__not__' '__eq__' '__ne__' '__lt__' '__le__' '__gt__' '__ge__' '__and__' '__or__' '__xor__' '__nand__' '__nor__' '__xnor__' '__lshift__' '__rshift__']
 const LOADS:set<string>=set['__load_i8__' '__load_u8__' '__load_i16__' '__load_u16__' '__load_i32__' '__load_u32__' '__load_i64__' '__load_u64__']
 Input:type=const [owner:addr root:addr nodes:array<hir.AST> types:types.Table registry:bindings.Registry source:SrcFile target:string]
-Scan:type=[locals:set<addr>=set[] addresses:set<addr>=set[] extractions:array<addr>=[] problem:Error?=none]
+Scan:type=[locals:set<addr>=set[] addresses:set<addr>=set[] checked_reads:array<addr>=[] problem:Error?=none]
 reject=(id:addr detail:string input:Input @scan:Scan):>void=>{
     if scan.problem isnt? none return
     scan.problem=Error[srcfile=input.source title='cannot prove scoped storage access' pointers=[Pointer[span=hir.node_at(input.nodes id).loc message=detail] Pointer[span=hir.node_at(input.nodes input.owner).loc message='storage is lent here']]]
@@ -66,7 +66,7 @@ visit=(id:addr input:Input @scan:Scan result:bool=false):>void=>{
     }
     if node is? hir.FunctionCall {
         let name=intrinsic_name(node input)
-        if extraction(node input) {scan.extractions.push(id) return}
+        if extraction(node input) {scan.checked_reads.push(id) return}
         if name =? '__syscall3__' {
             let args=node.pos_args
             if input.target not in? ['x86_64' 'c'] or args.length not=? 4 {reject(id 'only synchronous write consumes a scoped address in this initial subset' input @scan) return}
@@ -80,6 +80,7 @@ visit=(id:addr input:Input @scan:Scan result:bool=false):>void=>{
             reject(id 'this call has no checked scoped-storage lifetime' input @scan) return
         }
         loop argument in node.pos_args {visit(argument input @scan)}
+        if name isnt? none and (name in? LOADS or name =? '__syscall3__') {scan.checked_reads.push(id)}
         return
     }
     if node is? hir.ExpressedIdentifier {
@@ -153,7 +154,7 @@ validate_read=(owner_id:addr body:addr source:SrcFile @session:contexts.Session)
     visit(body input @scan result=true)
     if scan.problem isnt? none return scan.problem
     # No partially checked permission can reach lowering.
-    loop id in scan.extractions {
+    loop id in scan.checked_reads {
         let node=hir.node_at(session.hir id)
         $runtime_assert node is? hir.FunctionCall and id <? session.hir.length
         node.scoped_read=true
