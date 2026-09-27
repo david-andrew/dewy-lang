@@ -14,7 +14,7 @@ from ...semantic import builtins, hir, ty
 from ...parser import t0
 from . import borrowing
 from . import copy_policy
-from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_FLAGS_OFFSET, CopyNote, MoveNote, ProjectionPath, local_binding_key
+from .lowering_shared import ARRAY_ARENA_DESCRIPTOR, ARRAY_DATA_OFFSET, ARRAY_FLAGS_OFFSET, ARRAY_LENGTH_OFFSET, CopyNote, MoveNote, ProjectionPath, local_binding_key
 from ...semantic.hir_display import type_to_dewy
 
 
@@ -322,7 +322,7 @@ class _ObjectLowering:
         startup = self.lowering_module_startup
         self.lowering_module_startup = False
         try:
-            while self.pending_array_grows or self.pending_dict_probes or self.pending_dict_rebuilds or self.pending_named_copies or self.pending_object_copies or self.pending_object_releases or self.pending_shared_copies or self.pending_cell_copies or self.pending_cell_releases or self.pending_array_releases or self.pending_string_release or getattr(self, 'pending_pins', []) or getattr(self, 'pending_uniques', []):
+            while self.pending_array_grows or self.pending_dict_probes or self.pending_dict_rebuilds or self.pending_named_copies or self.pending_object_copies or self.pending_object_releases or self.pending_shared_copies or self.pending_cell_copies or self.pending_cell_releases or self.pending_array_releases or self.pending_string_release or getattr(self, 'pending_pins', []) or getattr(self, 'pending_uniques', []) or self.pending_value_equals:
                 result.extend(self._synthesize_array_grows())
                 result.extend(self._synthesize_dict_probes())
                 result.extend(self._synthesize_dict_rebuilds())
@@ -334,6 +334,7 @@ class _ObjectLowering:
                 result.extend(self._synthesize_uniques())
                 result.extend(self._synthesize_value_releases())
                 result.extend(self._synthesize_cell_copies())
+                result.extend(self._synthesize_value_equals())
         finally:
             self.lowering_module_startup = startup
         return result
@@ -662,6 +663,170 @@ class _ObjectLowering:
         if not arms:
             return []
         return [hir.Flow(loc, ty.VOID_TYPE, arms, None)]
+
+    # `=?` on arrays and records compares values, element-wise and
+    # field-wise, never the handles. Each compared type gets one helper.
+    def _value_compared(self, type_: ty.Type) -> bool:
+        shape = ty.structural_base(type_)
+        return (isinstance(shape, (ty.ArrayType, ty.ObjectType)) and not self._is_string_valued(type_)
+                and ty.dict_key_value(shape) is None)
+
+    def _extract_value_equality(self, node: hir.FunctionCall) -> tuple[list[hir.AST], hir.AST]:
+        loc = node.loc
+        prelude: list[hir.AST] = []
+        values = []
+        for arg in node.pos_args:
+            arg_prelude, value = self._extract_expression(arg)
+            prelude.extend(arg_prelude)
+            held = hir.ExpressedIdentifier(loc, 'int64', self._new_result_name())
+            prelude.append(hir.Declare(loc, ty.VOID_TYPE, 'let', held.name, 'int64', replace(value, type='int64')))
+            values.append(held)
+        shape = ty.structural_base(node.pos_args[0].type)
+        if isinstance(shape, ty.ArrayType):
+            # A local may keep its elements in the frame without a descriptor.
+            parts = []
+            for arg, value in zip(node.pos_args, values):
+                if self._array_use_representation(arg) is not None:
+                    parts.extend([value, self._int64_literal(loc, self._raw_array_length(arg))])
+                else:
+                    parts.extend(self._array_parts(value, loc))
+            equal = self._array_equal_call(parts, shape.element, loc)
+        else:
+            equal = self._value_equal_call(values[0], values[1], node.pos_args[0].type, loc)
+        if node.func.name == '__ne__':
+            equal = self._intrinsic_call('__not__', [equal], 'bool', loc)
+        # A call's record result is only read here; release it afterwards.
+        cleanup = [statement for arg, value in zip(node.pos_args, values)
+                   for statement in (self._discarded_call_result(arg, value) or [])]
+        if not cleanup:
+            return prelude, equal
+        result = hir.ExpressedIdentifier(loc, 'bool', self._new_result_name())
+        prelude.append(hir.Declare(loc, ty.VOID_TYPE, 'let', result.name, 'bool', equal))
+        prelude.extend(cleanup)
+        return prelude, result
+
+    def _array_parts(self, descriptor: hir.AST, loc: Span) -> list[hir.AST]:
+        return [self._load_i64_field(descriptor, ARRAY_DATA_OFFSET, loc), self._load_i64_field(descriptor, ARRAY_LENGTH_OFFSET, loc)]
+
+    def _equal_helper(self, key, loc: Span, arity: int) -> hir.ExpressedIdentifier:
+        symbol = next((name for known, name in self.value_equal_symbols if known == key), None)
+        if symbol is None:
+            symbol = self._internal_symbol(f'__dewy_value_equal_{len(self.value_equal_symbols)}')
+            self.value_equal_symbols.append((key, symbol))
+            self.pending_value_equals.append((key, symbol))
+        signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64')] * arity, [], None, 'bool')
+        return hir.ExpressedIdentifier(loc, signature, symbol)
+
+    def _array_equal_call(self, parts: list[hir.AST], element: ty.Type, loc: Span) -> hir.AST:
+        # (left data, left length, right data, right length)
+        helper = self._equal_helper(('array', element), loc, 4)
+        return hir.FunctionCall(loc, 'bool', helper, [replace(part, type='int64') for part in parts], {})
+
+    def _value_equal_call(self, left: hir.AST, right: hir.AST, type_: ty.Type, loc: Span) -> hir.AST:
+        shape = ty.structural_base(type_)
+        if isinstance(shape, ty.ArrayType):
+            return self._array_equal_call([*self._array_parts(left, loc), *self._array_parts(right, loc)], shape.element, loc)
+        helper = self._equal_helper(('value', type_), loc, 2)
+        return hir.FunctionCall(loc, 'bool', helper, [replace(left, type='int64'), replace(right, type='int64')], {})
+
+    def _synthesize_value_equals(self) -> list:
+        from .lowering_shared import LoweredFunction
+        result = []
+        loc = self.root.loc
+        left = hir.ExpressedIdentifier(loc, 'int64', '__dewy_equal_left')
+        right = hir.ExpressedIdentifier(loc, 'int64', '__dewy_equal_right')
+        while self.pending_value_equals:
+            (kind, type_), symbol = self.pending_value_equals.pop(0)
+            same = hir.ExpressedIdentifier(loc, 'bool', '__dewy_same')
+            if kind == 'array':
+                names = ['__dewy_left_data', '__dewy_left_length', '__dewy_right_data', '__dewy_right_length']
+                data_a, length_a, data_b, length_b = [hir.ExpressedIdentifier(loc, 'int64', name) for name in names]
+                statements = self._array_equal_statements(data_a, length_a, data_b, length_b, type_, same, loc)
+            else:
+                names = [left.name, right.name]
+                statements = self._value_equal_statements(left, right, type_, same, loc)
+            body = [hir.Declare(loc, ty.VOID_TYPE, 'let', same.name, 'bool', hir.Bool(loc, 'bool', True)),
+                    *statements, hir.Return(loc, ty.BOTTOM_TYPE, same)]
+            signature = ty.FunctionType([ty.PosOrKwArg(None, 'int64')] * len(names), [], None, 'bool')
+            literal = hir.FunctionLiteral(loc, signature, [hir.Param(name, 'int64') for name in names],
+                [], None, 'bool', hir.Block(loc, 'bool', body, True))
+            result.append(LoweredFunction(symbol, literal))
+        return result
+
+    def _value_equal_update(self, left: hir.AST, right: hir.AST, type_: ty.Type, same: hir.AST, loc: Span) -> list[hir.AST]:
+        """`same = left =? right` for two values of `type_` (cells and inline records by address)."""
+        statements: list[hir.AST] = []
+        if self._is_string_valued(type_):
+            a = hir.ExpressedIdentifier(loc, 'int64', self._new_result_name())
+            b = hir.ExpressedIdentifier(loc, 'int64', self._new_result_name())
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', a.name, 'int64', replace(left, type='int64')))
+            statements.append(hir.Declare(loc, ty.VOID_TYPE, 'let', b.name, 'int64', replace(right, type='int64')))
+            prelude, equal = self._extract_string_equal(hir.StringEqual(loc, 'bool', replace(a, type=type_), replace(b, type=type_)))
+            statements.extend(prelude)
+        elif ty.enum_members(type_) is None and (self._value_compared(type_) or self._field_union_members(type_) is not None):
+            if ty.dict_key_value(ty.structural_base(type_)) is not None:
+                self._target_error(hir.Void(loc, ty.VOID_TYPE), 'value equality of a dictionary or set')
+            equal = self._value_equal_call(left, right, type_, loc)
+        else:
+            operand = left.type
+            signature = ty.FunctionType([ty.PosOrKwArg(None, operand), ty.PosOrKwArg(None, operand)], [], None, 'bool')
+            equal = hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, signature, '__eq__'), [left, replace(right, type=operand)], {})
+        statements.append(hir.Assign(loc, ty.VOID_TYPE, same, '=', equal))
+        return statements
+
+    def _array_equal_statements(self, data_a, length_a, data_b, length_b, element: ty.Type, same: hir.AST, loc: Span) -> list[hir.AST]:
+        element_bytes, _signed = self._array_element_layout(element, hir.Void(loc, ty.VOID_TYPE))
+        index = hir.ExpressedIdentifier(loc, 'int64', self._new_result_name())
+        def item(data):
+            return self._array_load(self._pointer_element_address(data, index, element_bytes, loc), element, loc)
+        body = [*self._value_equal_update(item(data_a), item(data_b), element, same, loc),
+                hir.Assign(loc, ty.VOID_TYPE, index, '=', self._int64_binary('__add__', index, self._int64_literal(loc, 1), loc))]
+        running = hir.ShortCircuit(loc, 'bool', 'and', same, self._int64_comparison('__lt__', index, length_a, loc))
+        return [
+            hir.Assign(loc, ty.VOID_TYPE, same, '=', self._int64_comparison('__eq__', length_a, length_b, loc)),
+            hir.Declare(loc, ty.VOID_TYPE, 'let', index.name, 'int64', self._int64_literal(loc, 0)),
+            hir.Flow(loc, ty.VOID_TYPE, [hir.LoopArm(loc, ty.VOID_TYPE, running, hir.Block(loc, ty.VOID_TYPE, body, True))], None),
+        ]
+
+    def _value_equal_statements(self, a: hir.AST, b: hir.AST, type_: ty.Type, same: hir.AST, loc: Span) -> list[hir.AST]:
+        void = hir.Void(loc, ty.VOID_TYPE)
+        shape = ty.structural_base(type_)
+        def guarded(statements):
+            return hir.Flow(loc, ty.VOID_TYPE, [hir.IfArm(loc, ty.VOID_TYPE, same, hir.Block(loc, ty.VOID_TYPE, statements, True))], None)
+        if isinstance(shape, ty.ObjectType):
+            def fields(concrete):
+                _size, offsets = self._object_layout(concrete, void)
+                steps = []
+                for field in concrete.fields:
+                    address_a = self._int64_binary('__add__', a, self._int64_literal(loc, offsets[field.name]), loc)
+                    address_b = self._int64_binary('__add__', b, self._int64_literal(loc, offsets[field.name]), loc)
+                    steps.append(guarded(self._value_equal_update(self._value_load(address_a, field.type, loc),
+                                                                  self._value_load(address_b, field.type, loc), field.type, same, loc)))
+                return guarded(steps)
+            if self._descendant_extra_fields(shape):
+                # Equal values share their brand; each brand compares its own fields.
+                brand = self._int64_comparison('__eq__', self._brand_word_load(a, shape, loc), self._brand_word_load(b, shape, loc), loc)
+                dispatched = self._record_dispatch(a, shape, loc, fields)
+                return [hir.Assign(loc, ty.VOID_TYPE, same, '=', brand), guarded(dispatched)]
+            return [fields(shape)]
+        members = self._field_union_members(type_)
+        assert members is not None
+        tag = hir.ExpressedIdentifier(loc, 'int64', self._new_result_name())
+        statements = [hir.Declare(loc, ty.VOID_TYPE, 'let', tag.name, 'int64', self._intrinsic_call('__load_i64__', [a], 'int64', loc)),
+                      hir.Assign(loc, ty.VOID_TYPE, same, '=', self._int64_comparison('__eq__', tag, self._intrinsic_call('__load_i64__', [b], 'int64', loc), loc))]
+        arms = []
+        for member in members:
+            if member == 'none':
+                continue
+            if isinstance(ty.structural_base(member), (ty.ObjectType, ty.ArrayType)):
+                pa, pb = self._union_source_pointer(a, loc), self._union_source_pointer(b, loc)
+            else:
+                pa, pb = self._optional_load_payload(a, member, loc), self._optional_load_payload(b, member, loc)
+            condition = hir.ShortCircuit(loc, 'bool', 'and', same, self._tag_is(tag, member, loc))
+            arms.append(hir.IfArm(loc, ty.VOID_TYPE, condition, hir.Block(loc, ty.VOID_TYPE, self._value_equal_update(pa, pb, member, same, loc), True)))
+        if arms:
+            statements.append(hir.Flow(loc, ty.VOID_TYPE, arms, None))
+        return statements
 
     def _record_dispatch(self, source: hir.AST, object_type: ty.ObjectType, loc: Span,
                          operation: Callable[[ty.ObjectType], hir.AST]) -> list[hir.AST] | None:

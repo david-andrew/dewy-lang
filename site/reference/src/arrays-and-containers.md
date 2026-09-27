@@ -42,6 +42,10 @@ A loop inside `[]` is loop capture: the collector receives each non-`void` value
 
 A trailing `...` after a sequence inserts its elements into a surrounding array literal. Fixed elements and spreads may mix: `[heads... tails...]`, `[0 xs... 1]`.
 
+### Equality
+
+`xs =? ys` compares arrays by value: they are equal when they have the same length and their elements are pairwise `=?`, recursively through nested arrays, records and unions. Arrays whose static lengths differ are simply unequal. `not =?` is the negation. Storage is never compared: two arrays built separately with the same elements are equal. An array of dictionaries or sets has no `=?` yet.
+
 ## Shapes and Dimensions
 
 Arrays are also the intended foundation for vectors, matrices, and tensors. Shape belongs in array type information rather than requiring unrelated matrix classes.
@@ -102,7 +106,7 @@ A dictionary must not be mutated by a loop that iterates it; stores, `pop`, and 
 
 A dictionary is a compact hash table: dense entries in insertion order with their stored hashes, plus a sparse probe table using open addressing with CPython's perturbation sequence. Removal leaves a tombstone, iteration and growth compact entries lazily, and none of this is observable beyond the order and complexity guarantees. Keys and values are currently word-sized scalars or strings.
 
-Bidirectional dictionaries and container equality remain provisional.
+Bidirectional dictionaries and dictionary equality remain provisional.
 
 ## Sets
 

@@ -551,7 +551,11 @@ Implementation order: (1) runtime foundation: arena chunks in
 both compilers with copy notes and the `$explicit_copies` policy; (4) the
 bounds checker as first customer, measured with `--timings`.
 
-## Equality of arrays and records — proposal (2026-09-26)
+## Equality of arrays and records — decided 2026-09-27, implemented
+
+David: `=?` is always element-wise/field-wise comparison, never handles.
+Both compilers implement it (below, the original proposal; the interim
+rejection was not needed).
 
 **Problem.** The reference leaves container equality provisional, and both
 compilers reject `=?` on sets and dictionaries. On arrays and records they
@@ -643,7 +647,22 @@ be the block's result (`$raw(...) as data => count`). Until then the
 byte-by-byte read stays. Since the prelude cache is going away, this
 matters more for writes and general I/O than for the cache.
 
-## Juxtaposition narrowing — proposal only (2026-09-26)
+## Juxtaposition narrowing — narrowing rejected (2026-09-27)
+
+David: `a(x)^2` with a number `a` and `(x+1)5^2` stay multiplications;
+the two errors below are not acceptable. Measuring is welcome, and the
+checker-side alternative (resolve an `Ambiguous` node from its shared
+left operand once) remains open.
+
+**Measured 2026-09-27 (step 0).** An instrumented native self-build
+(56k source lines, compiler plus library) meets 622 `Ambiguous` nodes in the
+checker: 592 with two readings, 15 with three, 13 with four, one with 8
+and one with 32. Checking all of them takes 0.87 s. In the same run the
+parse phase totals 14.4 s and checking 13.2 s; the run was under concurrent
+load, so only the ratios are meaningful. Juxtaposition ambiguity is about 6%
+of checking and about 2% of the build. Nodes this rare do not make parser
+forking a large share of parsing either. Neither narrowing nor the
+checker-side alternative is worth doing for throughput now.
 
 Nothing here is implemented. ROADMAP 1.4 item 1 stays as decided.
 

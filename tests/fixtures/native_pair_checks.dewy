@@ -41,6 +41,7 @@ import p"native_literal_union_joins.dewy" as literal_union_joins
 import p"native_cached_record_fields.dewy" as cached_record_fields
 import p"native_record_unions.dewy" as record_unions
 import p"native_argument_temporaries.dewy" as argument_temporaries
+import p"value_equality.dewy" as value_equality
 import p"native_power_operator.dewy" as power_operator
 import p"native_iterator_formulas.dewy" as iterator_formulas
 import p"native_unpacking_targets.dewy" as unpacking_targets
@@ -184,5 +185,7 @@ let main=():>int64=>{
     if record_unions.main() not=?42 return 60
     printl('Checking argument temporaries')
     if argument_temporaries.main() not=?42 return 61
+    printl('Checking value equality')
+    if value_equality.main() not=?42 return 62
     return 42
 }

@@ -715,6 +715,11 @@ expression = (id:addr @state:State):>addr => {
         if callee is? hir.ArrayMethod return array_method_call(node callee @state)
         let function:addr=0
         if node.kw_args.length =? 0 and callee is? hir.ExpressedIdentifier and (callee.binding_id is? none or callee.binding_id not in? state.symbols) and (callee.name in? emit.binary or callee.name in? emit.prefix or callee.name in? emit.intrinsics) {
+            if callee.name in? ['__eq__' '__ne__'] and node.pos_args.length =? 2 {
+                let left=hir.node_at(state.input.nodes node.pos_args[0])
+                let right=hir.node_at(state.input.nodes node.pos_args[1])
+                if value_compared(left.value_type @state) and value_compared(right.value_type @state) return aggregate_equality(node callee.name =? '__ne__' @state)
+            }
             if callee.name =? '__unreachable__' {
                 # µDewy has no unreachable opcode. As in the hosted backend,
                 # an empty infinite loop closes a path after an exit syscall.
@@ -958,12 +963,17 @@ expression_owns = (id:addr @state:State):>bool => {
 }
 binding_symbol = (id:addr name:string state:State):>string => if state.debug_names "_b{id}_{emit.name(name)}" else "_b{id}"
 # A string literal, through the casts contextual typing wraps it in.
-static_literal = (id:addr state:State):>bool => {
+static_literal = (id:addr @state:State):>bool => {
     let current=id
     loop true {
         let node=hir.node_at(state.input.nodes current)
         if node is? hir.String return true
-        if node is? hir.ValueCast|hir.RepresentationCast {current=node.expr continue}
+        # Packing a literal into a union cell allocates the cell.
+        if node is? hir.ValueCast|hir.RepresentationCast {
+            if cell_members(node.value_type @state) isnt? none return false
+            current=node.expr
+            continue
+        }
         if node is? hir.Suppress {current=node.item continue}
         return false
     }
@@ -1183,7 +1193,7 @@ owned_value = (id:addr @state:State site:string='kept'):>addr => {
     }
     # A string literal is static data with owner zero: retain returns it
     # and drop ignores it, so an owning slot may hold the descriptor itself.
-    if static_literal(id state) return value
+    if static_literal(id @state) return value
     if owned_string(node.value_type state) {
         note_copy('string' node.value_type site owned_reason(id @state) node @state)
         return string_runtime('_native_string_copy' [value] node @state)
@@ -2804,6 +2814,132 @@ string_equal = (node:hir.StringEqual @state:State):>addr => {
     if right.owned {prefix.push(string_runtime('_native_string_release' [right.root] node @state result_void=true))}
     prefix.push(result)
     return put(hir.Block[node.loc types.primitive('bool' @state.type_nodes) prefix false] @state)
+}
+# `=?` on arrays and records compares values, element-wise and field-wise,
+# never the handles. Each compared layout gets one generated helper.
+value_compared = (type:addr @state:State):>bool => (array_valued(type state) or object_valued(type @state)) and not string_type(type state) and views.container_entry_types(type state.type_nodes) is? none
+aggregate_equality = (node:hir.FunctionCall negated:bool @state:State):>addr => {
+    let prefix:array<addr>=[]
+    let owners:array<OwnedLocal>=[]
+    let values:array<addr>=[]
+    loop argument in node.pos_args {
+        let value=snapshot(expression(argument @state) @prefix @state)
+        if temporary_owner(argument @state) {owners.push(OwnedLocal[value hir.node_at(state.input.nodes argument).value_type])}
+        values.push(value)
+    }
+    $runtime_assert values.length =? 2 and node.pos_args.length =? 2
+    let left_type=hir.node_at(state.input.nodes node.pos_args[0]).value_type
+    let right_type=hir.node_at(state.input.nodes node.pos_args[1]).value_type
+    # A nullable record union also reads a plain record's handle.
+    let type=if record_union(right_type @state) isnt? none right_type else left_type
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let result=snapshot(value_equality(values[0] values[1] type node @state) @prefix @state)
+    loop owner in owners {prefix.push(release_value(owner.value owner.value_type node @state))}
+    prefix.push(if negated intrinsic_call('__not__' [result] boolean node @state) else result)
+    return put(hir.Block[node.loc boolean prefix false] @state)
+}
+value_equality = (left:addr right:addr type:addr node:hir.AST @state:State):>addr => {
+    let boolean=types.primitive('bool' @state.type_nodes)
+    if string_type(type state) return string_equal_values(left right node false @state)
+    if views.container_entry_types(type state.type_nodes) isnt? none return reject(node 'value equality of a dictionary or set' @state)
+    let shape=types.node_at(state.type_nodes views.structural_base(type state.type_nodes))
+    let compound=array_valued(type state) or object_valued(type @state) or (cell_members(type @state) isnt? none and shape is? types.TypeOr)
+    if not compound or enum_members(type state) isnt? none return compare('__eq__' left right node @state)
+    return intrinsic_call(value_equal_helper(type node @state) [left right] boolean node @state)
+}
+value_equal_helper = (type:addr node:hir.AST @state:State):>string => {
+    let key="equal:{layout_key(type node @state)}"
+    let existing=state.copy_helpers.get(key)
+    if existing isnt? none return existing
+    let generated=fresh('value_equal' @state)
+    state.copy_helpers[key]=generated
+    let word_type=types.primitive('int64' @state.type_nodes)
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let names=[fresh('equal_left' @state) fresh('equal_right' @state)]
+    let parameters:array<hir.Param>=[]
+    let slots:array<types.PosOrKwArg>=[]
+    loop name in names {parameters.push(hir.Param[name word_type]) slots.push(types.PosOrKwArg[name word_type])}
+    let a=put(hir.ExpressedIdentifier[node.loc word_type names[0]] @state)
+    let b=put(hir.ExpressedIdentifier[node.loc word_type names[1]] @state)
+    let body=value_equal_body(a b type node @state)
+    let signature=types.function_type(slots [] none boolean [] @state.type_nodes)
+    let literal=put(hir.FunctionLiteral[node.loc signature parameters [] none boolean body source=state.source_index] @state)
+    state.generated.push(program.Function[generated literal])
+    return generated
+}
+# `same` starts true and each later comparison runs only while it holds.
+value_equal_body = (a:addr b:addr type:addr node:hir.AST @state:State):>addr => {
+    let boolean=types.primitive('bool' @state.type_nodes)
+    let prefix:array<addr>=[]
+    let same=snapshot(put(hir.Bool[node.loc boolean true] @state) @prefix @state)
+    let array=array_type(type state)
+    if array isnt? none {
+        let length=snapshot(read_word(a layouts.array_descriptor.length node @state) @prefix @state)
+        prefix.push(assign_value(same compare('__eq__' length read_word(b layouts.array_descriptor.length node @state) node @state) node @state))
+        let index=snapshot(word(0 node @state) @prefix @state)
+        let element=array.element
+        let pair=value_equality(array_load(dict_element_pointer(a index element node @state) element node @state) array_load(dict_element_pointer(b index element node @state) element node @state) element node @state)
+        let running=put(hir.ShortCircuit[node.loc boolean 'and' same compare('__lt__' index length node @state)] @state)
+        prefix.push(loop_while(running [assign_value(same pair node @state) assign_value(index word_op('__add__' index word(1 node @state) node @state) node @state)] node @state))
+    } else if object_valued(type @state) {
+        let steps:array<addr>=[]
+        let storage=storage_base(type @state)
+        let layout=object_layout(type node @state)
+        let brand=layout.offsets.get(layouts.brand_field)
+        if brand isnt? none {
+            # Equal values share their brand; then each brand compares its own fields.
+            let tag=snapshot(read_word(a brand node @state) @steps @state)
+            steps.push(assign_value(same compare('__eq__' tag read_word(b brand node @state) node @state) node @state))
+            let arms:array<addr>=[]
+            loop entry in state.layout_context.brands.entries {
+                if not subtyping.is_subtype(entry.value_type storage state.links @state.type_nodes) continue
+                let numbered=brand_number(entry.name state)
+                $runtime_assert numbered isnt? none
+                let condition=put(hir.ShortCircuit[node.loc boolean 'and' same compare('__eq__' tag word(numbered.first node @state) node @state)] @state)
+                arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition record_fields_equal(a b entry.value_type same node @state)] @state))
+            }
+            let fallback=conditional(same record_fields_equal(a b type same node @state) node @state)
+            steps.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms fallback] @state))
+        } else {steps.push(record_fields_equal(a b type same node @state))}
+        if record_union(type @state) isnt? none {
+            # Handles: the same handle is the same value; `none` is zero.
+            let identical=compare('__eq__' a b node @state)
+            let absent=put(hir.ShortCircuit[node.loc boolean 'or' compare('__eq__' a word(0 node @state) node @state) compare('__eq__' b word(0 node @state) node @state)] @state)
+            let decided=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) identical sequence([] node @state)] @state)
+            let missing=put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) absent assign_value(same put(hir.Bool[node.loc boolean false] @state) node @state)] @state)
+            prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [decided missing] sequence(steps node @state)] @state))
+        } else {loop step in steps {prefix.push(step)}}
+    } else {
+        let members=cell_members(type @state)
+        $runtime_assert members isnt? none
+        let tag=snapshot(read_word(a 0 node @state) @prefix @state)
+        prefix.push(assign_value(same compare('__eq__' tag read_word(b 0 node @state) node @state) node @state))
+        let optional=views.optional_payload(type @state.type_nodes)
+        let arms:array<addr>=[]
+        loop member in members {
+            if types.is_primitive(types.node_at(state.type_nodes member) 'none') continue
+            let present=if optional isnt? none compare('__ne__' tag word(0 node @state) node @state) else compare('__eq__' tag word(member_tag(member @state) node @state) node @state)
+            let condition=put(hir.ShortCircuit[node.loc boolean 'and' same present] @state)
+            let payload=value_equality(read_word(a 8 node @state) read_word(b 8 node @state) member node @state)
+            arms.push(put(hir.IfArm[node.loc types.primitive('void' @state.type_nodes) condition assign_value(same payload node @state)] @state))
+        }
+        if arms.length >? 0 {prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms none] @state))}
+    }
+    prefix.push(same)
+    return put(hir.Block[node.loc boolean prefix false] @state)
+}
+record_fields_equal = (a:addr b:addr type:addr same:addr node:hir.AST @state:State):>addr => {
+    let record=object_type(type @state)
+    $runtime_assert record isnt? none
+    let layout=object_layout(type node @state)
+    let steps:array<addr>=[]
+    loop field in record.fields {
+        let offset=layout.offsets.get(field.name)
+        $runtime_assert offset isnt? none
+        let pair=value_equality(field_read(address(a offset node @state) field.value_type node @state) field_read(address(b offset node @state) field.value_type node @state) field.value_type node @state)
+        steps.push(conditional(same assign_value(same pair node @state) node @state))
+    }
+    return sequence(steps node @state)
 }
 string_equal_values = (a_value:addr b_value:addr node:hir.AST negated:bool @state:State):>addr => {
     let prefix:array<addr>=[]
@@ -4750,7 +4886,7 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
     }
     let value=snapshot(owned_value(argument @state 'passed to a call') @prefix @state)
     # A literal argument is static: nothing to release after the call.
-    if (argument in? disposable or argument in? borrowed or argument in? reclaimable) and source isnt? hir.Place and not static_literal(argument state) and releasable(source.value_type @state) {temporary.push(OwnedLocal[value source.value_type])}
+    if (argument in? disposable or argument in? borrowed or argument in? reclaimable) and source isnt? hir.Place and not static_literal(argument @state) and releasable(source.value_type @state) {temporary.push(OwnedLocal[value source.value_type])}
     return value
 }
 # Only the lifted code signature contains captures. Ordinary function values

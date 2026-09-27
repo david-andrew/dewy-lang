@@ -20,6 +20,11 @@ low=(interval:Interval?):>int64=>{
 }
 make=(i:int64):>Interval=>Interval[i as bigint (i + 1) as bigint]
 
+# A literal packed into a union argument is a fresh cell, not static data.
+Tagged:type = [tag:string?]
+tagged=(tag:string?):>Tagged=>Tagged[tag]
+tag_width=(tag:string?):>int64=>if tag is? none 0 else tag.length
+
 # A field read of a getter's result returns only that field, which the
 # reader owns: `source_of(...).body` must not be retained twice.
 Source:type = [path:string body:string]
@@ -68,6 +73,11 @@ exercise=():>int64=>{
     let session=Session[]
     loop k in [0..4) {session.sources.push(Source['p{k}' 'body text {k}'])}
     loop k in [0..40) {total+=body_width(session (k % 4) as addr)}
+    loop k in [0..20) {
+        total+=tag_width('lit')
+        let t=tagged('q')
+        if t.tag isnt? none {total+=1}
+    }
     if decode(3) not=? 'abc' return -1
     loop k in [0..20) {total+=decode(k + 30).length}
     snapshot.list.sort(key=(v)=>low(v))

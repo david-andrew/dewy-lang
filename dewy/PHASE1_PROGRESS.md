@@ -4839,3 +4839,54 @@ Validation:
   tests.
 - A 3-generation bootstrap from `phase1-y` gives identical generations
   (`phase1-z`), and `check_native` passes on that pair.
+
+## Value equality of arrays and records (2026-09-27)
+
+David decided that `=?` is always an element-wise/field-wise comparison,
+never of handles. Before this, native compared handles (`a =? a` true,
+equal copies false), and hosted answered differently again.
+
+Both backends now lower `=?`/`not =?` on arrays, records and record unions
+to one generated helper per compared layout (`value_equal_*`):
+- arrays: equal lengths, then elements pairwise;
+- records: the brand first (a family record compares its own concrete
+  type's fields), then each field;
+- union cells: the tag, then the active payload;
+- strings: the existing byte helper;
+- anything else: word equality.
+
+Nested aggregates recurse through their own helpers. Record unions treat
+zero as `none`. Hosted keeps an exact-length local's elements in the frame,
+so its array helper takes a data pointer and a length per side. Both
+checkers accept arrays with the same element type whatever their static
+lengths (a different length is simply unequal), so `[1 2 3] =? [1 2]` is
+`false` rather than a type error. Dictionaries and sets inside a compared
+value are rejected. Their equality stays open.
+
+Call results compared directly are released afterwards (hosted
+`_discarded_call_result`, native owned operands).
+
+Found while testing:
+- **Native** packed a string literal into a union argument
+  (`tagged('q')` for `string?`) but treated the cell as static data, so
+  the 16-byte cell leaked. `static_literal` no longer looks through a
+  packing cast. The case joins `native_argument_temporaries`.
+- `xs =? []` is rejected by both compilers: an empty literal has no element
+  type to infer from the other operand.
+
+New fixture `value_equality` (pair check 62 and hosted x86-64/C tests):
+arrays, records, families, optionals, string and nested arrays, mixed
+unions. It requires unchanged live memory on a second run.
+
+Self-hosting is unaffected: the native compiler built with the new
+semantics reaches a fixed point (generations 3 and 4 identical), and the
+self-build stays at about 48 s.
+
+Validation:
+- Gate: 4,761 passed.
+- A 3-generation bootstrap from `phase1-z` gives identical generations
+  (`phase1-a2`), and `check_native` passes on that pair.
+
+Juxtaposition ambiguity was also measured (for the rejected narrowing): 622
+`Ambiguous` nodes in a self-build, 0.87 s of checking, about 2% of the
+build. Details are in `PHASE1_DESIGN_PROPOSALS.md`.

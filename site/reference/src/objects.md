@@ -39,6 +39,10 @@ copy.saved = true             # original.saved remains false
 
 Nested array and object fields recursively follow the same value rule.
 
+## Equality
+
+`a =? b` compares records by value: field by field with `=?`, recursively. Records of different branded types are unequal, and a record in a family compares the fields of its own concrete type. As for arrays, storage is never compared.
+
 ## Immutable Records
 
 `const [...]` in a type position is an *immutable record*: a runtime value whose contents never change after it is built. It is not a compile-time value, and it is not the `const` binding declaration: the binding may still be replaced whole. Nothing writes through such a value — not a field, not a member changed in place (an array's `push`, a dictionary's store or `pop`), not a place taken of a field (`@info.radix`), and not a method of the record that assigns a field (refused where the method is declared). The barrier holds through copies, containers, unions, and function boundaries, because the qualifier is part of the type: `const [x:int64]` and `[x:int64]` are different types. A writable record of the same shape may be used where the immutable one is expected (the value is copied there), never the reverse, so a writable contract cannot be handed an immutable value. A copy of a member taken out with `let` is an ordinary value again. `type of any & const [...]` mints an immutable nominal type, and a child of an immutable parent is immutable.

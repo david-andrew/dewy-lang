@@ -5088,6 +5088,19 @@ builtin_value = (function:addr arguments:array<addr> id:addr env:Environment @se
         return put(hir.OverloadedFunction[loc types.overload_type(methods @session.types) alternates] @session)
     }
     if views.container_entry_types(a.value_type session.types) isnt? none or views.container_entry_types(b.value_type session.types) isnt? none return container_algebra(name left right id env @session)
+    if name in? ['__eq__' '__ne__'] and not views.string_valued(a.value_type session.types) {
+        # Arrays compare as values: element-wise, whatever their static
+        # lengths (a different length is simply unequal).
+        let a_shape=types.node_at(session.types views.structural_base(a.value_type session.types))
+        let b_shape=types.node_at(session.types views.structural_base(b.value_type session.types))
+        if a_shape is? types.ArrayType and b_shape is? types.ArrayType and types.same_type(a_shape.element b_shape.element session.types) {
+            let boolean=types.primitive('bool' @session.types)
+            let loc=contexts.node_at(id env.lexical session).loc
+            let signature=types.function_type([types.PosOrKwArg['left' a.value_type] types.PosOrKwArg['right' b.value_type]] [] none boolean [] @session.types)
+            let function=put(hir.ExpressedIdentifier[loc signature name] @session)
+            return put(hir.FunctionCall[loc boolean function [left right] []] @session)
+        }
+    }
     if not views.string_valued(a.value_type session.types) or not views.string_valued(b.value_type session.types) return none
     let loc = contexts.node_at(id env.lexical session).loc
     let a_type = types.node_at(session.types a.value_type)

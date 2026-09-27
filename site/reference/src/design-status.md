@@ -40,7 +40,7 @@ These areas have a clear direction, but some syntax, edge cases, or runtime cont
 - the general effect vocabulary and effect-polymorphic contracts;
 - multidimensional array shape syntax, broadcasting, and contiguous layout selection;
 - IEEE floating-point formats, conversions, promotion, and numerical execution policies; implementation is tentatively expected alongside the full matrix math system;
-- bidictionaries, container equality and ordering, compound container operators, and keys beyond words and strings;
+- bidictionaries, dictionary and set equality, container ordering, compound container operators, and keys beyond words and strings;
 - the numeric hierarchy beyond integers, rationals, and fixed-point (reals, complex, quaternions);
 - the overloadable string-conversion protocol beyond built-in conversions;
 - transformed exception propagation, recovery helpers, and whether pipes join automatic exception forwarding;

@@ -350,6 +350,8 @@ class _Lowerer(
         self.cell_copy_symbols: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
         self.cell_copy_names = {}
         self.pending_cell_copies: list[tuple[tuple[ty.TypeExpr, ...], bool, bool, str]] = []
+        self.value_equal_symbols: list[tuple[ty.TypeExpr, str]] = []
+        self.pending_value_equals: list[tuple[ty.TypeExpr, str]] = []
         # bindings whose value is an enum (a union of singletons): a word
         # holding the member index (`ty.enum_members`), no cell
         self.enum_words: dict[int, tuple[ty.TypeExpr, ...]] = {}
@@ -5626,6 +5628,10 @@ class _Lowerer(
                 return self._extract_method_call(node)
             if self._is_fixed_width_shift(node):
                 return self._extract_fixed_width_shift(node)
+            if (isinstance(node.func, hir.ExpressedIdentifier) and node.func.binding_id is None
+                    and node.func.name in ('__eq__', '__ne__') and len(node.pos_args) == 2
+                    and all(self._value_compared(arg.type) for arg in node.pos_args)):
+                return self._extract_value_equality(node)
             prelude: list[hir.AST] = []
             func_prelude, func = self._extract_expression(node.func)
             prelude.extend(func_prelude)

@@ -1,0 +1,44 @@
+# `=?` compares values, element-wise and field-wise, never handles. Arrays
+# of different static lengths are simply unequal.
+P:type = [a:int64 b:string]
+Node = $abstract type of [loc:int64]
+Leaf = type of Node & [value:int64]
+Pair = type of Node & [left:int64 right:array<int64>]
+Holder:type = [items:array<P> tag:string? inner:P node:Leaf|Pair|none mixed:int64|string]
+make=(n:int64):>array<int64>=>{
+    let xs:array<int64>=[]
+    loop i in [0..n) {xs.push(i)}
+    return xs
+}
+holder=(tag:string? node:Leaf|Pair|none mixed:int64|string):>Holder=>Holder[[P[1 'x'] P[2 'y']] tag P[3 'z'] node mixed]
+check=():>int64=>{
+    let r:int64=0
+    let a:array<int64>=[1 2 3]
+    let b:array<int64>=[1 2 3]
+    if a =? a and a =? b {r+=1}
+    if a not=? [1 2 4] and a not=? [1 2] {r+=2}
+    if make(3) =? make(3) and make(3) not=? make(4) and make(0) =? make(0) and make(0) not=? [0] {r+=4}
+    if P[1 'x'] =? P[1 'x'] and P[1 'x'] not=? P[1 'y'] and P[1 'x'] not=? P[2 'x'] {r+=8}
+    if holder('q' Leaf[1 5] 7) =? holder('q' Leaf[1 5] 7) {r+=16}
+    if holder('q' Leaf[1 5] 7) not=? holder(none Leaf[1 5] 7) and holder('q' Leaf[1 5] 7) not=? holder('q' Pair[1 5 []] 7) {r+=32}
+    if holder('q' none 'm') =? holder('q' none 'm') and holder('q' none 'm') not=? holder('q' none 7) {r+=64}
+    let s:array<string>=['ab' 'c{r}']
+    let t:array<string>=['ab' 'c{r}']
+    if s =? t and s not=? ['ab'] {r+=128}
+    let n1:array<array<int64>>=[[1] [2 3]]
+    let n2:array<array<int64>>=[[1] [2 3]]
+    let n3:array<array<int64>>=[[1] [2 4]]
+    if n1 =? n2 and n1 not=? n3 {r+=256}
+    let o1:P?=P[4 'w']
+    let o2:P?=P[4 'w']
+    let o3:P?=none
+    if o1 =? o2 and o1 not=? o3 {r+=512}
+    return r
+}
+main=():>int64=>{
+    let first=check()
+    let before=_arena_live_bytes
+    let second=check()
+    if first not=? 1023 return first % 256
+    return if second =? first and _arena_live_bytes =? before 42 else 2
+}

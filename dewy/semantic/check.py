@@ -11431,6 +11431,15 @@ def _dispatch_builtin(
         # ever reinterpreted
         args = [args[0], check_against(args[1], ty.strip_refinement(arg_types[0]), ctx=ctx)]
         arg_types = [args[0].type, args[1].type]
+    if fname in {'__eq__', '__ne__'} and len(args) == 2:
+        # Arrays compare as values: element-wise, whatever their static
+        # lengths (a different length is simply unequal).
+        shapes = [ty.structural_base(arg.type) for arg in args]
+        if (all(isinstance(shape, ty.ArrayType) for shape in shapes) and not any(_is_string_type(arg.type) for arg in args)
+                and ctx.type_system.is_subtype(shapes[0].element, shapes[1].element)
+                and ctx.type_system.is_subtype(shapes[1].element, shapes[0].element)):
+            signature = ty.FunctionType([ty.PosOrKwArg('left', args[0].type), ty.PosOrKwArg('right', args[1].type)], [], None, 'bool', [])
+            return hir.FunctionCall(loc, 'bool', hir.ExpressedIdentifier(loc, signature, fname), args, {})
     if (
         fname in {'__eq__', '__ne__'}
         and len(args) == 2

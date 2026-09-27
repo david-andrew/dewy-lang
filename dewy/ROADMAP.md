@@ -297,18 +297,17 @@ What Jai does that Dewy does not, and the lever each implies:
    borrowing, moves). Retrofitting linearity into a proof engine later is
    the expensive path, so Phase 1.2 designs against it now.
 
-Other measured costs with the same flavor: the multi-stage parser resolves
-juxtaposition ambiguity at ~18k lines/s against Jai's millions, and the
+Other measured costs with the same flavor: the multi-stage parser is far
+slower than Jai's (juxtaposition ambiguity itself is small: 622 ambiguous
+nodes and about 2% of a self-build, measured 2026-09-27), and the
 compiler as a Dewy program pays copies, retain/release pairs and string
 work that Jai's compiler never performs (Phase 1.1 removes these as a side
 effect; the copy budget is the metric).
 
-**Open design question for David:** which language constraints to relax
-for throughput. His own candidate is narrowing the allowed juxtaposition
-cases while keeping every form people actually write (`2x`, `f(x)`,
-`printl"hi"`, `sin(x)^2`), so the parser stops carrying undecided
-call-or-multiply alternatives through to the checker. Any such narrowing is
-a surface change and needs his decision first; record it in 1.4 when made.
+**Juxtaposition narrowing (decided against, 2026-09-27):** David keeps
+`a(x)^2` (a number `a`) and `(x+1)5^2` as multiplications, and the measured
+cost of ambiguity is small (see `PHASE1_DESIGN_PROPOSALS.md`), so the
+surface stays as decided in 1.4 item 1.
 
 Sequencing: levers 1, 2 and 5 need no language change and belong to the
 next performance batch after Phase 1.1's current slices; lever 3 lands
@@ -1050,6 +1049,13 @@ Decisions were made by David on 2026-09-13.
    the same everywhere. `length` is the uniform accessor for both length
    and shape: on a multidimensional array `myarr.length` returns an array
    of dimensions. There is no `size` or `shape`.
+
+9. **Equality of arrays and records (decided 2026-09-27).** `=?` is
+   always a value comparison: element-wise for arrays (a different length
+   is unequal, including a different static length) and field-wise for
+   records, recursively; never a comparison of handles. Implemented in both
+   compilers with one generated helper per compared layout. Dictionary and
+   set equality stay open.
 
 Not decisions: the precedence adjustments once listed as open in the
 reference's design-status appendix (word `not` below comparisons,
