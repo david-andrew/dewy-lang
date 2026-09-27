@@ -782,12 +782,37 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
 
     def array_operation(node, allowed, inherited, control):
         method = node.func
-        if method.name not in ('push', 'insert', 'pop', 'reserve', 'clear', 'truncate'):
+        if method.name not in ('push', 'insert', 'pop', 'reserve', 'clear', 'truncate', 'sort'):
             reject(node, 'a resource array method without element lifetime handling')
         # Borrow the receiver once. Clearing uses a checked helper to drop
         # live elements; insertion/removal otherwise transfers their owners.
         receiver = expression(hir.Place(method.loc, method.array.type, method.array), allowed,
                               inherited=inherited, control=control)
+        if method.name == 'sort':
+            # The engine permutes owners in place. Its internal adapter borrows
+            # one element and creates the independent owner that the source
+            # by-value key receives (and drops). It captures no source key.
+            shape = ty.structural_base(method.array.type)
+            assert isinstance(shape, ty.ArrayType)
+            parameter = registry.allocate(object(), '__sort_element', 'param', node.loc)
+            parameter.type = shape.element
+            borrowed = hir.ExpressedIdentifier(node.loc, shape.element, parameter.name, binding_id=parameter.id)
+            owned = copy_value(borrowed, implicit=True)
+            signature = ty.FunctionType([ty.PosOrKwArg(parameter.name, shape.element)], [], None, shape.element)
+            adapter = hir.FunctionLiteral(node.loc, signature,
+                [hir.Param(parameter.name, shape.element, binding_id=parameter.id)], [], None,
+                shape.element, owned, source=current_source)
+            name = f'__dewy_sort_copy_{registry.next_id}'
+            binding = registry.allocate(object(), name, 'value', node.loc)
+            binding.type = signature
+            declaration = hir.Declare(node.loc, ty.VOID_TYPE, 'const', name, signature, adapter, binding_id=binding.id)
+            binding.function = adapter
+            binding.declaration = declaration
+            generated.append(declaration)
+            operation = hir.ExpressedIdentifier(node.loc, signature, name, binding_id=binding.id)
+            return replace(node, func=replace(method, array=receiver.target, key_copy=operation),
+                kw_args={name: expression(arg, allowed, inherited=inherited, control=control)
+                         for name, arg in node.kw_args.items()})
         if method.name == 'truncate':
             prefix = []
             receiver_root = bindings.access_path(receiver.target, dictionaries=True).binding_id

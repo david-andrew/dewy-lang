@@ -537,6 +537,9 @@ class ArrayMethod(AST):
 
     array: AST
     name: str
+    # Lifecycle lowering supplies a noncapturing borrowed-element adapter
+    # when a source sort key owns a resource argument. Not a source option.
+    key_copy: AST | None = None
 
 
 @dataclass(slots=True, weakref_slot=True)

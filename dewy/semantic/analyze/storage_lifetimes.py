@@ -115,7 +115,9 @@ def validate(root, registry, srcfile):
         borrowed = binding in borrowed_parameters
         relevant = tracked if borrowed else {binding}
         key = call.kw_args.get('key')
-        if key is not None and not isolated and not nonmutating(key):
+        copied = call.func.key_copy
+        callbacks_safe = (key is None or nonmutating(key)) and (copied is None or nonmutating(copied))
+        if key is not None and not isolated and not callbacks_safe:
             changed = {owner(item) for item in writes.get(id(call), tracked)}
             if changed & relevant:
                 user_error(source, 'sort key may change its receiver',

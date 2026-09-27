@@ -129,7 +129,10 @@ validate=(roots:array<places.Root> source_files:array<SrcFile> session:contexts.
         let relevant:set<addr>=if borrowed tracked else if binding is? none set[] else set[binding]
         let key=call.kw_args.get('key')
         $runtime_assert candidate.source <? source_files.length
-        if key isnt? none and not isolated and not nonmutating(key session) {
+        let method=hir.node_at(session.hir call.func)
+        $runtime_assert method is? hir.ArrayMethod
+        let callbacks_safe=(key is? none or nonmutating(key session)) and (method.key_copy is? none or nonmutating(method.key_copy session))
+        if key isnt? none and not isolated and not callbacks_safe {
             loop changed in writes.get(candidate.id tracked) {
                 let selected=owner(changed session)
                 if selected isnt? none and selected in? relevant {

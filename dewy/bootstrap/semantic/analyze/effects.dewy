@@ -654,6 +654,11 @@ analyze_global_writes_in = (roots:array<addr> nodes:array<hir.AST> globals:set<a
             # ambient writes must cross the same graph as ordinary calls.
             if function is? hir.ArrayMethod and function.name =? 'sort' and 'key' in? node.kw_args {
                 resolved=value_targets(node.kw_args['key'] none analysis nodes)
+                if resolved isnt? none and function.key_copy isnt? none {
+                    let copied=value_targets(function.key_copy none analysis nodes)
+                    if copied is? none {resolved=none}
+                    else {loop target in copied {resolved.push(target)}}
+                }
             }
             if resolved isnt? none {targets[id]=resolved}
             else {result[id]=globals}

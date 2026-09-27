@@ -2244,18 +2244,22 @@ class _ArrayLowering(_ArraySharing):
             index = name('sort_build')
             method = node.func
             assert isinstance(method, hir.ArrayMethod)
-            # The key reads the stored element in place: a function value
-            # borrows its by-value parameters, as in the native lowerer, so
-            # no per-element copy is made (or left behind).
+            # Ordinary elements borrow. Resource keys own their arguments:
+            # lifecycle lowering supplies a checked copy adapter, while the
+            # original array retains its elements throughout the permutation.
             argument = name('sort_argument')
-            key_call = hir.FunctionCall(loc, key_type, key_function, [replace(argument, type=element_type)], {})
-            key_prelude, key_value = self._extract_expression(key_call)
-            key_prelude.insert(0, declare(argument, replace(self._array_load(element_at(data, index), element_type, loc), type='int64')))
-            # Materialize the callback result before bit normalization, as the
-            # native lowerer does. An indirect call nested inside a transmute
-            # is not a µDewy expression supported by its call parser.
+            selected = replace(argument, type=element_type)
+            if method.key_copy is not None:
+                selected = hir.FunctionCall(loc, element_type, method.key_copy, [selected], {})
+            key_call = hir.FunctionCall(loc, key_type, key_function, [selected], {})
+            # Each iteration owns its temporaries. Releasing only at the end
+            # of the sort would overwrite earlier callback argument owners.
             key_result = name('sort_result', key_type)
-            key_prelude.append(declare(key_result, key_value, key_type))
+            def build_key():
+                prefix, result = self._extract_expression(key_call)
+                return [*prefix, declare(key_result, result, key_type)]
+            key_prelude = self._lower_result_statements(build_key)
+            key_prelude.insert(0, declare(argument, replace(self._array_load(element_at(data, index), element_type, loc), type='int64')))
             key_word = normalized(key_result, key_type)
             record = add(records, times(index, record_bytes))
             setup.extend([

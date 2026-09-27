@@ -4674,6 +4674,7 @@ encode_Value237=(value:Value237 @out:bytes.Writer):>void=>{
     encode_Value13(value.value_type @out)
     encode_Value13(value.array @out)
     encode_Value9(value.name @out)
+    encode_Value47(value.key_copy @out)
 }
 decode_Value237=(@input:bytes.Reader):>Value237|CacheMiss=>{
     if bytes.read_byte(@input) not=? 0 or input.failed return miss(@input)
@@ -4685,7 +4686,9 @@ decode_Value237=(@input:bytes.Reader):>Value237|CacheMiss=>{
     if field_2 is? CacheMiss return field_2
     let field_3=decode_Value9(@input)
     if field_3 is? CacheMiss return field_3
-    return Value237[loc=field_0 value_type=field_1 array=field_2 name=field_3]
+    let field_4=decode_Value47(@input)
+    if field_4 is? CacheMiss return field_4
+    return Value237[loc=field_0 value_type=field_1 array=field_2 name=field_3 key_copy=field_4]
 }
 
 encode_Value238=(value:Value238 @out:bytes.Writer):>void=>{

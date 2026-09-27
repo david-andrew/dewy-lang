@@ -1090,12 +1090,37 @@ freeze_route = (id:addr loc:Span root:addr? @prefix:array<addr> @plan:Plan @sess
     return id
 }
 array_operation = (id:addr node:hir.FunctionCall method:hir.ArrayMethod allowed:set<addr> inherited:bool @plan:Plan @session:contexts.Session frame:Frame?=none):>void => {
-    if method.name not in? ['push' 'insert' 'pop' 'reserve' 'clear' 'truncate'] {reject(node 'a resource array method without element lifetime handling' @plan) return}
+    if method.name not in? ['push' 'insert' 'pop' 'reserve' 'clear' 'truncate' 'sort'] {reject(node 'a resource array method without element lifetime handling' @plan) return}
     # Insertion introduces owners; pop transfers one; reserve only changes
     # capacity. Other methods need explicit handling for discarded elements.
     let receiver=hir.node_at(session.hir method.array)
     let place=put(hir.Place[receiver.loc receiver.value_type method.array] @session)
     expression(place allowed inherited @plan @session frame=frame)
+    if method.name =? 'sort' {
+        # Sorting preserves stored owners. The internal noncapturing adapter
+        # borrows an element and constructs the source key's owning argument.
+        let shape=types.node_at(session.types views.structural_base(receiver.value_type session.types))
+        $runtime_assert shape is? types.ArrayType
+        let parameter_id=bindings.allocate(@session.registry none '__sort_element' 'param' node.loc)
+        let parameter=bindings.binding_at(session.registry parameter_id)
+        parameter.value_type=shape.element parameter.store_type=shape.element
+        bindings.store_binding(@session.registry parameter_id parameter)
+        let borrowed=put(hir.ExpressedIdentifier[node.loc shape.element '__sort_element' parameter_id] @session)
+        let owned=copy_component(borrowed true @plan @session)
+        let signature=types.function_type([types.PosOrKwArg['__sort_element' shape.element]] [] none shape.element [] @session.types)
+        let adapter=put(hir.FunctionLiteral[node.loc signature [hir.Param['__sort_element' shape.element parameter_id]] [] none shape.element owned source=plan.function_source] @session)
+        let name="__dewy_sort_copy_{session.registry.next_id}"
+        let binding_id=bindings.allocate(@session.registry none name 'value' node.loc)
+        let declaration=put(hir.Declare[node.loc types.primitive('void' @session.types) 'const' name signature adapter binding_id] @session)
+        let binding=bindings.binding_at(session.registry binding_id)
+        binding.value_type=signature binding.function=adapter binding.declaration=declaration
+        bindings.store_binding(@session.registry binding_id binding)
+        plan.generated.push(declaration)
+        method.key_copy=put(hir.ExpressedIdentifier[node.loc signature name binding_id] @session)
+        store(node.func method @session)
+        loop argument in node.kw_args.values {expression(argument allowed inherited @plan @session frame=frame)}
+        return
+    }
     if method.name =? 'truncate' {
         let prefix:array<addr>=[]
         let root=receiver_root(method.array session.hir)

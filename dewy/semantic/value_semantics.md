@@ -295,3 +295,12 @@ store's offset or initialization of every committed byte. Allocation failure
 policy remains open, as for ordinary array reservation.
 
 Strings and arbitrary aggregate owners are outside this initial subset.
+
+
+Resource array sorting preserves the stored owners while permuting their
+handles. An owning by-value key callback receives an independent value
+through the checked copy operation and drops that argument normally. Those
+copies obey `$explicit_copies` and contribute hook effects; an unknown or
+mutating hook cannot invalidate the sort receiver. Move-only elements cannot
+be supplied to an owning key while the array retains them. Borrowed key
+parameter syntax is not introduced by this implementation.

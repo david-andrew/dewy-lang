@@ -2962,11 +2962,11 @@ class _Lowerer(
             self._target_error(node, 'a generic function used as a value')
         if isinstance(node, hir.ModuleNamespace):
             self._target_error(node, 'using a module namespace as a runtime value')
-        if isinstance(node, (hir.ArrayLength, hir.ArrayMethod)):
-            return replace(
-                node,
-                array=self._require_node(self._transform_node(node.array)),
-            )
+        if isinstance(node, hir.ArrayMethod):
+            return replace(node, array=self._require_node(self._transform_node(node.array)),
+                           key_copy=self._transform_node(node.key_copy) if node.key_copy is not None else None)
+        if isinstance(node, hir.ArrayLength):
+            return replace(node, array=self._require_node(self._transform_node(node.array)))
         if isinstance(node, (hir.CopyMethod, hir.CopyValue)):
             return replace(node, value=self._require_node(self._transform_node(node.value)))
         if isinstance(node, hir.DictLookup):

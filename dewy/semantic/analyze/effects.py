@@ -840,16 +840,26 @@ def analyze_global_writes(root: hir.AST, globals: set[int]) -> dict[int, set[int
 
     analysis = _EffectAnalyzer(root)
     calls = {id(node): node for node in hir.walk(root) if isinstance(node, hir.FunctionCall)}
-    targets = {
-        # A checked intrinsic has no lexical binding. integer_operation is
-        # numeric meaning, not a purity promise for a library implementation.
-        key: (analysis._value_targets(call.kw_args['key'])
-              if call.func.name == 'sort' and 'key' in call.kw_args else [])
-        if isinstance(call.func, hir.ArrayMethod) else [] if (
-            isinstance(call.func, hir.ExpressedIdentifier) and call.func.binding_id is None
-        ) else analysis._direct_targets(call)
-        for key, call in calls.items()
-    }
+    targets = {}
+    for key, call in calls.items():
+        if isinstance(call.func, hir.ArrayMethod):
+            resolved = []
+            if call.func.name == 'sort':
+                for callback in (call.kw_args.get('key'), call.func.key_copy):
+                    if callback is None:
+                        continue
+                    found = analysis._value_targets(callback)
+                    if found is None:
+                        resolved = None
+                        break
+                    resolved.extend(found)
+            targets[key] = resolved
+        # A checked intrinsic has no lexical binding. Numeric meaning alone
+        # is not a purity promise for a user/library function.
+        elif isinstance(call.func, hir.ExpressedIdentifier) and call.func.binding_id is None:
+            targets[key] = []
+        else:
+            targets[key] = analysis._direct_targets(call)
     summaries: dict[int, set[int]] = {}
     callers: dict[int, set[int]] = {}
     for literal in analysis.literals:

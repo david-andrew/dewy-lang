@@ -3849,6 +3849,8 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
         }
     }
     if views.fixed_integer_layout(key_type state.type_nodes) is? none return reject(call 'a sort key must return a fixed-width integer' @state)
+    let key_copy:addr?=none
+    if method.key_copy isnt? none {key_copy=snapshot(expression(method.key_copy @state) @prefix @state)}
     let length=snapshot(read_word(descriptor layouts.array_descriptor.length call @state) @prefix @state)
     let data=snapshot(read_word(descriptor layouts.array_descriptor.data call @state) @prefix @state)
     let size=snapshot(word_op('__mul__' length word(16 call @state) call @state) @prefix @state)
@@ -3862,15 +3864,21 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
     let building:array<addr>=[]
     let element=snapshot(array_load(element_pointer type.element call @state) @building @state)
     let key=element
+    let copied_argument:addr?=none
     if key_function isnt? none and key_signature isnt? none {
+        let argument_value=element
+        if key_copy isnt? none {
+            # The generated adapter borrows; its result supplies the source
+            # key's independent owner. The stored array element stays live.
+            argument_value=snapshot(put(hir.FunctionCall[call.loc runtime_type(type.element call @state) key_copy [element] []] @state) @building @state)
+            copied_argument=argument_value
+        }
         let args:array<addr>=[]
         let first=true
         loop parameter in key_signature.pos_or_kw {
             let argument:addr?=none
-            # Function values take by-value parameters as borrows (a callee
-            # that writes one copies it on entry), so the key reads the
-            # element in place; an owned copy here was never released.
-            if first {argument=element}
+            # Ordinary keys borrow; resource keys receive the checked owner.
+            if first {argument=argument_value}
             call_slot(argument parameter.value_type parameter.required call @args @state)
             first=false
         }
@@ -3879,6 +3887,9 @@ array_sort = (call:hir.FunctionCall method:hir.ArrayMethod @state:State):>addr =
     }
     let normalized=sort_key(key key_type mask call @state)
     building.push(store_word(put(hir.Transmute[call.loc types.primitive('int64' @state.type_nodes) normalized] @state) record 0 call @state))
+    # Function-value ABI borrows the supplied handle. A resource key creates
+    # and drops its private owner; release this caller-side snapshot per key.
+    if copied_argument isnt? none {building.push(release_value(copied_argument type.element call @state))}
     building.push(array_store(element address(record 8 call @state) type.element call @state))
     building.push(assign_value(index word_op('__add__' index word(1 call @state) call @state) call @state))
     prefix.push(loop_while(intrinsic_call('__lt__' [index length] boolean call @state) building call @state))

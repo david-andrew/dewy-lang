@@ -180,7 +180,10 @@ visit = (id:addr input:Input @scan:Scan):>void => {
             if method.name not=? 'join' {record_access(method.array 'mutates' input @scan)}
             if method.name not=? 'set_length' {storage(@scan)}
             let key=node.kw_args.get('key')
-            if method.name =? 'sort' and key isnt? none {callback(key input @scan)}
+            if method.name =? 'sort' and key isnt? none {
+                callback(key input @scan)
+                if method.key_copy isnt? none {callback(method.key_copy input @scan)}
+            }
             loop arg in node.pos_args {visit(arg input @scan)}
             loop arg in node.kw_args.values {visit(arg input @scan)}
             return

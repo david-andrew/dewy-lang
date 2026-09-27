@@ -16,7 +16,7 @@ all source shapes or the complete integration matrix have been certified.
 | Area | Implemented foundation | Remaining closure work |
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
-| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Dynamic conditional element routes, transfers through hooked wrappers, resource sort/key ownership and other unsupported resource operations; captured/exposed storage lifetimes. |
+| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Dynamic conditional element routes, transfers through hooked wrappers, remaining unsupported resource operations; captured/exposed storage lifetimes. |
 | 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | More precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
@@ -5202,3 +5202,26 @@ execution/rejection tests on both backends. Tests cover unrelated wrapper
 slots, incorrect translated permissions, nominal remainders and exclusions.
 More general place-bearing generic rows remain a separately reviewed design;
 they are outside this approved Phase 1 subset.
+
+
+## Resource array sorting (2026-09-27)
+
+Sort now permutes existing resource owners and supplies each owning key
+callback with a checked independent copy. A noncapturing internal adapter
+keeps logical copy hooks, copy-policy notes and public/ambient effects in
+ordinary HIR. It does not introduce source callback or closure syntax.
+The receiver lifetime check includes the adapter's effects even when the
+source key promises purity. Move-only elements still reject when the key
+requires an independent owner.
+
+Both lowerers release the caller-side key snapshot after each invocation;
+the source key performs logical drop of its private argument. Hosted
+statement temporaries now use the per-iteration boundary rather than waiting
+until the sort ends. The native prelude cache format is version 9 because
+ArrayMethod now carries the optional internal adapter.
+
+Eight focused checks passed, including the native-built paired group on
+x86-64/C, exact copy/drop counts, reverse order, a 40-element sort, zero
+retained bytes and rejection of hidden effects/receiver mutation/forbidden
+copies. The three paired resource/effect/lifetime groups passed together;
+26 surrounding hosted sort checks also passed. Full integration follows.

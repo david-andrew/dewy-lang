@@ -228,6 +228,8 @@ def inventory(root, registry, allocator_scopes=None):
                         storage()
                     if node.func.name == 'sort' and (key := node.kw_args.get('key')) is not None:
                         callback(key)
+                        if node.func.key_copy is not None:
+                            callback(node.func.key_copy)
                     for argument in [*node.pos_args, *node.kw_args.values()]:
                         visit(argument)
                     return

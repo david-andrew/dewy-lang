@@ -397,6 +397,8 @@ DictMethod = type of AST & [
 ArrayMethod = type of AST & [
     array:addr
     name:string
+    # Internal borrowed-element adapter for an owning resource sort key.
+    key_copy:addr?=none
 ]
 
 # An explicit copy is a value boundary, independent of the backend's
@@ -828,6 +830,7 @@ push_children = (node:AST @result:array<addr>):>void => {
     }
     if node is? ArrayLength | ArrayMethod {
         result.push(node.array)
+        if node is? ArrayMethod and node.key_copy isnt? none {result.push(node.key_copy)}
         return void
     }
     if node is? DictLookup {
