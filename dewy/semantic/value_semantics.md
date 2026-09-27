@@ -266,7 +266,8 @@ address origins to a fixed point. The owner cannot be mutated, replaced or
 passed elsewhere inside the expression. Unknown operations are rejected;
 the compiler grants unpinned access only after checking the whole body.
 The Linux x86-64/C stdout, stderr and file-writing library paths use these
-loans. Unscoped raw exposure retains the existing pinning rule.
+loans. File reads use writable loans to fill array storage in bulk.
+Unscoped raw exposure retains the existing pinning rule.
 
 Writable `$lend(@bytes reserve=n)` accepts a named, growable array of
 unrestricted `uint8`. It evaluates `n` once, reserves that many **additional**

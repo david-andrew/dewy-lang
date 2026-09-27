@@ -50,17 +50,34 @@ let _read_bytes_at = (path:string):>array<uint8>|FileNotFound|FileAccessDenied|I
         let size:int64 = __load_i64__(status + 48)
         if size >? 0 and size <? 4294967296 { contents.reserve(size) }
     }
-    let chunk:int64 = __alloca__(4096)
-    let count:int64 = __syscall3__(0 fd chunk 4096)
-    loop count >? 0 {
-        let i:int64 = 0
-        loop i <? count {
-            let address:int64 = chunk + i
-            let byte:uint8 = __load_u8__(address)
-            contents.push(byte)
-            i += 1
+    # Read straight into private reserved storage. A short read commits
+    # only initialized bytes; the next read appends at that new length.
+    let count:int64=0
+    if $target in? ['x86_64' 'c'] {
+        loop true {
+            count=$lend(@contents reserve=4096) {
+                let data:int64=__load_i64__(contents)
+                let received:int64=__syscall3__(0 fd data+contents.length 4096)
+                if received >? 0 and received <=? 4096 {
+                    contents.set_length(contents.length+received)
+                }
+                received
+            }
+            if count <=? 0 break
         }
+    } else {
+        let chunk:int64 = __alloca__(4096)
         count = __syscall3__(0 fd chunk 4096)
+        loop count >? 0 {
+            let i:int64 = 0
+            loop i <? count {
+                let address:int64 = chunk + i
+                let byte:uint8 = __load_u8__(address)
+                contents.push(byte)
+                i += 1
+            }
+            count = __syscall3__(0 fd chunk 4096)
+        }
     }
     let closed:int64 = __syscall1__(3 fd)
     if count <? 0 { return _file_error(count) }    # a read failed midway (a directory reads as EISDIR)

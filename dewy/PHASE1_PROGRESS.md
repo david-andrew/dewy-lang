@@ -17,7 +17,7 @@ all source shapes or the complete integration matrix have been certified.
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
 | 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations. | Conditional element routes, transfers through hooked wrappers, resource sort/key ownership and other unsupported resource operations; captured/exposed storage lifetimes. |
-| 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | Bulk input adoption of writable `$lend`; owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
+| 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | User-written polymorphic rows with callback-local place subjects; more precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
 | 1.4 Settled surface decisions | Type-directed juxtaposition (including numeric RHS), reserved names, unit nominals, uniform `set.push`, digit-label normalization, array/record value equality. | Final integration checks and documentation consistency. Keep the expressly open decisions below separate. |
@@ -5131,3 +5131,17 @@ three-generation fixed point in the isolated `phase1-output-integration`
 build. Six ambient-analysis regressions also passed. The manifest now has
 217 cases. Bulk file-read adoption and a new integration checkpoint follow;
 this does not close Phase 1.
+
+
+## Bulk file reads into scoped storage (2026-09-27)
+
+The x86-64/C `_read_bytes_at` path now reads chunks directly into reserved
+private array storage and commits only the returned initialized length. It
+retains the fstat reservation, short-read loop and existing error values.
+Other targets retain the previous byte-push route. No per-byte load/push
+loop remains on the supported bulk path.
+
+Hosted and native-built tests execute on both backends, check every byte
+across multiple chunks and a short tail, preserve independent snapshots,
+handle empty/missing/directory inputs and retain zero bytes after repeated
+reads. Native fixed-point and broad integration checks follow this checkpoint.
