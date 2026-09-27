@@ -5268,3 +5268,26 @@ byte loops, rejection of consumed/replaced owners and unused-function errors.
 Thirty-nine adjacent hosted view/conditional/renewal checks passed before the
 source-contract extension; its 24-case focused subset passed afterward. The
 manifest now has 222 cases. Broader integration follows the next batch.
+
+
+## Copy-policy adoption and inventory scope (2026-09-27)
+
+`semantic/source_lines.dewy`, `text_shapes.dewy` and `target_values.dewy`
+now opt into `$explicit_copies`. Each passed hosted standalone lowering and
+the native-built compiler driver with the policy enabled. No compensating
+`.copy()` calls were added. Compiler-source adoption remains incomplete.
+
+A full-main inventory using the bulk-integration native seed reported 2,583
+static sites (1,531 record, 658 array, 394 cell) over 52,644 physical bootstrap
+source lines: 49.065/KLOC. The hosted inventory reported 5,625 sites, including
+1,766 string placement copies exempt from the source policy. These are static
+reports for the reachable main program, not allocation counts or a certificate
+of every function in every imported file. In particular parser CLI functions
+unused by the compiler require separate standalone checks.
+
+Those checks exposed two remaining cases, so the parser wrappers have not
+been marked strict: constructing a Report from its by-value pointer array
+requires an owning field copy, and native `read_input(argv)` still falls back
+to a copy because unrelated raw I/O blocks the array borrow. Hosted accepts
+the latter without a source copy. These are follow-up proof/acceptance work,
+not reasons to add explicit copies merely to enable the directive.
