@@ -64,6 +64,7 @@ from .lowering_shared import (
     replace_changed,
     LoopRegion,
     CopyNote,
+    PlacementNote,
     MoveNote,
     ARRAY_LENGTH_OFFSET,
     ARRAY_OWNER_OFFSET,
@@ -459,6 +460,7 @@ class _Lowerer(
         self.current_literal: hir.FunctionLiteral | None = None   # the function being lowered (locals are traced through it)
         self.copy_bound_memo: dict[int, tuple[ty.Type, bool]] = {}
         self.shared_copy_bound_memo: dict[int, tuple[ty.Type, bool]] = {}
+        self.placement_notes: list[PlacementNote] = []
         self.copy_notes: list[CopyNote] = []   # escape copies made, for `dewy analyze`
         self.owned_array_names: set[str] = set()   # locals of the function being lowered that own a growable array's storage
         self.owned_array_elements: dict[str, ty.TypeExpr] = {}   # one element contract drives recursive cleanup
@@ -3751,13 +3753,16 @@ class _Lowerer(
     def _note_allocator_escapes(self, body: hir.AST) -> None:
         """Report values leaving `$allocator` blocks as copies (see allocator_escapes)."""
         from ...semantic import allocator_escapes
-        for escape in allocator_escapes.escapes(body):
-            kind = _allocator_copy_kind(escape.value_type)
-            if kind is not None:
-                self._note_copy(kind, escape.value_type, escape.site,
-                                'requested with `.copy()`' if escape.explicit else
-                                f'values leave the `$allocator(@{escape.arena})` block by copy', escape.loc,
-                                explicit=escape.explicit, escape=True)
+        for block in allocator_escapes.blocks(body):
+            self.placement_notes.append(PlacementNote(self.srcfile, block.loc,
+                'hosted lowering uses the enclosing allocator; arena placement is not implemented'))
+            for escape in allocator_escapes.block_escapes(block):
+                kind = _allocator_copy_kind(escape.value_type)
+                if kind is not None:
+                    self._note_copy(kind, escape.value_type, escape.site,
+                                    'requested with `.copy()`' if escape.explicit else
+                                    f'values leave the `$allocator(@{escape.arena})` block by copy', escape.loc,
+                                    explicit=escape.explicit, escape=True)
 
     def _compute_moves(self, literal: hir.FunctionLiteral) -> set[int]:
         """Find transfer sites that can consume an owned local.
@@ -6342,6 +6347,9 @@ class _Lowerer(
         return node
 
 
+last_placement_notes: list[PlacementNote] = []
+"""Requested allocator placements that fell back in the most recent lowering."""
+
 last_copy_notes: list[CopyNote] = []
 """The escape copies of the most recent lowering, for `dewy analyze`."""
 
@@ -6361,6 +6369,7 @@ def lower_for_udewy(root: hir.AST, srcfile: SrcFile, *, entry_name: str = 'main'
     root = _uniquify_module_locals(root)   # every local of a function under a name of its own
     lowerer = _Lowerer(root, srcfile, entry_name)
     program = lowerer.lower()
+    last_placement_notes[:] = lowerer.placement_notes
     last_copy_notes[:] = lowerer.copy_notes
     last_move_notes[:] = lowerer.move_notes
     from .copy_policy import validate

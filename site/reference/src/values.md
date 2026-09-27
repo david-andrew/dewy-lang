@@ -193,6 +193,29 @@ conservative.
 The broader typed allocation capabilities remain provisional. Their direction
 is recorded in the compiler's [`user_managed_storage.md`](https://github.com/david-andrew/dewy-lang/blob/main/dewy/semantic/user_managed_storage.md) note.
 
+## Scoped Allocators
+
+`$allocator(@scratch) expression` requests allocation from an `Arena` for the
+whole next expression. Braces group several statements under the same request:
+
+```dewy
+let scratch = Arena[]
+let summary = $allocator(@scratch) build_summary(input)
+scratch.reset()
+```
+
+Results leave the scope with independent storage, so resetting the scratch
+arena does not invalidate `summary`. The arena itself cannot be used while
+it is lent to the expression. Cross-allocator copies remain subject to
+`$explicit_copies`, including immutable strings whose bytes must leave the
+arena.
+
+Placement is currently conservative. The native compiler uses the enclosing
+allocator if it cannot establish safe lifetimes for outer stores, captures or
+calls. The hosted compiler currently uses the enclosing allocator for every
+request. `dewy analyze` reports each fallback and its reason; this preserves
+value behavior but is not a guarantee that the requested arena was used.
+
 ## Storage and Escape Copies
 
 Where a value's bytes live is the implementation's business, but it is observable in one way: cost. A string may be static (a literal), arena-backed (decoded bytes, a `join`), owned by a container (an array element, an object field), frame-backed (an interpolation, or a call result copied into the calling frame), or a parameter's (the caller's, unknown to the callee). Storing a string where it outlives the current evaluation — into a growable array, an object field, a union cell — stores a static literal as it is, takes over a fresh arena string nobody else holds (a `join` or a decode stored directly), and copies everything else into the arena, so **every stored string has exactly one owner**. `dewy analyze file.dewy` lists every such *escape copy* with its reason, so the copies a program pays for are never a mystery; the ownership model's later steps (moves by liveness, borrowed parameters) will remove the ones that proofs can.

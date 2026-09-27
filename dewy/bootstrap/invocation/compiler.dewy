@@ -53,6 +53,17 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
         let counts:dict<string int64>=[]
         let files=compiled.lowered.input.source_files
         let geometry:dict<addr source_lines.Index>=[]
+        loop note in compiled.lowered.placements {
+            let source=note.source
+            if source isnt? none and source <? files.length {
+                let srcfile=files[source]
+                let index=geometry.get(source)
+                if index is? none {index=source_lines.build(srcfile.body) geometry[source]=index}
+                let location=source_lines.locate(index note.loc.start)
+                printl("allocator: {srcfile.path}:{location.row+1}: using enclosing allocator: {note.reason}")
+                if not request.brief {Info[srcfile=srcfile title='allocator fallback' pointers=[Pointer[note.loc note.reason]]].render(srcfile)}
+            } else {printl("allocator: ?:0: using enclosing allocator: {note.reason}")}
+        }
         loop note in compiled.lowered.notes {
             let source=note.source
             let message="{note.kind} `{note.type}` copied when {note.site}: {note.reason}"

@@ -258,6 +258,14 @@ class MoveNote:
 
 
 @dataclass(frozen=True)
+class PlacementNote:
+    """A requested allocator placement the backend could not establish."""
+    srcfile: SrcFile
+    loc: Span
+    reason: str
+
+
+@dataclass(frozen=True)
 class CopyNote:
     """One dynamic aggregate copy the lowering decided, and why no borrow or move applied.
 

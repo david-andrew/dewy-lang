@@ -20,6 +20,10 @@ main=(argv:array<string>):>int64=>{
     if expected isnt? none and (expected =? 'hit') not=? engine.prelude_cache_restored return 3
     let compilation=graph.compile(entry @engine)
     if compilation is? Error {compilation.fail}
+    if environment('DEWY_TEST_ALLOCATOR_NOTES') =? '1' {
+        loop note in compilation.lowered.placements {printl(note.reason)}
+        return 0
+    }
     let emitted=program.render(compilation.lowered.program compilation.lowered.input)
     if emitted is? Error {emitted.fail}
     printl(emitted)

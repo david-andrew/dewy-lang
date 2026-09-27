@@ -906,7 +906,7 @@ def collect_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[
         # `$breakpoint` takes nothing: whatever follows is the next statement
         return Directive(metatag.loc, metatag, None), i
     if metatag.name == "allocator":
-        return _collect_allocator_directive(tokens, start, ctx=ctx)
+        return _collect_allocator_directive(tokens, start, stop_keywords=stop_keywords, ctx=ctx)
     ends_here = (
         i >= len(tokens)
         or is_stop_keyword(tokens[i], stop_keywords)
@@ -966,7 +966,7 @@ def collect_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[
     return Directive(Span(metatag.loc.start, message.loc.stop), metatag, condition, message), i
 
 
-def _collect_allocator_directive(tokens: list[t1.Token], start: int, *, ctx: Context) -> tuple[Directive, int]:
+def _collect_allocator_directive(tokens: list[t1.Token], start: int, *, stop_keywords: set[str], ctx: Context) -> tuple[Directive, int]:
     """`$allocator(@arena) { ... }`: the argument group, then the block it applies to."""
     metatag = tokens[start]
     i = start + 1
@@ -984,16 +984,15 @@ def _collect_allocator_directive(tokens: list[t1.Token], start: int, *, ctx: Con
     i += 1
     if i < len(tokens) and isinstance(tokens[i], (Juxtapose, QJuxtapose)):
         i += 1
-    body = tokens[i] if i < len(tokens) else None
-    if not isinstance(body, t1.Block) or body.kind != '{}':
-        Error(
-            srcfile=ctx.srcfile,
-            title="`$allocator(...)` applies to the block after it",
-            message="",
-            pointer_messages=[Pointer(span=Span(metatag.loc.start, group.loc.stop), message="expected `{ ... }` after this")],
-            hint="`$allocator(@scratch) { ... }`",
-        ).throw()
-    return Directive(Span(metatag.loc.start, body.loc.stop), metatag, Chain(group.loc, [group]), Chain(body.loc, [body])), i + 1
+    if i >= len(tokens) or is_stop_keyword(tokens[i], stop_keywords) or isinstance(tokens[i], t1.Semicolon):
+        Error(srcfile=ctx.srcfile, title="`$allocator(...)` needs an expression after it",
+              pointer_messages=[Pointer(span=group.loc, message="expected an expression or `{ ... }`")]).throw()
+    body, i = collect_expr(tokens, i, stop_keywords=stop_keywords, ctx=ctx)
+    # Desugar to a scoped block so lifetime and escape rules stay identical
+    # for calls, arithmetic, control flow and the explicit brace spelling.
+    if len(body.items) != 1 or not isinstance(body.items[0], t1.Block) or body.items[0].kind != '{}':
+        body = Chain(body.loc, [t1.Block(body.loc, body.items, '{}', None)])
+    return Directive(Span(metatag.loc.start, body.loc.stop), metatag, Chain(group.loc, [group]), body), i
 
 
 def _is_comma_void(token: t1.Token) -> bool:

@@ -256,8 +256,10 @@ scratch. Jai holds the same line.
 Where that puts the targets: the compiler's ~49k lines build in about 20 s
 on the C route and 45 s direct (2.5k and 1.1k lines/s); the 30 s and 10 s
 targets above are 1.6k and 5k lines/s; the Jai class is ~100k lines/s. The
-stretch goal is therefore a waypoint, not the destination, and tuning the
-current pipeline cannot reach the destination. The design has to.
+stretch goal is therefore a waypoint, not the destination. Cross-language
+lines-per-second comparisons motivate investigating wasted work; they do not
+establish which redesigns are necessary or what time Dewy can achieve. Use
+phase profiles, allocation volume and scaling tests to choose those changes.
 
 What Jai does that Dewy does not, and the lever each implies:
 
@@ -270,16 +272,21 @@ What Jai does that Dewy does not, and the lever each implies:
    specified under "Direct binary fast path" below, and both landed on
    2026-09-25.
 2. **The unoptimized backend is the fast one.** Jai uses LLVM only for
-   release builds and its own backend for development, where compile speed
-   is everything and output speed is nothing. Dewy's direct route is
-   currently the *slow* route. Lever: make the direct backend the
-   development path, measured on compile time alone, with C (or a later
-   optimizing path) for release builds.
+   release builds and its own backend for development. Lever: make the direct
+   backend a fast development path, with C (or a later optimizing path) for
+   release builds. Measure frontend time, backend time and generated-code
+   throughput separately: development output is also the next compiler and
+   the test runner. Distinguish a C-built executing compiler from a compiler
+   emitting C.
 3. **Never freeing.** Jai's compiler allocates from arenas and lets the
    process exit reclaim everything: no reference counts, no releases. Lever:
    the context allocator (ownership tier 3, `status.md`) pushed at the top
-   of the compiler makes every release a no-op and most copy proofs moot
-   for this one program. The compiler is that mechanism's first customer.
+   of the compiler can remove individual reclamation at suitable lifetime
+   boundaries. It does not remove copy obligations: two independently mutable
+   values must remain independent even if neither is freed. Measure working
+   set as well as time; a module-sized bounds-checker arena increased memory
+   without improving time in the first experiment. The compiler remains
+   the mechanism's first customer, at measured lifetime boundaries.
 4. **A worklist, not passes.** Declarations typecheck out of order from a
    queue; a job that meets an unresolved dependency requeues; compile-time
    execution runs in the same loop. Nothing walks the whole program eight
@@ -292,10 +299,12 @@ What Jai does that Dewy does not, and the lever each implies:
 6. **A cheap semantic layer.** Jai has no proofs, no effects, no ownership
    analysis and no operator ambiguity; typechecking is near-linear and
    local. Dewy cannot copy this: proofs are its reason to exist. The
-   constraint instead is that **no analysis may do superlinear work in
-   program size**, budgeted and measured like any phase (bounds, effects,
-   borrowing, moves). Retrofitting linearity into a proof engine later is
-   the expensive path, so Phase 1.2 designs against it now.
+   constraint instead is **measured scaling and bounded proof effort**:
+   bound qualifier generation, propagate changes through dependency worklists,
+   and give expensive searches explicit budgets. Budget exhaustion yields
+   unknown or a diagnostic, never an assumed proof. Track time, work and
+   memory for bounds, effects, borrowing and moves on increasing inputs;
+   a blanket linearity guarantee is not realistic for the intended proofs.
 
 Other measured costs with the same flavor: the multi-stage parser is far
 slower than Jai's (juxtaposition ambiguity itself is small: 622 ambiguous
@@ -317,7 +326,10 @@ compiler's own sources, C route and direct route separately.
 
 ### Direct binary fast path (2026-09-24)
 
-**Status (2026-09-25): done.** All seven steps landed in both compilers.
+**Status (2026-09-25): initial implementation complete.** All seven steps
+landed in both compilers. The September 27 follow-up records target/ABI
+identity in `UBC2` and rejects incompatible streams; internal token and
+assembly representations remain candidates for measured simplification.
 Both Dewy compilers write µDewy bytecode, and the native µDewy writes x86-64,
 AArch64, RISC-V and wasm32 objects itself by default. The details and
 verification are in `PHASE1_PROGRESS.md`.
@@ -392,7 +404,9 @@ relocations. `ld` still links.
   process. Emitting an object from this backend would mean abandoning C.
 
 The two paths compose. A bytecode blob replayed into an object-emitting
-backend never produces µDewy text or assembly text. Either path is useful
+backend avoids external µDewy text and assembler round trips. The current
+object writers still parse assembly strings internally; native Dewy
+emission still passes through µDewy tokens and a parser port. Either path is useful
 alone: bytecode into today's assemblers, or assembly text into a direct
 object writer. Dewy emitting bytecode is the step that removes the text
 round trip from a cold compile.
@@ -630,7 +644,13 @@ in both lowerings and the parity tool is the gate.
   it an aggregate copy the analysis cannot justify is an error whose
   diagnostic names the reason and the explicit forms: `.copy()` to keep the
   copy, or a read-only view. Without the directive the copy lands with an
-  analysis note.
+  analysis note. Only copies that cost something count (David, 2026-09-27):
+  sharing an immutable string is not a copy, while a string leaving an
+  `$allocator` block still is. A backend's own placement copy (hosted
+  frame-region strings) is reported by `dewy analyze` but never enforced, so
+  acceptance cannot depend on placement. The same exemption applies
+  recursively to shared immutable strings in fixed aggregates; mutable
+  runtime-length containers keep their independent-storage obligation.
 - *Read-only views.* A `const` binding of a place (`const node = arena[id]`)
   is a view whenever the analysis proves the source is not written while the
   binding lives; otherwise it copies (with a note, or an error under the

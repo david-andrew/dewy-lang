@@ -71,19 +71,14 @@ def _escape(value: hir.AST, site: str, arena: str) -> 'Escape':
     return Escape(value.loc, value.type, site, arena, _explicit(value))
 
 
-def _last_value(block: hir.Block) -> hir.AST | None:
-    if block.type in ('void', None) or not block.items:
-        return None
-    return block.items[-1]
+def blocks(root: hir.AST):
+    """Every allocator request under this checked body."""
+    return (node for node in hir.walk(root) if isinstance(node, hir.AllocatorBlock))
 
 
 def escapes(root: hir.AST) -> list[Escape]:
     """Every lexical escape of every allocator block under ``root``."""
-    found: list[Escape] = []
-    for node in hir.walk(root):
-        if isinstance(node, hir.AllocatorBlock):
-            found.extend(_block_escapes(node))
-    return found
+    return [escape for block in blocks(root) for escape in block_escapes(block)]
 
 
 def _arena_name(block: hir.AllocatorBlock) -> str:
@@ -91,7 +86,7 @@ def _arena_name(block: hir.AllocatorBlock) -> str:
     return _name(target).strip('`')
 
 
-def _block_escapes(block: hir.AllocatorBlock) -> list[Escape]:
+def block_escapes(block: hir.AllocatorBlock) -> list[Escape]:
     arena = _arena_name(block)
     declared: set[int] = set()
     nodes: list[hir.AST] = []
@@ -107,9 +102,12 @@ def _block_escapes(block: hir.AllocatorBlock) -> list[Escape]:
             declared.add(node.target.binding_id)
         pending.extend(reversed(list(hir.children(node))))
     found: list[Escape] = []
-    result = _last_value(block)
-    if result is not None:
-        found.append(_escape(result, 'produced as the block result', arena))
+    # Dewy blocks express their non-void items, even before trailing
+    # statements. A trailing assignment must not hide the escaping value.
+    if block.type not in ('void', 'never', None):
+        for result in block.items:
+            if result.type not in ('void', 'never', None):
+                found.append(_escape(result, 'produced as the block result', arena))
 
     def outer(target: hir.AST) -> bool:
         binding = _root(target)

@@ -405,7 +405,7 @@ collect_directive = (items:array<addr> start:addr stop:set<string> srcfile:SrcFi
     if tag isnt? compound.Metatag return compound.lexical_error(srcfile tag.loc 'Expected directive')
     let i:addr = start+1
     if tag.name =? 'breakpoint' return Collected[compound.append_node(@nodes Directive[loc=tag.loc name=tag.name]) i]
-    if tag.name =? 'allocator' return collect_allocator(items start srcfile @nodes)
+    if tag.name =? 'allocator' return collect_allocator(items start stop srcfile @nodes)
     let ends_here:bool = i >=? items.length
     if i <? items.length {
         let next = compound.node_at(nodes items[i])
@@ -450,7 +450,7 @@ collect_directive = (items:array<addr> start:addr stop:set<string> srcfile:SrcFi
 # `$allocator(@arena) { ... }` owns its argument group (as the condition)
 # and the block after it (as the message): whitespace would otherwise make
 # the block a separate expression.
-collect_allocator = (items:array<addr> start:addr srcfile:SrcFile @nodes:array<compound.Token>):>Collected | compound.TokenError => {
+collect_allocator = (items:array<addr> start:addr stop:set<string> srcfile:SrcFile @nodes:array<compound.Token>):>Collected | compound.TokenError => {
     $runtime_assert start <? items.length
     let tag = compound.node_at(nodes items[start])
     if tag isnt? compound.Metatag return compound.lexical_error(srcfile tag.loc 'Expected directive')
@@ -462,12 +462,25 @@ collect_allocator = (items:array<addr> start:addr srcfile:SrcFile @nodes:array<c
     let group_id = items[i]
     i += 1
     if i <? items.length and compound.node_at(nodes items[i]) is? Juxtapose { i += 1 }
-    if i >=? items.length return compound.lexical_error(srcfile group.loc '`$allocator(...)` applies to the block after it')
-    let body = compound.node_at(nodes items[i])
-    if body isnt? compound.Block or body.delims not=? '\{}' return compound.lexical_error(srcfile group.loc '`$allocator(...)` applies to the block after it')
-    let condition = chain([group_id] @nodes)
-    let message = chain([items[i]] @nodes)
-    return Collected[compound.append_node(@nodes Directive[loc=Span[tag.loc.start body.loc.stop] name=tag.name condition=condition message=message]) i+1]
+    if i >=? items.length return compound.lexical_error(srcfile group.loc '`$allocator(...)` needs an expression after it')
+    let next=compound.node_at(nodes items[i])
+    if is_stop(next stop) or next is? compound.Semicolon return compound.lexical_error(srcfile group.loc '`$allocator(...)` needs an expression after it')
+    let collected=collect_expr(items i stop srcfile @nodes)
+    if collected is? compound.TokenError return collected
+    let body=compound.node_at(nodes collected.id)
+    $runtime_assert body is? Chain
+    let message=collected.id
+    let braced=false
+    if body.items.length =? 1 {
+        let only=compound.node_at(nodes body.items[0])
+        braced=only is? compound.Block and only.delims =? '\{}'
+    }
+    if not braced {
+        let block=compound.append_node(@nodes compound.Block[loc=body.loc inner=body.items delims='\{}'])
+        message=chain([block] @nodes)
+    }
+    let condition=chain([group_id] @nodes)
+    return Collected[compound.append_node(@nodes Directive[loc=Span[tag.loc.start body.loc.stop] name=tag.name condition=condition message=message]) collected.next]
 }
 
 postok = (srcfile:SrcFile):>compound.TokenStream | compound.TokenError => {

@@ -191,6 +191,14 @@ def analyze(argv: list[str]) -> int:
     if unsafe_audit.last_entries:
         print('unsafe assumption audit:')
         print(unsafe_audit.render(unsafe_audit.last_entries))
+    for note in lower.last_placement_notes:
+        row, _column = note.srcfile.offset_to_row_col(note.loc.start)
+        print(f'allocator: {note.srcfile.path}:{row + 1}: using enclosing allocator: {note.reason}')
+        if not args.brief:
+            print(Info(srcfile=note.srcfile, title='allocator fallback',
+                       pointer_messages=[Pointer(span=note.loc, message=note.reason)],
+                       use_color=use_color))
+            print()
     # One machine-readable line per copy, then the excerpt; the same shape as
     # the native compiler's report (tools/copy_report.py reads both).
     counts: dict[str, int] = {}

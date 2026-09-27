@@ -49,8 +49,8 @@ ERRORS = [
     '$explicit_copies\nbuild=(n:int64):>array<int64>=>{let xs:array<int64>=[] loop i in 0.. and i <? n {xs.push(i)} return xs}\n'
     'main=():>int64=>{let a=Arena[] let xs=$allocator(@a) {build(2)} return xs.length}',
 ]
-# The directive needs its block.
-PARSE_ERRORS = ['main=():>int64=>{let a=Arena[] $allocator(@a) return 0}']
+# The directive needs a following expression.
+PARSE_ERRORS = ['main=():>int64=>{let a=Arena[] $allocator(@a)}']
 STRICT = ('$explicit_copies\nbuild=(n:int64):>array<int64>=>{let xs:array<int64>=[] loop i in 0.. and i <? n {xs.push(i)} return xs}\n'
           'main=():>int64=>{let a=Arena[] let n=$allocator(@a) {build(40).length} let xs=$allocator(@a) {build(2).copy()} return n+xs.length}')
 
@@ -107,3 +107,67 @@ def test_native_arena_placement(tmp_path):
     for target in ('x86_64', 'c'):
         assert entry_point(output, [], EntryPointOptions(compile_only=True, target=target)) == 0
         assert subprocess.run([cache_artifact(output).resolve()], timeout=10).returncode == 42, target
+
+
+EXPRESSIONS = """build=(n:int64):>array<int64>=>{let xs:array<int64>=[] loop i in 0.. and i <? n {xs.push(i)} return xs}
+main=():>int64=>{
+    let a=Arena[]
+    let b=Arena[]
+    let n=if true $allocator(@a) build(18).length + build(20).length else 0
+    let result=$allocator(@a) $allocator(@b) build(4)
+    a.reset()
+    b.reset()
+    return n + result.length
+}
+"""
+
+
+def test_allocator_expression_scope(tmp_path):
+    execute(tmp_path, 'allocator-expressions', codegen(SrcFile(None, EXPRESSIONS)))
+
+
+def test_hosted_allocator_fallback_report(capsys):
+    from dewy.__main__ import analyze
+    assert analyze(['--brief', str(FIXTURE)]) == 0
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith('allocator: ')]
+    assert len(lines) == 3
+    assert all('hosted lowering' in line and str(FIXTURE) in line for line in lines)
+
+
+def test_allocator_result_before_trailing_statements_is_reported():
+    source = SrcFile(None, """make=(text:string):>string=>text
+main=():>int64=>{
+    let a=Arena[]
+    let result=$allocator(@a) {
+        let count=0
+        make('hello')
+        count=1
+    }
+    return 42
+}
+""")
+    codegen(source)
+    notes = [note for note in lower.last_copy_notes if note.srcfile == source
+             and note.site == 'produced as the block result']
+    assert len(notes) == 1 and notes[0].runtime_sized and not notes[0].policy_exempt
+    with pytest.raises(ReportException, match='unproven copy'):
+        codegen(SrcFile(None, '$explicit_copies\n' + source.body))
+
+
+def test_native_allocator_expressions(tmp_path):
+    from test_bootstrap_structural_text import build_program_driver, check_structural_text
+    check_structural_text(build_program_driver(tmp_path), tmp_path, cases=[EXPRESSIONS], errors=[])
+
+
+def test_native_allocator_fallback_report(tmp_path):
+    import os
+    import test_bootstrap_lowering as native_lowering
+    from test_bootstrap_structural_text import build_program_driver
+    source = tmp_path / 'placement.dewy'
+    source.write_text(PLACEMENT)
+    result = subprocess.run([build_program_driver(tmp_path), source, native_lowering.ROOT / 'library', tmp_path / 'prelude'],
+                            env={**os.environ, 'DEWY_TEST_ALLOCATOR_NOTES': '1'},
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    notes = result.stdout.splitlines()
+    assert len(notes) == 1 and '`kept`' in notes[0] and 'outside the block' in notes[0], notes

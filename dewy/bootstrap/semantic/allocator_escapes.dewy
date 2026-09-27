@@ -89,8 +89,12 @@ block_escapes = (block:hir.AllocatorBlock nodes:array<hir.AST> type_nodes:types.
         hir.push_children(node @pending)
     }
     let found:array<Escape>=[]
-    if block.items.length >? 0 and not types.is_primitive(types.node_at(type_nodes block.value_type) 'void') {
-        found.push(escape(block.items[block.items.length-1] 'produced as the block result' arena nodes))
+    if not types.is_primitive(types.node_at(type_nodes block.value_type) 'void') and not types.is_primitive(types.node_at(type_nodes block.value_type) 'never') {
+        # The expressed item may precede trailing statements.
+        loop id in block.items {
+            let type=types.node_at(type_nodes hir.node_at(nodes id).value_type)
+            if not types.is_primitive(type 'void') and not types.is_primitive(type 'never') {found.push(escape(id 'produced as the block result' arena nodes))}
+        }
     }
     loop id in inside {
         let node=hir.node_at(nodes id)

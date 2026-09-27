@@ -4923,3 +4923,35 @@ native driver pass the shared-string snapshot and mutable-copy cases (both
 x86-64 and C execution). The original pending shared-string changes are now
 completed by this slice; the reported site-count reduction is not a timing
 measurement.
+
+
+## Review closure: target contracts and allocator visibility (2026-09-27)
+
+`UBC2` records the target and ABI revision before the operation stream. Both
+µDewy readers reject a different target, unknown ABI revision, and old UBC1
+streams before replay. Both Dewy emitters propagate the selected target.
+The native bootstrap uses source text for generation zero's handoff so an
+old seed's untagged stream is never misinterpreted by a new reader. Following
+generations exercise the new stream format.
+
+`$allocator(@arena)` now covers the whole following expression in both
+parsers, including arithmetic, flow arms and nested directives. It desugars
+to the existing scoped block. Both analysis commands report fallback
+placement: hosted identifies its unimplemented placement, while native gives
+the failed lifetime condition (outer stores, captures or unresolved callees).
+No fallback is reported when native proves the request eligible. The escape
+inventory now finds the expressed result before trailing void statements;
+such a statement must not hide a runtime-sized allocator escape from policy.
+
+Validation so far: all 57 µDewy stream checks passed; shared-string policy
+passed 19 hosted/native checks through a fresh hosted-built driver; all nine
+hosted allocator checks passed. A complete native compiler rebuilt from these
+sources runs the expression fixture on x86-64 and C with result 42, and its
+analysis reports exactly the outer-store fallback in the placement fixture.
+The two-generation direct bootstrap passed, with byte-identical Dewy and
+µDewy generations and the native execution checks passing. Artifacts and
+source hashes are in `../dewy-build-artifacts/phase1-review-followup`; the
+49/54-second generation times are integration observations, not isolated
+performance benchmarks (hosted tests ran concurrently). The paired driver
+suite remains the final integration gate. Scoped raw loans (`$lend`), general owner promotion and
+no-allocation warnings remain separate implementation work.

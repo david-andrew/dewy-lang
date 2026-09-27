@@ -531,17 +531,17 @@ Deferred: `allocates<A>` effect rows naming the allocator; the allocation
 failure policy (`$fallible_allocation`, still tentative); `Pool`, tracking
 and user-defined allocator kinds; making `Heap` user-visible.
 
-Agreed for later, low priority (2026-09-24). The full language should
-behave this way:
+Approved follow-ups (2026-09-24); expression coverage and fallback reports
+implemented on 2026-09-27:
 
-- **Any expression.** `$allocator(@a) expr` applies to the entire next
+- **Any expression (implemented).** `$allocator(@a) expr` applies to the entire next
   expression, like `$assert cond`: `$allocator(@a) f(x) + g(y)` covers
   `f(x) + g(y)`. It means `$allocator(@a) {expr}`.
-- **Report a fallback.** A block that allocates from the enclosing
+- **Report a fallback (implemented).** A block that allocates from the enclosing
   allocator instead of its arena gets a `dewy analyze` note saying why
   ("stores a string into `kept`, which outlives the block", "calls `f`,
   which may store into a global").
-- **Warn about nothing to allocate.** A block or expression that provably
+- **Warn about nothing to allocate (pending).** A block or expression that provably
   allocates nothing gets a warning. Exact detection needs the
   `allocates<A>` effect rows; before them, only the provable cases.
 
@@ -597,7 +597,16 @@ layout, which is cheap. A handle-equality fast path (the same handle
 means equal) stays sound under value semantics, since values are
 immutable through a shared handle.
 
-## Scoped raw storage access and bulk byte reads — proposal (2026-09-26)
+## Scoped raw storage access (`$lend`) — approved 2026-09-27
+
+David approved the semantics below and chose the name `$lend` (read-only
+`$lend(x) {...}`, writable `$lend(@x) {...}`, attaching to the next
+expression like `$allocator`). The address comes from the existing
+`__load_i64__(x)` idiom rather than an `as` binding; `x.set_length(n)` commits
+bytes written into reserved space. The original proposal follows (it used
+the working name `$raw`).
+
+### Original proposal (2026-09-26)
 
 **Problem.** Library I/O gets storage addresses by raw exposure, as in
 `__load_i64__(bytes)` in `_write_bytes_at`. The compiler cannot see where
