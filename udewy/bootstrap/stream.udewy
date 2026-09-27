@@ -829,8 +829,8 @@ let st_rec_emit_intrinsic = (name:int num_args:int static_args:int):>void => {
 }
 
 # Start recording: every recorded backend call is written to the stream,
-# which begins with the module's link artifacts.
-let st_install_recorder = (artifacts:int):>void => {
+# which begins with the target/ABI and the module's link artifacts.
+let st_install_recorder = (artifacts:int target:int):>void => {
     st_out = bb_new(1 << 20)
     st_refs = intmap_new()
     st_rec_fn = st_space_new()
@@ -839,7 +839,9 @@ let st_install_recorder = (artifacts:int):>void => {
     st_rec_static = st_space_new()
     st_rec_slot = st_space_new()
     st_rec_cond = st_space_new()
-    bb_push_str(st_out "UBC1")
+    bb_push_str(st_out "UBC2")
+    st_str(target)
+    st_u(1) # ABI revision: folded constants, imports and intrinsic contract
     let n:int = 0
     if artifacts not=? 0 { n = vec_len(artifacts) }
     st_u(n)
@@ -1031,14 +1033,17 @@ let st_read_value = (kind:int):>int => {
 }
 
 # The link artifacts at the head of a stream (a vec of paths).
-let st_open = (data:int len:int):>int => {
+let st_open = (data:int len:int target:int):>int => {
     st_data = data
     st_len = len
     st_pos = 0
-    if len <? 4 or __load_u8__(data) not=? 85 or __load_u8__(data + 1) not=? 66 or __load_u8__(data + 2) not=? 67 or __load_u8__(data + 3) not=? 49 {
-        st_fail("not a UBC1 stream")
+    if len <? 4 or __load_u8__(data) not=? 85 or __load_u8__(data + 1) not=? 66 or __load_u8__(data + 2) not=? 67 or __load_u8__(data + 3) not=? 50 {
+        st_fail("unsupported bytecode version; rebuild the stream (expected UBC2)")
     }
     st_pos = 4
+    let recorded_target:int = st_read_str()
+    if not str_eq(recorded_target target) { st_fail("bytecode target mismatch") }
+    if st_read_u() not=? 1 { st_fail("unsupported bytecode ABI revision; rebuild the stream") }
     let count:int = st_read_u()
     let artifacts:int = vec_new(count + 1)
     let ai:int = 0

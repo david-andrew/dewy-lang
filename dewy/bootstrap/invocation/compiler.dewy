@@ -78,7 +78,7 @@ execute = (request:options.Request cwd:string executable:string):>int64|Error =>
     let text=environment('DEWY_EMIT') =? 'udewy'
     let debug=request.command =? 'debug'
     let emission_started=timing.start(request.timings)
-    let emitted:string|array<uint8>|Error=if text program.render(compiled.lowered.program compiled.lowered.input debug_locations=debug) else program.stream(compiled.lowered.program compiled.lowered.input debug=debug)
+    let emitted:string|array<uint8>|Error=if text program.render(compiled.lowered.program compiled.lowered.input debug_locations=debug) else program.stream(compiled.lowered.program compiled.lowered.input debug=debug target=request.target)
     timing.finish('emission' emission_started)
     if emitted is? Error return emitted
     $runtime_assert request.source isnt? none

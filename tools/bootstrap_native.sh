@@ -198,7 +198,11 @@ for ((bootstrap_generation=bootstrap_first; bootstrap_generation<=bootstrap_gene
     bootstrap_compile_udewy "$bootstrap_output/udewy-stage$bootstrap_previous" --target "$bootstrap_target" -c udewy/bootstrap/main.udewy
     cp -- __dewycache__/udewy/bootstrap/main "$bootstrap_output/udewy-stage$bootstrap_generation"
     rm -f -- "$DEWY_BOOTSTRAP_BACKEND_ARGS"
-    DEWY_LIBRARY_ROOT="$bootstrap_root/library" \
+    # Generation zero may emit an older bytecode version. Source text is
+    # the format bridge; later generations exercise this checkout's stream.
+    bootstrap_emit=${DEWY_EMIT:-}
+    if [[ $bootstrap_generation == 1 ]]; then bootstrap_emit=udewy; fi
+    DEWY_EMIT="$bootstrap_emit" DEWY_LIBRARY_ROOT="$bootstrap_root/library" \
         DEWY_UDEWY="$bootstrap_handoff/udewy" \
         "$bootstrap_output/dewy-stage$bootstrap_previous" --target "$bootstrap_target" -c dewy/bootstrap/main.dewy
     if [[ ! -s $DEWY_BOOTSTRAP_BACKEND_ARGS ]]; then

@@ -39,6 +39,8 @@ class RiscvBackend(Backend):
     _SAVE_AREA_BYTES = 112
     _MAX_STACK_ADJUST_IMM = 2032
     
+    bytecode_target = 'riscv'
+
     def __init__(self) -> None:
         self._function_code: list[tuple[int, list[str]]] = []
         self._current_fn_code: list[str] | None = None

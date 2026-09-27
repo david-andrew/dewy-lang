@@ -92,15 +92,15 @@ def _driver(tmp_path: Path) -> Path:
     return _DRIVER
 
 
-def _emit(tmp_path: Path, name: str, debug: bool) -> tuple[Path, bytes]:
+def _emit(tmp_path: Path, name: str, debug: bool, target: str = 'x86_64') -> tuple[Path, bytes]:
     global _PRELUDE_CACHE
     driver = _driver(tmp_path)
     if _PRELUDE_CACHE is None:
         _PRELUDE_CACHE = tmp_path / 'prelude-cache'
-    source = tmp_path / f'{name}.dewy'
+    source = tmp_path / f'{name}-{target}.dewy'
     source.write_text(CASES[name])
     text, stream = tmp_path / f'{name}.udewy', tmp_path / f'{name}.ubc'
-    command = [driver, source, ROOT / 'library', _PRELUDE_CACHE, text, stream, *(['debug'] if debug else [])]
+    command = [driver, source, ROOT / 'library', _PRELUDE_CACHE, text, stream, target, *(['debug'] if debug else [])]
     built = subprocess.run(command, capture_output=True, text=True, timeout=300)
     assert built.returncode == 0, built.stdout + built.stderr
     return text, stream.read_bytes()
@@ -115,13 +115,17 @@ def _backend(target: str, debug: bool):
 @pytest.mark.parametrize('debug', [False, True], ids=['plain', 'debug'])
 @pytest.mark.parametrize('name', sorted(CASES))
 def test_the_stream_compiles_to_the_texts_assembly(tmp_path, name, debug):
-    text, stream = _emit(tmp_path, name, debug)
-    loaded = t0.load_program(text)
     for target in ('x86_64', 'arm'):
+        text, stream = _emit(tmp_path, name, debug, target)
+        loaded = t0.load_program(text, target_backend=target)
         backend = _backend(target, debug)
         backend.set_imported_sources([])
         expected = p0.parse(t1.tokenize(loaded.source), loaded.source, backend)
+        assert Stream(stream).target == target
         assert Stream(stream).play(_backend(target, debug)) == expected, (name, target)
+        other = 'arm' if target == 'x86_64' else 'x86_64'
+        with pytest.raises(ValueError, match='target mismatch'):
+            Stream(stream).play(_backend(other, debug))
 
 
 @pytest.mark.parametrize('name', sorted(CASES))

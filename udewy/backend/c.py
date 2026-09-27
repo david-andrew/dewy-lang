@@ -155,6 +155,8 @@ class _FunctionBuilder:
 class CBackend(Backend):
     _INTRINSIC_ARITIES = CORE_INTRINSIC_ARITIES | _PLATFORM_INTRINSIC_ARITIES
 
+    bytecode_target = 'c'
+
     def __init__(self) -> None:
         self._next_label = 0
         self._module_init_name: str | None = None

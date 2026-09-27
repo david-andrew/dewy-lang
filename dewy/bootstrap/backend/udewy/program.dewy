@@ -89,13 +89,13 @@ render = (program:Program input:emit.Input debug_locations:bool=false):>string|E
 # The program as µDewy bytecode (udewy/BYTECODE.md): the calls parsing the
 # rendered text would make on a backend, recorded without the text. `debug`
 # matches the µDewy compiler's debug information (locations, locals).
-let stream = (program:Program input:emit.Input debug:bool=false):>array<uint8>|Error => {
+let stream = (program:Program input:emit.Input debug:bool=false target:string='x86_64'):>array<uint8>|Error => {
     let state=emit.State[]
     let out=emit.Writer[stream=true]
     let parser=bytecode.Parser[debug=debug intrinsics=emit.intrinsics]
     let problem=write_program(program input debug @state @out @parser)
     if problem isnt? none return problem
-    return bytecode.finish(@parser)
+    return bytecode.finish(@parser target)
 }
 # After each top-level declaration in stream mode: define the includes it
 # named, then parse its tokens.

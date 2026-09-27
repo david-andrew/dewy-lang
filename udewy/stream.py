@@ -13,7 +13,8 @@ from pathlib import Path
 
 from . import t1
 
-MAGIC = b'UBC1'
+MAGIC = b'UBC2'
+ABI_REVISION = 1  # folded constants, target imports and intrinsic contract
 SV_INT, SV_FUNCTION, SV_STRING, SV_STATIC = 1, 2, 3, 4
 
 OPS = {
@@ -101,6 +102,8 @@ class Recorder:
     def __init__(self, backend, link_artifacts: list[str]):
         self._backend = backend
         self._writer = _Writer()
+        self._writer.text(backend.bytecode_target)
+        self._writer.u(ABI_REVISION)
         self._writer.u(len(link_artifacts))
         for artifact in link_artifacts:
             self._writer.text(str(artifact))
@@ -381,7 +384,7 @@ for _name in PLAIN:
 class _Reader:
     def __init__(self, data: bytes):
         if data[:4] != MAGIC:
-            raise ValueError('not a UBC1 stream')
+            raise ValueError('unsupported µDewy bytecode version; rebuild the stream (expected UBC2)')
         self.data = data
         self.at = 4
 
@@ -428,10 +431,16 @@ class Stream:
 
     def __init__(self, data: bytes):
         self._reader = _Reader(data)
+        self.target = self._reader.text()
+        self.abi_revision = self._reader.u()
+        if self.abi_revision != ABI_REVISION:
+            raise ValueError(f'unsupported µDewy bytecode ABI revision {self.abi_revision}; rebuild the stream')
         self.link_artifacts = [self._reader.text() for _ in range(self._reader.u())]
         self.imported_sources: list[Path] = []
 
     def play(self, backend) -> str:
+        if self.target != backend.bytecode_target:
+            raise ValueError(f'µDewy bytecode target mismatch: recorded for {self.target}, requested {backend.bytecode_target}')
         read = self._reader
         spaces: dict[str, dict[int, object]] = {space: {} for space in SPACES}
 

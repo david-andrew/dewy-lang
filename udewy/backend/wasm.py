@@ -33,6 +33,8 @@ class Wasm32Backend(Backend):
     - Addresses truncated to i32 at memory operations
     """
     
+    bytecode_target = 'wasm32'
+
     def __init__(self) -> None:
         self._imports: list[str] = []
         self._functions: dict[int, str] = {}

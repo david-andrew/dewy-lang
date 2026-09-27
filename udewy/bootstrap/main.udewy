@@ -177,7 +177,7 @@ let main = (argc:int argv:int):>int => {
     if str_eq(path_suffix(g_input_path) ".ubc") {
         # µDewy bytecode (udewy/BYTECODE.md): replay the recorded backend
         # calls; no tokenizing or parsing.
-        artifacts = st_open(src str_len(src))
+        artifacts = st_open(src str_len(src) g_target)
         asm = st_play()
     } else {
         let loaded:int = t0_load_program(g_input_path g_target)
@@ -189,7 +189,7 @@ let main = (argc:int argv:int):>int => {
         artifacts = loaded_artifacts(loaded)
         # UDEWY_RECORD=path also writes the module's bytecode to `path`.
         let record_path:int = proc_getenv("UDEWY_RECORD")
-        if record_path not=? 0 { st_install_recorder(artifacts) }
+        if record_path not=? 0 { st_install_recorder(artifacts g_target) }
         (@be_set_imported_sources)(loaded_sources(loaded))
         let toks:int = t1_tokenize(combined)
         asm = parse_run(toks combined path_absolute(g_input_path))

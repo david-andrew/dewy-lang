@@ -117,3 +117,47 @@ def test_native_replay_reaches_the_parsed_assembly(tmp_path, native_udewy, name)
                    capture_output=True, env=env)
     cache = work / '__dewycache__'
     assert (cache / 'replay.s').read_text() == (cache / f'{name}.s').read_text()
+
+
+@pytest.mark.parametrize('target', ['x86_64', 'arm', 'riscv', 'wasm32', 'c'])
+def test_target_identity_round_trip(target):
+    source = 'let main = ():>int => { return 42 }'
+    recorder = Recorder(get_backend(target), [])
+    expected = p0.parse(t1.tokenize(source), source, recorder)
+    stream = Stream(recorder.stream())
+    assert stream.target == target
+    assert stream.play(get_backend(target)) == expected
+
+
+def test_folded_target_constant_cannot_cross_targets():
+    source = 'let main = ():>int => { return SYS_WRITE }'
+    recorder = Recorder(get_backend('x86_64'), [])
+    p0.parse(t1.tokenize(source), source, recorder)
+    backend = get_backend('arm')
+    # Reject before any operation, including beginning the module.
+    backend.begin_module = lambda: pytest.fail('replayed before checking target')
+    with pytest.raises(ValueError, match='target mismatch.*x86_64.*arm'):
+        Stream(recorder.stream()).play(backend)
+
+
+@pytest.mark.parametrize('data,diagnostic', [
+    (b'UBC1\x00', 'expected UBC2'),
+    (b'UBC2\x06x86_64\x02\x00', 'ABI revision'),
+])
+def test_unknown_stream_contract_rejected(data, diagnostic):
+    with pytest.raises(ValueError, match=diagnostic):
+        Stream(data)
+
+
+@pytest.mark.parametrize('data,target,diagnostic', [
+    (b'UBC1\x00', 'x86_64', 'expected UBC2'),
+    (b'UBC2\x06x86_64\x02\x00', 'x86_64', 'ABI revision'),
+    (b'UBC2\x06x86_64\x01\x00', 'arm', 'target mismatch'),
+])
+def test_native_rejects_incompatible_stream(tmp_path, native_udewy, data, target, diagnostic):
+    source = tmp_path / 'wrong.ubc'
+    source.write_bytes(data)
+    result = subprocess.run([native_udewy, '-c', '--target', target, source],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode != 0
+    assert diagnostic in result.stderr, result.stdout + result.stderr

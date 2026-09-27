@@ -73,6 +73,8 @@ class X86_64Backend(Backend):
     _FIXED_FRAME_BYTES = 48
     _XMM_ARG_REGS = [f"%xmm{i}" for i in range(8)]
     
+    bytecode_target = 'x86_64'
+
     def __init__(self) -> None:
         self._function_code: list[tuple[int, list[str]]] = []
         self._source_files: dict[str, int] = {}   # DWARF file numbers for `.loc`

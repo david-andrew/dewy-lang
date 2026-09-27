@@ -82,6 +82,9 @@ class Backend(ABC):
     # breakpoint instructions remain available when it is false.
     debug_info: bool = True
 
+    # Exact target identity for already-resolved backend-call streams.
+    bytecode_target: str
+
     # ========================================================================
     # Module lifecycle
     # ========================================================================

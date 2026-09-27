@@ -1008,7 +1008,7 @@ let parse_top = (toks:Tokens @p:Parser):>void => {
 
 # The stream: header, module, include definitions, the program, then the
 # module initializer and reachability p0 computes at its end.
-let finish = (@p:Parser):>array<uint8>|Error => {
+let finish = (@p:Parser target:string):>array<uint8>|Error => {
     let globals_init:int64=-1
     if p.global_inits.length >? 0 {
         op(op_set_module_init @p)
@@ -1072,8 +1072,10 @@ let finish = (@p:Parser):>array<uint8>|Error => {
         index+=1
     }
     op(op_finish_module @p)
-    let stream:array<uint8>=[85 66 67 49]
+    let stream:array<uint8>=[85 66 67 50]
     stream.reserve(p.prologue.length + p.body.length + 8)
+    write_text(target @stream)
+    write_u(1 @stream) # UBC2 ABI revision, shared with both µDewy readers.
     write_u(0 @stream)
     stream.push(op_set_imported_sources)
     write_u(0 @stream)

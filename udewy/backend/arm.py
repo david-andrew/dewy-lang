@@ -40,6 +40,8 @@ class ArmBackend(Backend):
     _MAX_STACK_ADJUST_IMM = 4080
     _FP_ARG_REGS = [f"v{i}" for i in range(8)]
     
+    bytecode_target = 'arm'
+
     def __init__(self) -> None:
         self._function_code: list[tuple[int, list[str]]] = []
         self._current_fn_code: list[str] | None = None

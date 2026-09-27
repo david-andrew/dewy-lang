@@ -19,7 +19,10 @@ and a stream has no such file, so those statements get no location.
 
 A stream is only valid for the target it was recorded for: builtin constants
 such as syscall numbers are folded before the calls are made, and
-target-conditional imports are resolved by then.
+target-conditional imports are resolved by then. Both readers check the
+recorded target and ABI revision before replaying any operation. Targets are
+the exact backend names (`x86_64`, `arm`, `riscv`, `wasm32`, `c`); streams
+are not interchangeable even where two backends share syscall numbers.
 
 ## Encoding
 
@@ -28,8 +31,13 @@ target-conditional imports are resolved by then.
 - `str`: `u` byte length, then the bytes.
 - `ostr`: `u` 0 for none, otherwise byte length + 1, then the bytes.
 
-A file is the magic `UBC1`, a `u` count of link artifacts followed by one
-`str` path each, then operations until `finish_module`. Each operation is a
+A file is the magic `UBC2`, a `str` target name, a `u` ABI revision
+(currently 1), a `u` count of link artifacts followed by one `str` path
+each, then operations until `finish_module`. The ABI revision identifies
+the target constants, intrinsic contract and import environment assumed by
+this format. Changes to that contract must bump the revision. Old `UBC1`
+streams have no target identity and are rejected with a rebuild diagnostic;
+they cannot be safely upgraded without recompiling their source. Each operation is a
 one-byte opcode followed by its operands.
 
 ## Ids
