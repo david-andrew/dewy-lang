@@ -1,0 +1,45 @@
+# Every aggregate escape keeps the decoder's payload alive. Local decoding
+# may use a region, but handing its payload to an owning cell must retain it.
+Box:type=[value:string|none]
+direct=():>string|none=>{
+    let bytes:array<uint8>=[32 120 32]
+    return bytes as string|none
+}
+local=():>string|none=>{
+    let bytes:array<uint8>=[32 120 32]
+    let value=bytes as string|none
+    return value
+}
+implicit=():>string|none=>{
+    let bytes:array<uint8>=[32 120 32]
+    bytes as string|none
+}
+boxed=():>Box=>{
+    let bytes:array<uint8>=[32 120 32]
+    return Box[bytes as string|none]
+}
+store=(@box:Box):>void=>{
+    let bytes:array<uint8>=[32 120 32]
+    box.value=bytes as string|none
+}
+valid=(value:string|none):>bool=>{
+    match value {
+        <none> => return false
+        text:string => return "<{text}>"=?'< x >' and text.trim=?'x'
+    }
+}
+exercise=():>int64=>{
+    if not valid(direct()) or not valid(local()) or not valid(implicit()) return 1
+    let box=boxed()
+    if not valid(box.value) return 2
+    let assigned=Box[none]
+    store(@assigned)
+    if not valid(assigned.value) return 3
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 return 4
+    let before:int64=_arena_live_bytes
+    loop i in [0..40) {if exercise() not=?42 return 5}
+    return if _arena_live_bytes=?before 42 else 6
+}

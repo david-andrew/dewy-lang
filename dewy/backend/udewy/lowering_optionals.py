@@ -1025,13 +1025,16 @@ class _OptionalLowering:
             fresh_decode = (isinstance(value, hir.RepresentationCast)
                             and isinstance(value.expr.type, ty.ArrayType)
                             and value.expr.type.element == 'uint8'
-                            and ty.optional_payload(value.type) is not None)
+                            and ty.optional_payload(value.type) is not None
+                            and not self._stays_in_frame(value))
             if (not self._union_tree_slots(members, prepared=prepared)
                     and (ty.optional_payload(value.type) is not None or not self._union_tree_slots(members))
                     and (fresh_call or fresh_decode)):
                 # With no caller-frame trees on either side, an ordinary
-                # call's dead result (or a fresh decode) can transfer its
-                # active payload. This includes general unions whose record
+                # call's dead result (or an arena-backed fresh decode) can
+                # transfer its active payload. A region-backed decode must
+                # still copy into the cell's independently owned storage.
+                # This includes general unions whose record
                 # alternatives are arena handles. The source cell itself
                 # remains frame-owned.
                 return [*prelude,

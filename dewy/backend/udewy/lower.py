@@ -4886,18 +4886,23 @@ class _Lowerer(
         return [*prelude, value]
 
     def _discarded_call_result(self, source: hir.AST, value: hir.AST) -> list[hir.AST] | None:
-        """Release an unused ordinary call's record/cell result, once evaluated.
+        """Release an unused owning record/cell temporary, once evaluated.
 
         These ABI roots are caller-prepared frame storage. Only the fields or
         active payload are owned allocations. Methods have separate result
         conventions; strings and dynamic arrays already track temporaries.
         """
-        if not self._has_arena() or not isinstance(source, (hir.FunctionCall, hir.CopyValue)):
+        fresh_decode = isinstance(source, hir.RepresentationCast) and self._fresh_cell_expression(source)
+        if not self._has_arena() or not (isinstance(source, (hir.FunctionCall, hir.CopyValue)) or fresh_decode):
             return None
         if isinstance(source.type, ty.ObjectType) and self._frame_record_call(source):
             return self._release_object_members(value, source.type, source.loc)
-        if not isinstance(source, hir.CopyValue) and (not isinstance(source, hir.FunctionCall) or not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
+        if not fresh_decode and not isinstance(source, hir.CopyValue) and (not isinstance(source, hir.FunctionCall) or not isinstance(source.func, (hir.ExpressedIdentifier, hir.FunctionLiteral))):
             return None
+        # A checked decode also owns its active payload. Retagging can clone
+        # it into a differently spelled optional/union; retire the source
+        # after that copy just as for an ordinary call result. Region-backed
+        # payloads have no arena owner and need no individual release.
         members = self._field_union_members(source.type)
         if members is not None:
             return self._release_cell_payload(value, members, source.loc,

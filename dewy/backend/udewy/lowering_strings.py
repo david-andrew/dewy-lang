@@ -2606,7 +2606,14 @@ class _StringLowering:
         initializers of returned locals, the sources of returned views, the string arguments of
         returned calls (a callee may return an argument's descriptor)."""
         params = {param.binding_id for param in [*literal.pos_or_kw_args, *literal.kw_only_args]}
-        return self._reached_string_nodes(self._returned_string_expressions(literal), candidates, params)
+        # The string-result ABI query intentionally excludes containers.
+        # Placement cannot: an optional/record/array result may carry a
+        # freshly decoded string whose descriptor must outlive this frame.
+        roots = [node.item for node in self._string_body_nodes(literal)
+                 if isinstance(node, hir.Return) and node.item is not None]
+        if literal.body.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
+            roots.append(literal.body)
+        return self._reached_string_nodes(roots, candidates, params)
 
     def _reached_string_nodes(self, roots: list[hir.AST], candidates: dict[int, list[hir.AST]], params: set[int | None], identifiers: list[hir.ExpressedIdentifier] | None = None, *, expressions: list[hir.AST] | None = None) -> set[int]:
         """Every expression the string values of ``roots`` may come from: through casts,
@@ -2645,7 +2652,9 @@ class _StringLowering:
                 if expr.default is not None:
                     mark(expr.default)
             elif isinstance(expr, hir.Block) and expr.items:
-                mark(expr.items[-1])
+                for item in expr.items:
+                    if item.type not in (ty.VOID_TYPE, ty.BOTTOM_TYPE):
+                        mark(item)
             elif isinstance(expr, hir.InterpolatedString):
                 for part in expr.parts:
                     mark(part)

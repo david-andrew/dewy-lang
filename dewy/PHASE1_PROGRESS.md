@@ -5165,5 +5165,23 @@ surrounding hosted ownership checks also passed. This closes the literal-slot
 case, not general dynamic disjointness or the complete ownership item.
 
 The bulk-read checkpoint also passed its three-generation native fixed point
-and execution checks (`phase1-bulk-integration`). Full 217-case parity and
-broad hosted tests are still running against that isolated checkpoint.
+and execution checks (`phase1-bulk-integration`). All 217 parity cases passed against that isolated checkpoint. The broad
+hosted run passed 4,113 tests (13 skipped) and exposed one decoded-string
+lifetime failure, corrected at the next checkpoint.
+
+
+## Decoded strings escaping through aggregates (2026-09-27)
+
+Hosted string placement now follows returned aggregate payloads as well as
+direct string returns. Region-backed decoded payloads are copied into owning
+cells; arena-backed payloads can transfer. Retagging a fresh decoded optional
+releases its original payload after copying, including when the two signatures
+use different equivalent string spellings. This fixes the broad-suite crash
+and the related leak exposed by repeated implicit/record returns.
+
+Twenty-three focused checks passed, including the formerly failing test and
+a paired hosted/native fixture on both execution backends. The fixture checks
+explicit, named-local, implicit and record returns, outer-field assignment,
+subsequent string operations and zero retained bytes over repeated calls. The
+native implementation already passes these cases and needs no corresponding
+change. The parity manifest now includes this regression.
