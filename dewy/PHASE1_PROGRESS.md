@@ -4953,5 +4953,9 @@ The two-generation direct bootstrap passed, with byte-identical Dewy and
 source hashes are in `../dewy-build-artifacts/phase1-review-followup`; the
 49/54-second generation times are integration observations, not isolated
 performance benchmarks (hosted tests ran concurrently). The paired driver
-suite remains the final integration gate. Scoped raw loans (`$lend`), general owner promotion and
+suite passed all 31 stream/allocator tests, including independently
+hosted-built native drivers. All 64 focused parser regressions passed, and
+all nine strict-copy acceptance/execution cases agreed with the verified
+second-generation native compiler. The trailing-result regression is also
+recorded in the phase-1 parity manifest. Scoped raw loans (`$lend`), general owner promotion and
 no-allocation warnings remain separate implementation work.

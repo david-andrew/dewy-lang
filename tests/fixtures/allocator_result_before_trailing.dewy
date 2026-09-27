@@ -1,0 +1,12 @@
+$explicit_copies
+# A trailing void statement does not hide the result that leaves the arena.
+make=(text:string):>string=>text
+main=():>int64=>{
+    let a=Arena[]
+    let result=$allocator(@a) {
+        let count=0
+        make('hello')
+        count=1
+    }
+    return 42
+}
