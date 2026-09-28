@@ -6842,3 +6842,18 @@ The cases include weighted sums, strictness, equality, cancellation, transitive
 relations, mutation invalidation, narrow-word overflow and budget exhaustion.
 The finite vocabulary document records the supported fragment and limits; final
 integration and the remaining Phase 1 audit/lifetime work are still open.
+
+Checkpoint (2026-09-28): strict-copy adoption now covers 37 physical modules.
+`analyze/storage_borrows.dewy` consumes the hosted dictionary-store and record-
+replacement proofs above. `prelude_cache.dewy` gives the loaded byte buffer one
+owner, the Reader, and performs later length/checksum checks through that owner.
+This removes its unnecessary buffer snapshot without adding explicit copies.
+The complete native compiler analysis accepts both directives. A hosted lowering
+inventory found no policy failures, followed by the full enforced prelude-cache
+regression passing (228.54 seconds including its hosted driver build and cold,
+warm, stale-input and corrupt-cache checks).
+
+Integration follow-up: `2dd7c9ae` reached a three-generation native fixed point,
+including x86-64/C execution checks. Generations 2/3 took 50/55 seconds under
+concurrent checking; these are not isolated performance measurements. Full
+parity at this newer checkpoint is still pending.

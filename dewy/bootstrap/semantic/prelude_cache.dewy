@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"bindings.dewy" as bindings
 import p"module_state.dewy" as state
 import p"cache_values.dewy" as codec
@@ -110,13 +112,14 @@ inputs_match = (snapshot:state.PreludeSnapshot entry:Entry):>bool => {
 restore = (entry:Entry):>state.PreludeSnapshot? => {
     let contents=p(entry.path).read_bytes
     if contents isnt? array<uint8> return none
+    # The reader owns the file buffer; later checks read through that owner.
     let input=bytes.Reader[contents]
     if bytes.read_text(@input) not=? FORMAT return none
     if bytes.read_text(@input) not=? entry.identity return none
     let checksum=bytes.read_word(@input)
     # Decode the payload where it lies in the file's bytes, not a copy.
     let length=bytes.read_count(@input)
-    if input.failed or input.position+length not=? contents.length or fingerprint_from(contents input.position) not=? checksum return none
+    if input.failed or input.position+length not=? input.bytes.length or fingerprint_from(input.bytes input.position) not=? checksum return none
     let snapshot=codec.decode_from(@input)
     if snapshot is? codec.CacheMiss return none
     if not inputs_match(snapshot entry) return none
