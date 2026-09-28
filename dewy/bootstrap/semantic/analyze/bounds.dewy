@@ -382,7 +382,7 @@ array_call = (id:addr call:hir.FunctionCall method:hir.ArrayMethod @state:facts.
     if validate and method.name =? 'truncate' and not unchanged and (count is? none or count.lower is? none or count.lower <? 0) {fail(id 'truncate length is not proven nonnegative' 'the count may be negative' @checker)}
     if method.name in? ['push' 'insert'] {
         let value=if call.pos_args.length >? 0 call.pos_args[0] else call.kw_args.get('value')
-        if value isnt? none {elements.store(@state sequence value checker.word_type call.loc checker.data.env @checker.data.registry) note_element_routes(sequence @checker)}
+        if value isnt? none {elements.store(@state sequence value checker.word_type call.loc checker.data.env @checker.data.registry symbolic=intervals.stable(value checker.data.snapshot checker.data.env.nodes)) note_element_routes(sequence @checker)}
     }
     if method.name in? ['push' 'insert' 'pop' 'truncate' 'clear' 'set_length'] {
         let name:lengths.Method=if method.name =? 'push' 'push' else if method.name =? 'insert' 'insert' else if method.name =? 'pop' 'pop' else if method.name =? 'truncate' 'truncate' else if method.name =? 'set_length' 'set_length' else 'clear'
@@ -691,7 +691,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
                 evaluate(node.pos_args[1] @state @checker validate)
                 let sequence=terms.sequence_id(target.target checker.data.env @checker.data.registry)
                 if sequence isnt? none {
-                    elements.store(@state sequence node.pos_args[1] checker.word_type node.loc checker.data.env @checker.data.registry)
+                    elements.store(@state sequence node.pos_args[1] checker.word_type node.loc checker.data.env @checker.data.registry symbolic=intervals.stable(node.pos_args[1] checker.data.snapshot checker.data.env.nodes))
                     note_element_routes(sequence @checker)
                     intervals.forget(@checker.data.snapshot sequence)
                     lengths.apply(@state sequence 'push' none checker.data.env.cap);
@@ -816,7 +816,7 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
             if nonzero {facts.put(@state facts.nonzero(route) ranges.exact(1))}
         }
         let array=terms.sequence_id(target.array checker.data.env @checker.data.registry)
-        if array isnt? none {elements.store(@state array node.value checker.word_type node.loc checker.data.env @checker.data.registry) note_element_routes(array @checker)}
+        if array isnt? none {elements.store(@state array node.value checker.word_type node.loc checker.data.env @checker.data.registry symbolic=intervals.stable(node.value checker.data.snapshot checker.data.env.nodes)) note_element_routes(array @checker)}
     }
     if node is? hir.DictStore|hir.DictRemove {
         # Public dictionary length is its live count. Backing arrays may

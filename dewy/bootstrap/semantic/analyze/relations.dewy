@@ -186,6 +186,7 @@ copy_relational = (@state:facts.State source:facts.Term target:facts.Term):>void
 }
 
 subject_of = (fact:facts.Fact):>facts.Term? => {
+    if fact is? facts.Value return fact.term
     if fact is? facts.Order return fact.smaller
     if fact is? facts.Remainder return fact.subject
     if fact is? facts.Nonzero return facts.Term[fact.subject]
@@ -193,6 +194,7 @@ subject_of = (fact:facts.Fact):>facts.Term? => {
     return none
 }
 rekey = (fact:facts.Fact subject:facts.Term):>facts.Fact => {
+    if fact is? facts.Value return facts.value(subject)
     if fact is? facts.Distinct return facts.distinct(subject if fact.left.binding_id =? 0 fact.right else fact.left)
     if fact is? facts.Order {
         return if fact.smaller.binding_id =? 0 facts.order(subject fact.larger) else facts.order(fact.smaller subject)

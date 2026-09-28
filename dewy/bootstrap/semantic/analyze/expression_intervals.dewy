@@ -208,6 +208,8 @@ transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @
     if node is? hir.MemberAccess {
         let route=bindings.array_route_id(id env.nodes @registry mutable_selectors=true)
         let interval=if route is? none none else facts.lookup(state facts.value(facts.Term[route]))
+        let element=elements.route_of(id env @registry)
+        if element isnt? none {interval=meet(interval facts.lookup(state facts.value(facts.Term[element])))}
         interval=meet(interval values.bounds_of(expressions.member_invariant(id env.nodes env.types) env.cap))
         # The read's declared type still carries facts such as `addr`, even
         # when a negative type test leaves no single recoverable owner shape.
@@ -223,6 +225,10 @@ transfer = (id:addr state:facts.State snapshot:Snapshot env:values.Environment @
     if node is? hir.Index|hir.DictLookup {
         let route=bindings.array_route_id(id env.nodes @registry mutable_selectors=true)
         let known=if route is? none none else facts.lookup(state facts.value(facts.Term[route]))
+        if node is? hir.Index {
+            let element=elements.route_of(id env @registry)
+            if element isnt? none {known=meet(known facts.lookup(state facts.value(facts.Term[element])))}
+        }
         return meet(known own_bounds(node.value_type env))
     }
     if node is? hir.DictRemove return own_bounds(node.value_type env)

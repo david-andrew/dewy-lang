@@ -133,7 +133,7 @@ literal_lengths = (@state:facts.State array:addr literal:hir.ArrayLiteral word_t
     }
 }
 
-store = (@state:facts.State array:addr value:addr word_type:addr loc:Span env:values.Environment @registry:bindings.Registry):>void => {
+store = (@state:facts.State array:addr value:addr word_type:addr loc:Span env:values.Environment @registry:bindings.Registry symbolic:bool=true):>void => {
     let length = facts.lookup(state facts.value(facts.Term[array 'length']))
     let empty = length isnt? none and ranges.same_bounds(length ranges.exact(0))
     if empty {
@@ -159,7 +159,8 @@ store = (@state:facts.State array:addr value:addr word_type:addr loc:Span env:va
         }
     }
     let stored:dict<addr facts.State> = []
-    loop source in sources(value env @registry) {
+    let incoming_sources:array<Source>=if symbolic sources(value env @registry) else []
+    loop source in incoming_sources {
         let target = route(array source.path word_type loc @registry)
         stored[target] = relations.facts_of(state facts.Term[source.binding])
     }

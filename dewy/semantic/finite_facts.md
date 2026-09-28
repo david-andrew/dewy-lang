@@ -54,8 +54,12 @@ source, while relations between the snapshot and other unchanged terms survive.
 For example, `let size = xs.length` creates a scalar term; it does not create a
 new sequence to which index facts may refer.
 
-Uniform array-element summaries retain supported order/index/remainder facts,
-nonzero facts and disequalities about stable external terms. A stored foreign
+Uniform array-element summaries retain numeric intervals, both endpoints of
+order facts, index/remainder facts, nonzero facts and disequalities about stable
+external terms. Source identities must still describe the evaluated argument;
+later constructor fields or call arguments that change them prevent symbolic
+transfer. Record field initialization consumes captured values, never replays
+initializers. A stored foreign
 element removes unsupported summaries; clearing or popping to empty makes old
 summaries vacuous, so the first replacement discards them before deriving new
 facts. Reading or copying the array transfers the surviving summaries. This is

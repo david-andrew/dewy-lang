@@ -29,6 +29,50 @@ ERRORS = [SCALAR.replace('values.push(a)', 'values.push(a)\n    values.clear\n  
     RECORD.replace('    let saved=values[0]', '    values[0].value=b\n    let saved=values[0]'),
 ]
 
+# Numeric intervals use the same uniform-element meet as relational facts.
+INTERVAL = SCALAR.replace('if a<=?b', 'if a<?1 or a>?10').replace('$assert saved >?b', '$assert saved >=?1 and saved <=?10')
+CASES.extend([INTERVAL, INTERVAL.replace('values.push(a)', 'values.push(a)\n    a=0'),
+              INTERVAL.replace('let saved=values[0]\n    $assert saved >=?1 and saved <=?10', '$assert values[0] >=?1 and values[0] <=?10'),
+              INTERVAL.replace('probe=', 'Item:type=[value:int64]\nprobe=', 1).replace('array<int64>', 'array<Item>').replace('values.push(a)', 'values.push(Item[a])').replace('saved >=?1 and saved <=?10', 'saved.value >=?1 and saved.value <=?10')])
+ERRORS.extend([INTERVAL.replace('values.push(a)', 'values.push(a)\n    values.push(b)'),
+               INTERVAL.replace('values.push(a)', 'values.push(a)\n    values.clear\n    values.push(b)')])
+
+CASES.append("""Item:type=[value:int64 spare:int64]
+main=():>int64=>{
+    let a:int64=0
+    let item=Item[a {a=8 0}]
+    $assert item.value=?0 and a=?8
+    return 42
+}""")
+ERRORS.extend([
+    """Item:type=[value:int64 spare:int64]
+main=():>int64=>{
+    let a:int64=0
+    let item=Item[a {a=8 0}]
+    $assert item.value>?0
+    return 42
+}""",
+    """Item:type=[value:int64 spare:int64]
+main=():>int64=>{
+    let a:int64=0
+    let values:array<Item>=[]
+    values.push(Item[a {a=8 0}])
+    $assert values.length>?0
+    let saved=values[0]
+    $assert saved.value>?0
+    return 42
+}""",
+    """main=():>int64=>{
+    let a:int64=0
+    let values:array<int64>=[]
+    values.insert(a {a=8 0})
+    $assert values.length>?0
+    let saved=values[0]
+    $assert saved>?0
+    return 42
+}""",
+])
+
 @pytest.mark.parametrize('source', CASES)
 def test_element_order(tmp_path, source):
     execute(tmp_path, 'element-order', codegen(SrcFile(None, source), debug_locations=False))

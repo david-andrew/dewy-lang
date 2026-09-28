@@ -2728,6 +2728,10 @@ class _BoundsValidator:
         route_id = sb.array_route_id(node, self.registry, mutable_selectors=True)
         self._seed_sibling_relations(node, state)
         interval = state.get(route_id) if route_id is not None else None
+        element = self._element_route_of(node)
+        uniform = state.get(element) if element is not None else None
+        if uniform is not None:
+            interval = uniform if interval is None else interval.intersect(uniform)
         declared = self._bounds_of(self._member_invariant(node))
         if declared is not None:
             interval = declared if interval is None else interval.intersect(declared)
@@ -2935,6 +2939,10 @@ class _BoundsValidator:
             self._validate_index(node, interval, state, length_interval=length)
         route = self._binding_id(node)
         known = state.get(route) if route is not None else None
+        element = self._element_route_of(node)
+        uniform = state.get(element) if element is not None else None
+        if uniform is not None:
+            known = uniform if known is None else known.intersect(uniform)
         if isinstance(node.type, ty.RefinedType):
             declared = self._bounds_of([p for p in node.type.propositions if p.term is None and p.field is None])
             if declared is not None:
@@ -3179,7 +3187,12 @@ class _BoundsValidator:
                 if name in {'push', 'insert'}:
                     stored = node.pos_args[0] if node.pos_args else node.kw_args.get('value')
                     if stored is not None:
-                        self._store_element(state, array_id, stored, node.loc)
+                        supplied = [*node.pos_args, *node.kw_args.values()]
+                        position = next(i for i, argument in enumerate(supplied) if argument is stored)
+                        reads = self.predicate_bindings.read_bindings(stored)
+                        stable = not any(reads & self.predicate_bindings.mutated_bindings(argument)
+                                         for argument in supplied[position + 1:])
+                        self._store_element(state, array_id, stored, node.loc, symbolic=stable)
                     state[key] = Interval(
                         _add(current.lower, 1),
                         _minimum_upper(_add(current.upper, 1), self.max_length),
@@ -3533,8 +3546,11 @@ class _BoundsValidator:
             elif isinstance(field.type, ty.ObjectType):
                 self._seed_field_routes(root_id, field.type, field_value.value, field_path, state)
             elif isinstance(field.type, str) and ty.fixed_integer_layout(field.type) is not None:
-                # an integer field starts with its initializer's interval (`bottom=2`, `bottom=d`)
-                interval = self._eval(field_value.value, state, validate=False)
+                # Literal evaluation already captured each field before later
+                # fields ran. Replaying an initializer here both repeats its
+                # effects and can substitute a source binding's newer value.
+                interval = (state.get(field_value.binding_id) if field_value.binding_id is not None
+                            else self._constant_expr(field_value.value, set()))
                 if interval is not None and interval != UNKNOWN_INTERVAL:
                     route_id = self.registry.route_id(root_id, field_path, field.type, field_value.loc)
                     state[route_id] = interval
@@ -4505,9 +4521,12 @@ class _BoundsValidator:
         return sources
 
     def _facts_of(self, state: State, subject: int) -> State:
-        """The relational facts whose subject is `subject`, keyed as they would be for subject 0."""
+        """Value facts about `subject`, normalized to the reserved template subject 0."""
         facts: State = {}
         for key, interval in state.items():
+            if key == subject:
+                facts[0] = interval
+                continue
             if isinstance(key, DistinctFact):
                 if subject in (key.left, key.right):
                     facts[_distinct_key(0, key.right if key.left == subject else key.left)] = interval
@@ -4535,6 +4554,8 @@ class _BoundsValidator:
 
     @staticmethod
     def _rekey(key: FactKey, subject: int) -> FactKey:
+        if key == 0:
+            return subject
         if isinstance(key, DistinctFact):
             return _distinct_key(subject, key.right if key.left == 0 else key.left)
         if isinstance(key, NonzeroFact):
@@ -4556,7 +4577,7 @@ class _BoundsValidator:
         shape = ty.unfold(ty.strip_refinement(_strip_casts(value).type))
         return shape.length if isinstance(shape, ty.ArrayType) else self._string_length(shape)
 
-    def _store_element(self, state: State, array_id: int, value: hir.AST, loc: Span) -> None:
+    def _store_element(self, state: State, array_id: int, value: hir.AST, loc: Span, *, symbolic: bool = True) -> None:
         """An element joins the array: its facts become (or narrow) the element facts."""
         empty = state.get(_length_key(array_id)) == Interval.exact(0)
         if empty:
@@ -4575,7 +4596,11 @@ class _BoundsValidator:
             else:
                 state[_length_key(route)] = state[_length_key(route)].union(Interval.exact(known))
         stored: dict[int, State] = {}
-        for path, source in self._value_fact_sources(value):
+        # The completed argument is a value snapshot. A later field/argument
+        # may have replaced one of the bindings from which it was read.
+        symbolic &= not (self.predicate_bindings.read_bindings(value)
+                         & self.predicate_bindings.mutated_bindings(value))
+        for path, source in self._value_fact_sources(value) if symbolic else []:
             stored[self._element_route(array_id, path, loc)] = self._facts_of(state, source)
         for route in self._element_routes(array_id):
             existing = self._facts_of(state, route)

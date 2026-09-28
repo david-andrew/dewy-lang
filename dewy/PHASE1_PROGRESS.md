@@ -6238,3 +6238,25 @@ Validation: all 33 element-order/exclusion checks pass including paired native
 execution on x86-64/C. A separate direct hosted/native fact-state comparison
 also passes. Two fixtures bring the manifest to 271 cases; the full integration
 in progress remains the preceding 269-case snapshot.
+
+## Element ranges and evaluated-value identity (2026-09-28)
+
+Uniform element summaries now transfer numeric intervals alongside relational
+facts in both compilers. Direct scalar/field reads and saved elements consume
+these bounds. Foreign stores still weaken the common summary.
+
+Evaluation-order counterexamples exposed two mistakes. Element stores could
+re-read a binding changed by a later constructor field or insertion argument;
+those identities now require stability before symbolic transfer. Static type
+lengths remain valid independently. Hosted record declarations also replayed
+numeric field initializers after constructing the record; they now consume the
+field's captured binding interval, matching native snapshot use. A later field
+changing `a` cannot change the earlier field initialized from `a`, nor can analysis
+repeat an initializer's effects.
+
+Validation: 42 combined element-order/exclusion checks pass including native
+x86-64/C execution; 42 surrounding loop/order checks and the direct element-state
+comparison pass. The final 28-case group adds the positive record snapshot and
+record-default/refined-field regressions. Three fixtures bring the manifest to
+274. The preceding `9ef254b8` integration completed all 269 cases; later changes
+need their own full integration checkpoint.
