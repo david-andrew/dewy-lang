@@ -164,6 +164,25 @@ pass. A reserved row container takes a COW-backed array descriptor with
 zero allocation at insertion, preserves its explicit snapshot and retains
 zero bytes over 100 calls.
 
+Integration at `0b24cedc`: three native generations reached an identical
+fixed point, a fresh hosted-built driver passed all 35 record/payload/union
+checks, and all 235 paired manifest cases passed. Generation 2/3 builds took
+53/56 seconds under concurrent checking. The ordinary-array element changes
+above have separate focused checks and postdate this isolated checkpoint.
+
+Checkpoint (2026-09-27): stable dictionary/set entry properties now lend
+their original entries directly to single and combined iterators in both
+lowerers. The existing whole-function storage proof must establish source
+stability; ordinary property values and loops that mutate their source keep
+their snapshots. Selectors still evaluate once, and lifecycle lowering
+continues to own hook invocation and resource snapshots. This removes the
+temporary key set and entry arrays in `semantic/builtins.dewy`, which now
+passes `$explicit_copies` standalone in both compilers (25 physical modules).
+Validation: five hosted cases, paired x86-64/C iteration and lifecycle groups,
+26 hosted lifecycle checks and 49 surrounding iterator/dictionary checks
+pass. A paired counter kernel repeatedly iterates scalar/record dictionary
+values, dictionary keys and set values with zero allocation after warmup.
+
 ## Strict-copy cleanup
 
 The inherited uncommitted CLI-only `$explicit_copies` implementation was

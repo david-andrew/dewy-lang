@@ -1,0 +1,32 @@
+$explicit_copies
+const table:dict<string int64>=['a'->20 'b'->22]
+const members:set<int64>=set[20 22]
+Box:type=[items:array<int64>]
+const records:dict<string Box>=['answer'->Box[[42]]]
+values=(source:dict<string int64>):>int64=>{
+    let total:int64=0
+    loop value in source.values {total+=value}
+    return total
+}
+exercise=():>int64=>{
+    let total:int64=0
+    loop key in table.keys {if key in? table {total+=table[key]}}
+    if total not=?42 or values(table) not=?42 return 1
+    total=0
+    loop key in table.keys and value in table.values {total+=value}
+    if total not=?42 return 2
+    total=0
+    loop value in members.values {total+=value}
+    if total not=?42 return 3
+    total=0
+    loop entry in records.values {if entry.items.length>?0 {total+=entry.items[0]}}
+    return total
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..100) {if exercise() not=?42 return 2}
+    let allocated:int64=_arena_allocated_bytes-before
+    printl(allocated)
+    return if allocated=?0 42 else 3
+}

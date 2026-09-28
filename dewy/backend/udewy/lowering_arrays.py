@@ -3665,6 +3665,7 @@ class _ArrayLowering(_ArraySharing):
     ) -> list[hir.AST]:
         """Lower left-to-right reads from an array without choosing alias semantics."""
 
+        iterator = replace(iterator, iterable=self._iterable_entry_view(iterator.iterable))
         array_type = iterator.iterable.type
         if not isinstance(array_type, ty.ArrayType):
             raise TypeError('INTERNAL ERROR: array iterator has no array type')

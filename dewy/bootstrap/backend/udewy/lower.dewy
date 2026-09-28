@@ -5628,11 +5628,25 @@ iterated_view = (id:addr @state:State):>bool => {
     let route=borrowing.route(id state.input.nodes)
     return route isnt? none and route.binding not in? state.boxed and borrowing.stable_owner(route state.stable_bindings state.stable_parameters)
 }
+# An iterator only reads the entries of `d.keys` / `d.values` / `s.values`.
+# Reuse a stable owner's live entries instead of constructing the ordinary
+# independent property result. Mutating/captured/exposed roots keep that
+# snapshot. This is the same whole-function proof used by storage borrowing.
+iterable_entry_view = (source:hir.AST @state:State):>hir.AST => {
+    let view=if source is? hir.DictEntries hir.node_at(state.input.nodes source.dictionary) else source
+    if view isnt? hir.DictView return source
+    let route=borrowing.route(view.dictionary state.input.nodes)
+    if route is? none or not borrowing.stable_owner(route state.stable_bindings state.stable_parameters) return source
+    let entries=views.container_entry_types(hir.node_at(state.input.nodes view.dictionary).value_type state.type_nodes)
+    if entries is? none return source
+    let field=if view.name =? 'values' and entries.value isnt? none 'values' else 'keys'
+    return hir.DictEntries[source.loc source.value_type view.dictionary field]
+}
 iterator_step = (node:hir.IteratorExpression @sources:dict<addr DictParts> @state:State plain:bool=false):>IteratorStep => {
     let prefix:array<addr>=[]
     let bool_type=types.primitive('bool' @state.type_nodes)
     let void_type=types.primitive('void' @state.type_nodes)
-    let source=hir.node_at(state.input.nodes node.iterable)
+    let source=iterable_entry_view(hir.node_at(state.input.nodes node.iterable) @state)
     let target=hir.node_at(state.input.nodes node.target)
     $runtime_assert target is? hir.ExpressedIdentifier
     let target_type=runtime_type(target.value_type target @state)

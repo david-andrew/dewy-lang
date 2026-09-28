@@ -20,6 +20,26 @@ from .lowering_shared import (
 
 
 class _IteratorLowering:
+    def _iterable_entry_view(self, iterable: hir.AST) -> hir.AST:
+        """Read stable container entries without first building a snapshot.
+
+        `d.keys` is normally an independent set. An iterator only lends its
+        elements; when the complete source owner stays stable, the set and
+        its copied arrays are unnecessary. Use the existing whole-function
+        storage proof, including exclusions for captured/raw-exposed roots.
+        """
+        view = iterable.dictionary if isinstance(iterable, hir.DictEntries) else iterable
+        if not isinstance(view, hir.DictView):
+            return iterable
+        source = borrowing.route(view.dictionary)
+        if source is None or not borrowing.stable_owner(source, self.borrow_plan):
+            return iterable
+        entries = ty.container_entry_types(view.dictionary.type)
+        if entries is None:
+            return iterable
+        field = 'values' if view.name == 'values' and entries[1] is not None else 'keys'
+        return hir.DictEntries(iterable.loc, iterable.type, view.dictionary, field)
+
     def _new_iterator_temp(
         self,
         node: hir.IteratorExpression,
@@ -188,6 +208,7 @@ class _IteratorLowering:
         # Keep this cache local to setup of this particular iterator flow.
         dictionary_sources = []
         for iterator in condition.iterators:
+            iterator = replace(iterator, iterable=self._iterable_entry_view(iterator.iterable))
             range_iterator = isinstance(iterator.iterable, hir.Range)
             array_iterator = isinstance(iterator.iterable.type, ty.ArrayType)
             string_iterator = not range_iterator and not array_iterator
@@ -633,4 +654,3 @@ class _IteratorLowering:
             scaled_offset,
             iterator.loc,
         )
-
