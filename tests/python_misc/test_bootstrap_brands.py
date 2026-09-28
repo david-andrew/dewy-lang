@@ -71,3 +71,9 @@ main = ():>int64 => {{
     assert order.splitlines() == [','.join(ty.brand_children('Root')), ','.join(ty.brand_descendants('Root')),
                                   ','.join(ty.brand_ancestry('Grand')), ty.brand_root('Grand'),
                                   'Grand,Right,Left,Other,Root', 'false', 'true']
+
+
+def test_wide_brand_adjacency_stays_linear(tmp_path):
+    from test_scalar_projection import execute
+    source = SrcFile.from_path(ROOT / 'tests/fixtures/native_brand_adjacency_scaling.dewy')
+    execute(tmp_path, 'brand-adjacency-scaling', codegen(source, debug_locations=False))

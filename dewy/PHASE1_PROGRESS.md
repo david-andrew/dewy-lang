@@ -6596,3 +6596,37 @@ manifest now has 310 cases. The preceding frozen hosted-built driver passed
 both borrowing/operator groups (318 seconds including its independent build).
 A new frozen three-generation run and complete parity run will certify this
 correction; the failed `ecd0547f` run is not a fixed-point checkpoint.
+
+The `11fa4515` frozen snapshot reached byte-identical native generations 2 and
+3 on the direct x86-64 route. Both generations took 55 seconds with concurrent
+validation; these are not isolated performance measurements. Its independent
+hosted-built borrowing driver passed (310 seconds including build). The earlier
+`bbdffdfe` broad hosted snapshot finished with 4,626 passed and 13 skipped
+(1,876 seconds); later corrections have their focused checks above.
+The complete `11fa4515` copy inventory is 3,996 sites over 53,417 lines,
+74.807646/KLOC, within the unchanged 4,500/85 gates. It retains the full inventory,
+including bounded inline records. The measured preceding `65b46249` inventory
+was 4,296 sites. Full end-to-end parity remains a separate running gate.
+
+An isolated native join kernel (100 joins, two 100-fact inputs, identical
+compiler seed for both source versions) allocated 4,326,400 bytes before the
+reservation change and 4,134,400 after, a 192,000-byte/4.4% reduction. This is a
+kernel result, not a claim about total compiler allocation volume.
+
+## Update analysis collections through their proven owners (2026-09-28)
+
+Brand-family adjacency construction now extends a checked dictionary-entry
+place instead of copying and replacing the sibling array for every child.
+This removes quadratic storage traffic in a wide family: the 512-sibling
+native kernel falls from 4,248,216 allocated bytes to 8,776. The fixture gates
+linear bookkeeping and retains insertion order. It also passes through fresh
+hosted compilation on x86-64/C. Existing numbering/independent-snapshot checks
+pass.
+
+Predicate write discovery reads an existing call summary through a required
+view, adding its members to the separately owned result. The direct comparison
+now covers supplied summaries and checks that mutating its result leaves the
+summaries unchanged. The expanded hosted-built comparison passes (314 seconds);
+the original comparison also passes under native compilation. Both modules
+enable `$explicit_copies`, bringing adoption to 35 modules without broadening
+the exemptions. The manifest adds the adjacency kernel (311 cases).

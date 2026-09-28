@@ -1,0 +1,18 @@
+# Building a wide family extends one owned adjacency bucket. Snapshotting
+# that bucket for each sibling makes the same operation quadratic.
+import p"../../dewy/bootstrap/semantic/brands.dewy" as brands
+main=():>int64=>{
+    let registry=brands.Registry[]
+    registry.entries.push(brands.Brand['Root' 0 none true])
+    loop i in 1..512 {registry.entries.push(brands.Brand["Child{i}" i 'Root' false])}
+    let before=_arena_allocated_bytes
+    let children=brands.child_index(registry)
+    let allocated=_arena_allocated_bytes-before
+    if 'Root' not in? children return 1
+    const siblings=@children['Root']
+    if siblings.length not=?512 return 2
+    if siblings[0] not=?'Child1' or siblings[511] not=?'Child512' return 3
+    # Allow linear bookkeeping, but reject a snapshot per appended child.
+    if allocated >?512*256 return 4
+    return 42
+}

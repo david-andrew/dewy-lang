@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"ty.dewy" as types
 
 doc"""
@@ -74,9 +76,12 @@ child_index = (registry:Registry):>dict<string array<string>> => {
     let result:dict<string array<string>>=[]
     loop entry in registry.entries {
         if entry.parent is? none continue
-        let children=result.get(entry.parent [])
-        children.push(entry.name)
-        result[entry.parent]=children
+        # The adjacency bucket is live scratch: extend its place rather
+        # than snapshotting and replacing it for every sibling.
+        if entry.parent in? result {
+            let children=@result[entry.parent]
+            children.push(entry.name)
+        } else {result[entry.parent]=[entry.name]}
     }
     return result
 }

@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"../hir.dewy" as hir
 import p"../bindings.dewy" as bindings
 
@@ -44,8 +46,10 @@ mutated_bindings = (root:addr nodes:array<hir.AST> call_writes:dict<addr set<add
         if node is? hir.FunctionLiteral continue
         let target=write_target(node nodes)
         if node is? hir.Place and id in? read_only_places {target=none}
-        if node is? hir.FunctionCall {
-            loop binding in call_writes.get(id set[]) {result.push(binding)}
+        if node is? hir.FunctionCall and id in? call_writes {
+            # The summary is read-only; the result owns its own set.
+            const writes=@call_writes[id]
+            loop binding in writes {result.push(binding)}
         }
         if target isnt? none {
             let path = bindings.access_path(target nodes facts=true dictionaries=true)
