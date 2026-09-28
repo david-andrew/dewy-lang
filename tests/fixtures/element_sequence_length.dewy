@@ -1,0 +1,10 @@
+probe=(text:string bound:int64):>int64=>{
+    if text.length<=?bound return 0
+    let values:array<string>=[]
+    values.push(text)
+    if values.length=?0 return 0
+    let saved=values[0]
+    $assert saved.length>?bound
+    return 42
+}
+main=():>int64=>probe("hello" 2)

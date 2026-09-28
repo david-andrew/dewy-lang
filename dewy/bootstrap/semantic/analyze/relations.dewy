@@ -193,39 +193,39 @@ subject_of = (fact:facts.Fact):>facts.Term? => {
     if fact is? facts.Index return facts.Term[fact.index]
     return none
 }
-rekey = (fact:facts.Fact subject:facts.Term):>facts.Fact => {
-    if fact is? facts.Value return facts.value(subject)
-    if fact is? facts.Distinct return facts.distinct(subject if fact.left.binding_id =? 0 fact.right else fact.left)
-    if fact is? facts.Order {
-        return if fact.smaller.binding_id =? 0 facts.order(subject fact.larger) else facts.order(fact.smaller subject)
-    }
-    if fact is? facts.Remainder return facts.remainder(subject fact.upper fact.offset)
-    if fact is? facts.Nonzero {
-        $runtime_assert subject.projection =? 'value'
-        return facts.nonzero(subject.binding_id)
-    }
-    $runtime_assert fact is? facts.Index and subject.projection =? 'value'
-    return facts.index(subject.binding_id fact.sequence)
+# A value snapshot carries both its scalar and length identities. Rename every
+# occurrence, including upper/offset/sequence positions, without changing the
+# relation's direction or confusing a scalar with a sequence length.
+map_term = (term:facts.Term source:addr target:addr):>facts.Term =>
+    if term.binding_id =? source facts.Term[target term.projection] else term
+mentions_binding = (fact:facts.Fact binding:addr):>bool => {
+    if fact is? facts.Value return fact.term.binding_id =? binding
+    if fact is? facts.Distinct return fact.left.binding_id =? binding or fact.right.binding_id =? binding
+    if fact is? facts.Order return fact.smaller.binding_id =? binding or fact.larger.binding_id =? binding
+    if fact is? facts.Remainder return fact.subject.binding_id =? binding or fact.upper.binding_id =? binding or fact.offset =? binding
+    if fact is? facts.Nonzero return fact.subject =? binding
+    $runtime_assert fact is? facts.Index
+    return fact.index =? binding or fact.sequence =? binding
 }
-# Normalize just the subject so an element's facts can be compared with the
-# facts stored for an array's element route. Other bindings retain identity.
+map_binding = (fact:facts.Fact source:addr target:addr):>facts.Fact => {
+    if fact is? facts.Value return facts.value(map_term(fact.term source target))
+    if fact is? facts.Distinct return facts.distinct(map_term(fact.left source target) map_term(fact.right source target))
+    if fact is? facts.Order return facts.order(map_term(fact.smaller source target) map_term(fact.larger source target))
+    if fact is? facts.Remainder return facts.remainder(map_term(fact.subject source target) map_term(fact.upper source target) if fact.offset =? source target else fact.offset)
+    if fact is? facts.Nonzero return facts.nonzero(if fact.subject =? source target else fact.subject)
+    $runtime_assert fact is? facts.Index
+    return facts.index(if fact.index =? source target else fact.index if fact.sequence =? source target else fact.sequence)
+}
+rekey = (fact:facts.Fact subject:facts.Term):>facts.Fact => {
+    $runtime_assert subject.projection =? 'value'
+    return map_binding(fact 0 subject.binding_id)
+}
 facts_of = (state:facts.State subject:facts.Term):>facts.State => {
+    $runtime_assert subject.projection =? 'value'
     let output:facts.State = facts.State[]
     loop entry in state.values {
-        let fact=entry.fact
-        if fact is? facts.Distinct {
-            if facts.same_term(fact.left subject) {facts.put(@output facts.distinct(facts.Term[0] fact.right) entry.interval)}
-            else if facts.same_term(fact.right subject) {facts.put(@output facts.distinct(facts.Term[0] fact.left) entry.interval)}
-            continue
-        }
-        if fact is? facts.Order {
-            if facts.same_term(fact.smaller subject) {facts.put(@output facts.order(facts.Term[0] fact.larger) entry.interval)}
-            else if facts.same_term(fact.larger subject) {facts.put(@output facts.order(fact.smaller facts.Term[0]) entry.interval)}
-            continue
-        }
-        let term = subject_of(entry.fact)
-        if term isnt? none and facts.same_term(term subject) {
-            facts.put(@output rekey(entry.fact facts.Term[0]) entry.interval)
+        if mentions_binding(entry.fact subject.binding_id) {
+            facts.put(@output map_binding(entry.fact subject.binding_id 0) entry.interval)
         }
     }
     return output

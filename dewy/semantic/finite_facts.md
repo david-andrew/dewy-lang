@@ -56,7 +56,10 @@ new sequence to which index facts may refer.
 
 Uniform array-element summaries retain numeric intervals, both endpoints of
 order facts, index/remainder facts, nonzero facts and disequalities about stable
-external terms. Source identities must still describe the evaluated argument;
+external terms. Transfer renames every occurrence of the stored value's identity,
+including its length and sequence/upper/offset positions in relations. Scalar and
+length identities remain distinct. Static length evidence joins through this
+same summary, rather than a separate length-only path. Source identities must still describe the evaluated argument;
 later constructor fields or call arguments that change them prevent symbolic
 transfer. Record field initialization consumes captured values, never replays
 initializers. A stored foreign
@@ -118,7 +121,7 @@ or unproved candidates cannot justify an obligation.
 ## Remaining closure work
 
 Broader linear-combination inference, measurements of nested-loop state size
-and qualifier discovery, complete transfer of every fact kind through aggregate element
-summaries, and consuming-obligation provenance for unsafe audits still need work.
+and qualifier discovery, correlations among multiple aggregate components, and
+consuming-obligation provenance for unsafe audits still need work.
 The roadmap remains open for these items; this inventory does not certify all
 of Phase 1 merely because the current finite domain reaches a fixed point.

@@ -6364,3 +6364,19 @@ lookup's independent generic-alias snapshot remains a separate open site.
 The `a4c05062` destination-cell snapshot reached an identical three-generation
 native fixed point (generation 3: 55 seconds under concurrent analysis). Its
 broader parity checkpoint is separate from these directive-only changes.
+
+## Sequence identities in element facts (2026-09-28)
+
+Element summaries now rename every occurrence of a stored value's identity in
+both compilers, including length projections and the sequence/upper/offset ends
+of index and remainder relations. The operation preserves relation direction
+and keeps scalar terms distinct from lengths. Static length evidence uses the
+same incoming-summary join, removing the separate length-only transfer path.
+Only matching facts are rebuilt; unrelated state entries are left alone.
+
+Validation: 71 combined element/order/exclusion/empty-join checks pass, including
+native execution on x86-64/C. The final sequence group passes 21 checks, adding
+independent nested-array snapshots and length-changing mutation rejection. Two
+direct hosted/native fact-state comparisons pass, including the new sequence
+endpoints. Four fixtures bring the manifest to 292 cases. The broader owning-cell
+snapshot parity run remains separate and in progress.

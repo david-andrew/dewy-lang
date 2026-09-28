@@ -4520,56 +4520,53 @@ class _BoundsValidator:
                 sources.append((self.registry.route_paths[route], route))
         return sources
 
+    @staticmethod
+    def _map_fact_binding(key: FactKey, source: int, target: int) -> FactKey:
+        """Rename one value identity, including its length and every relation end."""
+        def term(value: int) -> int:
+            if value == source:
+                return target
+            return _length_key(target) if value == _length_key(source) else value
+
+        if isinstance(key, int):
+            return term(key)
+        if isinstance(key, DistinctFact):
+            return _distinct_key(term(key.left), term(key.right))
+        if isinstance(key, NonzeroFact):
+            return _nonzero_key(target if key.binding == source else key.binding)
+        if isinstance(key, RemainderFact):
+            return _remainder_key(term(key.subject), term(key.upper), target if key.offset == source else key.offset)
+        if isinstance(key, OrderFact):
+            return _order_key(term(key.smaller), term(key.larger))
+        assert isinstance(key, IndexFact)
+        return _index_fact_key(target if key.index == source else key.index, target if key.array == source else key.array)
+
     def _facts_of(self, state: State, subject: int) -> State:
-        """Value facts about `subject`, normalized to the reserved template subject 0."""
+        """All facts about a value or its length, normalized to template binding 0."""
         facts: State = {}
+        length = _length_key(subject)
         for key, interval in state.items():
-            if key == subject:
-                facts[0] = interval
-                continue
-            if isinstance(key, DistinctFact):
-                if subject in (key.left, key.right):
-                    facts[_distinct_key(0, key.right if key.left == subject else key.left)] = interval
-                continue
-            if isinstance(key, NonzeroFact):
-                if key.binding == subject:
-                    facts[_nonzero_key(0)] = interval
-                continue
-            remainder = _decode_remainder_fact(key)
-            if remainder is not None:
-                if remainder[0] == subject:
-                    facts[_remainder_key(0, remainder[1], remainder[2])] = interval
-                continue
-            order = _decode_order_fact(key)
-            if order is not None:
-                if order[0] == subject:
-                    facts[_order_key(0, order[1])] = interval
-                elif order[1] == subject:
-                    facts[_order_key(order[0], 0)] = interval
-                continue
-            index_fact = _decode_index_fact(key)
-            if index_fact is not None and index_fact[0] == subject:
-                facts[_index_fact_key(0, index_fact[1])] = interval
+            if isinstance(key, int):
+                mentioned = key in (subject, length)
+            elif isinstance(key, DistinctFact):
+                mentioned = key.left in (subject, length) or key.right in (subject, length)
+            elif isinstance(key, OrderFact):
+                mentioned = key.smaller in (subject, length) or key.larger in (subject, length)
+            elif isinstance(key, RemainderFact):
+                mentioned = (key.subject in (subject, length) or key.upper in (subject, length)
+                             or key.offset == subject)
+            elif isinstance(key, NonzeroFact):
+                mentioned = key.binding == subject
+            else:
+                assert isinstance(key, IndexFact)
+                mentioned = key.index == subject or key.array == subject
+            if mentioned:
+                facts[self._map_fact_binding(key, subject, 0)] = interval
         return facts
 
-    @staticmethod
-    def _rekey(key: FactKey, subject: int) -> FactKey:
-        if key == 0:
-            return subject
-        if isinstance(key, DistinctFact):
-            return _distinct_key(subject, key.right if key.left == 0 else key.left)
-        if isinstance(key, NonzeroFact):
-            return _nonzero_key(subject)
-        remainder = _decode_remainder_fact(key)
-        if remainder is not None:
-            return _remainder_key(subject, remainder[1], remainder[2])
-        order = _decode_order_fact(key)
-        if order is not None:
-            return (_order_key(subject, order[1]) if order[0] == 0
-                    else _order_key(order[0], subject))
-        index_fact = _decode_index_fact(key)
-        assert index_fact is not None
-        return _index_fact_key(subject, index_fact[1])
+    @classmethod
+    def _rekey(cls, key: FactKey, subject: int) -> FactKey:
+        return cls._map_fact_binding(key, 0, subject)
 
     def _static_element_length(self, value: hir.AST) -> int | None:
         # Type evidence describes the evaluated value even if a later
@@ -4585,16 +4582,6 @@ class _BoundsValidator:
             # They cannot describe the first new element, nor act as bounds
             # while deriving that element's incoming facts.
             self._drop_route_facts(state, array_id, ('*',))
-        route = self.registry.route_ids.get((array_id, ('*',)))
-        known = self._static_element_length(value)
-        if known is not None and empty:
-            route = self._element_route(array_id, (), loc)
-            state[_length_key(route)] = Interval.exact(known)
-        elif route is not None and _length_key(route) in state:
-            if known is None:
-                state.pop(_length_key(route))
-            else:
-                state[_length_key(route)] = state[_length_key(route)].union(Interval.exact(known))
         stored: dict[int, State] = {}
         # The completed argument is a value snapshot. A later field/argument
         # may have replaced one of the bindings from which it was read.
@@ -4602,6 +4589,10 @@ class _BoundsValidator:
                          & self.predicate_bindings.mutated_bindings(value))
         for path, source in self._value_fact_sources(value) if symbolic else []:
             stored[self._element_route(array_id, path, loc)] = self._facts_of(state, source)
+        known = self._static_element_length(value)
+        if known is not None:
+            route = self._element_route(array_id, (), loc)
+            stored.setdefault(route, {})[_length_key(0)] = Interval.exact(known)
         for route in self._element_routes(array_id):
             existing = self._facts_of(state, route)
             incoming = stored.get(route, {})
@@ -4625,8 +4616,6 @@ class _BoundsValidator:
         for route in self._element_routes(array_id):
             path = self.registry.route_paths[route][1:]
             subject = target if not path else self.registry.route_id(target, path, 'int64', loc)
-            if _length_key(route) in state:
-                state[_length_key(subject)] = state[_length_key(route)]
             for key, interval in self._facts_of(state, route).items():
                 state[self._rekey(key, subject)] = interval
 
@@ -4635,8 +4624,6 @@ class _BoundsValidator:
         for route in self._element_routes(source):
             path = self.registry.route_paths[route]
             mirrored = self.registry.route_id(target, path, 'int64', loc)
-            if _length_key(route) in state:
-                state[_length_key(mirrored)] = state[_length_key(route)]
             for key, interval in self._facts_of(state, route).items():
                 state[self._rekey(key, mirrored)] = interval
 

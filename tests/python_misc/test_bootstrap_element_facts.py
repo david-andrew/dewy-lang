@@ -35,6 +35,8 @@ def test_native_element_facts_match_hosted(tmp_path):
     array = reference('array', ty.ArrayType(record_type, None))
     result = reference('result', record_type)
     copied = reference('copied', array.type)
+    texts = reference('texts', ty.ArrayType(text.type, None))
+    text_result = reference('text_result', text.type)
     scalars = reference('scalars', ty.ArrayType('int64', None))
     scalar_result = reference('scalar_result', 'int64')
     refined = reference('refined', ty.ArrayType(ty.RefinedType('int64', (ty.Proposition('self', '>?', 0),)), None))
@@ -43,7 +45,7 @@ def test_native_element_facts_match_hosted(tmp_path):
     unknown = hir.ObjectLiteral(LOC, record_type, [hir.ObjectField(LOC, 'length', number), hir.ObjectField(LOC, 'start', number)])
     read = hir.Index(LOC, record_type, array, number, 0)
     member = hir.MemberAccess(LOC, 'int64', read, 'length')
-    root = hir.Block(LOC, ty.VOID_TYPE, [text, start, length, array, result, copied, scalars, scalar_result, refined, value, unknown, read, member], False)
+    root = hir.Block(LOC, ty.VOID_TYPE, [text, start, length, array, result, copied, texts, text_result, scalars, scalar_result, refined, value, unknown, read, member], False)
     validator = bounds._BoundsValidator(registry, SrcFile(None, ''), root)
     base_bindings = list(registry.by_id.values())
     type_lines = []
@@ -95,6 +97,15 @@ def test_native_element_facts_match_hosted(tmp_path):
     validator._read_element(state, scalars.binding_id, scalar_result.binding_id, LOC)
     checks.append(f'    elements.read(@state {scalars.binding_id} {scalar_result.binding_id} {word} span @registry)')
     snapshot('scalar-read')
+    # The sequence endpoint of index/remainder/order facts travels with a
+    # stored sequence too; reading it back preserves projection identity.
+    put(bounds._length_key(text.binding_id), bounds.Interval(3, 12))
+    put(bounds._distinct_key(bounds._length_key(text.binding_id), length.binding_id), bounds.Interval.exact(1))
+    put(bounds._length_key(texts.binding_id), bounds.Interval.exact(0))
+    store(texts, text, 'sequence')
+    validator._read_element(state, texts.binding_id, text_result.binding_id, LOC)
+    checks.append(f'    elements.read(@state {texts.binding_id} {text_result.binding_id} {word} span @registry)')
+    snapshot('sequence-read')
     for index, node in enumerate([value, result, read, member, unknown]):
         sources = validator._value_fact_sources(node)
         checks.append(f'    emit_sources("sources{index}" elements.sources({names[id(node)]} env @registry))')

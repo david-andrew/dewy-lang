@@ -1,0 +1,12 @@
+size=(src:string):>int64<v=>0<=?v<=?src.length>=>src.length
+probe=(text:string offset:int64):>int64=>{
+    if offset<?0 or offset>?text.length return 0
+    let count=size(text[offset..])
+    let values:array<int64>=[]
+    values.push(offset)
+    if values.length=?0 return 0
+    let saved=values[0]
+    let part=text[saved..saved+count)
+    return 42
+}
+main=():>int64=>probe("hello" 1)

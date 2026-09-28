@@ -144,25 +144,18 @@ store = (@state:facts.State array:addr value:addr word_type:addr loc:Span env:va
             facts.forget(@state facts.Term[item.id 'length'])
         }
     }
-    let exact=static_length(value env)
-    let target:addr?=none
-    loop item in routes(array registry) {if item.path.length =? 1 {target=item.id}}
-    if exact isnt? none and empty {
-        target=route(array [] word_type loc @registry)
-        facts.put(@state facts.value(facts.Term[target 'length']) ranges.exact(exact))
-    } else if target isnt? none {
-        let key=facts.value(facts.Term[target 'length'])
-        let previous=facts.lookup(state key)
-        if previous isnt? none {
-            if exact is? none {facts.remove(@state key)}
-            else {facts.put(@state key ranges.union(previous ranges.exact(exact)))}
-        }
-    }
     let stored:dict<addr facts.State> = []
     let incoming_sources:array<Source>=if symbolic sources(value env @registry) else []
     loop source in incoming_sources {
         let target = route(array source.path word_type loc @registry)
         stored[target] = relations.facts_of(state facts.Term[source.binding])
+    }
+    let exact=static_length(value env)
+    if exact isnt? none {
+        let target=route(array [] word_type loc @registry)
+        let incoming=stored.get(target facts.State[])
+        facts.put(@incoming facts.value(facts.Term[0 'length']) ranges.exact(exact))
+        stored[target]=incoming
     }
     loop item in routes(array registry) {
         let existing = relations.facts_of(state facts.Term[item.id])
@@ -200,8 +193,6 @@ read = (@state:facts.State array:addr target:addr word_type:addr loc:Span @regis
         let path:array<string> = []
         loop i in 1.. and i <? item.path.length { path.push(item.path[i]) }
         let subject = if path.length =? 0 target else bindings.route_id(@registry target path word_type loc)
-        let length=facts.lookup(state facts.value(facts.Term[item.id 'length']))
-        if length isnt? none {facts.put(@state facts.value(facts.Term[subject 'length']) length)}
         loop entry in relations.facts_of(state facts.Term[item.id]).values {
             facts.put(@state relations.rekey(entry.fact facts.Term[subject]) entry.interval)
         }
@@ -210,8 +201,6 @@ read = (@state:facts.State array:addr target:addr word_type:addr loc:Span @regis
 copy = (@state:facts.State source:addr target:addr word_type:addr loc:Span @registry:bindings.Registry):>void => {
     loop item in routes(source registry) {
         let mirrored = bindings.route_id(@registry target item.path word_type loc)
-        let length=facts.lookup(state facts.value(facts.Term[item.id 'length']))
-        if length isnt? none {facts.put(@state facts.value(facts.Term[mirrored 'length']) length)}
         loop entry in relations.facts_of(state facts.Term[item.id]).values {
             facts.put(@state relations.rekey(entry.fact facts.Term[mirrored]) entry.interval)
         }
