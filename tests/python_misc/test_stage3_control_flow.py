@@ -155,9 +155,14 @@ let main = ():>int64 => {
     return 42
 }
 """))
-    assert 'let __dewy_eager_1:bool = left()' in emitted
-    assert 'let __dewy_eager_2:bool = right()' in emitted
-    assert 'let direct:bool = __dewy_eager_1 and __dewy_eager_2' in emitted
+    # Prelude temporaries share the allocator; their count is not part of
+    # eager-call semantics. Check the ordered evaluations and their uses.
+    import re
+    evaluations = re.search(
+        r'let (__dewy_eager_\d+):bool = left\(\)\s+'
+        r'let (__dewy_eager_\d+):bool = right\(\)\s+'
+        r'let direct:bool = \1 and \2', emitted)
+    assert evaluations is not None
 
 
 def test_flow_display_covers_structured_nodes() -> None:

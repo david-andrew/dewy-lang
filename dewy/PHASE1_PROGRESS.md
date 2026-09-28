@@ -5863,3 +5863,13 @@ The preceding `734a479f` checkpoint's fresh hosted-built native driver passed
 all 32 focused selector, allocator-storage and projected-string checks (299.04 s
 including its build). `ef2fa9d0` reached a three-generation native fixed point;
 its broad hosted and 246-case parity runs are still in progress.
+
+
+Integration at `ef2fa9d0`: all 246 paired manifest cases passed, in addition to
+the three-generation fixed point above. The broad hosted selection completed
+with 4,333 passes, 13 skips and one brittle generated-code assertion: it assumed
+the main function's eager temporaries always had suffixes 1 and 2. Added prelude
+helpers legitimately use earlier suffixes. The test now checks the ordered calls
+and exact reuse of their captured operands without depending on global temporary
+numbering; all 32 control-flow checks pass with that correction. No compiler
+semantics changed to accommodate the assertion.
