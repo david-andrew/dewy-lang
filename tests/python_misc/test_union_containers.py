@@ -38,9 +38,9 @@ def test_optional_elements_are_arena_cells() -> None:
     assert 'optional_cell' in emitted   # stores allocate the cells the container owns
 
 
-def test_aggregate_union_members_stay_unsupported() -> None:
+def test_fixed_array_union_members_stay_unsupported() -> None:
     with pytest.raises(TypeCheckError, match='unsupported array element type'):
-        _compile('let main = ():>int64 => {\n    let xs:array<array<int64>|none> = []\n    return 0\n}\n')
+        _compile('let main = ():>int64 => {\n    let xs:array<array<int64 length=2>|none> = []\n    return 0\n}\n')
 
 
 TOKENS = (

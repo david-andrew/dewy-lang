@@ -6460,3 +6460,15 @@ inventory is 4,296 sites across 53,360 lines (80.51/KLOC), within the corrected
 4,500/85 gate. Generation 3 took 74 seconds while hosted checks ran concurrently;
 that is integration evidence, not an isolated performance measurement.
 
+
+## Sequence-transfer integration checkpoint (2026-09-28)
+
+The frozen `65b46249` compiler passed all 296 parity fixtures. Its broad hosted
+run finished with 4,588 passes, 13 skips and one stale rejection expectation:
+`test_union_containers` still rejected dynamic-array union members after the
+destination-owner storage work enabled them. That expectation now specifically
+covers fixed-length array alternatives, which remain unsupported. The updated
+container group passes with the surrounding hosted checks (65 total). Dynamic
+array ownership and reset/reuse already have paired execution coverage in the
+allocator storage group; no implementation restriction was restored to satisfy
+the old expectation.
