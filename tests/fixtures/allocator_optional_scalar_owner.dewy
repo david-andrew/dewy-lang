@@ -1,0 +1,27 @@
+build=(n:int64):>array<int64>=>{let xs:array<int64>=[] xs.push(n) return xs}
+label=(n:int64):>string=>"item {n}"
+reuse=(@arena:Arena):>void=>{
+    let previous=_allocator_enter(@arena)
+    let junk=build(99)
+    let text=label(99)
+    _allocator_exit(previous)
+}
+change=(@xs:array<int64?> @arena:Arena):>void=>{
+    let previous=_allocator_enter(@arena)
+    if xs.length>?0 {xs[0]=42}
+    _allocator_exit(previous)
+}
+main=():>int64=>{
+    let arena=Arena[]
+    let xs:array<int64?>=[1 2]
+    let before=xs.copy()
+    change(@xs @arena)
+    arena.reset()
+    reuse(@arena)
+    if xs.length not=?2 or before.length not=?2 return 1
+    let untouched=xs[1]
+    let original=before[0]
+    let changed=xs[0]
+    if untouched is?none or original is?none or changed is?none return 2
+    return if untouched=?2 and original=?1 and changed=?42 42 else 3
+}

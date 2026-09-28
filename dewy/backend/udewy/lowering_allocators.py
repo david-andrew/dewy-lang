@@ -25,6 +25,34 @@ def _body_nodes(root):
 
 
 class _AllocatorLowering:
+    def _cell_for_store_owner(self, value, type_, anchor, loc):
+        """Promote an owned tag cell after RHS evaluation, before publishing it."""
+        if not self._has_arena() or self._runtime_helper('_allocator_enter_for') is None:
+            return [], value
+        if not (self._is_optional_element(type_) or self._is_union_element(type_)):
+            return [], value
+        result = self._name('store_cell', loc)
+        previous = self._name('store_allocator', loc)
+        slot = self._name('promoted_cell_slot', loc)
+        promoted = [self._declare(slot, self._intrinsic_call('__alloca__', [self._int64_literal(loc, 8)], 'int64', loc), loc)]
+        if self._is_optional_element(type_):
+            promoted.extend(self._copy_optional_element(result, slot, type_, loc))
+        else:
+            promoted.extend(self._copy_union_element(result, slot, type_, loc))
+        members = self._field_union_members(ty.strip_refinement(type_))
+        assert members is not None
+        promoted.extend(self._release_cell_payload(result, members, loc))
+        promoted.extend([
+            self._arena_release_call(result, self._int64_literal(loc, 16), loc),
+            hir.Assign(loc, ty.VOID_TYPE, result, '=', self._intrinsic_call('__load_i64__', [slot], 'int64', loc)),
+        ])
+        return [
+            self._declare(result, value, loc),
+            self._declare(previous, self._region_call('_allocator_enter_for', [anchor], loc, 'int64'), loc),
+            self._if(self._intrinsic_call('__not__', [self._shareable_storage(result, loc)], 'bool', loc), promoted, loc),
+            self._region_call('_allocator_exit', [previous], loc, ty.VOID_TYPE),
+        ], result
+
     @staticmethod
     def _allocator_owned(type_):
         plain = ty.structural_base(type_)

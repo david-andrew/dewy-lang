@@ -1,0 +1,33 @@
+build=(n:int64):>array<int64>=>{let xs:array<int64>=[] xs.push(n) return xs}
+let observed:int64=0
+label=(n:int64):>string=>{
+    let pointer=_arena_alloc(8)
+    observed=_allocator_of(pointer)
+    _arena_release(pointer 8)
+    return "item {n}"
+}
+reuse=(@arena:Arena):>void=>{
+    let previous=_allocator_enter(@arena)
+    let junk=build(99)
+    let text=label(99)
+    _allocator_exit(previous)
+}
+change=(@xs:array<string?> @arena:Arena):>void=>{
+    let previous=_allocator_enter(@arena)
+    if xs.length>?0 {xs[0]=label(42)}
+    _allocator_exit(previous)
+}
+main=():>int64=>{
+    let arena=Arena[]
+    let xs:array<string?>=[label(1)]
+    let before=xs.copy()
+    change(@xs @arena)
+    if observed not=?arena.handle return 5
+    arena.reset()
+    reuse(@arena)
+    if xs.length not=?1 or before.length not=?1 return 1
+    let changed=xs[0]
+    let original=before[0]
+    if changed is?none or original is?none return 2
+    return if changed=?"item 42" and original=?"item 1" 42 else 3
+}

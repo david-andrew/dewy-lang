@@ -1,0 +1,34 @@
+build=(n:int64):>array<int64>=>{let xs:array<int64>=[] xs.push(n) return xs}
+label=(n:int64):>string=>"item {n}"
+reuse=(@arena:Arena):>void=>{
+    let previous=_allocator_enter(@arena)
+    let junk=build(99)
+    let text=label(99)
+    _allocator_exit(previous)
+}
+change=(@xs:array<(array<int64>)?> @arena:Arena):>void=>{
+    let previous=_allocator_enter(@arena)
+    if xs.length>?0 {xs[0]=build(42)}
+    _allocator_exit(previous)
+}
+exercise=():>int64=>{
+    let arena=Arena[]
+    let xs:array<(array<int64>)?>=[build(1)]
+    let before=xs.copy()
+    change(@xs @arena)
+    arena.reset()
+    reuse(@arena)
+    if xs.length not=?1 or before.length not=?1 return 1
+    let changed=xs[0]
+    let original=before[0]
+    if changed is?none or original is?none return 2
+    if changed.length not=?1 or original.length not=?1 return 3
+    return if changed[0]=?42 and original[0]=?1 42 else 4
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before=_arena_live_bytes
+    loop i in [0..40) {if exercise() not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}
+

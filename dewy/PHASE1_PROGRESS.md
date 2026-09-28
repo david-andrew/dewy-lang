@@ -6325,3 +6325,29 @@ The preceding `9dc8ae48` snapshot reached a three-generation native fixed point
 (generation 3: 60 seconds under concurrent tests), and its fresh hosted-built
 driver passed all four new groups in 364.57 seconds including build. Its full
 281-case parity and broad hosted runs remain in progress.
+
+## Destination-owned tag cells (2026-09-28)
+
+Native array detachment now places recursively copied elements in the array's
+allocator, matching the hosted clone context. Anchoring only the buffer left
+nested tag cells in a temporary region. Both lowerers also promote an owned
+optional/union replacement into its destination array's allocator before
+publishing it. Promotion consumes the original cell and payload exactly once;
+source evaluation remains in its original allocator context. This closes indexed
+tag-cell replacement, not every aggregate store or allocator escape path.
+
+The hosted container-element checker now accepts dynamic arrays in supported
+unions, using the existing backend handle representation. Fixed-length array
+alternatives have not been added by this change.
+
+Validation: 25 allocator storage/exit/insertion checks and 56 surrounding
+strict-copy, optional-array, narrowing and union checks pass. The final storage
+group passes 12 checks, including paired x86-64/C execution, a reset/reuse test,
+repeated promotion with no retained heap bytes, and source allocator evaluation
+order. Four fixtures bring the parity manifest to 288 cases.
+
+The preceding `9dc8ae48` integration completed all 281 parity cases and the broad
+hosted run (4,551 passed, 13 skipped). Its complete copy inventory is 4,306 sites
+across 53,302 lines (80.785/KLOC), within the corrected 4,500/85 gate. These results
+complement its three-generation fixed point and fresh hosted-built driver checks;
+they do not yet include the allocator exit and destination-cell follow-ups.

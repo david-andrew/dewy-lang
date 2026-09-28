@@ -4763,11 +4763,13 @@ class _Lowerer(
                     hir.Declare(node.loc, ty.VOID_TYPE, 'let', old.name, 'int64', self._intrinsic_call('__load_i64__', [address], 'int64', node.loc)),
                     self._release_string_by_owner(old, node.loc),
                 ]
+            promotion, value = self._cell_for_store_owner(value, node.target.type, address, node.loc)
             return [
                 *target_prelude,
                 *index_prelude,
                 *value_prelude,
                 *cow,
+                *promotion,
                 # Detachment copies the old elements. They must remain live
                 # until the destination owns its independent backing buffer.
                 *old_release,

@@ -584,6 +584,9 @@ expression = (id:addr @state:State):>addr => {
         let descriptor=detach_array(route stored node @prefix @state)
         let pointer=snapshot(array_element_address(descriptor index target @state) @prefix @state)
         let replacement=snapshot(owned_value(node.value @state 'stored in an element') @prefix @state)
+        if cell_members(stored @state) isnt? none {
+            replacement=snapshot(cell_for_owner(replacement pointer stored node @state) @prefix @state)
+        }
         # Raw exposure pins the entire container tree. An untracked pointer
         # can still name the previous record or cell after this replacement.
         let tracked=compare('__ne__' read_word(descriptor layouts.array_descriptor.owner node @state) word(-1 node @state) node @state)
@@ -1919,6 +1922,13 @@ write_route = (id:addr @state:State detach:bool=true):>addr => {
 array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State detach:bool=false):>addr => {
     let prefix:array<addr>=[]
     let descriptor=snapshot(value @prefix @state)
+    # Detachment replaces the original owner's complete storage tree. The
+    # buffer's allocation anchor alone does not cover copied tag cells or
+    # recursively allocated children. Match the hosted clone-owner context.
+    let previous:addr?=none
+    if detach and aggregate(type.element @state) and state.runtime_helpers.get('_allocator_enter_for') isnt? none {
+        previous=snapshot(string_runtime('_allocator_enter_for' [descriptor] node @state) @prefix @state)
+    }
     let source=snapshot(intrinsic_call('__load_i64__' [descriptor] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let length=snapshot(intrinsic_call('__load_i64__' [address(descriptor layouts.array_descriptor.length node @state)] types.primitive('int64' @state.type_nodes) node @state) @prefix @state)
     let layout=layouts.element(type.element @state.type_nodes nominals=state.layout_context.nominals)
@@ -1942,6 +1952,7 @@ array_copy_storage = (value:addr type:types.ArrayType node:hir.AST @state:State 
         let condition=intrinsic_call('__lt__' [cursor length] types.primitive('bool' @state.type_nodes) node @state)
         let arm=put(hir.LoopArm[node.loc types.primitive('void' @state.type_nodes) condition body] @state)
         prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) [arm] none] @state))
+        if previous isnt? none {prefix.push(string_runtime('_allocator_exit' [previous] node @state result_void=true))}
         prefix.push(memory.descriptor)
         return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
     }
@@ -2153,6 +2164,24 @@ cell_write = (destination:addr source:addr type:addr node:hir.AST @state:State):
     let fallback=store_word(payload destination 8 node @state)
     prefix.push(store_word(tag destination 0 node @state))
     prefix.push(put(hir.Flow[node.loc types.primitive('void' @state.type_nodes) arms fallback] @state))
+    return sequence(prefix node @state)
+}
+# Acquire an already evaluated, owned replacement in the destination's
+# allocator. A region-owned tag cell cannot outlive that region merely
+# because its containing array has a longer-lived buffer.
+cell_for_owner = (value:addr anchor:addr type:addr node:hir.AST @state:State):>addr => {
+    if state.allocator is? none or state.runtime_helpers.get('_allocator_enter_for') is? none return value
+    let prefix:array<addr>=[]
+    let result=snapshot(value @prefix @state)
+    let previous=snapshot(string_runtime('_allocator_enter_for' [anchor] node @state) @prefix @state)
+    let promoted:array<addr>=[]
+    let copied=snapshot(cell_copy(result type node @state) @promoted @state)
+    promoted.push(release_value(result type node @state))
+    promoted.push(assign_value(result copied node @state))
+    prefix.push(conditional(intrinsic_call('__not__' [shareable(result node @state)] types.primitive('bool' @state.type_nodes) node @state) sequence(promoted node @state) node @state))
+    prefix.push(assign_value(result cell_private(result type node @state) node @state))
+    prefix.push(string_runtime('_allocator_exit' [previous] node @state result_void=true))
+    prefix.push(result)
     return sequence(prefix node @state)
 }
 # Copy a cell into fresh storage unconditionally (see addressed locals).
@@ -7222,7 +7251,7 @@ sort_key_literal = (node:hir.FunctionCall @state:State):>addr? => {
 # allocate from the enclosing context, which is always correct.
 arena_fallback = (node:hir.AllocatorBlock @state:State):>string? => {
     if state.allocator is? none or not state.cleanup_enabled return 'the current lowering has no arena cleanup context'
-    loop helper in ['_allocator_enter' '_allocator_exit' '_shareable' '_arena_alloc_for'] {if state.runtime_helpers.get(helper) is? none return "missing allocator runtime helper `{helper}`"}
+    loop helper in ['_allocator_enter' '_allocator_exit' '_shareable' '_arena_alloc_for' '_allocator_enter_for'] {if state.runtime_helpers.get(helper) is? none return "missing allocator runtime helper `{helper}`"}
     if not state.allocator_hazards_ready {
         state.allocator_hazards=allocator_hazards(@state)
         state.allocator_hazards_ready=true

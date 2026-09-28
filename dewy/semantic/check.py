@@ -9917,7 +9917,7 @@ def _tcr_spread_array_literal(
 
 _ELEMENT_TYPE_HINT = (
     'container elements need a fixed runtime width: a sized integer (`int64`, `uint8`, …), `bool`, '
-    '`string`, an object type, or a union of those with `none`'
+    '`string`, an object or array handle, or a supported union with `none`'
 )
 
 
@@ -9965,7 +9965,7 @@ def _supported_array_element_type(type_: ty.Type) -> bool:
 
 
 def _union_container_element(type_: ty.Type) -> bool:
-    """A general union of words, strings, `none`, and plain objects
+    """A general union of words, strings, `none`, objects and dynamic arrays
     (`Number | Name | Punct`): containers hold such elements as one-word
     pointers to tagged cells they own."""
     if isinstance(type_, str):
@@ -9982,12 +9982,14 @@ def _union_container_element(type_: ty.Type) -> bool:
             continue
         if isinstance(unfolded, ty.ObjectType) and (unfolded.brand is None or ty.user_branded(unfolded)):
             continue
+        if isinstance(unfolded, ty.ArrayType) and unfolded.length is None:
+            continue
         return False
     return True
 
 
 def _optional_container_element(type_: ty.Type) -> bool:
-    """`T | none` with a word or string payload: containers hold such
+    """`T | none` with a word or owned handle payload: containers hold such
     elements as one-word cells."""
     if isinstance(type_, str):
         return False
@@ -9999,6 +10001,7 @@ def _optional_container_element(type_: ty.Type) -> bool:
         or ty.fixed_integer_layout(payload) is not None
         or ty.string_valued(payload)
         or isinstance(ty.unfold(payload), ty.ObjectType)
+        or isinstance(ty.unfold(payload), ty.ArrayType) and ty.unfold(payload).length is None
     )
 
 
