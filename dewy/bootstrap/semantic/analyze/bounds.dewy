@@ -281,6 +281,29 @@ analyze = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer =
     return result
 }
 
+# Every edge leaving the lexical scope retires the same local identities.
+# Value arms install their destination before arriving here.
+expire_scope = (@output:Transfer locals:set<addr> @checker:Checker):>void => {
+    if locals.length =? 0 return
+    if output.normal isnt? none {
+        let remaining=output.normal
+        stores.forget_many(@remaining locals @checker.data)
+        output.normal=remaining
+    }
+    let breaks:array<Exit>=[] let continues:array<Exit>=[]
+    loop exit in output.breaks {
+        let remaining=exit.state
+        stores.forget_many(@remaining locals @checker.data)
+        breaks.push(Exit[exit.levels remaining])
+    }
+    loop exit in output.continues {
+        let remaining=exit.state
+        stores.forget_many(@remaining locals @checker.data)
+        continues.push(Exit[exit.levels remaining])
+    }
+    output.breaks=breaks output.continues=continues
+}
+
 analyze_inner = (id:addr state:facts.State @checker:Checker validate:bool):>Transfer => {
     let node=node_at(id checker)
     let current=state
@@ -297,26 +320,7 @@ analyze_inner = (id:addr state:facts.State @checker:Checker validate:bool):>Tran
             output.normal=transfer.normal
             append_exits(@output transfer)
         }
-        if node.scoped and output.normal isnt? none {
-            let remaining=output.normal
-            loop local in locals {stores.forget(@remaining local @checker.data)}
-            output.normal=remaining
-        }
-        if node.scoped {
-            let breaks:array<Exit>=[]
-            let continues:array<Exit>=[]
-            loop exit in output.breaks {
-                let remaining=exit.state
-                loop local in locals {stores.forget(@remaining local @checker.data)}
-                breaks.push(Exit[exit.levels remaining])
-            }
-            loop exit in output.continues {
-                let remaining=exit.state
-                loop local in locals {stores.forget(@remaining local @checker.data)}
-                continues.push(Exit[exit.levels remaining])
-            }
-            output.breaks=breaks output.continues=continues
-        }
+        if node.scoped {expire_scope(@output locals @checker)}
         return output
     }
     if node is? hir.Break return Transfer[none breaks=[Exit[node.loop_levels current]]]
@@ -682,21 +686,22 @@ bind_arm = (id:addr body_id:addr arm_state:facts.State @checker:Checker validate
         value=body.items[body.items.length - 1]
     }
     let reached=output.normal
-    if reached is? none return output
+    if reached is? none {expire_scope(@output locals @checker) return output}
     let current:facts.State=reached
     let value_type=types.node_at(checker.data.env.types node_at(value checker).value_type)
     if types.is_primitive(value_type 'never') {
         let transfer=analyze(value current @checker validate)
         output.normal=transfer.normal
         append_exits(@output transfer)
+        expire_scope(@output locals @checker)
         return output
     }
     evaluate(value @current @checker validate)
     let node=node_at(id checker)
     if node is? hir.Declare {declare_value(node value @current @checker)}
     else if node is? hir.Assign {assign_value(node value @current @checker)}
-    loop local in locals {stores.forget(@current local @checker.data)}
     output.normal=current
+    expire_scope(@output locals @checker)
     return output
 }
 

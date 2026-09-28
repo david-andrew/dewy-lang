@@ -1,0 +1,57 @@
+# Lexical cleanup retires numeric routes together, including routes selected
+# by local indices. Saved values survive; their links to dead storage do not.
+from reporting import Span
+import p"../../dewy/bootstrap/semantic/ty.dewy" as types
+import p"../../dewy/bootstrap/semantic/bindings.dewy" as bindings
+import p"../../dewy/bootstrap/semantic/analyze/value_bounds.dewy" as values
+import p"../../dewy/bootstrap/semantic/analyze/predicate_facts.dewy" as predicates
+import p"../../dewy/bootstrap/semantic/analyze/expression_intervals.dewy" as intervals
+import p"../../dewy/bootstrap/semantic/analyze/term_facts.dewy" as terms
+import p"../../dewy/bootstrap/semantic/analyze/binding_facts.dewy" as stores
+import p"../../dewy/bootstrap/semantic/analyze/relations.dewy" as relations
+import p"../../dewy/bootstrap/semantic/analyze/fact_state.dewy" as facts
+import p"../../dewy/bootstrap/semantic/analyze/intervals.dewy" as ranges
+main=():>int64=>{
+    let span=Span[0 0]
+    let type_nodes=types.Table[]
+    let word=types.primitive('int64' @type_nodes)
+    let registry=bindings.Registry[]
+    let survivor=bindings.allocate_param(@registry 'survivor' word span)
+    let owners:set<addr>=set[]
+    let state=facts.State[]
+    facts.set_value(@state facts.Term[survivor] ranges.Interval[1 100])
+    loop repeat in 0..127 {
+        let owner=bindings.allocate_param(@registry 'local' word span)
+        owners.push(owner)
+        let field=bindings.route_id(@registry owner ['field'] word span)
+        facts.set_value(@state facts.Term[owner] ranges.Interval[1 100])
+        facts.set_value(@state facts.Term[field] ranges.Interval[1 100])
+        facts.put(@state facts.order(facts.Term[owner] facts.Term[survivor]) ranges.Interval[0 none])
+    }
+    let selected=bindings.route_id(@registry survivor ['[local]'] word span)
+    let child=bindings.route_id(@registry survivor ['[local]' 'field'] word span)
+    let first:addr=0
+    loop owner in owners {first=owner break}
+    registry.index_routes[first]=set[selected]
+    facts.set_value(@state facts.Term[selected] ranges.Interval[1 100])
+    facts.set_value(@state facts.Term[child] ranges.Interval[1 100])
+    let env=values.Environment[[] type_nodes registry 1024]
+    let data=predicates.Data[env relations.Context[facts.Context[1024]] intervals.Snapshot[] registry]
+    data.snapshot.numbers[1]=ranges.Interval[1 100]
+    data.snapshot.terms[1]=terms.Offset[facts.Term[selected] 0]
+    data.snapshot.sequences[1]=child
+    let slow=state let fast=state let slow_data=data let fast_data=data
+    let before=_arena_allocated_bytes
+    loop owner in owners {stores.forget(@slow owner @slow_data)}
+    let slow_bytes=_arena_allocated_bytes-before
+    before=_arena_allocated_bytes
+    stores.forget_many(@fast owners @fast_data)
+    let fast_bytes=_arena_allocated_bytes-before
+    if fast.values.length not=?1 or slow.values.length not=?1 return 1
+    let retained=facts.lookup(fast facts.value(facts.Term[survivor]))
+    if retained is? none or not ranges.same_bounds(retained ranges.Interval[1 100]) return 2
+    if 1 in? fast_data.snapshot.terms or 1 in? fast_data.snapshot.sequences return 3
+    if 1 not in? fast_data.snapshot.numbers return 4
+    if fast_bytes>=?slow_bytes or fast_bytes>?256000 return 5
+    return 42
+}

@@ -6784,3 +6784,33 @@ manifest has 318 cases.
 The preceding `eb154c85` startup/ownership snapshot reached an identical
 three-generation native fixed point (generations 2/3: 47/50 seconds under
 concurrent checking). Its complete 317-case parity run is still underway.
+
+## Expire lexical facts and batch native cleanup (2026-09-28)
+
+Hosted statement/value-arm scope exits now remove all facts mentioning local
+bindings, their descendants and selector-dependent routes, rather than only
+the locals' scalar intervals. Constructor cleanup shares the same expiration
+walk. Copies stored into outer owners keep their own evidence. Native scope
+cleanup now collects the same retired route closure and scans the fact state
+and expression identity maps once, instead of once per local. Normal, break
+and continue exits share that operation, including early exits from value
+arms. Saved numeric expression results survive; dead storage identities do not.
+
+A 128-scope hosted probe drops from 16,514 peak facts to 4, and from 5.628
+seconds to 0.684 seconds with the prelude warmed. The native cleanup kernel
+compares batched cleanup with repeated individual invalidations: allocations
+fall from 405,264 to 209,648 bytes when hosted-built, and from 278,448 to
+212,704 bytes when native-built. Its gate checks surviving external facts,
+expired selector descendants and saved snapshots, and caps batched requests
+at 256,000 bytes.
+
+Validation: 44 adjacent hosted fact/loop checks, two new scope checks, 51
+additional global/constructor/proof checks, the standalone cleanup kernel,
+and three paired scope/snapshot/element groups pass. A fresh driver after the
+exit-path consolidation passes both new fixtures on hosted/native x86-64/C
+(50.62 seconds). The manifest now has 320 cases.
+
+The preceding `eb154c85` snapshot completed all 317 parity cases, in addition
+to its identical three-generation native fixed point. Transitive update and
+scope cleanup changes postdate that frozen integration. Phase 1 remains open
+for the completion checklist above.

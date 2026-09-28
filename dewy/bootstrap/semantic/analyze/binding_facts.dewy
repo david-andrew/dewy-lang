@@ -60,6 +60,32 @@ forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<str
     }
 }
 
+# A lexical scope can retire all its locals in one state scan. Follow both
+# nested routes and routes selected by a retired index before removing any
+# facts, matching repeated `forget` without cloning/scanning per binding.
+forget_many = (@state:facts.State subjects:set<addr> @data:predicates.Data):>void => {
+    if subjects.length =? 0 return
+    let expired:set<addr>=set[]
+    let pending:array<addr>=[]
+    loop subject in subjects {pending.push(subject)}
+    loop pending.length >? 0 {
+        let subject=pending.pop
+        if subject in? expired continue
+        expired.push(subject)
+        loop route in data.registry.routes_by_root.get(subject []) {pending.push(route.id)}
+        loop dependent in data.registry.index_routes.get(subject set[]) {
+            pending.push(dependent)
+            let route=bindings.route_at(data.registry dependent)
+            if route isnt? none {
+                loop selected in bindings.routes_under(data.registry route.root route.path) {pending.push(selected)}
+            }
+        }
+    }
+    facts.forget_bindings(@state expired)
+    intervals.forget_many(@data.snapshot expired)
+    loop subject in expired {data.member_calls.pop(subject default=0);}
+}
+
 # Bind a checked call result's concrete and symbolic promises. A mutated
 # argument can still supply its saved interval, but never a current identity.
 call_result = (@state:facts.State subject:addr value:addr @data:predicates.Data):>void => {

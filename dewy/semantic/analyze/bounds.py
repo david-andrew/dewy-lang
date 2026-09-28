@@ -982,10 +982,26 @@ class _BoundsValidator:
             roots = self.literal_fields[identity] = frozenset(found)
         if not roots:
             return
+        self._expire_bindings(roots, state)
+
+    def _expire_bindings(self, roots: set[int] | frozenset[int], state: State) -> None:
+        """Retire inaccessible bindings, their routes and selector dependents."""
+        if not roots:
+            return
         # Routes are allocated during transfer, so only the syntax is cached.
-        expired = set(roots)
-        for root in roots:
-            expired.update(self.registry.routes_under(root))
+        expired = set()
+        pending = list(roots)
+        while pending:
+            root = pending.pop()
+            if root in expired:
+                continue
+            expired.add(root)
+            pending.extend(self.registry.routes_under(root))
+            for route in self.registry.index_routes.get(root, ()):
+                pending.append(route)
+                parent = self.registry.by_id[route].route_root
+                if parent is not None:
+                    pending.extend(self.registry.routes_under(parent, self.registry.route_paths[route]))
         terms = expired | {_length_key(root) for root in expired}
         removed = []
         for fact in state:
@@ -1033,8 +1049,7 @@ class _BoundsValidator:
             for item in node.items:
                 current = self._analyze(item, current, validate=validate)
             if node.scoped:
-                for binding_id in local_ids:
-                    current.pop(binding_id, None)
+                self._expire_bindings(local_ids, current)
             return current
         if isinstance(node, hir.Declare):
             if node.binding_id is not None:
@@ -1988,8 +2003,7 @@ class _BoundsValidator:
                     else:
                         interval = current.get(binding)
                         payload_intervals.append(interval if interval is not None else self._declared_type_interval(value.type))
-            for binding_id in local_ids:
-                current.pop(binding_id, None)
+            self._expire_bindings(local_ids, current)
             return current
 
         remaining: State | None = dict(state)
@@ -2577,8 +2591,7 @@ class _BoundsValidator:
                     *(state for states in breaks.values() for state in states),
                     *(state for states in continues.values() for state in states),
                 ]:
-                    for binding_id in local_ids:
-                        exit_state.pop(binding_id, None)
+                    self._expire_bindings(local_ids, exit_state)
             return _LoopTransfer(current, breaks, continues)
         if isinstance(node, hir.Break):
             return _LoopTransfer(None, {node.loop_levels: [dict(state)]}, {})

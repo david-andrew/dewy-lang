@@ -1,0 +1,11 @@
+work=(x:int64):>int64=>{
+    let result:int64=0
+    loop i in 0..3 {
+        {let local=x result=local if i<?2 continue}
+        $assert result=?x
+    }
+    let selected=if x>=?0 {let local=x local} else {let local=x local}
+    $assert selected=?x
+    return selected
+}
+main=():>int64=>work(42)

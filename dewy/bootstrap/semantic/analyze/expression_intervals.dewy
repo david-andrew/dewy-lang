@@ -40,6 +40,17 @@ forget = (@snapshot:Snapshot binding:addr):>void => {
     loop [id sequence] in snapshot.sequences {if sequence =? binding {removed.push(id)}}
     loop id in removed {if id in? snapshot.sequences {snapshot.sequences.pop(id);}}
 }
+# Scope exit retires several identities together. Saved numeric results
+# remain valid values; only their links to current storage expire.
+forget_many = (@snapshot:Snapshot bindings:set<addr>):>void => {
+    if bindings.length =? 0 return
+    let removed:array<addr>=[]
+    loop [id term] in snapshot.terms {if term.term.binding_id in? bindings {removed.push(id)}}
+    loop id in removed {if id in? snapshot.terms {snapshot.terms.pop(id);}}
+    removed.clear
+    loop [id sequence] in snapshot.sequences {if sequence in? bindings {removed.push(id)}}
+    loop id in removed {if id in? snapshot.sequences {snapshot.sequences.pop(id);}}
+}
 stable = (id:addr snapshot:Snapshot nodes:array<hir.AST> places:bool=false):>bool => {
     let pending:array<addr>=[id]
     loop pending.length >? 0 {

@@ -54,7 +54,11 @@ selection tracking does not make arbitrary mutable indexed type narrowing safe.
 
 Private constructor field bindings live through default evaluation and value
 installation, then expire with their temporary routes. Destination field facts
-and independently stored snapshots survive that expiration.
+and independently stored snapshots survive that expiration. Lexical scope
+exits also retire local routes and selections whose indices have expired.
+Normal, break and continue edges use the same cleanup; destination snapshots
+are installed before their source locals expire. Native cleanup batches the
+retired identities into one state scan.
 
 A scalar or length snapshot receives the source facts that still describe its
 observed value. Later replacement of the source discards relations involving that
