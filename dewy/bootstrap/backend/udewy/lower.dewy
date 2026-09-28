@@ -452,7 +452,7 @@ expression = (id:addr @state:State):>addr => {
                 return if expression_owns(id @state) copy_value(read node.value_type node @state) else read
             }
         }
-        if temporary_owner(node.expr @state) {
+        if expression_owns(node.expr @state) {
             if cell_members(actual @state) isnt? none return owned_cell_cast(node actual @state)
             if cell_members(node.value_type @state) isnt? none return cell_pack(owned_value(node.expr @state 'packed into a cell') actual node.value_type node @state owned=true)
         }
@@ -921,7 +921,9 @@ expression_owns = (id:addr @state:State):>bool => {
     }
     if node is? hir.ValueCast|hir.RepresentationCast {
         let source=hir.node_at(state.input.nodes node.expr)
-        if cell_members(source.value_type @state) isnt? none and temporary_owner(node.expr @state) return true
+        # Fresh storage remains owned during module initialization, even
+        # though globals do not participate in lexical scope cleanup.
+        if cell_members(source.value_type @state) isnt? none and expression_owns(node.expr @state) return true
         # `none` as a record union is the zero handle, which owns nothing.
         if record_union(node.value_type @state) isnt? none and types.is_primitive(types.node_at(state.type_nodes types.unfold(source.value_type state.type_nodes)) 'none') return true
         if node is? hir.ValueCast or relative_cast(node @state) {
@@ -3592,7 +3594,7 @@ representation = (node:hir.RepresentationCast @state:State):>addr => {
     # Both logical and representation conversions can consume a fresh union
     # result. Preserve its payload before retiring the source cell instead
     # of treating that result as a borrowed binding and abandoning it.
-    if cell_members(source.value_type @state) isnt? none and temporary_owner(node.expr @state) return owned_cell_cast(node source.value_type @state)
+    if cell_members(source.value_type @state) isnt? none and expression_owns(node.expr @state) return owned_cell_cast(node source.value_type @state)
     if enum_members(node.value_type state) isnt? none return enum_pack(expression(node.expr @state) source.value_type node.value_type node @state)
     if enum_members(source.value_type state) isnt? none return enum_read(expression(node.expr @state) source.value_type node.value_type node @state)
     if cell_members(node.value_type @state) isnt? none {
@@ -4874,7 +4876,7 @@ NarrowedRecord:type = const [handle:addr type:addr]
 # (expression_owns, for a cast node known only by value).
 cast_owns = (node:hir.ValueCast|hir.RepresentationCast @state:State):>bool => {
     let source=hir.node_at(state.input.nodes node.expr)
-    return cell_members(source.value_type @state) isnt? none and temporary_owner(node.expr @state)
+    return cell_members(source.value_type @state) isnt? none and expression_owns(node.expr @state)
 }
 narrowed_record = (id:addr @state:State):>NarrowedRecord? => {
     let node=hir.node_at(state.input.nodes id)

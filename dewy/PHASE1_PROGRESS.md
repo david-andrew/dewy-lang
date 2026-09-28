@@ -6741,3 +6741,24 @@ first, then check that value storage does not accumulate. The parity
 manifest now has 316 cases. The broad hosted run of the preceding
 `ad4c959c` integration finished with 4,631 passed and 13 skipped in 1,865.39
 seconds; this does not claim broad certification of subsequent edits.
+
+## Fresh tagged values during startup (2026-09-28)
+
+Native conversion ownership now follows fresh cell storage independently of
+lexical cleanup being enabled. Module initialization adopts a newly packed or
+converted cell instead of reporting and performing another logical copy. A
+read of an existing global still requires its ordinary copy/borrow proof.
+This repairs the strict-copy rejection of the zero endpoint in the global
+`Interval[1 0]` constructor without exempting BigInt copies from policy.
+
+Hosted startup now uses the binding's declared type at its initialization
+store. Using the initializer's narrower type could write a record directly
+into a tagged global's cell, omitting the tag. An obsolete early rejection of
+global heterogeneous unions containing `none` has been removed: existing
+cell allocation and packing now handle them. Regressions pass globals through
+ordinary function boundaries so constant propagation cannot hide a bad tag.
+
+Validation: four focused hosted checks and their native x86-64/C group pass,
+including a retained-source strict-copy rejection. Thirty-three adjacent
+global, union, array-move and sharing checks also pass. The integration
+manifest now contains 317 cases.

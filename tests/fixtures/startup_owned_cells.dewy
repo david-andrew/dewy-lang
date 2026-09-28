@@ -1,0 +1,6 @@
+$explicit_copies
+const zero:bigint?=0
+const present:bigint?=42
+const absent:bigint?=none
+read=(value:bigint?):>int64=>{if value is?none return 7 return if value=?0 0 else 42}
+main=():>int64=>if read(zero)=?0 and read(present)=?42 and read(absent)=?7 42 else 4

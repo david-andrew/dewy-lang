@@ -654,7 +654,7 @@ class _Lowerer(
                     ty.VOID_TYPE,
                     hir.ExpressedIdentifier(
                         transformed.loc,
-                        transformed.expr.type,
+                        transformed.annotation or transformed.expr.type,
                         transformed.name,
                         binding_id=transformed.binding_id,
                     ),
@@ -1669,15 +1669,6 @@ class _Lowerer(
     def _global_storage(self, declaration: hir.Declare) -> hir.Declare:
         """Create inert udewy storage initialized later by module startup."""
         annotation = declaration.annotation or declaration.expr.type
-        if (
-            isinstance(annotation, ty.TypeOr)
-            and 'none' in annotation.items
-            and ty.optional_payload(annotation) is None
-        ):
-            self._target_error(
-                declaration,
-                'heterogeneous runtime union containing `none`',
-            )
         if isinstance(annotation, ty.IntegerLiteralType):
             if not ty.integer_literal_fits(annotation.value, 'int64'):
                 raise NotImplementedYet(Error(
