@@ -32,7 +32,9 @@ its checked contract, not a guessed meaning from its source name. This also
 applies to lexical operator declarations: a user function named `__lt__` is not
 an intrinsic comparison. Builtin recognition requires its binding identity (or
 an explicitly lowered integer operation tag). Guard and storage affine transfer
-both require the mathematical result to fit its machine representation.
+both require the mathematical result to fit its machine representation. Scalar
+locals and named record fields use the same affine assignment proof, checking
+the operation width as well as its destination width.
 
 ## Identities and stored facts
 
@@ -42,6 +44,7 @@ spellings. A term is a scalar value or a sequence length. Current facts include:
 - a numeric interval, with target-address-cap provenance;
 - nonzero evidence and an index bound against a named sequence;
 - an ordered difference, `larger - smaller >= gap`;
+- a source-selected weighted sum, `sum(coefficient * term) >= gap`;
 - a remainder bound, `upper - offset >= subject + gap`;
 - a symmetric disequality between two terms;
 - separately maintained literal/type alternatives and callable predicate facts.
@@ -98,12 +101,17 @@ intermediate operation fits. Normalization accepts addition, subtraction and
 multiplication by a known constant, with cancellation of equal identities.
 It uses at most 128 expression visits and 32 distinct terms per query. Opposite
 coefficients consume concrete order paths; unmatched terms use ordinary
-interval endpoints. Pair selection is deliberately incomplete, so a different
+interval endpoints. A held weighted-sum fact supplies an additional lower
+bound on the normalized form. Exact numeric endpoints do not erase a named
+term from that identity. Pair selection is deliberately incomplete, so a different
 matching could prove a query this implementation leaves unknown. No new facts
 are assumed by normalization, and nonlinear expressions, invalidated identities,
 opaque calls, potentially wrapping intermediates and exhausted budgets stay
 unknown. The query itself never installs new evidence. Separately, bounded linear
-source syntax can select difference candidates for ordinary loop validation.
+source syntax can select difference and weighted-sum candidates for ordinary
+loop validation. Weighted facts preserve invariants such as `2*i <= j` when
+`i` advances once and `j` twice, and follow scalar snapshots, field routes and
+array-length changes. They do not introduce a general linear-programming solver.
 
 Disequality does not choose an ordering. It can sharpen a known non-strict integer
 order. A join retains facts supported on every reachable incoming path. For an
@@ -129,8 +137,13 @@ Candidate selection is bounded separately from proof:
 - source predicates and subtraction select at most 64 deduplicated term pairs;
   while guards precede bodies in this shared pair budget. Names under addition,
   subtraction and literal scaling also select cross-operand pairs, with at most
-  128 expression visits and 32 terms per operand. These still propose only
-  ordinary differences, not general coefficient-weighted invariant facts;
+  128 expression visits and 32 terms per operand;
+- the same syntax selects at most 32 weighted-sum rows per loop (including
+  opposite directions). Each state holds at most 128 weighted rows, including
+  copies derived by renaming aliases. This bounds the otherwise exponential
+  combinations of snapshots of a many-term fact. Further rows stay unknown;
+  expired rows release capacity, and ordinary difference facts keep their own
+  vocabulary;
 - entry intervals must establish each offered difference;
 - the loop condition's effects and every advancing edge participate in transfer,
   including `continue` paths;
@@ -152,7 +165,7 @@ or unproved candidates cannot justify an obligation.
 
 ## Remaining closure work
 
-General coefficient-weighted loop invariants, measurements of nested-loop state size
+Broader shared proof coverage and measurements of nested-loop state size
 and qualifier discovery, correlations among multiple aggregate components, and
 consuming-obligation provenance for unsafe audits still need work.
 The roadmap remains open for these items; this inventory does not certify all

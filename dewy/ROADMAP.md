@@ -968,9 +968,12 @@ subjects. Dependent disequality contracts now use the same evidence for
 parameters, results, predicate arms and checked proof calls; copied scalar
 values retain their own facts after the source changes. Bounded linear queries now combine established difference paths with constant
 coefficients, checking every intermediate for wrapping. They preserve unknown
-for nonlinear, opaque, invalidated or over-budget queries. Bounded linear source syntax now selects ordinary difference candidates,
-validated from entry facts and every advancing edge. General coefficient-weighted
-invariants and the final finite-vocabulary audit remain closure work.
+for nonlinear, opaque, invalidated or over-budget queries. Bounded linear source syntax now selects difference and weighted-sum candidates,
+validated from entry facts and every advancing edge. Weighted rows preserve
+uneven counter updates such as `2*i<=j`, scalar snapshots, field routes and
+array-length growth. Candidate and derived-row budgets retain unknown on
+exhaustion. Broader shared proof coverage, final scaling and the unsafe-audit
+consumer provenance remain closure work.
 
 ### 1.3 Effects as a real vocabulary
 

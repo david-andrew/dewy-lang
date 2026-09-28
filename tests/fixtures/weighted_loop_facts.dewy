@@ -1,0 +1,13 @@
+# This needs a weighted invariant, rather than a constant difference.
+work=(start:int64<v=>0<=?v<=?100>):>int64=>{
+    let i:int64=0
+    let j:int64=start
+    loop i<?10 and j<?1000 {
+        $assert 2*i<=?j
+        i+=1
+        j+=2
+    }
+    $assert 2*i<=?j
+    return 42
+}
+main=():>int64=>if work(0)=?42 and work(100)=?42 42 else 1

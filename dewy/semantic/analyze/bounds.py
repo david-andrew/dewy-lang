@@ -134,8 +134,55 @@ class RemainderFact:
     offset: int
 
 
-FactKey = int | IndexFact | NonzeroFact | OrderFact | DistinctFact | RemainderFact
+@dataclass(frozen=True, slots=True)
+class LinearFact:
+    # A lower bound on sum(weight * current term). Constant offsets belong
+    # to the bound, not the identity. Sorted, nonzero, unique coefficients.
+    coefficients: tuple[tuple[int, int], ...]
+
+
+def _linear_key(items) -> LinearFact:
+    weights = {}
+    for term, weight in items:
+        weights[term] = weights.get(term, 0) + weight
+    return LinearFact(tuple(sorted((term, weight) for term, weight in weights.items() if weight)))
+
+
+FactKey = int | IndexFact | NonzeroFact | OrderFact | DistinctFact | RemainderFact | LinearFact
 State = dict[FactKey, Interval]
+_MAX_LINEAR_FACTS = 128
+
+
+def _update_facts(state: State, additions: State) -> None:
+    """Bound derived weighted rows too, not only source candidates.
+
+    Renaming every combination of aliases of a many-term relation otherwise
+    creates exponentially many rows. Exhaustion forgets a candidate; it never
+    supplies a proof. Ordinary scalar/difference facts keep their own domain.
+    """
+    if not any(isinstance(key, LinearFact) for key in additions):
+        state.update(additions)
+        return
+    remaining = _MAX_LINEAR_FACTS - sum(isinstance(key, LinearFact) for key in state)
+    for key, interval in additions.items():
+        if isinstance(key, LinearFact) and key not in state:
+            if remaining <= 0:
+                continue
+            remaining -= 1
+        state[key] = interval
+
+
+def _limit_linear_facts(state: State) -> State:
+    remaining, removed = _MAX_LINEAR_FACTS, []
+    for key in state:
+        if isinstance(key, LinearFact):
+            if remaining == 0:
+                removed.append(key)
+            else:
+                remaining -= 1
+    for key in removed:
+        del state[key]
+    return state
 
 # A runtime-length array's length is a nonnegative int64, which keeps
 # `i <? xs.length` bounded above so `i + 1` cannot roll over.
@@ -606,6 +653,11 @@ def _drop_index_facts(
     array_id: int | None = None,
 ) -> None:
     for key in [key for key in state if not isinstance(key, int)]:
+        if isinstance(key, LinearFact):
+            if any(term == index_id or array_id is not None and term == _length_key(array_id)
+                   for term, _ in key.coefficients):
+                del state[key]
+            continue
         if isinstance(key, NonzeroFact):
             if index_id == key.binding:
                 del state[key]
@@ -653,6 +705,16 @@ def _change_length_facts(state: State, array_id: int, change: Interval) -> None:
     # only removals. Every transformation reads its own original interval.
     removed: list[FactKey] = []
     for key, interval in state.items():
+        if isinstance(key, LinearFact):
+            coefficient = dict(key.coefficients).get(term, 0)
+            if coefficient:
+                endpoint = change.lower if coefficient > 0 else change.upper
+                if interval.lower is None or endpoint is None:
+                    removed.append(key)
+                else:
+                    state[key] = Interval(interval.lower + coefficient * endpoint, None,
+                                          capped=interval.capped or change.capped)
+            continue
         if isinstance(key, DistinctFact) and term in (key.left, key.right):
             if change.lower != 0 or change.upper != 0:
                 removed.append(key)
@@ -903,6 +965,7 @@ class _BoundsValidator:
         self.loop_depth = 0
         self.loop_search_budget = 0
         self.loop_qualifier_pairs = {}
+        self.loop_linear_qualifiers = {}
         self.literal_fields: dict[int, frozenset[int]] = {}
         self.constant_indices: dict[int, int | None] = {}
         self.call_writes: dict[int, set[int]] = {}
@@ -1015,6 +1078,8 @@ class _BoundsValidator:
                 discard = fact.smaller in terms or fact.larger in terms
             elif isinstance(fact, DistinctFact):
                 discard = fact.left in terms or fact.right in terms
+            elif isinstance(fact, LinearFact):
+                discard = any(term in terms for term, _ in fact.coefficients)
             else:
                 discard = fact.subject in terms or fact.upper in terms or fact.offset in expired
             if discard:
@@ -2104,7 +2169,7 @@ class _BoundsValidator:
                 state.pop(binding, None)
         return _LoopTransfer(self._join_states(exits) if exits else None, breaks, continues)
 
-    def _linear_qualifier_terms(self, node, budget):
+    def _linear_qualifier_form(self, node, budget):
         """Select names inside bounded linear syntax, without proving a fact.
 
         Offsets and literal coefficients only select a vocabulary. Entry
@@ -2116,32 +2181,36 @@ class _BoundsValidator:
             return None
         budget[0] -= 1
         if isinstance(node, hir.Obligation):
-            return self._linear_qualifier_terms(node.value, budget)
+            return self._linear_qualifier_form(node.value, budget)
         if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
-            return self._linear_qualifier_terms(node.expr, budget)
+            return self._linear_qualifier_form(node.expr, budget)
         if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
-            return self._linear_qualifier_terms(node.items[0], budget)
+            return self._linear_qualifier_form(node.items[0], budget)
         if isinstance(node, hir.Integer):
-            return []
+            return node.value, {}
         if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.ArrayLength, hir.StringLength)):
             term = self._binding_id(node)
-            return None if term is None else [term]
+            return None if term is None else (0, {term: 1})
         if not isinstance(node, hir.FunctionCall) or not isinstance(node.func, hir.ExpressedIdentifier):
             return None
         op = node.integer_operation or (node.func.name if node.func.binding_id is None else None)
         if op not in {'__add__', '__sub__', '__mul__'} or len(node.pos_args) != 2:
             return None
-        left, right = [self._linear_qualifier_terms(arg, budget) for arg in node.pos_args]
-        if left is None or right is None or (op == '__mul__' and left and right):
+        left, right = [self._linear_qualifier_form(arg, budget) for arg in node.pos_args]
+        if left is None or right is None or (op == '__mul__' and left[1] and right[1]):
             return None
-        terms = list(dict.fromkeys([*left, *right]))
-        return terms if len(terms) <= 32 else None
+        if op == '__mul__':
+            scale, base = (left[0], right) if not left[1] else (right[0], left)
+            return scale * base[0], {term: scale * weight for term, weight in base[1].items() if scale * weight}
+        sign = 1 if op == '__add__' else -1
+        weights = _linear_key([*left[1].items(), *((term, sign * weight) for term, weight in right[1].items())])
+        return None if len(weights.coefficients) > 32 else (left[0] + sign * right[0], dict(weights.coefficients))
 
     def _mentioned_loop_pairs(self, body):
         cached = self.loop_qualifier_pairs.get(id(body))
         if cached is not None:
             return cached[1]
-        pairs, seen, pending = [], set(), [body]
+        pairs, linear, seen, pending = [], [], set(), [body]
         while pending and len(pairs) < 64:
             node = pending.pop()
             if id(node) in seen or isinstance(node, hir.FunctionLiteral):
@@ -2155,7 +2224,16 @@ class _BoundsValidator:
                     choices = ([left[0]], [right[0]])
                 else:
                     budget = [128]
-                    choices = tuple(self._linear_qualifier_terms(arg, budget) for arg in node.pos_args)
+                    shapes = tuple(self._linear_qualifier_form(arg, budget) for arg in node.pos_args)
+                    choices = tuple(None if shape is None else tuple(shape[1]) for shape in shapes)
+                    if all(shape is not None for shape in shapes):
+                        weights = _linear_key([*shapes[0][1].items(),
+                            *((term, -weight) for term, weight in shapes[1][1].items())])
+                        if 2 <= len(weights.coefficients) <= 32:
+                            for sign in (1, -1):
+                                key = _linear_key((term, sign * weight) for term, weight in weights.coefficients)
+                                if len(linear) < 32 and key not in linear:
+                                    linear.append(key)
                 if all(side is not None for side in choices):
                     for a in choices[0]:
                         for b in choices[1]:
@@ -2166,7 +2244,31 @@ class _BoundsValidator:
                                 pairs.append(pair)
             pending.extend(reversed(tuple(hir.children(node))))
         self.loop_qualifier_pairs[id(body)] = (body, pairs)
+        self.loop_linear_qualifiers[id(body)] = linear
         return pairs
+
+    def _seed_linear_qualifiers(self, state, roots):
+        result, selected = dict(state), set()
+        for root in roots:
+            self._mentioned_loop_pairs(root)
+            for key in self.loop_linear_qualifiers[id(root)]:
+                if len(selected) == 32:
+                    return _limit_linear_facts(result)
+                if key in selected:
+                    continue
+                selected.add(key)
+                changing = False
+                for term, _ in key.coefficients:
+                    binding_id = term if term >= 0 else -term - 1
+                    binding = self.registry.by_id.get(binding_id)
+                    owner = binding.route_root if binding is not None and binding.route_root is not None else binding_id
+                    changing |= owner in self.assigned
+                if not changing:
+                    continue
+                evidence = self._implied(state, key)
+                if evidence is not None and evidence is not _ANY_FACT and evidence.lower is not None:
+                    result[key] = result[key].intersect(evidence) if key in result else evidence
+        return _limit_linear_facts(result)
 
     def _analyze_while_loop(
         self,
@@ -2186,6 +2288,7 @@ class _BoundsValidator:
             if pair not in mentioned and pair[::-1] not in mentioned:
                 mentioned.append(pair)
         state = _seed_loop_relations(state, self.assigned, self.registry, mentioned)
+        state = self._seed_linear_qualifiers(state, (condition, body))
         head = dict(state)
         single_pass = loop_control.single_pass(body, self.loop_controls)
         # Each transfer includes evaluating the condition. Its writes are
@@ -2346,6 +2449,7 @@ class _BoundsValidator:
         would be invisible.
         """
         state = _seed_loop_relations(state, self.assigned, self.registry, self._mentioned_loop_pairs(body))
+        state = self._seed_linear_qualifiers(state, (body,))
         head = dict(state)
         for _ in range(8):
             if not self._spend_loop_search():
@@ -3244,10 +3348,14 @@ class _BoundsValidator:
         assigned = sb.member_path(node.target)
         if assigned is not None:
             root_id, path = assigned
-            self._drop_route_facts(state, root_id, path)
             route_id = sb.array_route_id(node.target, self.registry, mutable_selectors=True)
+            shift = self._assignment_shift(node)
+            shifted = (self._shifted_facts(state, route_id, shift)
+                       if route_id is not None and shift is not None and self._shift_is_exact(node, state, shift) else {})
+            self._drop_route_facts(state, root_id, path)
             if route_id is not None:
                 self._set_interval(state, route_id, value)  # the field now holds the assigned value
+                state.update(shifted)
         return None
 
     def _eval_type_value(self, node: hir.TypeValue, state: State, *, validate: bool) -> Interval | None:
@@ -4031,10 +4139,12 @@ class _BoundsValidator:
                 number = self._eval(node, dict(state), validate=False)
                 if number is None:
                     return None
+                term = self._binding_id(node)
+                if term is not None:
+                    return 0, {term: 1}, number
                 if number.lower is not None and number.lower == number.upper:
                     return number.lower, {}, number
-                term = self._binding_id(node)
-                return None if term is None else (0, {term: 1}, number)
+                return None
             if not isinstance(node, hir.FunctionCall) or not isinstance(node.func, hir.ExpressedIdentifier):
                 return None
             op = node.integer_operation or (node.func.name if node.func.binding_id is None else None)
@@ -4048,8 +4158,14 @@ class _BoundsValidator:
                 return None
             if op == '__mul__':
                 if a[1] and b[1]:
-                    return None
-                scale, base = (a[0], b) if not a[1] else (b[0], a)
+                    if a[2].lower is not None and a[2].lower == a[2].upper:
+                        scale, base = a[2].lower, b
+                    elif b[2].lower is not None and b[2].lower == b[2].upper:
+                        scale, base = b[2].lower, a
+                    else:
+                        return None
+                else:
+                    scale, base = (a[0], b) if not a[1] else (b[0], a)
                 return scale * base[0], {term: scale * coefficient for term, coefficient in base[1].items() if scale * coefficient}, number
             scale = 1 if op == '__add__' else -1
             coefficients = dict(a[1])
@@ -4073,6 +4189,9 @@ class _BoundsValidator:
             remaining = {term: sign * coefficient for term, coefficient in coefficients.items()}
             result = sign * (a[0] - b[0])
             capped = a[2].capped or b[2].capped
+            held = state.get(_linear_key(remaining.items()))
+            fallback = None if held is None or held.lower is None else result + held.lower
+            capped |= held is not None and held.capped
             # At most 32*32 pairs. Reusing the finite difference graph never
             # invents a relation between unrelated terms.
             for positive in remaining:
@@ -4097,10 +4216,10 @@ class _BoundsValidator:
                 interval = _known_interval(state, term, self.max_length) if term < 0 else self._binding_interval(state, term)
                 endpoint = interval.lower if coefficient > 0 else interval.upper
                 if endpoint is None:
-                    return Interval(None, None, capped=capped or interval.capped)
+                    return Interval(fallback, None, capped=capped or interval.capped)
                 result += coefficient * endpoint
                 capped |= interval.capped
-            return Interval(result, None, capped=capped)
+            return Interval(result if fallback is None else max(result, fallback), None, capped=capped)
 
         lo, negative_hi = lower(1), lower(-1)
         difference = Interval(lo.lower, None if negative_hi.lower is None else -negative_hi.lower,
@@ -4536,18 +4655,18 @@ class _BoundsValidator:
                             state[key] = Interval(needed if previous is None or previous.lower is None else max(previous.lower, needed), None)
         return state
 
-    def _assignment_shift(self, node: hir.Assign) -> int | None:
+    def _assignment_shift(self, node: hir.Assign | hir.MemberAssign) -> int | None:
         """The same affine update whether spelled `i += c` or `i = i + c`.
 
         A checked storage contract can wrap the latter in an obligation; it
         does not change the arithmetic or invalidate an otherwise known gap.
         """
         value = _strip_casts(node.value)
-        op = node.op
+        op = node.op if isinstance(node, hir.Assign) else '='
         if op == '=':
             if not (isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier)
                     and value.func.binding_id is None and value.func.name in ('__add__', '__sub__') and len(value.pos_args) == 2
-                    and self._binding_id(value.pos_args[0]) == node.target.binding_id):
+                    and self._binding_id(value.pos_args[0]) == self._binding_id(node.target)):
                 return None
             op = '+=' if value.func.name == '__add__' else '-='
             value = value.pos_args[1]
@@ -4558,14 +4677,16 @@ class _BoundsValidator:
             return None
         return constant.lower if op == '+=' else -constant.lower
 
-    def _shift_is_exact(self, node: hir.Assign, state: State, shift: int) -> bool:
+    def _shift_is_exact(self, node: hir.Assign | hir.MemberAssign, state: State, shift: int) -> bool:
         """Affine substitution requires mathematical addition, not rollover.
 
         Check the arithmetic's own width as well as its destination: an int8
         expression may wrap before its result is widened into an int64 slot.
         Abstract integers have no representation overflow at this boundary.
         """
-        subject = node.target.binding_id
+        subject = self._binding_id(node.target)
+        if subject is None:
+            return False
         before = self._binding_interval(state, subject)
         for key, interval in state.items():
             order = _decode_order_fact(key)
@@ -4584,7 +4705,7 @@ class _BoundsValidator:
                         capped=interval.capped or other.capped))
         mathematical = Interval(_add(before.lower, shift), _add(before.upper, shift))
         types = [node.target.type]
-        if node.op == '=':
+        if not isinstance(node, hir.Assign) or node.op == '=':
             types.append(_strip_casts(node.value).type)
         if all(self._fit_type(mathematical, ty.strip_refinement(type_)) is not None for type_ in types):
             return True
@@ -4648,6 +4769,11 @@ class _BoundsValidator:
         shifted: State = {}
         for key, interval in state.items():
             if interval.lower is None:
+                continue
+            if isinstance(key, LinearFact):
+                coefficient = dict(key.coefficients).get(term, 0)
+                if coefficient:
+                    shifted[key] = Interval(interval.lower + coefficient * shift, None, capped=interval.capped)
                 continue
             order = _decode_order_fact(key)
             if order is not None and term in order:
@@ -4751,6 +4877,11 @@ class _BoundsValidator:
         # one tuple per unrelated fact on every value/field transfer.
         updates: State = {}
         for key, interval in state.items():
+            if isinstance(key, LinearFact):
+                if any(term == source for term, _ in key.coefficients):
+                    updates[_linear_key((target if term == source else term, weight)
+                                        for term, weight in key.coefficients)] = interval
+                continue
             if isinstance(key, DistinctFact):
                 if source in (key.left, key.right):
                     updates[_distinct_key(*(target if term == source else term for term in (key.left, key.right)))] = interval
@@ -4775,7 +4906,7 @@ class _BoundsValidator:
                     # A length saved in a scalar is an order bound, not an
                     # array identity to which an IndexFact can refer.
                     updates[_order_key(index_fact[0], target)] = Interval(1, None)
-        state.update(updates)
+        _update_facts(state, updates)
 
     # ---- element facts: what holds of every element of an array ----
     #
@@ -4842,6 +4973,8 @@ class _BoundsValidator:
 
         if isinstance(key, int):
             return term(key)
+        if isinstance(key, LinearFact):
+            return _linear_key((term(value), weight) for value, weight in key.coefficients)
         if isinstance(key, DistinctFact):
             return _distinct_key(term(key.left), term(key.right))
         if isinstance(key, NonzeroFact):
@@ -4860,6 +4993,8 @@ class _BoundsValidator:
         for key, interval in state.items():
             if isinstance(key, int):
                 mentioned = key in (subject, length)
+            elif isinstance(key, LinearFact):
+                mentioned = any(term in (subject, length) for term, _ in key.coefficients)
             elif isinstance(key, DistinctFact):
                 mentioned = key.left in (subject, length) or key.right in (subject, length)
             elif isinstance(key, OrderFact):
@@ -4915,8 +5050,7 @@ class _BoundsValidator:
                     del state[self._rekey(key, route)]
         if empty:
             for route, facts in stored.items():
-                for key, interval in facts.items():
-                    state[self._rekey(key, route)] = interval
+                _update_facts(state, {self._rekey(key, route): interval for key, interval in facts.items()})
 
     def _read_element(self, state: State, array_id: int, target: int, loc: Span) -> None:
         """`let m = xs[k]`, `loop m in xs`: the element facts hold of `m` and its routes,
@@ -4928,16 +5062,14 @@ class _BoundsValidator:
         for route in self._element_routes(array_id):
             path = self.registry.route_paths[route][1:]
             subject = target if not path else self.registry.route_id(target, path, 'int64', loc)
-            for key, interval in self._facts_of(state, route).items():
-                state[self._rekey(key, subject)] = interval
+            _update_facts(state, {self._rekey(key, subject): interval for key, interval in self._facts_of(state, route).items()})
 
     def _copy_element_facts(self, state: State, source: int, target: int, loc: Span) -> None:
         """`let matches = capture`: the element facts of one array hold of the other."""
         for route in self._element_routes(source):
             path = self.registry.route_paths[route]
             mirrored = self.registry.route_id(target, path, 'int64', loc)
-            for key, interval in self._facts_of(state, route).items():
-                state[self._rekey(key, mirrored)] = interval
+            _update_facts(state, {self._rekey(key, mirrored): interval for key, interval in self._facts_of(state, route).items()})
 
     def _implied(self, state: State, key: FactKey) -> Interval | None:
         """The interval a state implies for a relational fact it does not hold:
@@ -4947,6 +5079,16 @@ class _BoundsValidator:
         loop keep `i <= src.length` from its entry through its exit."""
         if self._vacuous(state, key):
             return _ANY_FACT
+        if isinstance(key, LinearFact):
+            result, capped = 0, False
+            for term, weight in key.coefficients:
+                interval = _known_interval(state, term, self.max_length)
+                endpoint = interval.lower if weight > 0 else interval.upper
+                if endpoint is None:
+                    return None
+                result += weight * endpoint
+                capped |= interval.capped
+            return Interval(result, None, capped=capped)
         if isinstance(key, DistinctFact):
             # A join asks about a candidate already selected by another
             # path. It need not synthesize exclusions for every term pair.
@@ -4983,6 +5125,8 @@ class _BoundsValidator:
             terms = (key.smaller, key.larger)
         elif isinstance(key, DistinctFact):
             terms = (key.left, key.right)
+        elif isinstance(key, LinearFact):
+            terms = tuple(term for term, _ in key.coefficients)
         else:
             assert isinstance(key, RemainderFact)
             terms = (key.subject, key.upper, key.offset)
@@ -5713,7 +5857,7 @@ class _BoundsValidator:
                 joined[key] = _union_intervals(parts) if parts else states[0][key] if key in states[0] else next(state[key] for state in states if key in state)
         for binding_id in common:
             joined[binding_id] = _union_intervals([state[binding_id] for state in states])
-        return joined
+        return _limit_linear_facts(joined)
 
     def _narrow_states(self, head: State, candidate: State) -> State:
         """The head tightened by one more pass of the body (keys the pass lost are dropped)."""

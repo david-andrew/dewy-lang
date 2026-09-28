@@ -65,6 +65,7 @@ Checker:type = [
     loop_depth:bigint=0
     loop_search_budget:addr=0
     loop_qualifier_pairs:dict<addr array<facts.TermPair>>=[]
+    loop_linear_qualifiers:dict<addr array<facts.Linear>>=[]
     literal_fields:dict<addr set<addr>>=[]
     container_receivers:set<addr>=set[]
 ]
@@ -572,15 +573,11 @@ declare_value = (node:hir.Declare value:addr @current:facts.State @checker:Check
     install(@current node.binding_id value node.annotation node.loc @checker)
     if node.binding_id not in? checker.assigned {values.record_elements(@checker.element_intervals node.binding_id value checker.data.env)}
 }
-assign_value = (node:hir.Assign value:addr @current:facts.State @checker:Checker):>void => {
+# Scalar locals and named record fields share the same checked affine
+# substitution. Callers invalidate storage aliases before retaining this proof.
+shifted_assignment=(node:hir.Assign subject:addr shift:bigint? current:facts.State checker:Checker):>facts.State=>{
     let target=node_at(node.target checker)
-    $runtime_assert target is? hir.ExpressedIdentifier
-    if target.binding_id is? none return
-    let subject=target.binding_id
-    let interval=checker.data.snapshot.numbers.get(value)
-    let rebound=hir.Assign[node.loc node.value_type node.target node.op value]
-    let shift=terms.assignment_shift(rebound checker.data.env @checker.data.registry)
-    stores.forget_selected(@current subject @checker.data)
+    let value=node.value
     let shifted:facts.State=facts.State[]
     if shift isnt? none {
         # Preserve affine facts only if the update cannot roll over, including
@@ -603,6 +600,18 @@ assign_value = (node:hir.Assign value:addr @current:facts.State @checker:Checker
         }
         if exact {shifted=facts.shifted(current facts.Term[subject] shift)}
     }
+    return shifted
+}
+assign_value = (node:hir.Assign value:addr @current:facts.State @checker:Checker):>void => {
+    let target=node_at(node.target checker)
+    $runtime_assert target is? hir.ExpressedIdentifier
+    if target.binding_id is? none return
+    let subject=target.binding_id
+    let interval=checker.data.snapshot.numbers.get(value)
+    let rebound=hir.Assign[node.loc node.value_type node.target node.op value]
+    let shift=terms.assignment_shift(rebound checker.data.env @checker.data.registry)
+    stores.forget_selected(@current subject @checker.data)
+    let shifted=shifted_assignment(rebound subject shift current checker)
     if node.op in? ['+=' '-='] {interval=values.binary(if node.op =? '+=' '__add__' else '__sub__' facts.lookup(current facts.value(facts.Term[subject])) interval target.value_type checker.data.env.types)}
     else if node.op not=? '=' {interval=none}
     stores.forget(@current subject @checker.data)
@@ -859,9 +868,13 @@ evaluate_inner = (id:addr @state:facts.State @checker:Checker validate:bool):>vo
         let root=node_at(access.root checker)
         let path=bindings.member_fields(access checker.data.env.nodes)
         if root is? hir.ExpressedIdentifier and root.binding_id isnt? none and path isnt? none {
-            stores.forget(@state root.binding_id @checker.data prefix=path)
             let route=bindings.route_id(@checker.data.registry root.binding_id path target.value_type target.loc)
+            let assignment=hir.Assign[node.loc node.value_type node.target '=' node.value]
+            let shift=terms.assignment_shift(assignment checker.data.env @checker.data.registry)
+            let shifted=shifted_assignment(assignment route shift state checker)
+            stores.forget(@state root.binding_id @checker.data prefix=path)
             install(@state route node.value none node.loc @checker)
+            loop entry in shifted.values {facts.put(@state entry.fact entry.interval)}
         }
     }
     if node is? hir.IndexAssign {
@@ -1145,6 +1158,7 @@ mentioned_loop_pairs=(body:addr @checker:Checker):>array<facts.TermPair>=>{
     let cached=checker.loop_qualifier_pairs.get(body)
     if cached isnt? none return cached
     let pairs:array<facts.TermPair>=[] let pending:array<addr>=[body] let seen:set<addr>=set[]
+    let linear:array<facts.Linear>=[]
     loop pending.length>?0 and pairs.length<?64 {
         let id=pending.pop
         if id in? seen continue
@@ -1159,14 +1173,21 @@ mentioned_loop_pairs=(body:addr @checker:Checker):>array<facts.TermPair>=>{
                 loop_qualifiers.add_pairs(@pairs [left.term] [right.term])
             } else {
                 let budget:addr=128
-                let a=loop_qualifiers.linear_terms(node.pos_args[0] checker.data.env @checker.data.registry @budget)
-                let b=loop_qualifiers.linear_terms(node.pos_args[1] checker.data.env @checker.data.registry @budget)
-                if a isnt? none and b isnt? none {loop_qualifiers.add_pairs(@pairs a b)}
+                let a=loop_qualifiers.linear_form(node.pos_args[0] checker.data.env @checker.data.registry @budget)
+                let b=loop_qualifiers.linear_form(node.pos_args[1] checker.data.env @checker.data.registry @budget)
+                if a isnt? none and b isnt? none {
+                    let left_terms:array<facts.Term>=[] let right_terms:array<facts.Term>=[]
+                    loop item in a.coefficients {left_terms.push(item.term)}
+                    loop item in b.coefficients {right_terms.push(item.term)}
+                    loop_qualifiers.add_pairs(@pairs left_terms right_terms)
+                    loop_qualifiers.add_linear(@linear a b)
+                }
             }
         }
         hir.push_children_reversed(node @pending)
     }
     checker.loop_qualifier_pairs[body]=pairs
+    checker.loop_linear_qualifiers[body]=linear
     return pairs
 }
 loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:bool word_candidates:bool=true):>Transfer => {
@@ -1225,6 +1246,16 @@ search_loop_body = (arm:hir.LoopArm state:facts.State @checker:Checker validate:
         if not found {mentioned.push(pair)}
     }
     incoming=facts.seed_loop_relations(incoming changing mentioned)
+    let selected:array<facts.Linear>=[]
+    loop source in [arm.condition arm.body] {
+        loop candidate in checker.loop_linear_qualifiers.get(source []) {
+            if selected.length>=?32 break
+            let found=false
+            loop known in selected {if facts.same(candidate known) {found=true break}}
+            if not found {selected.push(candidate)}
+        }
+    }
+    if selected.length>?0 {incoming=loop_qualifiers.seed(incoming selected changing checker.data.relations.facts)}
     let head=incoming
     # Widening prevents an accumulator from retaining the entry interval
     # forever. Narrowing then recovers bounds imposed by a while guard.

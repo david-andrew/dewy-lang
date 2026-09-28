@@ -3,23 +3,25 @@ import p"../bindings.dewy" as bindings
 import p"value_bounds.dewy" as values
 import p"term_facts.dewy" as terms
 import p"fact_state.dewy" as facts
+import p"intervals.dewy" as ranges
 
 # Vocabulary selection, not a theorem: names under addition, subtraction and
 # literal scaling may be useful difference qualifiers. Entry intervals must
 # establish each offered bound and every advancing edge must preserve it.
 # Even a wrapping expression cannot bypass that proof. Unknown/nonlinear
 # syntax and exhausted discovery budgets offer no additional names.
-linear_terms=(id:addr env:values.Environment @registry:bindings.Registry @budget:addr):>array<facts.Term> | none =>{
+Shape:type=[constant:bigint coefficients:array<facts.Coefficient>]
+linear_form=(id:addr env:values.Environment @registry:bindings.Registry @budget:addr):>Shape? =>{
     if budget=?0 return none
     budget-=1
     let node=hir.node_at(env.nodes id)
-    if node is? hir.Obligation return linear_terms(node.value env @registry @budget)
-    if node is? hir.ValueCast|hir.RepresentationCast return linear_terms(node.expr env @registry @budget)
-    if node is? hir.Block and not node.scoped and node.items.length=?1 return linear_terms(node.items[0] env @registry @budget)
-    if node is? hir.Integer return []
+    if node is? hir.Obligation return linear_form(node.value env @registry @budget)
+    if node is? hir.ValueCast|hir.RepresentationCast return linear_form(node.expr env @registry @budget)
+    if node is? hir.Block and not node.scoped and node.items.length=?1 return linear_form(node.items[0] env @registry @budget)
+    if node is? hir.Integer return Shape[node.value []]
     if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.ArrayLength|hir.StringLength {
         let term=terms.binding_term(id env @registry)
-        return if term is? none none else [term]
+        return if term is? none none else Shape[0 [facts.Coefficient[term 1]]]
     }
     if node isnt? hir.FunctionCall or node.pos_args.length not=?2 return none
     let function=hir.node_at(env.nodes node.func)
@@ -27,17 +29,23 @@ linear_terms=(id:addr env:values.Environment @registry:bindings.Registry @budget
     if node.integer_operation is? none and function.binding_id isnt? none and not bindings.builtin_binding(env.registry function.binding_id) return none
     let operation=if node.integer_operation is? none function.name else node.integer_operation
     if operation not in? ['__add__' '__sub__' '__mul__'] return none
-    let left=linear_terms(node.pos_args[0] env @registry @budget)
-    let right=linear_terms(node.pos_args[1] env @registry @budget)
+    let left=linear_form(node.pos_args[0] env @registry @budget)
+    let right=linear_form(node.pos_args[1] env @registry @budget)
     if left is? none or right is? none return none
-    if operation=?'__mul__' and left.length>?0 and right.length>?0 return none
-    loop term in right {
-        let found=false
-        loop known in left {if facts.same_term(term known) {found=true break}}
-        if not found {left.push(term)}
-        if left.length>?32 return none
+    let result:array<facts.Coefficient>=[]
+    if operation=?'__mul__' {
+        if left.coefficients.length>?0 and right.coefficients.length>?0 return none
+        let scale=if left.coefficients.length=?0 left.constant else right.constant
+        let base=if left.coefficients.length=?0 right else left
+        loop item in base.coefficients {if scale*item.weight not=?0 {result.push(facts.Coefficient[item.term scale*item.weight])}}
+        return Shape[scale*base.constant result]
     }
-    return left
+    let sign:bigint=if operation=?'__add__' 1 else -1
+    let merged=left.coefficients
+    loop item in right.coefficients {facts.combine_coefficient(@merged item.term sign*item.weight)}
+    loop item in merged {if item.weight not=?0 {result.push(item)}}
+    if result.length>?32 return none
+    return Shape[left.constant+sign*right.constant result]
 }
 
 add_pairs=(@pairs:array<facts.TermPair> left:array<facts.Term> right:array<facts.Term>):>void=>{
@@ -52,4 +60,36 @@ add_pairs=(@pairs:array<facts.TermPair> left:array<facts.Term> right:array<facts
             if not found {pairs.push(facts.TermPair[a b])}
         }
     }
+}
+
+# A separate finite vocabulary of weighted sums handles invariants such as
+# `2*i <= j` when i advances once and j twice. These are candidates only.
+add_linear=(@selected:array<facts.Linear> left:Shape right:Shape):>void=>{
+    let merged=left.coefficients
+    loop item in right.coefficients {facts.combine_coefficient(@merged item.term (-item.weight))}
+    let forward=facts.linear(merged)
+    if forward.coefficients.length<?2 or forward.coefficients.length>?32 return
+    let directions:array<bigint>=[1 (-1)]
+    loop sign in directions {
+        if selected.length>=?32 return
+        let items:array<facts.Coefficient>=[]
+        loop item in forward.coefficients {items.push(facts.Coefficient[item.term sign*item.weight])}
+        let candidate=facts.linear(items)
+        let found=false
+        loop known in selected {if facts.same(candidate known) {found=true break}}
+        if not found {selected.push(candidate)}
+    }
+}
+seed=(state:facts.State selected:array<facts.Linear> changing:set<addr> context:facts.Context):>facts.State=>{
+    let result=state
+    loop candidate in selected {
+        let changed=false
+        loop item in candidate.coefficients {if item.term.binding_id in? changing {changed=true break}}
+        if not changed continue
+        let evidence=facts.implied(state candidate context)
+        if evidence is? none or evidence is? facts.Vacuous or evidence.lower is? none continue
+        let previous=facts.lookup(result candidate)
+        facts.put(@result candidate if previous is? none evidence else ranges.intersect(previous evidence))
+    }
+    return result
 }

@@ -263,9 +263,8 @@ assignment_shift = (node:hir.Assign env:values.Environment @registry:bindings.Re
         if function isnt? hir.ExpressedIdentifier or (function.name not=? '__add__' and function.name not=? '__sub__') return none
         if function.binding_id isnt? none and not bindings.builtin_binding(registry function.binding_id) return none
         let left = binding_term(call.pos_args[0] env @registry)
-        let target = hir.node_at(env.nodes node.target)
-        $runtime_assert target is? hir.ExpressedIdentifier
-        if left is? none or left.projection not=? 'value' or left.binding_id not=? target.binding_id return none
+        let target = binding_term(node.target env @registry)
+        if left is? none or target is? none or target.projection not=? 'value' or not facts.same_term(left target) return none
         op = if function.name =? '__add__' '+=' else '-='
         value = call.pos_args[1]
     }

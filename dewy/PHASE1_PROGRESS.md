@@ -36,6 +36,27 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): a separate finite weighted-sum domain now carries
+invariants such as `2*i<=j` through unequal counter steps. It shares entry,
+join, widening, affine-update, alias invalidation, scope retirement, snapshot
+and array-length transfer rules with the existing fact store. Scalar locals
+and named record fields use one checked affine rule, including the arithmetic
+width before conversion to the destination. Normalized queries retain named
+terms even when their current interval is exact. Arbitrary-precision weights
+participate in structural identity; native hash collisions compare complete
+coefficients. No source assumption is introduced by candidate discovery.
+
+The source vocabulary selects at most 32 weighted rows per loop. Each state
+retains at most 128 including derived copies: otherwise aliases of a many-term
+fact can generate exponentially many combinations. Exhaustion contributes no
+proof, and expired rows release capacity. Hosted/native fact-state comparisons
+cover joins, widening, invalidation, length changes, vacuity and collisions;
+paired x86-64/C tests cover counters, snapshots, record fields and wrapping
+rejection. Focused hosted runs pass 45 field/affine checks, 72 surrounding
+linear/snapshot/route checks, 32 state/convergence checks, and 16 weighted/budget
+checks. A fresh complete bootstrap/parity checkpoint is still required for
+this batch; Phase 1 remains open for the other checklist items.
+
 Checkpoint (2026-09-28): bounded linear source queries now select difference
 candidates for loop checking. For example, `2*lower<=?2*upper` selects the
 `lower`/`upper` pair even when neither variable has an exact initial value in
@@ -62,8 +83,8 @@ classes remain conservative.
 
 Integration at `4361396c`: three native generations reached an identical fixed
 point, with x86-64/C pipeline execution checks. Generations 2/3 took 49/52 seconds
-under concurrent checking. The complete 326-case parity manifest and broad
-hosted selection are running separately; the named-projection changes postdate
+under concurrent checking. All 326 parity cases passed. The broad hosted selection passed 4,715 tests
+with 13 skips in 1,874.04 seconds; the named-projection changes postdate
 that frozen source checkpoint.
 
 Checkpoint (2026-09-27): hosted tagged locals now transfer their owned

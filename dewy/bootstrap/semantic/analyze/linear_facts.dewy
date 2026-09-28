@@ -11,14 +11,8 @@ import p"relations.dewy" as relations
 # generate assumptions or loop candidates. Every arithmetic intermediate must
 # fit its actual word; the form describes mathematical, not modular, arithmetic.
 # Unknown operations, changed identities and exhausted budgets stay unknown.
-Coefficient:type=[term:facts.Term weight:bigint]
+Coefficient:type=facts.Coefficient
 Form:type=[constant:bigint coefficients:array<Coefficient> number:ranges.Interval]
-combine=(@items:array<Coefficient> term:facts.Term weight:bigint):>void=>{
-    loop index in 0.. and index<?items.length {
-        if facts.same_term(items[index].term term) {items[index].weight+=weight return}
-    }
-    items.push(Coefficient[term weight])
-}
 form=(id:addr snapshot:observations.Snapshot env:values.Environment @budget:addr):>Form?=>{
     if budget=?0 return none
     budget-=1
@@ -33,10 +27,10 @@ form=(id:addr snapshot:observations.Snapshot env:values.Environment @budget:addr
     if observations.simple_operand(id env.nodes) {
         let number=snapshot.numbers.get(id)
         if number is? none return none
-        if number.lower isnt? none and ranges.same_endpoint(number.lower number.upper) return Form[number.lower [] number]
         let term=snapshot.terms.get(id)
-        if term is? none return none
-        return Form[term.shift [Coefficient[term.term 1]] number]
+        if term isnt? none return Form[term.shift [Coefficient[term.term 1]] number]
+        if number.lower isnt? none and ranges.same_endpoint(number.lower number.upper) return Form[number.lower [] number]
+        return none
     }
     if node isnt? hir.FunctionCall or node.pos_args.length not=?2 return none
     let function=hir.node_at(env.nodes node.func)
@@ -51,15 +45,19 @@ form=(id:addr snapshot:observations.Snapshot env:values.Environment @budget:addr
     if ranges.fits(number values.result_width(node.value_type env.types)) is? none return none
     let result:array<Coefficient>=[]
     if operation=?'__mul__' {
-        if a.coefficients.length>?0 and b.coefficients.length>?0 return none
-        let scale=if a.coefficients.length=?0 a.constant else b.constant
-        let base=if a.coefficients.length=?0 b else a
+        let left_constant=a.coefficients.length=?0 or (a.number.lower isnt? none and ranges.same_endpoint(a.number.lower a.number.upper))
+        let right_constant=b.coefficients.length=?0 or (b.number.lower isnt? none and ranges.same_endpoint(b.number.lower b.number.upper))
+        if not left_constant and not right_constant return none
+        let constant=if a.coefficients.length=?0 or (b.coefficients.length>?0 and left_constant) a else b
+        let base=if a.coefficients.length=?0 or (b.coefficients.length>?0 and left_constant) b else a
+        let scale=if constant.coefficients.length=?0 constant.constant else constant.number.lower
+        $runtime_assert scale isnt? none
         loop entry in base.coefficients {if scale*entry.weight not=?0 {result.push(Coefficient[entry.term scale*entry.weight])}}
         return Form[scale*base.constant result number]
     }
     let scale:bigint=if operation=?'__add__' 1 else -1
     let merged=a.coefficients
-    loop entry in b.coefficients {combine(@merged entry.term scale*entry.weight)}
+    loop entry in b.coefficients {facts.combine_coefficient(@merged entry.term scale*entry.weight)}
     loop entry in merged {if entry.weight not=?0 {result.push(entry)}}
     if result.length>?32 return none
     return Form[a.constant+scale*b.constant result number]
@@ -74,6 +72,9 @@ lower=(value:Form sign:bigint state:facts.State context:relations.Context):>rang
     loop i in 0.. and i<?remaining.length {remaining[i].weight*=sign}
     let result=sign*value.constant
     let capped=value.number.capped
+    let held=facts.lookup(state facts.linear(remaining))
+    let fallback=if held is? none or held.lower is? none none else result+held.lower
+    capped=capped or (held isnt? none and held.capped)
     loop i in 0.. and i<?remaining.length {
         if remaining[i].weight<=?0 continue
         loop j in 0.. and j<?remaining.length {
@@ -92,11 +93,11 @@ lower=(value:Form sign:bigint state:facts.State context:relations.Context):>rang
         if entry.weight=?0 continue
         let interval=relations.interval_of(entry.term state context)
         let endpoint=if entry.weight>?0 interval.lower else interval.upper
-        if endpoint is? none return ranges.Interval[none none capped or interval.capped]
+        if endpoint is? none return ranges.Interval[fallback none capped or interval.capped]
         result+=entry.weight*endpoint
         capped=capped or interval.capped
     }
-    return ranges.Interval[result none capped]
+    return ranges.Interval[if fallback is? none or result>?fallback result else fallback none capped]
 }
 decide=(op:propositions.Operator left:addr right:addr state:facts.State snapshot:observations.Snapshot env:values.Environment context:relations.Context):>bool?=>{
     let budget:addr=128
@@ -104,7 +105,7 @@ decide=(op:propositions.Operator left:addr right:addr state:facts.State snapshot
     let b=form(right snapshot env @budget)
     if a is? none or b is? none return none
     let merged=a.coefficients
-    loop entry in b.coefficients {combine(@merged entry.term (-entry.weight))}
+    loop entry in b.coefficients {facts.combine_coefficient(@merged entry.term (-entry.weight))}
     let coefficients:array<Coefficient>=[]
     loop entry in merged {if entry.weight not=?0 {coefficients.push(entry)}}
     if coefficients.length>?32 return none

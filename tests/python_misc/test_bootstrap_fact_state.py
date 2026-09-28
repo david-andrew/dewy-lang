@@ -24,6 +24,10 @@ def fact(key):
 
     if isinstance(key, int):
         return f'facts.value({term(key)})', f'v:{name(key)}'
+    if isinstance(key, bounds.LinearFact):
+        items = ' '.join(f'facts.Coefficient[{term(value)} ({weight})]' for value, weight in key.coefficients)
+        label = ','.join(f'{weight}*{name(value)}' for value, weight in key.coefficients)
+        return f'facts.linear([{items}])', f'l:{label}'
     if isinstance(key, bounds.DistinctFact):
         return f'facts.distinct({term(key.left)} {term(key.right)})', f'd:{name(key.left)}:{name(key.right)}'
     remainder = bounds._decode_remainder_fact(key)
@@ -79,6 +83,16 @@ def test_native_fact_state_matches_hosted(tmp_path):
                        bounds._index_fact_key(1, large): interval(None, None),
                        bounds._nonzero_key(1): interval(None, None)})
     states.extend([
+        {1: interval(0, 5), 3: interval(0, 10),
+         bounds._linear_key([(1, -2), (3, 1)]): interval(0, None)},
+        {1: interval(2, 7), 3: interval(4, 14),
+         bounds._linear_key([(1, -2), (3, 1)]): interval(-1, None, capped=True)},
+        {length(2): interval(1, 4),
+         bounds._linear_key([(1, -2), (length(2), 1)]): interval(0, None)},
+        {bounds._linear_key([(1, 1), (3, -1)]): interval(0, None),
+         bounds._linear_key([(1, 2**80 + 1), (3, -1)]): interval(7, None)},
+        {length(2): interval(0, 0),
+         bounds._linear_key([(element, 2), (3, -1)]): interval(1, None)},
         {length(2): interval(1, 5), element: interval(1, 10),
          length(element): interval(2, 4), order(1, element): interval(1, None),
          bounds._distinct_key(1, element): interval.exact(1)},

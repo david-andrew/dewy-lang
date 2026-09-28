@@ -22,11 +22,13 @@ Nonzero = type of Fact & [subject:addr]
 Order = type of Fact & [smaller:Term larger:Term]
 Distinct = type of Fact & [left:Term right:Term]
 Remainder = type of Fact & [subject:Term upper:Term offset:addr]
+Coefficient:type=[term:Term weight:bigint]
+Linear = type of Fact & [coefficients:array<Coefficient>]
 Entry:type = const [fact:Fact interval:ranges.Interval]
 # Entries with the same hash form an intrusive chain through `next`
 # (position of the previous entry with that hash, or -1), starting at
 # `heads`. Inserting never copies a bucket array; positions are internal.
-State:type = [values:array<Entry>=[] heads:dict<uint64 int64>=[] next:array<int64>=[]]
+State:type = [values:array<Entry>=[] heads:dict<uint64 int64>=[] next:array<int64>=[] linear_count:addr=0]
 Vacuous = type of []
 Evidence:type = ranges.Interval | Vacuous | none
 Context:type = [
@@ -55,7 +57,38 @@ distinct = (left:Term right:Term):>Distinct => {
     return Distinct[mix(mix(6 term_hash(left)) term_hash(right)) left right]
 }
 
+combine_coefficient=(@items:array<Coefficient> term:Term weight:bigint):>void=>{
+    loop i in 0.. and i<?items.length {
+        if same_term(items[i].term term) {items[i].weight+=weight return}
+    }
+    items.push(Coefficient[term weight])
+}
+# Coefficients are unique and nonzero. The commutative hash permits source
+# order to differ. Hash only the bounded term identities; structural equality
+# checks every arbitrary-precision weight. Selected rows with the same terms
+# deliberately share a bucket, avoiding bigint conversion/allocation to hash.
+linear=(items:array<Coefficient>):>Linear=>{
+    let merged:array<Coefficient>=[]
+    loop item in items {combine_coefficient(@merged item.term item.weight)}
+    let kept:array<Coefficient>=[]
+    let hash:uint64=7
+    loop item in merged {
+        if item.weight=?0 continue
+        hash=hash xor term_hash(item.term)
+        kept.push(item)
+    }
+    return Linear[hash kept]
+}
 same = (left:Fact right:Fact):>bool => {
+    if left is? Linear and right is? Linear {
+        if left.coefficients.length not=?right.coefficients.length return false
+        loop a in left.coefficients {
+            let found=false
+            loop b in right.coefficients {if same_term(a.term b.term) and a.weight=?b.weight {found=true break}}
+            if not found return false
+        }
+        return true
+    }
     if left is? Value and right is? Value return same_term(left.term right.term)
     if left is? Index and right is? Index return left.index =? right.index and left.sequence =? right.sequence
     if left is? Nonzero and right is? Nonzero return left.subject =? right.subject
@@ -65,6 +98,11 @@ same = (left:Fact right:Fact):>bool => {
     return false
 }
 describe = (fact:Fact):>string => {
+    if fact is? Linear {
+        let parts:array<string>=[]
+        loop item in fact.coefficients {parts.push("{item.weight}*{term_key(item.term)}")}
+        return 'l:{parts.join(",")}'
+    }
     if fact is? Value return "v:{term_key(fact.term)}"
     if fact is? Index return "i:{fact.index}:{fact.sequence}"
     if fact is? Nonzero return "n:{fact.subject}"
@@ -111,6 +149,13 @@ put = (@state:State fact:Fact interval:ranges.Interval):>void => {
         state.values[position]=Entry[fact interval]
         return
     }
+    # Source candidates are finite, but copying each term into new aliases
+    # can otherwise form exponentially many renamed weighted rows. Losing
+    # precision at this budget stays unknown, never an assumed theorem.
+    if fact is? Linear {
+        if state.linear_count>=?128 return
+        state.linear_count+=1
+    }
     state.next.push(state.heads.get(fact.hash default=(-1)))
     state.heads[fact.hash]=state.values.length
     state.values.push(Entry[fact interval])
@@ -139,6 +184,10 @@ remove = (@state:State fact:Fact):>void => {
     let position=position_of(state fact)
     if position <? 0 return
     $runtime_assert position <? state.values.length and position <? state.next.length
+    if state.values[position].fact is? Linear {
+        $runtime_assert state.linear_count>?0
+        state.linear_count-=1
+    }
     unlink(@state fact.hash position)
     $runtime_assert state.values.length >? 0 and state.next.length >? 0
     let moved_from=state.values.length-1
@@ -174,6 +223,10 @@ known = (state:State term:Term context:Context):>ranges.Interval? => {
 # remove relations to the sequence's length. Element writes may leave length
 # alone. The caller selects the changed term from the storage route.
 mentions = (fact:Fact term:Term):>bool => {
+    if fact is? Linear {
+        loop item in fact.coefficients {if same_term(item.term term) return true}
+        return false
+    }
     if fact is? Value return same_term(fact.term term)
     if fact is? Nonzero return term.projection =? 'value' and fact.subject =? term.binding_id
     if fact is? Index {
@@ -195,6 +248,10 @@ forget = (@state:State term:Term):>void => {
 # Expire many private bindings in one scan. Calling forget once per field
 # visits unrelated facts repeatedly and can itself become quadratic.
 mentions_any = (fact:Fact bindings:set<addr>):>bool => {
+    if fact is? Linear {
+        loop item in fact.coefficients {if item.term.binding_id in? bindings return true}
+        return false
+    }
     if fact is? Value return fact.term.binding_id in? bindings
     if fact is? Nonzero return fact.subject in? bindings
     if fact is? Index return fact.index in? bindings or fact.sequence in? bindings
@@ -232,6 +289,15 @@ change_length = (@state:State sequence:addr change:ranges.Interval):>void => {
             if change.lower not=?0 or change.upper not=?0 {removed.push(fact)}
             continue
         }
+        if fact is? Linear {
+            loop item in fact.coefficients {
+                if not same_term(item.term term) continue
+                let endpoint=if item.weight>?0 change.lower else change.upper
+                if entry.interval.lower is? none or endpoint is? none {removed.push(fact)}
+                else {changed.push(Entry[fact ranges.Interval[entry.interval.lower+item.weight*endpoint none entry.interval.capped or change.capped]])}
+            }
+            continue
+        }
         let subject:Term? = none
         let upper:Term? = none
         if fact is? Order { subject = fact.smaller upper = fact.larger }
@@ -259,6 +325,10 @@ empty_element = (state:State subject:addr context:Context):>bool => {
     return length isnt? none and ranges.same_bounds(length ranges.exact(0))
 }
 vacuous = (state:State fact:Fact context:Context):>bool => {
+    if fact is? Linear {
+        loop item in fact.coefficients {if empty_element(state item.term.binding_id context) return true}
+        return false
+    }
     # All element endpoints, including length projections, are universally
     # quantified. A missing element makes its complete predicate vacuous.
     if fact is? Value return empty_element(state fact.term.binding_id context)
@@ -271,6 +341,17 @@ vacuous = (state:State fact:Fact context:Context):>bool => {
 }
 implied = (state:State fact:Fact context:Context):>Evidence => {
     if vacuous(state fact context) return Vacuous
+    if fact is? Linear {
+        let lower:bigint=0 let capped=false
+        loop item in fact.coefficients {
+            let interval=known(state item.term context)
+            if interval is? none return none
+            let endpoint=if item.weight>?0 interval.lower else interval.upper
+            if endpoint is? none return none
+            lower+=item.weight*endpoint capped=capped or interval.capped
+        }
+        return ranges.Interval[lower none capped]
+    }
     if fact is? Distinct {
         # Only decide the candidate a peer path already carries. This keeps
         # join inference finite without enumerating all possible exclusions.
@@ -471,6 +552,12 @@ shifted = (state:State term:Term shift:bigint):>State => {
         if entry.interval.lower is? none continue
         let fact = entry.fact
         let eligible:bool = false
+        if fact is? Linear {
+            loop item in fact.coefficients {
+                if same_term(item.term term) {put(@result fact ranges.Interval[entry.interval.lower+item.weight*shift none entry.interval.capped])}
+            }
+            continue
+        }
         if fact is? Order {
             let smaller=same_term(fact.smaller term)
             let larger=same_term(fact.larger term)

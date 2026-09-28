@@ -215,7 +215,12 @@ copy_relational = (@state:facts.State source:facts.Term target:facts.Term):>void
     loop entry in state.values {
         let fact = entry.fact
         if not facts.mentions(fact source) continue
-        if fact is? facts.Order {
+        if fact is? facts.Linear {
+            let items:array<facts.Coefficient>=[]
+            loop item in fact.coefficients {items.push(facts.Coefficient[replace_term(item.term source target) item.weight])}
+            entries.push(facts.Entry[facts.linear(items) entry.interval])
+        }
+        else if fact is? facts.Order {
             entries.push(facts.Entry[facts.order(replace_term(fact.smaller source target) replace_term(fact.larger source target)) entry.interval])
         }
         else if fact is? facts.Distinct {
@@ -258,6 +263,10 @@ subject_of = (fact:facts.Fact):>facts.Term? => {
 map_term = (term:facts.Term source:addr target:addr):>facts.Term =>
     if term.binding_id =? source facts.Term[target term.projection] else term
 mentions_binding = (fact:facts.Fact binding:addr):>bool => {
+    if fact is? facts.Linear {
+        loop item in fact.coefficients {if item.term.binding_id=?binding return true}
+        return false
+    }
     if fact is? facts.Value return fact.term.binding_id =? binding
     if fact is? facts.Distinct return fact.left.binding_id =? binding or fact.right.binding_id =? binding
     if fact is? facts.Order return fact.smaller.binding_id =? binding or fact.larger.binding_id =? binding
@@ -267,6 +276,11 @@ mentions_binding = (fact:facts.Fact binding:addr):>bool => {
     return fact.index =? binding or fact.sequence =? binding
 }
 map_binding = (fact:facts.Fact source:addr target:addr):>facts.Fact => {
+    if fact is? facts.Linear {
+        let items:array<facts.Coefficient>=[]
+        loop item in fact.coefficients {items.push(facts.Coefficient[map_term(item.term source target) item.weight])}
+        return facts.linear(items)
+    }
     if fact is? facts.Value return facts.value(map_term(fact.term source target))
     if fact is? facts.Distinct return facts.distinct(map_term(fact.left source target) map_term(fact.right source target))
     if fact is? facts.Order return facts.order(map_term(fact.smaller source target) map_term(fact.larger source target))
