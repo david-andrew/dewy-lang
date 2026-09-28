@@ -4656,3 +4656,19 @@ when the source route and the target route have different roots (the old
 field contents are released before the write, so a source inside the
 written record keeps the owned copy). Compiler-wide copies 2,448 to 2,127
 (cells 715 to 427). Second generation passes the bundle 98/4.
+
+### Phase 1 copy-budget ratchet (2026-09-27)
+
+The `450bd71a` native pair reached a three-generation fixed point. Its
+inventory of bootstrap source at `e4263c30` (the same native implementation,
+with a hosted layout correction) reports **2,381 static sites** over
+**52,867 physical lines**, or **45.038 sites/KLOC**: 1,503 records, 552 arrays,
+and 326 cells. Collected with `python tools/copy_report.py --compiler
+<native-pair>/dewy --scope dewy/bootstrap --json dewy/bootstrap/main.dewy`
+from the source checkpoint above.
+
+The CI command gate is reduced from 4,500 sites / 100 sites per KLOC to
+**3,000 / 60**, leaving about 25% headroom for ongoing implementation while
+protecting the current gains. This is a source-site budget, not a runtime
+allocation count or timing claim. Source coverage has grown since the older
+measurements above; compare counts with their recorded source checkpoint.
