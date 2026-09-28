@@ -6351,3 +6351,16 @@ hosted run (4,551 passed, 13 skipped). Its complete copy inventory is 4,306 site
 across 53,302 lines (80.785/KLOC), within the corrected 4,500/85 gate. These results
 complement its three-generation fixed point and fresh hosted-built driver checks;
 they do not yet include the allocator exit and destination-cell follow-ups.
+
+## Reachable strict-copy adoption (2026-09-28)
+
+Five further modules enable `$explicit_copies`: parser CLI, cache bytes, source
+views, type names and timing. The complete compiler entry point passes native
+and hosted analysis with these directives, including reachable exports. Adoption
+now covers 31 physical modules. Bounded Span/Alternative stores remain reported;
+no new explicit copies or reporting exemptions were added. The namespace
+lookup's independent generic-alias snapshot remains a separate open site.
+
+The `a4c05062` destination-cell snapshot reached an identical three-generation
+native fixed point (generation 3: 55 seconds under concurrent analysis). Its
+broader parity checkpoint is separate from these directive-only changes.
