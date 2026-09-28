@@ -1,0 +1,9 @@
+# An optional record handle must select none before packing a wider cell.
+A=type of [value:int64]
+B=type of [value:int64]
+read=(item:A|B|none):>int64=>{if item is? none return 42 return item.value}
+forward=(item:A?):>int64=>read(item)
+main=():>int64=>{
+    if forward(none) not=?42 return 1
+    return forward(A[42])
+}

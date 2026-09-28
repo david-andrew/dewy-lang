@@ -2220,7 +2220,9 @@ cell_copy_body = (value:addr type:addr node:hir.AST @state:State):>addr => {
 }
 # `shared`: a record payload read from a container slot may share the block
 # (a refcount bump on a headed block) rather than copy it, as `d[k]` does.
-cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owned:bool=false shared:bool=false):>addr => {
+# `borrowed_cell`: a proven view supplies a frame slot and retains the payload
+# owner. Selection of none and dynamic record members is unchanged.
+cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owned:bool=false shared:bool=false borrowed_cell:addr?=none):>addr => {
     let members=cell_members(expected @state)
     $runtime_assert members isnt? none
     if cell_members(actual @state) isnt? none return read_value(value actual expected node @state)
@@ -2229,14 +2231,14 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owne
         let prefix:array<addr>=[]
         let source=snapshot(value @prefix @state)
         let output=types.primitive('int64' @state.type_nodes)
-        let present=cell_pack(source present_record(actual @state) expected node @state owned=owned shared=shared)
+        let present=cell_pack(source present_record(actual @state) expected node @state owned=owned shared=shared borrowed_cell=borrowed_cell)
         let absent=types.primitive('none' @state.type_nodes)
         let has_none=false
         loop member in members {if types.is_primitive(types.node_at(state.type_nodes types.unfold(member state.type_nodes)) 'none') {has_none=true}}
         if not has_none {prefix.push(present)}
         else {
             let arm=put(hir.IfArm[node.loc output compare('__ne__' source word(0 node @state) node @state) present] @state)
-            prefix.push(put(hir.Flow[node.loc output [arm] cell_pack(word(0 node @state) absent expected node @state)] @state))
+            prefix.push(put(hir.Flow[node.loc output [arm] cell_pack(word(0 node @state) absent expected node @state borrowed_cell=borrowed_cell)] @state))
         }
         return put(hir.Block[node.loc output prefix false] @state)
     }
@@ -2270,7 +2272,7 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owne
             if not object_valued(member @state) return reject(node 'a narrowed record union has a non-record payload' @state)
             let condition=object_matches(source actual member node @state)
             let payload=if owned owned_record(source actual member node @state) else source
-            let packed=cell_pack(payload member expected node @state owned=owned)
+            let packed=cell_pack(payload member expected node @state owned=owned borrowed_cell=borrowed_cell)
             arms.push(put(hir.IfArm[node.loc output condition packed] @state))
         }
         if arms.length =? 0 return reject(node 'the value has no member in this union storage' @state)
@@ -2286,11 +2288,17 @@ cell_pack = (value:addr actual:addr expected:addr node:hir.AST @state:State owne
     }
     let prefix:array<addr>=[]
     let content=value
-    if not owned {content=owned_copy(value selected node @state shared=shared and object_valued(selected @state))}
-    else if object_valued(actual @state) and object_valued(selected @state) {content=owned_record(value actual selected node @state)}
+    if not owned and borrowed_cell is? none {content=owned_copy(value selected node @state shared=shared and object_valued(selected @state))}
+    else if owned and object_valued(actual @state) and object_valued(selected @state) {content=owned_record(value actual selected node @state)}
     let payload=snapshot(content @prefix @state)
     let word_value=put(hir.Transmute[node.loc types.primitive('int64' @state.type_nodes) payload] @state)
     let tag=word(member_tag(selected @state) node @state)
+    if borrowed_cell isnt? none {
+        prefix.push(store_word(tag borrowed_cell 0 node @state))
+        prefix.push(store_word(word_value borrowed_cell 8 node @state))
+        prefix.push(borrowed_cell)
+        return put(hir.Block[node.loc types.primitive('int64' @state.type_nodes) prefix false] @state)
+    }
     let helper=construction_helper('new_cell' 2 node @state)
     if helper isnt? none {
         prefix.push(intrinsic_call(helper [tag word_value] types.primitive('int64' @state.type_nodes) node @state))
@@ -4941,15 +4949,7 @@ call_argument = (argument:addr borrowed:set<addr> disposable:set<addr> consumed:
             let source=hir.node_at(state.input.nodes loan)
             let value=snapshot(expression(loan @state) @prefix @state)
             if cell_members(source.value_type @state) isnt? none or record_union(hir.node_at(state.input.nodes argument).value_type @state) isnt? none return value
-            # One fixed frame slot per call site, reused on loop iterations.
-            # Its borrowed payload never enters ownership cleanup.
-            let hoisted:array<addr>=[]
-            let word_type=types.primitive('int64' @state.type_nodes)
-            let cell=snapshot(intrinsic_call('__alloca__' [word(16 source @state)] word_type source @state) @hoisted @state)
-            loop item in hoisted {state.loop_prologue.push(item)}
-            prefix.push(store_word(word(member_tag(source.value_type @state) source @state) cell 0 source @state))
-            prefix.push(store_word(value cell 8 source @state))
-            return cell
+            return snapshot(view_cell(value source.value_type hir.node_at(state.input.nodes argument).value_type source @state) @prefix @state)
         }
     }
     if argument in? borrowed {
@@ -6382,16 +6382,14 @@ keep_fallback = (type:addr @state:State):>void => {
 view_cell = (value:addr actual:addr expected:addr node:hir.AST @state:State):>addr => {
     let members=cell_members(expected @state)
     $runtime_assert members isnt? none
-    let prefix:array<addr>=[]
     let word_type=types.primitive('int64' @state.type_nodes)
     let hoisted:array<addr>=[]
     let slot=snapshot(intrinsic_call('__alloca__' [word(16 node @state)] word_type node @state) @hoisted @state)
     loop item in hoisted {state.loop_prologue.push(item)}
-    let payload=put(hir.Transmute[node.loc word_type value] @state)
-    prefix.push(store_word(word(member_tag(actual @state) node @state) slot 0 node @state))
-    prefix.push(store_word(payload slot 8 node @state))
-    prefix.push(slot)
-    return put(hir.Block[node.loc word_type prefix false] @state)
+    # Reuse ordinary union selection: nullable record handles need a none
+    # branch, and a family union may need dynamic brand-to-member selection.
+    # Only the cell's storage/ownership differs from an owned conversion.
+    return cell_pack(value actual expected node @state borrowed_cell=slot)
 }
 finish_dictionary = (value:addr parts:DictParts node:hir.AST @prefix:array<addr> @state:State copy_result:bool=false):>addr => {
     if parts.owner_type isnt? none {

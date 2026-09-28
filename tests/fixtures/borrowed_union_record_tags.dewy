@@ -1,0 +1,17 @@
+# Borrowing changes storage ownership, never runtime union selection.
+Node=$abstract type of [value:int64]
+Leaf=type of Node & [leaf:int64]
+Branch=type of Node & [branch:int64]
+Other=type of [value:int64]
+read=(item:Leaf|Branch|Other|none):>int64=>{
+    if item is? none return 42
+    return item.value
+}
+forward=(item:Leaf|Branch|none):>int64=>read(item)
+main=():>int64=>{
+    let leaf=Leaf[42 1] let branch=Branch[42 2]
+    if forward(leaf) not=?42 return 1
+    if forward(branch) not=?42 return 2
+    if forward(none) not=?42 return 3
+    return 42
+}

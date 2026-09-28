@@ -41,6 +41,8 @@ import p"native_literal_union_joins.dewy" as literal_union_joins
 import p"native_cached_record_fields.dewy" as cached_record_fields
 import p"native_record_unions.dewy" as record_unions
 import p"native_argument_temporaries.dewy" as argument_temporaries
+import p"borrowed_optional_record_tags.dewy" as optional_record_tags
+import p"borrowed_union_record_tags.dewy" as union_record_tags
 import p"value_equality.dewy" as value_equality
 import p"native_power_operator.dewy" as power_operator
 import p"native_iterator_formulas.dewy" as iterator_formulas
@@ -187,5 +189,8 @@ let main=():>int64=>{
     if argument_temporaries.main() not=?42 return 61
     printl('Checking value equality')
     if value_equality.main() not=?42 return 62
+    printl('Checking borrowed optional and family tags')
+    if optional_record_tags.main() not=?42 return 63
+    if union_record_tags.main() not=?42 return 64
     return 42
 }

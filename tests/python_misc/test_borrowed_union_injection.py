@@ -1,5 +1,7 @@
 """Read-only call conversions may lend payloads through temporary union cells."""
 
+from pathlib import Path
+
 import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile, ReportException
@@ -52,6 +54,17 @@ original.value=7 if kept is? none return 1 return kept.value}''',
 forward=(items:array<Box>):>int64 & no_effects=>{if items.length=?0 return 0 return read(items[0])}
 main=():>int64=>forward([Box[42]])''',
 ]]
+# Nullable record unions are zero-or-record handles; unrelated record unions
+# are tagged cells. A borrowed conversion must select the runtime member.
+OPTIONAL_RECORD_HEADER = """A=type of [value:int64]
+B=type of [value:int64]
+read=(item:A|B|none):>int64=>{if item is? none return 42 return item.value}
+forward=(item:A?):>int64=>read(item)
+"""
+CASES += [OPTIONAL_RECORD_HEADER + f'main=():>int64=>forward({value})'
+          for value in ('none', 'A[42]')]
+CASES.append((Path(__file__).resolve().parents[2] / 'tests/fixtures/borrowed_union_record_tags.dewy').read_text())
+
 ERRORS = [HEADER + body for body in [
     '''read=(item:Box? ignored:int64):>int64=>{if item is? none return 0 return item.value}
 alter=(@item:Box):>int64=>{item.value=9 return 0}

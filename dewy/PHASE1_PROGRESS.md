@@ -6573,3 +6573,26 @@ empty joins retain empty buffers, and zero/single-input fast paths are unchanged
 The hint is not a bound: implied evidence can retain more than any one input.
 The complete hosted/native fact-state comparison passes (5.87 seconds).
 A full self-build allocation delta has not yet been measured.
+
+## Preserve union selection in borrowed cells (2026-09-28)
+
+The `ecd0547f` integration passed the first-generation x86-64/C execution
+checks, but generation 2 crashed while parsing the next self-build. A reduced
+case exposed the mistake: forwarding `A?` into `A|B|none` borrowed the nullable
+record handle but tagged it as the whole source union. An absent handle was
+therefore treated as a present record. The wider route discovery made this
+previously unexercised shortcut reachable.
+
+Borrowed frame cells now reuse ordinary union packing's member selection,
+including its absent-value branch and dynamic record-family selection. The
+proven owner retains the payload; only the destination cell's storage differs
+from an owned conversion. Dictionary getter frame views use the same helper.
+No source-language semantics changed. Both regression fixtures are in the
+native-pair smoke checks, so this failure is caught before another self-build.
+
+Validation: 38 borrowing, argument-cleanup and union-getter checks pass,
+including hosted/native x86-64/C execution (190 seconds). The complete parity
+manifest now has 310 cases. The preceding frozen hosted-built driver passed
+both borrowing/operator groups (318 seconds including its independent build).
+A new frozen three-generation run and complete parity run will certify this
+correction; the failed `ecd0547f` run is not a fixed-point checkpoint.
