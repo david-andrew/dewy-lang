@@ -8526,7 +8526,9 @@ def _tcr_object_literal(
     *,
     expected: ty.Type | None,
     ctx: Context,
+    argument_names: frozenset[str] = frozenset(),
 ) -> hir.ObjectLiteral:
+    caller = ctx
     expected = ty.unfold(ty.strip_refinement(expected)) if expected is not None else None
     expected_object = expected if isinstance(expected, ty.ObjectType) else None
     if expected_object is not None:
@@ -8639,7 +8641,7 @@ def _tcr_object_literal(
         )
         binding = ctx.binding_registry.allocate(entries[index][1], name, kind, loc)
         field_bindings.append(binding)
-        if kind != 'function':
+        if kind != 'function' or name in argument_names:
             continue
         try:
             signature = signature_of(value_ast, ctx=ctx)
@@ -8666,8 +8668,16 @@ def _tcr_object_literal(
             value = prechecked  # a field copied in by a spread
         else:
             assert value_ast is not None
-            value_context = _field_default_context(expected_object.fields[index], value_ast, ctx) if expected_object is not None else ctx
-            value = typecheck_and_resolve_inner(value_ast, ctx=value_context, expected=field_expected)
+            if name in argument_names:
+                # Constructor arguments are expressions in their caller's
+                # scope. Earlier destination fields only scope defaults and
+                # dependent field contracts, never another supplied argument.
+                value_context = caller
+                value_expected = ty.strip_refinement(field_expected) if field_expected is not None else None
+            else:
+                value_context = _field_default_context(expected_object.fields[index], value_ast, ctx) if expected_object is not None else ctx
+                value_expected = field_expected
+            value = typecheck_and_resolve_inner(value_ast, ctx=value_context, expected=value_expected)
         require_valued(value.type, ctx.srcfile, value.loc, 'object field')
         if isinstance(value.type, (ty.FunctionType, ty.OverloadType)) and not isinstance(
             _unwrap_literal_value(value),
@@ -16275,7 +16285,7 @@ def _tcr_type_constructor_call(
         literal_items.append(p0.BinOp(loc, t1.Operator(loc, '='), p0.Atom(loc, t1.Identifier(loc, field_.name)), value))
     literal = p0.Block(right.loc, literal_items, '[]', None)
     ctx.synthesized.append(literal)
-    return typecheck_and_resolve_inner(literal, ctx=ctx, expected=left.value)
+    return _tcr_object_literal(literal, ctx=ctx, expected=left.value, argument_names=frozenset(given))
 
 
 def _include_bytes_call(ast: p0.AST) -> p0.AST | None:

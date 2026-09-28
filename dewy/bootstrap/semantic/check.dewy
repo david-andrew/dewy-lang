@@ -3735,7 +3735,9 @@ construct = (constructor:hir.TypeValue arguments_id:addr? id:addr env:Environmen
         let value:addr? = none
         let from_default = false
         if supplied isnt? none {
-            let checked = expression(supplied inner @session expected=field.value_type)
+            # Explicit arguments resolve in the caller. Only defaults and
+            # dependent field contracts may see earlier constructed fields.
+            let checked = expression(supplied env @session expected=field.value_type)
             if checked is? Error return checked
             value = checked
         } else if field.default is? none and implemented_slot(shape field session) {

@@ -5906,3 +5906,27 @@ Scope analysis checks actual loop depth; returns and edges leaving the allocator
 scope still retain the documented conservative fallback. Two hosted cases and
 the paired placement case pass, including context restoration and continued
 fallback for a nonlocal exit. This fixture brings the manifest to 249 cases.
+
+
+## Constructor arguments retain caller bindings (2026-09-28)
+
+The disequality-fact implementation exposed an existing constructor scope bug:
+`Pair[right left]`, in a caller with `left` and `right` parameters, rebound the
+second argument to the newly constructed first field. Both checkers now resolve
+supplied positional/keyword arguments in the caller's scope, as the reference
+already specifies. Defaults and dependent field contracts still resolve earlier
+fields from this construction. Explicit callback literals likewise keep caller
+bindings; ordinary object-literal methods retain their sibling scope.
+
+Validation: 24 constructor/immutable-record checks, 15 default/lifetime checks,
+and seven focused hosted/paired checks pass. Regressions cover swapped arguments,
+keywords, default-derived values, callback/global scope and rejection of a value
+that meets an outer name's value but violates the constructed sibling contract.
+The fixture is in the 250-case manifest. A compiler built by the old checker can
+still contain this misresolution in its own newly compiled code; fresh native
+generations are required before certifying the pending disequality extension.
+
+The preceding cleanup checkpoint `c72625b0` reached a three-generation fixed
+point (generation 3 took 56 s under concurrent checks). Its fresh hosted-built
+native driver passed all 30 focused dynamic ownership checks in 332.92 s,
+including its build. Phase 1 remains in progress.

@@ -1,0 +1,8 @@
+# Supplied values use caller bindings even when destination field names overlap.
+Term:type=const [id:int64]
+Pair:type=const [left:Term right:Term]
+swap=(left:Term right:Term):>Pair=>Pair[right left]
+main=():>int64=>{
+    let result=swap(Term[8] Term[4])
+    return if result.left.id=?4 and result.right.id=?8 42 else 1
+}
