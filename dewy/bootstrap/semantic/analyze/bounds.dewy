@@ -50,6 +50,7 @@ Checker:type = [
     proof_context:proofs.Context=proofs.Context[data.env data.relations]
     declared:refinements.Declared=[] assigned:set<addr>=set[]
     mutable_globals:set<addr>=set[] call_writes:dict<addr set<addr>>=[] checked:set<addr>=set[]
+    mutable_captures:set<addr>=set[] resized:set<addr>=set[] stable_capture_lengths:set<addr>=set[]
     root_items:set<addr>=set[] deferred:array<addr>=[]
     read_only_places:set<addr>=set[]
     element_intervals:values.ElementIntervals=[]
@@ -375,10 +376,14 @@ function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Che
     let prototype=checker.prototype
     if node.proof {checker.prototype=false}
     let enclosing=state
+    let saved=checker.data.snapshot
+    let saved_calls=checker.data.member_calls
+    checker.data.snapshot=intervals.Snapshot[]
     let globals=checker.mutable_globals
     loop global in globals {stores.forget(@enclosing global @checker.data)}
-    let saved=checker.data.snapshot
-    checker.data.snapshot=intervals.Snapshot[]
+    # A deferred body reads current captures. Content changes need not erase
+    # a proven invariant extent; a replacement/resize does erase it.
+    stores.forget_many(@enclosing checker.mutable_captures @checker.data keep_lengths=checker.stable_capture_lengths)
     let source=checker.srcfile
     if node.source isnt? none {checker.srcfile=hir.source_at(node.source checker.source_files)}
     let parameters=node.pos_or_kw_args
@@ -389,6 +394,7 @@ function_body = (id:addr node:hir.FunctionLiteral state:facts.State @checker:Che
     analyze(node.body enclosing @checker validate);
     checker.srcfile=source
     checker.data.snapshot=saved
+    checker.data.member_calls=saved_calls
     checker.prototype=prototype
 }
 
@@ -1363,6 +1369,7 @@ collect = (root:addr @checker:Checker):>void => {
         let node=node_at(id checker)
         let target:addr?=none
         if node is? hir.Assign|hir.MemberAssign|hir.IndexAssign|hir.Place {target=node.target}
+        else if node is? hir.Transmute {target=node.expr}
         else if node is? hir.DictStore|hir.DictRemove {
             target=node.keys
             let path=bindings.access_path(node.keys checker.data.env.nodes dictionaries=true)
@@ -1370,6 +1377,7 @@ collect = (root:addr @checker:Checker):>void => {
             let indexed=false
             loop step in path.steps {if node_at(step checker) is? hir.Index|hir.DictLookup {indexed=true}}
             if indexed and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.container_receivers.push(owner.binding_id)}
+            if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.resized.push(owner.binding_id)}
         }
         else if node is? hir.FunctionCall {
             let method=node_at(node.func checker)
@@ -1379,6 +1387,7 @@ collect = (root:addr @checker:Checker):>void => {
             let access=bindings.access_path(target checker.data.env.nodes facts=true)
             let owner=node_at(access.root checker)
             if owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.assigned.push(owner.binding_id)}
+            if access.steps.length=?0 and owner is? hir.ExpressedIdentifier and owner.binding_id isnt? none {checker.resized.push(owner.binding_id)}
         }
         hir.push_children(node @pending)
     }
@@ -1392,6 +1401,12 @@ collect = (root:addr @checker:Checker):>void => {
 }
 validate = (root:addr @checker:Checker read_only:set<addr> | none=none):>void => {
     collect(root @checker)
+    loop binding in effects.nonlocal_bindings(root checker.data.env.nodes) {
+        if binding in? checker.assigned and binding not in? checker.mutable_globals {
+            checker.mutable_captures.push(binding)
+            if binding not in? checker.resized {checker.stable_capture_lengths.push(binding)}
+        }
+    }
     let tracked=checker.mutable_globals
     if checker.container_receivers.length>?0 {
         loop binding in effects.nonlocal_bindings(root checker.data.env.nodes) {

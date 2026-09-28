@@ -36,6 +36,24 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): deferred local functions no longer inherit stale
+numeric facts about mutable captures. Previously a function declared while a
+captured divisor was nonzero (or an array nonempty) could retain that evidence
+after the caller changed it. Both analyzers now expire mutable captured value
+and route facts at function entry, preserving unchanged array extents when
+only elements can change. Scalar snapshots, declared storage contracts and
+local guards retain their normal proofs. Expression/predicate metadata stays
+inside the function's analysis, including defaults. Eight rejection cases and
+nine positive cases pass in both compilers on x86-64/C; 80 surrounding hosted
+checks pass. Native lowering also accepts the complete compiler source with
+the corrected fact rule. The parity manifest adds the stale-divisor rejection.
+
+Integration at `eae8789e`: three native generations reached an identical
+fixed point (generations 2/3: 53/60 seconds under concurrent validation).
+All 335 parity cases passed. A separately hosted-built driver passed all 28
+strict-unused-body and local-union-widening tests (365.21 seconds including
+its build). This predates the capture changes and does not close Phase 1.
+
 Checkpoint (2026-09-28): strict-copy obligations now survive unused-function
 and unused-import pruning. Native graph assembly retains strict bodies and
 their dependencies through lowering, then follows lowered runtime references

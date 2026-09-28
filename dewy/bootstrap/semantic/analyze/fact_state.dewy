@@ -260,10 +260,24 @@ mentions_any = (fact:Fact bindings:set<addr>):>bool => {
     $runtime_assert fact is? Remainder
     return fact.subject.binding_id in? bindings or fact.upper.binding_id in? bindings or fact.offset in? bindings
 }
-forget_bindings = (@state:State bindings:set<addr>):>void => {
+# A deferred function may retain an unchanged extent while forgetting the
+# current contents. All relation kinds obey the same term-level boundary.
+mentions_changed=(fact:Fact bindings:set<addr> keep_lengths:set<addr>):>bool=>{
+    if keep_lengths.length=?0 return mentions_any(fact bindings)
+    let changed=(term:Term):>bool=>term.binding_id in? bindings and (term.projection not=?'length' or term.binding_id not in? keep_lengths)
+    if fact is? Linear {loop item in fact.coefficients {if changed(item.term) return true} return false}
+    if fact is? Value return changed(fact.term)
+    if fact is? Nonzero return fact.subject in? bindings
+    if fact is? Index return fact.index in? bindings or (fact.sequence in? bindings and fact.sequence not in? keep_lengths)
+    if fact is? Order return changed(fact.smaller) or changed(fact.larger)
+    if fact is? Distinct return changed(fact.left) or changed(fact.right)
+    $runtime_assert fact is? Remainder
+    return changed(fact.subject) or changed(fact.upper) or fact.offset in? bindings
+}
+forget_bindings = (@state:State bindings:set<addr> keep_lengths:set<addr>=set[]):>void => {
     if bindings.length=?0 return
     let removed:array<Fact>=[]
-    loop entry in state.values {if mentions_any(entry.fact bindings) {removed.push(entry.fact)}}
+    loop entry in state.values {if mentions_changed(entry.fact bindings keep_lengths) {removed.push(entry.fact)}}
     loop fact in removed {remove(@state fact)}
 }
 

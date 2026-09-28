@@ -837,8 +837,8 @@ def _assigned_binding_ids(root: hir.AST) -> set[int]:
             binding_id = root_binding(value.target)
             if binding_id is not None:
                 found.add(binding_id)
-        elif isinstance(value, (hir.IndexAssign, hir.Place)):
-            binding_id = root_binding(value.target)
+        elif isinstance(value, (hir.IndexAssign, hir.Place, hir.Transmute)):
+            binding_id = root_binding(value.expr if isinstance(value, hir.Transmute) else value.target)
             if binding_id is not None:
                 found.add(binding_id)
         elif isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ArrayMethod):
@@ -858,6 +858,22 @@ def _assigned_binding_ids(root: hir.AST) -> set[int]:
             if binding_id is not None:
                 found.add(binding_id)
     return found
+
+
+def _resized_binding_ids(root: hir.AST) -> set[int]:
+    """Roots whose own extent may change, as opposed to an element/field."""
+    resized = set()
+    for node in hir.walk(root):
+        target = predicate_effects.write_target(node)
+        if isinstance(node, hir.Transmute):
+            target = node.expr
+        if isinstance(node, (hir.DictStore, hir.DictRemove)):
+            target = sb.access_path(node.keys, dictionaries=True).root
+        if target is not None:
+            target = _strip_casts(target)
+            if isinstance(target, hir.ExpressedIdentifier) and target.binding_id is not None:
+                resized.add(target.binding_id)
+    return resized
 
 
 def _truncate_divide(numerator: int, divisor: int) -> int:
@@ -991,6 +1007,11 @@ class _BoundsValidator:
             and item.binding_id is not None
             and item.binding_id in assigned
         }
+        # Deferred bodies see current captures, not the values at declaration.
+        # Element writes can invalidate content without changing an array's
+        # extent. Keep that distinction in the inherited fact vocabulary.
+        self.mutable_captures = assigned & effects.nonlocal_bindings(root) - self.mutable_globals
+        self.stable_capture_lengths = self.mutable_captures - _resized_binding_ids(root)
 
     def validate(self, root: hir.Block, *, effect_context: hir.AST | None = None) -> None:
         receivers = {sb.access_path(node.keys, dictionaries=True).binding_id for node in hir.walk(root)
@@ -1047,7 +1068,7 @@ class _BoundsValidator:
             return
         self._expire_bindings(roots, state)
 
-    def _expire_bindings(self, roots: set[int] | frozenset[int], state: State) -> None:
+    def _expire_bindings(self, roots: set[int] | frozenset[int], state: State, *, keep_lengths=frozenset()) -> None:
         """Retire inaccessible bindings, their routes and selector dependents."""
         if not roots:
             return
@@ -1065,7 +1086,8 @@ class _BoundsValidator:
                 parent = self.registry.by_id[route].route_root
                 if parent is not None:
                     pending.extend(self.registry.routes_under(parent, self.registry.route_paths[route]))
-        terms = expired | {_length_key(root) for root in expired}
+        lengths = expired - keep_lengths
+        terms = expired | {_length_key(root) for root in lengths}
         removed = []
         for fact in state:
             if isinstance(fact, int):
@@ -1073,7 +1095,7 @@ class _BoundsValidator:
             elif isinstance(fact, NonzeroFact):
                 discard = fact.binding in expired
             elif isinstance(fact, IndexFact):
-                discard = fact.index in expired or fact.array in expired
+                discard = fact.index in expired or fact.array in lengths
             elif isinstance(fact, OrderFact):
                 discard = fact.smaller in terms or fact.larger in terms
             elif isinstance(fact, DistinctFact):
@@ -2006,6 +2028,8 @@ class _BoundsValidator:
         if validate:
             self.checked_functions.add(function_id)
         previous_source = self.srcfile
+        previous_member_facts = self.member_facts
+        self.member_facts = dict(previous_member_facts)
         self.srcfile = function.source or previous_source
         try:
             state: State = {
@@ -2015,6 +2039,8 @@ class _BoundsValidator:
             }
             for binding_id in self.mutable_globals:
                 self._forget_global(binding_id, state)
+            self._expire_bindings(self.mutable_captures, state,
+                                  keep_lengths=self.stable_capture_lengths)
             for param in [
                 *function.pos_or_kw_args,
                 *function.kw_only_args,
@@ -2032,6 +2058,7 @@ class _BoundsValidator:
                 self.prototype_sites = prototype_sites
         finally:
             self.srcfile = previous_source
+            self.member_facts = previous_member_facts
 
 
     def _bind_conditional(self, node: hir.Declare | hir.Assign, flow: hir.Flow, state: State, *, validate: bool) -> State:

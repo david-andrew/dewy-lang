@@ -63,7 +63,7 @@ forget = (@state:facts.State subject:addr @data:predicates.Data prefix:array<str
 # A lexical scope can retire all its locals in one state scan. Follow both
 # nested routes and routes selected by a retired index before removing any
 # facts, matching repeated `forget` without cloning/scanning per binding.
-forget_many = (@state:facts.State subjects:set<addr> @data:predicates.Data):>void => {
+forget_many = (@state:facts.State subjects:set<addr> @data:predicates.Data keep_lengths:set<addr>=set[]):>void => {
     if subjects.length =? 0 return
     let expired:set<addr>=set[]
     let pending:array<addr>=[]
@@ -81,7 +81,7 @@ forget_many = (@state:facts.State subjects:set<addr> @data:predicates.Data):>voi
             }
         }
     }
-    facts.forget_bindings(@state expired)
+    facts.forget_bindings(@state expired keep_lengths=keep_lengths)
     intervals.forget_many(@data.snapshot expired)
     loop subject in expired {data.member_calls.pop(subject default=0);}
 }

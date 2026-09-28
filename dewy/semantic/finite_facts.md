@@ -36,6 +36,16 @@ both require the mathematical result to fit its machine representation. Scalar
 locals and named record fields use the same affine assignment proof, checking
 the operation width as well as its destination width.
 
+Deferred local functions read the current captured values at each call, not
+snapshots from their declaration. Function-entry checking drops inherited
+facts about captures that can be assigned or exposed, including their field
+and selector-dependent routes. Unchanged array extents retain their own
+length/index/order facts when only elements can change. Replacement, resizing
+or whole-owner exposure prevents that exception. Written storage contracts
+and guards inside the deferred body still supply ordinary evidence. Function
+analysis keeps its expression snapshots and predicate-result associations
+separate from its caller's state, including lazy defaults.
+
 ## Identities and stored facts
 
 Facts name declaration identities and registered field/element routes, not source
