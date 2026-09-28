@@ -858,12 +858,17 @@ backedges retain repeated reads, and outward/captured/exposed aliases retain
 the lexical lifetime. Known nonescaping place calls outside the interval no
 longer exclude the owner for its entire function. Mutable local places now use rooted bindings, fields and array selections,
 capturing selectors once and retaining checked storage/fact/effect contracts.
-Their private, uncaptured owners must remain stable through the last use of
-all dependent aliases. Proven dictionary entries now use the same lifetime demand, including nested
+Their owners must remain stable through the last use of
+all dependent aliases. Nonescaping read-only local functions may capture the
+owner or the place; capturing a place retains its loan through the enclosing
+scope, including dependent aliases and default arguments. The enclosing
+function keeps ownership and cleanup; the callee borrows the captured storage.
+Writes through captures and escaping function values remain unsupported.
+Proven dictionary entries now use the same lifetime demand, including nested
 receivers and dependent aliases. Value writes retain ancestor membership,
 while mutable entry routes detach shared dictionary/payload storage and
 publish replacement handles back to their slots. Other entry writes remain
-conservative; lifetimes for captured or exposed owners remain pending.
+conservative; raw-exposed owners require further lifetime evidence.
 
 Read-only `$lend(bytes) { ... }` now checks scoped raw access to named byte
 arrays in both compilers. It permits address extraction, scalar local work,

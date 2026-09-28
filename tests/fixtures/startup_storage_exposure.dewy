@@ -8,5 +8,7 @@ read=(snapshot:array<int64>):>int64=>{
 }
 main=():>int64=>{
     let answer=read(values)
-    return if answer=?42 and values[0]=?99 42 else 2
+    # Raw exposure does not preserve a declaration-time extent proof across
+    # deferred calls. Establish the current extent before selecting a slot.
+    return if answer=?42 and values.length>?0 and values[0]=?99 42 else 2
 }

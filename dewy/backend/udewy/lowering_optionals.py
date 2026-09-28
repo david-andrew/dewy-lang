@@ -465,6 +465,8 @@ class _OptionalLowering:
         value: hir.AST,
         member: ty.TypeExpr,
         loc: Span,
+        *,
+        reported: bool = False,
     ) -> tuple[list[hir.AST], hir.AST]:
         """Materialize ``value`` as arena storage of the member, as a handle."""
         unfolded = ty.structural_base(member)
@@ -478,6 +480,12 @@ class _OptionalLowering:
             ]
             return statements, dest
         if isinstance(unfolded, ty.ObjectType):
+            if not reported:
+                adopted = self._adopt_object_fields(value, unfolded, site='stored in a union')
+                if adopted is not None:
+                    return adopted
+                if not self._object_expression_owns_fresh_storage(value):
+                    self._note_copy('record', member, 'stored in a union', self._copy_reason(value), loc)
             prelude, source = self._extract_object_pointer(value)
             if self._frame_record_temporary(value):
                 # The union owns its cloned payload. The call's frame-rooted
@@ -487,8 +495,10 @@ class _OptionalLowering:
             return [*prelude, *clone_prelude], handle
         assert isinstance(unfolded, ty.ArrayType)
         source = self._copy_source_expression(value)
-        if unfolded.length is None and id(source) in self.moved_payload_uses:
+        if unfolded.length is None and not reported:
             return self._transfer_array_value(value, source, unfolded, site='stored in a union')
+        if not reported and not self._array_expression_owns_fresh_storage(source):
+            self._note_copy('array', member, 'stored in a union', self._copy_reason(source), loc)
         return self._clone_dynamic_array_value(value, unfolded, arena=True)
 
     def _named_copy_call(self, named: ty.NamedType, source: hir.AST, loc: Span) -> hir.FunctionCall:
@@ -936,11 +946,12 @@ class _OptionalLowering:
 
     def _movable_cell_local(self, value: hir.AST, members: tuple[ty.TypeExpr, ...]) -> bool:
         """A last-use owner whose active payload keeps its complete layout."""
-        if (not isinstance(value, hir.ExpressedIdentifier) or id(value) not in self.moved_uses
+        if (not isinstance(value, hir.ExpressedIdentifier)
+                or id(value) not in self.moved_uses and id(value) not in self.moved_payload_uses
                 or (value.name not in self.owned_aggregate_cells and value.name not in self.owned_cells)):
             return False
         stored = self._stored_union_members(value)
-        possible = self._field_union_members(value.type)
+        possible = self._field_union_members(value.type) or (value.type,)
         return (stored is not None and possible is not None
                 and not self._union_tree_slots(stored) and not self._union_tree_slots(members)
                 and not self._union_family_conversions(stored, possible)
@@ -1024,8 +1035,14 @@ class _OptionalLowering:
             return self._union_write(cell, replace(value, type=ty.IntegerLiteralType(value.value)), members, prepared=prepared)
         stored_members = self._stored_union_members(value)
         possible = self._field_union_members(value.type)
-        if not reported and stored_members != members and self._movable_cell_local(value, members):
-            prelude, source = self._extract_expression(value)
+        if not reported and self._movable_cell_local(value, members):
+            if possible is None:
+                # A narrowed record expression extracts its payload pointer.
+                # Transfer from the original binding's cell instead; its tag
+                # and cleanup still belong to that cell after narrowing.
+                prelude, source = [], replace(value, type='int64', binding_id=None)
+            else:
+                prelude, source = self._extract_expression(value)
             self.move_notes.append(MoveNote(self.srcfile, value.loc,
                 f'`{value.name}` is moved when stored in a union: this is its last use, so its payload changes owner', True))
             return [*prelude, *self._take_cell_payload(cell, source, value.loc)]
@@ -1130,13 +1147,15 @@ class _OptionalLowering:
             # positive structure. Evaluate the source once before copying it.
             prelude, pointer = self._extract_object_pointer(value)
             viewed, view = self._family_union_view(pointer, shape, members, value)
+            if not reported and not self._object_expression_owns_fresh_storage(value):
+                self._note_copy('record', value.type, 'stored in a union', self._copy_reason(value), value.loc)
             return [*prelude, *viewed, *self._union_copy_cell(cell, view, members, value.loc, prepared=prepared),
                     *(self._discarded_call_result(value, pointer) or [])]
         index = self._union_member_index(members, value.type, value)
         member = members[index]
         slots = self._union_tree_slots(members, prepared=prepared)
         if self._union_member_kind(member, prepared=prepared) == 'handle':
-            handle_prelude, handle = self._union_handle_value(value, member, value.loc)
+            handle_prelude, handle = self._union_handle_value(value, member, value.loc, reported=reported)
             return [
                 *handle_prelude,
                 tag_store(index),

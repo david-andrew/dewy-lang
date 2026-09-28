@@ -471,7 +471,7 @@ class _Lowerer(
         self.borrowed_default_inputs: set[str] = set()
         self.default_owner_conditions: dict[LocalBindingKey, hir.AST] = {}
         self.moved_uses: set[int] = set()   # ids of identifier uses that are last uses of owned array locals at transfer sites (`_compute_moves`)
-        self.moved_payload_uses: set[int] = set()  # last-use narrowed arrays still stored in owned union cells
+        self.moved_payload_uses: set[int] = set()  # last-use narrowed aggregates still stored in owned union cells
         self.move_notes: list[MoveNote] = []
         self.frame_region: hir.ExpressedIdentifier | None = None   # the function's region for frame-only string storage, once used
         self.loop_regions: list[LoopRegion] = []   # the enclosing loops being lowered, innermost last (`_lower_loop_body`)
@@ -3849,6 +3849,11 @@ class _Lowerer(
 
         def transfer(node: hir.AST, *, handle_only: bool = False, aggregate_element: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
+            if isinstance(source, hir.RepresentationCast) and storage_borrows.union_loan_source(source) is not None:
+                # A member injection changes the tag, not its owned payload
+                # layout. The union store can adopt a last-use member just as
+                # an ordinary aggregate field can.
+                return transfer(source.expr, handle_only=handle_only, aggregate_element=True)
             if isinstance(source, hir.Flow) and all(isinstance(arm, hir.IfArm) for arm in source.arms):
                 result = {}
                 for value in [*(arm.body for arm in source.arms), *([source.default] if source.default is not None else [])]:
@@ -3862,11 +3867,12 @@ class _Lowerer(
                 # Narrowing reads a cell's payload; it does not turn the
                 # binding into an independently owned array/record handle.
                 # Ordinary moves empty a handle variable; this owner still
-                # needs its cell for lexical cleanup. Track a runtime-array
-                # payload separately so its transfer empties only the payload
-                # word. Other narrowed representations keep their copy.
+                # needs its cell for lexical cleanup. Track aggregate
+                # payloads separately so an exact-layout transfer can empty
+                # only the payload word. Each storage boundary checks layout.
                 narrowed = ty.structural_base(source.type)
-                if isinstance(narrowed, ty.ArrayType) and narrowed.length is None:
+                if (isinstance(narrowed, ty.ObjectType)
+                        or isinstance(narrowed, ty.ArrayType) and narrowed.length is None):
                     payload_candidates.add(id(source))
                     return {id(source): id(source)}
                 return {}
@@ -3923,7 +3929,9 @@ class _Lowerer(
                 movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node) or node.binding_id in strings or node.binding_id in cells
                 # A descriptor-backed destination can take the source's
                 # ownership. Fixed raw buffers still require their own layout.
-                aggregate_destination = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node)
+                aggregate_destination = (self._owned_array_declaration(node) is not None
+                                         or self._owned_object_declaration(node)
+                                         or node.binding_id in cells)
                 walk(node.expr, depth, nested, transfer(node.expr, handle_only=not aggregate_destination))
                 if movable and node.binding_id is not None and not nested:
                     counter += 1

@@ -1,0 +1,12 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+make=():>Box?=>Box[[42]]
+forward=():>Box?=>{let value=make() if value isnt? none return value return none}
+probe=():>int64=>{let result=forward()
+if result isnt? none and result.items.length>?0 return result.items[0]
+return 1}
+main=():>int64=>{if probe() not=?42 return 1
+let before:int64=_arena_live_bytes
+loop i in [0..100) {if probe() not=?42 return 2}
+$runtime_assert _arena_live_bytes=?before
+return 42}

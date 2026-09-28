@@ -36,6 +36,29 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): hosted union payload injection now reports ordinary
+member copies, including optional results, iterator elements and fixed arrays
+with dynamic components. These copies previously bypassed `$explicit_copies`.
+Explicit snapshots retain one policy entry; last-use record/array locals can
+use the existing field/descriptor transfer, and a narrowed owned optional can
+transfer its exact-layout payload back into a union. The emptied original cell
+retains its lexical cleanup. Live sources, family conversions and prepared
+frame trees keep their copy obligations. Five focused hosted positive cases and
+four rejections, 124 surrounding hosted checks, and a further 80 checks after the
+narrowed-payload change pass. Paired execution covers payload survival and
+retained-byte counters; all three paired injection/local-move/widening groups
+pass. The complete compiler source also passes hosted policy checking.
+`key_facts.dewy` passes strict mode in both compilers,
+bringing adoption to 39 physical modules.
+
+Integration at `bff02558`: three native generations reached an identical fixed
+point (generations 2/3: 53/58 seconds under concurrent validation). A fresh
+hosted-built driver passed all 52 capture tests. The full manifest passed
+337/338 cases: both compilers correctly rejected the raw-exposed global's stale
+length proof in `startup_storage_exposure`. That fixture now establishes the
+current extent before indexing, and its unguarded form is an explicit rejection
+regression. This is a corrected fixture expectation, not a weakened proof rule.
+
 Checkpoint (2026-09-28): nonescaping, read-only local functions can borrow
 enclosing resource owners and local places. Capturing a place retains its loan
 through the enclosing scope, including dependent aliases and default arguments;
