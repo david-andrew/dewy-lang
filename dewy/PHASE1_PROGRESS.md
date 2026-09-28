@@ -36,6 +36,15 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): frozen revision `07335a43` passes all 344 paired
+compiler acceptance/execution cases. Its native integration build reaches a
+three-generation identical fixed point; generations two and three take 54 and
+57 seconds under concurrent validation load. These results certify that
+revision, not later working-tree edits. The parity tool and fixtures were run
+from the frozen checkout so relative bootstrap imports use the same revision.
+The expanded strict-policy inventory still has 2,152 nonexplicit runtime-sized
+copy obligations in 93 bootstrap modules; compiler-wide adoption remains open.
+
 Checkpoint (2026-09-28): resource liveness retains symbolic identities for
 unchanged integer inputs and proposes ordinary checked disjointness assertions
 when move-only array components would otherwise overlap. The final bounds pass
