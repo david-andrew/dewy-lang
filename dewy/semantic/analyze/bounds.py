@@ -605,6 +605,10 @@ def _drop_index_facts(
     array_id: int | None = None,
 ) -> None:
     for key in [key for key in state if not isinstance(key, int)]:
+        if isinstance(key, NonzeroFact):
+            if index_id == key.binding:
+                del state[key]
+            continue
         if isinstance(key, DistinctFact):
             if (index_id is not None and index_id in (key.left, key.right)
                     or array_id is not None and _length_key(array_id) in (key.left, key.right)):
@@ -3818,6 +3822,11 @@ class _BoundsValidator:
         if name not in {'__lt__', '__le__', '__gt__', '__ge__', '__eq__', '__ne__'}:
             return None
         a, b = self._checked_offset_term(left, state), self._checked_offset_term(right, state)
+        if name in {'__eq__', '__ne__'}:
+            for term, other in ((a, right), (b, left)):
+                if (term is not None and term[1] == 0 and _nonzero_key(term[0]) in state
+                        and self._constant_expr(other, set()) == Interval.exact(0)):
+                    return name == '__ne__'
         if a is None or b is None:
             return None
         if name in {'__gt__', '__ge__'}:
@@ -4499,6 +4508,14 @@ class _BoundsValidator:
         """The relational facts whose subject is `subject`, keyed as they would be for subject 0."""
         facts: State = {}
         for key, interval in state.items():
+            if isinstance(key, DistinctFact):
+                if subject in (key.left, key.right):
+                    facts[_distinct_key(0, key.right if key.left == subject else key.left)] = interval
+                continue
+            if isinstance(key, NonzeroFact):
+                if key.binding == subject:
+                    facts[_nonzero_key(0)] = interval
+                continue
             remainder = _decode_remainder_fact(key)
             if remainder is not None:
                 if remainder[0] == subject:
@@ -4516,6 +4533,10 @@ class _BoundsValidator:
 
     @staticmethod
     def _rekey(key: FactKey, subject: int) -> FactKey:
+        if isinstance(key, DistinctFact):
+            return _distinct_key(subject, key.right if key.left == 0 else key.left)
+        if isinstance(key, NonzeroFact):
+            return _nonzero_key(subject)
         remainder = _decode_remainder_fact(key)
         if remainder is not None:
             return _remainder_key(subject, remainder[1], remainder[2])
@@ -4535,6 +4556,11 @@ class _BoundsValidator:
     def _store_element(self, state: State, array_id: int, value: hir.AST, loc: Span) -> None:
         """An element joins the array: its facts become (or narrow) the element facts."""
         empty = state.get(_length_key(array_id)) == Interval.exact(0)
+        if empty:
+            # Old element summaries are vacuous after clear/pop-to-empty.
+            # They cannot describe the first new element, nor act as bounds
+            # while deriving that element's incoming facts.
+            self._drop_route_facts(state, array_id, ('*',))
         route = self.registry.route_ids.get((array_id, ('*',)))
         known = self._static_element_length(value)
         if known is not None and empty:
@@ -5084,7 +5110,7 @@ class _BoundsValidator:
             for side, other in ((left, right), (right, left)):
                 side_binding = self._binding_id(side)
                 other_interval = self._eval(other, refined, validate=False)
-                if side_binding is not None and other_interval is not None and other_interval.lower == 0 and other_interval.upper == 0:
+                if side_binding is not None and side_binding >= 0 and other_interval is not None and other_interval.lower == 0 and other_interval.upper == 0:
                     refined[_nonzero_key(side_binding)] = Interval.exact(1)
         if left_binding is not None and right_interval is not None:
             previous = self._binding_interval(refined, left_binding)

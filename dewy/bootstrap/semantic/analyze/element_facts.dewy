@@ -136,6 +136,14 @@ literal_lengths = (@state:facts.State array:addr literal:hir.ArrayLiteral word_t
 store = (@state:facts.State array:addr value:addr word_type:addr loc:Span env:values.Environment @registry:bindings.Registry):>void => {
     let length = facts.lookup(state facts.value(facts.Term[array 'length']))
     let empty = length isnt? none and ranges.same_bounds(length ranges.exact(0))
+    if empty {
+        # A vacuous summary of removed elements cannot supply facts about
+        # the first replacement, including through another subject's relation.
+        loop item in routes(array registry) {
+            facts.forget(@state facts.Term[item.id])
+            facts.forget(@state facts.Term[item.id 'length'])
+        }
+    }
     let exact=static_length(value env)
     let target:addr?=none
     loop item in routes(array registry) {if item.path.length =? 1 {target=item.id}}

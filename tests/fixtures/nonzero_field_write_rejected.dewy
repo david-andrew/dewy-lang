@@ -1,0 +1,7 @@
+Box:type=[value:int64]
+probe=(box:Box):>int64=>{
+    if box.value=?0 return 0
+    box.value=0
+    return 42//box.value
+}
+main=():>int64=>probe(Box[8])

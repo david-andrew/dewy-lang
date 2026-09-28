@@ -1,0 +1,30 @@
+# Uniform scalar and record-field exclusions survive array storage.
+probe=(a:int64 b:int64):>int64=>{
+    if a=?b return 0
+    let values:array<int64>=[]
+    values.push(a)
+    if values.length=?0 return 0
+    let saved=values[0]
+    $assert saved not=?b
+    return 42
+}
+Item:type=[value:int64]
+record_probe=(a:int64 b:int64):>int64=>{
+    if a=?b return 0
+    let values:array<Item>=[]
+    values.push(Item[a])
+    if values.length=?0 return 0
+    let saved=values[0]
+    $assert saved.value not=?b
+    return 42
+}
+nonzero_probe=(a:int64 b:int64):>int64=>{
+    if a=?0 return 0
+    let values:array<int64>=[]
+    values.push(a)
+    if values.length=?0 return 0
+    let saved=values[0]
+    $assert saved not=?0
+    return 42
+}
+main=():>int64=>if probe(8 4)=?42 and record_probe(8 4)=?42 nonzero_probe(8 4) else 0

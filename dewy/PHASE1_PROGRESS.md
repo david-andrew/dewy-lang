@@ -6185,3 +6185,28 @@ they need reachable-function tests before adoption. `container_methods` retains
 its directive pending the full-graph check, making the current physical count
 26. Do not interpret standalone module acceptance as complete copy-policy
 coverage or insert explicit copies merely to preserve an adoption count.
+
+## Element exclusions and vacuous-summary invalidation (2026-09-28)
+
+Array element summaries now transfer symmetric disequalities in both compilers
+and nonzero facts in hosted analysis (native already transferred the latter).
+Reads, iterator bindings and array copies retain the supported exclusions;
+foreign insertions and writes invalidate them. Comparisons consume incoming
+nonzero evidence before refining their own condition. Hosted invalidation also
+removes nonzero route evidence after writes and uses length intervals, rather
+than scalar nonzero identities, for length exclusions.
+
+The new clear/reinsert counterexample exposed a pre-existing summary bug: old
+facts about an empty array's elements could describe its first replacement.
+Both store transfers now discard those vacuous route facts before collecting
+incoming evidence. This also prevents a symmetric relation from producing a
+false self-disequality through an old element route. Negative tests cover
+ordinary order facts, field division after a zero write, length after clear,
+and comparison operands that mutate an earlier operand's source.
+
+Validation: 74 hosted surrounding exclusion/contract checks, 41 loop/invalidation
+checks, and the final 21-case group including paired x86-64/C execution pass.
+Three fixtures bring the manifest to 269 cases. Whole-program native driver
+construction also passes with `container_methods`' directive; adoption remains
+26 physical modules. The preceding `f899b2b5` snapshot completed all 265 parity
+cases; the current proof changes still need their fresh-build integration.

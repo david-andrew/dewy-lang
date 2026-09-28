@@ -71,7 +71,13 @@ narrow = (@state:facts.State op:propositions.Operator subject:Operand other:Oper
     return true
 }
 
+nonzero_against_zero = (subject:Operand bound:Operand state:facts.State):>bool => {
+    return subject.affine isnt? none and subject.affine.projection =? 'value' and subject.shift =? 0 and bound.interval isnt? none and ranges.same_bounds(bound.interval ranges.exact(0)) and facts.contains(state facts.nonzero(subject.affine.binding_id))
+}
 decide_order = (op:propositions.Operator left:Operand right:Operand state:facts.State context:relations.Context):>bool? => {
+    if op =? '=?' or op =? 'not=?' {
+        if nonzero_against_zero(left right state) or nonzero_against_zero(right left state) return op =? 'not=?'
+    }
     if left.affine is? none or right.affine is? none return none
     if op =? '>?' or op =? '>=?' return decide_order(reverse(op) right left state context)
     let delta=left.shift-right.shift

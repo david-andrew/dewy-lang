@@ -54,6 +54,13 @@ source, while relations between the snapshot and other unchanged terms survive.
 For example, `let size = xs.length` creates a scalar term; it does not create a
 new sequence to which index facts may refer.
 
+Uniform array-element summaries retain supported order/index/remainder facts,
+nonzero facts and disequalities about stable external terms. A stored foreign
+element removes unsupported summaries; clearing or popping to empty makes old
+summaries vacuous, so the first replacement discards them before deriving new
+facts. Reading or copying the array transfers the surviving summaries. This is
+not a complete aggregate relational domain yet.
+
 ## Entailment and joins
 
 Intervals answer constant range questions. The finite ordered graph answers
