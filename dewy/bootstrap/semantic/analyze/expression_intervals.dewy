@@ -298,6 +298,22 @@ record = (@snapshot:Snapshot id:addr state:facts.State env:values.Environment @r
     else if id in? snapshot.sequences {snapshot.sequences.pop(id);}
 }
 
+# The integer result before machine-width wrapping. Binding transfers can
+# use it only when it fits the operation's actual result representation.
+# Operand numbers are the evaluated snapshot, never replayed source calls.
+mathematical = (id:addr state:facts.State snapshot:Snapshot env:values.Environment):>ranges.Interval? => {
+    let node=hir.node_at(env.nodes expressions.strip_casts(id env.nodes))
+    if node isnt? hir.FunctionCall or node.pos_args.length not=? 2 return none
+    let function=hir.node_at(env.nodes node.func)
+    if function isnt? hir.ExpressedIdentifier or function.name not in? ['__add__' '__sub__'] return none
+    if function.binding_id isnt? none and not bindings.builtin_binding(env.registry function.binding_id) return none
+    let left=snapshot.numbers.get(node.pos_args[0])
+    let right=snapshot.numbers.get(node.pos_args[1])
+    let bound=if function.name =? '__sub__' difference(node.pos_args[0] node.pos_args[1] state snapshot) else none
+    let operation:ranges.Operation=if function.name =? '__add__' '__add__' else '__sub__'
+    return ranges.binary(operation left right bound=bound)
+}
+
 # A sum relation describes operands observed together. Restrict live term
 # identities to simple reads, and require every fixed-width sum to fit.
 Sum:type = const [left:facts.Term? right:facts.Term?]

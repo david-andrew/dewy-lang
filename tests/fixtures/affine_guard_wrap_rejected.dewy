@@ -1,0 +1,5 @@
+probe=(x:uint8 limit:uint8):>int64=>{
+    if x+1<?limit {$assert x<?limit}
+    return 42
+}
+main=():>int64=>probe(8 10)

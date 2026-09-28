@@ -6421,6 +6421,7 @@ x86-64/C, including repeated sibling types and shared-string classification. The
 copy-bound fixture is now included in the full 296-case parity manifest. A fresh
 integration will cover these modules as part of the complete compiler.
 
+
 ## Allocation profile and a counting correction (2026-09-28)
 
 `tools/allocation_sites.py` attributes a native program's arena allocations
@@ -6436,3 +6437,26 @@ imports, sub-phases), so the totals overstate the real volume about
 threefold. For example, the 87.7 GB recorded for `phase1-u` corresponds to
 roughly 31 GB. Comparisons between the recorded totals still roughly hold.
 Sum only the top-level phases.
+
+## Machine arithmetic in affine evidence (2026-09-28)
+
+A guard or stored sum/difference now supplies an affine relation only when its
+mathematical result fits the machine result type. Previously, wrapping arithmetic
+could supply a false order: `uint8(255)+1 < 1` does not establish `255 < 1`, and
+storing `uint8(0)-1` does not preserve the source's upper bound. Both compilers
+check the operation before transferring evidence; native storage uses the already
+observed operand intervals rather than replaying evaluation. Named user functions
+do not acquire affine meaning merely by spelling their names like operators.
+
+Validation: 55 focused hosted checks, 66 surrounding finite-fact checks, 60
+combined paired checks, and three direct hosted/native fact-state comparisons
+pass. Three fixtures bring the manifest to 299 cases. These checks include
+unsigned/signed 8- and 64-bit guards, underflowing storage, and successful guarded
+nonwrapping operations.
+
+The preceding `65b46249` snapshot reached an identical three-generation native
+fixed point and passed four fresh hosted-built driver checks. Its complete copy
+inventory is 4,296 sites across 53,360 lines (80.51/KLOC), within the corrected
+4,500/85 gate. Generation 3 took 74 seconds while hosted checks ran concurrently;
+that is integration evidence, not an isolated performance measurement.
+

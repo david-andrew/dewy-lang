@@ -274,11 +274,13 @@ assignment_shift = (node:hir.Assign env:values.Environment @registry:bindings.Re
 
 # These transfers run after arithmetic has been checked: they preserve
 # evidence for the mathematical sum, not for a possibly wrapped word.
-seed_sum = (@state:facts.State subject:addr id:addr env:values.Environment context:relations.Context @registry:bindings.Registry):>void => {
+seed_sum = (@state:facts.State subject:addr id:addr mathematical:ranges.Interval? env:values.Environment context:relations.Context @registry:bindings.Registry):>void => {
     let node = hir.node_at(env.nodes expressions.strip_casts(id env.nodes))
     if node isnt? hir.FunctionCall or node.pos_args.length not=? 2 return
     let function = hir.node_at(env.nodes node.func)
     if function isnt? hir.ExpressedIdentifier or (function.name not=? '__add__' and function.name not=? '__sub__') return
+    if function.binding_id isnt? none and not bindings.builtin_binding(registry function.binding_id) return
+    if ranges.fits(mathematical values.result_width(node.value_type env.types)) is? none return
     loop side in 0..1 {
         if side =? 1 and function.name =? '__sub__' break
         let source = if side =? 0 node.pos_args[0] else node.pos_args[1]

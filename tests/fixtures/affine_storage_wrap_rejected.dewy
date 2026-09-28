@@ -1,0 +1,7 @@
+probe=(x:uint8 bound:uint8):>int64=>{
+    if x>?bound return 0
+    let saved=x-1
+    $assert saved<=?bound
+    return 42
+}
+main=():>int64=>probe(8 10)

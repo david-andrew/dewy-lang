@@ -31,11 +31,12 @@ def test_native_affine_facts_match_hosted(tmp_path):
     def number(value):
         return hir.Integer(LOC, ty.IntegerLiteralType(value), '0d', value)
 
-    def binary(name, left, right):
-        fn = hir.ExpressedIdentifier(LOC, ty.FunctionType([], [], None, 'int64'), name)
-        return hir.FunctionCall(LOC, 'int64', fn, [left, right], {})
+    def binary(name, left, right, result='int64'):
+        fn = hir.ExpressedIdentifier(LOC, ty.FunctionType([], [], None, result), name)
+        return hir.FunctionCall(LOC, result, fn, [left, right], {})
 
     i, j = reference('i', 'int64'), reference('j', 'int64')
+    byte = reference('byte', 'uint8')
     text, prefix = reference('text', ty.StringType(None)), reference('prefix', ty.StringType(None))
     length = hir.StringLength(LOC, 'int64', text)
     prefix_length = hir.StringLength(LOC, 'int64', prefix)
@@ -44,6 +45,7 @@ def test_native_affine_facts_match_hosted(tmp_path):
             binary('__sub__', prefix_length, number(1)), binary('__add__', prefix_length, number(1)),
             binary('__sub__', length, prefix_length), binary('__sub__', length, i),
             binary('__sub__', i, i), binary('__mul__', i, number(2))]
+    sums.append(binary('__sub__', byte, number(1), 'uint8'))
     assignments = [hir.Assign(LOC, 'void', i, op, value) for op, value in [
         ('+=', number(2)), ('-=', number(-1)), ('+=', j), ('*=', number(2)),
         ('=', binary('__add__', i, number(2))), ('=', binary('__sub__', i, number(2))),
@@ -61,7 +63,7 @@ def test_native_affine_facts_match_hosted(tmp_path):
                       for b in registry.by_id.values()]
     interval, order, length_key = bounds.Interval, bounds._order_key, bounds._length_key
     states = [{}, {
-        i.binding_id: interval(0, 4), j.binding_id: interval(1, 7),
+        i.binding_id: interval(0, 4), j.binding_id: interval(1, 7), byte.binding_id: interval(1, 12),
         order(i.binding_id, length_key(text.binding_id)): interval(5, None),
         bounds._remainder_key(j.binding_id, length_key(text.binding_id), i.binding_id): interval(2, None),
         length_key(prefix.binding_id): interval(3, 9),
@@ -85,8 +87,17 @@ def test_native_affine_facts_match_hosted(tmp_path):
             expected.extend(f'sum{state_index}_{index}|{fact(key)[1]}|{spelling(value)}' for key, value in seeded.items())
             difference = validator._difference_bound(node, state)
             expected.append(f'difference{state_index}_{index}|none' if difference is None else f'difference{state_index}_{index}|{spelling(difference)}')
+            operands = [validator._eval(arg, dict(state), validate=False) for arg in node.pos_args]
+            mathematical = validator._binary_interval(node.func.name, *operands, 'int',
+                bound=difference if node.func.name == '__sub__' else None)
+            if mathematical is None:
+                math_source = 'none'
+            else:
+                lo = 'none' if mathematical.lower is None else f'({mathematical.lower})'
+                hi = 'none' if mathematical.upper is None else f'({mathematical.upper})'
+                math_source = f'ranges.Interval[{lo} {hi} {str(mathematical.capped).lower()}]'
             checks.append(f'''    let s{state_index}_{index} = state
-    terms.seed_sum(@s{state_index}_{index} 100 {names[id(node)]} env context @registry)
+    terms.seed_sum(@s{state_index}_{index} 100 {names[id(node)]} {math_source} env context @registry)
     emit("sum{state_index}_{index}" s{state_index}_{index})
     emit_interval("difference{state_index}_{index}" terms.difference_bound({names[id(node.pos_args[0])]} {names[id(node.pos_args[1])]} state env @registry))''')
     source = tmp_path / 'affine_facts.dewy'

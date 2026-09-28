@@ -3896,7 +3896,8 @@ class _BoundsValidator:
         binding = self._binding_id(node)
         if binding is not None:
             return binding, 0
-        if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier) and len(node.pos_args) == 2:
+        if (isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ExpressedIdentifier)
+                and node.func.binding_id is None and len(node.pos_args) == 2):
             name = node.func.name
             if name in ('__add__', '__sub__'):
                 left, right = node.pos_args
@@ -4398,6 +4399,18 @@ class _BoundsValidator:
         `let last = prefix.length - 1`: what bounds `prefix.length` bounds `last` by one more."""
         value = _strip_casts(value)
         if not (isinstance(value, hir.FunctionCall) and isinstance(value.func, hir.ExpressedIdentifier) and value.func.name in ('__add__', '__sub__') and len(value.pos_args) == 2):
+            return
+        # These relations describe mathematical addition/subtraction. A
+        # wrapped result has a different value, and a later argument may have
+        # replaced an operand's source. Neither may seed an affine promise.
+        if value.func.binding_id is not None or (
+                self.predicate_bindings.read_bindings(value)
+                & self.predicate_bindings.mutated_bindings(value)):
+            return
+        operands = [self._eval(argument, dict(state), validate=False) for argument in value.pos_args]
+        bound = self._difference_bound(value, state) if value.func.name == '__sub__' else None
+        mathematical = self._binary_interval(value.func.name, *operands, 'int', bound=bound)
+        if self._fit_type(mathematical, ty.strip_refinement(value.type)) is None:
             return
         for term_node, constant_node, sign in ((value.pos_args[0], value.pos_args[1], 1), *(((value.pos_args[1], value.pos_args[0], 1),) if value.func.name == '__add__' else ())):
             constant = self._constant_expr(constant_node, set())
@@ -5099,7 +5112,11 @@ class _BoundsValidator:
         effective = name if truth else {'__gt__': '__le__', '__ge__': '__lt__', '__lt__': '__ge__', '__le__': '__gt__'}.get(name)
         if effective in ordered:
             smaller, larger = ordered[effective]
-            smaller_term, larger_term = self._offset_term(smaller), self._offset_term(larger)
+            # A true predicate describes the machine result it observed.
+            # Rewriting a wrapping word expression as an integer affine term
+            # would turn e.g. uint8(255)+1 < 1 into the false fact 255 < 0.
+            smaller_term = self._checked_offset_term(smaller, refined)
+            larger_term = self._checked_offset_term(larger, refined)
             if smaller_term is not None and larger_term is not None and smaller_term[0] != larger_term[0]:
                 smaller_id, smaller_offset = smaller_term
                 larger_id, larger_offset = larger_term
