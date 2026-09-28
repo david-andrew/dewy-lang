@@ -4454,7 +4454,7 @@ loop_predicate = (predicate:addr iterators:array<addr> body_env:Environment @pre
         $runtime_assert iter is? hir.IteratorExpression
         let target = node_at(iter.target session)
         $runtime_assert target is? hir.ExpressedIdentifier and target.binding_id isnt? none
-        if hir_facts.predicate_bounds_counter(predicate target.binding_id session.hir session.types) {
+        if hir_facts.predicate_bounds_counter(predicate target.binding_id session.hir session.types session.registry) {
             let item = iterators[index]
             $runtime_assert item <? session.hir.length
             contexts.replace_hir(item hir.IteratorExpression[iter.loc iter.value_type iter.target iter.iterable iter.first iter.step iter.last iter.count true] @session)

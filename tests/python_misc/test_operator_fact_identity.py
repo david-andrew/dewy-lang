@@ -1,4 +1,5 @@
 """User operator names carry only their checked contracts, never builtin laws."""
+from pathlib import Path
 import pytest
 from dewy.backend.udewy import codegen
 from dewy.reporting import ReportException, SrcFile
@@ -52,6 +53,8 @@ CASES.append("""narrow=(value:bigint):>int64=>{
     return value as int64
 }
 main=():>int64=>narrow(42)""")
+
+CASES.append((Path(__file__).resolve().parents[2]/'dewy/tests/length_terms.dewy').read_text())
 
 @pytest.mark.parametrize('source', ERRORS)
 def test_user_operator_cannot_supply_builtin_evidence(source):

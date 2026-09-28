@@ -6555,3 +6555,12 @@ hook and 2,000 warmed negative queries with zero allocated bytes. Twenty-seven
 recursive copy/drop, resource-replacement and union checks pass, including
 paired execution. The kernel brings the parity manifest to 308 cases. Full
 self-build volume and timing are still to be measured for this batch.
+
+The `573a2b1b` parity snapshot passed 303 of 304 cases. The native failure in
+`length_terms.dewy` came from counter-bound discovery rejecting a builtin with
+a stable binding id. That query now consults the registry rather than accepting
+only binding-less intrinsics. User functions with the same spelling still do
+not establish a counter bound. The direct HIR comparison includes a shadowed
+operator, and the full length-term fixture joins the focused operator group:
+15 checks pass, including paired x86-64/C execution. A new frozen integration
+will cover this correction together with the borrow and lifecycle-query work.

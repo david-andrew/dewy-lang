@@ -38,6 +38,7 @@ def test_native_hir_fact_views_match_hosted(tmp_path):
             operands = [x, limit] if operator in ('__lt__', '__le__') else [limit, x]
             predicates.append(hir.FunctionCall(LOC, 'bool', identifier(operator, ty.FunctionType([], [], None, 'bool')), operands, {}))
     predicates += [hir.ShortCircuit(LOC, 'bool', op, hir.Bool(LOC, 'bool', False), predicates[0]) for op in ('and', 'or')]
+    predicates.append(replace(predicates[0], func=replace(predicates[0].func, binding_id=99)))
     positive = ty.Proposition('self', '>?', 0)
     small = ty.Proposition('self', '<?', 10)
     field_type = ty.ObjectType((ty.ObjectField('count', 'int64', refinement=(positive, small)),))
@@ -78,7 +79,7 @@ def test_native_hir_fact_views_match_hosted(tmp_path):
     lines, root_id, names = emit_hir(root, type_value=build, with_names=True)
     checks, expected = [], []
     for i, predicate in enumerate(predicates):
-        checks.append(f'    printl("guard{i}|{{analysis.predicate_bounds_counter({names[id(predicate)]} 1 nodes type_nodes)}}")')
+        checks.append(f'    printl("guard{i}|{{analysis.predicate_bounds_counter({names[id(predicate)]} 1 nodes type_nodes bindings.Registry[])}}")')
         expected.append(f'guard{i}|{str(bounds.predicate_bounds_counter(predicate, 1)).lower()}')
     for i, access in enumerate(accesses):
         checks.append(f'    emit_props("field{i}" analysis.member_invariant({names[id(access)]} nodes type_nodes))')
@@ -107,6 +108,7 @@ from reporting import Span
 import p"{ROOT / 'dewy/bootstrap/semantic/ty.dewy'}" as types
 import p"{ROOT / 'dewy/bootstrap/semantic/propositions.dewy'}" as facts
 import p"{ROOT / 'dewy/bootstrap/semantic/hir.dewy'}" as hir
+import p"{ROOT / 'dewy/bootstrap/semantic/bindings.dewy'}" as bindings
 import p"{ROOT / 'dewy/bootstrap/semantic/analyze/hir_facts.dewy'}" as analysis
 emit_props = (label:string props:array<facts.Proposition>):>void => {{
     loop p in props {{ printl("{{label}}|{{p.subject}},{{p.op}},{{_bigint_as_string(p.value)}}") }}

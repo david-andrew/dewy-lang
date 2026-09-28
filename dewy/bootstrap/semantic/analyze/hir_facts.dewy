@@ -216,13 +216,14 @@ is_target = (id:addr binding:addr nodes:array<hir.AST>):>bool => {
     let node = hir.node_at(nodes strip_casts(id nodes))
     return node is? hir.ExpressedIdentifier and node.binding_id =? binding
 }
-predicate_bounds_counter = (id:addr target:addr nodes:array<hir.AST> type_nodes:types.Table):>bool => {
+predicate_bounds_counter = (id:addr target:addr nodes:array<hir.AST> type_nodes:types.Table registry:bindings.Registry):>bool => {
     let node = hir.node_at(nodes id)
-    if node is? hir.ShortCircuit and node.op =? 'and' return predicate_bounds_counter(node.left target nodes type_nodes) or predicate_bounds_counter(node.right target nodes type_nodes)
+    if node is? hir.ShortCircuit and node.op =? 'and' return predicate_bounds_counter(node.left target nodes type_nodes registry) or predicate_bounds_counter(node.right target nodes type_nodes registry)
     if node isnt? hir.FunctionCall return false
     if node.pos_args.length not=? 2 return false
     let function = hir.node_at(nodes node.func)
-    if function isnt? hir.ExpressedIdentifier or function.binding_id isnt? none return false
+    if function isnt? hir.ExpressedIdentifier return false
+    if function.binding_id isnt? none and not bindings.builtin_binding(registry function.binding_id) return false
     let left = node.pos_args[0]
     let right = node.pos_args[1]
     if function.name =? '__lt__' return is_target(left target nodes) and word_bound(right nodes type_nodes)
