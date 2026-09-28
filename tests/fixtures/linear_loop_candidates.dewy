@@ -1,0 +1,14 @@
+# The scaled comparison selects lower/upper as a candidate pair. Entry and
+# every backedge prove its difference; the assertion does not assume it.
+work=(start:int64<v=>0<=?v<=?100>):>int64=>{
+    let lower:int64=0
+    let upper:int64=start
+    loop lower<?10 and upper<?1000 {
+        $assert 2*lower<=?2*upper
+        lower+=1
+        upper+=1
+    }
+    $assert 2*lower<=?2*upper
+    return 42
+}
+main=():>int64=>if work(0)=?42 and work(100)=?42 42 else 1

@@ -1,0 +1,55 @@
+import p"../hir.dewy" as hir
+import p"../bindings.dewy" as bindings
+import p"value_bounds.dewy" as values
+import p"term_facts.dewy" as terms
+import p"fact_state.dewy" as facts
+
+# Vocabulary selection, not a theorem: names under addition, subtraction and
+# literal scaling may be useful difference qualifiers. Entry intervals must
+# establish each offered bound and every advancing edge must preserve it.
+# Even a wrapping expression cannot bypass that proof. Unknown/nonlinear
+# syntax and exhausted discovery budgets offer no additional names.
+linear_terms=(id:addr env:values.Environment @registry:bindings.Registry @budget:addr):>array<facts.Term> | none =>{
+    if budget=?0 return none
+    budget-=1
+    let node=hir.node_at(env.nodes id)
+    if node is? hir.Obligation return linear_terms(node.value env @registry @budget)
+    if node is? hir.ValueCast|hir.RepresentationCast return linear_terms(node.expr env @registry @budget)
+    if node is? hir.Block and not node.scoped and node.items.length=?1 return linear_terms(node.items[0] env @registry @budget)
+    if node is? hir.Integer return []
+    if node is? hir.ExpressedIdentifier|hir.MemberAccess|hir.ArrayLength|hir.StringLength {
+        let term=terms.binding_term(id env @registry)
+        return if term is? none none else [term]
+    }
+    if node isnt? hir.FunctionCall or node.pos_args.length not=?2 return none
+    let function=hir.node_at(env.nodes node.func)
+    if function isnt? hir.ExpressedIdentifier return none
+    if node.integer_operation is? none and function.binding_id isnt? none and not bindings.builtin_binding(env.registry function.binding_id) return none
+    let operation=if node.integer_operation is? none function.name else node.integer_operation
+    if operation not in? ['__add__' '__sub__' '__mul__'] return none
+    let left=linear_terms(node.pos_args[0] env @registry @budget)
+    let right=linear_terms(node.pos_args[1] env @registry @budget)
+    if left is? none or right is? none return none
+    if operation=?'__mul__' and left.length>?0 and right.length>?0 return none
+    loop term in right {
+        let found=false
+        loop known in left {if facts.same_term(term known) {found=true break}}
+        if not found {left.push(term)}
+        if left.length>?32 return none
+    }
+    return left
+}
+
+add_pairs=(@pairs:array<facts.TermPair> left:array<facts.Term> right:array<facts.Term>):>void=>{
+    loop a in left {
+        loop b in right {
+            if pairs.length>=?64 return
+            if facts.same_term(a b) continue
+            let found=false
+            loop pair in pairs {
+                if facts.same_term(pair.left a) and facts.same_term(pair.right b) or facts.same_term(pair.left b) and facts.same_term(pair.right a) {found=true break}
+            }
+            if not found {pairs.push(facts.TermPair[a b])}
+        }
+    }
+}

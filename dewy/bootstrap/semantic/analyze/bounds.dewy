@@ -19,6 +19,7 @@ import p"length_proofs.dewy" as proofs
 import p"term_facts.dewy" as terms
 import p"fact_state.dewy" as facts
 import p"loop_control.dewy" as loop_control
+import p"loop_qualifiers.dewy" as loop_qualifiers
 import p"relations.dewy" as relations
 import p"intervals.dewy" as ranges
 import p"obligations.dewy" as obligations
@@ -1154,12 +1155,13 @@ mentioned_loop_pairs=(body:addr @checker:Checker):>array<facts.TermPair>=>{
         if node is? hir.FunctionCall and node.pos_args.length=?2 and function is? hir.ExpressedIdentifier and function.name in? set['__lt__' '__le__' '__gt__' '__ge__' '__eq__' '__ne__' '__sub__'] {
             let left=terms.offset_term(node.pos_args[0] checker.data.env @checker.data.registry)
             let right=terms.offset_term(node.pos_args[1] checker.data.env @checker.data.registry)
-            if left isnt? none and right isnt? none and not facts.same_term(left.term right.term) {
-                let found=false
-                loop pair in pairs {
-                    if facts.same_term(pair.left left.term) and facts.same_term(pair.right right.term) or facts.same_term(pair.left right.term) and facts.same_term(pair.right left.term) {found=true break}
-                }
-                if not found {pairs.push(facts.TermPair[left.term right.term])}
+            if left isnt? none and right isnt? none {
+                loop_qualifiers.add_pairs(@pairs [left.term] [right.term])
+            } else {
+                let budget:addr=128
+                let a=loop_qualifiers.linear_terms(node.pos_args[0] checker.data.env @checker.data.registry @budget)
+                let b=loop_qualifiers.linear_terms(node.pos_args[1] checker.data.env @checker.data.registry @budget)
+                if a isnt? none and b isnt? none {loop_qualifiers.add_pairs(@pairs a b)}
             }
         }
         hir.push_children_reversed(node @pending)

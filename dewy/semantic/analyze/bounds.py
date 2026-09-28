@@ -2104,6 +2104,39 @@ class _BoundsValidator:
                 state.pop(binding, None)
         return _LoopTransfer(self._join_states(exits) if exits else None, breaks, continues)
 
+    def _linear_qualifier_terms(self, node, budget):
+        """Select names inside bounded linear syntax, without proving a fact.
+
+        Offsets and literal coefficients only select a vocabulary. Entry
+        intervals establish each proposed difference, and ordinary transfer
+        must preserve it on every advancing edge, including wrapping updates.
+        This keeps qualifier discovery independent of query-time evidence.
+        """
+        if budget[0] == 0:
+            return None
+        budget[0] -= 1
+        if isinstance(node, hir.Obligation):
+            return self._linear_qualifier_terms(node.value, budget)
+        if isinstance(node, (hir.ValueCast, hir.RepresentationCast)):
+            return self._linear_qualifier_terms(node.expr, budget)
+        if isinstance(node, hir.Block) and not node.scoped and len(node.items) == 1:
+            return self._linear_qualifier_terms(node.items[0], budget)
+        if isinstance(node, hir.Integer):
+            return []
+        if isinstance(node, (hir.ExpressedIdentifier, hir.MemberAccess, hir.ArrayLength, hir.StringLength)):
+            term = self._binding_id(node)
+            return None if term is None else [term]
+        if not isinstance(node, hir.FunctionCall) or not isinstance(node.func, hir.ExpressedIdentifier):
+            return None
+        op = node.integer_operation or (node.func.name if node.func.binding_id is None else None)
+        if op not in {'__add__', '__sub__', '__mul__'} or len(node.pos_args) != 2:
+            return None
+        left, right = [self._linear_qualifier_terms(arg, budget) for arg in node.pos_args]
+        if left is None or right is None or (op == '__mul__' and left and right):
+            return None
+        terms = list(dict.fromkeys([*left, *right]))
+        return terms if len(terms) <= 32 else None
+
     def _mentioned_loop_pairs(self, body):
         cached = self.loop_qualifier_pairs.get(id(body))
         if cached is not None:
@@ -2118,10 +2151,19 @@ class _BoundsValidator:
                     and isinstance(node.func, hir.ExpressedIdentifier)
                     and node.func.name in {'__lt__', '__le__', '__gt__', '__ge__', '__eq__', '__ne__', '__sub__'}):
                 left, right = (self._offset_term(arg) for arg in node.pos_args)
-                if left is not None and right is not None and left[0] != right[0]:
-                    pair = (left[0], right[0])
-                    if pair not in pairs and pair[::-1] not in pairs:
-                        pairs.append(pair)
+                if left is not None and right is not None:
+                    choices = ([left[0]], [right[0]])
+                else:
+                    budget = [128]
+                    choices = tuple(self._linear_qualifier_terms(arg, budget) for arg in node.pos_args)
+                if all(side is not None for side in choices):
+                    for a in choices[0]:
+                        for b in choices[1]:
+                            if len(pairs) == 64:
+                                break
+                            pair = (a, b)
+                            if a != b and pair not in pairs and pair[::-1] not in pairs:
+                                pairs.append(pair)
             pending.extend(reversed(tuple(hir.children(node))))
         self.loop_qualifier_pairs[id(body)] = (body, pairs)
         return pairs

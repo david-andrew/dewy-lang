@@ -36,6 +36,18 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): bounded linear source queries now select difference
+candidates for loop checking. For example, `2*lower<=?2*upper` selects the
+`lower`/`upper` pair even when neither variable has an exact initial value in
+the selected group. Selection uses literal scaling, addition and subtraction,
+with 128 expression visits, 32 terms and the existing shared 64-pair loop
+budget. Entry intervals and every advancing edge establish the actual facts;
+wrapping, unknown calls and failed candidates retain conservative behavior.
+Twelve focused hosted checks and two paired x86-64/C groups pass, including
+multi-term sums, 70 unrelated counters, continue paths and rejection of
+invalid entry/backedge/wrapping/nonlinear obligations. These remain ordinary
+difference qualifiers, not general coefficient-weighted invariant facts.
+
 Checkpoint (2026-09-28): naming a stable parameter projection now preserves
 its storage evidence when forwarding the name or a descendant to a known
 read-only callee. Local views use the same field-access permission as direct

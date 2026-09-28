@@ -102,7 +102,8 @@ interval endpoints. Pair selection is deliberately incomplete, so a different
 matching could prove a query this implementation leaves unknown. No new facts
 are assumed by normalization, and nonlinear expressions, invalidated identities,
 opaque calls, potentially wrapping intermediates and exhausted budgets stay
-unknown. This query does not generate additional loop invariants.
+unknown. The query itself never installs new evidence. Separately, bounded linear
+source syntax can select difference candidates for ordinary loop validation.
 
 Disequality does not choose an ordering. It can sharpen a known non-strict integer
 order. A join retains facts supported on every reachable incoming path. For an
@@ -126,7 +127,10 @@ Candidate selection is bounded separately from proof:
 - exact entry values select at most 64 changing terms and a linear-size set of
   difference relations through representative anchors;
 - source predicates and subtraction select at most 64 deduplicated term pairs;
-  while guards precede bodies in this shared pair budget;
+  while guards precede bodies in this shared pair budget. Names under addition,
+  subtraction and literal scaling also select cross-operand pairs, with at most
+  128 expression visits and 32 terms per operand. These still propose only
+  ordinary differences, not general coefficient-weighted invariant facts;
 - entry intervals must establish each offered difference;
 - the loop condition's effects and every advancing edge participate in transfer,
   including `continue` paths;
@@ -148,7 +152,7 @@ or unproved candidates cannot justify an obligation.
 
 ## Remaining closure work
 
-Linear loop-candidate selection, measurements of nested-loop state size
+General coefficient-weighted loop invariants, measurements of nested-loop state size
 and qualifier discovery, correlations among multiple aggregate components, and
 consuming-obligation provenance for unsafe audits still need work.
 The roadmap remains open for these items; this inventory does not certify all
