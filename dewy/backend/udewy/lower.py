@@ -500,6 +500,9 @@ class _Lowerer(
         self.entry_name = entry_name
         analysis = _EffectAnalyzer(root)
         self.program_effects: ProgramEffects = analysis.solve()
+        # Selected overloads and immutable callable aliases are ordinary
+        # value boundaries too; their names alone do not imply raw exposure.
+        self.known_value_calls = frozenset(id(call) for call in analysis.calls if analysis._direct_targets(call))
         self.place_loans = place_loans(analysis, self.program_effects)
         self.storage_borrow_proofs = storage_borrows.prove(analysis, self.program_effects)
         self.forwarded_values = self.storage_borrow_proofs.arguments
@@ -527,9 +530,6 @@ class _Lowerer(
             create_scope=False,
             function_body=False,
         )
-        # Scope borrows need the captured-binding set discovery just collected.
-        captured = {binding.semantic_id for uses in self.captures.values() for _use, binding in uses if binding.semantic_id is not None}
-        self.borrow_plan = borrowing.analyze(self.root, captured, self.program_effects, set(self.binding_by_semantic_id))
         self._classify_array_representations()
         self._analyze_string_results()
         self._check_captures()

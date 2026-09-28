@@ -8,6 +8,9 @@ from tests.python_misc.test_scalar_projection import execute
 FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures'
 SOURCE = (FIXTURES / 'unrelated_raw_array_borrows.dewy').read_text()
 CASES = [SOURCE,
+    # Dispatch selection and immutable callable aliases are known value calls.
+    SOURCE.replace('forward=(values:array<int64>):>int64=>read(values)',
+                   'identity=(value:int64):>int64=>value\nforward=@read & @identity'),
     # Local growth changes representation, not read-only call semantics.
     SOURCE.replace('let values=make()', 'let values:array<int64>=[]\n    loop i in [0..42) {values.push(i)}'),
     SOURCE.replace('return values.length', 'if values.length>?0 return values[0]+42\n    return 0'),
@@ -78,6 +81,19 @@ forward=(@source:array<int64>):>int64=>read(source change())
 main=():>int64=>{
     let answer=forward(@values)
     return if answer=?42 and values.length=?0 42 else 1
+}""",
+
+    # Global storage is safe across a call with no ambient writes; being a
+    # global alone is not a reason to allocate an independent snapshot.
+    """let values:array<int64>=[42]
+read=(snapshot:array<int64>):>int64=>if snapshot.length>?0 snapshot[0] else 0
+main=():>int64=>{
+    let before:int64=_arena_allocated_bytes
+    loop i in [0..20) {if read(values) not=?42 return 1}
+    if _arena_allocated_bytes not=?before return 2
+    if values.length not=?1 return 4
+    values[0]=43
+    return if values[0]=?43 42 else 3
 }""",
 
 ]

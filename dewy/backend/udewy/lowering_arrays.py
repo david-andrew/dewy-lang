@@ -383,6 +383,8 @@ class _ArrayLowering(_ArraySharing):
     def _analyze_array_call_boundaries(self) -> dict[int, set[ArrayUse]]:
         boundary_uses: dict[int, set[ArrayUse]] = defaultdict(set)
         self.array_call_boundary_analyses = {}
+        nonlocal_roots = (self.borrow_plan.place_bindings | self.borrow_plan.captured_bindings
+                          | self.borrow_plan.globals)
         for call in self.array_calls:
             function = self._direct_call_function(call)
             for position, argument, parameter in self._call_array_arguments(
@@ -415,8 +417,7 @@ class _ArrayLowering(_ArraySharing):
                 # A growable descriptor can be borrowed just like a fixed
                 # buffer, provided raw/ambient aliases cannot change it.
                 ambient = self.borrow_plan.ambient_writes.get(id(call), ())
-                nonlocal_source = storage_root_id in (
-                    self.borrow_plan.place_bindings | self.borrow_plan.captured_bindings)
+                nonlocal_source = storage_root_id in nonlocal_roots
                 safe = (
                     function is not None
                     and parameter_analysis is not None
@@ -428,7 +429,6 @@ class _ArrayLowering(_ArraySharing):
                     # record fields do not overlap merely by sharing a root.
                     and not any(self._storage_routes_overlap(storage_route, place) for place in place_routes)
                     and storage_root_id not in self.borrow_plan.exposed_bindings
-                    and storage_root_id not in self.borrow_plan.globals
                     and not (nonlocal_source and ambient)
                     and self._array_later_arguments_stable(call, position, storage_route)
                 )
@@ -528,6 +528,11 @@ class _ArrayLowering(_ArraySharing):
                 return self._array_argument_binding(node)
 
     def _classify_array_representations(self) -> None:
+        # Discovery supplies captures for both the full lowerer and focused
+        # representation queries. Storage safety precedes representation.
+        captured = {binding.semantic_id for uses in self.captures.values() for _use, binding in uses if binding.semantic_id is not None}
+        self.borrow_plan = borrowing.analyze(self.root, captured, self.program_effects, set(self.binding_by_semantic_id),
+                                            known_value_calls=self.known_value_calls)
         self.frame_array_bindings: set[int] = set()
         self._analyze_array_aliases_and_parameters()
         allowed_uses: set[ArrayUse] = {

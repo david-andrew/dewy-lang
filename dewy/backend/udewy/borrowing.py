@@ -54,6 +54,7 @@ class Function:
 
 @dataclass
 class Plan:
+    known_value_calls: frozenset[int] = frozenset()                   # resolved ordinary value boundaries
     functions: dict[int, Function] = field(default_factory=dict)      # id(literal) -> Function
     globals: set[int] = field(default_factory=set)
     named: dict[int, hir.FunctionLiteral] = field(default_factory=dict)   # binding id -> literal it names
@@ -199,7 +200,7 @@ def _word_value(type_: ty.Type) -> bool:
 
 def is_raw_call(node: hir.FunctionCall, plan: Plan, source_bindings: set[int]) -> bool:
     """A call that may expose an aggregate argument's storage (borrowing.dewy `raw`)."""
-    if node.scoped_read:
+    if node.scoped_read or id(node) in plan.known_value_calls:
         return False
     callee = node.func
     if isinstance(callee, hir.ExpressedIdentifier):
@@ -387,9 +388,9 @@ def view_region(scope: ViewScope, declaration: hir.Declare, excluded: set[int]) 
     return scope.items[start:max(scope.ends[id(declaration)], stop) + 1]
 
 
-def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source_bindings: set[int]) -> Plan:
+def analyze(root: hir.Block, captured: set[int], effects: ProgramEffects, source_bindings: set[int], *, known_value_calls: frozenset[int] = frozenset()) -> Plan:
     """Compute the borrow plan for a module (borrowing.dewy `details`, the scope-borrow part)."""
-    plan = Plan()
+    plan = Plan(known_value_calls=known_value_calls)
     comparisons: dict[int, tuple[hir.AST, hir.AST]] = {}
     interpolations: dict[int, list[hir.AST]] = {}
     def comparison(node):
@@ -662,7 +663,8 @@ def validate_required_views(root: hir.Block, srcfile):
                        if isinstance(node, hir.Declare) and node.binding_id is not None}
     for literal in analysis.literals:
         source_bindings.update(param.binding_id for param in literal_params(literal) if param.binding_id is not None)
-    plan = analyze(root, nonlocal_bindings(root), summaries, source_bindings)
+    plan = analyze(root, nonlocal_bindings(root), summaries, source_bindings,
+                   known_value_calls=frozenset(id(call) for call in analysis.calls if analysis._direct_targets(call)))
     for function in plan.functions.values():
         literal = function.literal
         for node in _walk_function(literal):

@@ -5345,3 +5345,31 @@ The earlier full-graph prototype passed its main source-contract group but
 found the hosted imported-function gap; it was narrowed before this checkpoint
 to avoid pulling all unused library bodies into the storage analysis.
 Fresh hosted-built and fixed-point integration follow this batch.
+
+
+## Array-boundary integration follow-up (2026-09-27)
+
+The broad hosted run at the argument-borrow checkpoint completed with 4,163
+passes and 14 failures. Eleven focused representation queries exposed a setup
+dependency introduced by the refactor: array classification now builds its
+borrow plan itself, after discovery. Three code-shape checks caught avoidable
+copies of globals and a selected overload mistaken for raw exposure. Global
+arguments may borrow when the callee has no ambient writes; places and captures
+keep the same condition. Hosted exposure analysis now consumes already resolved
+ordinary value calls, including overload selections, instead of guessing from
+the callee's spelling. Native global borrowing uses the corresponding rule.
+
+The surrounding regression batch passed 335 tests and left one overload-shape
+assertion, then all 72 targeted checks passed after its correction. None of
+the original failing assertions was relaxed. The paired argument group passes
+on both backends, including zero-allocation global/overload reads and the
+required snapshots across ambient/raw writes. The nonlocal-root inventory is
+built once per analysis, not once per argument.
+
+The preceding view-contract checkpoint (`7fe7854d`) closed a three-generation
+native fixed point with execution checks at
+`../dewy-build-artifacts/phase1-view-contract-integration`. Its fresh hosted-built
+native-driver suite passed all 60 selected view/resource/effect/argument checks.
+The 223-case parity manifest is running against that isolated snapshot; this
+is not yet a completed parity result. The newest global/overload corrections
+remain covered by the focused batch pending the next integration checkpoint.

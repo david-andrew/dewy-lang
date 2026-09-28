@@ -904,15 +904,15 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
                 else {kept.push(pair.argument)}
                 # Raw operations elsewhere in the callee cannot reach a
                 # parameter whose own storage is unexposed and uncaptured.
-                # The caller's source must also be unexposed, non-global and
-                # free of conflicting argument/place writes below. This is
+                # The caller's source must also be unexposed; nonlocal owners
+                # require no ambient writes, and arguments must not conflict. This is
                 # separate from retaining a later private argument snapshot.
                 let raw_blocked=direct in? opaque and not record_value(pair.argument nodes type_nodes) and not private_lifetime
-                if not raw_blocked and source isnt? none and source.binding not in? exposed and source.binding not in? plan.globals and (source.binding not in? places and source.binding not in? captured or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.push(pair.argument)}
+                if not raw_blocked and source isnt? none and source.binding not in? exposed and (source.binding not in? places and source.binding not in? captured and source.binding not in? plan.globals or direct not in? dirty) and summary isnt? none and effects.read_only(summary) and not conflicts(node position source nodes plan dirty) {allowed.push(pair.argument)}
                 else {
                     rejected.push(pair.argument)
                     if source isnt? none {
-                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? exposed 'its storage has been exposed to raw operations' else if source.binding in? plan.globals 'it is a global' else if (source.binding in? places or source.binding in? captured) and direct in? dirty 'ambient writes may reach its storage' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
+                        rejections[source.binding]=if raw_blocked 'the callee exposes raw storage or is not known statically' else if source.binding in? exposed 'its storage has been exposed to raw operations' else if (source.binding in? places or source.binding in? captured or source.binding in? plan.globals) and direct in? dirty 'ambient writes may reach its storage' else if pair.parameter is? none 'it is passed as a rest argument' else if summary is? none "the callee's effects are unknown" else if not effects.read_only(summary) 'the callee writes or keeps its parameter' else 'another argument of the same call may write it'
                     }
                 }
                 position+=1
