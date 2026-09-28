@@ -142,6 +142,8 @@ class _OptionalLowering:
         cell: hir.AST,
         value: hir.AST,
         payload: ty.TypeExpr,
+        *,
+        reported: bool = False,
     ) -> list[hir.AST]:
         value = self._unwrap_transparent(value)
         if isinstance(value, hir.Block) and not value.scoped and value.items:
@@ -150,9 +152,9 @@ class _OptionalLowering:
             # extracting the whole block first would mistake a payload handle
             # for an already-tagged cell.
             prefix = [statement for item in value.items[:-1] for statement in self._lower_statement(item)]
-            return [*prefix, *self._optional_write(cell, value.items[-1], payload)]
+            return [*prefix, *self._optional_write(cell, value.items[-1], payload, reported=reported)]
         if isinstance(value, hir.ValueCast):
-            return self._optional_write(cell, value.expr, payload)
+            return self._optional_write(cell, value.expr, payload, reported=reported)
         if (
             isinstance(value, hir.RepresentationCast)
             and ty.optional_payload(value.type) is not None
@@ -161,11 +163,11 @@ class _OptionalLowering:
             # checking wraps a member value in a conversion to the optional type;
             # the tag-and-payload store below is that conversion (a decode
             # `bytes as string | none` is a real conversion and stays)
-            return self._optional_write(cell, value.expr, payload)
+            return self._optional_write(cell, value.expr, payload, reported=reported)
         if isinstance(payload, (ty.NamedType, ty.ObjectType, ty.ArrayType)) or self._is_string_valued(payload):
             # An optional owns its aggregate or string payload, just like
             # a general union. A pointer into a shorter-lived local is unsafe.
-            return self._union_write(cell, value, ('none', payload), prepared=False)
+            return self._union_write(cell, value, ('none', payload), prepared=False, reported=reported)
         if isinstance(value, hir.Flow):
             prelude, flow = self._lower_optional_flow(value, cell, payload)
             return [*prelude, flow]

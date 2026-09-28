@@ -560,18 +560,20 @@ class _DictLowering:
             # its consumer. Its temporary owns that first copy until exit.
             self.owned_aggregate_cells[cell.name] = (('none', payload), False)
             self.owned_cells[cell.name] = ('none', payload)
-        if isinstance(ty.unfold(payload), ty.ObjectType):
-            # an object value: bind the element's handle to a name typed as the
-            # object, then let the optional write copy it into the cell's prepared
-            # tree (a raw object-typed load would be re-extracted as a call)
-            self._note_copy('record', ty.unfold(payload), 'looked up with get', 'the optional result owns its payload', loc)
+        if isinstance(ty.unfold(payload), (ty.ObjectType, ty.ArrayType)):
+            # A generated memory load borrows the stored handle; it is not a
+            # source-level call returning a fresh owner. Name it before passing
+            # it to the optional value boundary, for arrays as well as records.
+            # Otherwise call-result adoption could empty the dictionary entry.
+            kind = 'record' if isinstance(ty.unfold(payload), ty.ObjectType) else 'array'
+            self._note_copy(kind, ty.unfold(payload), 'looked up with get', 'the optional result owns its payload', loc)
             element = self._name('dict_element', loc)
             found_body = [
                 self._declare(element, replace(value_at(position), type='int64'), loc),
                 # An already-optional element is a cell, not the object's
                 # address. Preserve its stored type so copying decodes the
                 # presence tag and independently copies the active payload.
-                *self._optional_write(cell_word, replace(element, type=parts.value_type), payload),
+                *self._optional_write(cell_word, replace(element, type=parts.value_type), payload, reported=True),
             ]
         else:
             found_body = self._optional_write(cell_word, value_at(position), payload)

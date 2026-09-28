@@ -1,0 +1,20 @@
+# A generated storage load is borrowed. Packing it into an optional result
+# must copy the value, never adopt and empty the dictionary's stored array.
+fetch=(table:dict<int64 array<int64>>):>array<int64>|none=>table.get(0)
+probe=():>int64=>{
+    let table:dict<int64 array<int64>>=[0->[42]]
+    let first=fetch(table)
+    let second=fetch(table)
+    if first isnt? none {first.clear()}
+    if second isnt? none and second.length>?0 and 0 in? table and table[0].length>?0 {
+        return second[0]+table[0][0]-42
+    }
+    return 1
+}
+main=():>int64=>{
+    if probe() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if probe() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}
