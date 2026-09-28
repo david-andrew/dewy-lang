@@ -6872,3 +6872,17 @@ accesses. Fifty-six surrounding hosted checks and three paired groups pass.
 
 The preceding scope-cleanup checkpoint `7b9799ca` passed all 320 parity cases.
 The newer linear-query checkpoint's complete parity run remains in progress.
+
+Checkpoint (2026-09-28): ownership liveness now retains field suffixes below
+unknown array indices. A wildcard footprint proves `rows[i].left` disjoint from
+`rows[j].right` without claiming anything about i and j. The cleanup plan still
+stores only the static containing region and captures actual selectors once.
+Reads of overlapping fields, whole-owner reads and selected-slot replacements
+keep the resource live. Exact containment remains separate for assignment kills:
+a selected write cannot erase liveness for every possible slot. Complete
+containing-region replacement retains the previous renewal rule.
+Validation: 24 hosted checks and three paired x86-64/C groups pass. New cases
+exercise equal and unequal indices, conditional transfers, scalar sibling reads,
+selector mutation after capture, and rejected same-field reads/transfers and
+possibly overlapping replacements. This closes dynamic field disjointness;
+proofs of distinct runtime indices themselves remain a separate case.

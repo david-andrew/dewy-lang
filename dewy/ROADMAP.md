@@ -885,7 +885,10 @@ use. Full integration evidence is tracked in `PHASE1_PROGRESS.md`.
 Ownership follow-up (2026-09-28): runtime-selected transfers now preserve
 unrelated sibling fields, and disjoint containing arrays can transfer on the
 same path. Cleanup propagates independent presence conditions and saved selectors
-through nested arrays. Replacing a statically selected containing array or ancestor after a dynamic
+through nested arrays. Liveness now also retains field suffixes below unknown
+indices: `rows[i].left` and `rows[j].right` are disjoint for every selection.
+Same-field selections still conflict when their indices may overlap, and selected
+slot replacement cannot silently renew an unknown hole. Replacing a statically selected containing array or ancestor after a dynamic
 element transfer now cleans only the old remainder and restores the new value
 across backedges. Possibly overlapping dynamic routes remain conservative;
 this is a remaining lifetime-proof case, not implicit permission to copy a

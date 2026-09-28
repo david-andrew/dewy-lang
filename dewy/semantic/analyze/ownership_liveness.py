@@ -23,7 +23,7 @@ def fixed_index(node):
     return index if index is not None and index >= 0 else None
 
 
-def field_route(node, *, allow_prefix=False):
+def field_route(node, *, allow_prefix=False, wildcards=False):
     """A stable route, or conservatively its prefix before an unknown slot."""
     path = []
     while isinstance(node, (hir.MemberAccess, hir.Index)):
@@ -33,11 +33,14 @@ def field_route(node, *, allow_prefix=False):
         else:
             index = fixed_index(node)
             if index is None:
-                if not allow_prefix:
+                if wildcards:
+                    path.append(-1)  # every valid index is nonnegative
+                elif not allow_prefix:
                     return None
-                # Walking toward the root: discard everything below this
-                # unknown selection, but preserve its enclosing field route.
-                path.clear()
+                else:
+                    # Cleanup keeps only the containing region; the liveness
+                    # footprint above instead retains the selected fields.
+                    path.clear()
             else:
                 path.append(index)
             node = node.array
@@ -48,13 +51,22 @@ def field_route(node, *, allow_prefix=False):
 
 def conflicts(path, entry_path, kind):
     """Whether a live entry needs the value a consumption of `path` takes."""
-    if kind == 'length':
-        return len(path) <= len(entry_path) and entry_path[:len(path)] == path
-    if kind == 'store':
-        # Storing into a component needs its ancestors, not the component.
-        return len(path) < len(entry_path) and entry_path[:len(path)] == path
     shared = min(len(path), len(entry_path))
-    return path[:shared] == entry_path[:shared]
+    pairs = tuple(zip(path[:shared], entry_path[:shared]))
+    if any(a != b and not (isinstance(a, int) and isinstance(b, int) and -1 in (a, b)) for a, b in pairs):
+        return False
+    if kind == 'length':
+        return len(path) <= len(entry_path)
+    if kind == 'store':
+        # A replacement selected through a possibly overlapping array slot
+        # cannot renew a known hole. Its old-value cleanup would need the
+        # saved selector/presence proof. Replacing a whole containing region
+        # (above the wildcard) still starts a new lifetime as before.
+        if any(-1 in (a, b) for a, b in pairs):
+            return True
+        # Storing into a component needs its ancestors, not the component.
+        return len(path) < len(entry_path)
+    return True
 
 
 def conditional_consumptions(body, parameter_owners, resource, component=None, *, call_writes=None, read_only_places=frozenset()):
@@ -166,9 +178,9 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                 return True
         return False
 
-    def consume(node, binding, path, live, enabled):
+    def consume(node, binding, path, live, enabled, *, stored_path=None):
         if binding in enabled and id(node) in candidates and not needed(binding, path, live):
-            consumes[id(node)] = (binding, path)
+            consumes[id(node)] = (binding, path if stored_path is None else stored_path)
         else:
             consumes.pop(id(node), None)  # a later fixed-point iteration may reveal a use
 
@@ -210,22 +222,16 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             consume(node, node.binding_id, (), live, enabled)
             live.add((node.binding_id, (), 'read'))
             return live
-        if isinstance(node, (hir.MemberAccess, hir.Index)) and (route := field_route(node)) is not None:
-            consume(node, route[0], route[1], live, enabled)
+        if isinstance(node, (hir.MemberAccess, hir.Index)) and (route := field_route(node, wildcards=True)) is not None:
+            # A wildcard retains fields below an unknown selector. Thus
+            # rows[i].left and rows[j].right are disjoint for every i and j,
+            # while two .left routes still conflict. Cleanup stores only the
+            # static containing region and captures actual selectors once.
+            region = field_route(node, allow_prefix=True)
+            consume(node, route[0], route[1], live, enabled, stored_path=region[1])
             live.add((route[0], route[1], 'read'))
             return visit_selectors(node, live, enabled, exits)
-        if isinstance(node, (hir.MemberAccess, hir.Index)) and id(node) in candidates:
-            route = field_route(node, allow_prefix=True)
-            if route is not None:
-                # A replacement of this whole containing region starts a new
-                # lifetime. Writes into its possibly absent elements still need
-                # the old region and prevent transfer, just like other reads.
-                consume(node, route[0], route[1], live, enabled)
-                # Another transfer may use a disjoint containing array;
-                # possible overlap still keeps this entire prefix live.
-                live.add((route[0], route[1], 'read'))
-                return visit_selectors(node, live, enabled, exits)
-        if isinstance(node, hir.ArrayLength) and (route := field_route(node.array)) is not None:
+        if isinstance(node, hir.ArrayLength) and (route := field_route(node.array, wildcards=True)) is not None:
             live.add((route[0], route[1], 'length'))
             return visit_selectors(node.array, live, enabled, exits)
         if isinstance(node, hir.FunctionLiteral):

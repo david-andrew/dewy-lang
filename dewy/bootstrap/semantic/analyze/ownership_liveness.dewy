@@ -47,7 +47,7 @@ fixed_index=(node:hir.Index nodes:array<hir.AST>):>int64?=>{
     return none
 }
 # A stable route, or conservatively its prefix before an unknown slot.
-field_route=(id:addr nodes:array<hir.AST> allow_prefix:bool=false):>Entry?=>{
+field_route=(id:addr nodes:array<hir.AST> allow_prefix:bool=false wildcards:bool=false):>Entry?=>{
     let reverse:array<string|int64>=[]
     let node=hir.node_at(nodes id)
     loop node is? hir.MemberAccess|hir.Index {
@@ -55,8 +55,9 @@ field_route=(id:addr nodes:array<hir.AST> allow_prefix:bool=false):>Entry?=>{
         else {
             let index=fixed_index(node nodes)
             if index is? none {
-                if not allow_prefix return none
-                reverse.clear
+                if wildcards {reverse.push(-1)}
+                else if not allow_prefix {return none}
+                else {reverse.clear}
             } else {reverse.push(index)}
             node=hir.node_at(nodes node.array)
         }
@@ -87,25 +88,44 @@ read_roots=(id:addr aliases:dict<addr addr> nodes:array<hir.AST>):>set<addr>=>{
     }
     return result
 }
+# Wildcards describe all valid slots, retaining disjoint fields below them.
+# `under` above remains exact: a write to one selected slot cannot kill the
+# liveness of every slot in this footprint.
+overlaps=(left:array<string|int64> right:array<string|int64>):>bool=>{
+    loop i in 0.. and i<?left.length and i<?right.length {
+        let a=left[i] let b=right[i]
+        if a=?b continue
+        if a is? int64 and b is? int64 and (a=?-1 or b=?-1) continue
+        return false
+    }
+    return true
+}
 # Whether a live entry needs the value a consumption of `path` takes.
 needed=(binding:addr path:array<string|int64> live:Live aliases:dict<addr addr>):>bool=>{
     loop entry in live.values {
         if binding not in? roots(entry.binding aliases) continue
         if entry.binding not=? binding return true
+        if not overlaps(path entry.path) continue
         if entry.measure {
-            if under(entry.path path) return true
+            if path.length<=?entry.path.length return true
         } else if entry.store {
-            # Storing into a component needs its ancestors, not the component.
-            if path.length <? entry.path.length and under(entry.path path) return true
-        } else if under(path entry.path) or under(entry.path path) return true
+            # Selected-slot cleanup cannot renew a possibly overlapping hole.
+            # A complete containing-region replacement, above the wildcard,
+            # still starts a new lifetime through ordinary renewal handling.
+            loop i in 0.. and i<?path.length and i<?entry.path.length {
+                if path[i]=?-1 or entry.path[i]=?-1 return true
+            }
+            if path.length<?entry.path.length return true
+        } else {return true}
     }
     return false
 }
 LoopExit:type=const [after:Live repeated:Live]
-consume=(id:addr binding:addr path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis):>void=>{
+consume=(id:addr binding:addr path:array<string|int64> saved_path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis):>void=>{
     if binding in? enabled and id in? analysis.candidates and not needed(binding path live analysis.aliases) {
         analysis.consumes[id]=binding
-        if path.length >? 0 {analysis.paths[id]=path}
+        if saved_path.length >? 0 {analysis.paths[id]=saved_path}
+        else {analysis.paths.pop(id default=[]);}
     } else {
         analysis.consumes.pop(id default=0);
         analysis.paths.pop(id default=[]);
@@ -176,33 +196,23 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
     check_view_writes(id live @analysis nodes)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none {
-            consume(id node.binding_id [] live enabled @analysis)
+            consume(id node.binding_id [] [] live enabled @analysis)
             add_entry(@live Entry[node.binding_id])
         }
         return live
     }
     if node is? hir.MemberAccess|hir.Index {
-        let route=field_route(id nodes)
+        let route=field_route(id nodes wildcards=true)
         if route isnt? none {
-            consume(id route.binding route.path live enabled @analysis)
+            let region=field_route(id nodes allow_prefix=true)
+            $runtime_assert region isnt? none
+            consume(id route.binding route.path region.path live enabled @analysis)
             add_entry(@live route)
             return visit_selectors(id live enabled @analysis nodes exits)
         }
-        if id in? analysis.candidates {
-            let enclosing=field_route(id nodes allow_prefix=true)
-            # Replacing the complete containing region starts a new lifetime.
-            # Descendant stores still require the possibly partial old region.
-            if enclosing isnt? none {
-                consume(id enclosing.binding enclosing.path live enabled @analysis)
-                # Disjoint containing arrays may transfer independently;
-                # possibly overlapping routes retain this complete prefix.
-                add_entry(@live Entry[enclosing.binding enclosing.path])
-                return visit_selectors(id live enabled @analysis nodes exits)
-            }
-        }
     }
     if node is? hir.ArrayLength {
-        let route=field_route(node.array nodes)
+        let route=field_route(node.array nodes wildcards=true)
         if route isnt? none {add_entry(@live Entry[route.binding route.path measure=true]) return visit_selectors(node.array live enabled @analysis nodes exits)}
     }
     if node is? hir.FunctionLiteral {
