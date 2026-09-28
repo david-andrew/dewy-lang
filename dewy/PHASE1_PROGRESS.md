@@ -16,7 +16,7 @@ all source shapes or the complete integration matrix have been certified.
 | Area | Implemented foundation | Remaining closure work |
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
-| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations, conditional runtime-selected transfers with conservative containing-array liveness. | General dynamic-route disjointness, transfers through hooked wrappers, remaining unsupported resource operations; captured/exposed storage lifetimes. |
+| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations, conditional runtime-selected transfers with disjoint field footprints and drop-hook access proofs. | Proofs of distinct runtime indices, remaining unsupported resource operations; captured/exposed storage lifetimes. |
 | 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | More precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
@@ -6886,3 +6886,16 @@ exercise equal and unequal indices, conditional transfers, scalar sibling reads,
 selector mutation after capture, and rejected same-field reads/transfers and
 possibly overlapping replacements. This closes dynamic field disjointness;
 proofs of distinct runtime indices themselves remain a separate case.
+
+Checkpoint (2026-09-28): native `.typename` no longer captures an aggregate
+when its receiver is already a named local/parameter. Its brand tests and
+literal result arms cannot mutate that receiver. Computed receivers still
+capture once at the original evaluation point, including inside conditionals.
+This matches the hosted checker and removes a strict-copy rejection for naming
+a borrowed record while it remains live. Seven hosted cases and the paired
+x86-64/C group pass, retaining the existing computed-receiver, member-receiver,
+conditional evaluation, conversion-dispatch and effect-contract coverage.
+
+Full integration at `2dd7c9ae`: all 323 parity cases passed, in addition to the
+three-generation fixed point recorded above. The hook/footprint/typename changes
+postdate that checkpoint and have the focused paired evidence recorded here.

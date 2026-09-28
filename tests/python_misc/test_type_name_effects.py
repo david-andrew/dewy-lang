@@ -1,5 +1,6 @@
 """Known type names retain receiver evaluation, including conditional dispatch."""
 import pytest
+from pathlib import Path
 from dewy.backend.udewy import codegen
 from dewy.reporting import SrcFile, ReportException
 from test_scalar_projection import execute
@@ -26,6 +27,7 @@ CASES=[STATIC, DYNAMIC,
        STATIC.replace('let name=make().typename', "let ignored=if false make().typename else 'skip'\n    if calls not=?0 return 2\n    let name=make().typename"),
        DYNAMIC.replace('let calls:int64=0', 'Box:type=[item:Root]\nlet calls:int64=0').replace('make=():>Root=>{calls+=1 Grandchild[42]}', 'make=():>Box=>{calls+=1 Box[Grandchild[42]]}').replace('make().typename', 'make().item.typename')]
 CASES.append(DYNAMIC.replace('[value:int64]', "[value:int64 __as__=():>string=>'root']").replace('let Child=type of Root', "let Child=type of Root & [__as__=():>string=>'child']").replace('make().typename', '(make() as string)').replace("name=?'Grandchild'", "name=?'child'"))
+CASES.append((Path(__file__).parents[1] / 'fixtures/type_name_borrowed_receiver.dewy').read_text())
 ERRORS=[STATIC.replace('main=():>int64=>', 'main=():>int64 & no_effects=>')]
 
 @pytest.mark.parametrize('source', CASES)

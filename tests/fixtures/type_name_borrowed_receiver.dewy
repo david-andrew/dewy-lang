@@ -1,0 +1,13 @@
+$explicit_copies
+Base=type of [items:array<int64>]
+let Child=type of Base & [id:int64]
+name=(value:Base @names:array<string>):>int64=>{
+    names.push(value.typename)
+    return value.items.length
+}
+main=():>int64=>{
+    let names:array<string>=[]
+    let value=Child[[1 2] 3]
+    let length=name(value @names)
+    return if length=?2 and names.length=?1 and names[0]=?'Child' 42 else 0
+}

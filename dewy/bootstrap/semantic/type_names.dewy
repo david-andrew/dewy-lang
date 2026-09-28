@@ -64,12 +64,19 @@ instance = (value:addr loc:Span @session:contexts.Session):>addr => {
         let discarded=hir.append_node(@session.hir hir.Suppress[loc types.primitive('void' @session.types) value])
         return hir.append_node(@session.hir hir.Block[loc hir.node_at(session.hir fallback).value_type [discarded fallback] true])
     }
-    let id=bindings.allocate(@session.registry none "__dewy_typename_{session.registry.next_id}" 'value' loc)
-    let binding=bindings.binding_at(session.registry id)
-    binding.value_type=node.value_type binding.store_type=node.value_type
-    bindings.store_binding(@session.registry id binding)
-    let declared=hir.append_node(@session.hir hir.Declare[loc types.primitive('void' @session.types) 'const' binding.name none value id])
-    let read=hir.append_node(@session.hir hir.ExpressedIdentifier[loc node.value_type binding.name id])
+    # Brand tests and literal names cannot change a named receiver. Read it
+    # directly instead of creating an independent aggregate merely to name it.
+    # Computed receivers still need one capture at this evaluation point.
+    let declared:addr?=none
+    let read=value
+    if node isnt? hir.ExpressedIdentifier {
+        let id=bindings.allocate(@session.registry none "__dewy_typename_{session.registry.next_id}" 'value' loc)
+        let binding=bindings.binding_at(session.registry id)
+        binding.value_type=node.value_type binding.store_type=node.value_type
+        bindings.store_binding(@session.registry id binding)
+        declared=hir.append_node(@session.hir hir.Declare[loc types.primitive('void' @session.types) 'const' binding.name none value id])
+        read=hir.append_node(@session.hir hir.ExpressedIdentifier[loc node.value_type binding.name id])
+    }
     let arms:array<addr>=[]
     let result_type=types.primitive('string' @session.types)
     loop choice in choices {
@@ -78,5 +85,6 @@ instance = (value:addr loc:Span @session:contexts.Session):>addr => {
         arms.push(hir.append_node(@session.hir hir.IfArm[loc result_type condition body]))
     }
     let flow=hir.append_node(@session.hir hir.Flow[loc result_type arms fallback])
+    if declared is? none return flow
     return hir.append_node(@session.hir hir.Block[loc result_type [declared flow] false])
 }
