@@ -5989,3 +5989,33 @@ This is focused evidence; the new checkpoint still needs fresh-build integration
 The preceding constructor checkpoint `e6d355a1` completed all 250 manifest
 cases. Its copy inventory is 2,417 sites across 53,081 lines (45.534/KLOC), below
 both unchanged gates of 3,000 sites and 60/KLOC. Phase 1 remains incomplete.
+
+
+## Direct owning record parameters (2026-09-28)
+
+Direct, nonescaping mutable record parameters can now use the existing owning
+argument protocol in both lowerers. Fresh arguments transfer once; proved last-use
+locals transfer their owned fields; live sources supply one independent copy.
+The callee releases its fields on normal/early exits and replacement, without a
+second entry copy. First-class callbacks, captured/exposed parameters, defaults
+and lifecycle-bearing records retain the ordinary boundary. Native reuses the
+aggregate cleanup protocol; hosted keeps the root in the caller frame and shares
+the existing record-field transfer used for array element stores.
+
+Owning arguments participate in the same last-use traversal as other storage
+boundaries. Transfers inside a return expression are candidates only after
+checking all its later operand reads and live borrowers. Repeated loop uses,
+live views and a later argument reading the source prevent early donation.
+This is an internal calling convention, not a new source ownership operation.
+
+Validation: 23 focused hosted checks and 70 surrounding record/array/callback
+checks passed. Three paired groups passed on x86-64/C. The repeated-call kernel
+keeps zero retained bytes over 100 calls; native takes the descriptor, while
+hosted still spends one 64-byte descriptor transfer. Its budget has a positive
+control that exceeds the bound when record transfer is disabled. The fixture
+brings the parity manifest to 255 cases. Fresh complete-build integration remains
+required before certifying this new convention on compiler sources.
+
+The preceding disequality checkpoint `ee5a3fc0` reached a three-generation native
+fixed point (generation 3: 55 s under concurrent checks). Its fresh hosted-built
+driver passed all 43 focused contract/guard checks in 329.18 s including build.

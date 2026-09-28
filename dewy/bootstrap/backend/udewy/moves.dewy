@@ -5,7 +5,7 @@ Last-use moves.
 
 An owned local whose last use hands its value to storage that outlives the
 expression (a `return`, a record or array literal, a field, element or
-dictionary store, a binding) moves there: the lowering takes the local's
+dictionary store, a binding, an owning call argument) moves there: the lowering takes the local's
 handle and empties the local, so its scope-exit release does nothing. A use
 is the last one when no reference to the binding follows it in traversal
 order (a later sibling arm counts as after, conservatively), it is not
@@ -26,6 +26,7 @@ Use:type = const [id:addr sequence:addr depth:addr nested:bool transfer:bool ret
 Transfer:type = const [binding:addr id:addr sequence:addr depth:addr]
 Candidate:type = const [id:addr sequence:addr until:addr]
 Analysis:type = [
+    donations:dict<addr set<addr>>=[]
     uses:dict<addr array<Use>>=[] declared:dict<addr addr>=[] counter:addr=0
     transfers:array<Transfer>=[] exits:array<addr>=[] candidates:dict<addr array<Candidate>>=[]
 ]
@@ -122,7 +123,19 @@ walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> @analysis:Analysis):
         return
     }
     if node is? hir.Return {
+        let first=analysis.transfers.length
         if node.item isnt? none {walk_transfer(node.item depth nested true nodes @analysis)}
+        if not nested {
+            let index=first
+            loop index <? analysis.transfers.length {
+                let transfer=analysis.transfers[index]
+                index+=1
+                if transfer.depth not=? depth continue
+                let candidates=analysis.candidates.get(transfer.binding [])
+                candidates.push(Candidate[transfer.id transfer.sequence analysis.counter])
+                analysis.candidates[transfer.binding]=candidates
+            }
+        }
         return
     }
     if node is? hir.ObjectLiteral {
@@ -148,6 +161,19 @@ walk = (id:addr depth:addr nested:bool nodes:array<hir.AST> @analysis:Analysis):
     if node is? hir.Assign {
         # The target is written, not read.
         walk_transfer(node.value depth nested false nodes @analysis)
+        return
+    }
+    if node is? hir.FunctionCall and id in? analysis.donations {
+        let donated=analysis.donations[id]
+        walk(node.func depth nested nodes @analysis)
+        loop argument in node.pos_args {
+            if argument in? donated {walk_transfer(argument depth nested false nodes @analysis)}
+            else {walk(argument depth nested nodes @analysis)}
+        }
+        loop [name argument] in node.kw_args {
+            if argument in? donated {walk_transfer(argument depth nested false nodes @analysis)}
+            else {walk(argument depth nested nodes @analysis)}
+        }
         return
     }
     if node is? hir.FunctionCall {
@@ -205,11 +231,11 @@ borrow_live_after = (binding:addr sequence:addr borrows:dict<addr set<addr>> ana
     }
     return false
 }
-compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[]):>set<addr> => {
+compute = (literal:addr nodes:array<hir.AST> borrows:dict<addr set<addr>>=[] donations:dict<addr set<addr>>=[]):>set<addr> => {
     let function=hir.node_at(nodes literal)
     let moves:set<addr>=set[]
     if function isnt? hir.FunctionLiteral return moves
-    let analysis=Analysis[]
+    let analysis=Analysis[donations=donations]
     walk(function.body 0 false nodes @analysis)
     loop [binding uses] in analysis.uses {
         let declared=analysis.declared.get(binding)

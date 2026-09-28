@@ -1665,7 +1665,7 @@ class _ArrayLowering(_ArraySharing):
         if isinstance(element_type, ty.ArrayType):
             return self._stored_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
-            adopted = self._adopt_object_element(node, element_type)
+            adopted = self._adopt_object_fields(node, element_type)
             if adopted is not None:
                 return adopted
             # a fresh value (a call's result, a literal) dies here: its members move
@@ -2980,7 +2980,7 @@ class _ArrayLowering(_ArraySharing):
         if isinstance(element_type, ty.ArrayType):
             return self._stored_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
-            adopted = self._adopt_object_element(node, element_type)
+            adopted = self._adopt_object_fields(node, element_type)
             if adopted is not None:
                 return adopted
             # an element object is an arena block (the array's release gives

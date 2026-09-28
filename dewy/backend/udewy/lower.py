@@ -554,6 +554,23 @@ class _Lowerer(
                     binding = self.identifier_bindings.get(id(child))
                     if binding is not None and binding.kind in {'function', 'overload'}:
                         self.value_function_ids.update(id(function.literal) for function in self._resolve_callable(child))
+        self.owned_record_parameters = set()
+        self.owned_record_arguments = {}
+        if self._has_arena():
+            for function in self.functions:
+                literal = function.literal
+                if literal.object_receiver or id(literal) in self.value_function_ids or self.lifted.get(id(function)):
+                    continue
+                for parameter in [*literal.pos_or_kw_args, *literal.kw_only_args]:
+                    binding = parameter.binding_id
+                    if (binding is None or parameter.place or isinstance(parameter, hir.BoundParam)
+                            or binding in self.borrow_plan.captured_bindings or binding in self.borrow_plan.exposed_bindings
+                            or not isinstance(ty.structural_base(parameter.type), ty.ObjectType)
+                            or not storage_borrows.borrowable(parameter.type)):
+                        continue
+                    summary = self.program_effects.for_param_binding(binding)
+                    if summary is not None and not summary.read_only and not summary.escapes:
+                        self.owned_record_parameters.add(binding)
         self.user_main_takes_argv = any(
             isinstance(item, hir.Declare)
             and item.name == self.entry_name
@@ -878,8 +895,10 @@ class _Lowerer(
                     if param.binding_id is not None
                     else None
                 )
-                if summary is not None and summary.read_only:
-                    # The body provably never writes to or retains the object,
+                owned = param.binding_id in self.owned_record_parameters
+                if owned or summary is not None and summary.read_only:
+                    # An owning call supplies independent storage. Otherwise,
+                    # the body provably never writes to or retains the object,
                     # so the parameter borrows the caller's storage instead of
                     # copying it into a fresh allocation.
                     parameter_prologue.append(hir.Declare(
@@ -891,6 +910,9 @@ class _Lowerer(
                         incoming,
                         binding_id=param.binding_id,
                     ))
+                    if owned:
+                        owner = hir.ExpressedIdentifier(literal.loc, 'int64', param.name, binding_id=param.binding_id)
+                        parameter_objects[local_binding_key(owner)] = param.type
                     return replace(
                         param,
                         name=incoming_name,
@@ -3196,6 +3218,17 @@ class _Lowerer(
                 selected_method_index=None,
             )
             self._keyed_nodes_keepalive.append(transformed)
+            targets = self.allocator_analysis._direct_targets(node)
+            if targets and len(targets) == 1:
+                pairs = self.allocator_analysis._pair_arguments(node, targets[0])
+                donated = {id(argument) for argument, parameter in pairs or []
+                           if parameter is not None and parameter.binding_id in self.owned_record_parameters}
+                if donated:
+                    self.owned_record_arguments[id(transformed)] = {
+                        index for index, position in enumerate(source_positions)
+                        if position is not None and id(node.pos_args[position] if isinstance(position, int)
+                                                       else node.kw_args[position]) in donated
+                    }
             if id(node) in self.borrow_plan.comparison_snapshots:
                 self.borrow_plan.comparison_snapshots.add(id(transformed))
             if id(node) in self.borrow_plan.array_snapshots:
@@ -3902,7 +3935,12 @@ class _Lowerer(
                 source = self._copy_source_expression(node.item)
                 if isinstance(source, hir.ExpressedIdentifier):
                     returned.add(id(source))
+                first = len(transfers)
                 walk(node.item, depth, nested, transfer(node.item))
+                if not nested:
+                    for binding, site, sequence, use_depth in transfers[first:]:
+                        if use_depth == depth:
+                            candidates.setdefault(binding, []).append((site, sequence, counter))
                 return
             if isinstance(node, hir.ObjectLiteral):
                 for field_ in node.fields:
@@ -3927,6 +3965,14 @@ class _Lowerer(
                     walk(argument, depth, nested, transfer(argument, handle_only=True, aggregate_element=True) if index == 0 else {})
                 for name, argument in node.kw_args.items():
                     walk(argument, depth, nested, transfer(argument, handle_only=True, aggregate_element=True) if name == 'value' and not node.pos_args else {})
+                return
+            if isinstance(node, hir.FunctionCall) and id(node) in self.owned_record_arguments:
+                walk(node.func, depth, nested, {})
+                donated = self.owned_record_arguments[id(node)]
+                for index, argument in enumerate(node.pos_args):
+                    walk(argument, depth, nested, transfer(argument) if index in donated else {})
+                for name, argument in node.kw_args.items():
+                    walk(argument, depth, nested, transfer(argument) if name in donated else {})
                 return
             if isinstance(node, hir.Flow):
                 for arm in node.arms:

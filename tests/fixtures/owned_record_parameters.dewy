@@ -1,0 +1,28 @@
+$explicit_copies
+Pack:type=[text:string values:array<int64>]
+make=():>Pack=>{
+    let values:array<int64>=[2]
+    values.reserve(8)
+    return Pack['owned' values]
+}
+change=(p:Pack):>int64=>{
+    p.values.push(40)
+    return if p.values.length>?1 p.values[0]+p.values[1] else 0
+}
+exercise=():>int64=>{
+    let p=make()
+    let before:int64=_arena_allocated_bytes
+    let result=change(p)
+    let allocated:int64=_arena_allocated_bytes-before
+    # Native takes the descriptor too; hosted currently transfers its six
+    # words into one owned descriptor. Neither path copies the array data.
+    return if result=?42 and allocated<=?64 0 else -1
+}
+main=():>int64=>{
+    if exercise() not=?0 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?0 return 2}
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    return if retained=?0 42 else 3
+}

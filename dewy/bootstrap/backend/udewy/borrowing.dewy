@@ -673,13 +673,13 @@ consumed_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures
     return result
 }
 
-# A separate ownership protocol for mutable array parameters. The caller
+# A separate ownership protocol for mutable aggregate parameters. The caller
 # supplies an independent value (fresh, moved, or copied); the callee owns
 # that value until it rebinds the parameter or exits. Unlike the single-use
 # protocol above, no parameter read itself consumes the owner. This avoids
 # retaining a second descriptor reference only to detach it at the first
 # write. Unknown/first-class callers retain the ordinary borrowed ABI.
-owned_array_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects valued:set<addr> retaining:set<addr> captured:set<addr> consumed:set<addr>):>set<addr> => {
+owned_mutable_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captures.Plan summaries:effects.ProgramEffects valued:set<addr> retaining:set<addr> captured:set<addr> consumed:set<addr>):>set<addr> => {
     let result:set<addr>=set[]
     let named:set<addr>=set[]
     loop id in plan.named.values {named.push(id)}
@@ -692,7 +692,7 @@ owned_array_parameters = (nodes:array<hir.AST> type_nodes:types.Table plan:captu
             let binding=parameter.binding_id
             if binding is? none or parameter.place or parameter is? hir.BoundParam or binding in? captured or binding in? consumed continue
             let type=types.node_at(type_nodes types.unfold(types.strip_refinement(parameter.value_type type_nodes) type_nodes))
-            if type isnt? types.ArrayType continue
+            if type isnt? types.ArrayType and (type isnt? types.ObjectType or not storage_borrows.borrowable(parameter.value_type type_nodes)) continue
             let summary=summaries.by_param_binding.get(binding)
             if summary isnt? none and summary.escapes.length =? 0 and effects.writes(summary) {result.push(binding)}
         }
@@ -785,7 +785,7 @@ details = (root:addr nodes:array<hir.AST> type_nodes:types.Table plan:captures.P
         }
     }
     let consumed=consumed_parameters(nodes type_nodes plan valued)
-    let owned:set<addr>=if owned_parameter_protocol owned_array_parameters(nodes type_nodes plan summaries valued retaining captured consumed.parameters) else set[]
+    let owned:set<addr>=if owned_parameter_protocol owned_mutable_parameters(nodes type_nodes plan summaries valued retaining captured consumed.parameters) else set[]
     let consumed_arguments:dict<addr set<addr>>=[]
     let array_snapshots:set<addr>=set[]
     let result:dict<addr set<addr>>=[]

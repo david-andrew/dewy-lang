@@ -5163,7 +5163,7 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
         }
     }
     let moves_started=timing.start(state.timings)
-    state.moved_uses=if enabled moves.compute(id state.input.nodes borrow_dependents) else set[]
+    state.moved_uses=if enabled moves.compute(id state.input.nodes borrow_dependents donations=state.consumed_arguments) else set[]
     timing.accumulate(@state.move_time moves_started)
     note_allocator_escapes(node.body @state)
     state.moved_bindings=set[]

@@ -361,13 +361,25 @@ class _ObjectLowering:
     ) -> tuple[list[hir.AST], hir.AST]:
         """Lower one object-typed value argument of ``call``.
 
-        The bare handle is passed, because the callee prologue either clones
-        it or, for a proven read-only parameter, borrows it. When a place
+        A direct owning parameter receives a fresh, moved or copied value.
+        Other callees receive a handle that their prologue clones or borrows
+        according to its read-only proof. When a place
         argument in the same call exposes overlapping storage, a
         borrowing callee could observe mid-call writes, so the caller clones
         the argument first. Distinct fields of a record do not overlap.
         """
         object_type = ty.structural_base(arg.type)
+        if isinstance(object_type, ty.ObjectType) and position in self.owned_record_arguments.get(id(call), ()):
+            # The caller materializes one independent value; the callee
+            # releases its fields. The frame root lives across this call.
+            if self._object_expression_owns_fresh_storage(arg):
+                return self._extract_object_pointer(arg)
+            moved = self._adopt_object_fields(arg, object_type, arena=False, site='passed to a call')
+            if moved is not None:
+                return moved
+            self._note_copy('record', arg.type, 'passed to a call',
+                            'the callee owns a mutable value and the source is still live or cannot transfer its layout', arg.loc)
+            return self._clone_object_value(arg, object_type)
         if isinstance(object_type, ty.ObjectType):
             # A raw pointer can reach this value without appearing as an
             # argument or a parameter effect of this call. Preserve the
@@ -447,14 +459,15 @@ class _ObjectLowering:
             return self._extract_object_pointer(node)
         return self._clone_object_value(node, object_type)
 
-    def _adopt_object_element(self, node: hir.AST, object_type: ty.ObjectType) -> tuple[list[hir.AST], hir.AST] | None:
-        """Move an owned local's fields into an array-owned record root.
+    def _adopt_object_fields(self, node: hir.AST, object_type: ty.ObjectType, *, arena: bool = True,
+                              site: str = 'stored in an element') -> tuple[list[hir.AST], hir.AST] | None:
+        """Move an owned local's fields into a root with the required lifetime.
 
-        Locals can have frame roots, so transferring their pointer would
-        violate the array element's arena-release protocol. Reuse the result
-        transfer: it clears moved string slots and empties adopted array
-        descriptors, leaving ordinary local cleanup valid on every path.
-        Prepared trees and aggregate union payloads retain their layout copy.
+        Array elements need an arena root; synchronous owning calls can use
+        the caller's frame. Reuse the result transfer: it clears moved string
+        slots and empties adopted array descriptors, leaving source cleanup
+        valid on every path. Prepared trees and aggregate union payloads
+        retain their layout copy.
         """
         source = self._copy_source_expression(node)
         if (not self._has_arena() or not isinstance(source, hir.ExpressedIdentifier)
@@ -483,9 +496,9 @@ class _ObjectLowering:
         if not transferable(object_type):
             return None
         prelude, pointer = self._extract_object_pointer(node)
-        allocated, dest = self._allocate_object_result_value(object_type, node.loc, arena=True)
+        allocated, dest = self._allocate_object_result_value(object_type, node.loc, arena=arena)
         self.move_notes.append(MoveNote(self.srcfile, source.loc,
-            f'`{source.name}` is moved when stored in an element: this is its last use, so its owned fields change owner', True))
+            f'`{source.name}` is moved when {site}: this is its last use, so its owned fields change owner', True))
         return [*prelude, *allocated,
                 *self._copy_object_into_result_storage(dest, pointer, object_type, node.loc, move='adopt')], dest
 
