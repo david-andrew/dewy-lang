@@ -5373,3 +5373,14 @@ native-driver suite passed all 60 selected view/resource/effect/argument checks.
 The 223-case parity manifest is running against that isolated snapshot; this
 is not yet a completed parity result. The newest global/overload corrections
 remain covered by the focused batch pending the next integration checkpoint.
+
+
+## Five more compiler modules under copy policy (2026-09-27)
+
+`invocation/options.dewy`, `invocation/platform.dewy`, `semantic/lifecycle.dewy`,
+`semantic/prelude.dewy` and `main.dewy` now enable `$explicit_copies`. All five
+passed standalone hosted and native-built lowering, including the real compiler
+entry graph. No `.copy()` calls were added to satisfy the directive. This checks
+each marked physical module; the entry directive does not silently opt all of
+its imports into the policy. Adoption across the remaining compiler modules
+is still required.
