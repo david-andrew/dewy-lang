@@ -3946,7 +3946,9 @@ class _Lowerer(
                 for field_ in node.fields:
                     expected = node.type.field(field_.name) if isinstance(node.type, ty.ObjectType) else None
                     field_type = expected.type if expected is not None else field_.value.type
-                    site = transfer(field_.value, handle_only=not (isinstance(field_type, ty.ArrayType) and field_type.length is None))
+                    site = transfer(field_.value,
+                                    handle_only=not (isinstance(field_type, ty.ArrayType) and field_type.length is None),
+                                    aggregate_element=isinstance(field_type, ty.ObjectType))
                     walk(field_.value, depth, nested, site)
                 return
             if isinstance(node, (hir.MemberAssign, hir.IndexAssign)):

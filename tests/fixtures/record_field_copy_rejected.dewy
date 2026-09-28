@@ -1,0 +1,11 @@
+$explicit_copies
+# A live source needs an independent snapshot when stored in a record field.
+Inner:type=[values:array<int64>]
+Outer:type=[child:Inner]
+make=():>Inner=>Inner[[42]]
+main=():>int64=>{
+    let source=make()
+    let target=Outer[source]
+    target.child.values.clear
+    return if source.values.length>?0 source.values[0] else 0
+}

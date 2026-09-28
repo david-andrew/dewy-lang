@@ -460,7 +460,8 @@ class _ObjectLowering:
         return self._clone_object_value(node, object_type)
 
     def _adopt_object_fields(self, node: hir.AST, object_type: ty.ObjectType, *, arena: bool = True,
-                              site: str = 'stored in an element') -> tuple[list[hir.AST], hir.AST] | None:
+                              site: str = 'stored in an element',
+                              destination: hir.AST | None = None) -> tuple[list[hir.AST], hir.AST] | None:
         """Move an owned local's fields into a root with the required lifetime.
 
         Array elements need an arena root; synchronous owning calls can use
@@ -496,7 +497,8 @@ class _ObjectLowering:
         if not transferable(object_type):
             return None
         prelude, pointer = self._extract_object_pointer(node)
-        allocated, dest = self._allocate_object_result_value(object_type, node.loc, arena=arena)
+        allocated, dest = (self._allocate_object_result_value(object_type, node.loc, arena=arena)
+                           if destination is None else ([], destination))
         self.move_notes.append(MoveNote(self.srcfile, source.loc,
             f'`{source.name}` is moved when {site}: this is its last use, so its owned fields change owner', True))
         return [*prelude, *allocated,
@@ -1217,12 +1219,19 @@ class _ObjectLowering:
                     # the object may outlive this frame (returned, pushed, stored)
                     prelude, value = self._escaping_string_value(field.value)
                 elif isinstance(field_type, ty.ObjectType):
-                    # a nested object copied from elsewhere (`srcfile=ctx.srcfile`): its
-                    # strings and arrays are copied for escape too, like the literal's own
+                    adopted = self._adopt_object_fields(field.value, field_type,
+                                                        site='stored in a field', destination=address)
+                    if adopted is not None:
+                        statements.extend(adopted[0])
+                        continue
+                    # A live source supplies an independent field value. Its
+                    # runtime-sized copy must be visible to the source policy.
                     prelude, src = self._extract_object_pointer(field.value)
                     statements.extend(prelude)
-                    fresh = (isinstance(field.value, hir.FunctionCall)
-                             and isinstance(field.value.func, (hir.ExpressedIdentifier, hir.FunctionLiteral)))
+                    fresh = self._object_expression_owns_fresh_storage(field.value)
+                    if not fresh:
+                        self._note_copy('record', field_type, 'stored in a field',
+                                        self._copy_reason(field.value), field.loc)
                     # An ordinary call has already returned an independent
                     # value. Transfer its fields into the containing record;
                     # copying would abandon the original returned payload.

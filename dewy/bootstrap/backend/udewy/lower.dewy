@@ -4569,7 +4569,10 @@ object_literal = (id:addr node:hir.ObjectLiteral @state:State):>addr => {
             } else {prefix.push(put(hir.Suppress[item.loc types.primitive('void' @state.type_nodes) value] @state))}
             continue
         }
-        if not field_binding_referenced(node item.binding_id @state) and inline_place(field.value_type @state) and view_source(source @state) {
+        if not field_binding_referenced(node item.binding_id @state) and inline_place(field.value_type @state) and view_source(source @state) and source not in? state.moved_uses {
+            # This path still makes a value snapshot in the inline field.
+            # Do not bypass either copy reporting or a proved consuming use.
+            note_copy(if object_valued(field.value_type @state) 'record' else 'cell' field.value_type 'stored in a field' owned_reason(source @state) hir.node_at(state.input.nodes source) @state)
             prefix.push(field_write(address(destination offset node @state) expression(item.value @state) field.value_type node @state))
             continue
         }

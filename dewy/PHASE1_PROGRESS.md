@@ -6101,3 +6101,30 @@ rejected. The updated expectation checks both acceptance and refutation; the new
 positive fixture brings the parity manifest to 263 cases. The broader hosted
 run remains tied to the preceding frozen snapshot and still records the old
 expectation as a failure, not a newly certified full-suite pass.
+
+## Nested record stores and copy-report coverage (2026-09-28)
+
+Both inline-record store shortcuts omitted copy reporting for a live source.
+They now expose that snapshot to `$explicit_copies`. Hosted lowering also uses
+its existing checked field-adoption operation to initialize an inline destination
+from a last-use record; nested-field stores participate in the same liveness
+walk as element stores. Fresh explicit snapshots transfer their owned fields.
+
+The native shortcut also bypassed consuming reads. A last-use record now takes
+the ordinary owning path: its fields are retained into the inline destination,
+then its temporary root is released before the following mutation. This removes
+the extra live array owner that forced an otherwise unnecessary COW detachment.
+No new ownership syntax or source-visible value-sharing rule is introduced.
+
+Validation: 48 hosted record/element/parameter checks, 37 surrounding policy and
+lifecycle checks, and both paired record-field/element groups pass on x86-64/C.
+Regressions include retained sources/views, later constructor operands, repeated
+uses, explicit snapshots, nested records, branches and fixed-layout fallback.
+The allocation kernel permits at most 64 bytes and retains zero bytes over 100
+calls; disabling hosted field adoption exceeds that budget. Positive and negative
+fixtures bring the manifest to 265 cases. Fresh hosted/native build integration
+remains required for this expanded policy-report coverage.
+
+The preceding loop-exit checkpoint `3cc21750` completed all 260 parity cases.
+The broader hosted run at `36fd8465` is still running; its obsolete disequality
+expectation was repaired separately at `e3796a0a`.
