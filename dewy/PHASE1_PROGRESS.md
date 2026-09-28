@@ -6380,3 +6380,23 @@ independent nested-array snapshots and length-changing mutation rejection. Two
 direct hosted/native fact-state comparisons pass, including the new sequence
 endpoints. Four fixtures bring the manifest to 292 cases. The broader owning-cell
 snapshot parity run remains separate and in progress.
+
+## Hosted owned-array replacement (2026-09-28)
+
+Hosted array assignment now consumes independently owned dynamic-array call
+results instead of cloning them. Dynamic-array local replacements also use the
+existing last-use analysis and transfer helper, including narrowed owning cells.
+The new value is prepared before releasing the old one; place parameters publish
+the replacement back to their caller. Later source/alias uses and exposed storage
+retain the ordinary copy obligation. Native lowering already uses these transfer
+rules. This repairs a hosted strict-policy gap found while adopting the layout
+module, without adding a policy exemption.
+
+Validation: 47 replacement, strict-policy and surrounding array/record transfer
+checks pass, including native x86-64/C execution. Repeated replacements retain no
+heap bytes, shared source snapshots remain independent, and a live source/view
+prevents the move. Three fixtures bring the manifest to 295 cases.
+
+The preceding `a4c05062` ownership snapshot completed all 288 parity cases in
+addition to its identical three-generation fixed point. Later fact-transfer and
+replacement work awaits the next frozen integration snapshot.

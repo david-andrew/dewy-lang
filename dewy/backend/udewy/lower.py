@@ -3797,8 +3797,8 @@ class _Lowerer(
     def _compute_moves(self, literal: hir.FunctionLiteral) -> set[int]:
         """Find transfer sites that can consume an owned local.
 
-        Transfer sites are `return xs` and `xs` stored into a runtime-length
-        array field (an object literal's field, a member assignment). A use is
+        Transfer sites include owning results, bindings, array replacements,
+        aggregate stores and owning call arguments. A use is
         the last one when no reference to the binding follows it in the
         function's traversal order (branches count conservatively: a later
         sibling branch's use is "after"), it is not inside a loop the
@@ -3953,6 +3953,11 @@ class _Lowerer(
                                     handle_only=not (isinstance(field_type, ty.ArrayType) and field_type.length is None),
                                     aggregate_element=isinstance(field_type, ty.ObjectType))
                     walk(field_.value, depth, nested, site)
+                return
+            if (isinstance(node, hir.Assign) and node.op == '='
+                    and isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None):
+                walk(node.target, depth, nested, {})
+                walk(node.value, depth, nested, transfer(node.value))
                 return
             if isinstance(node, (hir.MemberAssign, hir.IndexAssign)):
                 walk(node.target, depth, nested, {})

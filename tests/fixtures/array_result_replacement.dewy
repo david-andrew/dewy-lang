@@ -1,0 +1,21 @@
+$explicit_copies
+make=(n:int64):>array<string>=>{
+    let result:array<string>=[]
+    result.push("item {n}")
+    return result
+}
+replace=(@values:array<string> n:int64):>void=>{values=make(n)}
+exercise=():>int64=>{
+    let values:array<string>=[]
+    replace(@values 42)
+    if values.length not=?1 or values[0] not=?"item 42" return 1
+    replace(@values 1)
+    if values.length not=?1 or values[0] not=?"item 1" return 2
+    return 42
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before=_arena_live_bytes
+    loop i in [0..40) {if exercise() not=?42 return 2}
+    return if _arena_live_bytes=?before 42 else 3
+}

@@ -1016,21 +1016,39 @@ class _ArrayLowering(_ArraySharing):
         # keep their separate temporary-owner protocol.
         move_literal = isinstance(self._copy_source_expression(node.value), hir.ArrayLiteral)
         representation = self._array_use_representation(node.target)
-        if move_literal and array_type.length is None and representation != 'stack_data':
+        adopt_call = array_type.length is None and representation != 'stack_data' and self._is_named_array_call(node.value)
+        source = self._copy_source_expression(node.value)
+        adopt_local = (array_type.length is None and representation != 'stack_data'
+                       and (id(source) in self.moved_uses or id(source) in self.moved_payload_uses))
+
+        def replacement():
+            if adopt_call:
+                return self._independent_array_value(node.value, array_type)
+            if adopt_local:
+                return self._transfer_array_value(node.value, source, array_type, site=f'assigned to `{node.target.name}`')
+            return self._clone_array_value(node.value, array_type, arena=True, move=move_literal)
+
+        if adopt_call:
+            # Ordinary dynamic-array calls return independently owned arena
+            # descriptors. Rebinding takes that owner directly, just as a
+            # declaration does; cloning it would create a needless snapshot.
+            self.move_notes.append(MoveNote(self.srcfile, node.loc,
+                f'array call result is moved when assigned to `{node.target.name}`', True))
+        elif move_literal and array_type.length is None and representation != 'stack_data':
             # The lifetime promotion below transfers the literal's owned
             # elements. It is placement plus a move, not an independent
             # snapshot (even when the elements have runtime-sized storage).
             self.move_notes.append(MoveNote(self.srcfile, node.loc,
                 f'fresh array elements are moved when assigned to `{node.target.name}`: the replacement outlives the expression buffer', True))
-        elif place_cell is not None or representation == 'stack_data' or array_type.length is None or not fresh:
+        elif not adopt_local and (place_cell is not None or representation == 'stack_data' or array_type.length is None or not fresh):
             self._note_copy('array', array_type, f'assigned to `{node.target.name}`',
                             self._copy_reason(node.value), node.loc)
         if place_cell is not None:
             if array_type.length is None:
-                # The caller owns this place. Finish the copy before releasing
-                # its previous value (the RHS may read it), and publish an
+                # The caller owns this place. Prepare the replacement before
+                # releasing its previous value (the RHS may read it), and publish an
                 # arena descriptor, never a pointer into this callee's frame.
-                prelude, copied = self._clone_array_value(node.value, array_type, arena=True, move=move_literal)
+                prelude, copied = replacement()
                 fresh = hir.ExpressedIdentifier(node.loc, 'int64', self._new_array_name('place_rebound'))
                 target = replace(node.target, type='int64')
                 element = array_type.element
@@ -1053,7 +1071,9 @@ class _ArrayLowering(_ArraySharing):
                 node.value,
                 array_type,
             )
-        if self._array_use_representation(node.target) == 'stack_data':
+        if adopt_call or adopt_local:
+            prelude, copied = replacement()
+        elif self._array_use_representation(node.target) == 'stack_data':
             prelude, copied = self._clone_array_to_raw(node.value, array_type)
         elif array_type.length is None:
             # Rebinding can cross a block/loop boundary. Its RHS frame buffer
