@@ -29,6 +29,7 @@ from itertools import chain
 
 from ...semantic import hir, ty
 from ...semantic.analyze.effects import INDEX_STEP, ParameterEffects, ProgramEffects, analyze_global_writes
+from ...semantic.analyze import storage_borrows
 
 # The operator spellings µDewy emits directly (emit.py's binop/prefix tables);
 # listed here to avoid a circular import with the emitter.
@@ -628,6 +629,67 @@ def stable_owner(source: Route, plan: Plan) -> bool:
         if overlap(source, Route(source.binding, tuple(step for step in change))):
             return False
     return True
+
+
+def union_argument_loans(analysis, summaries: ProgramEffects, plan: Plan, source_bindings: set[int]) -> dict[int, set[int]]:
+    """Use the scope borrow proof at representation-preserving union calls.
+
+    The native call planner already lends these routes. This supplements
+    the semantic whole-caller proof with stable local owners and precise
+    later-argument checks; it does not assert a public allocation contract.
+    Every target must agree, including its parameter's absence of exposure.
+    """
+    result = {}
+    possible_consumers = {}
+    for target in analysis.literals:
+        counts, forwarded = {}, set()
+        for node in hir.walk(target):
+            if isinstance(node, hir.ExpressedIdentifier) and node.binding_id is not None:
+                counts[node.binding_id] = counts.get(node.binding_id, 0) + 1
+            if isinstance(node, hir.FunctionCall):
+                forwarded.update(arg.binding_id for arg in [*node.pos_args, *node.kw_args.values()]
+                                 if isinstance(arg, hir.ExpressedIdentifier))
+        # Native ownership donation requires a sole, direct argument use.
+        # Keep all such parameters on their ordinary protocol here, without
+        # relying on whether a particular downstream consumer was optimized.
+        possible_consumers[id(target)] = {binding for binding in forwarded if counts.get(binding) == 1}
+    nonlocal_roots = plan.globals | plan.captured_bindings | plan.place_bindings
+    for call in analysis.calls:
+        targets = analysis._direct_targets(call)
+        if not targets:
+            continue
+        arguments = [*call.pos_args, *call.kw_args.values()]
+        allowed = None
+        for target in targets:
+            current, rejected = set(), set()
+            for argument, parameter in analysis._pair_arguments(call, target) or ():
+                loan = storage_borrows.union_loan_source(argument, parameter.type) if parameter is not None and not parameter.place else None
+                source = route(loan) if loan is not None else None
+                effect = summaries.for_param_binding(parameter.binding_id) if parameter else None
+                safe = (source is not None and effect is not None and effect.read_only
+                        and parameter.binding_id not in possible_consumers[id(target)]
+                        and storage_borrows.borrowable(argument.type)
+                        and source.binding not in plan.exposed_bindings and stable_owner(source, plan)
+                        and not (source.binding in nonlocal_roots and plan.ambient_writes.get(id(call)))
+                        and not expression_conflicts(loan, source, plan, source_bindings))
+                if safe:
+                    later = False
+                    for other in arguments:
+                        # Earlier expressions have finished, but their direct
+                        # places still let the callee write overlapping storage.
+                        if isinstance(other, hir.Place):
+                            place = route(other.target)
+                            if place is None or overlap(source, place):
+                                safe = False
+                        if later and expression_conflicts(other, source, plan, source_bindings):
+                            safe = False
+                        later |= other is argument
+                (current if safe else rejected).add(id(argument))
+            current -= rejected
+            allowed = current if allowed is None else allowed & current
+        if allowed:
+            result[id(call)] = allowed
+    return result
 
 
 def required_local_view(node: hir.Declare, plan: Plan) -> bool:

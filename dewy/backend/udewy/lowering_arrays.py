@@ -555,6 +555,9 @@ class _ArrayLowering(_ArraySharing):
         captured = {binding.semantic_id for uses in self.captures.values() for _use, binding in uses if binding.semantic_id is not None}
         self.borrow_plan = borrowing.analyze(self.root, captured, self.program_effects, set(self.binding_by_semantic_id),
                                             known_value_calls=self.known_value_calls)
+        for call, arguments in borrowing.union_argument_loans(
+                self.allocator_analysis, self.program_effects, self.borrow_plan, set(self.binding_by_semantic_id)).items():
+            self.forwarded_values.setdefault(call, set()).update(arguments)
         self.frame_array_bindings: set[int] = set()
         self._analyze_array_aliases_and_parameters()
         allowed_uses: set[ArrayUse] = {

@@ -1,0 +1,14 @@
+$explicit_copies
+
+Bounds:type=[lower:bigint? upper:bigint?]
+make=():>Bounds?=>Bounds[42 42]
+same=(a:bigint? b:bigint?):>bool=>{
+    if a is? none or b is? none return false
+    return a=?b
+}
+main=():>int64=>{
+    let interval=make()
+    if interval is? none return 1
+    if interval.lower is? none return 2
+    return if same(interval.lower interval.upper) 42 else 3
+}

@@ -1,3 +1,5 @@
+$explicit_copies
+
 import p"../hir.dewy" as hir
 import p"../bindings.dewy" as bindings
 import p"hir_facts.dewy" as expressions
@@ -127,8 +129,10 @@ lower = (id:addr sequence:addr gap:bigint state:facts.State context:Context obse
                 let other = if side =? 0 node.pos_args[1] else node.pos_args[0]
                 let constant = values.constant(other context.env)
                 if constant isnt? none and constant.lower isnt? none and ranges.same_endpoint(constant.lower constant.upper) {
-                    let shift = if function.name =? '__add__' constant.lower else -constant.lower
-                    return lower(value sequence gap-shift state context observed @registry)
+                    # Solve x+c>=length+gap directly for x. For subtraction
+                    # add c to the requested gap, without materializing -c.
+                    let adjusted = if function.name =? '__add__' gap-constant.lower else gap+constant.lower
+                    return lower(value sequence adjusted state context observed @registry)
                 }
             }
         }

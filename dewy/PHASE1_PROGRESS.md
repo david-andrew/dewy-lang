@@ -36,6 +36,27 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): hosted union argument conversion now consumes the
+existing scope-borrow evidence for stable local owners, matching the native
+call planner. Every known target must be read-only, later arguments and live
+places must preserve the route, and raw/external aliases or possible owning
+parameter protocols keep the ordinary copy. This is a lowering proof, not a
+new public effect promise. Focused checks include narrowed optional bigint
+fields, keyword calls, large values and later writes that must see a snapshot.
+Ten focused checks (including a repeated zero-allocation kernel), both paired
+x86-64/C groups, and 67 adjacent ownership/length checks pass.
+`length_proofs.dewy` also solves the requested
+shifted gap directly, avoiding a negated-bigint temporary; it passes strict
+copy checking standalone in both compilers. Adoption reaches 38 physical
+modules, without adding explicit-copy annotations to hide a missing proof.
+
+The fresh hosted-built driver at `b934932d` passed all 42 weighted-invariant,
+linear-candidate and named-projection checks (331.03 seconds including its
+build). The newer `47e15597` reached a three-generation native fixed point,
+with generations 2/3 taking 49/54 seconds under concurrent checking. Its
+complete 331-case parity run is in progress. These are separate checkpoints;
+Phase 1 remains open.
+
 Checkpoint (2026-09-28): fixed temporary record arguments can lend stable
 array handles and scalar fields to a known read-only callee that only projects
 the root. The shared call-specific proof controls public allocation effects
