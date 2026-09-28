@@ -1,0 +1,24 @@
+$explicit_copies
+build=():>dict<int64 dict<int64 int64>>=>{
+    let result:dict<int64 dict<int64 int64>>=[]
+    loop index in 0..4 {
+        let entry:dict<int64 int64>=[]
+        entry[0]=42
+        result[index]=entry
+    }
+    return result
+}
+main=():>int64=>{
+    {let warm=build()}
+    let before=_arena_live_bytes
+    loop repeat in 0..49 {
+        let entries=build()
+        if entries.length not=?5 return 1
+        loop index in 0..4 {
+            if index not in? entries return 2
+            if 0 not in? entries[index] return 3
+            if entries[index].get(0 0) not=?42 return 4
+        }
+    }
+    return if _arena_live_bytes=?before 42 else 5
+}

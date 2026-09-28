@@ -3954,7 +3954,8 @@ class _Lowerer(
                     walk(field_.value, depth, nested, site)
                 return
             if (isinstance(node, hir.Assign) and node.op == '='
-                    and isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None):
+                    and (isinstance(node.target.type, ty.ObjectType)
+                         or isinstance(node.target.type, ty.ArrayType) and node.target.type.length is None)):
                 walk(node.target, depth, nested, {})
                 walk(node.value, depth, nested, transfer(node.value))
                 return
@@ -3963,6 +3964,17 @@ class _Lowerer(
                 field_type = node.target.type
                 site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None), aggregate_element=isinstance(node, hir.IndexAssign) or isinstance(field_type, ty.ObjectType))
                 walk(node.value, depth, nested, site)
+                return
+            if isinstance(node, hir.DictStore):
+                # The dictionary owns the stored value, just as an array
+                # owns a replacement element. Keys and backing arrays are
+                # still ordinary reads; only the value is a transfer site.
+                walk(node.keys, depth, nested, {})
+                if node.values is not None:
+                    walk(node.values, depth, nested, {})
+                walk(node.key, depth, nested, {})
+                if node.value is not None:
+                    walk(node.value, depth, nested, transfer(node.value, handle_only=True, aggregate_element=True))
                 return
             if isinstance(node, hir.ArrayLiteral):
                 for item in node.items:

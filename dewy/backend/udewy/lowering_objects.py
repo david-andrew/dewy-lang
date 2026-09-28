@@ -1729,6 +1729,19 @@ class _ObjectLowering:
             )
             self.object_globals_initialized.add(node.target.binding_id)
             fresh_destination = True
+        adopted = self._adopt_object_fields(node.value, node.target.type, arena=False,
+                                           site=f'assigned to `{node.target.name}`')
+        if adopted is not None:
+            # Stage the replacement before releasing the old fields: source
+            # and destination may be the same record. Adoption clears the
+            # source's transferred handles, preserving its later cleanup.
+            prelude, replacement = adopted
+            statements.extend(prelude)
+            if not fresh_destination:
+                statements.extend(self._release_object_members(dest, node.target.type, node.loc))
+            size, _offsets = self._object_layout(node.target.type, node)
+            statements.extend(self._byte_copy_loop(dest, replacement, self._int64_literal(node.loc, size), node.loc))
+            return statements
         prelude, src = self._extract_object_pointer(node.value)
         statements.extend(prelude)
         if not self._object_expression_owns_fresh_storage(node.value):

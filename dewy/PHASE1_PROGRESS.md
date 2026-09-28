@@ -6814,3 +6814,16 @@ The preceding `eb154c85` snapshot completed all 317 parity cases, in addition
 to its identical three-generation native fixed point. Transitive update and
 scope cleanup changes postdate that frozen integration. Phase 1 remains open
 for the completion checklist above.
+
+Checkpoint (2026-09-28): hosted last-use transfer now includes dictionary value
+stores and ordinary record replacement, matching native lowering. Dictionary
+keys remain reads. A record replacement stages the adopted fields before
+releasing the old destination, and clears transferred source handles for its
+later cleanup. The shared eligibility check retains conservative fallback for
+prepared trees, incompatible descendant layouts, and borrowed fields. Later
+reads, live views and repeated outer-owner use in a loop still prevent moves.
+Validation: eight hosted acceptance/rejection cases and the paired x86-64/C
+group pass, including repeated nested-dictionary insertion/replacement,
+record/set replacement and zero retained bytes. The surrounding proof and
+ownership selection passed 127 checks. Two expected-result fixtures join the
+parity manifest; full integration for this checkpoint is still pending.
