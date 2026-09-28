@@ -111,8 +111,6 @@ checks, plus the paired widening group on x86-64/C, including array/record
 payloads, container insertion, fixed-layout conversion and zero retained
 bytes over repeated calls.
 
-## Strict-copy cleanup
-
 Checkpoint (2026-09-27): projecting an enclosing field contract onto a
 descendant now preserves the complete proposition in both analyzers. Only
 the subject and its projection change; the bound's value/length projection,
@@ -128,6 +126,21 @@ reporting-borrow, startup-exposure, const-owner and widening checks. The
 broader hosted suite and 232-case paired manifest are still running; this
 checkpoint does not claim those results yet. Generation 2/3 builds took
 62/87 seconds under concurrent test load, not isolated timing measurements.
+
+## Strict-copy cleanup
+
+Checkpoint (2026-09-27): hosted lowering now uses last-use evidence when a
+local record enters an array literal, push/insert, or indexed replacement.
+The destination receives an arena-owned root; owned strings and dynamic
+array fields transfer using the same clearing protocol as record returns.
+Local cleanup remains valid on paths that retain the source. Prepared trees,
+aggregate union fields, inherited extra layouts and borrowed fields retain
+their conservative copy. This matches the native path for the newly covered
+shapes. Validation: nine hosted cases, the paired x86-64/C group and 40
+surrounding hosted checks pass. Tests include retained views, repeated-loop
+uses, COW snapshots, fixed-layout fallback and zero retained bytes over 200
+branch calls. `binary_literals.dewy` now moves its diagnostic Pointer locals;
+its remaining narrowed-array payload copy still prevents strict adoption.
 
 The inherited uncommitted CLI-only `$explicit_copies` implementation was
 removed on 2026-09-20, with its patch and tests archived under

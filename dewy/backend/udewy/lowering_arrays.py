@@ -1652,6 +1652,9 @@ class _ArrayLowering(_ArraySharing):
         if isinstance(element_type, ty.ArrayType):
             return self._stored_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
+            adopted = self._adopt_object_element(node, element_type)
+            if adopted is not None:
+                return adopted
             # a fresh value (a call's result, a literal) dies here: its members move
             fresh = isinstance(self._copy_source_expression(node), (hir.FunctionCall, hir.ObjectLiteral))
             if not fresh:
@@ -2945,6 +2948,9 @@ class _ArrayLowering(_ArraySharing):
         if isinstance(element_type, ty.ArrayType):
             return self._stored_array_value(node, element_type)
         if isinstance(element_type, ty.ObjectType):
+            adopted = self._adopt_object_element(node, element_type)
+            if adopted is not None:
+                return adopted
             # an element object is an arena block (the array's release gives
             # it back as one), whether a dying temporary whose members move or
             # a copy of a borrowed value (`[p.span]`, `xs[i] = seg`)

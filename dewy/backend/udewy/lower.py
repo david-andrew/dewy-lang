@@ -3793,8 +3793,10 @@ class _Lowerer(
         }
         cells = {node.binding_id for node in hir.walk(literal.body)
                  if self._owned_cell_declaration(node)}
+        records = {node.binding_id for node in hir.walk(literal.body)
+                   if self._owned_object_declaration(node)}
 
-        def transfer(node: hir.AST, *, handle_only: bool = False) -> dict[int, int]:
+        def transfer(node: hir.AST, *, handle_only: bool = False, record_element: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
             if (isinstance(source, hir.ExpressedIdentifier) and source.binding_id in cells
                     and self._field_union_members(source.type) is None):
@@ -3804,7 +3806,7 @@ class _Lowerer(
                 # still needs its cell for lexical cleanup. Whole-cell moves
                 # below are distinct from taking a selected payload.
                 return {}
-            if isinstance(source, hir.ExpressedIdentifier) and (not handle_only or source.binding_id in strings or source.binding_id in cells):
+            if isinstance(source, hir.ExpressedIdentifier) and (not handle_only or source.binding_id in strings or source.binding_id in cells or record_element and source.binding_id in records):
                 return {id(source): id(source)}
             return {}
 
@@ -3888,19 +3890,19 @@ class _Lowerer(
             if isinstance(node, (hir.MemberAssign, hir.IndexAssign)):
                 walk(node.target, depth, nested, {})
                 field_type = node.target.type
-                site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None))
+                site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None), record_element=isinstance(node, hir.IndexAssign))
                 walk(node.value, depth, nested, site)
                 return
             if isinstance(node, hir.ArrayLiteral):
                 for item in node.items:
-                    walk(item, depth, nested, transfer(item, handle_only=True))
+                    walk(item, depth, nested, transfer(item, handle_only=True, record_element=True))
                 return
             if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod) and node.func.name in ('push', 'insert'):
                 walk(node.func, depth, nested, {})
                 for index, argument in enumerate(node.pos_args):
-                    walk(argument, depth, nested, transfer(argument, handle_only=True) if index == 0 else {})
+                    walk(argument, depth, nested, transfer(argument, handle_only=True, record_element=True) if index == 0 else {})
                 for name, argument in node.kw_args.items():
-                    walk(argument, depth, nested, transfer(argument, handle_only=True) if name == 'value' and not node.pos_args else {})
+                    walk(argument, depth, nested, transfer(argument, handle_only=True, record_element=True) if name == 'value' and not node.pos_args else {})
                 return
             if isinstance(node, hir.Flow):
                 for arm in node.arms:

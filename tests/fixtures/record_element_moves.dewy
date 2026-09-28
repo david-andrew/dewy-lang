@@ -1,0 +1,28 @@
+$explicit_copies
+# A local record's root may live in the frame. Its owned fields can still
+# move into an array's arena-owned root without copying their contents.
+Record:type=[text:string label:string? inner:[items:array<int64>]]
+make=():>Record=>["record {42}" "label {42}" [[42]]]
+exercise=(yes:bool):>int64=>{
+    let first=make()
+    let records:array<Record>=[]
+    if yes {
+        records.push(first)
+        if records.length>?0 {
+            records[0].inner.items.push(7)
+            const last=records[0]
+            return if last.text=?'record 42' and last.label=?'label 42' and last.inner.items.length=?2 and last.inner.items[0]=?42 42 else 1
+        }
+    }
+    return 42
+}
+main=():>int64=>{
+    if exercise(true) not=?42 or exercise(false) not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {
+        if exercise(true) not=?42 or exercise(false) not=?42 return 2
+    }
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    return if retained=?0 42 else 3
+}

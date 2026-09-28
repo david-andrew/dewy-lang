@@ -447,6 +447,48 @@ class _ObjectLowering:
             return self._extract_object_pointer(node)
         return self._clone_object_value(node, object_type)
 
+    def _adopt_object_element(self, node: hir.AST, object_type: ty.ObjectType) -> tuple[list[hir.AST], hir.AST] | None:
+        """Move an owned local's fields into an array-owned record root.
+
+        Locals can have frame roots, so transferring their pointer would
+        violate the array element's arena-release protocol. Reuse the result
+        transfer: it clears moved string slots and empties adopted array
+        descriptors, leaving ordinary local cleanup valid on every path.
+        Prepared trees and aggregate union payloads retain their layout copy.
+        """
+        source = self._copy_source_expression(node)
+        if (not self._has_arena() or not isinstance(source, hir.ExpressedIdentifier)
+                or id(source) not in self.moved_uses
+                or ty.structural_base(source.type) != object_type
+                or local_binding_key(source) not in self.owned_objects
+                or self.borrowed_fields.get(local_binding_key(source))):
+            return None
+
+        def transferable(record: ty.ObjectType) -> bool:
+            # Parent layouts may dispatch to unprepared descendant fields.
+            # Their transfer needs a separate complete-layout proof.
+            if any(ty.USER_BRAND_TYPES.get(brand, record) != record for brand in ty.brand_alternatives(record)):
+                return False
+            for field in record.fields:
+                plain = ty.structural_base(field.type)
+                if isinstance(plain, ty.ArrayType) and plain.length is not None:
+                    return False
+                if isinstance(plain, ty.ObjectType) and not transferable(plain):
+                    return False
+                members = self._field_union_members(field.type)
+                if members is not None and any(isinstance(ty.structural_base(member), (ty.ArrayType, ty.ObjectType)) for member in members):
+                    return False
+            return True
+
+        if not transferable(object_type):
+            return None
+        prelude, pointer = self._extract_object_pointer(node)
+        allocated, dest = self._allocate_object_result_value(object_type, node.loc, arena=True)
+        self.move_notes.append(MoveNote(self.srcfile, source.loc,
+            f'`{source.name}` is moved when stored in an element: this is its last use, so its owned fields change owner', True))
+        return [*prelude, *allocated,
+                *self._copy_object_into_result_storage(dest, pointer, object_type, node.loc, move='adopt')], dest
+
     def _allocate_object_result_value(
         self,
         object_type: ty.ObjectType,
