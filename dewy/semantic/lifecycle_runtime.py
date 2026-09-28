@@ -416,10 +416,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         return result
 
     def returning_projection(value, owners):
-        """An exiting owner may surrender a component through hook-free wrappers.
+        """An exiting owner may surrender a component through wrappers without drops.
 
-        A wrapper with lifecycle hooks still needs to see its complete value;
-        ordinary synthesized wrappers can clean up their remaining fields.
+        A wrapper's drop hook still needs to see its complete value. Copy/move
+        hooks do not run for a field transfer; synthesized cleanup can release
+        the remaining fields even when those other hooks are declared.
         Borrowed parameters and aliases are not in the owning declaration set.
         """
         while isinstance(value, (hir.Obligation, hir.ValueCast, hir.RepresentationCast)):
@@ -428,7 +429,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         while isinstance(value, (hir.MemberAccess, hir.Index)):
             if isinstance(value, hir.MemberAccess):
                 shape = ty.structural_base(value.value.type)
-                if not isinstance(shape, ty.ObjectType) or any(m.lifecycle is not None for m in shape.methods):
+                if not isinstance(shape, ty.ObjectType) or any(m.lifecycle == 'drop' for m in shape.methods):
                     return None
                 path.append(value.name)
                 value = value.value
@@ -1548,8 +1549,10 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
             body = replace(body, scoped=True)
         transfers, views, consumes = local_transfers(body, parameter_owners, allowed)
         def component(node):
-            # Hook-free wrappers can remain partially live. A custom move
-            # cleans its remainder at the consuming edge before clearing the
+            # Only a wrapper's drop needs a complete cleanup receiver. Its
+            # copy/move hooks are not called when one field changes owners.
+            # A custom move of the selected component cleans its remainder
+            # at the consuming edge before clearing the
             # component flag; the wrapper still owns its other fields.
             shape = ty.structural_base(node.type)
             if not isinstance(shape, (ty.ObjectType, ty.ArrayType, ty.TypeOr)):
@@ -1559,7 +1562,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     node = node.array
                     continue
                 owner_shape = ty.structural_base(node.value.type)
-                if not isinstance(owner_shape, ty.ObjectType) or any(method.lifecycle is not None for method in owner_shape.methods):
+                if not isinstance(owner_shape, ty.ObjectType) or any(method.lifecycle == 'drop' for method in owner_shape.methods):
                     return False
                 node = node.value
             return True

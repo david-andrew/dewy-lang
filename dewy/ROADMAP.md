@@ -759,7 +759,8 @@ in both lowerings and the parity tool is the gate.
   read or alias needs it. Returning a field or array element from an exiting local or by-value owner
   now transfers it through synthesized wrappers and drops the remaining
   components. Nested selectors evaluate once and retain checked bounds. Custom wrapper
-  hooks still require a complete receiver. Last-use component transfers now also
+  drop hooks still require a complete receiver; copy/move hooks alone do not
+  prevent partial field ownership. Last-use component transfers now also
   supply owning bindings, calls and constructors, retaining the wrapper’s lexical
   cleanup. Direct same-block field/ancestor replacement restores partial record ownership,
   preserving cleanup of remaining old components and the new value.

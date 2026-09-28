@@ -5448,3 +5448,29 @@ native fixed point with execution/scaling checks at
 hosted suite and 224-case parity manifest are still running against that
 checkpoint; their eventual results must not be attributed to the newer guard
 change without the separate focused evidence above.
+
+
+## Partial ownership through copy/move-only wrappers (2026-09-27)
+
+Both lifecycle passes now distinguish hooks needed during cleanup from hooks
+for whole-value operations. A wrapper with copy/move hooks but no drop hook
+can transfer a field and later clean up its remaining fields. Moving that
+field does not invoke the wrapper's copy/move operation. A wrapper drop hook
+still requires a complete receiver; reading a consumed field remains invalid.
+This follows the existing field-transfer rule rather than adding a new hook
+protocol or an invocation-count guarantee.
+
+Fifty-two hosted surrounding checks and all four native paired groups passed
+on x86-64/C. Coverage includes ordinary/returned field transfers, conditional
+consumption and renewal, independent copy-only/move-only wrappers, rejected
+post-consumption reads and drop-hook receivers, zero unintended wrapper-hook
+calls, and zero retained bytes across 200 conditional invocations. The fixture
+is now in the 226-case manifest.
+
+The isolated `00bb38cd` getter/join checkpoint passed all 224 parity cases and
+the broad hosted run passed 4,210 tests (1,040.42 seconds). Its refreshed native
+compiler-source copy inventory is 2,379 static sites: 1,501 record, 552 array,
+326 cell, over 52,812 lines (45.047 sites/KLOC). The previous inventory had
+2,583 sites and 49.065 sites/KLOC. These are static counts, not runtime bytes
+or an isolated performance measurement. The newer guard and wrapper changes
+have the focused validation above pending their next full integration.

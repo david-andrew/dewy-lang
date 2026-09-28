@@ -474,7 +474,9 @@ returning_projection=(id:addr owners:array<addr> session:contexts.Session):>Extr
         if value is? hir.MemberAccess {
             let shape=types.node_at(session.types views.structural_base(hir.node_at(session.hir value.value).value_type session.types))
             if shape isnt? types.ObjectType return none
-            loop method in shape.methods {if method.lifecycle isnt? none return none}
+            # A field transfer does not copy/move the wrapper itself. Only
+            # its drop hook requires a complete receiver during cleanup.
+            loop method in shape.methods {if method.lifecycle =? 'drop' return none}
             reverse_path.push(value.name)
             value=hir.node_at(session.hir value.value)
         } else {
@@ -534,8 +536,9 @@ restore_flags=(held:array<ComponentFlag> loc:Span @session:contexts.Session):>ar
     }
     return result
 }
-# Hook-free wrappers may remain partially live. Custom moves clean their
-# remainder on the consuming edge before the component flag is cleared.
+# Wrappers without drop hooks may remain partially live, even with copy/move
+# hooks. A selected component's custom move cleans its remainder on the
+# consuming edge before the component flag is cleared.
 transferable_component=(id:addr session:contexts.Session):>bool=>{
     let node=hir.node_at(session.hir id)
     if resource(node.value_type session.types) is? none return false
@@ -546,7 +549,7 @@ transferable_component=(id:addr session:contexts.Session):>bool=>{
         if current is? hir.Index {current=hir.node_at(session.hir current.array) continue}
         let owner=types.node_at(session.types views.structural_base(hir.node_at(session.hir current.value).value_type session.types))
         if owner isnt? types.ObjectType return false
-        loop method in owner.methods {if method.lifecycle isnt? none return false}
+        loop method in owner.methods {if method.lifecycle =? 'drop' return false}
         current=hir.node_at(session.hir current.value)
     }
     return true
