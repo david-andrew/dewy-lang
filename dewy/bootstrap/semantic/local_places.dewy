@@ -156,7 +156,11 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
     let joined=put(hir.Block[Span[0 0] types.primitive('void' @session.types) roots false] @session)
     let functions=captures.analyze(joined session.hir plan.symbols)
     let captured:set<addr>=set[]
-    loop function in functions.functions.values {loop binding in function.captures {captured.push(binding)}}
+    let written_captures:set<addr>=set[]
+    loop function in functions.functions.values {
+        loop binding in function.captures {captured.push(binding)}
+        loop binding in function.writes {if binding not in? function.locals {written_captures.push(binding)}}
+    }
     let exposed=borrowing.exposed_roots(joined functions session.hir session.types)
     let scopes:dict<addr borrowing.ViewScope>=[]
     loop binding in plan.order {
@@ -181,7 +185,9 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
         }
         if source is? none return selection_error(alias fallback session detail='the selection has no stored root')
         if alias.scope is? none return selection_error(alias fallback session detail='the place needs a containing block')
-        if binding in? captured or source.binding in? captured return selection_error(alias fallback session detail='the place or its owner is captured by another function')
+        # Read-only, nonescaping captures preserve the owner's storage. A
+        # captured alias instead demands stability through the whole scope.
+        if binding in? written_captures or (source.binding in? captured and source.binding in? written_captures) return selection_error(alias fallback session detail='another function can write the place or its owner')
         if source.binding in? exposed return selection_error(alias fallback session detail='the owner can escape through a raw operation or unknown call')
         let scope=alias.scope
         if scope not in? scopes {scopes[scope]=borrowing.prepare_view_scope(scope session.hir session.types)}
@@ -195,7 +201,12 @@ validate_lifetimes = (roots:array<addr> fallback:SrcFile plan:Plan @session:cont
                 if dependent not in? live {live.push(dependent) pending.push(dependent)}
             }
         }
-        if borrowing.view_conflicts(region live source session.hir functions) return selection_error(alias fallback session detail='a write or call may change the owner before the place’s last use')
+        let retained=false
+        loop dependent in live {
+            if dependent in? exposed or dependent in? written_captures return selection_error(alias fallback session detail='a dependent place can escape or be written by another function')
+            if dependent in? captured {retained=true}
+        }
+        if borrowing.view_conflicts(region live source session.hir functions retained=retained) return selection_error(alias fallback session detail='a write or call may change the owner before the place’s last use')
     }
     return none
 }

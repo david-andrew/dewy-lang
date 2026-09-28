@@ -5,6 +5,9 @@ from dewy.reporting import SrcFile, ReportException
 from tests.python_misc.test_scalar_projection import execute
 
 CASES = [
+    '''main=():>int64=>{let x:int64=1 let cursor=@x
+read=():>int64=>cursor
+cursor=42 return read()}''',
     '''let put=<T>(@xs:array<T length=1> value:T):>void=>{let cursor=@xs[0] cursor=value}
 main=():>int64=>{let xs:array<int64 length=1>=[0] put(@xs 42) return xs[0]}''',
     '''main=():>int64=>{let xs:array<int64>=[0 0]
@@ -93,10 +96,6 @@ return 0}''',
     '''bad=(@xs:array<int64 length=1>):>void & no_effects=>{let cursor=@xs[0] cursor=42}''',
     '''main=():>int64=>{let xs:array<int64<v=>v>=?0>>=[1]
 let cursor=@xs[0] cursor=-1 return 42}''',
-    '''main=():>int64=>{let x:int64=1 let cursor=@x
-read=():>int64=>cursor
-cursor=42 return read()}''',
-
     '''main=():>int64=>{let x:int64=0 let cursor=@x cursor=42
 let answer:int64<v=>v=?cursor>=41
 return answer}''',

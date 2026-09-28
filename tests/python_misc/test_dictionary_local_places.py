@@ -7,6 +7,9 @@ from dewy.reporting import SrcFile, ReportException
 from test_scalar_projection import execute
 
 CASES = [
+    '''main=():>int64=>{let table:dict<int64 int64>=[1->1]
+let entry=@table[1] read=():>int64=>entry
+entry=42 return read()}''',
     (Path(__file__).resolve().parents[1] / 'fixtures/dictionary_local_places.dewy').read_text(),
     '''main=():>int64=>{let table:dict<string int64>=['a'->40]
 let entry=@table['a'] entry+=2 return table['a']}''',
@@ -101,9 +104,6 @@ let entry=@table[1]
 if entry not=?0 {table[1]=0 return 84//entry} return 0}""",
     """Box:type=const [table:dict<int64 int64>]
 main=():>int64=>{let box=Box[[1->0]] let entry=@box.table[1] entry=42 return 42}""",
-    """main=():>int64=>{let table:dict<int64 int64>=[1->1]
-let entry=@table[1] read=():>int64=>entry
-entry=42 return read()}""",
     # A captured key is reinitialized on the next iteration; old entry facts
     # do not apply to that iteration's newly selected entry.
     """main=():>int64=>{let table:dict<int64 int64>=[1->1 2->0]

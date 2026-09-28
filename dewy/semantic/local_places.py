@@ -26,10 +26,12 @@ def prepare(root, registry, srcfile):
     scopes = {}
     def discover(node, scope=None, enclosing=frozenset()):
         if isinstance(node, hir.FunctionLiteral):
-            references = {read.binding_id for read in hir.walk(node.body) if isinstance(read, hir.ExpressedIdentifier)}
+            body = list(borrowing._walk_function(node))
+            references = {read.binding_id for read in body if isinstance(read, hir.ExpressedIdentifier)}
             captured.update(references & enclosing)
             scope = None
-            enclosing = enclosing | {child.binding_id for child in borrowing._walk_function_subtree(node.body) if isinstance(child, hir.Declare)}
+            enclosing = enclosing | {child.binding_id for child in body if isinstance(child, hir.Declare)} | {
+                param.binding_id for param in borrowing.literal_params(node)}
         if isinstance(node, hir.Block):
             scope = node
         if mutable(node):
@@ -38,13 +40,21 @@ def prepare(root, registry, srcfile):
             discover(child, scope, enclosing)
     discover(root)
     plan = borrowing.analyze(root, captured, analyze_effects(root), set(registry.by_id))
+    # A read-only, nonescaping capture does not relocate its owner's storage.
+    # Capturing an alias extends its demand through the containing scope.
+    # Calls are checked over that interval; escaping function values remain
+    # unsupported by callable lowering, and raw exposure is excluded below.
+    written_captures = set().union(*(function.writes - function.locals
+                                    for function in plan.functions.values()))
     for binding, declaration in aliases.items():
         source = borrowing.route(declaration.expr)
         while source is not None and source.binding in aliases:
             parent = borrowing.route(aliases[source.binding].expr)
             source = None if parent is None else borrowing.Route(parent.binding, parent.fields + source.fields)
         scope = scopes[binding]
-        if source is None or scope is None or binding in captured or source.binding in (plan.exposed_bindings | captured):
+        if (source is None or scope is None or binding in written_captures
+                or source.binding in plan.exposed_bindings
+                or source.binding in captured & written_captures):
             user_error(srcfile, 'cannot prove mutable local place lifetime', Pointer(span=declaration.loc, message='the selected owner must remain available through the place’s last use'))
         prepared = borrowing.prepare_view_scope(scope)
         region = borrowing.view_region(prepared, declaration, captured)
@@ -57,7 +67,9 @@ def prepare(root, registry, srcfile):
                 if dependent not in live:
                     live.add(dependent)
                     pending.append(dependent)
-        if borrowing.view_conflicts(region, live, source, plan, set(registry.by_id)):
+        if (live & (plan.exposed_bindings | written_captures)
+                or borrowing.view_conflicts(region, live, source, plan, set(registry.by_id),
+                                             retained=bool(live & captured))):
             user_error(srcfile, 'mutable local place conflicts with its owner', Pointer(span=declaration.loc, message='the selected owner must remain available through the place’s last use'))
 
     routes = {}

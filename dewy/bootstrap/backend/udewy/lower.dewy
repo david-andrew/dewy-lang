@@ -5451,9 +5451,10 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.cleanup_excluded=borrowed.escaping_places
     validate_required_views(proof_root @state)
     if state.problem isnt? none return state.problem
-    loop unit in state.capture_plan.functions.values {
-        loop binding in unit.captures {state.cleanup_excluded.push(binding)}
-    }
+    # Lifted captures are borrowed trailing parameters, never registered as
+    # owners in the callee. Their enclosing local still needs normal lexical
+    # cleanup. Escaping function values are rejected, and the move analysis
+    # separately prevents consuming a binding that a nested function reads.
     let units=state.capture_plan.functions
     let named=state.capture_plan.named
     loop [id capture] in units {state.code_symbols[id]="_f{id}"}

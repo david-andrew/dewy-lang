@@ -1520,7 +1520,7 @@ expression = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:conte
         statement(id @active frame.loops frame.allowed frame.inherited frame.owning_result @plan @session composed_parent=frame.composed_parent)
         return
     }
-    if node is? hir.FunctionLiteral {prepare_function(id @plan @session) return}
+    if node is? hir.FunctionLiteral {prepare_function(id @plan @session borrowed_captures=allowed) return}
     if node is? hir.TypeValue or (node is? hir.FunctionCall and node.proof) or (node is? hir.Assert and not node.runtime and not node.expect) return
     if node is? hir.MemberAccess|hir.ForwardingAccess|hir.ArrayLength {
         let selected=if node is? hir.MemberAccess|hir.ForwardingAccess node.value else node.array
@@ -2309,7 +2309,7 @@ return_result = (id:addr @session:contexts.Session):>addr => {
     }
     return put(hir.Return[node.loc bottom id] @session)
 }
-prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
+prepare_function = (id:addr @plan:Plan @session:contexts.Session borrowed_captures:set<addr>=set[]):>void => {
     if id in? plan.prepared or plan.problem isnt? none return
     plan.prepared.push(id)
     let node=hir.node_at(session.hir id)
@@ -2328,7 +2328,10 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session):>void => {
     let params=function.pos_or_kw_args
     loop parameter in function.kw_only_args {params.push(parameter)}
     if function.rest_args isnt? none {params.push(function.rest_args)}
-    let allowed:set<addr>=set[]
+    # Direct local functions borrow live enclosing resources. They never
+    # acquire those owners for cleanup or last-use transfer. Escaping and
+    # writable captures retain the callable lowerer's ordinary rejection.
+    let allowed=borrowed_captures
     let parameter_owners:array<addr>=[]
     loop index in 0.. and index <? params.length {
         let parameter=params[index]

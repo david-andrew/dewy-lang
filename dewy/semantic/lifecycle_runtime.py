@@ -1060,7 +1060,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod) and resource(node.func.array.type) is not None:
             return array_operation(node, allowed, inherited, control)
         if isinstance(node, hir.FunctionLiteral):
-            return function(node)
+            return function(node, borrowed_captures=allowed)
         if (isinstance(node, hir.TypeValue)
                 or isinstance(node, hir.FunctionCall) and node.proof
                 or isinstance(node, hir.Assert) and not node.runtime and not node.expect):
@@ -1342,7 +1342,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                            default=return_result(node.default))
         return hir.Return(node.loc, ty.BOTTOM_TYPE, node)
 
-    def function(literal):
+    def function(literal, *, borrowed_captures=()):
         nonlocal current_source
         if literal.proof or selected is not None and id(literal) not in selected:
             return literal
@@ -1351,7 +1351,11 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
         params = [*literal.pos_or_kw_args, *literal.kw_only_args]
         if literal.rest_args is not None:
             params.append(literal.rest_args)
-        allowed = set()
+        # A direct local function may read a still-live enclosing resource.
+        # It borrows that owner; only this function's own parameters/locals
+        # enter cleanup or last-use transfer. Callable lowering still rejects
+        # escaping captures and writes through captures.
+        allowed = set(borrowed_captures)
         parameter_owners = []
         for param in params:
             if resource(param.type) is not None:
@@ -1597,7 +1601,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     default = statement(default, list(owners), loops, fresh_result=fresh_result)
                 return replace(node, arms=arms, default=default)
             if isinstance(node, hir.Declare) and isinstance(node.expr, hir.FunctionLiteral):
-                return replace(node, expr=function(node.expr))
+                return replace(node, expr=function(node.expr, borrowed_captures=live))
             if isinstance(node, (hir.MemberAssign, hir.IndexAssign)) and resource(node.target.type) is not None:
                 # Capture selectors before the replacement, and the replacement
                 # before drop. The route remains rooted in its actual owner;

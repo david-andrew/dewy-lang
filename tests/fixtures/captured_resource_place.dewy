@@ -1,0 +1,20 @@
+let drops:int64=0
+let copies:int64=0
+Handle=type of [id:int64
+    $__drop__ release=():>void=>{drops+=1}
+    $__copy__ clone=():>Handle=>{copies+=1 Handle[id]}
+]
+work=():>int64=>{
+    let values:array<Handle>=[Handle[0]]
+    let cursor=@values[0]
+    read=():>int64=>cursor.id
+    cursor=Handle[42]
+    return read()
+}
+main=():>int64=>{
+    if work() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if work() not=?42 return 2}
+    $runtime_assert _arena_live_bytes=?before
+    return if drops=?202 and copies=?0 42 else 3
+}

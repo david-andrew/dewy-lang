@@ -36,6 +36,19 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): nonescaping, read-only local functions can borrow
+enclosing resource owners and local places. Capturing a place retains its loan
+through the enclosing scope, including dependent aliases and default arguments;
+owner relocation, raw exposure, writes through captures and escaping function
+values remain rejected. Captured owners stay in their enclosing cleanup list:
+the lifted callee borrows them, and must neither drop nor consume them. This
+also fixes native leaks of captured arrays and records. Twenty paired positive
+cases and twelve paired rejections pass, plus surrounding dictionary places,
+resource views, partial records and iteration checks. Repeated-call kernels
+check retained bytes, lifecycle counts and returned aggregate survival. These
+checks extend the implemented capture boundary; they do not implement escaping
+or writable closures.
+
 Checkpoint (2026-09-28): deferred local functions no longer inherit stale
 numeric facts about mutable captures. Previously a function declared while a
 captured divisor was nonzero (or an array nonempty) could retain that evidence

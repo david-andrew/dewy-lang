@@ -1,0 +1,9 @@
+main=():>int64=>{
+    let values:array<int64>=[40]
+    read=():>int64=>values[0]
+    let cursor=@values[0]
+    cursor+=1
+    let before=read()
+    cursor+=1
+    return if before=?41 read() else 1
+}
