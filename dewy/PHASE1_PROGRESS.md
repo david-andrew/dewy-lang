@@ -5679,10 +5679,12 @@ remains a separate checkpoint.
 ## Strict-copy adoption: namespace and type dispatch helpers (2026-09-27)
 
 `semantic/namespaces.dewy`, `semantic/type_names.dewy` and
-`semantic/container_methods.dewy` now enable `$explicit_copies`. Each passed
+`semantic/container_methods.dewy` were tested with `$explicit_copies`. Each passed
 standalone lowering through both the hosted compiler and the native program
-driver; no copy annotations or algorithm changes were needed. Adoption is now
-28 physical modules. Nine other small-module probes remain unmarked: their
+driver; no copy annotations or algorithm changes were needed. Standalone probes initially suggested adoption of these modules; the full
+compiler subsequently rejected the imported namespace return. The directives
+are withdrawn pending full-graph acceptance, so adoption remains 25 physical
+modules. Standalone success alone is insufficient. Nine other small-module probes remain unmarked: their
 failures include independently mutated parameter copies, borrowed payloads
 stored into containers, and projected arrays assigned through branch joins.
 Those need deliberate copy boundaries or shared ownership proofs, not a
