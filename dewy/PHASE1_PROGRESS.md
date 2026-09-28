@@ -5694,3 +5694,23 @@ The entry-snapshot integration also caught a missed temporary-helper rename
 in hosted union construction. The caller is corrected, and the counter fixture
 now includes an optional key-set result; paired x86-64/C execution retains
 zero bytes.
+
+
+## Integration and fixed-array replacement storage (2026-09-27)
+
+At `70da28c6`, three native generations reached an identical fixed point,
+a fresh hosted-built driver passed all 24 entry-snapshot/iteration/array-move
+checks, and all 239 paired manifest cases passed. The copy inventory reports
+2,404 sites across 52,900 physical lines (45.444/KLOC), within the unchanged
+3,000/60 budget. The additional reported snapshot sites close diagnostic gaps;
+this count is not a timing improvement. Generation 2/3 builds each took 54 s
+under concurrent checking, not isolated benchmark timings.
+
+A subsequent conditional-resource test exposed an existing hosted replacement
+bug, also reproducible with constant indices: fixed-array assignment inside
+a loop reused frame storage still owned by the prior replacement. Releasing
+the old value could therefore invalidate the new one. Descriptor-backed
+replacements now receive lasting independent storage before the old value is
+released, just like runtime-length replacements. The paired fixed-array
+regression retains zero bytes across 100 calls; 60 hosted allocation/frame
+checks pass. Dynamic resource selection is a separate in-progress change.

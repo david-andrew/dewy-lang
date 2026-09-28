@@ -1,0 +1,14 @@
+Box:type=[value:int64 items:array<int64>]
+exercise=():>int64=>{
+    let rows=[Box[1 [10]] Box[2 [20]]]
+    loop i in [0..5) {rows=[Box[20 [i]] Box[22 [i+1]]]}
+    return rows[0].value+rows[1].value
+}
+main=():>int64=>{
+    if exercise() not=?42 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {if exercise() not=?42 return 2}
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    return if retained=?0 42 else 3
+}

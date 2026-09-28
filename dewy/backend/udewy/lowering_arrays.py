@@ -1060,10 +1060,11 @@ class _ArrayLowering(_ArraySharing):
             # dies at that boundary, while the target remains live.
             prelude, copied = self._clone_array_value(node.value, array_type, arena=True, move=move_literal)
         else:
-            prelude, copied = self._independent_array_value(
-                node.value,
-                array_type,
-            )
+            # A fixed extent does not bound the replacement's lifetime. A
+            # loop reuses its frame slots, while the prior value is still
+            # owned by the outer binding until RHS evaluation completes.
+            # Give the replacement independent lasting storage before release.
+            prelude, copied = self._clone_array_value(node.value, array_type, arena=True, move=move_literal)
         assignment = replace(node, value=copied)
         replacement_owner = self.rebound_array_owners.get(node.target.binding_id)
         if replacement_owner is not None:
