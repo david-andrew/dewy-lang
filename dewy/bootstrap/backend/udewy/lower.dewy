@@ -5252,7 +5252,49 @@ function = (id:addr node:hir.FunctionLiteral @state:State projection:ScalarProje
     return put(hir.FunctionLiteral[node.loc code_type(id node @state result=if projection is? none none else projection.result) arguments [] none result_type body source=node.source] @state)
 }
 
-lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false):>Result|Error => {
+# Validate explicit storage demands before unused functions disappear. This
+# consumes the same borrow plan and representation checks as actual lowering;
+# there is no second, weaker interpretation of `const view=@owner`.
+validate_required_views = (root:addr @state:State):>void => {
+    let declarations:array<[id:addr source:addr?]>=[]
+    let pending:array<[id:addr source:addr?]>=[[root none]]
+    let seen:set<addr>=set[]
+    state.view_writes=[]
+    state.mutated_roots=set[]
+    loop pending.length >? 0 {
+        let next=pending.pop
+        if next.id in? seen continue
+        seen.push(next.id)
+        let current=hir.node_at(state.input.nodes next.id)
+        let source=next.source
+        if current is? hir.FunctionLiteral and current.source isnt? none {source=current.source}
+        if current is? hir.Declare and current.view {
+            declarations.push([next.id source])
+        }
+        let writes=captures.write_targets(current state.input.nodes)
+        if writes.length >? 0 {state.view_writes.push(next.id)}
+        loop target in writes {
+            let route=borrowing.route(target state.input.nodes)
+            if route isnt? none {state.mutated_roots.push(route.binding)}
+        }
+        loop child in hir.children(current) {pending.push([child source])}
+    }
+    let previous=state.source
+    loop site in declarations {
+        let declaration=hir.node_at(state.input.nodes site.id)
+        $runtime_assert declaration is? hir.Declare
+        if not borrowed_route_local(declaration @state) {
+            let source=site.source
+            if source isnt? none and source <? state.input.source_files.length {state.source=state.input.source_files[source]}
+            required_view_error(declaration @state);
+            break
+        }
+    }
+    state.source=previous
+    state.view_writes=[] state.mutated_roots=set[]
+}
+
+lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_context:layouts.Context=layouts.Context[] entry_binding:addr?=none infer_entry:bool=true source_by_item:dict<addr addr>=[] runtime_helpers:dict<string addr>=[] links:subtyping.Graph=subtyping.default_links debug_names:bool=false explicit_copy_sources:set<addr>=set[] source_registry:bindings.Registry=bindings.Registry[] timings:bool=false checked_root:addr?=none):>Result|Error => {
     let captures_started=timing.start(timings)
     let state=State[input source type_nodes=input.types allocator=allocator runtime_helpers=runtime_helpers layout_context=layout_context links=links debug_names=debug_names explicit_copy_sources=explicit_copy_sources]
     # Older seeds and prelude-free kernels retain the six-word allocation
@@ -5269,8 +5311,10 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     loop brand in brands.numbered(layout_context.brands) {state.brand_numbers[brand.name]=brand}
     let block=hir.node_at(input.nodes root)
     if block isnt? hir.Block return Error[srcfile=source title='lowering requires a module block']
-    discover(root @state)
+    let proof_root=if checked_root is? none root else checked_root
+    discover(proof_root @state)
     state.capture_plan=captures.analyze(root input.nodes state.symbols.keys)
+    let proof_captures=if proof_root =? root state.capture_plan else captures.analyze(proof_root input.nodes state.symbols.keys)
     # Entrypoints and compiler-emitted runtime calls do not go through source
     # argument preparation. Exclude their ABI from ownership specialization.
     let external:set<addr>=set[]
@@ -5284,7 +5328,7 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     }
     timing.finish('lowering.captures' captures_started)
     let borrowing_started=timing.start(timings)
-    let borrowed=borrowing.details(root input.nodes input.types state.capture_plan state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers registry=source_registry)
+    let borrowed=borrowing.details(proof_root input.nodes input.types proof_captures state.links external=external owned_parameter_protocol=state.allocator isnt? none and '_arena_release' in? runtime_helpers registry=source_registry)
     timing.finish('lowering.borrowing' borrowing_started)
     state.timings=timings
     state.borrowed_arguments=borrowed.arguments
@@ -5304,6 +5348,8 @@ lower = (root:addr input:emit.Input source:SrcFile allocator:addr?=none layout_c
     state.owned_parameters=borrowed.owned_parameters
     state.borrow_rejections=borrowed.rejections
     state.cleanup_excluded=borrowed.escaping_places
+    validate_required_views(proof_root @state)
+    if state.problem isnt? none return state.problem
     loop unit in state.capture_plan.functions.values {
         loop binding in unit.captures {state.cleanup_excluded.push(binding)}
     }

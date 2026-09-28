@@ -1519,6 +1519,8 @@ class _ObjectLowering:
         value_type = ty.unfold(ty.strip_refinement(value_type))
         if (not self._has_arena() and not node.view) or self.lowering_module_startup or node.binding_id is None:
             return False
+        if node.view:
+            return borrowing.required_local_view(node, self.borrow_plan)
         expr = borrowing.unwrap(node.expr)
         if not isinstance(expr, (hir.Index, hir.MemberAccess, hir.DictLookup)) and not (
             node.view and isinstance(expr, hir.ExpressedIdentifier)

@@ -604,3 +604,67 @@ def stable_owner(source: Route, plan: Plan) -> bool:
         if overlap(source, Route(source.binding, tuple(step for step in change))):
             return False
     return True
+
+
+def required_local_view(node: hir.Declare, plan: Plan) -> bool:
+    """The storage obligation for an explicit view, before or during lowering."""
+    expr = unwrap(node.expr)
+    if not isinstance(expr, (hir.Index, hir.MemberAccess, hir.DictLookup, hir.ExpressedIdentifier)):
+        return False
+    if isinstance(expr, hir.DictLookup) and not expr.proven:
+        if expr.default is not None or not isinstance(ty.unfold(ty.strip_refinement(expr.type)), ty.ObjectType):
+            return False
+    if node.binding_id is None or node.binding_id not in plan.stable_bindings:
+        return False
+    if node.annotation is not None and ty.strip_refinement(node.annotation) != ty.strip_refinement(expr.type):
+        return False
+    if id(expr) in plan.array_snapshots:
+        return False
+    source = route(expr)
+    return source is not None and (stable_owner(source, plan) or node.binding_id in plan.scoped_views)
+
+
+def required_view_error(node, plan, srcfile, literal=None):
+    from ...reporting import Pointer
+    from ...semantic.errors import user_error
+    owner = route(node.expr)
+    pointers = []
+    if owner is not None and literal is not None:
+        pending = list(reversed(plan.view_regions.get(node.binding_id, [literal.body])))
+        while pending:
+            item = pending.pop()
+            if isinstance(item, hir.FunctionLiteral):
+                continue
+            for target in write_targets(item):
+                written = route(target)
+                if written is not None and overlap(owner, written):
+                    pointers.append(Pointer(span=item.loc, message='this write or mutable place conflicts with the required view'))
+                    break
+            if pointers:
+                break
+            pending.extend(reversed(tuple(hir.children(item))))
+    user_error(srcfile, 'cannot prove required local view',
+               *pointers, Pointer(span=node.loc, message=f'`{node.name}` requires stable borrowed storage'),
+               hint='use `.copy()` for an independent value, or keep the owner stable',
+               notes=['A required view needs stable storage through its last use, including derived aliases; captured or exposed owners need additional lifetime evidence.'])
+
+
+def validate_required_views(root: hir.Block, srcfile):
+    """Check source demands retained only for validation, never for emission.
+
+    Module assembly calls this only when pruning would otherwise discard a
+    required view. Ordinary lowering reuses the very same predicate/report.
+    """
+    from ...semantic.analyze.effects import _EffectAnalyzer, nonlocal_bindings
+    analysis = _EffectAnalyzer(root)
+    summaries = analysis.solve()
+    source_bindings = {node.binding_id for node in hir.walk(root)
+                       if isinstance(node, hir.Declare) and node.binding_id is not None}
+    for literal in analysis.literals:
+        source_bindings.update(param.binding_id for param in literal_params(literal) if param.binding_id is not None)
+    plan = analyze(root, nonlocal_bindings(root), summaries, source_bindings)
+    for function in plan.functions.values():
+        literal = function.literal
+        for node in _walk_function(literal):
+            if isinstance(node, hir.Declare) and node.view and not required_local_view(node, plan):
+                required_view_error(node, plan, literal.source or srcfile, literal)

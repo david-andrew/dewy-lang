@@ -3721,29 +3721,7 @@ class _Lowerer(
         return isinstance(self._copy_source_expression(node.expr), (hir.ExpressedIdentifier, hir.Index, hir.MemberAccess, hir.DictLookup))
 
     def _required_view_error(self, node: hir.Declare) -> NoReturn:
-        from ...semantic.errors import user_error
-        owner = borrowing.route(node.expr)
-        pointers = []
-        if owner is not None and self.current_literal is not None:
-            pending = list(reversed(self.borrow_plan.view_regions.get(node.binding_id, [self.current_literal.body])))
-            while pending:
-                item = pending.pop()
-                if isinstance(item, hir.FunctionLiteral):
-                    continue
-                for target in borrowing.write_targets(item):
-                    written = borrowing.route(target)
-                    if written is not None and borrowing.overlap(owner, written):
-                        pointers.append(Pointer(span=item.loc, message='this write or mutable place conflicts with the required view'))
-                        break
-                if pointers:
-                    break
-                pending.extend(reversed(tuple(hir.children(item))))
-        user_error(
-            self.srcfile, 'cannot prove required local view',
-            *pointers, Pointer(span=node.loc, message=f'`{node.name}` requires stable borrowed storage'),
-            hint='use `.copy()` for an independent value, or keep the owner stable',
-            notes=['A required view needs stable storage through its last use, including derived aliases; captured or exposed owners need additional lifetime evidence.'],
-        )
+        borrowing.required_view_error(node, self.borrow_plan, self.srcfile, self.current_literal)
 
     def _note_allocator_escapes(self, body: hir.AST) -> None:
         """Report values leaving `$allocator` blocks as copies (see allocator_escapes)."""

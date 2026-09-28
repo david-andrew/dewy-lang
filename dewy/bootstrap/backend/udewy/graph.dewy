@@ -18,7 +18,7 @@ import p"emit.dewy" as emit
 # This is an assembly/legalization boundary for a validated graph. The full
 # invocation still owns initialization, bounds, and representation analysis;
 # assembling checked HIR alone does not authorize source code generation.
-Prepared:type = const [root:addr entry:addr? source:SrcFile source_by_item:dict<addr addr>]
+Prepared:type = const [root:addr entry:addr? source:SrcFile source_by_item:dict<addr addr> checked_root:addr]
 
 # Functions do not execute at declaration. Keep those reachable from startup,
 # the explicit entry binding, and runtime helpers needed by legalization.
@@ -36,6 +36,19 @@ visit = (id:addr functions:dict<addr addr> nodes:array<hir.AST> @seen:set<addr> 
         }
     }
     loop child in hir.children(node) {visit(child functions nodes @seen @live)}
+}
+requires_view_proof = (root:addr nodes:array<hir.AST>):>bool => {
+    let pending:array<addr>=[root]
+    let seen:set<addr>=set[]
+    loop pending.length >? 0 {
+        let id=pending.pop
+        if id in? seen continue
+        seen.push(id)
+        let node=hir.node_at(nodes id)
+        if node is? hir.Declare and node.view return true
+        hir.push_children(node @pending)
+    }
+    return false
 }
 assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):>Prepared => {
     checked_proofs.erase(@engine.session)
@@ -70,15 +83,31 @@ assemble = (entry:addr @engine:modules.Engine required_bindings:array<addr>=[]):
         if declaration is? hir.Declare and declaration.binding_id isnt? none and declaration.binding_id in? functions continue
         visit(id functions engine.session.hir @seen @live)
     }
+    # Unused functions still owe explicit storage demands. Add only those
+    # functions and their dependencies to the proof graph, not every unused
+    # library function. The normal runtime graph remains unchanged.
+    let proof_live=live
+    let proof_seen=seen
+    let additional=false
+    loop [binding declaration] in functions {
+        if binding not in? live and requires_view_proof(declaration engine.session.hir) {
+            additional=true proof_live.push(binding)
+            visit(declaration functions engine.session.hir @proof_seen @proof_live)
+        }
+    }
+    let proof_items:array<addr>=[]
     let kept:array<addr>=[]
     loop id in items {
         let declaration=hir.node_at(engine.session.hir id)
-        if declaration is? hir.Declare and declaration.binding_id isnt? none and declaration.binding_id in? functions and declaration.binding_id not in? live continue
+        let function=declaration is? hir.Declare and declaration.binding_id isnt? none and declaration.binding_id in? functions
+        if additional and (not function or declaration is? hir.Declare and declaration.binding_id isnt? none and declaration.binding_id in? proof_live) {proof_items.push(id)}
+        if function and declaration is? hir.Declare and declaration.binding_id isnt? none and declaration.binding_id not in? live continue
         kept.push(id)
     }
     let original=hir.node_at(engine.session.hir module.root)
     let root=hir.append_node(@engine.session.hir hir.Block[original.loc types.primitive('void' @engine.session.types) kept true])
-    return Prepared[root main source source_by_item]
+    let checked_root=if additional hir.append_node(@engine.session.hir hir.Block[original.loc types.primitive('void' @engine.session.types) proof_items true]) else root
+    return Prepared[root main source source_by_item checked_root]
 }
 explicit_copy_sources = (engine:modules.Engine):>set<addr> => {
     let sources:set<addr>=set[]
@@ -97,7 +126,7 @@ lower_checked = (entry:addr @engine:modules.Engine):>lower.Result|Error => {
         if helper isnt? none {required.push(helper)}
     }
     let prepared=assemble(entry @engine required_bindings=required)
-    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry)
+    return lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry checked_root=prepared.checked_root)
 }
 const helper_names=['_utf8_boundaries' '_utf8_boundaries_into' '_utf8_grapheme_scan' 'exit' '_arena_release' '_arena_alloc₈' '_arena_alloc₁₆' '_arena_alloc₃₂' '_arena_alloc₆₄' '_arena_alloc₁₂₈' '_arena_alloc₂₅₆' '_arena_release₈' '_arena_release₁₆' '_arena_release₃₂' '_arena_release₆₄' '_arena_release₁₂₈' '_arena_release₂₅₆' '_arena_note_copy' '_native_string_owner' '_native_string_view_owner' '_native_string_copy' '_native_string_release' '_native_string_pin' '_native_string_descriptor' '_native_string_retain' '_native_string_drop' '_shareable' '_arena_alloc_for' '_allocator_enter' '_allocator_exit']
 # Runtime helpers are the prelude's exports, plus a compiler-private helper
@@ -140,7 +169,7 @@ compile = (entry:addr @engine:modules.Engine timings:bool=false):>Compilation|Er
     timing.finish('initialization_and_reachability' preparation_started)
     if error isnt? none return error
     let lowering_started=timing.start(timings)
-    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry timings=timings)
+    let lowered=lower.lower(prepared.root emit.Input[engine.session.hir engine.session.types sources.files(engine.session)] prepared.source allocator=allocator layout_context=layouts.Context[engine.session.brands engine.session.error_types] entry_binding=prepared.entry infer_entry=false source_by_item=prepared.source_by_item runtime_helpers=helpers links=engine.session.links debug_names=engine.debug_names explicit_copy_sources=explicit_copy_sources(engine) source_registry=engine.session.registry timings=timings checked_root=prepared.checked_root)
     timing.finish('lowering' lowering_started)
     if lowered is? Error return lowered
     return Compilation[lowered validated]

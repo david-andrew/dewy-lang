@@ -5319,3 +5319,29 @@ The surrounding sharing/field-call/effects/review batch passed 39 tests; the
 final later-argument extension passed the focused group afterward. A fresh
 hosted-built route and fixed-point check remain for this batch. The manifest
 now has 223 cases. Phase 1 remains open.
+
+
+## Required-view contracts before reachability (2026-09-27)
+
+Native graph assembly now preserves a separate proof graph containing unused
+functions with explicit views and their dependencies. Runtime emission still
+uses the original reachable graph. The borrow plan and representation predicate
+are shared with lowering; this checks source demands without emitting unused
+functions or analyzing every unused library function for storage. Imported
+source locations survive into the conflict diagnostic.
+
+Hosted imported-function pruning had the same gap. Assembly now validates
+those otherwise discarded demands using the existing borrow analyzer and the
+same extracted predicate/report used by lowering. It skips that extra analysis
+when all demands already reach normal lowering. No second definition of view
+safety or new source syntax was introduced.
+
+Forty-eight focused hosted view/last-use/place checks and four native-built
+paired groups passed on both execution backends, including ordinary/resource
+projections, unused/imported failures, mutation through helpers, derived aliases,
+raw exposure and writes after the last view use. Native regression execution
+preserves the source-module filename and conflicting write in diagnostics.
+The earlier full-graph prototype passed its main source-contract group but
+found the hosted imported-function gap; it was narrowed before this checkpoint
+to avoid pulling all unused library bodies into the storage analysis.
+Fresh hosted-built and fixed-point integration follow this batch.

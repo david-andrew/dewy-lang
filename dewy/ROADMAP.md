@@ -822,8 +822,16 @@ raw reads and modeled synchronous writes without permanently pinning the
 owner. Address escape, owner mutation and unknown callees remain rejected.
 The repeated-read kernel and native three-generation fixed point pass.
 Stdout, stderr and file writes now use these loans on x86-64/C, with a
-zero-retained-bytes output kernel. The approved writable reservation/length-
-commit form and bulk reads remain required for the bulk-I/O checkpoint.
+zero-retained-bytes output kernel. Writable `$lend(@bytes reserve=n)` now
+checks reservation-bounded `.set_length(n)` commits, and file reads use this
+bulk path on x86-64/C. The paired bulk-read kernels and native fixed point
+pass; other targets retain their previous I/O route.
+
+Required-view obligations now survive unused-function/import pruning in both
+compilers. The native proof graph retains the needed view functions separately
+from runtime emission, and both routes reuse their lowering proof and report.
+Focused paired checks cover conflicts, derived aliases and writes after last
+use. Full integration evidence is tracked in `PHASE1_PROGRESS.md`.
 
 ### 1.2 The proof engine
 

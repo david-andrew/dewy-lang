@@ -758,6 +758,18 @@ class ModuleCompiler:
         check.validate_brand_matches()   # every module is loaded: the brands are a closed world
         names = self._emitted_names(entry)
         needed = self._needed_runtime_binding_ids(entry)
+        # Imported functions do not execute at startup, but their explicit
+        # storage demands remain source obligations when unused. Reuse the
+        # lowering predicate before erasing those declarations. Avoid this
+        # additional analysis when runtime lowering already sees every view.
+        if any(record is not entry and self._imported_function(item)
+               and item.binding_id not in needed
+               and any(isinstance(node, hir.Declare) and node.view for node in hir.walk(item))
+               for record in self.order for item in record.root.items):
+            from ..backend.udewy import borrowing
+            borrowing.validate_required_views(
+                hir.Block(entry.root.loc, entry.root.type,
+                          [item for record in self.order for item in record.root.items], True), entry.srcfile)
         items: list[hir.AST] = []
         item_sources: list[SrcFile] = []
         for record in self.order:
