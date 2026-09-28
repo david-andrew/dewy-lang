@@ -715,15 +715,16 @@ By mechanism (the runtime helper the allocating statement calls):
 | Shared array detaches | 1.53 GB | 5% | 11.5 M |
 | Union cells (new and copied) | 1.08 GB | 4% | 67.3 M |
 
-**No stack placement yet.** Every record, array descriptor and union cell is
-a handle to an arena block whose header carries the size and sharing count
-that copies, detaches and releases rely on. The only frame storage is for
-scalars and exact-length local array literals (`__alloca__` buffers). A
-frame-resident aggregate needs an owner state that is never released, and a
-proof that the value does not escape: returned, stored in a field or
-container, pushed, or captured. The storage model in `status.md` lists this
-as proof-gated placement; only frame regions for strings have landed. The
-profile separates into three groups.
+**Frame placement does not yet cover these main allocation sites.** The
+compiler already places proven nonescaping scalar records, bounded scalar
+arrays, some borrowed union cells and string views in frame storage; their
+zero-allocation kernels are recorded in `PHASE1_PROGRESS.md`. The allocation
+profile counts arena requests, so it cannot by itself establish the absence
+of frame placement. The large compiler aggregates measured here still rely
+on arena headers for their ownership, copying and cleanup. Extending placement
+to those shapes needs an owner state that is never released and proof that
+the storage does not escape through results, fields, containers or captures.
+The profile separates into three groups.
 
 *Allocations that should not happen at all.*
 - **Copies of narrowed AST nodes passed to read-only parameters:** 15.1 M

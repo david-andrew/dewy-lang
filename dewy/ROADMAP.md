@@ -645,8 +645,9 @@ silently.
 
 **Allocation profile (2026-09-28).** A self-build allocates about 32 GB in
 402 million allocations, 2.6 GB peak live; the per-site measurement is in
-`bootstrap/PERFORMANCE.md` ("Allocation profile of a self-build"). Nothing
-is frame-resident yet except scalars and exact-length local literals. The
+`bootstrap/PERFORMANCE.md` ("Allocation profile of a self-build"). This profile
+measures arena requests. Existing bounded scalar record/array placement and
+borrowed cells/views do not yet cover the main compiler aggregates below. The
 groups it found, and when each is dealt with:
 
 - *With the current borrow and move slices:* narrowed AST nodes copied
