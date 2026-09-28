@@ -72,6 +72,9 @@ let conjunction = <Data>(state:facts.State left:addr right:addr invalidated:set<
 
 let refine = <Data>(state:facts.State condition:addr truth:bool invalidated:set<addr> context:Context @data:Data leaf:<(state:facts.State condition:addr truth:bool context:Context @data:Data):>facts.State?>):>facts.State? => {
     let node=hir.node_at(context.nodes condition)
+    if node is? hir.Block and not node.scoped and node.items.length =? 1 {
+        return refine(state node.items[0] truth invalidated context @data @leaf)
+    }
     if node is? hir.ShortCircuit {
         if node.op =? 'and' or node.op =? 'nand' {
             let effective=if node.op =? 'and' truth else not truth

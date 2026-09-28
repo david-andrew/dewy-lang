@@ -116,13 +116,25 @@ class OrderFact:
 
 
 @dataclass(frozen=True, slots=True)
+class DistinctFact:
+    left: int
+    right: int
+
+
+def _distinct_key(left: int, right: int) -> DistinctFact:
+    a = (left if left >= 0 else -left - 1, left < 0)
+    b = (right if right >= 0 else -right - 1, right < 0)
+    return DistinctFact(left, right) if a <= b else DistinctFact(right, left)
+
+
+@dataclass(frozen=True, slots=True)
 class RemainderFact:
     subject: int
     upper: int
     offset: int
 
 
-FactKey = int | IndexFact | NonzeroFact | OrderFact | RemainderFact
+FactKey = int | IndexFact | NonzeroFact | OrderFact | DistinctFact | RemainderFact
 State = dict[FactKey, Interval]
 
 # A runtime-length array's length is a nonnegative int64, which keeps
@@ -593,6 +605,11 @@ def _drop_index_facts(
     array_id: int | None = None,
 ) -> None:
     for key in [key for key in state if not isinstance(key, int)]:
+        if isinstance(key, DistinctFact):
+            if (index_id is not None and index_id in (key.left, key.right)
+                    or array_id is not None and _length_key(array_id) in (key.left, key.right)):
+                del state[key]
+            continue
         remainder = _decode_remainder_fact(key)
         if remainder is not None:
             subject, upper, offset = remainder
@@ -628,6 +645,10 @@ def _change_length_facts(state: State, array_id: int, change: Interval) -> None:
     """
     term = _length_key(array_id)
     for key, interval in list(state.items()):
+        if isinstance(key, DistinctFact) and term in (key.left, key.right):
+            if change.lower != 0 or change.upper != 0:
+                del state[key]
+            continue
         remainder = _decode_remainder_fact(key)
         order = _decode_order_fact(key)
         pair = remainder[:2] if remainder is not None else order
@@ -3651,7 +3672,9 @@ class _BoundsValidator:
     def _ordered(self, smaller: int, larger: int, gap: int, state: State) -> bool:
         if self._ordered_direct(smaller, larger, gap, state):
             return True
-        return self._order_search(smaller, larger, state, required=gap) is not None
+        if self._order_search(smaller, larger, state, required=gap) is not None:
+            return True
+        return gap == 1 and _distinct_key(smaller, larger) in state and self._ordered(smaller, larger, 0, state)
 
     def _order_search(self, smaller: int, larger: int, state: State, *, required: int | None = None) -> Interval | None:
         """Search established difference edges, either for a proof or a bound.
@@ -3733,6 +3756,8 @@ class _BoundsValidator:
             a, b = b, a
             name = '__lt__' if name == '__gt__' else '__le__'
         delta = a[1] - b[1]
+        if name in {'__eq__', '__ne__'} and delta == 0 and _distinct_key(a[0], b[0]) in state:
+            return name == '__ne__'
         if name in {'__lt__', '__le__'}:
             strict = name == '__lt__'
             if self._ordered(a[0], b[0], delta + int(strict), state):
@@ -4790,6 +4815,8 @@ class _BoundsValidator:
         truth: bool,
         invalidated: frozenset[int] = frozenset(),
     ) -> State | None:
+        if isinstance(condition, hir.Block) and not condition.scoped and len(condition.items) == 1:
+            return self._refine(state, condition.items[0], truth=truth, invalidated=invalidated)
         refined = dict(state)
         if invalidated and not isinstance(condition, hir.ShortCircuit) and invalidated.intersection(self.predicate_bindings.read_bindings(condition)):
             return refined
@@ -4944,6 +4971,7 @@ class _BoundsValidator:
             # `n not=? text.length` (a failed `n =? text.length`) under `n <=? text.length`: `n <? text.length`
             left_term, right_term = self._binding_id(left), self._binding_id(right)
             if left_term is not None and right_term is not None and left_term != right_term:
+                refined[_distinct_key(left_term, right_term)] = Interval.exact(1)
                 for smaller, larger in ((left_term, right_term), (right_term, left_term)):
                     order = refined.get(_order_key(smaller, larger))
                     if order is not None and order.lower == 0:

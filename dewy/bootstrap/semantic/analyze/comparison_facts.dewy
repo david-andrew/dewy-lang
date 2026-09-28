@@ -75,6 +75,7 @@ decide_order = (op:propositions.Operator left:Operand right:Operand state:facts.
     if left.affine is? none or right.affine is? none return none
     if op =? '>?' or op =? '>=?' return decide_order(reverse(op) right left state context)
     let delta=left.shift-right.shift
+    if (op =? '=?' or op =? 'not=?') and delta =? 0 and facts.contains(state facts.distinct(left.affine right.affine)) return op =? 'not=?'
     if op =? '<?' or op =? '<=?' {
         let strict=op =? '<?'
         if relations.ordered(left.affine right.affine delta+(if strict 1 else 0) state context) return true
@@ -101,6 +102,7 @@ refine = (state:facts.State op:propositions.Operator left:Operand right:Operand 
         ordered(@result right left false)
     }
     else if effective =? 'not=?' and left.term isnt? none and right.term isnt? none and not facts.same_term(left.term right.term) {
+        facts.put(@result facts.distinct(left.term right.term) ranges.exact(1))
         # Under a <= b, excluding equality establishes a < b. Keep the
         # opposite direction too when it exists; interval narrowing below
         # rejects any resulting impossible value interval.

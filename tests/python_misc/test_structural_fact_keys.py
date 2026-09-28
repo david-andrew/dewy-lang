@@ -15,7 +15,9 @@ def test_fact_identity_and_transfers(large):
     keys = [large, length, b._index_fact_key(1, large), b._index_fact_key(large, 1),
             b._nonzero_key(1), b._nonzero_key(large), b._order_key(1, large),
             b._order_key(1, length), b._order_key(large, 1),
-            b._remainder_key(1, length, large), b._remainder_key(large, length, 1)]
+            b._remainder_key(1, length, large), b._remainder_key(large, length, 1),
+            b._distinct_key(1, large), b._distinct_key(1, length)]
+    assert b._distinct_key(large, 1) == b._distinct_key(1, large)
     assert len(set(keys)) == len(keys)
     assert b._is_length_key(length)
     assert not any(b._is_length_key(key) for key in keys if key != length)
@@ -35,6 +37,8 @@ def test_fact_identity_and_transfers(large):
     assert b._index_fact_key(large, 1) in forgotten
     assert b._order_key(1, large) in forgotten
     assert b._order_key(1, length) not in forgotten
+    assert b._distinct_key(1, length) not in forgotten
+    assert b._distinct_key(1, large) in forgotten
     assert b._remainder_key(1, length, large) not in forgotten
     assert validator._join_states([state, state]) == state
 

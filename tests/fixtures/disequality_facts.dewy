@@ -1,0 +1,8 @@
+# A disequality is evidence even when neither operand has a useful interval.
+probe=(a:int64 b:int64):>int64=>{
+    if a=?b return 0
+    if a>?b return 1
+    $assert a<?b
+    return 42
+}
+main=():>int64=>probe(4 12)

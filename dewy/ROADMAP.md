@@ -905,6 +905,12 @@ justify `rows[row][column]`; assignments, place writes and loop advancement
 invalidate facts that depend on the changed selector. This is numeric
 evidence for the current selection, not persistent source-level type narrowing.
 
+The finite fact vocabulary also retains symmetric disequalities between current
+scalar/length routes. Equality exclusions survive joins only with evidence on
+each path, sharpen an established non-strict order, and invalidate with their
+subjects. Dependent disequality contracts and broader linear-combination
+inference remain closure work.
+
 ### 1.3 Effects as a real vocabulary
 
 The transitive parameter effect analysis exists

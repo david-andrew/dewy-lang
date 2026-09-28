@@ -20,6 +20,7 @@ Value = type of Fact & [term:Term]
 Index = type of Fact & [index:addr sequence:addr]
 Nonzero = type of Fact & [subject:addr]
 Order = type of Fact & [smaller:Term larger:Term]
+Distinct = type of Fact & [left:Term right:Term]
 Remainder = type of Fact & [subject:Term upper:Term offset:addr]
 Entry:type = const [fact:Fact interval:ranges.Interval]
 # Entries with the same hash form an intrusive chain through `next`
@@ -45,11 +46,21 @@ nonzero = (subject:addr):>Nonzero => Nonzero[mix(3 subject as uint64) subject]
 order = (smaller:Term larger:Term):>Order => Order[mix(mix(4 term_hash(smaller)) term_hash(larger)) smaller larger]
 remainder = (subject:Term upper:Term offset:addr):>Remainder => Remainder[mix(mix(mix(5 term_hash(subject)) term_hash(upper)) offset as uint64) subject upper offset]
 
+# Disequality is symmetric. Canonical terms give both spellings one identity;
+# it carries no ordering and is discarded if either current value changes.
+distinct = (left:Term right:Term):>Distinct => {
+    if left.binding_id>?right.binding_id or (left.binding_id=?right.binding_id and left.projection=?'length' and right.projection=?'value') {
+        return Distinct[mix(mix(6 term_hash(right)) term_hash(left)) right left]
+    }
+    return Distinct[mix(mix(6 term_hash(left)) term_hash(right)) left right]
+}
+
 same = (left:Fact right:Fact):>bool => {
     if left is? Value and right is? Value return same_term(left.term right.term)
     if left is? Index and right is? Index return left.index =? right.index and left.sequence =? right.sequence
     if left is? Nonzero and right is? Nonzero return left.subject =? right.subject
     if left is? Order and right is? Order return same_term(left.smaller right.smaller) and same_term(left.larger right.larger)
+    if left is? Distinct and right is? Distinct return same_term(left.left right.left) and same_term(left.right right.right)
     if left is? Remainder and right is? Remainder return same_term(left.subject right.subject) and same_term(left.upper right.upper) and left.offset =? right.offset
     return false
 }
@@ -58,6 +69,7 @@ describe = (fact:Fact):>string => {
     if fact is? Index return "i:{fact.index}:{fact.sequence}"
     if fact is? Nonzero return "n:{fact.subject}"
     if fact is? Order return "o:{term_key(fact.smaller)}:{term_key(fact.larger)}"
+    if fact is? Distinct return "d:{term_key(fact.left)}:{term_key(fact.right)}"
     if fact is? Remainder return "r:{term_key(fact.subject)}:{term_key(fact.upper)}:{fact.offset}"
     return '?'
 }
@@ -168,6 +180,7 @@ mentions = (fact:Fact term:Term):>bool => {
         return (term.projection =? 'value' and fact.index =? term.binding_id) or (term.projection =? 'length' and fact.sequence =? term.binding_id)
     }
     if fact is? Order return same_term(fact.smaller term) or same_term(fact.larger term)
+    if fact is? Distinct return same_term(fact.left term) or same_term(fact.right term)
     if fact is? Remainder {
         return same_term(fact.subject term) or same_term(fact.upper term) or (term.projection =? 'value' and fact.offset =? term.binding_id)
     }
@@ -192,6 +205,10 @@ change_length = (@state:State sequence:addr change:ranges.Interval):>void => {
             if change.lower is? none or change.lower <? 0 {
                 remove(@state fact)
             }
+            continue
+        }
+        if fact is? Distinct and mentions(fact term) {
+            if change.lower not=?0 or change.upper not=?0 {remove(@state fact)}
             continue
         }
         let subject:Term? = none

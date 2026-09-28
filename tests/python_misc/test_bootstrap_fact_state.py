@@ -24,6 +24,8 @@ def fact(key):
 
     if isinstance(key, int):
         return f'facts.value({term(key)})', f'v:{name(key)}'
+    if isinstance(key, bounds.DistinctFact):
+        return f'facts.distinct({term(key.left)} {term(key.right)})', f'd:{name(key.left)}:{name(key.right)}'
     remainder = bounds._decode_remainder_fact(key)
     if remainder is not None:
         subject, upper, offset = remainder
@@ -77,6 +79,9 @@ def test_native_fact_state_matches_hosted(tmp_path):
                        bounds._index_fact_key(1, large): interval(None, None),
                        bounds._nonzero_key(1): interval(None, None)})
     states.extend([
+        {bounds._distinct_key(1, 2): interval.exact(1), order(1, 2): interval(0, None)},
+        {bounds._distinct_key(1, length(2)): interval.exact(1)},
+        {bounds._distinct_key(length(4), length(2)): interval.exact(1)},
         {1: interval(0, 0, capped=True), length(2): interval(2, 5, capped=True),
          order(1, length(2)): interval(2, None, capped=True),
          remainder(1, length(2), 3): interval(4, None, capped=True)},

@@ -5930,3 +5930,34 @@ The preceding cleanup checkpoint `c72625b0` reached a three-generation fixed
 point (generation 3 took 56 s under concurrent checks). Its fresh hosted-built
 native driver passed all 30 focused dynamic ownership checks in 332.92 s,
 including its build. Phase 1 remains in progress.
+
+
+## Finite disequality facts (2026-09-28)
+
+The bounds engines now retain a symmetric disequality between current binding
+or length identities. `if a not=? b {$assert a not=? b}` no longer needs an
+ordering or disjoint numeric intervals to justify its own guard. Reversed
+operands share one structural identity, and a non-strict order plus disequality
+establishes a strict integer order regardless of guard order. Successful ordinary
+bounds checks keep their existing direct path before querying this extra fact.
+
+Joins retain common disequalities; scalar writes, changed selectors, projected
+mutation, place calls and length changes invalidate the affected identities.
+The domain does not infer an ordering from disequality alone or synthesize all
+pairs. Single-expression grouping is transparent to predicate paths, including
+negation, while later-write exclusions still apply. Source dependent-disequality
+contracts remain separate work; this step adds the established guard fact.
+
+Validation: 67 surrounding hosted proof/loop/key checks, 12 structural-key and
+native fact-state/comparison/path driver checks, the paired disequality and
+convergence groups, and contradictory unsafe-assumption rejection pass. New
+cases cover fields, indexed selections, lengths, branch joins, loops, mutation,
+place calls and reversed operands. The positive and stale-fact fixtures bring
+the manifest to 252 cases. Native validation used a driver rebuilt by the
+constructor-corrected compiler; the earlier miscompiled factory was not accepted
+as evidence. The new factory keeps ordinary source spelling.
+
+Constructor checkpoint `e6d355a1` reached another three-generation fixed point
+(generations 2/3: 51/55 s under concurrent checks). Its fresh hosted-built driver
+passed 10 constructor and scoped-placement checks in 266.80 s including build.
+The full 250-case parity run is in progress.

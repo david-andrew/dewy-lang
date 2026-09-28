@@ -59,7 +59,11 @@ Edges:type = dict<addr array<Step>>
 ordered = (smaller:facts.Term larger:facts.Term gap:bigint state:facts.State context:Context):>bool => {
     # The usual direct proof needs no constructed bound result.
     if ordered_direct(smaller larger gap state context) return true
-    return search(smaller larger state context gap) isnt? none
+    if search(smaller larger state context gap) isnt? none return true
+    # Equality exclusion sharpens a non-strict integer order, regardless of
+    # which condition established its evidence first. Keep ordinary successful
+    # bounds queries on their existing allocation-free direct path.
+    return gap =? 1 and facts.contains(state facts.distinct(smaller larger)) and ordered(smaller larger 0 state context)
 }
 # Arithmetic needs the strongest established difference, while a predicate
 # can stop once it has enough evidence. Both consume the same finite graph.
