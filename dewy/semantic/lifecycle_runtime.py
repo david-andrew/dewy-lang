@@ -17,7 +17,7 @@ from ..parser import t0
 from .errors import not_implemented, user_error
 from ..reporting import Pointer
 from .analyze import public_effects, effects, predicate_effects
-from .analyze.ownership_liveness import conditional_consumptions, field_route, fixed_index
+from .analyze.ownership_liveness import conditional_consumptions, field_route, fixed_index, Selector
 
 
 def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, validate: bool = True,
@@ -1379,6 +1379,26 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                 return []
             return [hir.Assign(loc, ty.VOID_TYPE, flag[1], '=', hir.Bool(loc, 'bool', False))]
 
+        def disjointness(node):
+            def value(term):
+                if isinstance(term, Selector):
+                    param = selector_inputs[term.binding]
+                    return hir.ExpressedIdentifier(node.loc, param.type, param.name, binding_id=param.binding_id)
+                return hir.Integer(node.loc, 'int64', t0.base10, term)
+
+            def call(name, left, right):
+                signature = ty.FunctionType([ty.PosOrKwArg(None, left.type), ty.PosOrKwArg(None, right.type)], [], None, 'bool')
+                return hir.FunctionCall(node.loc, 'bool', hir.ExpressedIdentifier(node.loc, signature, name), [left, right], {})
+
+            checks = []
+            for alternatives in obligations.get(id(node), ()):
+                condition = None
+                for left, right in alternatives:
+                    unequal = call('__ne__', value(left), value(right))
+                    condition = unequal if condition is None else call('__or__', condition, unequal)
+                checks.append(hir.Assert(node.loc, ty.VOID_TYPE, condition, 'transferred resource slots are distinct'))
+            return checks
+
         def statement(node, owners, loops, *, entry=False, fresh_result=False):
             live = allowed | {owner.binding_id for owner in owners}
             def control(child, *, consume=False, fresh_result=False):
@@ -1389,7 +1409,7 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                         projection = returning_projection(child, owners)
                         if projection is None:
                             return None
-                        prefix = []
+                        prefix = disjointness(child)
                         selected = freeze_route(child, child.loc, projection[0], prefix)
                         projection = returning_projection(selected, owners)
                         value, moved = transfer(selected, child.type)
@@ -1662,9 +1682,12 @@ def prepare(root: hir.Block, srcfile, *, selected: set[int] | None = None, valid
                     return False
                 node = node.value
             return True
-        conditional, declarations_by_read, view_conflicts = conditional_consumptions(
+        selector_inputs = {p.binding_id: p for p in params if not p.place
+                           and p.binding_id is not None and ty.strip_refinement(p.type) == 'int64'}
+        conditional, declarations_by_read, view_conflicts, obligations = conditional_consumptions(
             body, parameter_owners, resource, component,
-            call_writes=argument_writes, read_only_places=readonly_arguments)
+            call_writes=argument_writes, read_only_places=readonly_arguments,
+            selector_inputs=selector_inputs, move_only=lambda node: lifecycle.copy_blocker(node.type) is not None)
         if view_conflicts:
             mutation, view = view_conflicts[0]
             user_error(current_source, 'resource view conflicts with a storage mutation',

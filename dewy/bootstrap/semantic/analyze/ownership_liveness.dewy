@@ -1,5 +1,6 @@
 import p"../bindings.dewy" as bindings
 import p"../hir.dewy" as hir
+import p"../lifecycle.dewy" as lifecycle
 import p"predicate_effects.dewy" as predicate_effects
 import p"../ty.dewy" as types
 
@@ -10,10 +11,15 @@ import p"../ty.dewy" as types
 # Liveness is kept per field route, so a component can leave its owner while
 # a sibling is still read. A `store` entry needs the enclosing storage of a
 # field assignment, but not the component's old value.
-Entry:type=const [binding:addr path:array<string|int64>=[] store:bool=false measure:bool=false]
+Selector:type=const [binding:addr]
+Distinct:type=const [left:int64|Selector right:int64|Selector]
+Requirements:type=array<array<Distinct>>
+Entry:type=const [binding:addr path:array<string|int64>=[] store:bool=false measure:bool=false selectors:dict<addr addr>=[]]
 Live:type=dict<string Entry>
 Analysis:type=[
     owners:set<addr>
+    selectors:set<addr>=set[]
+    obligations:dict<addr Requirements>=[]
     required_views:dict<addr addr>=[]
     view_conflicts:dict<addr addr>=[]
     call_writes:dict<addr set<addr>>=[]
@@ -30,6 +36,10 @@ Analysis:type=[
 entry_key=(entry:Entry):>string=>{
     let key="{entry.binding}{if entry.store '!' else if entry.measure '?' else ':'}"
     loop name in entry.path {key+=if name is? string "f{name.length}:{name}" else "i{name};"}
+    loop i in [0..entry.path.length) {
+        let binding=entry.selectors.get(i)
+        if binding isnt? none {key+="s{i}:{binding};"}
+    }
     return key
 }
 add_entry=(@live:Live entry:Entry):>void=>{live[entry_key(entry)]=entry}
@@ -47,25 +57,36 @@ fixed_index=(node:hir.Index nodes:array<hir.AST>):>int64?=>{
     return none
 }
 # A stable route, or conservatively its prefix before an unknown slot.
-field_route=(id:addr nodes:array<hir.AST> allow_prefix:bool=false wildcards:bool=false):>Entry?=>{
+field_route=(id:addr nodes:array<hir.AST> allow_prefix:bool=false wildcards:bool=false selectors:set<addr>=set[]):>Entry?=>{
     let reverse:array<string|int64>=[]
+    let reverse_selectors:array<addr?>=[]
     let node=hir.node_at(nodes id)
     loop node is? hir.MemberAccess|hir.Index {
-        if node is? hir.MemberAccess {reverse.push(node.name) node=hir.node_at(nodes node.value)}
+        if node is? hir.MemberAccess {reverse.push(node.name) reverse_selectors.push(none) node=hir.node_at(nodes node.value)}
         else {
             let index=fixed_index(node nodes)
             if index is? none {
-                if wildcards {reverse.push(-1)}
+                if wildcards {
+                    reverse.push(-1)
+                    let selected=hir.node_at(nodes node.index)
+                    reverse_selectors.push(if selected is? hir.ExpressedIdentifier and selected.binding_id isnt? none and selected.binding_id in? selectors selected.binding_id else none)
+                }
                 else if not allow_prefix {return none}
-                else {reverse.clear}
-            } else {reverse.push(index)}
+                else {reverse.clear reverse_selectors.clear}
+            } else {reverse.push(index) reverse_selectors.push(none)}
             node=hir.node_at(nodes node.array)
         }
     }
     if node isnt? hir.ExpressedIdentifier or node.binding_id is? none return none
     let path:array<string|int64>=[]
-    loop reverse.length >? 0 {path.push(reverse.pop)}
-    return Entry[node.binding_id path]
+    let selected:dict<addr addr>=[]
+    loop reverse.length >? 0 {
+        $runtime_assert reverse_selectors.length>?0
+        let binding=reverse_selectors.pop
+        if binding isnt? none {selected[path.length]=binding}
+        path.push(reverse.pop)
+    }
+    return Entry[node.binding_id path selectors=selected]
 }
 roots=(binding:addr aliases:dict<addr addr>):>set<addr>=>{
     let result:set<addr>=set[]
@@ -101,34 +122,52 @@ overlaps=(left:array<string|int64> right:array<string|int64>):>bool=>{
     return true
 }
 # Whether a live entry needs the value a consumption of `path` takes.
-needed=(binding:addr path:array<string|int64> live:Live aliases:dict<addr addr>):>bool=>{
+needed=(route:Entry live:Live aliases:dict<addr addr> propose:bool):>Requirements?=>{
+    let clauses:Requirements=[]
     loop entry in live.values {
-        if binding not in? roots(entry.binding aliases) continue
-        if entry.binding not=? binding return true
-        if not overlaps(path entry.path) continue
-        if entry.measure {
-            if path.length<=?entry.path.length return true
-        } else if entry.store {
-            # Selected-slot cleanup cannot renew a possibly overlapping hole.
-            # A complete containing-region replacement, above the wildcard,
-            # still starts a new lifetime through ordinary renewal handling.
-            loop i in 0.. and i<?path.length and i<?entry.path.length {
-                if path[i]=?-1 or entry.path[i]=?-1 return true
+        if route.binding not in? roots(entry.binding aliases) continue
+        if entry.binding not=?route.binding return none
+        if not overlaps(route.path entry.path) continue
+        if entry.measure and route.path.length>?entry.path.length continue
+        if entry.store {
+            # Selected stores still require their old-value cleanup proof.
+            loop i in 0.. and i<?route.path.length and i<?entry.path.length {
+                if route.path[i]=?-1 or entry.path[i]=?-1 return none
             }
-            if path.length<?entry.path.length return true
-        } else {return true}
+            if route.path.length>=?entry.path.length continue
+            return none
+        }
+        let alternatives:array<Distinct>=[]
+        if propose {
+            loop i in 0.. and i<?route.path.length and i<?entry.path.length {
+                let a=route.path[i] let b=entry.path[i]
+                if a isnt? int64 or b isnt? int64 continue
+                let left=route.selectors.get(i) let right=entry.selectors.get(i)
+                if (a=?-1 and left is? none) or (b=?-1 and right is? none) continue
+                if left=?right continue
+                alternatives.push(Distinct[if left is? none a else Selector[left] if right is? none b else Selector[right]])
+            }
+        }
+        if alternatives.length=?0 return none
+        clauses.push(alternatives)
     }
-    return false
+    return clauses
 }
 LoopExit:type=const [after:Live repeated:Live]
-consume=(id:addr binding:addr path:array<string|int64> saved_path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis):>void=>{
-    if binding in? enabled and id in? analysis.candidates and not needed(binding path live analysis.aliases) {
-        analysis.consumes[id]=binding
+consume=(id:addr route:Entry saved_path:array<string|int64> live:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> table:types.Table):>void=>{
+    let clauses:Requirements?=none
+    if route.binding in? enabled and id in? analysis.candidates {
+        clauses=needed(route live analysis.aliases lifecycle.copy_blocker(hir.node_at(nodes id).value_type table) isnt? none)
+    }
+    if clauses isnt? none {
+        analysis.consumes[id]=route.binding
+        analysis.obligations[id]=clauses
         if saved_path.length >? 0 {analysis.paths[id]=saved_path}
         else {analysis.paths.pop(id default=[]);}
     } else {
         analysis.consumes.pop(id default=0);
         analysis.paths.pop(id default=[]);
+        analysis.obligations.pop(id default=[]);
     }
 }
 # Keep fields above the first selection. A write through any array slot may
@@ -179,41 +218,41 @@ check_view_writes=(id:addr live:Live @analysis:Analysis nodes:array<hir.AST>):>v
 }
 # A known index does not erase its evaluation. Visit selectors backwards
 # without treating a component read as a read of the whole owner.
-visit_selectors=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> exits:array<LoopExit>):>Live=>{
+visit_selectors=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> exits:array<LoopExit> table:types.Table):>Live=>{
     let node=hir.node_at(nodes id)
     let live=after
     loop node is? hir.MemberAccess|hir.Index {
         if node is? hir.Index {
-            live=visit(node.index live enabled @analysis nodes exits)
+            live=visit(node.index live enabled @analysis nodes table exits)
             node=hir.node_at(nodes node.array)
         } else {node=hir.node_at(nodes node.value)}
     }
     return live
 }
-visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> exits:array<LoopExit>=[]):>Live=>{
+visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.AST> table:types.Table exits:array<LoopExit>=[]):>Live=>{
     let node=hir.node_at(nodes id)
     let live=after
     check_view_writes(id live @analysis nodes)
     if node is? hir.ExpressedIdentifier {
         if node.binding_id isnt? none {
-            consume(id node.binding_id [] [] live enabled @analysis)
+            consume(id Entry[node.binding_id] [] live enabled @analysis nodes table)
             add_entry(@live Entry[node.binding_id])
         }
         return live
     }
     if node is? hir.MemberAccess|hir.Index {
-        let route=field_route(id nodes wildcards=true)
+        let route=field_route(id nodes wildcards=true selectors=analysis.selectors)
         if route isnt? none {
             let region=field_route(id nodes allow_prefix=true)
             $runtime_assert region isnt? none
-            consume(id route.binding route.path region.path live enabled @analysis)
+            consume(id route region.path live enabled @analysis nodes table)
             add_entry(@live route)
-            return visit_selectors(id live enabled @analysis nodes exits)
+            return visit_selectors(id live enabled @analysis nodes exits table)
         }
     }
     if node is? hir.ArrayLength {
-        let route=field_route(node.array nodes wildcards=true)
-        if route isnt? none {add_entry(@live Entry[route.binding route.path measure=true]) return visit_selectors(node.array live enabled @analysis nodes exits)}
+        let route=field_route(node.array nodes wildcards=true selectors=analysis.selectors)
+        if route isnt? none {add_entry(@live Entry[route.binding route.path measure=true selectors=route.selectors]) return visit_selectors(node.array live enabled @analysis nodes exits table)}
     }
     if node is? hir.FunctionLiteral {
         loop binding in read_roots(id analysis.aliases nodes) {add_entry(@live Entry[binding])}
@@ -225,9 +264,9 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
         let continuation=exits[selected]
         return if node is? hir.Break continuation.after else continuation.repeated
     }
-    if node is? hir.Return {return if node.item is? none [] else visit(node.item [] analysis.owners @analysis nodes exits)}
+    if node is? hir.Return {return if node.item is? none [] else visit(node.item [] analysis.owners @analysis nodes table exits)}
     if node is? hir.Flow {
-        let following=if node.default is? none live else visit(node.default live enabled @analysis nodes exits)
+        let following=if node.default is? none live else visit(node.default live enabled @analysis nodes table exits)
         let index=node.arms.length
         loop index >? 0 {
             index-=1
@@ -241,18 +280,18 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
                 loop true {
                     let nested=exits
                     nested.push(LoopExit[live head])
-                    let entering=visit(arm.body head enabled @analysis nodes nested)
+                    let entering=visit(arm.body head enabled @analysis nodes table nested)
                     merge(@entering following)
-                    let next=visit(arm.condition entering enabled @analysis nodes nested)
+                    let next=visit(arm.condition entering enabled @analysis nodes table nested)
                     let before=head.length
                     merge(@head next)
                     if head.length=?before break
                 }
                 following=head
             } else {
-                let taken=visit(arm.body live enabled @analysis nodes exits)
+                let taken=visit(arm.body live enabled @analysis nodes table exits)
                 merge(@following taken)
-                following=visit(arm.condition following enabled @analysis nodes exits)
+                following=visit(arm.condition following enabled @analysis nodes table exits)
             }
         }
         return following
@@ -262,18 +301,20 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
         if target is? hir.ExpressedIdentifier and target.binding_id isnt? none {
             let kept:Live=[]
             loop [key entry] in live {if entry.binding not=? target.binding_id {kept[key]=entry}}
-            return visit(node.value kept enabled @analysis nodes exits)
+            return visit(node.value kept enabled @analysis nodes table exits)
         }
     }
     if node is? hir.MemberAssign|hir.IndexAssign {
-        let route=field_route(node.target nodes)
+        let route=field_route(node.target nodes wildcards=true selectors=analysis.selectors)
         if route isnt? none {
             # The old component is dead; the store needs only its ancestors.
+            let fixed=true
+            loop step in route.path {if step=?-1 {fixed=false}}
             let kept:Live=[]
-            loop [key entry] in live {if entry.binding not=? route.binding or not under(entry.path route.path) {kept[key]=entry}}
-            add_entry(@kept Entry[route.binding route.path true])
-            let before=visit(node.value kept enabled @analysis nodes exits)
-            return visit_selectors(node.target before enabled @analysis nodes exits)
+            loop [key entry] in live {if not fixed or entry.binding not=? route.binding or not under(entry.path route.path) {kept[key]=entry}}
+            add_entry(@kept Entry[route.binding route.path true selectors=route.selectors])
+            let before=visit(node.value kept enabled @analysis nodes table exits)
+            return visit_selectors(node.target before enabled @analysis nodes exits table)
         }
     }
     if node is? hir.Declare and node.binding_id isnt? none {
@@ -282,10 +323,10 @@ visit=(id:addr after:Live enabled:set<addr> @analysis:Analysis nodes:array<hir.A
         live=kept
     }
     let children=hir.children(node)
-    loop children.length >? 0 {live=visit(children.pop live enabled @analysis nodes exits)}
+    loop children.length >? 0 {live=visit(children.pop live enabled @analysis nodes table exits)}
     return live
 }
-consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table required_views:dict<addr addr>=[] call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[]):>Analysis=>{
+consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table required_views:dict<addr addr>=[] call_writes:dict<addr set<addr>>=[] read_only_places:set<addr>=set[] selector_inputs:set<addr>=set[]):>Analysis=>{
     let analysis=Analysis[owners required_views=required_views call_writes=call_writes read_only_places=read_only_places]
     let order:array<addr>=[]
     let pending:array<addr>=[body]
@@ -306,6 +347,10 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
     }
     let captured=analysis.captured
     loop binding in captured {loop root in roots(binding analysis.aliases) {analysis.captured.push(root)}}
+    let changed=predicate_effects.mutated_bindings(body nodes call_writes=call_writes)
+    loop binding in selector_inputs {
+        if binding not in? analysis.captured and binding not in? changed {analysis.selectors.push(binding)}
+    }
     loop id in order {
         let node=hir.node_at(nodes id)
         let inputs:array<addr>=[]
@@ -368,6 +413,6 @@ consumptions=(body:addr owners:set<addr> nodes:array<hir.AST> table:types.Table 
             }
         }
     }
-    visit(body [] owners @analysis nodes);
+    visit(body [] owners @analysis nodes table);
     return analysis
 }

@@ -1,0 +1,25 @@
+let drops:int64=0
+let total:int64=0
+Token=type of [id:int64 $__drop__ release=():>void=>{drops+=1 total+=id}]
+consume=(value:Token):>void=>{}
+probe=(i:int64 j:int64 k:int64):>void=>{
+    let values=[Token[1] Token[2] Token[4] Token[8]]
+    if i<?0 or i>=?values.length or j<?0 or j>=?values.length or k<?0 or k>=?values.length return
+    if i=?j or i=?k or j=?k return
+    let first=values[i]
+    consume(first)
+    consume(values[j])
+    consume(values[k])
+}
+main=():>int64=>{
+    probe(0 2 1)
+    if drops not=?4 or total not=?15 return 1
+    let before:int64=_arena_live_bytes
+    loop iteration in [0..100) {
+        drops=0 total=0
+        probe(3 0 2)
+        if drops not=?4 or total not=?15 return 2
+    }
+    $runtime_assert _arena_live_bytes=?before
+    return 42
+}

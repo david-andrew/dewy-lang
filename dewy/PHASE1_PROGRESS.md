@@ -16,7 +16,7 @@ all source shapes or the complete integration matrix have been certified.
 | Area | Implemented foundation | Remaining closure work |
 | --- | --- | --- |
 | 1.1 Copy policy | Both semantic/lowering entry points enforce `$explicit_copies`; `.copy()`, inferred/required views, last-use moves, recursive shared-string exemptions and placement-independent acceptance are present. | Complete compiler-source adoption and copy inventory/acceptance parity; reduce unexplained copies with shared proofs rather than explicit-copy annotations used to hide regressions. |
-| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations, conditional runtime-selected transfers with disjoint field footprints and drop-hook access proofs. | Proofs of distinct runtime indices, remaining unsupported resource operations; captured/exposed storage lifetimes. |
+| 1.1 Resource lifetimes | Checked lifecycle hooks, inherited composition, owning/borrowed parameters, conditional ownership, partial record fields, array and dictionary ownership operations, conditional runtime-selected transfers with disjoint field footprints and drop-hook access proofs. | Broader stable-selector discovery beyond function inputs, remaining unsupported resource operations; escaping/writable captured storage lifetimes. |
 | 1.1 Placement | Frame proofs shared with effects, native scoped arenas, escape checks/copy reports, fallback reasons and no-allocation body warnings. | owner-directed promotion instead of conservative outer-store fallbacks; hosted placement parity and measured allocator/copy kernels. |
 | 1.2 Proofs | Finite relational facts, checked loop candidates, alias/effect invalidation, `$proof`, `$assert`, audited `$unsafe_assume` and rejection of known contradictions. | Audit candidate selection, convergence limits and shared proof coverage against the intended finite-qualifier design; keep unsupported obligations unknown; final paired integration/scaling checks. |
 | 1.3 Effects | Public rows/exclusions, nominal resource identities, inferred rows, kind-checked row parameters, callback inference, place-subject translation, allocation contracts and lifecycle effects. | More precise storage/move proofs shared with lowering; clarify the remaining failure/escape vocabulary before implementing new forms. |
@@ -35,6 +35,21 @@ base-string packing and Unicode repertoire/escape decisions. The provisional
 COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
+
+Checkpoint (2026-09-28): resource liveness retains symbolic identities for
+unchanged integer inputs and proposes ordinary checked disjointness assertions
+when move-only array components would otherwise overlap. The final bounds pass
+must prove these assertions after implicit lifecycle effects are installed;
+unknown separation never authorizes a transfer. Cleanup retains each actual
+selector and presence flag. Mutated/exposed/captured inputs, arbitrary selector
+expressions, possibly overlapping selected stores and whole-owner reads keep
+the conservative path. Copyable values retain their existing copy fallback.
+This first selector boundary covers function inputs, not arbitrary later locals.
+Sixteen hosted cases, 28 surrounding hosted checks and five paired x86-64/C
+groups pass (96.03 seconds). Cases cover ordering and disequality guards,
+fixed/runtime index combinations, nested fields, conditional transfers, three
+independent slots, later reads/replacements and repeated-call retained storage.
+The native driver was rebuilt from the updated sources for these paired checks.
 
 Checkpoint (2026-09-28): independent hosted bootstrap validation exposed a
 regression in union member injection: a generated array load from a dictionary

@@ -11,6 +11,8 @@ sibling is still read. A live entry is `(binding, path, kind)`: a `read` of
 the route, or a `store` into it, which needs the enclosing storage but not
 the component's old value.
 """
+from dataclasses import dataclass
+
 from .. import hir, bindings
 from . import predicate_effects
 
@@ -23,7 +25,13 @@ def fixed_index(node):
     return index if index is not None and index >= 0 else None
 
 
-def field_route(node, *, allow_prefix=False, wildcards=False):
+@dataclass(frozen=True)
+class Selector:
+    """An unchanged scalar input, never an arbitrary selector expression."""
+    binding: int
+
+
+def field_route(node, *, allow_prefix=False, wildcards=False, selectors=frozenset()):
     """A stable route, or conservatively its prefix before an unknown slot."""
     path = []
     while isinstance(node, (hir.MemberAccess, hir.Index)):
@@ -34,7 +42,9 @@ def field_route(node, *, allow_prefix=False, wildcards=False):
             index = fixed_index(node)
             if index is None:
                 if wildcards:
-                    path.append(-1)  # every valid index is nonnegative
+                    value = node.index
+                    path.append(Selector(value.binding_id) if isinstance(value, hir.ExpressedIdentifier)
+                                and value.binding_id in selectors else -1)
                 elif not allow_prefix:
                     return None
                 else:
@@ -53,7 +63,8 @@ def conflicts(path, entry_path, kind):
     """Whether a live entry needs the value a consumption of `path` takes."""
     shared = min(len(path), len(entry_path))
     pairs = tuple(zip(path[:shared], entry_path[:shared]))
-    if any(a != b and not (isinstance(a, int) and isinstance(b, int) and -1 in (a, b)) for a, b in pairs):
+    if any(a != b and not (isinstance(a, (int, Selector)) and isinstance(b, (int, Selector))
+                          and (-1 in (a, b) or isinstance(a, Selector) or isinstance(b, Selector))) for a, b in pairs):
         return False
     if kind == 'length':
         return len(path) <= len(entry_path)
@@ -62,14 +73,14 @@ def conflicts(path, entry_path, kind):
         # cannot renew a known hole. Its old-value cleanup would need the
         # saved selector/presence proof. Replacing a whole containing region
         # (above the wildcard) still starts a new lifetime as before.
-        if any(-1 in (a, b) for a, b in pairs):
+        if any(-1 in (a, b) or isinstance(a, Selector) or isinstance(b, Selector) for a, b in pairs):
             return True
         # Storing into a component needs its ancestors, not the component.
         return len(path) < len(entry_path)
     return True
 
 
-def conditional_consumptions(body, parameter_owners, resource, component=None, *, call_writes=None, read_only_places=frozenset()):
+def conditional_consumptions(body, parameter_owners, resource, component=None, *, call_writes=None, read_only_places=frozenset(), selector_inputs=frozenset(), move_only=lambda node: False):
     nodes, owners, aliases, captured, occurrences = [], set(), {}, set(), {}
     owners.update(p.binding_id for p in parameter_owners)
     required_views, view_conflicts = {}, {}
@@ -116,6 +127,9 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
         return result
 
     captured = set().union(*(roots(binding) for binding in captured)) if captured else set()
+    # Inputs exist at every use in this function. Do not manufacture reads of
+    # a later local, a changing loop selector, an exposed place or a capture.
+    selectors = set(selector_inputs) - captured - predicate_effects.mutated_bindings(body, call_writes=call_writes)
     candidates, declarations = set(), {}
     for node in nodes:
         inputs = ()
@@ -171,18 +185,31 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
                         and counts.get(route[0]) == own_reads):
                     candidates.add(id(value))
 
-    consumes = {}
-    def needed(binding, path, live):
+    consumes, obligations = {}, {}
+    def needed(binding, path, live, propose):
+        clauses = []
         for entry, entry_path, kind in live:
             if binding in roots(entry) and (entry != binding or conflicts(path, entry_path, kind)):
-                return True
-        return False
+                alternatives = []
+                if propose and entry == binding and kind != 'store':
+                    for left, right in zip(path, entry_path):
+                        if (left != right and -1 not in (left, right)
+                                and isinstance(left, (int, Selector)) and isinstance(right, (int, Selector))
+                                and (isinstance(left, Selector) or isinstance(right, Selector))):
+                            alternatives.append((left, right))
+                if not alternatives:
+                    return None
+                clauses.append(alternatives)
+        return clauses
 
     def consume(node, binding, path, live, enabled, *, stored_path=None):
-        if binding in enabled and id(node) in candidates and not needed(binding, path, live):
+        clauses = needed(binding, path, live, move_only(node)) if binding in enabled and id(node) in candidates else None
+        if clauses is not None:
             consumes[id(node)] = (binding, path if stored_path is None else stored_path)
+            obligations[id(node)] = clauses
         else:
             consumes.pop(id(node), None)  # a later fixed-point iteration may reveal a use
+            obligations.pop(id(node), None)
 
     def visit_selectors(node, live, enabled, exits):
         # A known result does not erase evaluation. Work backwards through
@@ -222,7 +249,7 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             consume(node, node.binding_id, (), live, enabled)
             live.add((node.binding_id, (), 'read'))
             return live
-        if isinstance(node, (hir.MemberAccess, hir.Index)) and (route := field_route(node, wildcards=True)) is not None:
+        if isinstance(node, (hir.MemberAccess, hir.Index)) and (route := field_route(node, wildcards=True, selectors=selectors)) is not None:
             # A wildcard retains fields below an unknown selector. Thus
             # rows[i].left and rows[j].right are disjoint for every i and j,
             # while two .left routes still conflict. Cleanup stores only the
@@ -231,7 +258,7 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             consume(node, route[0], route[1], live, enabled, stored_path=region[1])
             live.add((route[0], route[1], 'read'))
             return visit_selectors(node, live, enabled, exits)
-        if isinstance(node, hir.ArrayLength) and (route := field_route(node.array, wildcards=True)) is not None:
+        if isinstance(node, hir.ArrayLength) and (route := field_route(node.array, wildcards=True, selectors=selectors)) is not None:
             live.add((route[0], route[1], 'length'))
             return visit_selectors(node.array, live, enabled, exits)
         if isinstance(node, hir.FunctionLiteral):
@@ -266,10 +293,11 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             live = {entry for entry in live if entry[0] != node.target.binding_id}
             return visit(node.value, live, enabled, exits)
         if (isinstance(node, (hir.MemberAssign, hir.IndexAssign)) and isinstance(node.target, (hir.MemberAccess, hir.Index))
-                and (route := field_route(node.target)) is not None):
+                and (route := field_route(node.target, wildcards=True, selectors=selectors)) is not None):
             # The old component is dead; the store needs only its ancestors.
             binding, path = route
-            live = {entry for entry in live if entry[0] != binding or entry[1][:len(path)] != path}
+            if not any(step == -1 or isinstance(step, Selector) for step in path):
+                live = {entry for entry in live if entry[0] != binding or entry[1][:len(path)] != path}
             live.add((binding, path, 'store'))
             return visit_selectors(node.target, visit(node.value, live, enabled, exits), enabled, exits)
         if isinstance(node, hir.Declare):
@@ -278,4 +306,4 @@ def conditional_consumptions(body, parameter_owners, resource, component=None, *
             live = visit(child, live, enabled, exits)
         return live
     visit(body, set(), owners)
-    return consumes, declarations, tuple(view_conflicts.values())
+    return consumes, declarations, tuple(view_conflicts.values()), obligations

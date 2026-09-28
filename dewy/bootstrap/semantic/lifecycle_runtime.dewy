@@ -23,7 +23,8 @@ Extraction:type = const [binding:addr path:array<string|addr> moved:bool=false]
 # is true, and cleanup consults the flag instead of a static route.
 ComponentFlag:type = const [path:array<string|int64> flag:Captured]
 # Save runtime selectors for lexical cleanup separately from static paths.
-# Liveness keeps possibly overlapping containing arrays mutually exclusive.
+# Liveness either proves selector separation or keeps possibly overlapping
+# containing arrays mutually exclusive.
 DynamicComponent:type = const [owner:addr flag:Captured selectors:array<Captured> path:array<string|addr> region:array<string|int64>]
 # Presence includes ancestor selector mismatches when descending into arrays.
 SelectedPresence:type = const [path:array<string|addr> present:addr]
@@ -51,6 +52,7 @@ Plan:type = [
     prepared:set<addr>=set[]
     transfer_sites:set<addr>=set[]
     consume_sites:set<addr>=set[]
+    disjointness:dict<addr array<addr>>=[]
     consumed_bindings:set<addr>=set[]
     iteration_loans:set<addr>=set[]
     view_sites:set<addr>=set[]
@@ -72,6 +74,13 @@ Plan:type = [
 put = (node:hir.AST @session:contexts.Session):>addr => hir.append_node(@session.hir node)
 store = (id:addr node:hir.AST @session:contexts.Session):>void => {
     contexts.replace_hir(id node @session)
+}
+selector_term=(term:int64|ownership_liveness.Selector loc:Span inputs:dict<addr addr> @session:contexts.Session):>addr=>{
+    if term is? ownership_liveness.Selector {
+        $runtime_assert term.binding in? inputs
+        return inputs[term.binding]
+    }
+    return put(hir.Integer[loc types.primitive('int64' @session.types) '0d' term] @session)
 }
 reject = (node:hir.AST detail:string @plan:Plan):>void => {
     if plan.problem is? none {plan.problem=Error[srcfile=plan.source title="not implemented: lifecycle ownership lowering: {detail}" pointers=[Pointer[node.loc 'this ownership operation is not implemented yet']]]}
@@ -859,7 +868,7 @@ fresh = (id:addr allowed:set<addr> inherited:bool @plan:Plan @session:contexts.S
     if candidate is? hir.MemberAccess|hir.Index and id in? plan.consume_sites and frame isnt? none {
         let projection=returning_projection(id frame.owners session plan)
         if projection isnt? none {
-            let prefix:array<addr>=[]
+            let prefix:array<addr>=plan.disjointness.get(id [])
             let selected=freeze_route(id candidate.loc projection.binding @prefix @plan @session)
             let frozen=returning_projection(selected frame.owners session plan)
             $runtime_assert frozen isnt? none
@@ -2372,7 +2381,18 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session borrowed_captur
         }
         hir.push_children(current @pending)
     }
-    let conditional=ownership_liveness.consumptions(function.body owned session.hir session.types required_views=required_views call_writes=plan.argument_writes read_only_places=plan.readonly_arguments)
+    # Stable integer inputs exist throughout this function. Liveness removes
+    # inputs assigned, captured or exposed through a place. Arbitrary selector
+    # expressions keep the wildcard; no evaluation is moved by this proof.
+    let selector_inputs:set<addr>=set[]
+    let selector_values:dict<addr addr>=[]
+    loop parameter in params {
+        if not parameter.place and parameter.binding_id isnt? none and types.is_primitive(types.node_at(session.types types.strip_refinement(parameter.value_type session.types)) 'int64') {
+            selector_inputs.push(parameter.binding_id)
+            selector_values[parameter.binding_id]=put(hir.ExpressedIdentifier[function.loc parameter.value_type parameter.name parameter.binding_id] @session)
+        }
+    }
+    let conditional=ownership_liveness.consumptions(function.body owned session.hir session.types required_views=required_views call_writes=plan.argument_writes read_only_places=plan.readonly_arguments selector_inputs=selector_inputs)
     loop [mutation view] in conditional.view_conflicts {
         if plan.problem is? none {plan.problem=Error[srcfile=plan.source title='resource view conflicts with a storage mutation' pointers=[Pointer[hir.node_at(session.hir mutation).loc 'this operation may change storage still borrowed by the view'] Pointer[hir.node_at(session.hir view).loc 'this required view is still live']]]}
         return
@@ -2380,6 +2400,35 @@ prepare_function = (id:addr @plan:Plan @session:contexts.Session borrowed_captur
     loop [read owner] in conditional.consumes {
         let path=conditional.paths.get(read [])
         let selected=hir.node_at(session.hir read)
+        # These are checked assertions, discharged only by the final bounds
+        # pass after implicit drop/move effects are present. Unknown separation
+        # cannot authorize a move-only transfer. Copyable inputs retain their
+        # ordinary copy fallback rather than acquiring a new proof obligation.
+        let checks:array<addr>=[]
+        let boolean=types.primitive('bool' @session.types)
+        let empty=types.primitive('void' @session.types)
+        let clauses=conditional.obligations.get(read [])
+        loop clause_index in [0..clauses.length) {
+            const clause=@clauses[clause_index]
+            let condition:addr?=none
+            loop pair in clause {
+                let left=pair.left let right=pair.right
+                let a=selector_term(left selected.loc selector_values @session)
+                let b=selector_term(right selected.loc selector_values @session)
+                let signature=types.function_type([types.PosOrKwArg[none hir.node_at(session.hir a).value_type] types.PosOrKwArg[none hir.node_at(session.hir b).value_type]] [] none boolean [] @session.types)
+                let operation=put(hir.ExpressedIdentifier[selected.loc signature '__ne__' none] @session)
+                let unequal=put(hir.FunctionCall[selected.loc boolean operation [a b] []] @session)
+                if condition is? none {condition=unequal}
+                else {
+                    let signature=types.function_type([types.PosOrKwArg[none boolean] types.PosOrKwArg[none boolean]] [] none boolean [] @session.types)
+                    let either=put(hir.ExpressedIdentifier[selected.loc signature '__or__' none] @session)
+                    condition=put(hir.FunctionCall[selected.loc boolean either [condition unequal] []] @session)
+                }
+            }
+            $runtime_assert condition isnt? none
+            checks.push(put(hir.Assert[selected.loc empty condition 'transferred resource slots are distinct'] @session))
+        }
+        if checks.length>?0 {plan.disjointness[read]=checks}
         if selected is? hir.MemberAccess|hir.Index and ownership_liveness.field_route(read session.hir) is? none {
             if read in? plan.consume_sites or not transferable_component(read session @plan) continue
             plan.consume_sites.push(read)

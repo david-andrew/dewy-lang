@@ -93,6 +93,15 @@ summaries vacuous, so the first replacement discards them before deriving new
 facts. Reading or copying the array transfers the surviving summaries. This is
 not a complete aggregate relational domain yet.
 
+Ownership liveness can request an ordinary checked disequality before moving
+two resource components selected by unchanged integer inputs. For nested
+selections, separation of any coordinate suffices. The bounds pass checks the
+request after lifecycle effects are present; liveness itself supplies no fact.
+Mutable, exposed or captured selectors remain conservative, as do arbitrary
+selector expressions and selected-slot replacement. Actual selector values are
+saved once for cleanup. Unknown proof requests reject move-only transfers;
+copyable values keep their ordinary fallback rather than a new source obligation.
+
 ## Entailment and joins
 
 Intervals answer constant range questions. The finite ordered graph answers
