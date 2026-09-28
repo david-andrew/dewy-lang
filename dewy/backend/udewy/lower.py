@@ -3725,6 +3725,20 @@ class _Lowerer(
     def _required_view_error(self, node: hir.Declare) -> NoReturn:
         borrowing.required_view_error(node, self.borrow_plan, self.srcfile, self.current_literal)
 
+    def _owned_cell_declaration(self, node: hir.AST) -> bool:
+        """A local tagged value owns its payload unless its declaration is a view.
+
+        The cell itself may stay in the frame. A transfer copies its two
+        words into the destination and empties the payload, so only the
+        destination releases the value. Prepared frame trees need their
+        usual layout conversion and are excluded at the storage boundary.
+        """
+        if not isinstance(node, hir.Declare) or node.binding_id is None:
+            return False
+        declared = ty.structural_base(node.annotation or node.expr.type)
+        return (self._field_union_members(declared) is not None
+                and not self._borrowed_route_local(node, declared))
+
     def _note_allocator_escapes(self, body: hir.AST) -> None:
         """Report values leaving `$allocator` blocks as copies (see allocator_escapes)."""
         from ...semantic import allocator_escapes
@@ -3756,6 +3770,8 @@ class _Lowerer(
         storage instead of cloning it (`_adopt_or_clone`). Record returns
         adopt their owned fields. Single-use string locals with independent
         descriptors also transfer into bindings, records and array storage.
+        Owned tagged locals use the same sites; their payload may transfer
+        when the source and destination layouts both contain owned handles.
         """
         owned: dict[int, tuple[int, int]] = {}   # binding id -> (sequence, loop depth) of its declaration
         uses: dict[int, list[tuple[int, int, bool, int | None]]] = {}   # binding id -> (sequence, loop depth, in nested literal, transfer node id)
@@ -3775,10 +3791,12 @@ class _Lowerer(
             and self.local_initializers.get(binding)
             and all(self._is_owned_string_result(value) for value in self.local_initializers[binding])
         }
+        cells = {node.binding_id for node in hir.walk(literal.body)
+                 if self._owned_cell_declaration(node)}
 
-        def transfer(node: hir.AST, *, string_only: bool = False) -> dict[int, int]:
+        def transfer(node: hir.AST, *, handle_only: bool = False) -> dict[int, int]:
             source = self._copy_source_expression(node)
-            if isinstance(source, hir.ExpressedIdentifier) and (not string_only or source.binding_id in strings):
+            if isinstance(source, hir.ExpressedIdentifier) and (not handle_only or source.binding_id in strings or source.binding_id in cells):
                 return {id(source): id(source)}
             return {}
 
@@ -3825,11 +3843,11 @@ class _Lowerer(
                         source = borrowing.route(node.expr)
                         if source is not None:
                             borrow_dependents.setdefault(source.binding, set()).add(node.binding_id)
-                movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node) or node.binding_id in strings
+                movable = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node) or node.binding_id in strings or node.binding_id in cells
                 # A descriptor-backed destination can take the source's
                 # ownership. Fixed raw buffers still require their own layout.
                 aggregate_destination = self._owned_array_declaration(node) is not None or self._owned_object_declaration(node)
-                walk(node.expr, depth, nested, transfer(node.expr, string_only=not aggregate_destination))
+                walk(node.expr, depth, nested, transfer(node.expr, handle_only=not aggregate_destination))
                 if movable and node.binding_id is not None and not nested:
                     counter += 1
                     owned[node.binding_id] = (counter, depth)
@@ -3856,25 +3874,25 @@ class _Lowerer(
                 for field_ in node.fields:
                     expected = node.type.field(field_.name) if isinstance(node.type, ty.ObjectType) else None
                     field_type = expected.type if expected is not None else field_.value.type
-                    site = transfer(field_.value, string_only=not (isinstance(field_type, ty.ArrayType) and field_type.length is None))
+                    site = transfer(field_.value, handle_only=not (isinstance(field_type, ty.ArrayType) and field_type.length is None))
                     walk(field_.value, depth, nested, site)
                 return
             if isinstance(node, (hir.MemberAssign, hir.IndexAssign)):
                 walk(node.target, depth, nested, {})
                 field_type = node.target.type
-                site = transfer(node.value, string_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None))
+                site = transfer(node.value, handle_only=not (isinstance(node, hir.MemberAssign) and isinstance(field_type, ty.ArrayType) and field_type.length is None))
                 walk(node.value, depth, nested, site)
                 return
             if isinstance(node, hir.ArrayLiteral):
                 for item in node.items:
-                    walk(item, depth, nested, transfer(item, string_only=True))
+                    walk(item, depth, nested, transfer(item, handle_only=True))
                 return
             if isinstance(node, hir.FunctionCall) and isinstance(node.func, hir.ArrayMethod) and node.func.name in ('push', 'insert'):
                 walk(node.func, depth, nested, {})
                 for index, argument in enumerate(node.pos_args):
-                    walk(argument, depth, nested, transfer(argument, string_only=True) if index == 0 else {})
+                    walk(argument, depth, nested, transfer(argument, handle_only=True) if index == 0 else {})
                 for name, argument in node.kw_args.items():
-                    walk(argument, depth, nested, transfer(argument, string_only=True) if name == 'value' and not node.pos_args else {})
+                    walk(argument, depth, nested, transfer(argument, handle_only=True) if name == 'value' and not node.pos_args else {})
                 return
             if isinstance(node, hir.Flow):
                 for arm in node.arms:

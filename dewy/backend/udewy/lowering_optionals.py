@@ -10,7 +10,7 @@ from ...utils import dataclass_replace as replace
 from ...parser import t0
 from ...reporting import Span
 from ...semantic import hir, ty
-from .lowering_shared import LoopRegion
+from .lowering_shared import LoopRegion, MoveNote
 
 
 class _OptionalLowering:
@@ -1027,16 +1027,28 @@ class _OptionalLowering:
                             and value.expr.type.element == 'uint8'
                             and ty.optional_payload(value.type) is not None
                             and not self._stays_in_frame(value))
+            moved_local = (not reported and isinstance(value, hir.ExpressedIdentifier)
+                           and id(value) in self.moved_uses
+                           # An optional's outer payload can be arena-owned
+                           # while fixed nested fields still live in its
+                           # frame. Those values need the layout copy below.
+                           and not self._union_tree_slots(members)
+                           and (value.name in self.owned_aggregate_cells or value.name in self.owned_cells))
             if (not self._union_tree_slots(members, prepared=prepared)
                     and (ty.optional_payload(value.type) is not None or not self._union_tree_slots(members))
-                    and (fresh_call or fresh_decode)):
+                    and (fresh_call or fresh_decode or moved_local)):
                 # With no caller-frame trees on either side, an ordinary
                 # call's dead result (or an arena-backed fresh decode) can
                 # transfer its active payload. A region-backed decode must
                 # still copy into the cell's independently owned storage.
                 # This includes general unions whose record
                 # alternatives are arena handles. The source cell itself
-                # remains frame-owned.
+                # remains frame-owned. The same operation consumes an owned
+                # local at a proved last use. Emptying its payload preserves
+                # lexical cleanup on both consuming and nonconsuming paths.
+                if moved_local:
+                    self.move_notes.append(MoveNote(self.srcfile, value.loc,
+                        f'`{value.name}` is moved when stored in a union: this is its last use, so its payload changes owner', True))
                 return [*prelude,
                         self._intrinsic_call('__store_i64__', [self._optional_tag(source_word, value.loc), cell], ty.VOID_TYPE, value.loc),
                         self._store_i64_field(cell, 8, self._load_i64_field(source_word, 8, value.loc), value.loc),

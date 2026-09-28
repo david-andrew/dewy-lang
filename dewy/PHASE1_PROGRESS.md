@@ -36,6 +36,28 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-27): hosted tagged locals now transfer their owned
+payload at a proved last use into a return, binding, record field, or array
+element, matching the native path. The tag cell retains its frame lifetime;
+its payload is emptied on the consuming edge so lexical cleanup cannot
+release the new owner's value. Live inferred views, later reads, repeated
+loop uses, explicit snapshots, and payloads containing prepared frame trees
+retain ordinary copying. This closes the strict-copy gap in
+`invocation/update.dewy`, bringing adoption to 21 physical modules. No
+explicit-copy annotations were added to work around missing proofs.
+Validation: 95 hosted surrounding checks and the paired union-transfer
+group pass on x86-64/C, including zero retained bytes over 200 calls. A
+fixed-array payload regression caught an overbroad optional-cell transfer
+during development; frame-dependent payloads now retain the layout copy.
+
+Integration checkpoint at `0bcab4b0`: three native generations reached an
+identical fixed point; all 227 paired cases passed. A separately rebuilt
+hosted native driver passed 50 focused getter, join, qualifier, partial-hook,
+and constant-slot checks. Builds took 49 and 55 seconds for generations 2
+and 3 during concurrent checking; these are correctness evidence, not
+isolated throughput measurements. The union-transfer changes above postdate
+that checkpoint and have their own focused paired checks.
+
 ## Strict-copy cleanup
 
 The inherited uncommitted CLI-only `$explicit_copies` implementation was

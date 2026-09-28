@@ -1,0 +1,29 @@
+$explicit_copies
+# The tag cell remains in the caller's frame. Only its active payload changes
+# owners; lexical cleanup still runs on the path that did not transfer it.
+Box:type=[items:array<int64>]
+make=(flag:bool):>Box|none=>{
+    let value:Box|none=Box[[42]]
+    if flag return value
+    return none
+}
+exercise=(flag:bool):>int64=>{
+    let value=make(flag)
+    let values:array<Box|none>=[]
+    values.push(value)
+    if values.length>?0 {
+        const first=values[0]
+        if first is? Box and first.items.length>?0 return first.items[0]
+    }
+    return 0
+}
+main=():>int64=>{
+    if exercise(true) not=?42 or exercise(false) not=?0 return 1
+    let before:int64=_arena_live_bytes
+    loop i in [0..100) {
+        if exercise(true) not=?42 or exercise(false) not=?0 return 2
+    }
+    let retained:int64=_arena_live_bytes-before
+    printl(retained)
+    return if retained=?0 42 else 3
+}
