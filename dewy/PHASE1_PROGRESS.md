@@ -36,6 +36,31 @@ COW implementation preserves value independence; predictable zero-cost
 ownership remains the long-term design question. This checklist does not
 approve new syntax or remove these items from the roadmap.
 
+Checkpoint (2026-09-28): independent hosted bootstrap validation exposed a
+regression in union member injection: a generated array load from a dictionary
+was mistaken for a fresh call result, allowing its stored descriptor to be
+emptied. Lookup now names that borrowed handle before the value boundary and
+reports its snapshot once. Nine lookup/view/optional-dictionary checks pass.
+A fresh complete hosted-built native compiler succeeds (143.24 seconds checking,
+38.72 lowering, 4.57 emission, 22.84 backend) and executes the repeated-lookup
+regression successfully. Existing native-driver tests alone did not exercise
+this construction path; independent hosted builds remain an integration gate.
+
+Checkpoint (2026-09-28): hosted direct calls now share native's ownership
+protocol for ordinary record inputs whose sole unconditional use donates them
+to array push/insert or another proved input. A dependency worklist starts at
+actual consumers; forwarding cycles alone establish nothing. Function values,
+captures, defaults, conditional/repeated uses and lifecycle records retain
+their existing protocols. Owning record parameters also participate in ordinary
+last-use field transfer, keeping caller snapshots and callee cleanup consistent.
+Seven positive cases and five rejection cases pass in both compilers on
+x86-64/C, including a twelve-helper chain, keyword calls, retained views and
+repeated-call memory counters. The complete compiler source passes hosted
+policy checking. This closes a hosted acceptance gap without introducing a
+source ownership annotation. The surrounding ownership/copy suite passes all
+146 checks (501.68 seconds); the fresh hosted-built native compiler also
+passes the consuming-input fixture through the parity runner.
+
 Checkpoint (2026-09-28): hosted union payload injection now reports ordinary
 member copies, including optional results, iterator elements and fixed arrays
 with dynamic components. These copies previously bypassed `$explicit_copies`.

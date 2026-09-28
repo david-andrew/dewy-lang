@@ -560,6 +560,9 @@ class _Lowerer(
         self.owned_record_parameters = set()
         self.owned_record_arguments = {}
         if self._has_arena():
+            from .consuming_inputs import record_parameters
+            consumed = record_parameters(self.allocator_analysis, self.value_function_ids | {
+                id(function.literal) for function in self.functions if self.lifted.get(id(function))})
             for function in self.functions:
                 literal = function.literal
                 if literal.object_receiver or id(literal) in self.value_function_ids or self.lifted.get(id(function)):
@@ -572,7 +575,7 @@ class _Lowerer(
                             or not storage_borrows.borrowable(parameter.type)):
                         continue
                     summary = self.program_effects.for_param_binding(binding)
-                    if summary is not None and not summary.read_only and not summary.escapes:
+                    if binding in consumed or summary is not None and not summary.read_only and not summary.escapes:
                         self.owned_record_parameters.add(binding)
         self.user_main_takes_argv = any(
             isinstance(item, hir.Declare)
@@ -3813,7 +3816,13 @@ class _Lowerer(
         Owned tagged locals use the same sites; their payload may transfer
         when the source and destination layouts both contain owned handles.
         """
-        owned: dict[int, tuple[int, int]] = {}   # binding id -> (sequence, loop depth) of its declaration
+        # Owning record parameters follow the same last-use rule as locals;
+        # their prologue installs the matching lexical cleanup owner.
+        owned: dict[int, tuple[int, int]] = {
+            parameter.binding_id: (0, 0)
+            for parameter in [*literal.pos_or_kw_args, *literal.kw_only_args]
+            if parameter.binding_id in self.owned_record_parameters
+        }  # binding id -> (sequence, loop depth) of its declaration
         uses: dict[int, list[tuple[int, int, bool, int | None]]] = {}   # binding id -> (sequence, loop depth, in nested literal, transfer node id)
         transfers: list[tuple[int, int, int, int]] = []   # (binding id, transfer node id, sequence, loop depth) in order
         exits: list[int] = []   # sequences of break/continue
@@ -3832,7 +3841,7 @@ class _Lowerer(
             and all(self._is_owned_string_result(value) for value in self.local_initializers[binding])
         }
         cells: set[int] = set()
-        element_owners: set[int] = set()
+        element_owners: set[int] = set(owned)
         for node in hir.walk(literal.body):
             if not isinstance(node, hir.Declare) or node.binding_id is None:
                 continue

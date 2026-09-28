@@ -406,7 +406,7 @@ class _ObjectLowering:
             if moved is not None:
                 return moved
             self._note_copy('record', arg.type, 'passed to a call',
-                            'the callee owns a mutable value and the source is still live or cannot transfer its layout', arg.loc)
+                            'the callee takes ownership and the source is still live or cannot transfer its layout', arg.loc)
             return self._clone_object_value(arg, object_type)
         if isinstance(object_type, ty.ObjectType):
             # A raw pointer can reach this value without appearing as an

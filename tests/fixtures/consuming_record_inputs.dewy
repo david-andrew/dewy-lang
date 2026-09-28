@@ -1,0 +1,11 @@
+$explicit_copies
+Box:type=[items:array<int64>]
+append=(@rows:array<Box> value:Box):>void=>{rows.push(value)}
+probe=():>int64=>{let rows:array<Box>=[] append(@rows Box[[42]])
+if rows.length>?0 and rows[0].items.length>?0 return rows[0].items[0]
+return 1}
+main=():>int64=>{if probe() not=?42 return 1
+let before:int64=_arena_live_bytes
+loop i in [0..100) {if probe() not=?42 return 2}
+$runtime_assert _arena_live_bytes=?before
+return 42}
